@@ -17,6 +17,8 @@ description: Model or review Forge factory/provider dependency wiring, construct
 
 For pools, define capacity/exhaustion, exclusive/shared access, cancellation, retained/reset state, quarantine and close policy. Do not copy HPVS's `RefCell` pool into a concurrent async host. `Arc` does not fix that; borrowed generic leases are not automatically dyn-compatible; ordinary `Drop` cannot await reset/rollback. Use the detailed DI reference when these constraints matter.
 
+For task/client wiring, choose a generic `IoClient` bound or a trait object with its request/response/error types fixed. Composition supplies concrete clients through constructors, optionally built by existing factories/providers; the task still owns business payload preparation. Substitute an in-memory client without changing the task and verify typed failures and call counts. Do not add a normal/library dependency between the `forge-task` and `forge-io-client` contract crates or make pure tasks acquire an I/O provider.
+
 Deliver **port → factory inputs → provider scope/lease → owner; assembly order/overrides; failures/cleanup; checks and gaps**. Keep roles as modules unless a real boundary justifies another crate.
 
 ## Small example

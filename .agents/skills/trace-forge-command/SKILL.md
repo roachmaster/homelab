@@ -17,6 +17,8 @@ description: Explain or review a Forge typed command through canonical header ro
 
 Return **status/evidence; input; hops and checks; possible effects; outcome; proposed or executed verification**. A short path plus one counterexample is enough.
 
+For a client-using task, trace **admitted binding → `Task::run` → prepared typed request → injected `IoClient::execute` → typed response/error**. The client may encode that prepared request for its boundary, but must not assemble business content. Use fake clients to check the exact prepared request, preserved error causes, no send after a failed fetch in a fail-fast flow, and no hidden retry. A fake is not proof of real I/O conformance; a pure task has no client hop.
+
 ## Small example
 
 `jobs.submit @ 1` with `JobsPayload::Status(id)` is a mismatch. Reject before either handler's effects; never repair the header or dispatch status by inspecting the variant. Check that neither capability storage nor its per-operation acquisition is invoked.

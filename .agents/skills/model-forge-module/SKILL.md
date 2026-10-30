@@ -1,11 +1,15 @@
 ---
 name: model-forge-module
-description: Explain the evolving Forge composition DSL or model a capability/module and its assembly. Separate observed source patterns from proposed homelab semantics and syntax; this starter skill does not imply a DSL parser or runtime exists.
+description: Explain the evolving Forge composition DSL or model a capability/module, pure task or injected-client workflow and its assembly. Separate observed source patterns from proposed homelab semantics and syntax; this starter skill does not imply a DSL parser or runtime exists.
 ---
 
 # Model a Forge module
 
 **Provisional starter.** Read the [canonical DSL reference](../../../docs/architecture/framework-dsl.md) for shared vocabulary and status labels. Keep this repository-local skill with that reference; if it is missing, report the gap rather than inventing a DSL.
+
+## Implemented task/client pattern
+
+[Task](../../../src/rust/forge-task/src/lib.rs) has associated `Input`, `Output`, `Error` and `run(&self, input)`. [IoClient](../../../src/rust/forge-io-client/src/lib.rs) has `Request`, `Response`, `Error` and `execute(&self, request)`. These synchronous contracts exist; the full composition DSL remains proposed. The contract crates have no normal dependency on each other. A consumer capability imports both only when its task uses clients; a pure task requires no I/O contract or envelope.
 
 ## Workflow
 
