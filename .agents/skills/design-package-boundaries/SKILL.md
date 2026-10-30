@@ -1,13 +1,27 @@
 ---
 name: design-package-boundaries
-description: Design or review package and module boundaries for a feature, refactor, or architecture change. Use a capability-first, practical hexagonal approach to separate policy from external adapters without creating unnecessary layers or tiny packages. Not a mandate to restructure an entire repository.
+description: Design or review package and module boundaries for a feature, refactor, or architecture change. Use capability-first hexagonal boundaries with thin ingress adapters, a shared header-routed bridge, and cohesive policy packages without unnecessary layers. Not a mandate to restructure an entire repository.
 ---
 
 # Design Package Boundaries
 
 Make the next meaningful change local: cohesive capability packages, narrow public contracts, and dependencies that keep external mechanisms out of application policy. Prefer practical ports and adapters, not maximal abstraction or a directory tree that merely looks hexagonal.
 
-This combines the user's package-oriented, hexagonal preference with *Clean Code* study principles. Formal hexagonal architecture is a separate supplement, not a claim about what the book prescribes. See [sources and rationale](references/sources.md) when explaining provenance; the skill works without retrieving those sources.
+This combines a package-oriented, hexagonal and shared-ingress convention with *Clean Code* study principles. Formal hexagonal architecture is a separate supplement, not a claim about what the book prescribes. See [sources and rationale](references/sources.md) when explaining provenance; the skill works without retrieving those sources.
+
+## Required ingress shape: shared header-routed bridge
+
+Keep ingress **adapters** as thin as practical: REST controllers, Kafka consumers, and other inbound transports map to the **same transport-neutral request envelope and single logical bridge ingress path**, never independently invoke business handlers. A port is the contract; an adapter is its transport implementation. Delegate work inward, then allow the admitted use case to fan out to the capabilities and driven ports it needs.
+
+The envelope has a canonical header plus body. The header alone supplies enough explicit destination metadata to select one registered route deterministically; adapters must not inspect business-body contents to decide routing. At minimum define a stable logical destination/operation identifier (one combined key or separate concepts) and supported contract/version identity, including envelope version where independently versioned. Use domain-appropriate names, not mandated HTTP/Kafka field names. Document any additional routing discriminator required by this system; do not guess destinations from missing metadata.
+
+Transport route/topic mappings may populate canonical header values, with explicit precedence and conflict rejection. Preserve correlation, deadline/cancellation, and idempotency metadata where the contract defines them; never reset an expired deadline or generate a fresh idempotency key merely because a delivery is retried. Trusted authentication context must remain distinguishable from untrusted header assertions.
+
+The bridge validates envelope/header consistency, supported versions, route existence and route authorization, then dispatches through an explicit allowlisted registry wired by composition. Reject missing, ambiguous, conflicting, unknown, or unsupported routing metadata with controlled outcomes before business effects. A route identifies a destination, **not** permission to call it. Never interpret a supplied header as an executable name, arbitrary class path, reflective method lookup, or dynamic code-loading instruction.
+
+Keep the bridge narrow: admission and registered dispatch, not a giant business god-class. Handlers own domain validation, resource-level authorization and use-case orchestration; transport parsing, HTTP responses, Kafka acknowledgments/offset commits, delivery retries and dead-letter lifecycle remain in adapters. Specify business retry safety and idempotency in the core contract; broker redelivery alone does not guarantee them.
+
+“Single logical path” permits multiple replicas, concurrent workers and internal fan-out after admission. It does not require a single thread/process, one deployment, or routing every outbound port through ingress. This shared-ingress convention does not imply vendor hardware or a mainframe technology requirement. It is more specific than generic hexagonal architecture; it supersedes examples that let HTTP or Kafka bypass the bridge. For a concrete acyclic graph, read [worked package graph](references/worked-example.md).
 
 ## Keep the assignment bounded
 
@@ -46,10 +60,11 @@ Name top-level application units after domain capabilities or business responsib
 For each proposed package, state what it owns, exposes, may import, and must not import.
 
 - **Feature core:** domain invariants, use-case policy, and the application-facing (driving/inbound) API. It does not import its HTTP, SQL, vendor SDK, UI, or framework implementation packages. Avoid leaking their types into its contracts.
-- **Driving adapter:** parses and validates transport shape, handles protocol concerns, maps input to the application API, and maps outcomes back. Business validation and authorization policy remain in the owning core; protocol authentication mechanics may live outside it.
+- **Driving adapter:** parses and validates transport shape, handles protocol concerns, maps input to the canonical envelope, submits only through the shared bridge ingress port, and maps outcomes back. It does not select or call business handlers directly; protocol authentication mechanics may live outside the core.
+- **Ingress bridge:** owns envelope admission and authorized registered dispatch. Its narrow contracts have explicit ownership; it depends on handler contracts, not concrete capability implementations. Domain rules stay with feature handlers.
 - **Driven port:** the consuming core owns the smallest contract that expresses its external need. Keep the contract next to its use case/capability, not in a repository-wide port mega-package. A port describes a purposeful conversation and its semantics, not a mirror of the vendor SDK.
 - **Driven adapter:** depends on that contract and translates it into the external mechanism. Multiple adapters are useful when real needs justify them; one production adapter plus a test double does not require a plugin framework.
-- **Composition root:** selects concrete implementations, reads deployment configuration, wires dependencies, and initiates the declared lifecycle. No business decisions or use-case workflows belong here. Runtime creation timing can stay in the use case through a narrowly scoped factory when genuinely needed.
+- **Composition root:** selects concrete implementations, reads deployment configuration, wires the allowlisted route-to-handler registry and other dependencies, and initiates the declared lifecycle. No business decisions or use-case workflows belong here. Runtime creation timing can stay in the use case through a narrowly scoped factory when genuinely needed.
 
 The intended package dependency graph is a DAG pointing inward. For a cycle, identify the actual edges and misplaced responsibility. Break it by moving policy to its owner, narrowing an API, introducing a consumer-owned port, or moving coordination to the appropriate higher-level use case. Do not hide cycles behind dynamic lookup, a service locator, or a new shared dumping ground.
 
@@ -74,10 +89,14 @@ Keep vendor-specific diagnostics available for investigation without leaking sec
 
 Select checks that establish the changed contracts:
 
+- **Ingress adapter units:** equivalent REST and Kafka requests must produce equivalent logical envelopes and invoke the same bridge contract; transport-only details need not be identical. Verify header/topic mapping conflicts, metadata preservation, and absence of direct handler dispatch.
+- **Bridge units:** test deterministic registered routing, unsupported versions, missing/ambiguous/unknown routes, spoofed authorization context, denied routes, and no handler effects on rejected admission. Test domain authorization and retry/idempotency semantics with the owning handlers.
+- **Real ingress lifecycle tests:** separately verify actual REST parsing/status/error mapping and Kafka acknowledgment/offset, retry/redelivery, dead-letter, ordering and shutdown behavior as applicable. An envelope-mapping unit test does not prove broker lifecycle or end-to-end deduplication.
+
 1. **Core tests:** exercise rules and use cases without UI/database/framework setup; use controlled collaborators for time, randomness, I/O, and failure when they affect behavior. Assert outcomes and meaningful effects, not incidental call choreography.
 2. **Real adapter contract tests:** run the real adapter against the actual dependency or a representative isolated local instance. Check meaningful success, absence, error translation, serialization, and relevant lifetime/transaction assumptions. A fake passing its own tests is not evidence that a real adapter honors the port.
 3. **Assembly/integration tests:** verify actual configuration and wiring, a representative end-to-end path, initialization failure, and relevant cleanup/shutdown. Unit isolation does not prove correct composition.
-4. **Dependency enforcement:** use existing build/module visibility or architecture checks to prevent forbidden imports and cycles. Inspect public re-exports and test-only shortcuts, not just directory names. Report observed edges and any remaining unenforced constraint.
+4. **Dependency enforcement:** use existing build/module visibility or architecture checks to prevent forbidden imports, adapter-to-handler bypasses and cycles. Inspect public re-exports and test-only shortcuts, not just directory names. Report observed edges and any remaining unenforced constraint.
 
 Use repository-native format, lint, build, and test commands; discover them rather than inventing a stack. Record exact commands and results. If a check needs unavailable credentials, infrastructure, or authorization, report it as **not run / blocked**, not passed. Do not weaken safeguards to make a refactor green.
 
@@ -105,3 +124,4 @@ Open decisions: only unresolved choices that materially affect the design
 ```
 
 For a small request, a short package graph and a few evidence-backed decisions are enough. Do not reward architecture by package count. Success means a maintainer can change one policy or adapter without learning or editing unrelated internals, and the tests and dependency rules support that claim.
+

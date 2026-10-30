@@ -2,15 +2,13 @@
 
 This is a practical synthesis, not an official implementation guide or a reproduction of either source. It has three distinct inputs:
 
-1. **User preference:** a generic, package-oriented approach, as hexagonal as practical, that does not put everything into one package. This sets the default architectural direction, not a fixed package count or requirement for separate services.
+1. **Skill convention:** a generic, package-oriented approach, as hexagonal as practical, that does not put everything into one package. Thin ingress adapters funnel through the same logical bridge path, with destination determined by header metadata and fan-out after admission. This sets the architectural direction, not a fixed package count, separate-service requirement, or vendor platform. The canonical envelope, safe registry and explicit admission contract operationalize this convention; the single bridge is not a universal requirement of hexagonal architecture or a claim from Clean Code.
 2. **Clean Code grounding:** cohesion, reasons to change, honest interfaces, external boundaries, construction versus use, tests, incremental refactoring, and restraint in abstractions.
 3. **Hexagonal supplement and implementation synthesis:** ports/adapters, inward package dependencies, consumer-owned external contracts, concrete package graphs, transaction/lifecycle checks, and language mappings. These are not all claims made by *Clean Code*.
 
 ## Clean Code study grounding
 
-Robert C. Martin and Object Mentor contributors, *Clean Code: A Handbook of Agile Software Craftsmanship*, first printing July 2008, copyright 2009, ISBN 978-0-13-235088-4. The companion notes are original first-pass study commentary, not a transcription or exhaustive substitute for the book.
-
-Pinned companion collection: [study index](https://github.com/roachmaster/study-notes/tree/711a5638662a3db7cb00a47c1514b748265b20a8/studies/clean-code), [source provenance and page map](https://github.com/roachmaster/study-notes/blob/711a5638662a3db7cb00a47c1514b748265b20a8/studies/clean-code/source.json). The study repository is private; access requires permission. These links are traceability aids, not runtime dependencies of the skill.
+Robert C. Martin and Object Mentor contributors, *Clean Code: A Handbook of Agile Software Craftsmanship*, first printing July 2008, copyright 2009, ISBN 978-0-13-235088-4. The principles below are a practical synthesis, not a transcription or exhaustive substitute for the book.
 
 | Study chapter | Printed pages | Principle carried into this skill |
 | --- | --- | --- |
@@ -25,7 +23,7 @@ Pinned companion collection: [study index](https://github.com/roachmaster/study-
 | 13 — Concurrency | 177–191 | Ownership, compound-operation invariants, lifecycle, and shutdown as explicit responsibilities |
 | 17 — Smells and Heuristics | 285–315 | Evidence-led review, truthful interfaces, explicit dependencies, and judgment rather than mechanical rules |
 
-The book's Java-era examples do not mandate Java exception policy, inheritance, AOP, a DI container, or matching syntax in Rust/C. The skill adapts their broader design concerns and retains the notes' warnings against automatic over-extraction.
+The book's Java-era examples do not mandate Java exception policy, inheritance, AOP, a DI container, or matching syntax in Rust/C. The skill adapts their broader design concerns and avoids automatic over-extraction.
 
 ## Hexagonal architecture supplement
 
