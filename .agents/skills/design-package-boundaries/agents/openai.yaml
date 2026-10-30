@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Package Boundaries"
+  short_description: "Cohesive packages with practical ports and adapters"
+  default_prompt: "Use $design-package-boundaries to review this change and propose cohesive packages with practical hexagonal boundaries."
