@@ -26,6 +26,8 @@ cargo clippy -p forge-bridge --all-targets --offline --locked -- -D warnings
 cargo run -p forge-bridge --example in_process --offline --locked
 ```
 
-The example uses `forge-provider` only as a dev dependency and explicitly injects
-a capability-owned port. Its boolean demo context is not production authentication.
+The examples use `forge-provider`, `forge-task` and `forge-io-client` only as dev
+dependencies and explicitly inject capability-owned ports. `task_clients` wraps
+a task behind an admitted binding and uses only in-memory client doubles. Run it
+with `cargo run -p forge-bridge --example task_clients --offline --locked`. The demo contexts are not production authentication.
 See the [workspace guide](../README.md) for complete checks and deferred features.

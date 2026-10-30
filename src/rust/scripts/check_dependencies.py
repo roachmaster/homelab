@@ -8,7 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
     "forge-ingress-contract": set(),
     "forge-provider": set(),
-    "forge-bridge": {("forge-ingress-contract", "normal"), ("forge-provider", "dev")},
+    "forge-io-client": set(),
+    "forge-task": {("forge-io-client", "dev"), ("forge-provider", "dev")},
+    "forge-bridge": {("forge-ingress-contract", "normal"), ("forge-provider", "dev"), ("forge-io-client", "dev"), ("forge-task", "dev")},
 }
 
 def main():
@@ -45,7 +47,7 @@ def main():
         visited.add(name)
     for name in packages:
         visit(name)
-    print("PASS: three local-only crates; allowed normal/dev edges; acyclic graph")
+    print("PASS: five local-only crates; allowed normal/dev edges; acyclic graph")
 
 if __name__ == "__main__":
     main()

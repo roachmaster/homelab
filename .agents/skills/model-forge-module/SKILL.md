@@ -10,7 +10,7 @@ description: Explain the evolving Forge composition DSL or model a capability/mo
 ## Workflow
 
 1. Identify the requested explanation, feature or review slice and its success guarantee. Inspect actual APIs/manifests when supplied; do not describe proposed names as existing exports.
-2. Name the capability, owned payload enum/result and consumer-owned ports. Map header destination/version → expected variant → binding → use case.
+2. Name the capability, owned payload enum/result and consumer-owned ports. Map header destination/version → expected variant → binding → use case. For task/client modeling, keep pure computation free of I/O requirements. Tasks prepare business requests and orchestrate injected typed clients; clients execute prepared requests and own only boundary encoding/I/O, not business payload assembly.
 3. Describe required dependencies, selected factory/provider, typed config, override points and lifecycle owner. Composition wires; it does not perform the business workflow.
 4. Keep package imports, assembly/lifetime order and runtime request flow distinct. Use modules for small internals; neither a module nor a crate automatically means a service.
 5. Preserve typed shared ingress and transport neutrality. One heterogeneous registry needs a finite application-owned payload sum and explicit result unification, not a framework-global enum or JSON fallback.

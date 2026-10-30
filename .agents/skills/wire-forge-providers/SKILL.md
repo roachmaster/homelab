@@ -10,7 +10,7 @@ description: Model or review Forge factory/provider dependency wiring, construct
 ## Workflow
 
 1. Start with the consumer-owned port and actual requirement. Inspect supplied constructors/providers; names, fresh wrappers and one-call tests do not prove lifetime behavior.
-2. Separate factory creation, provider acquisition/reuse, lease ownership and bootstrap wiring. Prefer injecting a ready port. Inject a narrow factory/provider only for genuine runtime creation or acquisition; no handler service locator.
+2. Separate factory creation, provider acquisition/reuse, lease ownership and bootstrap wiring. Prefer injecting a ready port, including typed `IoClient` interfaces into tasks; tasks must not resolve concrete I/O implementations from a registry. Inject a narrow factory/provider only for genuine runtime creation or acquisition; no handler service locator.
 3. Specify typed config/dependencies, default/override, scope, error and ownership transfer/borrowing. Host-shared is per assembly; transient may share captured state and is not request scope; OS-thread locality is not async request locality.
 4. Validate missing dependencies, duplicates, cycles and lifetime compatibility before factory effects/freeze. Construct in order, inject ports, finalize routing and establish actual readiness; never publish a partial host or silently fall back after construction failure.
 5. Assign cleanup: factory owns partial resources until transfer; host closes resources it owns after users stop. Preserve cleanup failures, handle outstanding leases and state whether admitted work finishes acquisition or is canceled. Grace exhaustion is not success.

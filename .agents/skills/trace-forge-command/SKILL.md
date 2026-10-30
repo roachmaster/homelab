@@ -12,7 +12,7 @@ description: Explain or review a Forge typed command through canonical header ro
 1. Record input, header destination/version, payload enum/variant and verified context. For a real review, follow actual entry-point, mapping, registry and handler code; distinguish observed behavior from proposed semantics.
 2. In-process callers construct the enum directly. A selected adapter uses a bounded side-effect-free codec chosen by the registered header/version mapping. Serialization stays outside; payload contents do not choose the route.
 3. Trace **header → registered destination/version → authorization/deadline → variant check → binding → capability**. Direct typed callers must not bypass admission. Explain the application-owned sum if one registry combines capabilities; no JSON/`Any` escape.
-4. Mark resource authorization and the first possible business effects. Dependencies are constructor-injected; fan-out belongs to the use case, not the adapter or bridge.
+4. Mark resource authorization and the first possible business effects. A task prepares typed client requests; the injected client performs the I/O. A composition binding may call `Task::run` without making the task depend on the envelope. Dependencies are constructor-injected; fan-out belongs to the use case, not the adapter or bridge.
 5. State the typed outcome and actual completion/durable-acceptance point. Retry, partial failure and cancellation do not imply rollback or exactly-once effects. Contrast the relevant failure with the happy path.
 
 Return **status/evidence; input; hops and checks; possible effects; outcome; proposed or executed verification**. A short path plus one counterexample is enough.

@@ -8,6 +8,8 @@ publish.workspace = true
 forge-ingress-contract.workspace = true
 
 [dev-dependencies]
+forge-io-client.workspace = true
+forge-task.workspace = true
 forge-provider.workspace = true
 
 [lints]

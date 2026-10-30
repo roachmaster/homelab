@@ -1,0 +1,12 @@
+[package]
+name = "forge-task"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+forge-io-client.workspace = true
+forge-provider.workspace = true
+
+[lints]
+workspace = true

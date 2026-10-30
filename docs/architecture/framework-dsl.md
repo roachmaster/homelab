@@ -6,7 +6,7 @@ This page is the canonical reference for the three framework-specific skills. Us
 
 ## Implemented subset
 
-The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`, `Header`, `Response<R>`, `Payload`, `AdmissionPolicy<C>`, `RegistryBuilder::freeze`, `Bridge::dispatch`, `Factory<T>`, `InstanceProvider<T>`, `Singleton` and `Transient` APIs. The runnable example demonstrates their actual syntax. `Payload::kind` is an explicit, pure capability-owned variant mapping, including nested application kinds. This slice has no module DSL, runtime dependency resolution, provider pool, async host, production authentication, deadline/cancellation metadata or durable acceptance. The conceptual jobs notation below remains proposed, not a supported API.
+The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`, `Header`, `Response<R>`, `Payload`, `AdmissionPolicy<C>`, `RegistryBuilder::freeze`, `Bridge::dispatch`, `Factory<T>`, `InstanceProvider<T>`, `Singleton`, `Transient`, `IoClient` and `Task` APIs. The runnable in-process examples demonstrate their actual syntax; the task/client example uses only in-memory doubles, not real external I/O. `Payload::kind` is an explicit, pure capability-owned variant mapping, including nested application kinds. This slice has no module DSL, runtime dependency resolution, provider pool, async host, production authentication, deadline/cancellation metadata or durable acceptance. The conceptual jobs notation below remains proposed, not a supported API.
 
 ## Label what exists
 
@@ -26,6 +26,8 @@ The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`,
 | Route / binding | Header destination+version selects an allowed binding; it checks the expected variant before invoking the capability |
 | `Bridge<P>` / operation registry | Shared admission and frozen allowed dispatch; not a domain switch or dependency service locator |
 | Port | Consumer-owned behavior, outcomes and ownership contract |
+| `IoClient` | Executes a preassembled typed request at an I/O boundary; may encode for that boundary, not assemble business content |
+| `Task` | Pure computation or business orchestration through injected client contracts; owns request preparation, not concrete I/O mechanisms |
 | Factory | Creates a typed value from explicit config and dependencies; errors remain visible |
 | Provider / lease | Controls acquisition/reuse and valid resource use/release; scope is explicit, not inferred from a name |
 | Assembly plan | Selected typed construction bindings plus dependency/lifetime diagnostics; distinct from operation routing |
@@ -38,6 +40,8 @@ These are roles, not a requirement for a trait or crate per row. Keep coherent c
 **Request path:** in-process caller or selected thin adapter → typed envelope → shared bridge → registered binding → capability → owned ports/fan-out. No transport is required. An optional boundary codec converts external data without effects, using the registered header/version mapping.
 
 **Routing:** header → allowed destination/version → authorization/deadline admission → expected enum-variant check → handler. Never guess or repair the route from the payload. Direct typed callers receive the same checks. No internal JSON/value-map or `Any` fallback. All entries in one registry share `P`; genuinely heterogeneous ingress may use a finite **application-owned** sum of selected capability enums, never a framework-global business enum. Unify heterogeneous results explicitly too.
+
+**Tasks and clients:** `Task::run` is a synchronous operation, not a scheduled/durable job. A task may compute without any I/O dependency or prepare requests and call injected typed `IoClient::execute` interfaces. Clients own the I/O and required boundary encoding, not business payload assembly. The task/client contracts do not depend on envelopes or each other; a composition-owned handler may adapt an admitted variant into a task input. Errors can follow earlier effects; neither trait adds retries or atomicity.
 
 **Dependencies:** factories create, providers acquire/reuse, bootstrap wires. Inject ready ports by default; inject a narrow provider only for actual runtime acquisition. Validate missing requirements, duplicate overrides, cycles and lifetime compatibility before factory effects/plan freeze. Construct in order, inject, finalize routing and check actual readiness before admission. Do not publish partial assembly.
 

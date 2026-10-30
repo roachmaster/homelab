@@ -10,7 +10,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a prop
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 
-The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, and factory/provider/lease primitives with a runnable in-process example and focused tests. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
+The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, and independent I/O-client/task contracts with runnable in-process examples and focused tests. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
 ## Source sets
 

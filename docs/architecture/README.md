@@ -4,7 +4,7 @@
 
 The framework is a library family. No particular transport is required or selected; a broker and a network API are optional integrations, not baseline components. A separate reference application proves configuration, registration, lifecycle, adapter substitutability, durable acceptance, and extension ergonomics. The diagrams show that application—not crates disguised as deployed services.
 
-**Implementation now started:** the [first Rust core](../../src/rust/README.md) implements typed contracts, synchronous routing and factory/provider/lease primitives. The full assembly/DSL and operational diagrams below remain target designs, not claims that every component exists.
+**Implementation now started:** the [first Rust core](../../src/rust/README.md) implements typed contracts, synchronous routing, factory/provider/lease primitives and independent task/I/O-client contracts. The full assembly/DSL and operational diagrams below remain target designs, not claims that every component exists.
 
 ## Read in this order
 

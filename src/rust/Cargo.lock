@@ -7,7 +7,9 @@ name = "forge-bridge"
 version = "0.1.0"
 dependencies = [
  "forge-ingress-contract",
+ "forge-io-client",
  "forge-provider",
+ "forge-task",
 ]
 
 [[package]]
@@ -15,5 +17,17 @@ name = "forge-ingress-contract"
 version = "0.1.0"
 
 [[package]]
+name = "forge-io-client"
+version = "0.1.0"
+
+[[package]]
 name = "forge-provider"
 version = "0.1.0"
+
+[[package]]
+name = "forge-task"
+version = "0.1.0"
+dependencies = [
+ "forge-io-client",
+ "forge-provider",
+]
