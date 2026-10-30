@@ -1,8 +1,16 @@
-# homelab
+# Homelab
 
-Homelab tools and capabilities, grouped by implementation language and then by
-purpose. Add source sets as real needs emerge; this repository does not yet
-contain runnable applications.
+A professional engineering portfolio: lessons from the Forge experiments, a proposed composable Rust framework, and reusable design practices.
+
+## Forge framework portfolio
+
+- [Documentation index](docs/README.md): observed repository findings versus proposed architecture.
+- [15 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
+- [Framework blueprint and assembly model](docs/architecture/forge-framework-blueprint.md).
+- [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
+- [Implementation roadmap](docs/roadmap/forge-framework.md).
+
+The framework is currently a design proposal backed by read-only source reviews, not a completed runtime or a fresh test certification. Existing source sets remain organized by language and purpose; this repository does not yet contain runnable applications.
 
 ## Source sets
 
