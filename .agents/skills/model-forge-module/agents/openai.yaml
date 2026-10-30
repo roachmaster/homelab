@@ -1,0 +1,4 @@
+interface:
+  display_name: "Model Forge Modules"
+  short_description: "Explain and model the Forge composition DSL"
+  default_prompt: "Use $model-forge-module to turn this capability into a typed module and assembly model, distinguishing proposed syntax from existing source patterns."

@@ -8,10 +8,11 @@ The framework is a library family. No particular transport is required or select
 
 1. [Repository reuse map](reuse-map.md) — where all 15 reviewed repositories fit; what to retain, adapt, keep optional, or exclude from the kernel.
 2. [Framework blueprint](forge-framework-blueprint.md) — the target shape, package boundaries, C4 views, request sequence, and reliability contract.
-3. [Module and starter authoring](module-authoring.md) — how a developer plugs in one cohesive capability without editing the bridge.
-4. [Provider/factory dependency injection](dependency-injection.md) — typed construction, acquisition scopes, leases, and bootstrap ownership.
-5. [Architecture decisions](decisions.md) — tradeoffs and explicit non-goals.
-6. [Delivery roadmap](../roadmap/forge-framework.md) — the smallest useful slice and evidence required before expanding.
+3. [DSL semantic reference and framework skills](framework-dsl.md) — shared vocabulary, status labels, a worked composition model and task-specific workflows.
+4. [Module and starter authoring](module-authoring.md) — how a developer plugs in one cohesive capability without editing the bridge.
+5. [Provider/factory dependency injection](dependency-injection.md) — typed construction, acquisition scopes, leases, and bootstrap ownership.
+6. [Architecture decisions](decisions.md) — tradeoffs and explicit non-goals.
+7. [Delivery roadmap](../roadmap/forge-framework.md) — the smallest useful slice and evidence required before expanding.
 
 [All diagrams and editable Graphviz sources](diagrams/README.md) · [Per-repository reports](../reviews/forge/README.md)
 

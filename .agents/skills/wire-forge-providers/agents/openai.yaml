@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wire Forge Providers"
+  short_description: "Model factories, provider scopes and lease ownership"
+  default_prompt: "Use $wire-forge-providers to design the smallest typed dependency wiring and verify acquisition, lifetime and cleanup semantics."

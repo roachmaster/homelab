@@ -24,5 +24,16 @@ The framework is currently a design proposal backed by read-only source reviews,
 Repository skills live separately from application code in `.agents/skills/`.
 
 - [Design Package Boundaries](.agents/skills/design-package-boundaries/SKILL.md): capability-first packages and practical hexagonal boundaries, without unnecessary layers.
+- [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
+- [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.
+- [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md): specify typed factories, acquisition scopes, leases and lifecycle wiring.
 
-Example: `Use $design-package-boundaries to review this feature and propose cohesive packages, dependency rules, and a safe migration plan.`
+The framework-specific skills share one [DSL semantic reference](docs/architecture/framework-dsl.md). Keep these repository-local skills with their linked documentation; the DSL is a proposed Rust-embedded composition model, not an implemented parser or public API.
+
+Examples: `Use $model-forge-module to explain the DSL and model a notifications capability.`
+
+`Use $trace-forge-command to trace this request and identify rejection before effects.`
+
+`Use $wire-forge-providers to specify the provider scope and cleanup for this dependency.`
+
+`Use $design-package-boundaries to review this feature and propose cohesive packages, dependency rules, and a safe migration plan.`

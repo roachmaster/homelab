@@ -1,0 +1,4 @@
+interface:
+  display_name: "Trace Forge Commands"
+  short_description: "Trace typed header routing, admission and effects"
+  default_prompt: "Use $trace-forge-command to trace this typed request and identify admission checks, handler effects and outcome guarantees."
