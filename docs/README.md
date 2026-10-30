@@ -4,6 +4,8 @@
 
 **Observed:** 15 repositories were reviewed read-only for architecture, contracts, boundaries, and implementation evidence. This is not a fresh build/test certification.
 
+**Implemented first slice:** [three std-only Rust core packages](../src/rust/README.md), a synchronous typed in-process example and focused tests. This does not implement the full DSL, durable jobs or host lifecycle.
+
 **Proposed:** a small, Spring Boot-inspired Rust assembly model with explicit capability modules, thin ingress adapters, a shared header-routed bridge, and deliberate lifecycle ownership. The blueprint is a design, not a deployed or completed framework.
 
 - [Repository reviews — 15 reports](reviews/forge/README.md)

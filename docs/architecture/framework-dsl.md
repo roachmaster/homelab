@@ -1,11 +1,16 @@
 # Forge composition DSL — starter reference
 
-**Provisional design, not an implemented API.** This is a small shared vocabulary for the framework taking shape. The intended direction is a **Rust-embedded composition DSL** using ordinary typed functions/builders and statically linked modules. No parser, macro set, compiler, public builder API or YAML/JSON manifest language is claimed. Names and spelling can evolve.
+**Provisional composition DSL; a small core subset is implemented.** This is a small shared vocabulary for the framework taking shape. The intended direction is a **Rust-embedded composition DSL** using ordinary typed functions/builders and statically linked modules. No parser, macro set, compiler, module/host-composition builder API or YAML/JSON manifest language is claimed. Names and spelling can evolve.
 
 This page is the canonical reference for the three framework-specific skills. Use the existing [blueprint](forge-framework-blueprint.md), [module contract](module-authoring.md) and [DI design](dependency-injection.md) when more detail is needed.
 
+## Implemented subset
+
+The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`, `Header`, `Response<R>`, `Payload`, `AdmissionPolicy<C>`, `RegistryBuilder::freeze`, `Bridge::dispatch`, `Factory<T>`, `InstanceProvider<T>`, `Singleton` and `Transient` APIs. The runnable example demonstrates their actual syntax. `Payload::kind` is an explicit, pure capability-owned variant mapping, including nested application kinds. This slice has no module DSL, runtime dependency resolution, provider pool, async host, production authentication, deadline/cancellation metadata or durable acceptance. The conceptual jobs notation below remains proposed, not a supported API.
+
 ## Label what exists
 
+- **Implemented core:** actual public code and executed checks in the linked Rust workspace; only the documented subset.
 - **Observed source pattern:** a mechanism found in a reviewed repository. Cite its report/source; inspected tests are not executed tests.
 - **Proposed semantics / spelling:** the intended homelab behavior or illustrative syntax below, not an existing callable API.
 - **Gap / unverified:** implementation, evidence or a decision still needed. Do not silently promote a design into working code.

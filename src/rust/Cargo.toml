@@ -1,0 +1,15 @@
+[workspace]
+members = ["forge-ingress-contract", "forge-bridge", "forge-provider"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+forge-ingress-contract = { path = "forge-ingress-contract" }
+forge-provider = { path = "forge-provider" }

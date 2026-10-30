@@ -1,6 +1,6 @@
 # Dependency injection: factories, providers, and owned lifetimes
 
-**Status:** Proposed Rust assembly contract, informed by a focused source reinspection of older Forge patterns and standalone HPVS. This is documentation, not an implemented DI container or a claim of drop-in compatibility.
+**Status:** Proposed Rust assembly contract, informed by a focused source reinspection of older Forge patterns and standalone HPVS. This is not an implemented DI container or a claim of drop-in compatibility. The [initial `forge-provider` crate](../../src/rust/forge-provider/README.md) now implements only synchronous factory/provider/lease primitives plus singleton/transient scopes; graph validation, pools and managed host lifecycle below remain proposed.
 
 ## The decision
 
@@ -53,7 +53,9 @@ trait Provider<T: ?Sized> {
         Self: 'a,
         T: 'a;
 
-    fn acquire(&self) -> Result<Self::Lease<'_>, Self::Error>;
+    fn acquire<'a>(&'a self) -> Result<Self::Lease<'a>, Self::Error>
+    where
+        T: 'a;
 }
 ```
 

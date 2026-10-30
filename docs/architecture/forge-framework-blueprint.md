@@ -1,6 +1,6 @@
 # Forge framework: small kernel, explicit starters, cohesive capabilities
 
-**Status:** Proposed target architecture, based on the complete 15-repository review set dated 30 October 2026. This is a design, not an implemented or production-validated framework.
+**Status:** Proposed target architecture, based on the complete 15-repository review set dated 30 October 2026. This remains the full target design, not a production-validated framework. A [first synchronous Rust core subset](../../src/rust/README.md) is now implemented and tested; the local guide explicitly distinguishes implemented primitives from planned assembly, transport and durability features.
 
 ## The product decision
 

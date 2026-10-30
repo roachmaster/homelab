@@ -10,7 +10,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a prop
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 
-The framework is currently a design proposal backed by read-only source reviews, not a completed runtime or a fresh test certification. Existing source sets remain organized by language and purpose; this repository does not yet contain runnable applications.
+The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, and factory/provider/lease primitives with a runnable in-process example and focused tests. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
 ## Source sets
 
