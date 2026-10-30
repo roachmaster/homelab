@@ -1,6 +1,6 @@
 # Worked example: publication capability
 
-This is a conditional design example, not a prescribed template. Assume an application accepts a document over REST or Kafka through the same logical bridge, applies publication rules, stores it, and requests delivery. Storage and delivery technology vary independently of those rules. The parts may still run in one process and deploy together.
+This is a conditional design example, not a prescribed template. Assume an application accepts a document through the shared logical bridge, applies publication rules, stores it, and requests delivery. Its input transport is not selected: an in-process driver is enough to prove the contract, and a thin adapter is added only for an actual consumer. Storage and delivery technology vary independently of those rules. The parts may still run in one process and deploy together.
 
 ## Packages and compile-time dependencies
 
@@ -10,18 +10,13 @@ publication_app             # composition / executable
   -> ingress_bridge         # constructs bridge and explicit route registry
   -> publication_handler    # registers publication route/version -> handler
   -> publication
-  -> publication_http
-  -> publication_kafka
+  -> publication_input      # optional selected input adapter
   -> publication_postgres
   -> publication_delivery
 
-publication_http            # thin driving adapter
+publication_input           # optional thin driving adapter; transport not prescribed
   -> ingress_contract       # canonical envelope, ingress port and outcomes
-  -> HTTP framework
-
-publication_kafka           # thin driving adapter
-  -> ingress_contract       # same canonical envelope and ingress port
-  -> Kafka client
+  -> selected input library # only if needed
 
 ingress_bridge              # admission + dispatch, not domain orchestration
   -> ingress_contract       # implements ingress port; invokes registered handler port
@@ -53,31 +48,32 @@ Arrows mean imports/build dependencies, not runtime calls. `ingress_bridge` rece
 Runtime flow is distinct:
 
 ```text
-REST controller ----\
-                     -> Envelope -> shared Ingress -> admission + registry dispatch
-Kafka consumer -----/                                -> publication handler
-                                                       -> PublishDocument
-                                                          -> storage / delivery
+Selected input adapter, if needed --\
+                                     -> Envelope -> shared Ingress
+In-process contract driver --------/                -> admission + registry dispatch
+                                                     -> publication handler
+                                                        -> PublishDocument
+                                                           -> storage / delivery
 ```
 
-Fan-out is owned by the admitted application workflow, not duplicated in REST/Kafka adapters or hidden in the bridge. Other registered routes may target other capability handlers without growing bridge business logic. Replicas may implement this same logical path; no singleton thread or central server is implied.
+Fan-out is owned by the admitted application workflow, not duplicated in input adapters or hidden in the bridge. Other registered routes may target other capability handlers without growing bridge business logic. Replicas may implement this same logical path; no singleton thread or central server is implied.
 
 `ingress_contract` owns only the versioned admission conversation shared by these actual consumers. It is not `common-core`: domain DTOs and driven ports remain owned by `publication`. The handler binding may be a boundary module instead of a build artifact if enforcement permits, but its dependencies must not introduce a bridge/core cycle. Composition knows implementations solely to assemble them; it must not perform business workflows.
 
 ## API, routing and data decisions
 
-- An illustrative canonical header might express destination `publication.publish` and contract version `1`. These are logical allowlisted identifiers, not a method/class to execute; names and representation are example-only. Header schema/version identity must also be explicit where independently versioned. Neither adapter determines this destination by inspecting the document body.
-- A configured REST method/path mapping and Kafka topic mapping can supply the same canonical destination/version. Define whether a supplied header must match that mapping, and reject conflicts. Both adapters submit the same logical envelope to `Ingress`; neither calls `PublishDocument` directly.
+- An illustrative canonical header might express destination `publication.publish` and contract version `1`. These are logical allowlisted identifiers, not a method/class to execute; names and representation are example-only. Header schema/version identity must also be explicit where independently versioned. No adapter determines this destination by inspecting the document body.
+- A configured input mapping can supply the canonical destination/version. Define whether a supplied header must match that mapping, and reject conflicts. Any installed adapter submits the same logical envelope to `Ingress`; it never calls `PublishDocument` directly. No second transport is required.
 - The bridge validates admission, resolves exactly one supported registered destination/version, and checks route authorization against trusted identity/context. Unknown routes or unauthorized requests do not reach the handler. Domain/resource-specific authorization remains in `publication`; a route is never authentication.
 - The registered handler translates the envelope body contract to `PublishRequest`, which is an application command, not an HTTP body with status codes or a database record. Domain validation remains in `publication`. Avoid duplicate representations without a semantic need.
 - Preserve defined correlation, deadline and idempotency metadata through admission and the handler contract. Define how they affect execution and retry, not merely how they are copied. Adapter redelivery must not reset these semantics.
 - `StorePublication` exposes the publication operation and guarantees the use case actually needs; it does not reproduce database CRUD operations. The adapter owns SQL and maps database errors to core-owned categories.
 - `RequestDelivery` expresses delivery intent. Vendor response types, tokens, and retry headers do not become domain objects.
-- Map controlled rejection/failure outcomes to HTTP responses or Kafka delivery actions in the corresponding adapter. Specify acknowledgments, offset commits, retryable failures and poison-message/dead-letter treatment; acknowledge only at the contract's defined completion or durable-handoff point, not merely because header validation succeeded. Neither protocol detail belongs in the bridge or domain core.
+- Map controlled rejection/failure outcomes to the selected caller interface. If an installed protocol requires acknowledgment or settlement, specify its actual retry/rejection policy and acknowledge only at the contract's defined completion or durable-handoff point, not merely because header validation succeeded. Do not introduce broker machinery for an in-process caller; protocol details never belong in the bridge or domain core.
 
 ## Evidence for this shape
 
-Use unit tests to show equivalent REST/Kafka logical requests reach the same bridge contract, including preserved metadata and conflicting mappings. Independently test registry uniqueness, deterministic routing, authorization and controlled rejection without handler effects. Test publication rules and business idempotency separately. Real REST/Kafka integration checks establish response mapping, broker redelivery/offset behavior and shutdown; adapter mocks cannot establish those guarantees. Enforce forbidden adapter-to-handler and bridge-to-concrete-core imports.
+Use an in-process driver to establish the bridge contract. Test each selected input adapter against that same logical request/outcome contract, including preserved metadata and conflicting mappings; compare multiple real adapters only when they are actually needed. Independently test registry uniqueness, deterministic routing, authorization and controlled rejection without handler effects. Test publication rules and business idempotency separately. Real boundary checks establish the installed adapter's outcome mapping and lifecycle; protocol-specific retry, ordering and settlement checks apply only if that protocol is chosen. Adapter mocks cannot establish those guarantees. Enforce forbidden adapter-to-handler and bridge-to-concrete-core imports.
 
 ## The transaction question the graph cannot answer
 
@@ -89,7 +85,7 @@ If durable delivery intent must be atomic with persistence, a transactional outb
 
 | Decision | Evidence that earns it | Reason to avoid or defer it |
 | --- | --- | --- |
-| Separate REST/Kafka adapters | Swap transports without altering admitted workflows; isolate different delivery lifecycles | Internal modules may suffice, but neither may bypass shared ingress |
+| Separate selected input adapter | Replace an actual input mechanism without altering admitted workflows | No adapter or second transport is required for an in-process consumer; modules may suffice, but cannot bypass shared ingress |
 | Shared ingress contract and bridge | Skill convention of one admission path with header-directed dispatch | Keep implementation small; this does not justify a distributed gateway or business god-class |
 | Separate SQL adapter | Driver types, persistence evolution, real database tests, independent dependency constraints | No persistent storage exists; a speculative repository adds nothing |
 | Keep rules and workflow in `publication` | One cohesive capability, shared vocabulary, no independent consumers | Split later if independent policy consumers or dependency constraints actually emerge |

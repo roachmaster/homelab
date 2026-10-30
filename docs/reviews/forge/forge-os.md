@@ -34,7 +34,7 @@ The reusable engineering pattern is modest but sound: small deterministic functi
 
 The bit representation, fixed 16-bit identity, angular semantics, floating-point matrix operations, and printing helpers are all domain-specific. They should never enter a universal request envelope, application context, module registry, or internal event bus. The templates are development material, not an implemented runtime registration system. **O2–O7.**
 
-In the proposed framework, an application could register a small numerical handler that calls these functions. REST and Kafka would still enter through their thin adapters and the same header-routed ingress bridge. The handler's result would remain a typed capability result; optional notifications could use the common internal fan-out mechanism. No dedicated microservice, transport-specific math router, or dynamic plugin ABI is required.
+In the proposed framework, an application could register a small numerical handler that calls these functions. Any selected external input would enter through a thin adapter and the same header-routed ingress bridge; an in-process caller needs no network transport. The handler's result would remain a typed capability result; optional notifications could use the common internal fan-out mechanism. No dedicated microservice, transport-specific math router, or dynamic plugin ABI is required.
 
 ## Correctness and maintainability observations
 

@@ -2,7 +2,7 @@
 
 ## Decision
 
-**Adapt the task contracts, duplicate-rejecting registry, typed factories, and boundary tests. Do not adopt this workspace wholesale as the new framework.** Of these three runtime-oriented repositories, this has the clearest implemented Rust request-to-handler path. Its next useful step is not more infrastructure: it is converging the existing entry paths on one shared bridge, then proving that two different adapters invoke the same capability.
+**Adapt the task contracts, duplicate-rejecting registry, typed factories, and boundary tests. Do not adopt this workspace wholesale as the new framework.** Of these three runtime-oriented repositories, this has the clearest implemented Rust request-to-handler path. Its next useful step is not more infrastructure: it is converging the existing entry paths on one shared bridge, then proving the canonical ingress contract with an in-process driver and checking any selected adapter against it.
 
 **Review snapshot:** 2026-10-30, default branch `main`. This is a read-only source review; the exact commit and private source evidence are retained separately. Source paths and line ranges below refer to that snapshot. No repository code, build scripts, or tests were executed. The tree has no `AGENTS.md` or checked-in CI workflow. Two non-default branches exist, concerning code review and source export; they were inventoried, not exhaustively reviewed.
 
@@ -41,7 +41,7 @@ This is real implementation, not merely a README diagram. Duplicate factory regi
 
 ## Fit to the intended framework
 
-The desired REST/Kafka → canonical envelope → shared bridge → allowlisted destination → handler flow is **not implemented here**. There is no HTTP server, Kafka consumer, header map, authenticated request identity, destination-header policy, internal fan-out contract, or broker acknowledgment model in the inspected workspace. The existing stdio port is a good adapter example, not evidence that network adapters already exist.
+The desired transport-independent canonical envelope → shared bridge → allowlisted destination → handler flow is **not fully implemented here**; the existing admission paths remain separate. There is no HTTP server, Kafka consumer, header map, authenticated request identity, destination-header policy, internal fan-out contract, or broker acknowledgment model in the inspected workspace. The existing stdio port is a good adapter example, not evidence that network adapters already exist.
 
 The registry is a useful destination allowlist substrate: external text resolves only to registered task identities. Extend that idea into a validated destination type. Do not dispatch arbitrary class names, filesystem paths, import paths, or executable names from headers. Adapters should normalize permitted header values and submit the same envelope to the same bridge; transport-specific response and acknowledgment mapping should remain outside handlers.
 
@@ -67,6 +67,6 @@ No checked-in CI workflow exists. The Actions API returned three historical dyna
 
 **Adapt:** envelope/response identity, factory registration, explicit bootstrap, injected I/O, and contract-test design. **Keep optional:** system automation tasks; enable only in applications that intentionally need them. **Separate:** notation/diff utilities. **Reference rather than preserve:** the macro-heavy application harness; handwritten composition is easier to audit until stable repetition justifies generation.
 
-A first vertical slice should register one harmless capability, feed equivalent requests through stdio and REST, and assert identical bridge decisions and handler results. Kafka can then add acknowledgment/retry semantics without creating a second application pipeline. Tests should cover unregistered destinations, duplicate registration, forbidden headers, deadline expiration, and nested fan-out context propagation.
+A first vertical slice should register one harmless capability and prove bridge decisions and handler results with an in-process driver. The existing stdio adapter can be checked against that contract if retained; add no new transport solely for this proof. Tests should cover unregistered destinations, duplicate registration, forbidden headers, deadline expiration, and nested fan-out context propagation.
 
 No repository-wide license file was found. Only the test-support manifest declares a license, which does not establish licensing for the other crates. Before publishing source, resolve ownership and licensing, package metadata, and dependency/version policy. This public review intentionally contains original technical analysis, not copied private source or private source links.

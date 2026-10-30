@@ -28,7 +28,7 @@ A suitable assembled use is:
 
 **canonical ingress → selected capability handler → capability-owned FSM definition → next state plus outputs → capability-owned persistence/effect ports**.
 
-The FSM belongs behind the handler, not inside the REST/Kafka adapters and not in a central bridge. Its outputs may describe follow-on work, but this crate does not dispatch that work. The domain capability decides whether to fan out, persist, emit events, retry an effect or expose a projection. The composition root supplies the required ports and state owner without knowing each transition rule.
+The FSM belongs behind the handler, not inside selected input adapters and not in a central bridge. Its outputs may describe follow-on work, but this crate does not dispatch that work. The domain capability decides whether to fan out, persist, emit events, retry an effect or expose a projection. The composition root supplies the required ports and state owner without knowing each transition rule.
 
 This is fully compatible with header-deterministic ingress: the envelope header chooses a registered capability operation; the payload becomes a typed domain event inside that capability. The FSM never needs to inspect transport headers or choose a route. It also need not be used for every operation—stateless reads and simple commands should remain simple.
 

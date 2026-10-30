@@ -131,7 +131,7 @@ UI, Bitwave/LLM research, orchestration, and framework primitives share one work
 
 ## A controlled extraction sequence
 
-1. **Freeze one behavioral slice:** a read-only capability and one idempotent mutation through HTTP and CLI, then the event adapter. Preserve request/result contracts and negative cases before moving code.
+1. **Freeze one behavioral slice:** a read-only capability and one idempotent mutation through the selected existing ingress, with an in-process driver proving the extracted contract. Preserve request/result contracts, negative cases and any existing transport behavior involved in migration; do not require new transports.
 2. **Create the smallest spine:** envelope/header identity, typed destination, registry, authorization interface, failure types, cancellation/deadline, and tracing context. No database client, LLM enum, workspace codec, or deployment backend in this layer.
 3. **Make capability registration declarative:** each package registers destinations/versions, handlers, schemas, policy, dependencies, health probes, and start/stop hooks. Build and validate a dependency DAG once. Keep transport selection separate from capability selection.
 4. **Move composition out of the CLI:** the application names capabilities and adapters; package factories own their wiring. All adapters submit to one shared logical ingress bridge. After authorized dispatch, handlers may call internal ports or fan out events; the bridge never selects business workflows.

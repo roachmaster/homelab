@@ -38,7 +38,7 @@ Important distinction: **“publish” here means an async request/reply operati
 
 ## Transferable mechanisms
 
-1. **One protocol, multiple adapters.** The same caller can use memory, HTTP, or local-loop providers. Reproduce that principle on the server: thin REST and Kafka adapters must feed one normalized ingress boundary rather than duplicate application routing.
+1. **One protocol, multiple adapters.** The same caller can use memory, HTTP, or local-loop providers. Reproduce that principle on the server: any selected input adapters feed one normalized ingress boundary rather than duplicate application routing. The framework does not require a particular transport.
 2. **Composition at application startup.** Route sets, provider pairs, and renderer registrations are app-owned choices. A Rust application builder can adopt that explicit assembly style without becoming a global service locator.
 3. **Executable contract fixtures.** JSON examples, recording doubles, and intercepted HTTP requests are stronger evidence than documentation-only diagrams. Shared cross-language fixtures would be particularly valuable for the Rust/Swift boundary.
 4. **Stable semantic identifiers.** Event types and render kinds let adapters remain generic. They still need versioning, validation, and ownership rules before becoming an externally supported contract.

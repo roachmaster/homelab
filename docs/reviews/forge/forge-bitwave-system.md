@@ -32,7 +32,7 @@ The evidence does not establish a completed transport-independent public gateway
 
 The inspected `ingest` executable parses its own CLI, resolves input and lookup-table resources, optionally creates a missing lookup table, then calls domain ingestion functions for single-file, per-token or parallel outputs. It does not enter the header-based command gateway. Likewise, the model-file adapter translates a `Message` into a `FileTask` carrying an export configuration; the inspected public `gguf_api` returns that task rather than proving a complete registered execution path. These are useful pieces, but the source does not support drawing one fully integrated application platform around them. (B4, B7)
 
-This distinction matters for the new architecture: preserve the intended shared bridge, but validate it with two real ingress adapters and an executable domain path before calling it the common entry point.
+This distinction matters for the new architecture: preserve the intended shared bridge, but validate it with an in-process driver and an executable domain path before calling it the common entry point; test real adapters only when selected.
 
 ## Important invariants and missing guarantees
 
@@ -64,7 +64,7 @@ This distinction matters for the new architecture: preserve the intended shared 
 
 The proposed framework should distinguish **wire envelope**, **validated logical command**, and **typed domain request**. Transport adapters perform framing and transport-specific authentication/acknowledgment work; the bridge handles canonical policy and route resolution; the handler owns its domain decoding and orchestration. No transport should be a gateway into another transport, and no universal trait should expose GGUF paths or bit-wave representation.
 
-A starter can provide an explicit composition root that registers two unrelated domains. Add REST and Kafka adapters to that same bridge, then prove that the operation identity, request/correlation context and error classification agree across transports. Keep broker commit/retry behavior at the Kafka adapter while making domain idempotency requirements explicit. These are proposed contracts, not implemented capabilities of this snapshot.
+A starter can provide an explicit composition root that registers two unrelated domains. Prove operation identity, request/correlation context and error classification through an in-process driver. Any later input adapter must conform to that same bridge contract; no particular transport is required. Keep any protocol-specific lifecycle in that adapter while making domain idempotency requirements explicit. These are proposed contracts, not implemented capabilities of this snapshot.
 
 ## Testing, CI and portability
 

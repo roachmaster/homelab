@@ -1,16 +1,15 @@
 digraph Containers {
 graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.65, ranksep=0.9, bgcolor="white"]; node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4]; edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
-rankdir=LR; label="02  Containers — proposed reference application\nOne application process plus durable storage; deployment replication is a separate decision";
-user [label="Operator / API consumer\n[Person]", fillcolor="#213b55", color="#213b55", fontcolor="white"];
-kafka [label="Kafka platform\n[External software system]", fillcolor="#f0f2f4", color="#8b98a3"];
+rankdir=LR; label="02  Containers — proposed durable reference workflow\nOne application host plus a data store; neither input transport nor store technology is selected";
+user [label="Application operator\n[Person]", fillcolor="#213b55", color="#213b55", fontcolor="white"];
+caller [label="Calling application\n[External software system; optional]", fillcolor="#f0f2f4", color="#8b98a3"];
 ext [label="Downstream capability\n[External software system; optional]", fillcolor="#f0f2f4", color="#8b98a3"];
 subgraph cluster_ref { label="Reference application [software system boundary]"; fontname="DejaVu Sans"; fontsize=14; color="#2b7686"; style="rounded,dashed"; margin=24;
-server [label="Application host\n[Container: Rust executable]\nREST + Kafka ingress, one logical bridge,\nregistered handlers, supervised workers", fillcolor="#087f8c", color="#087f8c", fontcolor="white", fontsize=15];
-store [shape=cylinder, label="Job ledger\n[Container: PostgreSQL database]\nJobs + idempotency receipts\nOptional outbox in the same transaction", fillcolor="#e8f4f7"];
-server -> store [label="Commit / query durable state\nSQL over database protocol"];
+server [label="Application host\n[Container: Rust executable]\nShared bridge + registered handlers\nInput adapters / workers only as needed", fillcolor="#087f8c", color="#087f8c", fontcolor="white", fontsize=15];
+store [shape=cylinder, label="Job ledger\n[Container: durable data store]\nTechnology undecided\nJobs + idempotency receipts", fillcolor="#e8f4f7"];
+server -> store [label="Commit / query durable state\nSelected store adapter"];
 }
-user -> server [label="Submit / inspect\nHTTPS"];
-kafka -> server [label="Deliver work\nKafka protocol"];
-server -> kafka [label="Commit offsets after defined outcome\nKafka protocol"];
+user -> server [label="Run / inspect\nInterface not selected"];
+caller -> server [label="Optional input interface\nNo broker or network API required", style=dashed];
 server -> ext [label="Optional worker effect\nOwned outbound port", style=dashed];
 }

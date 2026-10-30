@@ -1,5 +1,7 @@
 # Forge repository reviews
 
+**Transport scope:** the proposed framework is transport-neutral. No Kafka, REST, or other particular transport is required. Historical transport capabilities and absences below remain source findings, not a mandate to add those technologies. The first framework proof can use an in-process ingress driver.
+
 Read-only architectural reviews of 15 Forge experiments, inspected on 30 October 2026. These are original technical assessments, not source releases. Source observations describe the reviewed snapshots; reuse recommendations and the target framework are proposals. No fresh builds or tests were executed for these reviews.
 
 ## Reports

@@ -6,28 +6,29 @@
 
 Build **a Rust application-assembly framework**, not a new all-purpose application. Its promise is: add a supported starter, provide typed configuration and a capability handler, and receive predictable admission, lifecycle, diagnostics, and test seams. Keep business workflows out of the framework. Keep developer tools, model execution, client SDKs, and domain-specific engines outside its mandatory dependency graph.
 
-The framework is linked into a **reference application** that proves the developer experience. That application owns a jobs capability and demonstrates REST and Kafka reaching the same logical ingress. A separate deployment for every crate is neither required nor desirable.
+The framework is linked into a **reference application** that proves the developer experience. That application owns an illustrative jobs capability and proves the shared logical ingress with an in-process contract driver. No transport has been selected: a network API, broker, or CLI is added only for an actual consumer, not to satisfy the framework design. A separate deployment for every crate is neither required nor desirable.
 
 “Spring Boot-like” means convenient starters, conditional defaults, explicit overrides, consistent configuration, and dependable application startup—not copying Java reflection or building a universal service locator. Spring Boot's own guidance describes packaged auto-configuration, conditional defaults that can yield to user configuration, and focused tests for those combinations. The Rust mechanism proposed here is explicit and statically linked. [Spring Boot auto-configuration](https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html)
 
 The selection is evidence-led: retain the small framework command seams, Mission Control’s shared command-port/lifecycle patterns, and HPVS’s registration/ownership discipline rather than combining whole workspaces. See the [repository reuse map](reuse-map.md), [module authoring contract](module-authoring.md), [decisions](decisions.md), and [delivery roadmap](../roadmap/forge-framework.md).
 
-## 1. One logical ingress, multiple transports
+## 1. One logical ingress, independent of transport
 
 ```text
-REST adapter ----\
-                  -> canonical envelope -> shared bridge -> registered handler
-Kafka adapter ---/                         admission          -> feature use case
-                                                               -> owned ports / fan-out
+Chosen input adapter, if needed -> canonical envelope -> shared bridge
+In-process contract driver ----/                        admission + dispatch
+                                                        -> registered binding
+                                                        -> feature use case
+                                                        -> owned ports / fan-out
 ```
 
 The canonical header carries enough explicit information to resolve exactly one allowed operation and contract version. A single stable `command` identifier can be the destination; separate destination/operation fields are optional, not a requirement. Envelope schema identity and operation-contract identity are distinct when independently versioned.
 
-Transport path/topic mappings may supply routing values, with documented precedence and conflict rejection. The body is not inspected to guess the route. Adapters preserve correlation, original deadlines, and stable idempotency metadata. Verified identity/context is separate from claims supplied inside an untrusted envelope.
+Adapter mappings may supply routing values, with documented precedence and conflict rejection. The body is not inspected to guess the route. Adapters preserve correlation, original deadlines, and stable idempotency metadata. Verified identity/context is separate from claims supplied inside an untrusted envelope.
 
-For Kafka, the consumer's broker credentials authenticate the consumer connection, not the original producer or the tenant named in a message. The adapter needs a documented trusted producer/gateway mapping or independently verified producer claims before constructing caller context. Unverified header assertions cannot become an authorized principal.
+If a future input arrives through an intermediary, that connection's credentials do not automatically attest the original caller or tenant. The adapter needs a documented trust mapping or independently verified caller claims before constructing context. Unverified header assertions cannot become an authorized principal.
 
-The bridge owns envelope/header consistency, supported versions, deadline admission, allowlisted route lookup, route authorization, and dispatch. It does **not** own domain validation, resource-level authorization, SQL, HTTP response generation, Kafka commits, or business orchestration. A handler decodes its versioned body and calls its capability's application API. Fan-out begins only after admission and is governed by that use case.
+The bridge owns envelope/header consistency, supported versions, deadline admission, allowlisted route lookup, route authorization, and dispatch. It does **not** own domain validation, resource-level authorization, storage operations, transport responses/acknowledgments, or business orchestration. A handler decodes its versioned body and calls its capability's application API. Fan-out begins only after admission and is governed by that use case.
 
 The top-level catalog selects a capability-owned binding. Typed request enums, context, and secondary command registries can stay local to that capability; adding a domain must not enlarge a universal request enum or application context in the bridge. The registration object should provide both inspection metadata and its executable binding, so a capability cannot appear installed in one catalog but be absent from a separate dispatch map.
 
@@ -47,7 +48,7 @@ The downstream action is optional. Neither the framework nor its crates appear a
 
 ![C4 containers of the proposed reference application](diagrams/02-containers.svg)
 
-One Rust host contains ingress, dispatch, capability handlers, and supervised workers. PostgreSQL is a proposed reference-adapter choice, not a framework requirement. Kafka is an external delivery platform. Replicas, ingress gateways, and deployment topology are intentionally outside this container view.
+One Rust host contains admission, dispatch, capability handlers, and any selected input adapters or supervised workers. The durable-store technology and external input interface are deliberately undecided. No broker or network server is required. Replicas and deployment topology are outside this container view.
 
 ### Components: where does responsibility live?
 
@@ -69,11 +70,10 @@ Names below describe proposed roles; they are not claims that these packages alr
 
 | Unit | Owns | May depend on | Must not depend on |
 | --- | --- | --- | --- |
-| `forge-ingress-contract` | Canonical envelope/header, ingress/handler/admission contracts, controlled outcomes | Small transport-neutral value dependencies | HTTP/Kafka, concrete handlers, domain models, storage drivers |
+| `forge-ingress-contract` | Canonical envelope/header, ingress/handler/admission contracts, controlled outcomes | Small transport-neutral value dependencies | Transport libraries, concrete handlers, domain models, storage drivers |
 | `forge-bridge` | Validated immutable registry and admitted dispatch | Ingress contract | Concrete capabilities or transport implementations |
 | `forge-runtime` | Module plan, typed config assembly, startup/shutdown supervision | Focused runtime facilities | Domain policy or transport-specific mandatory dependencies |
-| `forge-starter-http` | HTTP adapter and optional installation defaults | Ingress contract, runtime extension surface, HTTP library | Concrete business handlers |
-| `forge-starter-kafka` | Kafka adapter, bounded consumer lifecycle, optional defaults | Ingress contract, runtime extension surface, Kafka library | Concrete business handlers |
+| Chosen ingress adapter, optional | Input normalization, actual transport lifecycle and outcome mapping | Ingress contract; runtime extension surface or transport library only as needed | Concrete business handlers |
 | `jobs` | Job invariants, submission/status use cases, owned persistence/effect ports | Domain values and stable policy dependencies | Framework bridge, transport DTOs, SQL client |
 | `reference-app` | Explicit composition, handler bindings, selected adapters | Selected framework packages and capability | Unrelated tools or domains merely because they exist |
 
@@ -88,7 +88,7 @@ Use a two-phase host plan: **describe and validate**, then **construct and start
 3. Apply explicit user-provided implementations before conditional defaults. A default backs off only for a documented matching provider. Two explicit providers or duplicate route/version registrations fail with a diagnostic; never let insertion order choose silently.
 4. Validate missing requirements, version compatibility, alias collisions, and dependency cycles **before changing the live registry or opening listeners**. Registration failure leaves the existing plan unchanged. Freeze the registry for normal operation.
 5. Construct dependencies and start resources in dependency order. Startup failure closes already-acquired resources in reverse order. Readiness becomes true only after required dependencies are ready.
-6. On shutdown: stop admission, pause new broker delivery, drain bounded in-flight work, cancel remaining cooperative tasks, join them, then close resources in reverse dependency order. Report unfinished or ambiguous work; do not label cancellation as rollback. If a task ignores cancellation or a blocking operation exceeds the grace period, record the unfinished work and apply an explicit host-failure/termination policy. A cancellation signal cannot guarantee a bounded join or undo committed effects; do not destroy resources still owned by a running task while pretending shutdown succeeded.
+6. On shutdown: stop admission, stop new input delivery, drain bounded in-flight work, cancel remaining cooperative tasks, join them, then close resources in reverse dependency order. Report unfinished or ambiguous work; do not label cancellation as rollback. If a task ignores cancellation or a blocking operation exceeds the grace period, record the unfinished work and apply an explicit host-failure/termination policy. A cancellation signal cannot guarantee a bounded join or undo committed effects; do not destroy resources still owned by a running task while pretending shutdown succeeded.
 
 Keep construction and lifecycle management distinct from business workflows. Extension registration can use ordinary Rust functions, traits, and explicit `Arc` ownership. An in-process trait object is not a dynamic library/plugin ABI. Runtime library loading, reflection, distributed discovery, hot reload, and a large DI framework are out of scope until a real requirement proves their value.
 
@@ -113,7 +113,7 @@ See [module authoring](module-authoring.md) for the plug-and-play contract and o
 | Failed / partial outcome | A contract-defined failure, possibly after earlier effects | Preserve actionable state and recovery information |
 | Canceled / deadline exceeded | Work stopped or admission refused according to the contract | Do not imply prior committed effects disappeared |
 
-An in-memory queue or successful header check is not durable acceptance. A handler returning quickly does not justify HTTP acceptance or a Kafka offset commit. Define route-specific completion points and teach each adapter to translate them.
+An in-memory queue or successful header check is not durable acceptance. A handler returning quickly does not justify reporting durable acceptance or acknowledging durable handoff. Define route-specific completion points and teach each adapter to translate them.
 
 ### Idempotency and durable handoff
 
@@ -123,25 +123,25 @@ Replaying a receipt must **not** re-emit its original external effects. Define r
 
 If a later milestone requires an external effect, a database transaction cannot atomically commit both local state and an unrelated remote service. Use an owned durable outbox/worker when required, plus destination idempotency or explicit reconciliation. Do not promise exactly-once external execution from at-least-once delivery.
 
-### Kafka and cancellation
+### Input lifecycle and cancellation
 
-The Kafka adapter owns polling, partition ordering, acknowledgments/commits, retry timing, and dead-letter delivery. With concurrent handling, commit only the safe contiguous completed position; never skip an unfinished earlier record. Terminal rejection may be committed only under the configured disposition policy, including durable dead-letter publication when required. A failed dead-letter send is not successful handling.
+An installed input adapter owns its actual protocol lifecycle, including any response, retry, ordering, or acknowledgment requirements. Specify and test only the mechanisms that exist; do not introduce a broker or delivery machinery for an in-process caller. If a future queued transport is chosen, its settlement point must match the route's completion or durable-handoff guarantee, including failure and shutdown behavior.
 
-A deadline is not reset on redelivery. Canceling an HTTP wait after durable acceptance does not erase the job. Canceling an accepted job is a separate authorized domain transition. An ambiguous database commit or lost response is recovered by the same idempotency key, not by issuing a new one.
+A deadline is not reset on retry. Canceling a caller's wait after durable acceptance does not erase the job. Canceling an accepted job is a separate authorized domain transition. An ambiguous database commit or lost response is recovered by the same idempotency key, not by issuing a new one.
 
 ### Submission sequence
 
 ![Submission sequence through the shared bridge to durable acceptance](diagrams/05-submit-sequence.svg)
 
-This is the new-key success path. Admission rejection stops before handler effects. Store failure produces no accepted receipt unless durable commit is confirmed or recovered. Replay returns the existing receipt without another job/effect. Broker offset handling remains transport-owned.
+This is the new-key success path. Admission rejection stops before handler effects. Store failure produces no accepted receipt unless durable commit is confirmed or recovered. Replay returns the existing receipt without another job/effect. Any protocol-specific response or acknowledgment remains adapter-owned.
 
 ## 6. Evidence needed before calling it a framework
 
 - Core rules run without a server, broker, database, or framework container.
-- Equivalent REST/Kafka inputs produce the same logical envelope and reach the same registered handler; mapping conflicts and spoofed identity are rejected.
+- An in-process driver proves the canonical ingress contract. Each selected adapter maps equivalent logical inputs to that contract; mapping conflicts and spoofed identity are rejected. Compare multiple real adapters only when they are actually needed.
 - Every ingress entry point goes through header/version/admission checks; no convenience method bypasses them.
 - Duplicate registration fails without replacing the original binding. Missing module requirements, incompatible versions, and override conflicts fail assembly deterministically.
-- Real HTTP and Kafka tests establish parsing, response/disposition mapping, redelivery, offset ordering, backpressure, and shutdown—not just mocked method calls.
+- Each installed adapter has real boundary tests for its parsing, outcome mapping, capacity and shutdown semantics. Retry, ordering or acknowledgment checks apply only when its protocol has those mechanisms; mocks alone do not establish them.
 - Real storage tests establish concurrent idempotency claims, persistence across restart, failure after acquisition, and ambiguous-result recovery.
 - Startup failure and shutdown leave no leaked tasks/listeners/connections; cancellation reaches the owner of the work.
 - Package/dependency checks forbid transport-to-concrete-handler bypasses and bridge-to-feature imports.

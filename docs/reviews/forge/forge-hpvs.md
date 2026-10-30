@@ -72,7 +72,7 @@ The architectural correspondence is valuable nonetheless: normalize outside the 
 | Dispatch-word encoding and prepared-program executor | Keep optional | Compute subsystem implementation |
 | DSP/neural models, fixed arithmetic, CPU tuning, C experiments | Exclude from generic core | Domain applications and specialized providers |
 
-The first extraction should prove one ordinary command with two substitutable providers, not recreate the HPVS workspace under new names. Freeze registration, validate before admission, acquire scoped resources, invoke the handler and release deterministically. Then test the same command through REST and Kafka adapters. The HPVS handler may be one optional domain consumer of that shared bridge.
+The first extraction should prove one ordinary command with two substitutable providers, not recreate the HPVS workspace under new names. Freeze registration, validate before admission, acquire scoped resources, invoke the handler and release deterministically. Then prove the canonical ingress with an in-process driver and test any selected input adapter against that contract; no second transport is required. The HPVS handler may be one optional domain consumer of that shared bridge.
 
 ## Verification and branch scope
 

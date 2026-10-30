@@ -68,7 +68,7 @@ No repository-wide license file or package license field was found in the fully 
 
 **Proposed, not implemented:** thin transport adapters create the same canonical envelope, the shared bridge validates and resolves `inference.generate`, and its registered handler calls a small inference service port. That service owns model admission, request sessions, streaming and domain stopping rules. An inference provider owns the current compute implementation. The application composition root chooses it; the bridge never imports model arithmetic or CPU-placement types.
 
-The integration acceptance test should send semantically identical requests through in-memory, REST and Kafka ingress and verify the same domain handler and header context. Separate tests should verify failed initialization prevents readiness, poisoned sessions are never returned to a pool, shutdown drains resources, and a disabled inference feature leaves the base service build free of model dependencies.
+The integration acceptance test should establish the domain handler and header context through an in-process ingress driver, then check any input adapter actually selected against that contract. No network API or broker is a prerequisite. Separate tests should verify failed initialization prevents readiness, poisoned sessions are never returned to a pool, shutdown drains resources, and a disabled inference feature leaves the base service build free of model dependencies.
 
 ## Verification and scope
 

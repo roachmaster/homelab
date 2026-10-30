@@ -43,7 +43,7 @@ This is real implementation rather than a method-shaped placeholder. However, a 
 - **Composition-root factories.** Select implementations once during application assembly instead of scattering construction and global registries throughout handlers.
 - **Stable presentation identifiers.** This is useful for optional UI projections, but not a reason to put UI models in the common ingress envelope.
 
-These are proposed adaptations, not claims that the generic mechanisms already exist in this repository. The REST and Kafka adapters should still converge on the **same header-normalizing ingress bridge**, which dispatches to one selected command handler. A game session may be one such handler-backed capability. Its effect values can feed internal fan-out after a successful command; they should not create a competing transport-specific dispatcher.
+These are proposed adaptations, not claims that the generic mechanisms already exist in this repository. Any selected input adapters should converge on the **same header-normalizing ingress bridge**; no particular transport is required. That bridge dispatches to one selected command handler. A game session may be one such handler-backed capability. Its effect values can feed internal fan-out after a successful command; they should not create a competing transport-specific dispatcher.
 
 ## Important limitations and coupling
 
@@ -65,7 +65,7 @@ Observed source contains **four Rust test functions**: two presentation unit tes
 
 No tracked GitHub Actions workflow was present, and the Actions query returned zero runs for this exact commit. The Makefile is a proposed local check entry point, not evidence of a passed run. **No build, tests, scripts, or generators were executed during this read-only review.** No repository-specific `AGENTS.md` or local skills were present in the pinned tree.
 
-The smallest useful next step is to reproduce the revision/replay contract behind the new generic handler interface with an in-memory implementation and a fake effect sink. Add tests proving that an identical command arriving through REST and Kafka is routed to the same handler and does not repeat side effects. Keep the game crates as an optional example capability demonstrating that the application kernel has not absorbed its domain.
+The smallest useful next step is to reproduce the revision/replay contract behind the new generic handler interface with an in-memory implementation and a fake effect sink. Use an in-process ingress driver to prove that repeated identical commands reach the same handler without repeating side effects; add adapter-conformance tests only for inputs actually selected. Keep the game crates as an optional example capability demonstrating that the application kernel has not absorbed its domain.
 
 ## Source evidence index
 

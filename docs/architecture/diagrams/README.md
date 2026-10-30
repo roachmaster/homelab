@@ -1,6 +1,6 @@
 # Architecture diagrams
 
-These diagrams show a **proposed reference application**, not verified deployed infrastructure.
+These diagrams show a **proposed reference application**, not verified deployed infrastructure. No input transport is selected or required; the first ingress proof uses an in-process driver. The component view shows the extension point for an input adapter only if a real consumer needs one.
 
 | Diagram | Question | SVG | Editable source |
 | --- | --- | --- | --- |
@@ -10,7 +10,7 @@ These diagrams show a **proposed reference application**, not verified deployed 
 | Package dependency DAG | What may import what at compile time? | [SVG](04-package-dependencies.svg) | [DOT](04-package-dependencies.dot) |
 | Submission sequence | When is durable acceptance safe? | [SVG](05-submit-sequence.svg) | [DOT](05-submit-sequence.dot) |
 
-C4 view boundaries and entity types are labeled directly. Teal highlights core policy/admission; amber marks composition/lifecycle; gray indicates external technology or systems. Dashed component arrows mean construction/lifecycle control; dashed context/container arrows mark an optional integration. Solid arrows mean the interaction/dependency named by the diagram, not a universal shared arrow meaning.
+C4 view boundaries and entity types are labeled directly. Teal highlights core policy/admission; amber marks composition/lifecycle; gray indicates external technology or systems. Dashed component arrows mean construction/lifecycle control; dashed context/container and package arrows mark optional integrations/dependencies. Solid arrows mean the interaction/dependency named by the diagram, not a universal shared arrow meaning.
 
 The crate DAG is not a C4 deployment view. Handler bindings and small driven adapters reside in `reference-app` boundary modules initially; they can be extracted when justified. The sequence depicts a successful new-key durable submission; rejection, replay, and failure semantics are described in the [blueprint](../forge-framework-blueprint.md).
 

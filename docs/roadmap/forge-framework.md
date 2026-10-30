@@ -4,18 +4,18 @@
 
 ## First proof: one useful workflow, not a new platform
 
-Build a reference `jobs.submit` → `jobs.status` workflow. The first route validates a bounded work request and returns a stable durable receipt; the second makes that acceptance observable. Use a trivial, explicitly documented job kind. Execution, Kafka, scheduling, remote model calls, and deployment orchestration are not prerequisites for proving the first admission/storage seam.
+Build a reference `jobs.submit` → `jobs.status` workflow. The first route validates a bounded work request and returns a stable durable receipt; the second makes that acceptance observable. Use a trivial, explicitly documented job kind. Execution, network/broker integrations, scheduling, remote model calls, and deployment orchestration are not prerequisites for proving the first admission/storage seam.
 
-Start with one REST adapter, the shared bridge, one capability, and a real local durable-store adapter. A memory adapter is useful for unit tests but cannot satisfy the durability gate. This is intentionally more meaningful than a health endpoint and smaller than recreating Mission Control.
+Start with an in-process contract driver, the shared bridge, one capability, and a real local durable-store adapter. No input transport is selected or required. A thin CLI or network adapter can be considered later for an actual consumer; neither is a prerequisite. A memory adapter is useful for unit tests but cannot satisfy the durability gate. This is intentionally more meaningful than a health endpoint and smaller than recreating Mission Control.
 
 ## Milestones and exit evidence
 
 | Stage | Scope | Exit evidence | Do not add yet |
 | --- | --- | --- | --- |
 | 0 — Select the salvage | Complete the repository reuse map; identify minimal contracts and licensing/ownership constraints before code copying | Every candidate has a source report, concrete extraction boundary, known limitations, and a validation plan | Wholesale repository merges or renamed application scaffolds |
-| 1 — Admission kernel | Canonical header/body, immutable registry, route/version checks, trusted-context authorization, explicit handler binding | Duplicate registration is non-mutating; every entry point validates; denied/unknown/conflicting routes have zero handler effects | HTTP/Kafka in the kernel; generic global service lookup |
-| 2 — Smallest durable vertical slice | REST submit/status, jobs policy, real store, explicit composition, stable receipts | Integration tests cover success, same-key replay, changed-body conflict, concurrent duplicate submissions, restart persistence, store failure, and lost-response recovery | Worker execution, remote side effects, extra domains |
-| 3 — Prove lifecycle and transport parity | Opt-in HTTP/Kafka starters, validated config, supervised startup/shutdown | Equivalent logical inputs reach the same handler; actual broker redelivery and ordered commits work; partial startup closes resources; bounded shutdown preserves outcomes | Dynamic plugin loading or distributed host orchestration |
+| 1 — Admission kernel | Canonical header/body, immutable registry, route/version checks, trusted-context authorization, explicit handler binding | Duplicate registration is non-mutating; every entry point validates; denied/unknown/conflicting routes have zero handler effects | Transport libraries in the kernel; generic global service lookup |
+| 2 — Smallest durable vertical slice | In-process submit/status, jobs policy, real store, explicit composition, stable receipts | Integration tests cover success, same-key replay, changed-body conflict, concurrent duplicate submissions, restart persistence, store failure, and lost-response recovery | Worker execution, remote side effects, extra domains |
+| 3 — Prove lifecycle and substitution | Validated config, supervised startup/shutdown, replaceable provider; add an input adapter only for a real consumer | Driver exercises one ingress contract; replacing the provider preserves it; any selected adapter conforms; partial startup closes resources; shutdown truthfully reports grace exhaustion | Mandatory second transport, dynamic plugin loading or distributed host orchestration |
 | 4 — Execute one job type | Supervised worker, durable claim/completion, cancellation policy, retry budget | Crash/reclaim tests; no lost accepted jobs; state transitions and concurrency controls explicit; status reflects reality | General workflow DSL or unbounded fan-out |
 | 5 — Prove extension ergonomics | Add a second small capability and one custom provider override without modifying bridge internals | Small composition-only integration; no mandatory unrelated dependencies; absent/default/override/conflict test matrix passes | Broad starter catalog before the extension contract stabilizes |
 | 6 — Package for reuse | Version public contracts, document compatibility/support, publish runnable examples and measured limits | Clean consumer build, contract tests, dependency checks, reproducible demo and release checks | Production claims unsupported by operational evidence |
@@ -26,7 +26,7 @@ A stage can be split into small reversible patches. Its exit gate—not a date o
 
 **Fast:** capability rules, versioned-body decoding, admission rejection without effects, config merge/validation, registry transactionality, override conflict detection, dependency-graph checks.
 
-**Real boundaries:** HTTP parsing/status mapping; Kafka partition ordering, rebalance/redelivery and commit rules; storage concurrency, cleanup, restart persistence, and ambiguity recovery. Keep test doubles, local real-dependency tests, and deployed-system tests visibly distinct.
+**Real boundaries:** storage concurrency, cleanup, restart persistence, and ambiguity recovery; parsing, outcome mapping and lifecycle of each input adapter only if selected. Test retry, ordering and acknowledgment semantics only when that adapter actually has them. Keep test doubles, local real-dependency tests, and deployed-system tests visibly distinct.
 
 **Lifecycle:** start failure after each acquisition step; stop during active requests and poll loops; bounded drain and cancellation; all workers joined before resource destruction. Canceling a caller must not falsely report that an already committed job vanished.
 

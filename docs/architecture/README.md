@@ -2,7 +2,7 @@
 
 **Design direction:** a small Rust application-assembly framework with explicit starters, one shared header-routed ingress, and capability-owned handlers. Reuse successful boundaries from the existing projects without merging their domains into a new monolith.
 
-The framework is a library family. A separate reference application proves configuration, registration, lifecycle, transport parity, durable acceptance, and extension ergonomics. The diagrams show that application—not crates disguised as deployed services.
+The framework is a library family. No particular transport is required or selected; a broker and a network API are optional integrations, not baseline components. A separate reference application proves configuration, registration, lifecycle, adapter substitutability, durable acceptance, and extension ergonomics. The diagrams show that application—not crates disguised as deployed services.
 
 ## Read in this order
 
@@ -17,7 +17,7 @@ The framework is a library family. A separate reference application proves confi
 ## The central path
 
 ```text
-Thin REST / Kafka adapters
+Selected thin input adapter, or an in-process caller
   -> canonical header + body + trusted context
   -> shared admission bridge
   -> one registered, authorized capability binding

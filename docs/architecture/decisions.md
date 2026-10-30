@@ -4,7 +4,8 @@
 
 | Decision | Why | Cost / rejection condition |
 | --- | --- | --- |
-| One logical header-routed ingress | Uniform admission and deterministic routing across REST/Kafka | The bridge must remain admission/dispatch only; reject domain logic growth |
+| One logical header-routed ingress | Uniform admission and deterministic routing for whatever inputs are actually selected | The bridge must remain admission/dispatch only; reject domain logic growth |
+| No prescribed input transport | Keep the framework usable in-process and install adapters only for real consumers | A second adapter is not a milestone by itself; prove the ingress contract first |
 | Explicit statically linked modules/starters | Predictable dependencies and simple Rust ownership; convenient opt-in assembly | Rebuild to add code; revisit dynamic loading only for a demonstrated operational need |
 | Capability-first packages | Localize changes around business invariants instead of global technical layers | Some boundary mappings remain; avoid one crate per class/helper |
 | Consumer-owned outbound ports | External technology does not define application vocabulary | Contracts must expose real failure/ownership/performance semantics, not hide them |

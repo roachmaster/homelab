@@ -8,13 +8,13 @@
 2. Supply typed namespaced configuration and any required capability implementation.
 3. Start the host, or receive an actionable validation error before the application becomes ready.
 
-Do not require copying a large example application, editing bridge internals, reflecting over type names, or adding a new domain to a central all-knowing switch. Static linking is the default. A runtime trait object is acceptable; a stable cross-library ABI is a different, deferred requirement.
+Do not require copying a large example application, editing bridge internals, reflecting over type names, or adding a new domain to a central all-knowing switch. No transport is mandatory; the first proof can use an in-process driver. Static linking is the default. A runtime trait object is acceptable; a stable cross-library ABI is a different, deferred requirement.
 
 ## Choose the right extension
 
 | Extension | Owns | Does not own |
 | --- | --- | --- |
-| Ingress starter | HTTP/Kafka parsing, mapping, transport lifecycle, outcome translation | Domain handlers or business policy |
+| Ingress starter | Chosen input parsing/mapping, actual transport lifecycle, outcome translation | Domain handlers or business policy |
 | Capability module | Cohesive application/domain behavior and owned outbound ports | Transport DTOs, bridge implementation, host internals |
 | Handler binding | Versioned body decoding and mapping into a capability API | Independent routing policy that bypasses admission |
 | Driven adapter | One capability's external conversation and real contract tests | All repositories' data models or a generic universal repository |
@@ -52,7 +52,7 @@ Route authorization is checked against trusted context before dispatch. Resource
 1. Define a small notification command/result and the feature-owned `Delivery` conversation. Keep vendor DTOs out of these types.
 2. Implement policy and a registered binding for one supported command version. Header routing chooses that binding; the body is decoded only after admission.
 3. Add one delivery adapter or controlled fake, according to the environment. State whether the result means delivered, durably queued, or merely attempted.
-4. Compose the binding and its dependencies explicitly. Configure a REST mapping and, only if needed, a Kafka mapping to the same logical operation/version.
+4. Compose the binding and its dependencies explicitly. Exercise it through the in-process ingress contract. Add an input adapter/mapping only when a real caller requires one; all selected adapters use the same logical operation/version.
 5. Add tests for rejected admission without effects, resource authorization, delivery failure, cancellation, duplicate request behavior, and actual adapter semantics.
 6. Verify that enabling notifications changes no bridge dispatch code and does not force the jobs capability or an unrelated model runtime into every application.
 

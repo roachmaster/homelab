@@ -1,83 +1,66 @@
 digraph Sequence {
 graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.65, ranksep=0.9, bgcolor="white"]; node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4]; edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
-graph [ranksep=0.55, nodesep=0.3]; label="05  Submit sequence — new idempotency key; durable commit succeeds\nProposed reference workflow; repeated keys replay the receipt without a second job or effect";
-h0 [label="Client / broker", group="g0", fillcolor="#e8f4f7", width=1.9];
-h1 [label="Ingress adapter", group="g1", fillcolor="#e8f4f7", width=1.9];
-h2 [label="Bridge", group="g2", fillcolor="#087f8c", fontcolor="white", width=1.9];
-h3 [label="Jobs handler", group="g3", fillcolor="#e8f4f7", width=1.9];
-h4 [label="Job ledger", group="g4", fillcolor="#e8f4f7", width=1.9];
-{rank=same; h0; h1; h2; h3; h4;}
-h0 -> h1 -> h2 -> h3 -> h4 [style=invis];
+graph [ranksep=0.55, nodesep=0.3]; label="05  Submit sequence — canonical ingress to durable acceptance\nCaller can be an in-process driver or a chosen thin adapter; no transport is required";
+h0 [label="Ingress caller", group="g0", fillcolor="#e8f4f7", width=1.9];
+h1 [label="Bridge", group="g1", fillcolor="#087f8c", fontcolor="white", width=1.9];
+h2 [label="Jobs handler", group="g2", fillcolor="#e8f4f7", width=1.9];
+h3 [label="Job ledger", group="g3", fillcolor="#e8f4f7", width=1.9];
+{rank=same; h0; h1; h2; h3;}
+h0 -> h1 -> h2 -> h3 [style=invis];
 n0_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n0_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n0_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n0_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n0_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n0_0; n0_1; n0_2; n0_3; n0_4;}
-n0_0 -> n0_1 -> n0_2 -> n0_3 -> n0_4 [style=invis, weight=10];
+{rank=same; n0_0; n0_1; n0_2; n0_3;}
+n0_0 -> n0_1 -> n0_2 -> n0_3 [style=invis, weight=10];
 n1_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n1_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n1_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n1_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n1_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n1_0; n1_1; n1_2; n1_3; n1_4;}
-n1_0 -> n1_1 -> n1_2 -> n1_3 -> n1_4 [style=invis, weight=10];
+{rank=same; n1_0; n1_1; n1_2; n1_3;}
+n1_0 -> n1_1 -> n1_2 -> n1_3 [style=invis, weight=10];
 n2_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n2_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n2_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n2_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n2_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n2_0; n2_1; n2_2; n2_3; n2_4;}
-n2_0 -> n2_1 -> n2_2 -> n2_3 -> n2_4 [style=invis, weight=10];
+{rank=same; n2_0; n2_1; n2_2; n2_3;}
+n2_0 -> n2_1 -> n2_2 -> n2_3 [style=invis, weight=10];
 n3_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n3_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n3_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n3_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n3_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n3_0; n3_1; n3_2; n3_3; n3_4;}
-n3_0 -> n3_1 -> n3_2 -> n3_3 -> n3_4 [style=invis, weight=10];
+{rank=same; n3_0; n3_1; n3_2; n3_3;}
+n3_0 -> n3_1 -> n3_2 -> n3_3 [style=invis, weight=10];
 n4_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n4_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n4_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n4_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n4_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n4_0; n4_1; n4_2; n4_3; n4_4;}
-n4_0 -> n4_1 -> n4_2 -> n4_3 -> n4_4 [style=invis, weight=10];
+{rank=same; n4_0; n4_1; n4_2; n4_3;}
+n4_0 -> n4_1 -> n4_2 -> n4_3 [style=invis, weight=10];
 n5_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n5_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n5_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n5_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n5_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n5_0; n5_1; n5_2; n5_3; n5_4;}
-n5_0 -> n5_1 -> n5_2 -> n5_3 -> n5_4 [style=invis, weight=10];
+{rank=same; n5_0; n5_1; n5_2; n5_3;}
+n5_0 -> n5_1 -> n5_2 -> n5_3 [style=invis, weight=10];
 n6_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n6_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n6_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n6_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n6_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n6_0; n6_1; n6_2; n6_3; n6_4;}
-n6_0 -> n6_1 -> n6_2 -> n6_3 -> n6_4 [style=invis, weight=10];
+{rank=same; n6_0; n6_1; n6_2; n6_3;}
+n6_0 -> n6_1 -> n6_2 -> n6_3 [style=invis, weight=10];
 n7_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n7_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n7_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n7_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n7_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n7_0; n7_1; n7_2; n7_3; n7_4;}
-n7_0 -> n7_1 -> n7_2 -> n7_3 -> n7_4 [style=invis, weight=10];
+{rank=same; n7_0; n7_1; n7_2; n7_3;}
+n7_0 -> n7_1 -> n7_2 -> n7_3 [style=invis, weight=10];
 n8_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
 n8_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
 n8_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
 n8_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n8_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n8_0; n8_1; n8_2; n8_3; n8_4;}
-n8_0 -> n8_1 -> n8_2 -> n8_3 -> n8_4 [style=invis, weight=10];
-n9_0 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g0"];
-n9_1 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g1"];
-n9_2 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g2"];
-n9_3 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g3"];
-n9_4 [shape=point, width=0.035, label="", fillcolor="#9cb1ba", color="#9cb1ba", group="g4"];
-{rank=same; n9_0; n9_1; n9_2; n9_3; n9_4;}
-n9_0 -> n9_1 -> n9_2 -> n9_3 -> n9_4 [style=invis, weight=10];
+{rank=same; n8_0; n8_1; n8_2; n8_3;}
+n8_0 -> n8_1 -> n8_2 -> n8_3 [style=invis, weight=10];
 h0 -> n0_0 [arrowhead=none, color="#b8c5cc"];
 n0_0 -> n1_0 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n1_0 -> n2_0 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
@@ -87,7 +70,6 @@ n4_0 -> n5_0 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n5_0 -> n6_0 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n6_0 -> n7_0 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n7_0 -> n8_0 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n8_0 -> n9_0 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 h1 -> n0_1 [arrowhead=none, color="#b8c5cc"];
 n0_1 -> n1_1 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n1_1 -> n2_1 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
@@ -97,7 +79,6 @@ n4_1 -> n5_1 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n5_1 -> n6_1 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n6_1 -> n7_1 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n7_1 -> n8_1 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n8_1 -> n9_1 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 h2 -> n0_2 [arrowhead=none, color="#b8c5cc"];
 n0_2 -> n1_2 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n1_2 -> n2_2 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
@@ -107,7 +88,6 @@ n4_2 -> n5_2 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n5_2 -> n6_2 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n6_2 -> n7_2 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n7_2 -> n8_2 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n8_2 -> n9_2 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 h3 -> n0_3 [arrowhead=none, color="#b8c5cc"];
 n0_3 -> n1_3 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n1_3 -> n2_3 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
@@ -117,23 +97,10 @@ n4_3 -> n5_3 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n5_3 -> n6_3 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n6_3 -> n7_3 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
 n7_3 -> n8_3 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n8_3 -> n9_3 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-h4 -> n0_4 [arrowhead=none, color="#b8c5cc"];
-n0_4 -> n1_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n1_4 -> n2_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n2_4 -> n3_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n3_4 -> n4_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n4_4 -> n5_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n5_4 -> n6_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n6_4 -> n7_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n7_4 -> n8_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n8_4 -> n9_4 [arrowhead=none, color="#b8c5cc", style=dashed, weight=20];
-n0_0 -> n0_1 [label="1  Request / delivered message", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
-n1_1 -> n1_2 [label="2  Canonical header + body + trusted identity", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
-n2_2 -> n2_3 [label="3  Admit, authorize, resolve unique route", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
-n3_3 -> n3_4 [label="4  Validate policy; atomically write job + receipt", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
-n4_4 -> n4_3 [label="5  Commit succeeds; stable receipt", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
-n5_3 -> n5_2 [label="6  Accepted(receipt, job_id)", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
-n6_2 -> n6_1 [label="7  Controlled application outcome", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
-n7_1 -> n7_0 [label="8  HTTP accepted response / commit Kafka offset", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
+n0_0 -> n0_1 [label="1  Canonical header + body + trusted context", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
+n1_1 -> n1_2 [label="2  Admit, authorize, resolve unique route", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
+n2_2 -> n2_3 [label="3  Validate policy; atomically write job + receipt", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
+n3_3 -> n3_2 [label="4  Commit succeeds; stable receipt", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
+n4_2 -> n4_1 [label="5  Accepted(receipt, job_id)", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
+n5_1 -> n5_0 [label="6  Controlled application outcome", constraint=false, color="#24576b", fontcolor="#163744", fontsize=11];
 }
