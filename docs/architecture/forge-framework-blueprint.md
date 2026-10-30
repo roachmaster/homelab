@@ -15,7 +15,7 @@ The selection is evidence-led: retain the small framework command seams, Mission
 ## 1. One logical ingress, independent of transport
 
 ```text
-Chosen input adapter, if needed -> canonical envelope -> shared bridge
+Chosen input adapter, if needed -> Envelope<P>        -> shared bridge
 In-process contract driver ----/                        admission + dispatch
                                                         -> registered binding
                                                         -> feature use case
@@ -24,15 +24,46 @@ In-process contract driver ----/                        admission + dispatch
 
 The canonical header carries enough explicit information to resolve exactly one allowed operation and contract version. A single stable `command` identifier can be the destination; separate destination/operation fields are optional, not a requirement. Envelope schema identity and operation-contract identity are distinct when independently versioned.
 
-Adapter mappings may supply routing values, with documented precedence and conflict rejection. The body is not inspected to guess the route. Adapters preserve correlation, original deadlines, and stable idempotency metadata. Verified identity/context is separate from claims supplied inside an untrusted envelope.
+Adapter mappings may supply routing values, with documented precedence and conflict rejection. The payload is not inspected to guess the route. Adapters preserve correlation, original deadlines, and stable idempotency metadata. Verified identity/context is separate from claims supplied inside an untrusted envelope.
 
 If a future input arrives through an intermediary, that connection's credentials do not automatically attest the original caller or tenant. The adapter needs a documented trust mapping or independently verified caller claims before constructing context. Unverified header assertions cannot become an authorized principal.
 
-The bridge owns envelope/header consistency, supported versions, deadline admission, allowlisted route lookup, route authorization, and dispatch. It does **not** own domain validation, resource-level authorization, storage operations, transport responses/acknowledgments, or business orchestration. A handler decodes its versioned body and calls its capability's application API. Fan-out begins only after admission and is governed by that use case.
+The bridge owns envelope/header consistency, supported versions, deadline admission, allowlisted route lookup, route authorization, and dispatch. It does **not** own domain validation, resource-level authorization, storage operations, transport responses/acknowledgments, or business orchestration. A registered binding checks the typed payload variant against the header-selected route before invoking its capability's application API. Any wire decoding stays at an external serialization boundary, not inside domain handlers. Fan-out begins only after admission and is governed by that use case.
 
-The top-level catalog selects a capability-owned binding. Typed request enums, context, and secondary command registries can stay local to that capability; adding a domain must not enlarge a universal request enum or application context in the bridge. The registration object should provide both inspection metadata and its executable binding, so a capability cannot appear installed in one catalog but be absent from a separate dispatch map.
+The top-level catalog selects a capability-owned binding. Typed payload enums, context, and secondary command registries belong to that capability; adding a domain must not enlarge a universal request enum or application context in the bridge. The registration object should provide both inspection metadata and its executable binding, so a capability cannot appear installed in one catalog but be absent from a separate dispatch map.
 
 There must be no alternate public dispatch API that avoids admission. A route names a registered operation; it never names executable code, a class path, a shell command, or a library to load. “One path” is a logical contract, not one thread, one server, or one bottleneck process. Replicas and concurrent workers may implement it.
+
+### Typed payloads inside; serialization only at the edge
+
+The internal contract is **`Envelope<P>` with a capability-owned Rust enum as `P`**, not JSON or a generic map of business fields. The shared admission/dispatch implementation is generic over that typed payload (`Bridge<P>` / `Registry<P>` conceptually). Keep typed results as typed values until an actual external boundary needs serialization. No `serde_json::Value`, `Any`/downcast, string-keyed value tree, or `Unknown(Json)` escape hatch substitutes for the internal business contract.
+
+Illustrative type shape only—not a production API, complete header, or implementation:
+
+```rust
+struct Envelope<P> {
+    header: Header,
+    payload: P,
+}
+
+// Owned by the jobs capability, not the framework:
+enum JobsPayload {
+    Submit(SubmitJob),
+    Status(JobId),
+}
+
+type JobsEnvelope = Envelope<JobsPayload>;
+```
+
+`Header`, `SubmitJob`, and `JobId` stand for the relevant validated contract types. The framework owns the generic envelope and admission machinery; it does not import `JobsPayload`. A single-capability host can use `Bridge<JobsPayload>` directly.
+
+One heterogeneous registry cannot accept unrelated payload types without an explicit unifying design. **Only if one host genuinely needs a single ingress for several capabilities**, its composition package may define a finite sum such as `AppPayload::Jobs(JobsPayload)` and `AppPayload::Notifications(NotificationsPayload)`, then instantiate `Bridge<AppPayload>`. All entries in that registry share `AppPayload`; capability bindings unwrap only their registered variants and pass the owned enum to the relevant feature API. This sum belongs to that application and contains only its selected capabilities; adding a capability can extend this local sum as a composition-only change. It is not a framework-wide enum that every new domain must edit. Do not hide the type mismatch behind JSON or runtime downcasts. If the common ingress also returns heterogeneous result types, apply the same explicit application-owned result sum or retain per-route typed results; a generic `Outcome<R>` alone does not unify unrelated result types.
+
+Routing order is explicit: **header → registered destination/version → authorization → expected payload-variant validation → handler**. For example, a `jobs.submit` header with `JobsPayload::Status` is a controlled mismatch, rejected before handler effects. Do not guess the destination from the enum variant, overwrite the header to make it agree, or offer a typed-caller shortcut that skips this check. Business validation and resource-level authorization still belong to the selected capability.
+
+An in-process caller constructs the enum directly; no serialization round trip is needed. If a selected external adapter receives JSON or another encoding, its bounded, side-effect-free boundary codec converts it to the capability enum before entering the typed bridge. The codec is selected from the same registered header/contract mapping, never from guessed business-body contents; transport code does not invent its own handler routes. Conflicting tags, unknown fields/variants as required by the versioned contract, unsupported versions and malformed data are rejected. The bridge independently checks header/variant agreement, including for directly constructed typed envelopes. Concrete codec bindings live in an application/capability boundary module that knows the payload enum and selected format. The generic input adapter receives that codec over `P` from composition; it does not need to import the capability. JSON libraries and wire DTOs remain in that optional boundary, not in the domain or generic ingress payload.
+
+This preserves the prior projects' typed-command direction while strengthening it. The inspected snapshots of both `forge-framework` and Mission Control use a custom fields-or-bytes payload enum and generic typed-request command APIs; that is not the same as an existing generic capability-enum envelope. The proposed `Envelope<P>` is an adaptation, not a claim that those repositories already implement it. See the [verified reuse distinction](reuse-map.md#typed-payload-lineage).
 
 ## 2. The diagrams answer different questions
 
@@ -70,12 +101,12 @@ Names below describe proposed roles; they are not claims that these packages alr
 
 | Unit | Owns | May depend on | Must not depend on |
 | --- | --- | --- | --- |
-| `forge-ingress-contract` | Canonical envelope/header, ingress/handler/admission contracts, controlled outcomes | Small transport-neutral value dependencies | Transport libraries, concrete handlers, domain models, storage drivers |
-| `forge-bridge` | Validated immutable registry and admitted dispatch | Ingress contract | Concrete capabilities or transport implementations |
+| `forge-ingress-contract` | Generic `Envelope<P>`/header, typed ingress/handler/admission contracts, controlled outcomes | Small transport-neutral value dependencies | Transport libraries, concrete handlers, domain models, storage drivers |
+| `forge-bridge` | Generic typed registry, header/variant checks and admitted dispatch | Ingress contract | Concrete capabilities or transport implementations |
 | `forge-runtime` | Module plan, typed config assembly, startup/shutdown supervision | Focused runtime facilities | Domain policy or transport-specific mandatory dependencies |
-| Chosen ingress adapter, optional | Input normalization, actual transport lifecycle and outcome mapping | Ingress contract; runtime extension surface or transport library only as needed | Concrete business handlers |
-| `jobs` | Job invariants, submission/status use cases, owned persistence/effect ports | Domain values and stable policy dependencies | Framework bridge, transport DTOs, SQL client |
-| `reference-app` | Explicit composition, handler bindings, selected adapters | Selected framework packages and capability | Unrelated tools or domains merely because they exist |
+| Chosen ingress adapter, optional | Input framing, delegation to an injected codec over `P`, protocol lifecycle and outcome encoding | Generic ingress/codec contracts; runtime or transport library only as needed | Concrete business handlers or capability imports hidden in the generic adapter |
+| `jobs` | `JobsPayload` enum, invariants, use cases and owned persistence/effect ports | Domain values and stable policy dependencies | Framework bridge, transport DTOs, SQL client |
+| `reference-app` | Explicit composition, handler bindings, concrete edge-codec bindings and selected adapters | Selected framework packages and capability | Unrelated tools or domains merely because they exist |
 
 The ingress contract is justified by actual shared consumers, not a license for `common-core` growth. Keep domain and application logic together inside a cohesive capability until a real dependency or change driver warrants another boundary. The framework must build without optional starters. Adding a starter must not silently enable every available transport.
 
@@ -138,13 +169,13 @@ This is the new-key success path. Admission rejection stops before handler effec
 ## 6. Evidence needed before calling it a framework
 
 - Core rules run without a server, broker, database, or framework container.
-- An in-process driver proves the canonical ingress contract. Each selected adapter maps equivalent logical inputs to that contract; mapping conflicts and spoofed identity are rejected. Compare multiple real adapters only when they are actually needed.
-- Every ingress entry point goes through header/version/admission checks; no convenience method bypasses them.
+- An in-process driver constructs capability enums and proves the generic typed ingress contract. Each selected adapter maps equivalent logical inputs to that contract; mapping conflicts and spoofed identity are rejected. Compare multiple real adapters only when they are actually needed.
+- Every ingress entry point checks header/version/admission and header/payload-variant consistency; mismatches, including direct typed construction, have zero handler effects. No convenience method bypasses these checks.
 - Duplicate registration fails without replacing the original binding. Missing module requirements, incompatible versions, and override conflicts fail assembly deterministically.
 - Each installed adapter has real boundary tests for its parsing, outcome mapping, capacity and shutdown semantics. Retry, ordering or acknowledgment checks apply only when its protocol has those mechanisms; mocks alone do not establish them.
 - Real storage tests establish concurrent idempotency claims, persistence across restart, failure after acquisition, and ambiguous-result recovery.
 - Startup failure and shutdown leave no leaked tasks/listeners/connections; cancellation reaches the owner of the work.
-- Package/dependency checks forbid transport-to-concrete-handler bypasses and bridge-to-feature imports.
+- Package/dependency checks forbid transport-to-concrete-handler bypasses, bridge-to-feature imports, and internal JSON/value-tree fallback payloads. Optional boundary serialization must not become a mandatory core dependency.
 - A second small capability can be added without changing bridge internals, adding a global registry lookup, or making unrelated starters mandatory.
 
 Performance claims require a defined workload, environment, and measurement. This architecture is not a benchmark result. Existing passing tests in a source repository do not certify the assembled framework; the [roadmap](../roadmap/forge-framework.md) defines the necessary proof sequence.

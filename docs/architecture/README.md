@@ -18,12 +18,14 @@ The framework is a library family. No particular transport is required or select
 
 ```text
 Selected thin input adapter, or an in-process caller
-  -> canonical header + body + trusted context
+  -> canonical header + capability-owned typed payload enum + trusted context
   -> shared admission bridge
   -> one registered, authorized capability binding
   -> domain/application handler
   -> owned outbound ports and explicit fan-out
 ```
+
+The shared envelope/bridge is generic over the capability payload enum. Header metadata selects the registered destination, and header/variant mismatches are rejected before effects. JSON is only an optional external serialization format, never the internal business payload.
 
 “Plug and play” means adding a linked starter/capability, supplying typed configuration, and getting deterministic assembly or an actionable failure. It does not mean dynamic code loading, a universal service locator, mandatory microservices, or automatic exactly-once effects.
 

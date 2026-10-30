@@ -10,24 +10,30 @@ publication_app             # composition / executable
   -> ingress_bridge         # constructs bridge and explicit route registry
   -> publication_handler    # registers publication route/version -> handler
   -> publication
-  -> publication_input      # optional selected input adapter
+  -> publication_input      # optional generic input adapter
+  -> publication_wire_codec # optional boundary module for a chosen wire format
   -> publication_postgres
   -> publication_delivery
 
 publication_input           # optional thin driving adapter; transport not prescribed
   -> ingress_contract       # canonical envelope, ingress port and outcomes
-  -> selected input library # only if needed
+  -> selected input library # only if needed; codec supplied by composition
+
+publication_wire_codec      # optional module, not a mandatory extra crate
+  -> ingress_contract       # header/version and generic Envelope<P>
+  -> publication            # constructs PublicationPayload enum
+  -> selected serialization library # only at this boundary
 
 ingress_bridge              # admission + dispatch, not domain orchestration
   -> ingress_contract       # implements ingress port; invokes registered handler port
 
 ingress_contract            # owned by ingress/admission boundary maintainers
-  public: Envelope, Header, Ingress, Handler, AdmissionPolicy, Outcome
+  public: Envelope<P>, Header, Ingress<P>, Handler<P>, AdmissionPolicy, Outcome<R>
   no transport, concrete handler or business-package dependencies
 
 publication_handler         # registered inward-facing handler binding
-  -> ingress_contract       # implements Handler; translates outcome
-  -> publication            # decodes versioned body contract into PublishRequest
+  -> ingress_contract       # implements Handler<PublicationPayload>; checks variant and translates outcome
+  -> publication            # consumes capability-owned typed requests
 
 publication_postgres        # driven adapter
   -> publication            # StorePublication contract and owned values
@@ -38,18 +44,18 @@ publication_delivery        # driven adapter
   -> delivery vendor SDK
 
 publication                 # capability core; no imports of the packages above
-  public: PublishDocument, PublishRequest, PublishOutcome
+  public: PublicationPayload enum, PublishDocument, PublishRequest, PublishOutcome
   ports: StorePublication, RequestDelivery
   internal modules: rules, publish_workflow, values
 ```
 
-Arrows mean imports/build dependencies, not runtime calls. `ingress_bridge` receives handler implementations and a trusted admission-policy implementation through explicit construction. Neither the bridge nor the ingress adapters import `publication_handler` or `publication`. The registry is local to bridge construction, not a global service locator; duplicate route/version registrations fail assembly rather than silently choosing a winner. The core invokes an injected `StorePublication` at runtime without importing `publication_postgres`.
+Arrows mean imports/build dependencies, not runtime calls. `ingress_bridge` receives handler implementations and a trusted admission-policy implementation through explicit construction. Neither the generic bridge nor the generic input adapter imports concrete handlers or the publication capability. Composition supplies the optional edge codec, which knows the capability payload type; the handler binding knows the capability API. The registry is local to bridge construction, not a global service locator; duplicate route/version registrations fail assembly rather than silently choosing a winner. The core invokes an injected `StorePublication` at runtime without importing `publication_postgres`.
 
 Runtime flow is distinct:
 
 ```text
 Selected input adapter, if needed --\
-                                     -> Envelope -> shared Ingress
+                                     -> Envelope<PublicationPayload> -> shared Ingress
 In-process contract driver --------/                -> admission + registry dispatch
                                                      -> publication handler
                                                         -> PublishDocument
@@ -65,7 +71,7 @@ Fan-out is owned by the admitted application workflow, not duplicated in input a
 - An illustrative canonical header might express destination `publication.publish` and contract version `1`. These are logical allowlisted identifiers, not a method/class to execute; names and representation are example-only. Header schema/version identity must also be explicit where independently versioned. No adapter determines this destination by inspecting the document body.
 - A configured input mapping can supply the canonical destination/version. Define whether a supplied header must match that mapping, and reject conflicts. Any installed adapter submits the same logical envelope to `Ingress`; it never calls `PublishDocument` directly. No second transport is required.
 - The bridge validates admission, resolves exactly one supported registered destination/version, and checks route authorization against trusted identity/context. Unknown routes or unauthorized requests do not reach the handler. Domain/resource-specific authorization remains in `publication`; a route is never authentication.
-- The registered handler translates the envelope body contract to `PublishRequest`, which is an application command, not an HTTP body with status codes or a database record. Domain validation remains in `publication`. Avoid duplicate representations without a semantic need.
+- The capability owns `PublicationPayload`, for example variants containing `PublishRequest` or a typed status request. The generic `Envelope<PublicationPayload>` carries that enum internally. The header selects the route; the binding checks its expected variant before calling the feature API. A publish header with a status variant is rejected before effects, never rerouted. `PublishRequest` is an application command, not a transport DTO or database record. Domain validation remains in `publication`. Avoid duplicate representations without a semantic need.
 - Preserve defined correlation, deadline and idempotency metadata through admission and the handler contract. Define how they affect execution and retry, not merely how they are copied. Adapter redelivery must not reset these semantics.
 - `StorePublication` exposes the publication operation and guarantees the use case actually needs; it does not reproduce database CRUD operations. The adapter owns SQL and maps database errors to core-owned categories.
 - `RequestDelivery` expresses delivery intent. Vendor response types, tokens, and retry headers do not become domain objects.
@@ -73,7 +79,13 @@ Fan-out is owned by the admitted application workflow, not duplicated in input a
 
 ## Evidence for this shape
 
-Use an in-process driver to establish the bridge contract. Test each selected input adapter against that same logical request/outcome contract, including preserved metadata and conflicting mappings; compare multiple real adapters only when they are actually needed. Independently test registry uniqueness, deterministic routing, authorization and controlled rejection without handler effects. Test publication rules and business idempotency separately. Real boundary checks establish the installed adapter's outcome mapping and lifecycle; protocol-specific retry, ordering and settlement checks apply only if that protocol is chosen. Adapter mocks cannot establish those guarantees. Enforce forbidden adapter-to-handler and bridge-to-concrete-core imports.
+Use an in-process driver to establish the bridge contract. Test each selected input adapter against that same logical request/outcome contract, including preserved metadata and conflicting mappings; compare multiple real adapters only when they are actually needed. Independently test registry uniqueness, deterministic routing, authorization and controlled rejection without handler effects. Test publication rules and business idempotency separately. If a wire format is selected, test side-effect-free conversion into the enum and rejection of conflicting tags or unsupported variants. No JSON/value-map fallback may travel through the internal bridge. Real boundary checks establish the installed adapter's outcome mapping and lifecycle; protocol-specific retry, ordering and settlement checks apply only if that protocol is chosen. Adapter mocks cannot establish those guarantees. Enforce forbidden adapter-to-handler and bridge-to-concrete-core imports.
+
+## Combining capabilities without a global enum
+
+For this one-capability example, `Bridge<PublicationPayload>` is sufficient. If an actual application needs one registry for publication and another capability, its composition package may define a finite sum of the two capability enums and instantiate `Bridge<AppPayload>`. Each registry entry has that same payload type and validates/extracts its registered variant. Extending this application-owned sum is an acceptable composition change; editing a framework-wide business enum is not. Do not erase unrelated payload types into JSON or `Any` to avoid acknowledging the type boundary.
+
+An in-process driver constructs `PublicationPayload` directly. Optional JSON or other serialization belongs in `publication_wire_codec`, selected through the registered header/version mapping and injected into the input adapter. Decode without side effects, reject mismatches, then use the same admitted typed path. The bridge never examines business values to choose a destination.
 
 ## The transaction question the graph cannot answer
 

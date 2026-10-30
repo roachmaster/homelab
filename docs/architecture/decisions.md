@@ -8,6 +8,7 @@
 | No prescribed input transport | Keep the framework usable in-process and install adapters only for real consumers | A second adapter is not a milestone by itself; prove the ingress contract first |
 | Explicit statically linked modules/starters | Predictable dependencies and simple Rust ownership; convenient opt-in assembly | Rebuild to add code; revisit dynamic loading only for a demonstrated operational need |
 | Capability-first packages | Localize changes around business invariants instead of global technical layers | Some boundary mappings remain; avoid one crate per class/helper |
+| Capability-owned internal payload enums | `Envelope<P>` and `Bridge<P>` preserve compile-time request structure; JSON is only optional wire encoding | Header/variant consistency is a runtime admission check; a heterogeneous host may need its own finite sum, never a global framework enum or JSON fallback |
 | Consumer-owned outbound ports | External technology does not define application vocabulary | Contracts must expose real failure/ownership/performance semantics, not hide them |
 | Separate ingress contract and implementation | Adapters/bindings share a narrow admission conversation without importing concrete core logic | Keep this package narrowly owned; reject a general-purpose `common` dump |
 | Separate framework and reference application | A reusable host can be tested without importing the demonstration domain | Two deliverables must be maintained; a second small capability proves the distinction |

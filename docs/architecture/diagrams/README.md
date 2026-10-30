@@ -12,7 +12,7 @@ These diagrams show a **proposed reference application**, not verified deployed 
 
 C4 view boundaries and entity types are labeled directly. Teal highlights core policy/admission; amber marks composition/lifecycle; gray indicates external technology or systems. Dashed component arrows mean construction/lifecycle control; dashed context/container and package arrows mark optional integrations/dependencies. Solid arrows mean the interaction/dependency named by the diagram, not a universal shared arrow meaning.
 
-The crate DAG is not a C4 deployment view. Handler bindings and small driven adapters reside in `reference-app` boundary modules initially; they can be extracted when justified. The sequence depicts a successful new-key durable submission; rejection, replay, and failure semantics are described in the [blueprint](../forge-framework-blueprint.md).
+The crate DAG is not a C4 deployment view. Handler bindings and small driven adapters reside in `reference-app` boundary modules initially; they can be extracted when justified. The internal envelope/bridge is generic over a capability-owned payload enum. The header selects the registered route; variant mismatch is rejected before effects. Optional wire codecs live outside this typed path. The sequence depicts a successful new-key durable submission; rejection, replay, and failure semantics are described in the [blueprint](../forge-framework-blueprint.md).
 
 Regenerate from the repository root with Graphviz installed:
 

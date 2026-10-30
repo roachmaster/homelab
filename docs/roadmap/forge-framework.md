@@ -13,8 +13,8 @@ Start with an in-process contract driver, the shared bridge, one capability, and
 | Stage | Scope | Exit evidence | Do not add yet |
 | --- | --- | --- | --- |
 | 0 — Select the salvage | Complete the repository reuse map; identify minimal contracts and licensing/ownership constraints before code copying | Every candidate has a source report, concrete extraction boundary, known limitations, and a validation plan | Wholesale repository merges or renamed application scaffolds |
-| 1 — Admission kernel | Canonical header/body, immutable registry, route/version checks, trusted-context authorization, explicit handler binding | Duplicate registration is non-mutating; every entry point validates; denied/unknown/conflicting routes have zero handler effects | Transport libraries in the kernel; generic global service lookup |
-| 2 — Smallest durable vertical slice | In-process submit/status, jobs policy, real store, explicit composition, stable receipts | Integration tests cover success, same-key replay, changed-body conflict, concurrent duplicate submissions, restart persistence, store failure, and lost-response recovery | Worker execution, remote side effects, extra domains |
+| 1 — Admission kernel | Generic `Envelope<P>`/`Bridge<P>`, capability payload enum, immutable registry, header/version/variant checks, trusted-context authorization | Duplicate registration is non-mutating; every entry point validates; denied/unknown/conflicting routes and header/variant mismatches have zero handler effects; no internal JSON fallback | Transport libraries in the kernel; generic global service lookup |
+| 2 — Smallest durable vertical slice | Typed-enum in-process submit/status, jobs policy, real store, explicit composition, stable receipts | Integration tests cover success, same-key replay, changed-body conflict, concurrent duplicate submissions, restart persistence, store failure, and lost-response recovery | Worker execution, remote side effects, extra domains |
 | 3 — Prove lifecycle and substitution | Validated config, supervised startup/shutdown, replaceable provider; add an input adapter only for a real consumer | Driver exercises one ingress contract; replacing the provider preserves it; any selected adapter conforms; partial startup closes resources; shutdown truthfully reports grace exhaustion | Mandatory second transport, dynamic plugin loading or distributed host orchestration |
 | 4 — Execute one job type | Supervised worker, durable claim/completion, cancellation policy, retry budget | Crash/reclaim tests; no lost accepted jobs; state transitions and concurrency controls explicit; status reflects reality | General workflow DSL or unbounded fan-out |
 | 5 — Prove extension ergonomics | Add a second small capability and one custom provider override without modifying bridge internals | Small composition-only integration; no mandatory unrelated dependencies; absent/default/override/conflict test matrix passes | Broad starter catalog before the extension contract stabilizes |
@@ -24,13 +24,13 @@ A stage can be split into small reversible patches. Its exit gate—not a date o
 
 ## Verification strategy
 
-**Fast:** capability rules, versioned-body decoding, admission rejection without effects, config merge/validation, registry transactionality, override conflict detection, dependency-graph checks.
+**Fast:** capability enum contracts, header/variant mismatch rejection including direct typed callers, optional edge-codec conversion, admission rejection without effects, config merge/validation, registry transactionality, override conflict detection, dependency-graph checks.
 
 **Real boundaries:** storage concurrency, cleanup, restart persistence, and ambiguity recovery; parsing, outcome mapping and lifecycle of each input adapter only if selected. Test retry, ordering and acknowledgment semantics only when that adapter actually has them. Keep test doubles, local real-dependency tests, and deployed-system tests visibly distinct.
 
 **Lifecycle:** start failure after each acquisition step; stop during active requests and poll loops; bounded drain and cancellation; all workers joined before resource destruction. Canceling a caller must not falsely report that an already committed job vanished.
 
-**Developer experience:** from a clean consumer project, install only the necessary starter, register a handler, supply config, and run the application. Add a second capability without central business switches. Inspect the dependency graph to prove optional code remains optional.
+**Developer experience:** from a clean consumer project, install only the necessary starter, register a handler, supply config, and run the application. Add a second capability without a framework-global business enum; a finite application-owned sum is permitted only when its single ingress genuinely combines different payload types. No JSON or runtime downcast substitutes for the typed contract. Inspect the dependency graph to prove optional code remains optional.
 
 No source-repository test result is automatically a pass for the assembled framework. Preserve exact commands, environments, failures, and not-run checks when implementation begins.
 

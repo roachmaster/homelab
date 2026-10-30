@@ -15,8 +15,9 @@ Do not require copying a large example application, editing bridge internals, re
 | Extension | Owns | Does not own |
 | --- | --- | --- |
 | Ingress starter | Chosen input parsing/mapping, actual transport lifecycle, outcome translation | Domain handlers or business policy |
-| Capability module | Cohesive application/domain behavior and owned outbound ports | Transport DTOs, bridge implementation, host internals |
-| Handler binding | Versioned body decoding and mapping into a capability API | Independent routing policy that bypasses admission |
+| Capability module | Capability-owned payload enum, domain/application behavior and owned outbound ports | Transport DTOs, bridge implementation, host internals |
+| Handler binding | Header/typed-variant consistency and mapping into a capability API | Independent routing policy, JSON fallback, or admission bypass |
+| Optional wire codec | Decode/encode an external format to/from the capability enum using the registered header/version mapping | Domain dispatch, payload-derived routing, or a generic JSON internal representation |
 | Driven adapter | One capability's external conversation and real contract tests | All repositories' data models or a generic universal repository |
 | Operational module | Focused configuration/lifecycle/diagnostic integration | Unrelated domain logic hidden behind hooks |
 
@@ -49,14 +50,14 @@ Route authorization is checked against trusted context before dispatch. Resource
 
 ## Example: add a `notifications.send` capability
 
-1. Define a small notification command/result and the feature-owned `Delivery` conversation. Keep vendor DTOs out of these types.
-2. Implement policy and a registered binding for one supported command version. Header routing chooses that binding; the body is decoded only after admission.
+1. Define a capability-owned `NotificationsPayload` enum for the supported typed requests. Separately define the typed result and feature-owned `Delivery` conversation. Keep JSON/value trees and vendor DTOs out of these contracts.
+2. Implement policy and a registered binding for one supported command version. Header routing chooses the destination; validate that the typed enum variant matches it before handler effects. A mismatch is an error, not a reason to infer or repair the route from the payload.
 3. Add one delivery adapter or controlled fake, according to the environment. State whether the result means delivered, durably queued, or merely attempted.
-4. Compose the binding and its dependencies explicitly. Exercise it through the in-process ingress contract. Add an input adapter/mapping only when a real caller requires one; all selected adapters use the same logical operation/version.
+4. Compose the binding and its dependencies explicitly. Use `Bridge<NotificationsPayload>` for a single-capability host; only a genuinely heterogeneous ingress needs a finite application-owned payload sum and bindings that extract its variants. Exercise it through the in-process ingress contract. Add an input adapter/mapping only when a real caller requires one; all selected adapters use the same logical operation/version.
 5. Add tests for rejected admission without effects, resource authorization, delivery failure, cancellation, duplicate request behavior, and actual adapter semantics.
 6. Verify that enabling notifications changes no bridge dispatch code and does not force the jobs capability or an unrelated model runtime into every application.
 
-These are illustrative names, not an existing implementation or a mandatory public API. If durable acceptance is promised, install and test a real durable handoff before returning it.
+If an external format is selected, add a boundary codec mapping that format to the enum using the registered header/version contract. In-process calls construct enum values directly. All internal registry entries share the bridge's payload type; no `serde_json::Value` or `Any` escape is allowed. These are illustrative names, not an existing implementation or a mandatory public API. If durable acceptance is promised, install and test a real durable handoff before returning it.
 
 ## Minimum extension test matrix
 
@@ -66,6 +67,7 @@ These are illustrative names, not an existing implementation or a mandatory publ
 | Starter enabled with valid config | One intended provider; readiness after required resources start |
 | Explicit custom provider | The documented default backs off; unrelated defaults remain |
 | Duplicate explicit provider / route | Assembly fails; previous registry unchanged |
+| Header and typed payload variant disagree | Controlled rejection before handler effects, including direct in-process envelopes |
 | Missing requirement / incompatible version | Clear error before admission opens |
 | Partial startup failure | Previously acquired resources close in reverse dependency order |
 | Shutdown during in-flight work | Stop admission, bounded drain, cooperative cancel/join; report grace exhaustion and apply explicit host-failure policy for uncooperative work |
