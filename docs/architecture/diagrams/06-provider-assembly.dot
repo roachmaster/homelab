@@ -1,0 +1,26 @@
+digraph ProviderAssembly {
+graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.65, ranksep=0.75, bgcolor="white"];
+node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4];
+edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
+newrank=true; rankdir=TB; label="06  Provider / factory assembly — proposed ownership model\nFirst slice: one host-owned provider; this is not an ingress routing registry";
+subgraph cluster_plan { label="Bootstrap and lifecycle — composition / host ownership"; fontname="DejaVu Sans"; fontsize=14; color="#ae7b26"; style="rounded,dashed"; margin=22;
+validate [label="1. Describe + validate\nTyped config; explicit override selection\nDependencies, cycles, scopes, duplicates\nNo factory side effects", fillcolor="#fff1d6", color="#ae7b26"];
+freeze [label="2. Consume validated plan\nProvider selection fixed\nNo arbitrary runtime lookup", fillcolor="#fff1d6", color="#ae7b26"];
+build [label="3. Construct + inject\nDependency order; finalize route bindings\nOn failure: reverse cleanup, no publication", fillcolor="#fff1d6", color="#ae7b26"];
+ready [label="4. Start + admit\nReadiness of actual injected resources\nTyped header-routed requests unchanged", fillcolor="#fff1d6", color="#ae7b26"];
+stop [label="5. Stop + release\nReject new admission / acquisition\nDrain, cancel, join; release leases\nClose resources in reverse order", fillcolor="#fff1d6", color="#ae7b26"];
+validate -> freeze -> build -> ready -> stop;
+}
+subgraph cluster_roles { label="Resource boundary — roles may be private modules"; fontname="DejaVu Sans"; fontsize=14; color="#2b7686"; style="rounded,dashed"; margin=22;
+factory [label="Typed factory\nExplicit inputs -> owned implementation\nConstruction error is visible"];
+provider [label="Host-owned provider\nRetains / shares selected instance\nOwns acquisition and close policy"];
+handler [label="Capability handler\nReceives ready port by constructor\nNo service-locator lookup", fillcolor="#087f8c", color="#087f8c", fontcolor="white"];
+factory -> provider [label="One owned instance\nfor this host"];
+provider -> handler [label="Inject typed port handle"];
+}
+build -> factory [label="Call selected constructor", style=dashed];
+stop -> provider [label="Close only after users stop", style=dashed];
+{rank=same; build; factory;}
+{rank=same; ready; provider;}
+{rank=same; stop; handler;}
+}

@@ -87,6 +87,12 @@ For this one-capability example, `Bridge<PublicationPayload>` is sufficient. If 
 
 An in-process driver constructs `PublicationPayload` directly. Optional JSON or other serialization belongs in `publication_wire_codec`, selected through the registered header/version mapping and injected into the input adapter. Decode without side effects, reject mismatches, then use the same admitted typed path. The bridge never examines business values to choose a destination.
 
+## Construction and resource lifetime
+
+`publication_app` supplies typed configuration and concrete storage/delivery factories, selects a host-owned provider initially, and passes ready `StorePublication` / `RequestDelivery` ports into the use case. The workflow receives no application-wide service registry. A store adapter may privately own a connection provider; only a genuine per-operation session requirement earns a consumer-visible acquisition port.
+
+Validate missing/cyclic dependencies, overrides and scope compatibility before factory effects; construct in dependency order, publish only complete wiring, and clean failed assembly in reverse order. The host owns shutdown; a provider owns its lease/reset/close semantics. A pooled instance may retain state, and an asynchronous reset cannot be promised by ordinary `Drop`. These roles can be modules rather than new packages. Test actual scope identity/state and failure cleanup; see [provider/factory boundaries](provider-factory.md).
+
 ## The transaction question the graph cannot answer
 
 If storage succeeds and delivery fails, the publication may already exist. Decide whether the public operation reports “stored, delivery pending,” fails with a recoverable stored identifier, or requires another explicitly defined outcome. Define retry/idempotency behavior before implementing it. Never promise “nothing changed” without evidence.

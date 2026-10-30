@@ -19,6 +19,7 @@ Do not require copying a large example application, editing bridge internals, re
 | Handler binding | Header/typed-variant consistency and mapping into a capability API | Independent routing policy, JSON fallback, or admission bypass |
 | Optional wire codec | Decode/encode an external format to/from the capability enum using the registered header/version mapping | Domain dispatch, payload-derived routing, or a generic JSON internal representation |
 | Driven adapter | One capability's external conversation and real contract tests | All repositories' data models or a generic universal repository |
+| Factory/provider binding | Typed creation and scoped acquisition for a narrow dependency; explicit lifecycle owner | Arbitrary service lookup, ingress routing or domain policy |
 | Operational module | Focused configuration/lifecycle/diagnostic integration | Unrelated domain logic hidden behind hooks |
 
 A module need not be a separately published crate. A starter earns its dependency cost by making a real infrastructure integration easier to install and verify. Optional dependencies stay optional when the starter is absent.
@@ -31,7 +32,7 @@ Define the following information, using ordinary Rust constructs initially:
 - Required capabilities and provided implementations, with ownership of acquired resources.
 - Typed configuration namespace, defaults, validation, and a redacted effective-configuration view.
 - Explicit route/version registrations or transport mappings, if any.
-- Dependencies that determine construction and lifecycle order.
+- Dependencies that determine construction and lifecycle order; typed factory inputs, provider scope, lease ownership and any concurrency restrictions.
 - Startup, readiness, cancellation/drain, and shutdown behavior; partial-start cleanup.
 - Public override points and exactly which default is suppressed by an override.
 - Meaningful errors, health semantics, and the verification commands/scenarios.
@@ -41,6 +42,8 @@ Inspection metadata and the executable binding come from the same registration o
 This is a design checklist, not a request to invent one giant trait with every hook. Use smaller interfaces and ordinary constructor parameters when different modules need different facilities. Avoid a global `Any` container that makes dependencies discoverable only at runtime.
 
 ## Registration and override rules
+
+Provider selection and operation registration are distinct parts of one local composition plan. Validate the plan transactionally before factory side effects; consume it, construct dependencies, inject typed ports, and finalize frozen operation bindings before opening admission. Neither catalog is a handler service locator. See [provider/factory DI](dependency-injection.md) for ownership and assembly details.
 
 A registry is built locally by composition, validated transactionally, then frozen. Reject duplicate destination/version pairs, duplicate aliases, unsatisfied requirements, incompatible versions, and cycles. Failure must not insert or replace a binding before returning an error.
 
@@ -52,7 +55,7 @@ Route authorization is checked against trusted context before dispatch. Resource
 
 1. Define a capability-owned `NotificationsPayload` enum for the supported typed requests. Separately define the typed result and feature-owned `Delivery` conversation. Keep JSON/value trees and vendor DTOs out of these contracts.
 2. Implement policy and a registered binding for one supported command version. Header routing chooses the destination; validate that the typed enum variant matches it before handler effects. A mismatch is an error, not a reason to infer or repair the route from the payload.
-3. Add one delivery adapter or controlled fake, according to the environment. State whether the result means delivered, durably queued, or merely attempted.
+3. Add one delivery adapter or controlled fake, according to the environment. Supply its typed factory/configuration at composition, select a host-owned provider initially, and inject the ready `Delivery` port. Only inject an acquisition provider if delivery genuinely needs per-operation sessions. State whether the result means delivered, durably queued, or merely attempted.
 4. Compose the binding and its dependencies explicitly. Use `Bridge<NotificationsPayload>` for a single-capability host; only a genuinely heterogeneous ingress needs a finite application-owned payload sum and bindings that extract its variants. Exercise it through the in-process ingress contract. Add an input adapter/mapping only when a real caller requires one; all selected adapters use the same logical operation/version.
 5. Add tests for rejected admission without effects, resource authorization, delivery failure, cancellation, duplicate request behavior, and actual adapter semantics.
 6. Verify that enabling notifications changes no bridge dispatch code and does not force the jobs capability or an unrelated model runtime into every application.
@@ -68,7 +71,10 @@ If an external format is selected, add a boundary codec mapping that format to t
 | Explicit custom provider | The documented default backs off; unrelated defaults remain |
 | Duplicate explicit provider / route | Assembly fails; previous registry unchanged |
 | Header and typed payload variant disagree | Controlled rejection before handler effects, including direct in-process envelopes |
-| Missing requirement / incompatible version | Clear error before admission opens |
+| Missing dependency / incompatible version / cycle / invalid scope capture | Clear error before factory side effects or plan freeze |
+| Factory fails during construction | No published partial host; previously acquired resources cleaned up; no silent fallback |
+| Selected provider lifetime | Host identity and isolation, or fresh transient / exclusive pooled acquisition, match the declared scope |
+| Lease error/cancellation and provider close, if relevant | Explicit return/reset/quarantine policy; no loss of capacity or resource destruction under live users |
 | Partial startup failure | Previously acquired resources close in reverse dependency order |
 | Shutdown during in-flight work | Stop admission, bounded drain, cooperative cancel/join; report grace exhaustion and apply explicit host-failure policy for uncooperative work |
 | Repeated or conflicting request key | Stable receipt or controlled conflict; no duplicate business effect |

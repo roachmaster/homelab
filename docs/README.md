@@ -13,6 +13,7 @@
 - [C4 and supporting diagrams](architecture/diagrams/README.md)
 - [Architecture decisions](architecture/decisions.md)
 - [Module-authoring contract](architecture/module-authoring.md)
+- [Provider/factory dependency injection](architecture/dependency-injection.md)
 - [Implementation roadmap and acceptance gates](roadmap/forge-framework.md)
 
 Keep review evidence in `reviews/`, target designs in `architecture/`, delivery gates in `roadmap/`, and implementations in the existing language-oriented `src/` tree. Do not duplicate source projects under documentation.

@@ -13,12 +13,15 @@
 | Separate ingress contract and implementation | Adapters/bindings share a narrow admission conversation without importing concrete core logic | Keep this package narrowly owned; reject a general-purpose `common` dump |
 | Separate framework and reference application | A reusable host can be tested without importing the demonstration domain | Two deliverables must be maintained; a second small capability proves the distinction |
 | Transactional registration, frozen after startup | No duplicate winner by insertion order or half-applied registry | Hot registration is deferred; explicit restart is initially simpler |
+| Typed factories plus narrow lifetime providers | Keep construction, acquisition/reuse and bootstrap ownership distinct; inject ready capability ports by default | No global service locator; providers enter use cases only for real runtime acquisition; pools/request scopes need explicit guarantees |
 | Conditional defaults, explicit overrides | Starter convenience without ambiguous dependency selection | Every override point needs documented precedence and conflict tests |
 | Durable acceptance is route-specific | Prevent acknowledgment before work is safely recorded | A store/receipt protocol is required for durable routes; not all routes need it |
 | At-least-once delivery plus bounded idempotency | Honest recovery model for retries and lost responses | Retention, conflicts, and external effects need explicit policies; no blanket exactly-once claim |
 | One process first | Prove boundaries before adding network failures and operational cost | Split deployment only for measured independent scaling, isolation, or lifecycle needs |
 | Feature-specific local adapters may start as modules | Avoid package explosion before reuse is demonstrated | Extract when enforcement, consumers, or independent evolution earns a crate |
 | Tools, SDKs, ML engines, games, and storage engines remain optional | Keep kernel scope comprehensible | Specialized integrations need their own adapter/extension contracts |
+
+The [provider/factory DI design](dependency-injection.md) adapts older Forge access/factory seams and HPVS lease discipline. It does not treat their caches, operation registries or synchronous pools as an existing general-purpose application container.
 
 ## What is deliberately not included
 

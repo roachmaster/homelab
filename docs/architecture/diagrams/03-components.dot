@@ -10,7 +10,7 @@ registry [label="Frozen allowlisted registry\n[Component]\nDestination / version
 handler [label="Jobs handler + use cases\n[Component]\nConsume JobsPayload enum\nResource authorization + policy"];
 persist [label="Job-store adapter\n[Component]\nAtomic job + receipt persistence\nMaps storage failures"];
 worker [label="Job worker\n[Component; later milestone]\nOwns claim / retry / completion"];
-host [label="Composition + lifecycle host\n[Component]\nValidate config; assemble once\nStart, supervise, drain, stop", fillcolor="#fff1d6", color="#ae7b26"];
+host [label="Composition + lifecycle host\n[Component]\nValidate dependency plan\nSelect factories + provider scopes\nInject, start, drain, stop", fillcolor="#fff1d6", color="#ae7b26"];
 adapter -> bridge [label="Typed Envelope<P>\n+ trusted context"];
 bridge -> registry [label="Resolve authorized binding"];
 bridge -> handler [label="Invoke registered handler"];
@@ -18,6 +18,7 @@ handler -> persist [label="Feature-owned store port"];
 worker -> persist [label="Claim / finish via owned port"];
 host -> bridge [label="Construct + freeze registry", style=dashed];
 host -> worker [label="Start / cancel / join", style=dashed];
+host -> persist [label="Factory + host-owned provider\nInject port; own close", style=dashed];
 }
 caller -> adapter [label="Selected input interface"];
 persist -> db [label="Store protocol\nnot selected"];

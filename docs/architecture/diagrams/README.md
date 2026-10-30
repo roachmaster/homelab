@@ -9,8 +9,11 @@ These diagrams show a **proposed reference application**, not verified deployed 
 | C4 components | What is inside the application host? | [SVG](03-components.svg) | [DOT](03-components.dot) |
 | Package dependency DAG | What may import what at compile time? | [SVG](04-package-dependencies.svg) | [DOT](04-package-dependencies.dot) |
 | Submission sequence | When is durable acceptance safe? | [SVG](05-submit-sequence.svg) | [DOT](05-submit-sequence.dot) |
+| Provider/factory assembly | Who constructs, provides, injects and closes dependencies? | [SVG](06-provider-assembly.svg) | [DOT](06-provider-assembly.dot) |
 
 C4 view boundaries and entity types are labeled directly. Teal highlights core policy/admission; amber marks composition/lifecycle; gray indicates external technology or systems. Dashed component arrows mean construction/lifecycle control; dashed context/container and package arrows mark optional integrations/dependencies. Solid arrows mean the interaction/dependency named by the diagram, not a universal shared arrow meaning.
+
+The provider assembly view is a startup/ownership model, not another C4 container or runtime request router. Its first slice uses a host-owned provider; transient/pool acquisition is an optional later contract. Dashed arrows in that view denote composition/lifecycle control. See [provider/factory DI](../dependency-injection.md).
 
 The crate DAG is not a C4 deployment view. Handler bindings and small driven adapters reside in `reference-app` boundary modules initially; they can be extracted when justified. The internal envelope/bridge is generic over a capability-owned payload enum. The header selects the registered route; variant mismatch is rejected before effects. Optional wire codecs live outside this typed path. The sequence depicts a successful new-key durable submission; rejection, replay, and failure semantics are described in the [blueprint](../forge-framework-blueprint.md).
 
