@@ -1,6 +1,6 @@
 # Writing a Forge module or starter
 
-**Status:** Proposed extension contract; no stable module/registrar SDK is claimed yet. The five core crates already exist. Start with the [bounded bootstrap/registrar slice](bootstrap-registrars.md), not every future lifecycle hook below.
+**Status:** Evolving extension contract. Six core crates and an optional-package demo now implement a small [bootstrap/registrar slice](bootstrap-registrars.md); this is not a stable universal SDK or every future lifecycle hook below.
 
 ## Plug-and-play should mean three explicit steps
 
@@ -44,9 +44,9 @@ This is a design checklist, not a request to invent one giant trait with every h
 
 ## Registration and override rules
 
-Bootstrap invokes registrars; registrars stage complete factory groups into narrow typed application slots. Metadata and typed recipes travel together, and a failed group leaves earlier groups unchanged. The application resolves documented default/replace/extend choices before construction. Startup config is not a command envelope; environment loading belongs to the composition boundary.
+Bootstrap invokes registrars; registrars return complete prepared factory groups. The consuming registry owns metadata and typed recipes together in a nested tuple; a rejected group returns the original builder unchanged. The application resolves documented default/replace/extend choices before construction. Startup config is not a command envelope; environment loading belongs to the composition boundary.
 
-Provider selection and operation registration are distinct parts of one local composition plan. Validate before factory effects; consume/freeze, construct dependencies, establish provider ownership, bind task dependencies and finalize frozen operation bindings before exposing the application. Neither catalog is a service locator. Heterogeneous groups stay in application-owned typed fields/tuples; the immediate design validates an explicit order rather than inventing auto-wiring. See [bootstrap registrars](bootstrap-registrars.md) for the single illustrative assembly sketch and [provider/factory DI](dependency-injection.md) for ownership.
+Provider selection and operation registration are distinct parts of one local composition plan. Validate before factory effects; consume/freeze, construct dependencies, establish provider ownership, bind task dependencies and finalize frozen operation bindings before exposing the application. Neither catalog is a service locator. Heterogeneous groups stay typed in the registry; implemented freeze checks an explicit order rather than inventing auto-wiring. See [bootstrap registrars](bootstrap-registrars.md) for the actual API/assembly sketch and [provider/factory DI](dependency-injection.md) for ownership.
 
 A registry is built locally by composition, validated transactionally, then frozen. Reject duplicate destination/version pairs and unsatisfied selected requirements without inserting or replacing a binding on error. The next slice checks declared dependency order and typed constructor compatibility; generalized alias/version negotiation, graph diagnostics and lifecycle orchestration remain full-target extensions, not prerequisites for a useful registrar.
 

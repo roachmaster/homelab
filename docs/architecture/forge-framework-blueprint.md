@@ -97,14 +97,14 @@ The application is the composition boundary. Handler bindings and small feature-
 
 ## 3. A deliberately small package surface
 
-The five current packages are `forge-ingress-contract`, `forge-bridge`, `forge-provider`, `forge-io-client` and `forge-task`. The next proposed package is `forge-bootstrap`; the broader runtime and capabilities below remain later roles, not existing exports.
+The six current core packages are `forge-ingress-contract`, `forge-bridge`, `forge-provider`, `forge-io-client`, `forge-task` and `forge-bootstrap`. Three separate demo packages prove optional selection; they are not mandatory framework dependencies. The broader runtime/capabilities below remain later roles.
 
 | Unit | Owns | May depend on | Must not depend on |
 | --- | --- | --- | --- |
 | `forge-ingress-contract` | Generic `Envelope<P>`/header, typed ingress/handler/admission contracts, controlled outcomes | Small transport-neutral value dependencies | Transport libraries, concrete handlers, domain models, storage drivers |
 | `forge-bridge` | Generic typed registry, header/variant checks and admitted dispatch | Ingress contract | Concrete capabilities or transport implementations |
 | `forge-provider`, `forge-io-client`, `forge-task` (implemented, independent) | Construction/acquisition contracts; prepared-request I/O; computation/orchestration | No normal dependencies on each other | Concrete implementation crates, mandatory transports or service lookup |
-| `forge-bootstrap` (next, proposed) | Prepared factory-group metadata, atomic validation/freeze helpers; typed application assembly support | Initially std only; existing crates in examples/tests | Concrete clients, business enums, environment reads or universal DI execution |
+| `forge-bootstrap` (implemented subset) | Prepared groups, atomic consuming registration, declared-order validation/freeze; typed tuple extraction | Std only | Concrete clients, business enums, environment reads or universal DI execution |
 | Optional implementation crate + registrar | Concrete client, dependencies, typed config, cohesive factories and reusable registrar | Implemented contracts and bootstrap helpers as needed | Mandatory core imports back into this implementation |
 | `forge-runtime` (deferred) | Managed startup/shutdown supervision and later lifecycle facilities | Focused runtime facilities | Domain policy or transport-specific mandatory dependencies |
 | Chosen ingress adapter, optional | Input framing, delegation to an injected codec over `P`, protocol lifecycle and outcome encoding | Generic ingress/codec contracts; runtime or transport library only as needed | Concrete business handlers or capability imports hidden in the generic adapter |
@@ -115,7 +115,7 @@ The ingress contract is justified by actual shared consumers, not a license for 
 
 ## 4. Assembly without a second monolith
 
-**Immediate scope:** [bootstrap invokes typed registrars](bootstrap-registrars.md) and stages factory groups into application-owned typed fields/tuples. Validate selections and explicit construction order, freeze, construct clients/providers/tasks, then publish the existing shared bridge. The numbered lifecycle below is the full target, not a demand to implement a universal container now. The application front door may eventually serve local or remote tools; it is not defined by a CLI parser or any mandatory transport.
+**Implemented narrow scope:** [bootstrap invokes typed registrars](bootstrap-registrars.md) and a consuming registry owns factory-group tuples and metadata together, returning unchanged state on conflict. Validate selections and explicit construction order, freeze, construct clients/providers/tasks, then publish the existing shared bridge. The numbered lifecycle below is the full target, not a demand to implement a universal container now. The application front door may eventually serve local or remote tools; it is not defined by a CLI parser or any mandatory transport.
 
 Use a two-phase host plan: **describe and validate**, then **construct and start**. Separate the construction/lifetime graph from the operation registry: factories construct typed values, providers control scoped acquisition/reuse, and bootstrap injects resolved ports into handlers. The bridge never looks up arbitrary services. The [DI design](dependency-injection.md) explains the source evidence, Rust lease contracts and scope choices.
 

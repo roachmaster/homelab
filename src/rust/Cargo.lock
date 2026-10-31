@@ -3,10 +3,47 @@
 version = 4
 
 [[package]]
+name = "forge-bootstrap"
+version = "0.1.0"
+
+[[package]]
+name = "forge-bootstrap-demo"
+version = "0.1.0"
+dependencies = [
+ "forge-bootstrap",
+ "forge-bridge",
+ "forge-demo-memory-client",
+ "forge-demo-messages",
+ "forge-ingress-contract",
+ "forge-provider",
+ "forge-task",
+]
+
+[[package]]
 name = "forge-bridge"
 version = "0.1.0"
 dependencies = [
  "forge-ingress-contract",
+ "forge-io-client",
+ "forge-provider",
+ "forge-task",
+]
+
+[[package]]
+name = "forge-demo-memory-client"
+version = "0.1.0"
+dependencies = [
+ "forge-bootstrap",
+ "forge-demo-messages",
+ "forge-io-client",
+ "forge-provider",
+]
+
+[[package]]
+name = "forge-demo-messages"
+version = "0.1.0"
+dependencies = [
+ "forge-bootstrap",
  "forge-io-client",
  "forge-provider",
  "forge-task",

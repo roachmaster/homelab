@@ -2,10 +2,10 @@ digraph ProviderAssembly {
 graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.65, ranksep=0.75, bgcolor="white"];
 node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4];
 edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
-newrank=true; rankdir=TB; label="06  Bootstrap calls registrars — proposed assembly and later lifecycle\nFirst slice: typed groups + explicit construction; not an ingress routing registry";
+newrank=true; rankdir=TB; label="06  Bootstrap calls registrars — implemented small slice and later lifecycle\nOwned typed groups + explicit construction; not an ingress routing registry";
 subgraph cluster_plan { label="Bootstrap and lifecycle — composition / host ownership"; fontname="DejaVu Sans"; fontsize=14; color="#ae7b26"; style="rounded,dashed"; margin=22;
 validate [label="1. Configure + call registrars\nStage complete typed factory groups\nValidate selections, order, duplicates\nNo client construction or I/O", fillcolor="#fff1d6", color="#ae7b26"];
-freeze [label="2. Consume validated plan\nProvider selection fixed\nNo arbitrary runtime lookup", fillcolor="#fff1d6", color="#ae7b26"];
+freeze [label="2. Consume validated registry\nMetadata + typed tuple stay together\nNo arbitrary runtime lookup", fillcolor="#fff1d6", color="#ae7b26"];
 build [label="3. Explicit construction + injection\nBind client handles into task recipes\nFinalize routes; no partial publication", fillcolor="#fff1d6", color="#ae7b26"];
 ready [label="4. Expose completed application\nTyped header-routed requests unchanged\nManaged resource readiness: later", fillcolor="#fff1d6", color="#ae7b26"];
 stop [label="5. Owned release\nSynchronous ownership first\nManaged drain / async close: later\nNever destroy resources still in use", fillcolor="#fff1d6", color="#ae7b26"];

@@ -10,7 +10,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a prop
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 
-The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, and independent I/O-client/task contracts with runnable in-process examples and focused tests. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
+The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
 ## Source sets
 
@@ -28,7 +28,7 @@ Repository skills live separately from application code in `.agents/skills/`.
 - [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.
 - [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md): specify typed factories, acquisition scopes, leases and lifecycle wiring.
 
-The framework-specific skills share one [DSL semantic reference](docs/architecture/framework-dsl.md). Keep these repository-local skills with their linked documentation; the DSL is a proposed Rust-embedded composition model, not an implemented parser or public API.
+The framework-specific skills share one [DSL semantic reference](docs/architecture/framework-dsl.md). Keep these repository-local skills with their linked documentation; the broader DSL is an evolving Rust-embedded composition model, not an implemented parser; the linked core documents its real public API subset.
 
 Examples: `Use $model-forge-module to explain the DSL and model a notifications capability.`
 

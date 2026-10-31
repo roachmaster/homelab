@@ -1,6 +1,6 @@
 # Bootstrap and cohesive factory registrars
 
-**Status: practical next core slice, not implemented.** The five existing [Rust crates](../../src/rust/README.md) remain unchanged. This refines the explicit assembly found in Mission Control and Forge-framework; it is not a new transport, parser, dynamic plugin loader or universal DI container. [Canonical vocabulary](framework-dsl.md) · [DI ownership](dependency-injection.md) · [Implementation sequence](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars)
+**Status: small bootstrap subset implemented.** The five earlier [Rust crates](../../src/rust/README.md) retain their public contracts. A sixth core package, [`forge-bootstrap`](../../src/rust/forge-bootstrap/README.md), and three explicitly labeled demo packages now implement atomic typed group registration, consuming validation/freeze and optional in-process assembly. Automatic graph execution, production clients, UI and managed lifecycle remain deferred. This refines the explicit assembly found in Mission Control and Forge-framework; it is not a new transport, parser, dynamic plugin loader or universal DI container. [Canonical vocabulary](framework-dsl.md) · [DI ownership](dependency-injection.md) · [Implementation checkpoint](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars)
 
 ## The developer-facing contract
 
@@ -8,7 +8,7 @@ The application chooses optional capability/implementation crates and supplies t
 
 A reusable implementation crate owns its concrete client, implementation dependencies, typed configuration (an enum when selecting supported modes), factories and registrar. It depends on the narrow contracts it implements; core never imports it. A caller needing another I/O mechanism selects another crate, not an extra dependency hidden in core. Pure computations need no I/O crate. Contract-only crates do not need meaningless registrars, and small coherent internals can remain modules.
 
-The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. No concrete transport/client implementation is part of this next slice.
+The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. No real transport/client implementation is included; the optional implementation package is an observable in-memory fake.
 
 ## Configuration is not a command payload
 
@@ -18,28 +18,30 @@ Startup configuration selects implementation behavior and lifecycle. Runtime cap
 
 ## Minimal Rust-feasible registration
 
-Propose **one new `forge-bootstrap` crate**, initially std-only with no normal dependency on a concrete implementation, transport, task or bridge. It provides small prepared-group/validation/freeze helpers and controlled assembly errors—not an all-purpose runtime. Reuse `forge-provider` for actual factory/provider behavior; bootstrap examples can depend on the existing crates as dev dependencies.
+The implemented **`forge-bootstrap` crate** is std-only with no normal dependencies. `PreparedGroup<F>` stores one package-owned factory/recipe struct plus validated group metadata. `Registry<G>` owns the index and all typed groups together. Successful registration appends to a nested tuple `(G, F)`; rejected registration returns the original registry and incoming group unchanged through `Rejected::into_parts()`.
 
-Keep heterogeneous factory values in an **application-owned typed struct or tuple**, with fields for the selected registrars' distinct factory-group types. A narrow typed registration target borrows one application slot plus the common metadata index; its commit checks the complete group for collisions before changing either. The index records binding identities, requirements and diagnostics, not erased services. A registrar produces its metadata and typed factory group together. Bootstrap stages the whole group, not a sequence of independently published registrations.
+This **consuming, typed builder replaces the earlier separately borrowed slot/metadata proposal**. Owning both together prevents mismatched slot/index ownership without a second container protocol. The tuple type changes when a group is added; the consuming application explicitly chooses the registration calls. No `Any`/downcasts, JSON, global business enum, heterogeneous factory map or dyn-GAT provider is used. The core does not impose a universal registrar trait: packages export ordinary typed registrar functions.
 
-Different concrete factory output types therefore never have to inhabit `HashMap<Key, dyn Factory<...>>`. No `Any`/downcasts, JSON, global business enum, `Box<dyn InstanceProvider<...>>` with an unsupported GAT promise, or heterogeneous array of unrelated registrars is needed. A configuration enum may choose implementations only through a compatible exported contract: fixed associated request/response/error types, a package-owned adapter enum, or explicitly typed application branches. A config tag cannot make unrelated Rust output types interchangeable. Ordinary typed functions are sufficient registrar contracts initially; a trait is useful only if real callers share its type parameters. Adding an optional crate can add a typed field/call in application composition without editing framework dispatch.
+`freeze` checks that all declared external requirements are provided by earlier selected groups. Only the resulting `Frozen<G>` exposes `into_factories()`. The application explicitly binds resolved client handles into a dependent task recipe, creates the task and registers its bridge binding. Metadata checks do not execute an automatic graph or prove arbitrary recipe behavior.
 
-**Illustrative shape only; these names/APIs do not exist and this is not a compiled example.** Here `ApplicationRegistry` and its typed slots belong to the consuming application, while each selected package owns its registrar and factory-group type:
+A configuration enum can select only compatible implementations: fixed request/response/error types, a package-owned adapter enum, or explicit typed application branches. A configuration tag cannot make unrelated Rust output types interchangeable. Startup errors remain typed; diagnostic IDs are not service-lookup keys.
+
+### Actual implemented composition
+
+The [demo bootstrap](../../src/rust/examples/forge-bootstrap-demo/src/messages.rs) calls two reusable registrars: [message capability](../../src/rust/examples/forge-demo-messages/src/lib.rs) and [optional memory client](../../src/rust/examples/forge-demo-memory-client/src/lib.rs). Reduced from that executable path (application error mapping and the pure group omitted):
 
 ```rust,ignore
-let config: AppConfig = load_at_application_boundary()?;
-let mut registry = ApplicationRegistry::new();
-
-lookup_package::register(config.lookup, registry.lookup_target())?;
-message_package::register(config.messages, registry.messages_target())?;
-// Each call stages a complete typed factory group; neither executes I/O.
-
-let plan = registry.validate_and_freeze()?;
-let application = plan.assemble()?; // explicit typed constructor calls, below
-// Only the completed application's front door is exposed to callers.
+let clients = memory::register(client_config, client_probe)?;
+let tasks = capability::register(task_config, task_probe)?;
+let registry = Registry::new().register(clients)?.register(tasks)?;
+let (((), clients), tasks) = registry.freeze()?.into_factories();
+// Construct the chosen client/provider, bind its handle to tasks.greeting,
+// create the task and register its typed bridge closure before publication.
 ```
 
-These packages are placeholders for a controlled in-memory demonstration, not commitments to production clients. Both typed slots and cross-group metadata are validated before assembly. A failed registrar leaves its target and earlier accepted groups unchanged; a later assembly failure discards the entire unpublished application.
+This fragment names real APIs but is not a standalone program; error mapping and lifetime selection are in the linked source. The default demo consumer contains only pure arithmetic and has **no normal dependency on either message package, `forge-io-client` or `forge-provider`**. Its opt-in Cargo `messages` feature adds the selected packages; tests/normal-dependency trees prove actual inclusion/omission, not just a runtime `if`.
+
+No client/task is created during staging or freeze. The complete group's collisions are checked before metadata or typed values move into the next builder. Preparation errors occur before registration; registration errors retain the prior plan; construction errors return no application. The sample composes only owned in-memory resources and makes no remote/durable/authentication guarantee.
 
 ## Construction and provider lifetime
 
@@ -51,18 +53,18 @@ For a client-using task the explicit order is:
 4. Construct the task, optionally retain it in a task provider, and register a typed bridge binding that calls `Task::run`. The task still prepares requests; `IoClient::execute` only executes prepared requests and required boundary encoding.
 5. Freeze the route registry and expose the fully assembled application. Header selection, admission and variant checks remain on the existing path.
 
-Factories and dependent recipes are typed values stored during registration; creating a factory object is not creating its client. A shared handle must satisfy actual Rust bounds. For a returned application, prefer owned handles or externally owned scoped backing; do not build a self-referential struct whose tasks borrow movable sibling provider fields. `Arc` alone does not confer thread safety, and the current bridge remains synchronous/non-`Send`.
+Factories and dependent recipes are typed values stored during registration; creating a factory object is not creating its client. A shared handle must satisfy actual Rust bounds. The demo uses owned `Rc` client/provider handles in a single-threaded application. For another returned application, prefer owned handles or externally owned scoped backing; do not build a self-referential struct whose tasks borrow movable sibling provider fields. `Arc` alone does not confer thread safety, and the current bridge remains synchronous/non-`Send`.
 
 A singleton task must not accidentally retain a short operation/pool lease for its entire lifetime. Keep per-call acquisition private to the client when possible, or inject a purposeful narrow provider when the workflow needs a session. Pools, async factories and awaited cleanup are deferred. A pure task has no client recipe or provider dependency.
 
 ## Validate, freeze, assemble; do not publish partial state
 
 - **Prepare:** validate typed config and group-local identities; stage all factory recipes together. No client construction, network/file operations, worker starts or route exposure. This is a contract for trusted registrar code, verified with effect counters—not a sandbox that proves arbitrary Rust code pure.
-- **Validate the selected application:** reject occupied slots, duplicate binding/route identities, missing selected requirements and conflicting overrides before factory effects. Check the explicitly declared construction order: required groups must precede consumers. Reject invalid/self/forward dependencies rather than inventing runtime resolution. Typed constructors additionally enforce actual dependency types/lifetimes; string metadata does not replace them.
-- **Freeze:** consume the pending application plan, keeping its typed groups and validated metadata together. No additions or implicit replacements afterward. Route descriptors and later bindings must agree; verify coverage during assembly.
+- **Validate the selected application:** reject duplicate groups/bindings and missing selected requirements before factory effects. The demo resolves conflicting explicit/default choices before calling registrars. Runtime route collisions remain the existing bridge builder's responsibility, checked before application publication. Check the explicitly declared construction order: required groups must precede consumers. Reject invalid/self/forward dependencies rather than inventing runtime resolution. Typed constructors additionally enforce actual dependency types/lifetimes; string metadata does not replace them.
+- **Freeze:** consume the pending application plan, keeping its typed groups and validated metadata together. No additions or implicit replacements afterward. The implemented metadata describes assembly bindings, not a route-descriptor catalog. Existing bridge registration rejects route collisions, and the demo tests its known routes; generic declared-route coverage validation remains deferred.
 - **Assemble:** application-owned code calls factories in that declared order and injects dependencies. It is not automatic heterogeneous graph execution. Tests compare actual creation order with the declared order. If construction fails, release already-owned synchronous resources in reverse dependency order (using explicit ownership scopes/drop order), preserve the original error, and return no application. Core registration errors describe metadata; application-owned typed error variants preserve specific factory/provider causes instead of adding every client failure to a framework-global enum. Effects outside memory are not rolled back by `Drop`; future adapters need explicit close/cleanup contracts before claiming such guarantees.
 
-For the next slice, an omitted required typed slot/configuration is an assembly error. A full auto-wiring graph, arbitrary cycle resolution/diagnostics, dynamic registration and managed startup/shutdown are later work, not promises supplied by these metadata checks.
+An omitted required binding/configuration is an assembly error. The implemented registry checks declared order and preserves failed builders; broader configuration/override policy remains application-owned. A full auto-wiring graph, arbitrary cycle resolution/diagnostics, dynamic registration and managed startup/shutdown are later work, not promises supplied by these metadata checks.
 
 ## Defaults, replacement and extension
 

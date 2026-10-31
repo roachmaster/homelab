@@ -1,0 +1,21 @@
+[package]
+name = "forge-bootstrap-demo"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+messages = ["dep:forge-demo-messages", "dep:forge-demo-memory-client", "dep:forge-provider"]
+
+[dependencies]
+forge-bootstrap.workspace = true
+forge-bridge.workspace = true
+forge-ingress-contract.workspace = true
+forge-task.workspace = true
+forge-demo-messages = { workspace = true, optional = true }
+forge-demo-memory-client = { workspace = true, optional = true }
+forge-provider = { workspace = true, optional = true }
+
+[lints]
+workspace = true

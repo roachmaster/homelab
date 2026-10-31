@@ -4,7 +4,7 @@
 
 **Observed:** 15 repositories were reviewed read-only for architecture, contracts, boundaries, and implementation evidence. This is not a fresh build/test certification.
 
-**Implemented core slices:** [five std-only Rust core packages](../src/rust/README.md), synchronous typed in-process examples and focused tests, including prepared-request I/O clients and pure/client-using tasks. This does not implement the full DSL, durable jobs or host lifecycle.
+**Implemented core slices:** [six std-only Rust core packages](../src/rust/README.md), synchronous typed in-process examples and focused tests, including prepared-request I/O clients, pure/client-using tasks and typed registrar/freeze helpers. Three optional-demo packages prove configuration-driven assembly and compile-time dependency omission. This does not implement the full DSL, durable jobs or host lifecycle.
 
 **Proposed:** a small, Spring Boot-inspired Rust assembly model with explicit capability modules, thin ingress adapters, a shared header-routed bridge, and deliberate lifecycle ownership. The blueprint is a design, not a deployed or completed framework.
 

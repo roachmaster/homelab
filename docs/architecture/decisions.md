@@ -23,9 +23,9 @@
 
 The [provider/factory DI design](dependency-injection.md) adapts older Forge access/factory seams and HPVS lease discipline. It does not treat their caches, operation registries or synchronous pools as an existing general-purpose application container.
 
-## Next core refinement
+## Implemented core refinement
 
-Bootstrap calls package-owned registrars with typed startup configuration; each stages a cohesive factory group. Concrete clients, dependencies, config enums and factories belong to optional implementation crates, not core. The proposed `forge-bootstrap` helpers support an application-owned typed registry and explicit construction order, not heterogeneous `Any` resolution. Configure once at the boundary; do not mix startup config with runtime payload enums.
+Bootstrap calls package-owned registrars with typed startup configuration; each stages a cohesive factory group. Concrete clients, dependencies, config enums and factories belong to optional implementation crates, not core. The implemented `forge-bootstrap` helpers own a typed tuple/index together and validate explicit construction order, not heterogeneous `Any` resolution. Consuming registration returns the original builder on error; this refines the earlier separate-slot sketch. Configure once at the boundary; do not mix startup config with runtime payload enums.
 
 Choose defaults/replacements before factory calls; group failure is atomic. Future home-menu extension contributes entries, not a second competing home binding. These decisions refine the reviewed explicit Forge/Mission Control assembly seams. [Scope and Rust feasibility](bootstrap-registrars.md) · [Next implementation gates](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars)
 

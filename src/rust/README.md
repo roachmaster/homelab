@@ -1,8 +1,9 @@
 # Rust source sets — first Forge core
 
-This directory is now a real **five-package Cargo workspace**, with an original,
-std-only synchronous core and runnable in-process examples. It is a narrow first
-slice, not the complete framework/reference application described in the designs.
+This directory contains **six core packages plus three clearly separated demo
+packages**, all original, std-only and synchronous. Typed registration/freeze and
+optional-package assembly now work; the broader managed framework/durable reference
+application remains a target, not a completed product.
 
 | Package | Responsibility | Normal dependencies |
 | --- | --- | --- |
@@ -11,6 +12,7 @@ slice, not the complete framework/reference application described in the designs
 | [forge-provider](forge-provider/README.md) | Typed factories, borrow-aware provider/lease contract, host-owned singleton and transient acquisition | Standard library only |
 | [forge-io-client](forge-io-client/README.md) | Executes an already prepared typed request at a narrow I/O boundary | Standard library only |
 | [forge-task](forge-task/README.md) | Typed pure computation or orchestration through injected client contracts | Standard library only |
+| [forge-bootstrap](forge-bootstrap/README.md) | Atomic typed factory-group registration, declared-order validation, consuming freeze and tuple extraction | Standard library only |
 
 The bridge's **dev-only** provider/client/task dependencies compose examples and
 contract tests. Task's client/provider dependencies are also dev-only; pure task
@@ -19,6 +21,21 @@ Production routing imports none of these abstractions. Factories, providers and 
 one cohesive crate; they are not a class-per-package hierarchy. Capability enums
 and ports live in consumers, not this framework. There is no JSON/value-map
 payload fallback, transport library, global enum, global registry or service locator.
+
+## Optional consumer proof
+
+The demo packages live under `examples/`, not inside core:
+
+- [forge-demo-messages](examples/forge-demo-messages/README.md): capability-owned input/prepared request/result, injected-client task, typed config and registrar.
+- [forge-demo-memory-client](examples/forge-demo-memory-client/README.md): fake client, its config/factories/registrar and explicit singleton/transient handle.
+- [forge-bootstrap-demo](examples/forge-bootstrap-demo/README.md): pure-default application; the Cargo `messages` feature opts in to the two packages above. Its default normal dependency graph excludes both, `forge-io-client` and `forge-provider`.
+
+The application selects configurations/registrars before constructing resources.
+`Registry<G>` owns metadata and typed groups together; a rejected complete group
+returns the original builder unchanged. `Frozen<G>` yields the nested tuple only
+after dependency-order checks. Construction stays explicit; dependent task recipes
+bind client handles without changing `Factory<T>::create`. No global service map,
+forced client for pure tasks or concrete transport is introduced.
 
 ## Run and check
 
@@ -29,9 +46,15 @@ Cargo.lock is committed; build output is ignored.
 
 ```bash
 cargo fmt --all -- --check
-cargo build --workspace --all-targets --offline --locked
-cargo test --workspace --offline --locked
-cargo clippy --workspace --all-targets --offline --locked -- -D warnings
+cargo build --workspace --all-targets --all-features --offline --locked
+cargo test --workspace --all-features --offline --locked
+cargo test --workspace --all-features --release --offline --locked
+cargo test -p forge-bootstrap-demo --no-default-features --offline --locked
+cargo clippy --workspace --all-targets --all-features --offline --locked -- -D warnings
+cargo clippy -p forge-bootstrap-demo --all-targets --no-default-features --offline --locked -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --offline --locked
+cargo run -p forge-bootstrap-demo --no-default-features --offline --locked
+cargo run -p forge-bootstrap-demo --features messages --offline --locked
 cargo run -p forge-bridge --example in_process --offline --locked
 cargo run -p forge-bridge --example task_clients --offline --locked
 python3 scripts/check_dependencies.py
@@ -45,14 +68,18 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The suite has 30
-integration tests plus one compile-fail lifetime doctest; it covers invalid
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite has 75
+integration tests and five doctests (four compile-fail, one runnable); the pure
+consumer is additionally checked separately. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
 header/variant mismatch, preserved duplicate binding, typed error propagation,
 nested application sums, factory substitution, scope identity and lease cleanup.
 Client/task tests add pure computation, unchanged non-Clone prepared requests,
 fetch/send sequencing, typed error causes, client substitution and no client
-effects after rejected bridge admission.
+effects after rejected bridge admission. Bootstrap tests add late multi-binding
+conflict preservation, typed recovery after rejection, missing/self/forward
+requirements, freeze restrictions, config/default selection, lazy transient
+creation, startup failure cleanup, and actual optional dependency omission.
 No minimum-supported-Rust-version guarantee or production certification is claimed.
 
 ## Task/client boundary
@@ -91,12 +118,21 @@ implementation is pure or that a future client respects its semantics.
   acquisition. Borrowed leases cannot outlive their owner. Owned transient values
   may still share captured backing state. Ordinary destruction is synchronous.
 
-**Not implemented:** a module/DSL parser or assembly container, dependency
-resolution/override validation, provider pools, async dispatch or `Send`/`Sync`
+`forge-bootstrap` validates assembly binding metadata, not a route-descriptor
+catalog. Existing bridge registration still rejects route duplicates; the demo
+tests its known route set. Metadata cannot prove arbitrary factory code follows
+its declarations. Registrar purity and construction/drop order are tested behavior,
+not a sandbox or automatic teardown guarantee. Runtime effects are never rolled back.
+
+**Not implemented:** a module/DSL parser, universal container, automatic dependency
+resolution, generic override/default engine, route-descriptor coverage validator,
+provider pools, async dispatch or `Send`/`Sync`
 handler hosting, real authentication, deadline/cancellation/idempotency metadata
 and enforcement, durable acceptance, storage, transports, workers or supervised
 startup/shutdown. The dependency guard checks the **compile-time crate graph**,
-not a runtime service graph. These remain planned rather than silently stubbed.
+and actual pure/enabled consumer dependency trees; bootstrap separately checks
+its declared assembly order, not an auto-wired runtime service graph. Deferred
+features remain planned rather than silently stubbed.
 
 ## Continue without growing a catch-all core
 
