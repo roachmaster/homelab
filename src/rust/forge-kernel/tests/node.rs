@@ -192,3 +192,17 @@ fn task_rejects_a_substituted_clients_wrong_response_kind() {
         assert_eq!(seen.borrow().len(), 1);
     }
 }
+
+#[test]
+fn command_description_is_optional_separate_and_has_no_client_bound_or_execution() {
+    use forge_command::{validate_descriptors, DescribeCommand};
+    // () is not a node client: reading metadata cannot require executing one.
+    let task = forge_kernel::node::NodeTask::new(());
+    let descriptions = task.descriptors();
+    validate_descriptors(descriptions).unwrap();
+    assert_eq!(
+        descriptions.iter().map(|d| d.name).collect::<Vec<_>>(),
+        ["node.info", "node.status"]
+    );
+    assert!(descriptions.iter().all(|d| d.arguments.is_empty()));
+}

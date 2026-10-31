@@ -20,6 +20,7 @@ From the repository root with stable Rust, GNU Make and Python 3.9+:
 ```bash
 make                         # discover the available targets
 make run ARGS='node.info'
+make run ARGS='disk.list --help' # typed command arguments and defaults
 make session                 # local stateful terminal
 make run NO_DEFAULT_FEATURES=1 ARGS='node.status'
 make test                    # workspace tests
@@ -32,7 +33,7 @@ assembly output and CI details](src/rust/README.md#root-makefile) include the di
 Cargo equivalents. The workflow performs CI checks only: no deployment or release
 publication is configured.
 
-The terminal discovers its selected registered commands and sends typed requests through the shared bridge. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
+The terminal discovers its selected registered commands and sends typed requests through the shared bridge. A separate [command-description contract](src/rust/forge-command/README.md) supplies names, help, named argument types and required/optional/default declarations; `Task` remains an independent execution stereotype. `help COMMAND` or `COMMAND --help` describes an admitted catalog entry without running the business task/client. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
 
 **Implemented:** local configured node observations, command discovery and optional native disk navigation. Node status reports client-instance uptime/responding, not machine health. **Later:** jobs, remote execution and Raspberry Pi deployment; no bootable OS or production authentication is claimed.
 

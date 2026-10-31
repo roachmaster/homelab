@@ -156,3 +156,11 @@ Node tests cover bounded configuration, metadata staging and duplicate preservat
 clock creation only after freeze, independent client/provider lifetimes, actual
 compile-target/monotonic observations, exact task-prepared requests, fake-client
 substitution, response-kind rejection and error propagation without retry.
+
+The node feature also opts into the dependency-free `forge-command` description
+contract. `NodeTask` implements `DescribeCommand` separately from `Task`, exposing
+`node.info` and `node.status` as distinct no-argument operations. Metadata reads do
+not require a working I/O client; execution still uses the original typed client
+contract. The disk-only kernel feature does not import command description or
+Task merely to expose filesystem I/O; its consuming application owns disk tasks
+and their descriptions.

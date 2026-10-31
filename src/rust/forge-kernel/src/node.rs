@@ -5,6 +5,7 @@
 //! client is constructed, not when the OS boots or the whole application becomes
 //! ready. A responding client is not a production health/readiness assessment.
 use forge_bootstrap::{PreparedGroup, RegistrationError};
+use forge_command::{CommandDescriptor, DescribeCommand};
 use forge_io_client::IoClient;
 use forge_provider::Factory;
 use forge_task::Task;
@@ -185,6 +186,22 @@ pub struct NodeTask<C> {
 impl<C> NodeTask<C> {
     pub fn new(client: C) -> Self {
         Self { client }
+    }
+}
+impl<C> DescribeCommand for NodeTask<C> {
+    fn descriptors(&self) -> &'static [CommandDescriptor] {
+        &[
+            CommandDescriptor {
+                name: "node.info",
+                help: "Configured node ID and compile target (not authenticated identity)",
+                arguments: &[],
+            },
+            CommandDescriptor {
+                name: "node.status",
+                help: "This node client responded; client-instance uptime, not system health",
+                arguments: &[],
+            },
+        ]
     }
 }
 impl<C> Task for NodeTask<C>

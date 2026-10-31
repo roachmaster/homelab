@@ -1,6 +1,6 @@
 # Rust source sets — first Forge core
 
-This directory contains **six core packages, one optional hosted system package, a local application/terminal pair and three
+This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, a local application/terminal pair and three
 clearly separated demo packages**, all original, std-only and synchronous. Typed registration/freeze and
 optional-package assembly, local node observations, admitted command discovery and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
@@ -11,6 +11,7 @@ application remains a target, not a completed product.
 | [forge-bridge](forge-bridge/README.md) | Local route builder, frozen membership, header-selected admission/variant-checked dispatch | `forge-ingress-contract` |
 | [forge-provider](forge-provider/README.md) | Typed factories, borrow-aware provider/lease contract, host-owned singleton and transient acquisition | Standard library only |
 | [forge-io-client](forge-io-client/README.md) | Executes an already prepared typed request at a narrow I/O boundary | Standard library only |
+| [forge-command](forge-command/README.md) | Optional command description: name, help, semantic argument types/presence and validation; no execution requirement | Standard library only |
 | [forge-task](forge-task/README.md) | Typed pure computation or orchestration through injected client contracts | Standard library only |
 | [forge-bootstrap](forge-bootstrap/README.md) | Atomic typed factory-group registration, declared-order validation, consuming freeze and tuple extraction | Standard library only |
 
@@ -28,7 +29,7 @@ payload fallback, transport library, global enum, global registry or service loc
 
 ## Runnable local system
 
-- [`forge-local`](forge-local/README.md) owns explicit node/disk composition, per-application providers, typed command/result sums and registered command descriptors. It imports the six core contracts and selected kernel modules; no core imports it.
+- [`forge-local`](forge-local/README.md) owns explicit node/disk composition, per-application providers, typed command/result sums and registered command descriptors. It imports the six execution contracts, independent command-description contract and selected kernel modules; no core imports it.
 - [`forge-terminal`](forge-terminal/README.md) is the std-only terminal adapter and `forge` binary. It imports only the local application contract and I/O-client contract. Console I/O is an injected typed client, not business policy.
 
 ```bash
@@ -185,7 +186,7 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **138 unit/integration tests and five doctests** (four compile-fail, one runnable), including the local application and terminal; the pure and node-only
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **167 unit/integration tests and six doctests** (four compile-fail, two runnable), including the local application and terminal; the pure and node-only
 consumers are additionally checked separately. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
 header/variant mismatch, preserved duplicate binding, typed error propagation,
@@ -196,8 +197,32 @@ effects after rejected bridge admission. Bootstrap tests add late multi-binding
 conflict preservation, typed recovery after rejection, missing/self/forward
 requirements, freeze restrictions, config/default selection, lazy transient
 creation, startup failure cleanup, and actual optional dependency omission.
-Local system tests add native/configured node observations, substituted provider failures, catalog/binding consistency, actual terminal process commands and stateful sessions, bounded input and escaped native names. Native disk tests add real temporary-fixture listing/navigation/permission checks, non-UTF8/symlink cases on Unix, isolated sessions and admission-before-cd; fake substitution tests remain separate evidence. Windows-specific cases are present but not executed on this Linux host.
+Local system tests add native/configured node observations, substituted provider failures, catalog/binding consistency, actual terminal process commands and stateful sessions, bounded input and escaped native names. Command-description checks add non-Task reuse, per-operation metadata validation, declared argument/codec agreement, typed help options and zero business-client calls while rendering admitted help. Native disk tests add real temporary-fixture listing/navigation/permission checks, non-UTF8/symlink cases on Unix, isolated sessions and admission-before-cd; fake substitution tests remain separate evidence. Windows-specific cases are present but not executed on this Linux host.
 No minimum-supported-Rust-version guarantee or production certification is claimed.
+
+## Command description is not task execution
+
+[`DescribeCommand`](forge-command/README.md) is an independent, object-safe trait
+returning static per-operation descriptors. It is **not a `Task` supertrait**;
+existing pure tasks remain valid without metadata. A selected task may implement
+both traits, while non-Task operations (the local discovery handler) reuse the
+same description contract. Neither contract imports the other.
+
+Descriptions own names/help and named arguments with semantic types (`Path`,
+`Bool`, `I64`, etc., or an explicit custom type label), required/optional presence
+and descriptive defaults. Node/disk enum-based tasks expose one descriptor per
+operation, not one ambiguous argument list for all variants. These are authored
+contracts, not Rust reflection or a universal schema/parser: `Task::Input` remains
+the compiled execution type, and tests check each adapter mapping against metadata.
+
+`forge-local` validates each selected descriptor and derives its route/catalog
+entry from it; duplicate or invalid descriptions do not partially add a binding.
+`forge-terminal` obtains that catalog through admitted `system.commands`, renders
+usage/help from it, and keeps explicit typed decoders. Reusable `-h`/`--help` option
+metadata is owned by the terminal, not a field forced into business inputs.
+Help never calls the selected task/client; application startup/factory validation
+and console output still occur. No authorization, automatic deserialization,
+default insertion in Rust task inputs or effect-safety proof comes from metadata.
 
 ## Task/client boundary
 

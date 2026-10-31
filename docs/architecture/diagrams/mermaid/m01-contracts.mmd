@@ -1,5 +1,5 @@
 ---
-title: M01 Implemented Rust contracts and disk examples
+title: M01 Execution and description are independent contracts
 ---
 classDiagram
     direction TB
@@ -33,6 +33,28 @@ classDiagram
         Error
         run(input) Result
     }
+    class DescribeCommand {
+        <<trait>>
+        descriptors() static operation list
+    }
+    class CommandDescriptor {
+        name
+        help text
+        arguments
+    }
+    class ArgumentDescriptor {
+        name and help
+        semantic DataType
+        required or optional default
+    }
+    class NodeTask {
+        injected client C
+        info and status operations
+    }
+    class DiscoverCommands {
+        description only
+        not a Task
+    }
     class IoClient {
         <<trait>>
         Request
@@ -62,3 +84,8 @@ classDiagram
     Task <|.. ListCurrentTask
     ListCurrentTask ..> IoClient : injected client C
     Singleton o-- DiskClient : disk demo owns
+    Task <|.. NodeTask
+    DescribeCommand <|.. NodeTask
+    DescribeCommand <|.. DiscoverCommands
+    DescribeCommand ..> CommandDescriptor : returns
+    CommandDescriptor ..> ArgumentDescriptor : static slice

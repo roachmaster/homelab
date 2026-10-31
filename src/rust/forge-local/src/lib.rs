@@ -6,6 +6,10 @@
 //! authentication, per-user authorization, a filesystem sandbox or remote access.
 use forge_bootstrap::{PreparedGroup, RegistrationError, Registry, ValidationError};
 use forge_bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
+use forge_command::validate_descriptors;
+pub use forge_command::{
+    ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, DescriptorError, Presence,
+};
 use forge_ingress_contract::{
     AdmissionDenied, AdmissionPolicy, Envelope, Header, HeaderError, Payload, Response,
 };
@@ -87,8 +91,7 @@ impl Payload for Command {
 pub struct CommandInfo {
     pub route: RouteKey,
     pub kind: CommandKind,
-    pub usage: &'static str,
-    pub summary: &'static str,
+    pub descriptor: &'static CommandDescriptor,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Output {
@@ -164,6 +167,9 @@ pub enum BootstrapError {
     Registration(RegistrationError),
     Validation(ValidationError),
     Routes(DuplicateRoute),
+    Descriptor(DescriptorError),
+    MissingDescriptor(&'static str),
+    Header(HeaderError),
 }
 impl BootstrapError {
     /// Invalid user startup values are usage errors; creation/assembly failures are runtime errors.
@@ -188,6 +194,9 @@ impl fmt::Display for BootstrapError {
             Self::Registration(e) => e.fmt(f),
             Self::Validation(e) => e.fmt(f),
             Self::Routes(e) => e.fmt(f),
+            Self::Descriptor(e) => e.fmt(f),
+            Self::MissingDescriptor(name) => write!(f, "missing command descriptor: {name}"),
+            Self::Header(e) => e.fmt(f),
         }
     }
 }
@@ -203,6 +212,9 @@ impl Error for BootstrapError {
             Self::Registration(e) => e,
             Self::Validation(e) => e,
             Self::Routes(e) => e,
+            Self::Descriptor(e) => e,
+            Self::MissingDescriptor(_) => return None,
+            Self::Header(e) => e,
         })
     }
 }
@@ -236,6 +248,30 @@ impl<C: IoClient> IoClient for Ready<C> {
     }
 }
 
+/// Description is reusable without the Task execution stereotype.
+struct DiscoverCommands;
+impl DescribeCommand for DiscoverCommands {
+    fn descriptors(&self) -> &'static [CommandDescriptor] {
+        &[CommandDescriptor {
+            name: "system.commands",
+            help: "List this application's registered commands",
+            arguments: &[],
+        }]
+    }
+}
+
+fn descriptor_for(
+    source: &impl DescribeCommand,
+    name: &'static str,
+) -> Result<&'static CommandDescriptor, BootstrapError> {
+    let descriptors = source.descriptors();
+    validate_descriptors(descriptors).map_err(BootstrapError::Descriptor)?;
+    descriptors
+        .iter()
+        .find(|d| d.name == name)
+        .ok_or(BootstrapError::MissingDescriptor(name))
+}
+
 struct Bindings {
     routes: Routes,
     commands: Vec<CommandInfo>,
@@ -249,16 +285,15 @@ impl Bindings {
     }
     fn register<F>(
         &mut self,
-        destination: &'static str,
+        descriptor: &'static CommandDescriptor,
         kind: CommandKind,
-        usage: &'static str,
-        summary: &'static str,
         handler: F,
     ) -> Result<(), BootstrapError>
     where
         F: Fn(Command, &Context) -> Result<Output, RunError> + 'static,
     {
-        let route = RouteKey::new(destination, 1).expect("application route constant is valid");
+        descriptor.validate().map_err(BootstrapError::Descriptor)?;
+        let route = RouteKey::new(descriptor.name, 1).map_err(BootstrapError::Header)?;
         self.routes
             .register(route.clone(), kind, handler)
             .map_err(BootstrapError::Routes)?;
@@ -266,17 +301,14 @@ impl Bindings {
         self.commands.push(CommandInfo {
             route,
             kind,
-            usage,
-            summary,
+            descriptor,
         });
         Ok(())
     }
     fn finish(mut self) -> Result<Application, BootstrapError> {
         self.register(
-            "system.commands",
+            descriptor_for(&DiscoverCommands, "system.commands")?,
             CommandKind::Commands,
-            "system.commands",
-            "List this application's registered commands",
             |command, context| match command {
                 Command::Commands => Ok(Output::Commands(context.commands.clone())),
                 _ => Err(RunError::UnexpectedCommand),
@@ -399,10 +431,8 @@ where
     let status = NodeTask::new(handle);
     let mut bindings = Bindings::new();
     bindings.register(
-        "node.info",
+        descriptor_for(&info, "node.info")?,
         CommandKind::NodeInfo,
-        "node.info",
-        "Configured node ID and compile target (not authenticated identity)",
         move |command, _| match command {
             Command::Node(NodeCommand::Info) => info
                 .run(NodeCommand::Info)
@@ -412,10 +442,8 @@ where
         },
     )?;
     bindings.register(
-        "node.status",
+        descriptor_for(&status, "node.status")?,
         CommandKind::NodeStatus,
-        "node.status",
-        "This node client responded; client-instance uptime, not system health",
         move |command, _| match command {
             Command::Node(NodeCommand::Status) => status
                 .run(NodeCommand::Status)
@@ -437,21 +465,111 @@ mod tests {
     #[test]
     fn failed_binding_does_not_add_or_replace_discovery_metadata() {
         let mut b = Bindings::new();
-        b.register("test", CommandKind::Commands, "first", "first", |_, _| {
+        static FIRST: CommandDescriptor = CommandDescriptor {
+            name: "test",
+            help: "first",
+            arguments: &[],
+        };
+        static SECOND: CommandDescriptor = CommandDescriptor {
+            name: "test",
+            help: "second",
+            arguments: &[],
+        };
+        b.register(&FIRST, CommandKind::Commands, |_, _| {
             Ok(Output::Commands(vec![]))
         })
         .unwrap();
         assert!(b
-            .register("test", CommandKind::NodeInfo, "second", "second", |_, _| {
-                Err(RunError::UnexpectedCommand)
-            })
+            .register(&SECOND, CommandKind::NodeInfo, |_, _| Err(
+                RunError::UnexpectedCommand
+            ))
             .is_err());
         assert_eq!(b.commands.len(), 1);
-        assert_eq!(b.commands[0].usage, "first");
+        assert_eq!(b.commands[0].descriptor.help, "first");
         let app = b.finish().unwrap();
         assert!(matches!(
             app.invoke(RouteKey::new("test", 1).unwrap(), Command::Commands),
             Ok(Output::Commands(_))
         ));
+    }
+    #[test]
+    fn invalid_descriptor_rejects_before_binding_or_catalog_change() {
+        static BAD: CommandDescriptor = CommandDescriptor {
+            name: "invalid",
+            help: "Duplicate fields are not a valid command",
+            arguments: &[
+                ArgumentDescriptor {
+                    name: "path",
+                    help: "First",
+                    data_type: DataType::Path,
+                    presence: Presence::Required,
+                },
+                ArgumentDescriptor {
+                    name: "path",
+                    help: "Second",
+                    data_type: DataType::Text,
+                    presence: Presence::Required,
+                },
+            ],
+        };
+        let mut bindings = Bindings::new();
+        assert!(matches!(
+            bindings.register(&BAD, CommandKind::Commands, |_, _| panic!("must not run")),
+            Err(BootstrapError::Descriptor(_))
+        ));
+        assert!(bindings.commands.is_empty());
+        static BAD_ROUTE: CommandDescriptor = CommandDescriptor {
+            name: "invalid route",
+            help: "Metadata grammar is transport-neutral",
+            arguments: &[],
+        };
+        assert!(matches!(
+            bindings.register(&BAD_ROUTE, CommandKind::Commands, |_, _| panic!(
+                "must not run"
+            )),
+            Err(BootstrapError::Header(_))
+        ));
+        assert!(bindings.commands.is_empty());
+        let app = bindings.finish().unwrap();
+        assert!(matches!(
+            app.invoke(RouteKey::new("invalid", 1).unwrap(), Command::Commands),
+            Err(AppError::Dispatch(DispatchError::UnknownRoute(_)))
+        ));
+    }
+
+    #[test]
+    fn missing_or_ambiguous_operation_never_registers_a_fallback() {
+        assert!(matches!(
+            descriptor_for(&DiscoverCommands, "not.a.command"),
+            Err(BootstrapError::MissingDescriptor(_))
+        ));
+        struct Ambiguous;
+        impl DescribeCommand for Ambiguous {
+            fn descriptors(&self) -> &'static [CommandDescriptor] {
+                &[
+                    CommandDescriptor {
+                        name: "same",
+                        help: "First",
+                        arguments: &[],
+                    },
+                    CommandDescriptor {
+                        name: "same",
+                        help: "Second",
+                        arguments: &[],
+                    },
+                ]
+            }
+        }
+        assert!(matches!(
+            descriptor_for(&Ambiguous, "same"),
+            Err(BootstrapError::Descriptor(_))
+        ));
+        // Discovery is intentionally described without implementing Task.
+        assert_eq!(
+            descriptor_for(&DiscoverCommands, "system.commands")
+                .unwrap()
+                .arguments,
+            &[]
+        );
     }
 }

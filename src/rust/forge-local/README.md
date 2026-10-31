@@ -1,6 +1,6 @@
 # Forge local application
 
-A runnable **synchronous local application**, separate from the six framework core
+A runnable **synchronous local application**, separate from the execution/description
 contracts and from its terminal adapter. It composes `forge-kernel::node` and an
 optional `forge-kernel::disk` through typed configuration and package registrars.
 The application owns its finite `Command`/`Output` enums; core has no business enum.
@@ -30,7 +30,23 @@ production authentication**, remote authorization or filesystem sandbox.
 `system.commands` is itself an admitted route. Each descriptor is appended only
 when its binding registers successfully. A duplicate adds neither a route nor a
 menu entry. There is no independent list of advertised capabilities or public
-unchecked handler lookup. Terminal help obtains this same catalog.
+unchecked handler lookup. Terminal help obtains this same catalog. `CommandInfo` carries a reference to
+its authoritative `CommandDescriptor`, not a second handwritten usage/help copy.
+Node/disk tasks opt into `DescribeCommand`, with one descriptor per enum operation;
+`DiscoverCommands` uses the same trait without implementing `Task`. Registration
+selects an exact declared name, validates the whole description set and that
+operation's argument names/types, then derives the route from the descriptor.
+Missing/ambiguous/invalid metadata is a typed bootstrap error; duplicate routes
+preserve the first binding and catalog entry. Static descriptors remain trusted,
+effect-free declarations, not Rust reflection or a permission grant.
+
+Required/optional/default declarations describe the command-facing input contract.
+For example, terminal omission of `disk.list`'s optional `path` becomes a concrete
+`PathBuf(".")` in its typed task input. `follow_symlinks` is a Boolean defaulting
+to true; the terminal maps its `--no-follow` flag to false. The Rust enum fields
+remain strongly typed and the adapter mappings are checked by tests, not derived
+by a universal deserializer. Help options live in terminal presentation metadata,
+not those business input enums.
 
 ## Selected commands
 

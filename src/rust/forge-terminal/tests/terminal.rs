@@ -310,7 +310,7 @@ mod disk {
         fs::write(fixture.path().join("--no-follow file"), b"f").unwrap();
         let (code, out, err) = execute_at(
             fixture.path(),
-            &["disk.permissions", "--no-follow file"],
+            &["disk.permissions", "./--no-follow file"],
             b"",
         );
         assert_eq!(code, 0);

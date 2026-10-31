@@ -7,6 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-command": set(),
     "forge-ingress-contract": set(),
     "forge-provider": set(),
     "forge-io-client": set(),
@@ -15,11 +16,11 @@ ALLOWED = {
                      ("forge-io-client", "dev"), ("forge-task", "dev")},
     "forge-bootstrap": set(),
     "forge-kernel": {(name, "normal") for name in
-                     ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task")},
+                     ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task", "forge-command")},
     "forge-local": {(name, "normal") for name in
                     ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider",
-                     "forge-io-client", "forge-task", "forge-kernel")},
-    "forge-terminal": {("forge-local", "normal"), ("forge-io-client", "normal")},
+                     "forge-io-client", "forge-task", "forge-kernel", "forge-command")},
+    "forge-terminal": {("forge-local", "normal"), ("forge-io-client", "normal"), ("forge-bootstrap", "dev")},
     "forge-demo-messages": {(name, "normal") for name in
                             ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task")},
     "forge-demo-memory-client": {(name, "normal") for name in
@@ -132,7 +133,7 @@ def main():
         raise SystemExit("Node-only terminal unexpectedly includes native disk module")
     if 'forge-kernel feature "node"' not in features:
         raise SystemExit("Node-only terminal must select its explicit node capability")
-    print("PASS: six core + optional kernel + local application/terminal + three demos; local allowed DAG")
+    print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
     print("PASS: node-only terminal omits disk Cargo feature and all demonstration implementations")
     print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 

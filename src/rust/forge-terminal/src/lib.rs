@@ -1,6 +1,7 @@
 //! Thin local terminal adapter: registered metadata -> typed command -> checked
 //! application ingress. No task/client lookup, shell execution or remote transport.
 pub mod console;
+pub mod help;
 pub mod parser;
 
 use console::{ConsoleRequest, ConsoleResponse, InputLine};
@@ -8,6 +9,7 @@ use forge_io_client::IoClient;
 #[cfg(feature = "disk")]
 use forge_local::DiskResponse;
 use forge_local::{Application, CommandInfo, NodeResponse, NodeState, Output};
+use help::HELP_OPTION;
 #[cfg(feature = "disk")]
 use parser::quote_os;
 use parser::{decode, decode_session, parse_options, safe_text, session_arguments, Mode};
@@ -19,7 +21,7 @@ Usage: forge [--node-id ID] [--cwd PATH | --no-disk] COMMAND [ARGUMENTS]\n\
        forge [OPTIONS] --help\n\
 Options precede the command. --cwd requires the disk build feature.\n\
 Session: one command per line; paths are literal remaining text, not shell syntax.\n\
-Use help for registered commands; exit or quit ends a session.\n\
+Use help, help COMMAND or COMMAND --help; exit or quit ends a session.\n\
 No job, remote-node, shell, create or delete commands are implemented.\n";
 
 struct Failure {
@@ -118,17 +120,6 @@ where
     }
 }
 
-fn catalog_text(commands: &[CommandInfo]) -> String {
-    let mut output = String::from("Registered commands:\n");
-    for command in commands {
-        output.push_str(&format!(
-            "  {}  {}\n",
-            safe_text(command.usage),
-            safe_text(command.summary)
-        ));
-    }
-    output
-}
 fn show_help<C>(app: &Application, console: &C) -> Result<(), Failure>
 where
     C: IoClient<Request = ConsoleRequest, Response = ConsoleResponse, Error = io::Error>,
@@ -139,8 +130,24 @@ where
         .map_err(|error| Failure::runtime(error.to_string()))?;
     write(
         console,
-        ConsoleRequest::WriteOut(format!("{STARTUP_HELP}\n{}", catalog_text(&commands))),
+        ConsoleRequest::WriteOut(format!("{STARTUP_HELP}\n{}", help::catalog(&commands))),
     )
+}
+fn find_command<'a>(commands: &'a [CommandInfo], name: &str) -> Result<&'a CommandInfo, Failure> {
+    commands
+        .iter()
+        .find(|command| command.route.destination() == name)
+        .ok_or_else(|| Failure::usage(format!("unknown or unavailable command {name:?}; use help")))
+}
+fn show_command_help<C>(app: &Application, name: &str, console: &C) -> Result<(), Failure>
+where
+    C: IoClient<Request = ConsoleRequest, Response = ConsoleResponse, Error = io::Error>,
+{
+    let commands = app
+        .commands()
+        .map_err(|error| Failure::runtime(error.to_string()))?;
+    let info = find_command(&commands, name)?;
+    write(console, ConsoleRequest::WriteOut(help::command_help(info)))
 }
 fn run_command<C>(
     app: &Application,
@@ -156,21 +163,27 @@ where
         .ok_or_else(|| Failure::usage("missing command"))?
         .to_str()
         .ok_or_else(|| Failure::usage("command name must be UTF-8"))?;
-    if matches!(name, "help" | "--help") {
-        if args.len() != 1 {
-            return Err(Failure::usage("help takes no arguments"));
-        }
-        return show_help(app, console);
+    if name == "help" || HELP_OPTION.matches(args[0].as_os_str()) {
+        return match args.len() {
+            1 => show_help(app, console),
+            2 if name == "help" => {
+                let target = args[1]
+                    .to_str()
+                    .ok_or_else(|| Failure::usage("help target must be UTF-8"))?;
+                show_command_help(app, target, console)
+            }
+            _ => Err(Failure::usage(
+                "use help, help COMMAND, or COMMAND --help without other arguments",
+            )),
+        };
     }
     let commands = app
         .commands()
         .map_err(|error| Failure::runtime(error.to_string()))?;
-    let info = commands
-        .iter()
-        .find(|command| command.route.destination() == name)
-        .ok_or_else(|| {
-            Failure::usage(format!("unknown or unavailable command {name:?}; use help"))
-        })?;
+    let info = find_command(&commands, name)?;
+    if args.len() == 2 && HELP_OPTION.matches(args[1].as_os_str()) {
+        return write(console, ConsoleRequest::WriteOut(help::command_help(info)));
+    }
     let payload = if literal_session {
         decode_session(info, &args[1..])
     } else {
@@ -238,7 +251,7 @@ where
 /// bytes (non-ASCII/control bytes escaped), never lossy-converted or executed.
 pub fn format_output(output: Output) -> String {
     match output {
-        Output::Commands(commands) => catalog_text(&commands),
+        Output::Commands(commands) => help::catalog(&commands),
         Output::Node(NodeResponse::Info(info)) => format!(
             "node_id={}\ntarget_os={}\ntarget_arch={}\n",
             safe_text(&info.id), safe_text(info.target_os), safe_text(info.target_arch)),
@@ -272,4 +285,75 @@ pub fn format_output(output: Output) -> String {
 #[cfg(feature = "disk")]
 fn mode_text(mode: Option<u32>) -> String {
     mode.map_or_else(|| "unavailable".into(), |value| format!("{value:04o}"))
+}
+
+#[cfg(test)]
+mod help_tests {
+    use super::*;
+    use crate::console::StreamConsole;
+    use forge_bootstrap::PreparedGroup;
+    use forge_local::{LocalConfig, NodeConfigError, NodeError, NodeFactories, NodeRequest};
+    use std::{cell::Cell, io::Cursor, rc::Rc};
+
+    struct CountingNode(Rc<Cell<usize>>);
+    impl IoClient for CountingNode {
+        type Request = NodeRequest;
+        type Response = NodeResponse;
+        type Error = NodeError;
+        fn execute(&self, _: NodeRequest) -> Result<NodeResponse, NodeError> {
+            self.0.set(self.0.get() + 1);
+            Err(NodeError::Unavailable(
+                "help must not invoke this collector".into(),
+            ))
+        }
+    }
+    #[test]
+    fn help_reads_admitted_descriptors_without_running_capability_clients() {
+        let creates = Rc::new(Cell::new(0));
+        let calls = Rc::new(Cell::new(0));
+        let (factory_creates, client_calls) = (creates.clone(), calls.clone());
+        let app = Application::bootstrap_with_node_registrar(LocalConfig::default(), move |_| {
+            PreparedGroup::new(
+                "test.node",
+                &["kernel.node.client"],
+                &[],
+                NodeFactories {
+                    client: move || {
+                        factory_creates.set(factory_creates.get() + 1);
+                        Ok::<_, NodeError>(CountingNode(client_calls.clone()))
+                    },
+                },
+            )
+            .map_err(NodeConfigError::Registration)
+        })
+        .unwrap();
+        assert_eq!(
+            creates.get(),
+            1,
+            "startup factory still constructs the host"
+        );
+        let console = StreamConsole::new(Cursor::new(Vec::<u8>::new()), Vec::new(), Vec::new());
+        for args in [
+            vec!["help"],
+            vec!["help", "node.info"],
+            vec!["node.status", "--help"],
+            vec!["node.info", "-h"],
+        ] {
+            assert!(run_command(
+                &app,
+                args.into_iter().map(OsString::from).collect(),
+                false,
+                &console
+            )
+            .is_ok());
+        }
+        let console = StreamConsole::new(
+            Cursor::new(b"node.info --help\nhelp node.status\nexit\n"),
+            Vec::new(),
+            Vec::new(),
+        );
+        assert_eq!(session(&app, &console).ok(), Some(0));
+        assert_eq!(calls.get(), 0);
+        assert_eq!(creates.get(), 1);
+    }
 }

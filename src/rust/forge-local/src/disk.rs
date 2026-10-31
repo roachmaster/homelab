@@ -1,5 +1,6 @@
 //! Disk use-case preparation is outside the concrete filesystem client.
-use super::{Bindings, BootstrapError, Command, CommandKind, Output, RunError};
+use super::{descriptor_for, Bindings, BootstrapError, Command, CommandKind, Output, RunError};
+use forge_command::{ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence};
 use forge_io_client::IoClient;
 use forge_kernel::disk::{DiskError, DiskRequest, DiskResponse};
 use forge_task::Task;
@@ -31,6 +32,57 @@ impl DiskCommand {
 }
 struct DiskTask<C> {
     client: C,
+}
+impl<C> DescribeCommand for DiskTask<C> {
+    fn descriptors(&self) -> &'static [CommandDescriptor] {
+        &[
+            CommandDescriptor {
+                name: "disk.pwd",
+                help: "Current client-local directory",
+                arguments: &[],
+            },
+            CommandDescriptor {
+                name: "disk.list",
+                help: "List native entries in deterministic native-name order",
+                arguments: &[ArgumentDescriptor {
+                    name: "path",
+                    help: "Directory to inspect, relative to the client-local cwd or absolute",
+                    data_type: DataType::Path,
+                    presence: Presence::Optional { default: Some(".") },
+                }],
+            },
+            CommandDescriptor {
+                name: "disk.cd",
+                help: "Change this application session's directory, not process cwd",
+                arguments: &[ArgumentDescriptor {
+                    name: "path",
+                    help: "Directory to select, relative to the client-local cwd or absolute",
+                    data_type: DataType::Path,
+                    presence: Presence::Required,
+                }],
+            },
+            CommandDescriptor {
+                name: "disk.permissions",
+                help: "Read permission metadata, not effective access",
+                arguments: &[
+                    ArgumentDescriptor {
+                        name: "path",
+                        help: "Native entry to inspect",
+                        data_type: DataType::Path,
+                        presence: Presence::Required,
+                    },
+                    ArgumentDescriptor {
+                        name: "follow_symlinks",
+                        help: "Inspect the target rather than the link itself",
+                        data_type: DataType::Bool,
+                        presence: Presence::Optional {
+                            default: Some("true"),
+                        },
+                    },
+                ],
+            },
+        ]
+    }
 }
 impl<C: IoClient<Request = DiskRequest, Response = DiskResponse, Error = DiskError>> Task
     for DiskTask<C>
@@ -73,40 +125,18 @@ where
         + Clone
         + 'static,
 {
-    for (destination, kind, usage, summary) in [
-        (
-            "disk.pwd",
-            CommandKind::DiskPwd,
-            "disk.pwd",
-            "Current client-local directory",
-        ),
-        (
-            "disk.list",
-            CommandKind::DiskList,
-            "disk.list [PATH]",
-            "List native entries in deterministic native-name order",
-        ),
-        (
-            "disk.cd",
-            CommandKind::DiskCd,
-            "disk.cd PATH",
-            "Change this application session's directory, not process cwd",
-        ),
-        (
-            "disk.permissions",
-            CommandKind::DiskPermissions,
-            "disk.permissions [--no-follow] PATH",
-            "Read permission metadata, not effective access",
-        ),
+    for (name, kind) in [
+        ("disk.pwd", CommandKind::DiskPwd),
+        ("disk.list", CommandKind::DiskList),
+        ("disk.cd", CommandKind::DiskCd),
+        ("disk.permissions", CommandKind::DiskPermissions),
     ] {
         let task = DiskTask {
             client: client.clone(),
         };
         bindings.register(
-            destination,
+            descriptor_for(&task, name)?,
             kind,
-            usage,
-            summary,
             move |command, _| match command {
                 Command::Disk(command) => task.run(command).map(Output::Disk),
                 _ => Err(RunError::UnexpectedCommand),

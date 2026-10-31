@@ -14,6 +14,18 @@ Proof covers node-provider replacement without task edits, missing/conflicting g
 
 This is **not** production health, authentication, bounded directory listings, jobs, networking, remote execution or a bootable Pi OS. Node status reports only this client's response and instance uptime. Next work remains a separately designed bounded job lifecycle, followed by a chosen authenticated remote boundary. [Run instructions](../../src/rust/forge-terminal/README.md) · [Assembly contract](../../src/rust/forge-local/README.md).
 
+## Independent command description checkpoint — implemented
+
+`forge-command` now provides `DescribeCommand` separately from the unchanged
+`Task` execution trait. Selected node/disk tasks and the non-Task discovery
+handler share authored names/help and named argument types/presence/defaults.
+Successful command bindings derive their catalog from validated descriptors;
+terminal help uses admitted discovery without executing the business task/client.
+The reusable help option stays in presentation metadata, not typed task inputs.
+Explicit codecs and tests establish agreement; this is not reflection, a universal
+schema/parser or automatic execution. Pure tasks remain metadata-free. See the
+[description contract](../../src/rust/forge-command/README.md).
+
 ## Next core slice: bootstrap and registrars
 
 **Implemented narrow checkpoint:** `src/rust/forge-bootstrap` now provides prepared groups, atomic consuming registration, declared-order validation/freeze and typed tuple extraction. The five earlier library contracts are unchanged. Three demo packages prove optional capability/implementation registration and explicit provider/task assembly; that bootstrap checkpoint added no CLI, HTTP, IPC, remote execution, home renderer or async runtime. Native disk access is the separate follow-on checkpoint below. The [bootstrap reference](../architecture/bootstrap-registrars.md) distinguishes the real APIs from deferred policies.

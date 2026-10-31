@@ -9,6 +9,8 @@ cargo run -p forge-terminal --bin forge -- --help
 cargo run -p forge-terminal --bin forge -- --node-id home-node node.info
 cargo run -p forge-terminal --bin forge -- node.status
 cargo run -p forge-terminal --bin forge -- system.commands
+cargo run -p forge-terminal --bin forge -- disk.cd --help
+cargo run -p forge-terminal --bin forge -- help node.status
 cargo run -p forge-terminal --bin forge -- --cwd /some/existing/directory --session
 ```
 
@@ -25,6 +27,8 @@ disk.cd child directory
 disk.pwd
 disk.permissions --no-follow some link
 help
+help disk.permissions
+node.info --help
 exit
 ```
 
@@ -39,14 +43,24 @@ cargo run -p forge-terminal --bin forge -- --no-disk --help
 cargo run -p forge-terminal --no-default-features --bin forge -- --help
 ```
 
-`--no-disk` is also accepted by a node-only build; `--cwd` is rejected there. `--cwd` and `--no-disk` conflict. All startup options precede the command, and `--session`/`--help` end the options. The application owns the chosen capability implementations, factories/providers and typed startup configuration; the terminal does not resolve services.
+`--no-disk` is also accepted by a node-only build; `--cwd` is rejected there. `--cwd` and `--no-disk` conflict. All startup options precede the command, and `--session`/`--help`/`-h` end the options. The application owns the chosen capability implementations, factories/providers and typed startup configuration; the terminal does not resolve services.
+
+## Command metadata and help
+
+Task execution stays separate from optional `DescribeCommand` metadata. The task/capability declares each exposed operation's name, help text, argument names, semantic data types and required/optional/default information. The application's admitted discovery catalog carries those descriptors with registered routes. This adapter derives usage and detailed help from them; it has no duplicate handwritten task-help catalog.
+
+Use **`COMMAND --help`**, **`COMMAND -h`** or **`help COMMAND`**, including in a session. `help`, `--help` and `-h` display overall help. These exact forms take no business arguments: malformed extra arguments reject rather than quietly triggering help. Describing a selected command never invokes its task or capability client. However, the normal application bootstrap runs first, so factory construction/configuration validation (including disk startup-directory inspection when enabled) can still fail before help is shown. Use `--no-disk` or a node-only build when disk is not needed.
+
+The reusable terminal `HelpOption` defines `-h`/`--help` as a separate **Bool, optional, default=false** argument named `help`; it is not inserted into every business input. For example, `disk.permissions` describes `path: Path` (required) and `follow_symlinks: Bool` (optional, default=true). The terminal convention `--no-follow` supplies false. Names/types/defaults come from authoritative metadata; positional and flag spellings belong to the terminal.
+
+Metadata is documentation, not reflection or an automatic converter. Decoding remains explicit per registered command kind into native typed payloads. The adapter tests descriptor/codec agreement, including optional `path=.` and the Boolean flag mapping. It does not create a JSON/string-map payload or promise generic support for every descriptor data type.
 
 ## Parsing, output and failures
 
 - Help and discovery come from the selected registered metadata through the admitted `system.commands` application command. The adapter selects that route descriptor first, decodes its expected typed command kind, then invokes the same checked bridge. It never calls a task/client directly or guesses a destination from a payload.
 - One-shot argv preserves native `OsString` paths, including non-UTF-8 paths where the host permits them. The shell invoking the binary may perform its own quoting/expansion; Forge does not.
-- Sessions accept UTF-8 lines up to **4096 bytes** excluding LF/CRLF. A command is followed by its literal remaining path, with surrounding whitespace trimmed. Spaces inside paths are retained. Quotes, backslashes, `$HOME`, `~`, semicolons and pipes are **not shell syntax**. A path with leading/trailing whitespace or non-UTF-8 bytes needs argv. `disk.permissions` alone recognizes the leading `--no-follow` option; use an explicit `./` prefix to disambiguate a similarly named literal session path.
-- `disk.list` accepts zero or one path (default `.`). `disk.cd` requires one path. `disk.permissions [--no-follow] PATH` requires one path. Node and discovery commands accept no arguments. `help` is an adapter shortcut to admitted discovery; `exit`/`quit` only end a session.
+- Sessions accept UTF-8 lines up to **4096 bytes** excluding LF/CRLF. A command is followed by its literal remaining path, with surrounding whitespace trimmed. Spaces inside paths are retained. Quotes, backslashes, `$HOME`, `~`, semicolons and pipes are **not shell syntax**. A path with leading/trailing whitespace or non-UTF-8 bytes needs argv. `disk.permissions` alone recognizes the leading `--no-follow` option. Flag-looking literal paths must use an explicit `./` prefix (for example `./--help`), in either argv or a session.
+- `disk.list` accepts zero or one path (default `.`). `disk.cd` requires one path. `disk.permissions [--no-follow] PATH` requires one path. Node and discovery commands accept no arguments. `help` is an adapter shortcut to admitted discovery and optionally describes one registered command; `exit`/`quit` only end a session.
 - Native names/paths are quoted encoded-byte representations: controls and non-ASCII bytes appear as `\xNN`, rather than being lossy-decoded or written as terminal escape sequences. Listings keep the native client's deterministic ordering, which is not cross-platform collation. This is text output, not a promised machine wire format.
 - Status reports only that the configured node client answered and elapsed time since its construction. Target OS/architecture are compile-target constants, not hardware probes. This is not global health/readiness, OS uptime or authenticated machine identity. Permission metadata is not effective-access authorization.
 - Exit codes: **0** success, **2** malformed input/invalid configuration/unavailable command, **1** construction/application/console I/O failure. Sessions continue after command or rejected-line errors and return the highest command-error code seen; a console transport failure stops immediately with 1. EOF and `exit` otherwise finish successfully. Console transport failures stop execution; writes may have partially completed. No hidden retry, timeout, cancellation or rollback is provided.
@@ -61,4 +75,4 @@ cargo test -p forge-terminal --no-default-features
 cargo clippy -p forge-terminal --all-targets --all-features -- -D warnings
 ```
 
-Tests cover real binary invocation and a stateful binary session, typed console substitution, bounded/rejected input, malformed commands, discovered omission, native filesystem fixtures, failed-cd preservation, literal paths and terminal-control escaping. Only test-owned temporary directories are created/removed.
+Tests also prove command help leaves an injected capability client uncalled after startup, descriptor/codec agreement, exact help forms, malformed extra help arguments and typed help-option metadata. Tests cover real binary invocation and a stateful binary session, typed console substitution, bounded/rejected input, malformed commands, discovered omission, native filesystem fixtures, failed-cd preservation, literal paths and terminal-control escaping. Only test-owned temporary directories are created/removed.

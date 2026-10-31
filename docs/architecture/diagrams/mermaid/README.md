@@ -4,7 +4,7 @@ Editable Mermaid sources and committed SVGs for the current Forge framework. **M
 
 | View | Status and purpose | Source | Image |
 | --- | --- | --- | --- |
-| M01 — Contracts | Implemented traits, ownership and native disk examples | [Mermaid](m01-contracts.mmd) | [SVG](images/m01-contracts.svg) |
+| M01 — Contracts | Independent execution/description traits, ownership and native examples | [Mermaid](m01-contracts.mmd) | [SVG](images/m01-contracts.svg) |
 | M02 — Bootstrap | Implemented disk singleton assembly, successful path | [Mermaid](m02-bootstrap.mmd) | [SVG](images/m02-bootstrap.svg) |
 | M03 — Request | Implemented checked list-current path, with rejection gates | [Mermaid](m03-disk-request.mmd) | [SVG](images/m03-disk-request.svg) |
 | M04 — Kernel phases | Implemented local system versus proposed jobs/remote phases | [Mermaid](m04-kernel-phases.mmd) | [SVG](images/m04-kernel-phases.svg) |
@@ -16,6 +16,13 @@ Editable Mermaid sources and committed SVGs for the current Forge framework. **M
 UML-like notation abbreviates Rust, not a generated API reference. Dashed hollow-triangle arrows mean trait implementation; diamonds mean ownership; other labeled arrows show construction or use. Type parameters are omitted from class names for readability: the actual contracts include `Factory<T>` and `InstanceProvider<T>`, and the concrete containers are generic. `InstanceProvider::Lease<'a>` is a borrow-tied **GAT** promising `Deref`, not a dyn-compatible universal provider. `Singleton` owns one prebuilt value per provider and returns a borrow; `Transient` retains its factory and constructs an `OwnedLease` on each acquisition. Associated errors are preserved in `Result`.
 
 `Task` and `IoClient` have independent normal dependency graphs. A pure task requires no client. `ListCurrentTask<C>` demonstrates constructor-injected client use, not a dependency of the Task contract on disk. The client accepts the task's prepared typed request. See the [actual Rust API](../../../../src/rust/README.md), [provider contracts](../../../../src/rust/forge-provider/src/lib.rs) and [disk consumer](../../../../src/rust/examples/forge-bootstrap-demo/src/disk.rs).
+
+`DescribeCommand` is independent of `Task`: `NodeTask<C>` implements both,
+while discovery implements description without Task and the older list-current
+Task need not expose metadata. Static per-operation descriptors own names/help
+and semantic argument types/presence; they are not reflection over Rust input
+fields. The terminal owns its help-option syntax and renders only the admitted
+catalog. See [command descriptions](../../../../src/rust/forge-command/README.md).
 
 ## M02 — Implemented bootstrap
 

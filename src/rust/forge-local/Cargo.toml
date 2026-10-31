@@ -9,6 +9,7 @@ default = ["disk"]
 disk = ["forge-kernel/disk"]
 
 [dependencies]
+forge-command.workspace = true
 forge-bootstrap.workspace = true
 forge-bridge.workspace = true
 forge-ingress-contract.workspace = true

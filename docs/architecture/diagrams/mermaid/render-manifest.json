@@ -16,9 +16,9 @@
   "diagrams": [
     {
       "source": "m01-contracts.mmd",
-      "source_sha256": "b3378592841601a5dcd93487d3448dd1751850b0f9154b01aa5e46d5e5c22a42",
+      "source_sha256": "adabd019ffdcf9519f381ee1b73c227d7aec2fd4038d474247e5ad16b994b984",
       "svg": "images/m01-contracts.svg",
-      "svg_sha256": "24af04786a45a9857d592046b2198321aa392ac107082d4413b5a52bcbad41a2"
+      "svg_sha256": "0a0b0d4eb09d772a7fe9f8a7b694987872b9f84a2bbc325c965ef47f8213c530"
     },
     {
       "source": "m02-bootstrap.mmd",

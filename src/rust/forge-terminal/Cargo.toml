@@ -12,6 +12,9 @@ disk = ["forge-local/disk"]
 forge-local = { workspace = true, default-features = false }
 forge-io-client.workspace = true
 
+[dev-dependencies]
+forge-bootstrap.workspace = true
+
 [[bin]]
 name = "forge"
 path = "src/main.rs"

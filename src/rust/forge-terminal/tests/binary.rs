@@ -85,3 +85,40 @@ fn actual_binary_session_keeps_local_cwd_and_survives_failed_cd() {
     assert!(err.contains("handler failed"));
     assert_eq!(std::env::current_dir().unwrap(), process_cwd);
 }
+
+#[test]
+fn actual_binary_command_help_is_metadata_not_execution() {
+    let binary = env!("CARGO_BIN_EXE_forge");
+    for arguments in [
+        vec!["--no-disk", "node.info", "--help"],
+        vec!["--no-disk", "help", "node.status"],
+        vec!["--no-disk", "node.info", "-h"],
+    ] {
+        let output = Command::new(binary).args(arguments).output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("Command: node."));
+        assert!(text.contains("help: Bool (optional, default=false)"));
+        assert!(!text.contains("node_id="));
+    }
+    let output = Command::new(binary)
+        .args(["--no-disk", "node.info", "--help", "extra"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    #[cfg(feature = "disk")]
+    {
+        let output = Command::new(binary)
+            .args(["disk.permissions", "--help"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("path: Path (required)"));
+        assert!(text.contains("follow_symlinks: Bool (optional, default=true)"));
+        assert!(!text.contains("metadata_only="));
+    }
+}

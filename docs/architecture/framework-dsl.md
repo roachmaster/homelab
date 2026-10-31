@@ -12,6 +12,24 @@ The optional [`forge-kernel::disk`](../../src/rust/forge-kernel/README.md) modul
 
 The [local application](../../src/rust/forge-local/README.md) and [terminal adapter](../../src/rust/forge-terminal/README.md) now implement configured node information/status, admitted command discovery and optional disk sessions. Node observations are capability-owned typed inputs/results; `forge-local` owns their sum with disk commands. A successful binding adds its descriptor to the same application catalog; terminal help obtains it through `system.commands`, not a second hardcoded menu registry. The [hosted-kernel plan](forge-kernel-plan.md) still defers bounded job lifecycle, remote boundaries, scheduling/cancellation contracts and remote codecs. The [source ledger](forge-kernel-sources.md) separates primary-source facts from these design choices.
 
+### Command description versus execution — implemented
+
+[`DescribeCommand`](../../src/rust/forge-command/README.md) is separate from
+`Task`: a task is one command stereotype, not a mandatory base class. Selected
+node/disk tasks opt in; the discovery handler uses the same description without
+being a Task. Plain pure tasks need neither metadata nor an I/O dependency.
+`CommandDescriptor` owns an operation name, help text and named argument records
+with semantic `DataType`, required/optional presence and descriptive defaults.
+One enum-based task can declare several operations, each with its own arguments.
+
+The application validates descriptions and derives successful binding/catalog
+entries from them. The terminal's reusable help-option definition stays outside
+business inputs. `COMMAND --help` / `help COMMAND` reads the admitted discovery
+catalog and never calls that command's task/client. Startup factory validation
+and console output still occur. Descriptions do not reflect Rust types, generate
+arbitrary decoders, authenticate access or apply defaults to Rust enum fields;
+explicit codecs plus tests maintain agreement with actual typed inputs.
+
 ## Label what exists
 
 - **Implemented core:** actual public code and executed checks in the linked Rust workspace; only the documented subset.

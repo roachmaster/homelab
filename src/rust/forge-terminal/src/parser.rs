@@ -1,3 +1,4 @@
+use crate::help::HELP_OPTION;
 #[cfg(feature = "disk")]
 use forge_local::DiskCommand;
 use forge_local::{Command, CommandInfo, CommandKind, LocalConfig, NodeCommand};
@@ -97,14 +98,14 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
                 options.disk = false;
             }
             // A node-only build already has no disk; this switch is idempotent.
-        } else if argument == "--session" || argument == "--help" {
+        } else if argument == "--session" || HELP_OPTION.matches(argument.as_os_str()) {
             options.mode = if argument == "--session" {
                 Mode::Session
             } else {
                 Mode::Help
             };
             if args.next().is_some() {
-                return Err("--help/--session must end the startup options".into());
+                return Err("--help/-h/--session must end the startup options".into());
             }
             return Ok(options);
         } else {
@@ -191,6 +192,8 @@ fn one_path(args: &[OsString]) -> Result<PathBuf, String> {
 fn nonempty_path(path: &std::path::Path) -> Result<(), String> {
     if path.as_os_str().is_empty() {
         Err("path must not be empty".into())
+    } else if path.as_os_str().as_encoded_bytes().first() == Some(&b'-') {
+        Err("unknown option or flag-looking path; prefix a literal path with ./".into())
     } else {
         Ok(())
     }

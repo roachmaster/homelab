@@ -34,3 +34,13 @@ cargo run -p forge-bridge --example task_clients --offline --locked
 The two tiny contract crates are separate to preserve independent consumers:
 client adapters need no task model, and pure tasks need no I/O model. This is an
 original interface, not a compatibility facade over older Forge task executors.
+
+## Optional command description
+
+A task is one possible command execution stereotype, not the universal command
+model. The separate [`forge-command`](../forge-command/README.md) contract owns
+`DescribeCommand` and typed argument/help descriptors. A consumer may implement
+both traits when exposing a task as a command; `Task` has no metadata supertrait
+or dependency, so existing pure tasks and trait objects remain unchanged. A
+non-Task handler may implement the same description trait. Descriptors are
+semantic declarations, not reflection over `Task::Input` or automatic decoding.

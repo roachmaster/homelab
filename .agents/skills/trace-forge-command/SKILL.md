@@ -21,6 +21,8 @@ For a client-using task, trace **admitted binding → `Task::run` → prepared t
 
 Keep startup separate from this trace: registrars stage configured factories during bootstrap; request headers do not choose providers or carry startup configuration. Trace the already-assembled task/client binding, not a service-locator lookup. A presentation menu entry is not authorization; an action invoking application work still uses the admitted typed bridge. The implemented local terminal obtains descriptors through `system.commands`; its selected header/codec builds a typed command and `Application::invoke` uses the same bridge as direct `dispatch`. There is no terminal-to-handler shortcut. Its local admission policy is not production authentication.
 
+For `help COMMAND` or `COMMAND --help`, trace admitted `system.commands` discovery → selected descriptor → terminal rendering, with **no business task/client execution**. Startup factories and console I/O are separate effects. The separate command-description trait does not force Task inheritance or help fields in typed input enums. Validate named semantic argument types/presence against actual codecs; metadata is not automatic deserialization, authorization or a reflection guarantee.
+
 For native disk requests, trace the optional consumer’s bridge check before `ChangeDirectory` changes client-local state. A failed cd preserves cwd; readonly/mode metadata is not effective authorization. Use the [disk contract](../../../src/rust/forge-kernel/README.md) for symlink/native-path semantics, and distinguish real temporary-filesystem tests from fake task-substitution tests.
 
 ## Small example

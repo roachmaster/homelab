@@ -141,8 +141,8 @@ fn selected_routes_are_sorted_and_discovery_is_a_checked_command() {
     );
     for c in &commands {
         assert_eq!(c.route.version(), 1);
-        assert!(!c.usage.is_empty());
-        assert!(!c.summary.is_empty());
+        assert_eq!(c.route.destination(), c.descriptor.name);
+        assert!(c.descriptor.validate().is_ok());
     }
     let bad = app
         .invoke(route("system.commands"), Command::Node(NodeCommand::Info))
@@ -409,4 +409,65 @@ mod native_disk {
         assert_eq!(counts.drops.get(), 1);
         assert_eq!(counts.calls.get(), 0);
     }
+
+    #[test]
+    fn disk_descriptors_preserve_argument_names_types_and_adapter_defaults() {
+        // Only configuration/creation inspects the fixture; discovery invokes no disk task.
+        let fixture = Fixture::new();
+        let app = Application::bootstrap(fixture.config()).unwrap();
+        let commands = app.commands().unwrap();
+        let list = commands
+            .iter()
+            .find(|c| c.kind == CommandKind::DiskList)
+            .unwrap()
+            .descriptor;
+        assert_eq!(list.arguments[0].name, "path");
+        assert_eq!(list.arguments[0].data_type, DataType::Path);
+        assert_eq!(
+            list.arguments[0].presence,
+            Presence::Optional { default: Some(".") }
+        );
+        let cd = commands
+            .iter()
+            .find(|c| c.kind == CommandKind::DiskCd)
+            .unwrap()
+            .descriptor;
+        assert_eq!(cd.arguments[0].presence, Presence::Required);
+        let permissions = commands
+            .iter()
+            .find(|c| c.kind == CommandKind::DiskPermissions)
+            .unwrap()
+            .descriptor;
+        assert_eq!(permissions.arguments[1].name, "follow_symlinks");
+        assert_eq!(permissions.arguments[1].data_type, DataType::Bool);
+        assert_eq!(
+            permissions.arguments[1].presence,
+            Presence::Optional {
+                default: Some("true")
+            }
+        );
+    }
+}
+
+#[test]
+fn description_discovery_is_admitted_without_running_business_clients() {
+    let counts = Counts::new();
+    let app = fake_app(counts.clone(), true);
+    let catalog = app.commands().unwrap();
+    assert_eq!(counts.calls.get(), 0);
+    assert_eq!(catalog.len(), 3);
+    for command in &catalog {
+        assert_eq!(command.descriptor.name, command.route.destination());
+        assert!(command.descriptor.arguments.is_empty());
+        command.descriptor.validate().unwrap();
+    }
+    let bad_header = Header::new(
+        RouteKey::new("system.commands", 2).unwrap(),
+        "bad-help-version",
+    )
+    .unwrap();
+    assert!(app
+        .dispatch(Envelope::new(bad_header, Command::Commands))
+        .is_err());
+    assert_eq!(counts.calls.get(), 0);
 }
