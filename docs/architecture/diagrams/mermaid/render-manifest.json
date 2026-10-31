@@ -1,0 +1,42 @@
+{
+  "renderer": {
+    "name": "mermaid-rs-renderer",
+    "version": "0.3.1",
+    "installation": "crates.io package with its published Cargo.lock (--locked)",
+    "font": "DejaVu Sans (installed locally, not embedded)",
+    "syntax_validator": "official mermaid 12.2.0 with jsdom 30.1.3"
+  },
+  "inputs": {
+    "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
+    "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
+    "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
+    "render.py": "0450765c9674c6913577927044e4bf6ade82fb1d20e13dddc70df7a8672033bb",
+    "validate.mjs": "691ed88cd15b7a07fe9975980d08f493158a2524f0e0001472ab2322b7e218a7"
+  },
+  "diagrams": [
+    {
+      "source": "m01-contracts.mmd",
+      "source_sha256": "b3378592841601a5dcd93487d3448dd1751850b0f9154b01aa5e46d5e5c22a42",
+      "svg": "images/m01-contracts.svg",
+      "svg_sha256": "24af04786a45a9857d592046b2198321aa392ac107082d4413b5a52bcbad41a2"
+    },
+    {
+      "source": "m02-bootstrap.mmd",
+      "source_sha256": "b149397dcb7885b34a0d34939b96711cd7179b0091253e23284ab1ff9e2d632b",
+      "svg": "images/m02-bootstrap.svg",
+      "svg_sha256": "512e3cd9d6268894cc721bfcf6f8e3656e542ab674d6bf943647248e5ef497ae"
+    },
+    {
+      "source": "m03-disk-request.mmd",
+      "source_sha256": "6dff3af6af3ba5ce26b0fbd348b703b24fdbf2c996f1a79b9b73b5a166a22e6e",
+      "svg": "images/m03-disk-request.svg",
+      "svg_sha256": "318261922190db33e44df83bf867d366214b68b611401651f6febca6b1e53205"
+    },
+    {
+      "source": "m04-kernel-phases.mmd",
+      "source_sha256": "0b641375ecc1c0c83160e6a059cd75c4ac55314faea6d0486f7834c8f3ec24e5",
+      "svg": "images/m04-kernel-phases.svg",
+      "svg_sha256": "aa82fb3edfc61f9a6e640250a8ae764e4bbde1529ea845aa77f9809c0d731cb8"
+    }
+  ]
+}

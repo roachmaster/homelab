@@ -1,0 +1,31 @@
+---
+title: M02 Implemented native disk bootstrap successful path
+---
+sequenceDiagram
+    participant A as App bootstrap
+    participant R as disk registrar
+    participant G as Group registry
+    participant F as Disk client factory
+    participant P as Singleton provider
+    participant B as Routes and Bridge
+    A->>R: register(typed DiskConfig)
+    Note over A,R: Validate config only.<br/>No filesystem I/O.
+    R-->>A: PreparedGroup
+    A->>G: register(group)
+    G-->>A: New typed registry
+    Note over A,G: Conflict preserves<br/>original and incoming.
+    A->>G: freeze() consumes
+    G-->>A: Validate order, Frozen
+    A->>G: into_factories()
+    G-->>A: DiskFactories tuple
+    A->>F: create()
+    Note over A,F: First filesystem I/O.<br/>Validate directory.
+    F-->>A: Fresh DiskClient
+    A->>P: new(ready DiskClient)
+    P-->>A: Explicit Rc handle
+    A->>A: Inject task and bindings
+    A->>B: Register checked routes
+    A->>B: Freeze routes, Bridge
+    B-->>A: DiskApplication
+    Note over A,B: Publish after success.<br/>Singleton path shown.
+    Note over F,P: Alternative Transient:<br/>create only on acquire.

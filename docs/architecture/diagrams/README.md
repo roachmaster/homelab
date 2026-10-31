@@ -1,5 +1,18 @@
 # Architecture diagrams
 
+## Mermaid UML-like views
+
+The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locally rendered SVGs for implemented contracts, disk bootstrap and typed requests, plus a clearly proposed kernel milestone view. It includes source/image hashes and a rebuild/drift-check command. **M01–M04 complement the DOT views below; they do not replace them.**
+
+| View | Source | Image |
+| --- | --- | --- |
+| M01 implemented contracts | [Mermaid](mermaid/m01-contracts.mmd) | [SVG](mermaid/images/m01-contracts.svg) |
+| M02 implemented bootstrap | [Mermaid](mermaid/m02-bootstrap.mmd) | [SVG](mermaid/images/m02-bootstrap.svg) |
+| M03 implemented typed request | [Mermaid](mermaid/m03-disk-request.mmd) | [SVG](mermaid/images/m03-disk-request.svg) |
+| M04 proposed kernel phases | [Mermaid](mermaid/m04-kernel-phases.mmd) | [SVG](mermaid/images/m04-kernel-phases.svg) |
+
+## C4 and supporting DOT views
+
 The C4 views and durable sequence show a **proposed reference application**, not verified deployed infrastructure. Diagram04 now shows the actual core/kernel/demo normal-dependency graph; diagram06 distinguishes the implemented small registration/assembly slice from later lifecycle. No input transport is selected or required; the first ingress proof uses an in-process driver. The component view shows the extension point for an input adapter only if a real consumer needs one.
 
 | Diagram | Question | SVG | Editable source |

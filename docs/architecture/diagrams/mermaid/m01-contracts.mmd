@@ -1,0 +1,64 @@
+---
+title: M01 Implemented Rust contracts and disk examples
+---
+classDiagram
+    direction TB
+    class Factory {
+        <<trait>>
+        Error
+        create() Result
+    }
+    class InstanceProvider {
+        <<trait>>
+        Error
+        Lease with borrow lifetime
+        acquire() Result
+    }
+    class Singleton {
+        owned value T
+        acquire() borrowed T
+    }
+    class Transient {
+        configured factory F
+        acquire() OwnedLease
+    }
+    class OwnedLease {
+        owned value T
+        into_inner() T
+    }
+    class Task {
+        <<trait>>
+        Input
+        Output
+        Error
+        run(input) Result
+    }
+    class IoClient {
+        <<trait>>
+        Request
+        Response
+        Error
+        execute(request) Result
+    }
+    class DiskClientFactory {
+        initial_directory
+        create() Result
+    }
+    class DiskClient {
+        client-local cwd
+        execute(request) Result
+    }
+    class ListCurrentTask {
+        injected client C
+        run(input) Result
+    }
+    Factory <|.. DiskClientFactory
+    DiskClientFactory ..> DiskClient
+    InstanceProvider <|.. Singleton
+    InstanceProvider <|.. Transient
+    Transient o-- Factory : stores concrete F
+    Transient ..> OwnedLease
+    IoClient <|.. DiskClient
+    Task <|.. ListCurrentTask
+    ListCurrentTask ..> IoClient : injected client C
+    Singleton o-- DiskClient : disk demo owns

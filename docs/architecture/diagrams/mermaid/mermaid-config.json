@@ -1,0 +1,17 @@
+{
+  "themeVariables": {
+    "fontFamily": "DejaVu Sans",
+    "fontSize": 16,
+    "primaryColor": "#e7f3f6",
+    "primaryTextColor": "#183342",
+    "primaryBorderColor": "#537787",
+    "lineColor": "#537787",
+    "background": "#ffffff",
+    "noteBkg": "#fff1d6",
+    "noteBorderColor": "#ae7b26"
+  },
+  "flowchart": {
+    "nodeSpacing": 35,
+    "rankSpacing": 60
+  }
+}

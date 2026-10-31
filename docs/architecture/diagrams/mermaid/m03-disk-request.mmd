@@ -1,0 +1,28 @@
+---
+title: M03 Implemented list-current success path and rejection gates
+---
+sequenceDiagram
+    participant U as Typed caller
+    participant B as Shared Bridge
+    participant A as Admission policy
+    participant T as ListCurrentTask
+    participant C as Native client
+    participant O as Host filesystem
+    U->>B: Typed Envelope + context
+    B->>B: Lookup header route
+    Note over U,B: Unknown route stops.<br/>No handler called.
+    B->>A: admit(header, context)
+    A-->>B: Allowed
+    Note over B,A: Denial stops here.<br/>Demo flag is not auth.
+    B->>B: Compare payload kind
+    Note over U,B: Mismatch stops here.<br/>No task or client call.
+    B->>T: Binding calls run(())
+    T->>C: Prepared List(.)
+    Note over T,C: Task prepares request.<br/>Handle acquires client.
+    C->>O: Native filesystem calls
+    O-->>C: Native data
+    C->>C: Sort native entries
+    C-->>T: DirectoryListing
+    T-->>B: Typed result
+    B-->>U: Typed response
+    Note over B,O: I/O errors propagate.<br/>No hidden retries.
