@@ -16,6 +16,7 @@ The framework is a library family. No particular transport is required or select
 6. [Provider/factory dependency injection](dependency-injection.md) — typed construction, acquisition scopes, leases, and bootstrap ownership.
 7. [Architecture decisions](decisions.md) — tradeoffs and explicit non-goals.
 8. [Delivery roadmap](../roadmap/forge-framework.md) — the smallest useful slice and evidence required before expanding.
+9. [Hosted kernel plan](forge-kernel-plan.md) — researched next steps: local node/status, bounded jobs and a deliberately selected remote boundary; not implemented APIs.
 
 [All diagrams and editable Graphviz sources](diagrams/README.md) · [Per-repository reports](../reviews/forge/README.md)
 

@@ -12,6 +12,7 @@
 - [Architecture overview](architecture/README.md)
 - [Cross-repository reuse map](architecture/reuse-map.md)
 - [Framework blueprint](architecture/forge-framework-blueprint.md)
+- [Hosted kernel research and implementation plan](architecture/forge-kernel-plan.md) · [primary-source ledger](architecture/forge-kernel-sources.md)
 - [C4 and supporting diagrams](architecture/diagrams/README.md)
 - [Architecture decisions](architecture/decisions.md)
 - [Module-authoring contract](architecture/module-authoring.md)

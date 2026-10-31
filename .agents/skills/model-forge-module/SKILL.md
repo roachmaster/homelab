@@ -15,6 +15,8 @@ For bootstrap work, read the [registrar implementation/reference](../../../docs/
 
 For native system clients, use [`forge-kernel::disk`](../../../src/rust/forge-kernel/README.md) as the implemented optional-module example. Related low-level clients may cohabit cohesive modules; do not move concrete clients into the six core contracts or call this hosted crate a bootable kernel. Tasks prepare requests; filesystem execution and client-local cwd remain at the disk boundary.
 
+For hosted-kernel expansion, consult the [research plan](../../../docs/architecture/forge-kernel-plan.md): node/status is the next proposed slice, not an existing API. Keep application jobs distinct from OS processes and local contracts distinct from remote failure/identity semantics; do not turn this plan into permission to implement later phases.
+
 ## Workflow
 
 1. Identify the requested explanation, feature or review slice and its success guarantee. Inspect actual APIs/manifests when supplied; do not describe proposed names as existing exports.

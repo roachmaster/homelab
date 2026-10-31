@@ -10,6 +10,8 @@ The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`,
 
 The optional [`forge-kernel::disk`](../../src/rust/forge-kernel/README.md) module is now a real `IoClient`: typed requests execute native directory listing, cwd navigation and permission inspection. Its `DiskConfig`, factory and registrar remain implementation-owned. Core imports none of it. `forge-kernel` groups related hosted system clients, not every capability and not a bootable OS. The disk-enabled in-process consumer uses real temporary filesystem fixtures; earlier message examples remain fakes.
 
+The researched [hosted-kernel plan](forge-kernel-plan.md) proposes local node information/status, then bounded job lifecycle and an explicit remote boundary. Those operations, scheduling/cancellation contracts and remote codecs are **not implemented** by the current Task, bridge or disk client. The [source ledger](forge-kernel-sources.md) separates primary-source facts from these design choices.
+
 ## Label what exists
 
 - **Implemented core:** actual public code and executed checks in the linked Rust workspace; only the documented subset.

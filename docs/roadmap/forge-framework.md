@@ -31,6 +31,12 @@ Original bootstrap checkpoint: 75 all-feature integration tests plus five doctes
 
 Native temporary-fixture tests cover deterministic listings, state isolation, failed cd, typed OS errors, registration before filesystem validation, provider scopes and permission metadata. Unix fixtures additionally cover symlinks and non-UTF8 names. See the [current executed check counts](../../src/rust/README.md) and [disk contract/limits](../../src/rust/forge-kernel/README.md). These checks are not proof of sandboxing, Windows behavior, effective access or Raspberry Pi/bare-metal readiness. Filesystem mutations and additional kernel-like clients require separate scoped work.
 
+## Kernel planning sequence
+
+The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) makes the immediate next implementation **local `node.info` and `node.status` only**, reusing typed bootstrap/bridge/provider contracts. Later gates add one bounded cooperative job lifecycle, then a deliberately chosen remote boundary starting with node reads. Those additions are proposed, not implemented or authorized by this plan. No transport, runtime, GUI, automatic discovery, file mutation or bootable Pi kernel is selected.
+
+The small volatile job proof in that plan precedes—not satisfies—the durable acceptance gate below. The existing durable jobs example remains a separate later consumer, not a requirement to turn every local command into a stored job.
+
 ## Later vertical slice: one useful workflow, not a new platform
 
 After the bootstrap core is proven and a durable consumer is selected, build the illustrative `jobs.submit` → `jobs.status` workflow. The first route validates a bounded work request and returns a stable durable receipt; the second makes that acceptance observable. Use a trivial, explicitly documented job kind. Execution, network/broker integrations, scheduling, remote model calls, and deployment orchestration are not prerequisites for proving the first admission/storage seam.
