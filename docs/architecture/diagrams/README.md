@@ -2,7 +2,7 @@
 
 ## Mermaid UML-like views
 
-The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locally rendered SVGs for implemented contracts, disk bootstrap and typed requests, plus a clearly proposed kernel milestone view. It includes source/image hashes and a rebuild/drift-check command. **M01–M04 complement the DOT views below; they do not replace them.**
+The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locally rendered SVGs for implemented contracts, disk bootstrap and typed requests, plus a clearly proposed kernel milestone view. It includes source/image hashes and a rebuild/drift-check command. **M01–M04 complement the DOT views below; they do not replace them. M05–M08 are explicitly proposed future-foundation views.**
 
 | View | Source | Image |
 | --- | --- | --- |
@@ -10,6 +10,17 @@ The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locall
 | M02 implemented bootstrap | [Mermaid](mermaid/m02-bootstrap.mmd) | [SVG](mermaid/images/m02-bootstrap.svg) |
 | M03 implemented typed request | [Mermaid](mermaid/m03-disk-request.mmd) | [SVG](mermaid/images/m03-disk-request.svg) |
 | M04 local checkpoint and planned phases | [Mermaid](mermaid/m04-kernel-phases.mmd) | [SVG](mermaid/images/m04-kernel-phases.svg) |
+
+| Proposed foundation view | Source | Image |
+| --- | --- | --- |
+| M05 module boundaries | [Mermaid](mermaid/m05-foundation-modules.mmd) | [SVG](mermaid/images/m05-foundation-modules.svg) |
+| M06 typed interfaces | [Mermaid](mermaid/m06-foundation-interfaces.mmd) | [SVG](mermaid/images/m06-foundation-interfaces.svg) |
+| M07 job lifecycle | [Mermaid](mermaid/m07-job-lifecycle.mmd) | [SVG](mermaid/images/m07-job-lifecycle.svg) |
+| M08 remote admission | [Mermaid](mermaid/m08-remote-admission.mmd) | [SVG](mermaid/images/m08-remote-admission.svg) |
+
+These detail [proposed internal modules/contracts](../foundation-interfaces.md),
+not additional implemented crates or deployed services. Existing DOT views remain
+unchanged; the compile-time DAG continues to show only actual source packages.
 
 ## C4 and supporting DOT views
 

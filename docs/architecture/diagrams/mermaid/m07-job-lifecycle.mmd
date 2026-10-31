@@ -1,0 +1,30 @@
+---
+title: M07 Proposed volatile job lifecycle - cancellation is not forced termination
+---
+flowchart TB
+    Submit["Authorized valid submit\nreserve and prepare\natomic record + intent + queue"]
+    Queued["Queued\naccepted volatile receipt"]
+    Running["Running\npermission and time checked\nbounded steps, yield preserves state"]
+    Requested["Running, cancel requested\nreason: user or runtime budget\nyield keeps request pending\nnot a terminal state"]
+    Success["Succeeded"]
+    Failed["Failed\npolicy denial/unavailable before start\nor execution failure"]
+    Cancelled["Cancelled\nnever started or confirmed stopped"]
+    Expired["Expired\nqueue deadline; never started"]
+    Submit --> Queued
+    Queued --> Running
+    Queued --> Cancelled
+    Queued --> Expired
+    Queued --> Failed
+    Running --> Requested
+    Running --> Success
+    Running --> Failed
+    Requested --> Cancelled
+    Requested --> Success
+    Requested --> Failed
+    Note["Terminal states never restart.\nRepeated cancel returns AlreadyTerminal.\nRetention eviction is not an execution state.\nPanic or uncooperative step can invalidate host."]
+    classDef pending fill:#fff1d6,stroke:#ae7b26,color:#163744;
+    classDef terminal fill:#e8f4f7,stroke:#24576b,color:#163744;
+    classDef note fill:#f1f3f6,stroke:#909aa8,color:#243342;
+    class Submit,Queued,Running,Requested pending;
+    class Success,Failed,Cancelled,Expired terminal;
+    class Note note;

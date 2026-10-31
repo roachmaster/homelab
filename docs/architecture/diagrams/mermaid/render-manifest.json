@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "0450765c9674c6913577927044e4bf6ade82fb1d20e13dddc70df7a8672033bb",
-    "validate.mjs": "691ed88cd15b7a07fe9975980d08f493158a2524f0e0001472ab2322b7e218a7"
+    "render.py": "941298b125c796552baf010da59a4cd83f96b95d610b6320c5d65f014aff37e9",
+    "validate.mjs": "a3e11fc0eb7f29d70870f162f7042afe651914317a3068b82730130c0425a651"
   },
   "diagrams": [
     {
@@ -37,6 +37,30 @@
       "source_sha256": "358ac319174c4ca42ee93bf8294f9f221fc155015d5cb12e5f4066879b3f3024",
       "svg": "images/m04-kernel-phases.svg",
       "svg_sha256": "99e95dfa0e436ba9f921ddd65fe5986e01e0bda7f20024391e6b3bc1caaa3155"
+    },
+    {
+      "source": "m05-foundation-modules.mmd",
+      "source_sha256": "fff4584e254a7b43fe383a769d373aa666db8dbd3da78a21d6533f852c5486c0",
+      "svg": "images/m05-foundation-modules.svg",
+      "svg_sha256": "b1edc4b5990ea2eee872b03cbf3aca74d152dcafdd9dbbc2cfee5fdaa960e43f"
+    },
+    {
+      "source": "m06-foundation-interfaces.mmd",
+      "source_sha256": "a4ee27089b0d76050eae762ec40601985304283c824a3f1632fbd837c9cc83b8",
+      "svg": "images/m06-foundation-interfaces.svg",
+      "svg_sha256": "4b334117f0ad1d0442a82c32e996557bbcced158b5bdb6425495d5857d8ed775"
+    },
+    {
+      "source": "m07-job-lifecycle.mmd",
+      "source_sha256": "6525022ed9f9c00f24d367076099211ba119b3b7258a9b0590c0a54ba44399d6",
+      "svg": "images/m07-job-lifecycle.svg",
+      "svg_sha256": "75ad1ab724947c3e1bacae9f396d8b3e2920e4b298581b97181042b16a2d1109"
+    },
+    {
+      "source": "m08-remote-admission.mmd",
+      "source_sha256": "8e527f2055c5a8a61e90e70d805188b0e602891c469a9204603ee45d99bcaf85",
+      "svg": "images/m08-remote-admission.svg",
+      "svg_sha256": "f36bed582372f24f1269f24487a60a4a6835794e682d182ae6fd04d4311ab35d"
     }
   ]
 }

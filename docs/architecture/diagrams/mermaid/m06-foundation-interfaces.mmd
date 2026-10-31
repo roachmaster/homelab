@@ -1,0 +1,67 @@
+---
+title: M06 Proposed typed ports - illustrative signatures only
+---
+classDiagram
+    direction TB
+    class IdentityVerifier {
+        <<proposed trait>>
+        Evidence fixed per adapter
+        verify(evidence) VerifiedFacts
+    }
+    class AuthenticatedBoundary {
+        configured verifier V
+        authenticate(evidence) AuthContext
+        private principal issuance
+    }
+    class AccessPolicy {
+        <<proposed trait>>
+        authorize(principal, query) Permit
+    }
+    class AuthContext {
+        privately issued verified facts
+        no caller-supplied owner
+        no raw credentials
+    }
+    class JobService {
+        <<proposed trait>>
+        Input and owned ResultView
+        submit(auth, input) Receipt
+        inspect(auth, id) Snapshot
+        cancel(auth, id) CancelAck
+        result(auth, id) ResultView
+    }
+    class JobProgram {
+        <<proposed trait>>
+        Input Intent Output Failure
+        intent(input, limits) Intent
+        prepare(input) owned stepper
+    }
+    class JobStepper {
+        <<proposed trait>>
+        Output and Failure
+        step(context) Step
+    }
+    class OwnerPump {
+        single owner
+        take token outside borrow
+        step then commit revision
+    }
+    class IoClient {
+        <<existing trait>>
+        Request Response Error
+        execute(request) Result
+    }
+    class PeerAdapter {
+        AddressedCall of typed P
+        matching RemoteReply
+        NotSent or OutcomeUnknown
+    }
+    AuthenticatedBoundary o-- IdentityVerifier
+    AuthenticatedBoundary ..> AuthContext
+    JobService ..> AuthContext
+    JobService ..> AccessPolicy
+    JobService ..> JobProgram
+    JobProgram ..> JobStepper
+    OwnerPump ..> JobStepper
+    IoClient <|.. PeerAdapter
+    PeerAdapter ..> AuthenticatedBoundary

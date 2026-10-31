@@ -26,6 +26,18 @@ Explicit codecs and tests establish agreement; this is not reflection, a univers
 schema/parser or automatic execution. Pure tasks remain metadata-free. See the
 [description contract](../../src/rust/forge-command/README.md).
 
+## Future foundation interfaces — designed, not implemented
+
+The [module/interface design](../architecture/foundation-interfaces.md) and
+[contract sketches](../architecture/foundation-contracts.md) detail the next
+bounded job engine, independent verified-identity/resource-policy boundary and
+transport-neutral addressed call. Four new UML-like views show proposed imports,
+typed ports, job transitions and authenticated remote reads. These do not create
+new source crates or make Task cancellable. Start with private cohesive modules,
+a scripted single-owner pure-job proof and explicit policy tests; choose a remote
+transport only after those semantics are demonstrated. Exact public APIs remain
+provisional, including any coordinated migration of exhaustive application enums.
+
 ## Next core slice: bootstrap and registrars
 
 **Implemented narrow checkpoint:** `src/rust/forge-bootstrap` now provides prepared groups, atomic consuming registration, declared-order validation/freeze and typed tuple extraction. The five earlier library contracts are unchanged. Three demo packages prove optional capability/implementation registration and explicit provider/task assembly; that bootstrap checkpoint added no CLI, HTTP, IPC, remote execution, home renderer or async runtime. Native disk access is the separate follow-on checkpoint below. The [bootstrap reference](../architecture/bootstrap-registrars.md) distinguishes the real APIs from deferred policies.

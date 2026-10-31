@@ -1,0 +1,26 @@
+---
+title: M08 Proposed authenticated remote read - no transport selected
+---
+sequenceDiagram
+    participant Caller as Typed caller
+    participant Client as Peer adapter
+    participant Edge as Destination edge
+    participant Bridge as Existing bridge
+    participant Read as Node capability
+    Caller->>Client: AddressedCall target B, typed node.info, request Q, budget
+    Note over Caller,Client: Configured peer identity, no caller URL. Caller supplied ID stays intact.
+    Client->>Edge: Bounded frame, evidence, remaining timeout
+    Note over Client,Edge: Authenticate intended peer. Do not refresh original budget.
+    Note over Edge,Bridge: Verify identity, audience, target and bounds. Claims alone are not a Principal.
+    Edge->>Edge: Versioned bounded decode, no business effects
+    Edge->>Bridge: Same typed Envelope plus verified HostContext
+    Bridge->>Bridge: Header route, admission, payload variant
+    Bridge->>Read: Admitted typed request
+    Read->>Read: Resource policy before observation
+    Read-->>Bridge: Typed result or bounded error
+    Bridge-->>Edge: Response preserves request and correlation
+    Edge-->>Client: Authenticated responder and matching response
+    Client->>Client: Verify target, incarnation, IDs, version and limits
+    Client-->>Caller: Typed result
+    Note over Caller,Client: Lost reply after possible send is OutcomeUnknown. No automatic failover or effectful retry.
+    Note over Edge,Read: First remote surface is node reads only. Jobs and disk remain disabled remotely.

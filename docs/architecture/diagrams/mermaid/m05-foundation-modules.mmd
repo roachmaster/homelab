@@ -1,0 +1,28 @@
+---
+title: M05 Proposed foundation modules - not implemented packages
+---
+flowchart TB
+    Host["Application composition\nverified ingress and job pump\nfinite typed request/result sums"]
+    Jobs["Jobs logical unit\ncontract / program / service\nengine / intent / retention / assembly"]
+    Access["Access logical unit\nidentity / policy / audit\nprivate context issuance"]
+    Remote["Remote boundary logical unit\naddress / call / outcome / peer"]
+    Adapter["Selected adapter later\nframing / codec / connection\ncredential verification / registrar"]
+    Existing["Existing unchanged contracts\nTask / DescribeCommand / IoClient\nprovider / bootstrap / typed ingress"]
+    Host --> Jobs
+    Host --> Access
+    Host --> Remote
+    Host --> Adapter
+    Jobs --> Access
+    Jobs --> Existing
+    Access --> Existing
+    Remote --> Existing
+    Adapter --> Access
+    Adapter --> Remote
+    Note["Arrows are proposed imports, not deployments.\nStart cohesive private application modules.\nExtract crates only when a real boundary earns it."]
+    Host --- Note
+    classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#163744;
+    classDef current fill:#087f8c,stroke:#087f8c,color:#ffffff;
+    classDef note fill:#f1f3f6,stroke:#909aa8,color:#243342;
+    class Host,Jobs,Access,Remote,Adapter proposed;
+    class Existing current;
+    class Note note;

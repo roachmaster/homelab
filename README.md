@@ -5,9 +5,10 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 ## Forge framework portfolio
 
 - [Documentation index](docs/README.md): observed repository findings versus proposed architecture.
-- [15 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
+- [16 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
 - [Framework blueprint and assembly model](docs/architecture/forge-framework-blueprint.md).
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
+- [Detailed future jobs, access and remote interfaces](docs/architecture/foundation-interfaces.md) — proposed modules, typed contracts and ownership/state diagrams.
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 - [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): local node/status first, then jobs and an explicit remote boundary.
 
@@ -47,6 +48,14 @@ The terminal discovers its selected registered commands and sends typed requests
 - [Bootstrap sequence: SVG](docs/architecture/diagrams/mermaid/images/m02-bootstrap.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m02-bootstrap.mmd)
 - [Typed disk request: SVG](docs/architecture/diagrams/mermaid/images/m03-disk-request.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m03-disk-request.mmd)
 - [Local checkpoint and planned phases: SVG](docs/architecture/diagrams/mermaid/images/m04-kernel-phases.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m04-kernel-phases.mmd)
+
+The **future foundation** now has a detailed, explicitly proposed module/interface set:
+
+- [Module boundaries](docs/architecture/diagrams/mermaid/images/m05-foundation-modules.svg) · [Typed ports](docs/architecture/diagrams/mermaid/images/m06-foundation-interfaces.svg)
+- [Job lifecycle](docs/architecture/diagrams/mermaid/images/m07-job-lifecycle.svg) · [Remote admission sequence](docs/architecture/diagrams/mermaid/images/m08-remote-admission.svg)
+- [Design and stability decisions](docs/architecture/foundation-interfaces.md) · [Rust interface sketches](docs/architecture/foundation-contracts.md)
+
+These are design artifacts, not implemented jobs, remote access or authentication.
 
 [Diagram captions and reproducible local rendering](docs/architecture/diagrams/mermaid/README.md) distinguish implemented code from the [kernel plan](docs/architecture/forge-kernel-plan.md). No remote transport or bootable OS is implemented by these diagrams.
 

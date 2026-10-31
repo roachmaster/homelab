@@ -14,6 +14,11 @@ distributed scheduler or shell platform.
 
 The [Pi Cluster Control review](../reviews/forge/pi-cluster-control.md) supplies historical node/coordinator use cases for this sequence. Its cluster behavior remains specification, not an implemented control plane; it adds no mandatory crate, transport or provisioning dependency.
 
+The next foundations now have a [detailed module/interface proposal](foundation-interfaces.md)
+and [Rust contract sketches](foundation-contracts.md). They refine bounded jobs,
+identity/policy and remote-read interfaces without implementing them or freezing
+an untested API. The existing local system and its source contracts are unchanged.
+
 ## What kernel means here
 
 An OS kernel manages execution, protected memory, I/O resources and the system-call

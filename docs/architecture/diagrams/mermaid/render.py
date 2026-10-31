@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 EXPECTED_RENDERER = "mmdr 0.3.1"
 SOURCES = [ROOT / f"{name}.mmd" for name in (
     "m01-contracts", "m02-bootstrap", "m03-disk-request", "m04-kernel-phases",
+    "m05-foundation-modules", "m06-foundation-interfaces", "m07-job-lifecycle", "m08-remote-admission",
 )]
 MANIFEST = ROOT / "render-manifest.json"
 
@@ -87,13 +88,13 @@ def main():
                     raise SystemExit(f"Stale or environment-different SVG: {tracked.name}; render, inspect and commit source/image together")
             if not MANIFEST.is_file() or json.loads(MANIFEST.read_text()) != manifest:
                 raise SystemExit("Render inputs or manifest differ; review and regenerate")
-            print("PASS: four SVGs and their source/config/tool hash manifest match")
+            print(f"PASS: {len(SOURCES)} SVGs and their source/config/tool hash manifest match")
         else:
             (ROOT / "images").mkdir(exist_ok=True)
             for _, svg in built:
                 shutil.copyfile(svg, ROOT / "images" / svg.name)
             MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
-            print("Rendered four local SVGs and hash manifest; visual review still required")
+            print(f"Rendered {len(SOURCES)} local SVGs and hash manifest; visual review still required")
 
 
 if __name__ == "__main__":
