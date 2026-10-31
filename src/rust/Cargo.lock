@@ -15,6 +15,8 @@ dependencies = [
  "forge-demo-memory-client",
  "forge-demo-messages",
  "forge-ingress-contract",
+ "forge-io-client",
+ "forge-kernel",
  "forge-provider",
  "forge-task",
 ]
@@ -56,6 +58,15 @@ version = "0.1.0"
 [[package]]
 name = "forge-io-client"
 version = "0.1.0"
+
+[[package]]
+name = "forge-kernel"
+version = "0.1.0"
+dependencies = [
+ "forge-bootstrap",
+ "forge-io-client",
+ "forge-provider",
+]
 
 [[package]]
 name = "forge-provider"

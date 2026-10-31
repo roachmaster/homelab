@@ -21,6 +21,8 @@ For a client-using task, trace **admitted binding → `Task::run` → prepared t
 
 Keep startup separate from this trace: registrars stage configured factories during bootstrap; request headers do not choose providers or carry startup configuration. Trace the already-assembled task/client binding, not a service-locator lookup. A presentation menu entry is not authorization; an action invoking application work still uses the admitted typed bridge.
 
+For native disk requests, trace the optional consumer’s bridge check before `ChangeDirectory` changes client-local state. A failed cd preserves cwd; readonly/mode metadata is not effective authorization. Use the [disk contract](../../../src/rust/forge-kernel/README.md) for symlink/native-path semantics, and distinguish real temporary-filesystem tests from fake task-substitution tests.
+
 ## Small example
 
 `jobs.submit @ 1` with `JobsPayload::Status(id)` is a mismatch. Reject before either handler's effects; never repair the header or dispatch status by inspecting the variant. Check that neither capability storage nor its per-operation acquisition is invoked.

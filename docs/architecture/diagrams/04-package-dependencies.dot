@@ -2,8 +2,9 @@ digraph Packages {
 graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.55, ranksep=0.9, bgcolor="white"];
 node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4];
 edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
-rankdir=TB; label="04  Implemented package dependencies — six core + three demo packages\nArrows are normal imports; dashed edges require the demo's messages Cargo feature. No real I/O.";
-app [label="forge-bootstrap-demo\nApplication-owned config / command enum\nCalls registrars; constructs explicitly\nPure default; optional messages", fillcolor="#fff1d6", color="#ae7b26"];
+rankdir=TB; label="04  Implemented package dependencies — six core + optional kernel + three demo packages\nArrows are normal imports; dashed edges are optional Cargo dependencies. Disk uses native hosted I/O.";
+app [label="forge-bootstrap-demo\nApplication-owned config / command enum\nCalls registrars; constructs explicitly\nPure default; opt-in messages / disk", fillcolor="#fff1d6", color="#ae7b26"];
+kernel [label="forge-kernel::disk\nNative filesystem + client-local cwd\nTyped config / factory / registrar"];
 feature [label="forge-demo-messages\nCapability contracts + task\nTyped config / recipe / registrar"];
 impl [label="forge-demo-memory-client\nIn-memory fake + typed config\nFactory / provider handle / registrar"];
 bootstrap [label="forge-bootstrap\nPreparedGroup / Registry<G> / Frozen<G>\nAtomic tuples + declared order", fillcolor="#fff1d6", color="#ae7b26"];
@@ -13,10 +14,13 @@ provider [label="forge-provider\nFactory / InstanceProvider\nSingleton / Transie
 task [label="forge-task\nTask::run"];
 io [label="forge-io-client\nIoClient::execute"];
 app -> {bootstrap bridge task contract};
-app -> {impl feature provider} [style=dashed];
+app -> {impl feature} [style=dashed, label="messages"];
+app -> {kernel io} [style=dashed, label="disk"];
+app -> provider [style=dashed, label="messages or disk"];
+kernel -> {bootstrap provider io};
 feature -> {bootstrap provider task io};
 impl -> {feature bootstrap provider io};
 bridge -> contract;
-{rank=same; impl; feature;}
+{rank=same; impl; feature; kernel;}
 {rank=same; bootstrap; provider; task; io; bridge;}
 }

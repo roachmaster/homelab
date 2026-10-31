@@ -25,6 +25,8 @@ Do not require copying a large example application, editing bridge internals, re
 
 Contract-only crates need not expose a registrar. An optional implementation crate should expose a reusable registrar when it participates in application assembly; it can own several cohesive factories rather than one crate per factory. A module need not be a separately published crate. A starter earns its dependency cost by making a real infrastructure integration easier to install and verify. Optional dependencies stay optional when the starter is absent.
 
+The optional [forge-kernel disk module](../../src/rust/forge-kernel/README.md) is a concrete example. Related low-level system clients may share this cohesive hosted package, with focused modules/config/factories rather than a crate per operation. It is not a bootable kernel or a universal catch-all; only disk exists now.
+
 ## A module declaration should be inspectable
 
 Define the following information, using ordinary Rust constructs initially:

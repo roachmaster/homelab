@@ -8,6 +8,8 @@ This page is the canonical reference for the three framework-specific skills. Us
 
 The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`, `Header`, `Response<R>`, `Payload`, `AdmissionPolicy<C>`, `RegistryBuilder::freeze`, `Bridge::dispatch`, `Factory<T>`, `InstanceProvider<T>`, `Singleton`, `Transient`, `IoClient` and `Task` APIs, plus `forge_bootstrap::PreparedGroup`, `Registry::register`, `Registry::freeze` and `Frozen::into_factories`. The runnable in-process examples demonstrate their actual syntax; the task/client example uses only in-memory doubles, not real external I/O. `Payload::kind` is an explicit, pure capability-owned variant mapping, including nested application kinds. A separate optional-package demo proves typed registrars and explicit client/provider/task assembly. This slice has no general module DSL, automatic runtime dependency resolution, provider pool, async host, production authentication, deadline/cancellation metadata or durable acceptance. The conceptual jobs notation below remains proposed, not a supported API.
 
+The optional [`forge-kernel::disk`](../../src/rust/forge-kernel/README.md) module is now a real `IoClient`: typed requests execute native directory listing, cwd navigation and permission inspection. Its `DiskConfig`, factory and registrar remain implementation-owned. Core imports none of it. `forge-kernel` groups related hosted system clients, not every capability and not a bootable OS. The disk-enabled in-process consumer uses real temporary filesystem fixtures; earlier message examples remain fakes.
+
 ## Label what exists
 
 - **Implemented core:** actual public code and executed checks in the linked Rust workspace; only the documented subset.

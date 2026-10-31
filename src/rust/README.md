@@ -1,8 +1,8 @@
 # Rust source sets — first Forge core
 
-This directory contains **six core packages plus three clearly separated demo
-packages**, all original, std-only and synchronous. Typed registration/freeze and
-optional-package assembly now work; the broader managed framework/durable reference
+This directory contains **six core packages, one optional hosted system package and three
+clearly separated demo packages**, all original, std-only and synchronous. Typed registration/freeze and
+optional-package assembly and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
 
 | Package | Responsibility | Normal dependencies |
@@ -22,13 +22,17 @@ one cohesive crate; they are not a class-per-package hierarchy. Capability enums
 and ports live in consumers, not this framework. There is no JSON/value-map
 payload fallback, transport library, global enum, global registry or service locator.
 
+## Optional native system clients
+
+[`forge-kernel`](forge-kernel/README.md) groups hosted low-level clients; `disk` is the first module. Its real native filesystem operations are list, pwd, client-local cd and permission inspection. It imports bootstrap/provider/I/O-client contracts; core never imports it. No shell wrapper, process cwd mutation, file mutation API, bootable OS or Raspberry Pi image is included. Other system clients remain unimplemented, not empty scaffolds.
+
 ## Optional consumer proof
 
 The demo packages live under `examples/`, not inside core:
 
 - [forge-demo-messages](examples/forge-demo-messages/README.md): capability-owned input/prepared request/result, injected-client task, typed config and registrar.
 - [forge-demo-memory-client](examples/forge-demo-memory-client/README.md): fake client, its config/factories/registrar and explicit singleton/transient handle.
-- [forge-bootstrap-demo](examples/forge-bootstrap-demo/README.md): pure-default application; the Cargo `messages` feature opts in to the two packages above. Its default normal dependency graph excludes both, `forge-io-client` and `forge-provider`.
+- [forge-bootstrap-demo](examples/forge-bootstrap-demo/README.md): pure-default application; the Cargo `messages` feature opts in to the two packages above. Its default normal dependency graph excludes both, `forge-kernel`, `forge-io-client` and `forge-provider`. A separate opt-in `disk` feature selects the native kernel module without importing the message packages.
 
 The application selects configurations/registrars before constructing resources.
 `Registry<G>` owns metadata and typed groups together; a rejected complete group
@@ -50,11 +54,13 @@ cargo build --workspace --all-targets --all-features --offline --locked
 cargo test --workspace --all-features --offline --locked
 cargo test --workspace --all-features --release --offline --locked
 cargo test -p forge-bootstrap-demo --no-default-features --offline --locked
+cargo test -p forge-bootstrap-demo --no-default-features --features disk --offline --locked
 cargo clippy --workspace --all-targets --all-features --offline --locked -- -D warnings
 cargo clippy -p forge-bootstrap-demo --all-targets --no-default-features --offline --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --offline --locked
 cargo run -p forge-bootstrap-demo --no-default-features --offline --locked
 cargo run -p forge-bootstrap-demo --features messages --offline --locked
+cargo run -p forge-bootstrap-demo --example disk_access --no-default-features --features disk --offline --locked
 cargo run -p forge-bridge --example in_process --offline --locked
 cargo run -p forge-bridge --example task_clients --offline --locked
 python3 scripts/check_dependencies.py
@@ -68,7 +74,7 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite has 75
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite has 99
 integration tests and five doctests (four compile-fail, one runnable); the pure
 consumer is additionally checked separately. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
@@ -80,6 +86,7 @@ effects after rejected bridge admission. Bootstrap tests add late multi-binding
 conflict preservation, typed recovery after rejection, missing/self/forward
 requirements, freeze restrictions, config/default selection, lazy transient
 creation, startup failure cleanup, and actual optional dependency omission.
+Native disk tests add real temporary-fixture listing/navigation/permission checks, non-UTF8/symlink cases on Unix, isolated sessions and admission-before-cd; fake substitution tests remain separate evidence. Windows-specific cases are present but not executed on this Linux host.
 No minimum-supported-Rust-version guarantee or production certification is claimed.
 
 ## Task/client boundary
@@ -128,9 +135,9 @@ not a sandbox or automatic teardown guarantee. Runtime effects are never rolled 
 resolution, generic override/default engine, route-descriptor coverage validator,
 provider pools, async dispatch or `Send`/`Sync`
 handler hosting, real authentication, deadline/cancellation/idempotency metadata
-and enforcement, durable acceptance, storage, transports, workers or supervised
+and enforcement, durable acceptance, persistent content stores, remote transports, workers or supervised
 startup/shutdown. The dependency guard checks the **compile-time crate graph**,
-and actual pure/enabled consumer dependency trees; bootstrap separately checks
+and actual pure/messages/disk/combined consumer dependency trees; bootstrap separately checks
 its declared assembly order, not an auto-wired runtime service graph. Deferred
 features remain planned rather than silently stubbed.
 

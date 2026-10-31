@@ -13,6 +13,8 @@ description: Explain the evolving Forge composition DSL or model a capability/mo
 
 For bootstrap work, read the [registrar implementation/reference](../../../docs/architecture/bootstrap-registrars.md). Model application-selected packages → typed startup config → registrar-staged cohesive factory groups → validation/freeze → explicit client/provider/task construction. Concrete clients, their dependencies/config/factories and reusable registrar live in optional implementation crates, never mandatory core. Contract-only crates need no empty registrar. The sixth core crate now owns typed factory-group tuples and metadata in a consuming registry; conflicts return the original builder. The optional demo has real package registrar functions. This is not automatic graph execution or a universal container.
 
+For native system clients, use [`forge-kernel::disk`](../../../src/rust/forge-kernel/README.md) as the implemented optional-module example. Related low-level clients may cohabit cohesive modules; do not move concrete clients into the six core contracts or call this hosted crate a bootable kernel. Tasks prepare requests; filesystem execution and client-local cwd remain at the disk boundary.
+
 ## Workflow
 
 1. Identify the requested explanation, feature or review slice and its success guarantee. Inspect actual APIs/manifests when supplied; do not describe proposed names as existing exports.

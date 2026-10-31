@@ -97,7 +97,7 @@ The application is the composition boundary. Handler bindings and small feature-
 
 ## 3. A deliberately small package surface
 
-The six current core packages are `forge-ingress-contract`, `forge-bridge`, `forge-provider`, `forge-io-client`, `forge-task` and `forge-bootstrap`. Three separate demo packages prove optional selection; they are not mandatory framework dependencies. The broader runtime/capabilities below remain later roles.
+The six current core packages are `forge-ingress-contract`, `forge-bridge`, `forge-provider`, `forge-io-client`, `forge-task` and `forge-bootstrap`. Optional `forge-kernel` groups hosted native system clients, starting with disk inspection/navigation; it is not a bootable OS kernel. Three separate demo packages prove optional selection; they are not mandatory framework dependencies. The broader runtime/capabilities below remain later roles.
 
 | Unit | Owns | May depend on | Must not depend on |
 | --- | --- | --- | --- |
@@ -105,6 +105,7 @@ The six current core packages are `forge-ingress-contract`, `forge-bridge`, `for
 | `forge-bridge` | Generic typed registry, header/variant checks and admitted dispatch | Ingress contract | Concrete capabilities or transport implementations |
 | `forge-provider`, `forge-io-client`, `forge-task` (implemented, independent) | Construction/acquisition contracts; prepared-request I/O; computation/orchestration | No normal dependencies on each other | Concrete implementation crates, mandatory transports or service lookup |
 | `forge-bootstrap` (implemented subset) | Prepared groups, atomic consuming registration, declared-order validation/freeze; typed tuple extraction | Std only | Concrete clients, business enums, environment reads or universal DI execution |
+| `forge-kernel::disk` (implemented optional client) | Native listing, cwd session, permission metadata; typed config/factory/registrar | Bootstrap, provider, I/O-client contracts | Shell wrappers, process cwd mutation, business workflows, mandatory core imports or bootable-OS claims |
 | Optional implementation crate + registrar | Concrete client, dependencies, typed config, cohesive factories and reusable registrar | Implemented contracts and bootstrap helpers as needed | Mandatory core imports back into this implementation |
 | `forge-runtime` (deferred) | Managed startup/shutdown supervision and later lifecycle facilities | Focused runtime facilities | Domain policy or transport-specific mandatory dependencies |
 | Chosen ingress adapter, optional | Input framing, delegation to an injected codec over `P`, protocol lifecycle and outcome encoding | Generic ingress/codec contracts; runtime or transport library only as needed | Concrete business handlers or capability imports hidden in the generic adapter |

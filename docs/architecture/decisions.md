@@ -29,6 +29,10 @@ Bootstrap calls package-owned registrars with typed startup configuration; each 
 
 Choose defaults/replacements before factory calls; group failure is atomic. Future home-menu extension contributes entries, not a second competing home binding. These decisions refine the reviewed explicit Forge/Mission Control assembly seams. [Scope and Rust feasibility](bootstrap-registrars.md) · [Next implementation gates](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars)
 
+## Hosted kernel package (implemented first module)
+
+Keep native system clients in optional `forge-kernel`, beginning with `disk`, separate from the six core contracts. Use hosted Rust filesystem APIs, no shell wrappers or process cwd mutation. Client-local cwd is a session, not a sandbox; permission metadata is not effective access. File mutation, bare-metal/Raspberry Pi boot and additional system modules remain deferred. [Exact boundary](../../src/rust/forge-kernel/README.md)
+
 ## What is deliberately not included
 
 No runtime plugin ABI, arbitrary reflection/code loading, universal repository abstraction, mandatory microservices, service mesh, scheduler platform, workflow DSL, IDE, code generator, model host, or custom database belongs in the initial kernel. None is inherently bad; each needs its own demonstrated consumer and acceptance tests.

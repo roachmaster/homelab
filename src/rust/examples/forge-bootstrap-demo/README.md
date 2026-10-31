@@ -4,7 +4,8 @@ Original, std-only application composition with a genuinely optional client
 path. The default package builds and runs a pure checked-sum `Task` through the
 existing mandatory-admission, header-selected, variant-checked `Bridge`.
 **Its default normal dependency graph contains neither demo messages crate,
-`forge-io-client`, nor `forge-provider`.** No transport is mandatory.
+`forge-io-client`, `forge-provider`, nor `forge-kernel`.** No transport or disk
+client is mandatory.
 
 The opt-in Cargo feature `messages` selects the two optional demo packages and
 provider primitives. Compile-time `#[cfg]` branches remove their config,
@@ -30,9 +31,11 @@ cargo run -p forge-bootstrap-demo --features messages --offline --locked
 cargo clippy -p forge-bootstrap-demo --all-targets --all-features --offline --locked -- -D warnings
 ```
 
-The executables only compute, update the selected in-memory fake and print
-results. They do not make network calls, read configuration from the environment,
-or write application files. Cargo itself of course writes its build outputs.
+The default and `messages` main-binary paths only compute, update the selected
+in-memory fake and print results. They do not make network calls, read
+configuration from the environment, or write application files. The separate
+optional disk example below explicitly owns its temporary filesystem fixture.
+Cargo itself of course writes its build outputs.
 The caller-controlled demo admission flag is **not authentication**.
 
 ## Composition, not a service locator
@@ -84,10 +87,10 @@ for transient mode means the configured acquisition path is installed, **not**
 that future acquisitions are guaranteed to succeed. No default fallback or retry
 conceals those failures.
 
-## Deliberate limits
+## Deliberate limits of pure/messages paths
 
-This is a fake-only, synchronous, single-threaded demonstration, not a production
-host/container or managed lifecycle. It adds no network transport, disk effects,
+These paths are fake-only, synchronous, single-threaded demonstrations, not a
+production host/container or managed lifecycle. They add no network transport, disk effects,
 authentication, pools, workers, async runtime/cleanup, concurrency guarantee,
 durable delivery, graph auto-execution, rollback, idempotency or automatic retry.
 Registrars, factories, admission and handlers remain trusted Rust code. The
@@ -96,3 +99,70 @@ typed constructors supply the actual dependency compatibility. Ordinary `Drop`
 only releases owned local state; it cannot undo outside-world effects or await
 cleanup. Separate transport implementations would need their own real contract
 and lifecycle tests.
+
+
+## Optional native disk consumer
+
+The independent `disk` feature selects the optional hosted
+[`forge-kernel::disk`](../../forge-kernel/README.md) module, `forge-io-client`, and
+provider primitives. It neither enables `messages` nor changes the existing
+`AppConfig`, main binary, command/result sums or pure-only build. The kernel name
+is a cohesive home for system-facing clients, **not** a bootable operating system,
+`no_std` kernel, Raspberry Pi image, driver or bare-metal implementation.
+
+```bash
+# From src/rust/: feature-selected native fixture tests and runnable example.
+cargo test -p forge-bootstrap-demo --features disk --test disk --offline --locked
+cargo run -p forge-bootstrap-demo --features disk --example disk_access --offline --locked
+```
+
+`disk::bootstrap_disk(DiskConfig)` stages the reusable native registrar's complete
+factory group, validates/freezes `forge-bootstrap::Registry`, then creates one
+client and installs an owned `Rc<Singleton<DiskClient>>` handle. A generic
+`ListCurrentTask<C>` prepares exactly `DiskRequest::List { path: "." }` for its
+injected `IoClient`, checks for a listing response, and preserves typed errors
+without retry. Tests substitute a fake client without changing that task.
+
+The separate application-owned `DiskCommand` classifier and four explicit routes
+cover pwd, list-current, change-directory and permission inspection. Thin
+bindings for the other three operations call that same host-owned client after
+the existing bridge's header lookup, mandatory admission and variant checks.
+The only exposed application entry path is `DiskApplication::dispatch`; there is
+no unchecked handler/native-client accessor or request-time service lookup.
+Native OS errors retain their `std::io::Error` cause, not a string or success-shaped
+fallback. Failed startup returns no application.
+
+Each assembled host has its own client-local navigation state. `ChangeDirectory`
+changes that session's directory, **never** the process working directory; later
+pwd/list/permission bindings see that same session. Other hosts remain separate.
+Directory and filename values remain `PathBuf`/`OsString`, including non-UTF-8
+names. Explicit `follow_symlinks` controls final-component permission inspection;
+reported permission metadata does not prove effective user access.
+
+The runnable example creates a unique temporary directory and sample files with
+native Rust APIs, operates only on that owned fixture, then explicitly cleans it
+up. It accepts no CLI/environment-supplied browsing path. `temp_dir()` is only the
+fixture allocation base, not the directory being inspected. Test fixtures follow
+the same ownership rule; no existing user files are mutated or removed. These
+fixture helpers are **not** native-client create/delete operations: the client
+currently exposes only inspection and session navigation.
+
+Native integration tests verify listing and metadata, shared host-local state,
+independent hosts, preserved process cwd, original native errors, non-UTF-8 names
+and symlink flags where supported. Denied, unknown, unsupported-version and
+header/variant-mismatched change-directory commands leave session cwd unchanged.
+Those tests use owned native filesystem fixtures; fake substitution tests prove
+task preparation separately and are not claimed as native-I/O evidence.
+
+### Native-path limits
+
+This is synchronous hosted `std::fs`/metadata access, with no shell commands or
+process spawning. The bridge/`Rc` demo host remains single-threaded. No file
+creation/deletion API, content reading/writing API, recursive scan, permission
+mutation, pool, async runtime, OS boot, automatic retry or rollback is supplied.
+Paths are **not sandboxed**: absolute paths, `..` and symlinks can access other
+locations allowed by the host process. The starting directory is not a security
+root, and the caller-controlled demo admission flag is not authentication or a
+production authorization policy. Filesystem state can change between native
+calls; listings are not atomic snapshots. The client owns a directory path, not
+a directory-handle capability or a promise to track outside renames/removals.

@@ -1,5 +1,6 @@
 //! Application-owned composition: pure arithmetic by default, optionally an
-//! in-memory message capability. Startup config is not an ingress command.
+//! in-memory message capability. A separate optional disk module demonstrates
+//! hosted native access. Startup config is not an ingress command.
 //! All construction precedes publication of the existing checked bridge.
 
 use forge_bootstrap::{PreparedGroup, RegistrationError, Registry, ValidationError};
@@ -12,6 +13,9 @@ use std::{error::Error, fmt};
 
 #[cfg(feature = "messages")]
 pub mod messages;
+
+#[cfg(feature = "disk")]
+pub mod disk;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PureConfig {

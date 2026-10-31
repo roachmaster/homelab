@@ -13,17 +13,21 @@ ALLOWED = {
     "forge-bridge": {("forge-ingress-contract", "normal"), ("forge-provider", "dev"),
                      ("forge-io-client", "dev"), ("forge-task", "dev")},
     "forge-bootstrap": set(),
+    "forge-kernel": {(name, "normal") for name in
+                     ("forge-bootstrap", "forge-provider", "forge-io-client")},
     "forge-demo-messages": {(name, "normal") for name in
                             ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task")},
     "forge-demo-memory-client": {(name, "normal") for name in
                                  ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-demo-messages")},
     "forge-bootstrap-demo": {(name, "normal") for name in
                              ("forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract",
-                              "forge-provider", "forge-demo-messages", "forge-demo-memory-client")},
+                              "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
 PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}
-OPTIONAL = {"forge-demo-messages", "forge-demo-memory-client", "forge-provider"}
+OPTIONAL = {"forge-demo-messages", "forge-demo-memory-client", "forge-provider", "forge-kernel", "forge-io-client"}
+MESSAGES_PROFILE = PURE_PROFILE | {"forge-demo-messages", "forge-demo-memory-client", "forge-provider", "forge-io-client"}
+DISK_PROFILE = PURE_PROFILE | {"forge-kernel", "forge-provider", "forge-io-client"}
 
 
 def cargo(*args):
@@ -75,13 +79,18 @@ def main():
     for name in packages:
         visit(name)
     pure = consumer_tree()
-    enabled = consumer_tree("--features", "messages")
+    messages = consumer_tree("--features", "messages")
+    disk = consumer_tree("--features", "disk")
+    combined = consumer_tree("--all-features")
     if pure != PURE_PROFILE:
         raise SystemExit(f"Pure consumer dependency mismatch: {sorted(pure)}")
-    if enabled != set(ALLOWED):
-        raise SystemExit(f"Enabled consumer dependency mismatch: {sorted(enabled)}")
-    print("PASS: six core + three demo packages; local-only allowed edges; acyclic graph")
-    print("PASS: pure consumer excludes message/client/provider packages; messages feature includes selected packages")
+    for name, actual, expected in [("messages", messages, MESSAGES_PROFILE),
+                                   ("disk", disk, DISK_PROFILE),
+                                   ("combined", combined, set(ALLOWED))]:
+        if actual != expected:
+            raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
+    print("PASS: six core + optional kernel + three demo packages; local-only allowed edges; acyclic graph")
+    print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 
 
 if __name__ == "__main__":

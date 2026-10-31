@@ -71,6 +71,8 @@ The generic associated lease type deliberately supports borrowed ownership. It i
 
 For the first reference application, the simplest binding is a host-owned store adapter exposed as `Arc<dyn JobStore + Send + Sync>` if its port is object-safe and its implementation supports those bounds. Composition passes it into the jobs handler constructor. The host separately retains the resource owner's lifecycle handle. A new generic registry of unrelated service types is unnecessary; explicit typed assembly functions and a small plan for diagnostic identities can coexist without `Any` or downcasts.
 
+The implemented [disk client](../../src/rust/forge-kernel/README.md) makes scope observable: each factory creation owns a fresh cwd; a shared singleton deliberately shares navigation, while transient acquisition starts again at the configured location. Registration is filesystem-free; factory construction validates the native directory. Provider scope is not filesystem authorization.
+
 ## Scope is a behavior, not a label
 
 | Scope | Actual guarantee | Failure / ownership rule |

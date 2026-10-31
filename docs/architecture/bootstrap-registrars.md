@@ -1,6 +1,6 @@
 # Bootstrap and cohesive factory registrars
 
-**Status: small bootstrap subset implemented.** The five earlier [Rust crates](../../src/rust/README.md) retain their public contracts. A sixth core package, [`forge-bootstrap`](../../src/rust/forge-bootstrap/README.md), and three explicitly labeled demo packages now implement atomic typed group registration, consuming validation/freeze and optional in-process assembly. Automatic graph execution, production clients, UI and managed lifecycle remain deferred. This refines the explicit assembly found in Mission Control and Forge-framework; it is not a new transport, parser, dynamic plugin loader or universal DI container. [Canonical vocabulary](framework-dsl.md) · [DI ownership](dependency-injection.md) · [Implementation checkpoint](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars)
+**Status: small bootstrap subset implemented.** The five earlier [Rust crates](../../src/rust/README.md) retain their public contracts. A sixth core package, [`forge-bootstrap`](../../src/rust/forge-bootstrap/README.md), and three explicitly labeled demo packages now implement atomic typed group registration, consuming validation/freeze and optional in-process assembly. The optional native disk module is a subsequent concrete client; automatic graph execution, remote clients, UI and managed lifecycle remain deferred. This refines the explicit assembly found in Mission Control and Forge-framework; it is not a new transport, parser, dynamic plugin loader or universal DI container. [Canonical vocabulary](framework-dsl.md) · [DI ownership](dependency-injection.md) · [Implementation checkpoint](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars)
 
 ## The developer-facing contract
 
@@ -8,7 +8,7 @@ The application chooses optional capability/implementation crates and supplies t
 
 A reusable implementation crate owns its concrete client, implementation dependencies, typed configuration (an enum when selecting supported modes), factories and registrar. It depends on the narrow contracts it implements; core never imports it. A caller needing another I/O mechanism selects another crate, not an extra dependency hidden in core. Pure computations need no I/O crate. Contract-only crates do not need meaningless registrars, and small coherent internals can remain modules.
 
-The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. No real transport/client implementation is included; the optional implementation package is an observable in-memory fake.
+The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. The original message implementation remains an observable in-memory fake. The subsequently added [forge-kernel disk module](../../src/rust/forge-kernel/README.md) is a selected native filesystem client, not a mandatory integration or operating-system kernel.
 
 ## Configuration is not a command payload
 
@@ -42,6 +42,10 @@ let (((), clients), tasks) = registry.freeze()?.into_factories();
 This fragment names real APIs but is not a standalone program; error mapping and lifetime selection are in the linked source. The default demo consumer contains only pure arithmetic and has **no normal dependency on either message package, `forge-io-client` or `forge-provider`**. Its opt-in Cargo `messages` feature adds the selected packages; tests/normal-dependency trees prove actual inclusion/omission, not just a runtime `if`.
 
 No client/task is created during staging or freeze. The complete group's collisions are checked before metadata or typed values move into the next builder. Preparation errors occur before registration; registration errors retain the prior plan; construction errors return no application. The sample composes only owned in-memory resources and makes no remote/durable/authentication guarantee.
+
+### Native client checkpoint
+
+The optional `disk` consumer feature calls `forge_kernel::disk::register` with an explicit absolute startup path. Registration checks configuration without filesystem access; only `DiskClientFactory::create` canonicalizes and validates the actual directory after freeze. New factory creations have independent cwd state. A retained singleton shares one navigation session; transient acquisition resets to the configured starting location. Core contracts and the existing message/pure profiles remain unchanged. No environment lookup or process-wide cwd mutation occurs in the client.
 
 ## Construction and provider lifetime
 

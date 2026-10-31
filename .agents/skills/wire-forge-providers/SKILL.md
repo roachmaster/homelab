@@ -23,6 +23,8 @@ For task/client wiring, choose a generic `IoClient` bound or a trait object with
 
 Deliver **port → factory inputs → provider scope/lease → owner; assembly order/overrides; failures/cleanup; checks and gaps**. Keep roles as modules unless a real boundary justifies another crate.
 
+For the implemented [disk client](../../../src/rust/forge-kernel/README.md), registration validates explicit startup config without filesystem access; its factory validates the directory after freeze. Every creation owns a separate cwd. Singleton shares navigation deliberately; transient acquisition restarts at the configured path. Never use process-wide cwd as session state or claim the starting directory is a sandbox.
+
 ## Small example
 
 For explicitly requested pooled rendering sessions, decide whether pooling stays private to the rendering adapter or a use case needs a session port. A failed render can contaminate retained state: require reset/validation or quarantine and explicit async cleanup ownership if needed. Test exhaustion, reuse state, cancellation and close—not just successful acquisition.

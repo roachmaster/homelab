@@ -1,0 +1,13 @@
+[package]
+name = "forge-kernel"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+forge-bootstrap.workspace = true
+forge-io-client.workspace = true
+forge-provider.workspace = true
+
+[lints]
+workspace = true

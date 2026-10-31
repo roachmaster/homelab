@@ -6,6 +6,7 @@ publish.workspace = true
 
 [features]
 default = []
+disk = ["dep:forge-kernel", "dep:forge-io-client", "dep:forge-provider"]
 messages = ["dep:forge-demo-messages", "dep:forge-demo-memory-client", "dep:forge-provider"]
 
 [dependencies]
@@ -16,6 +17,13 @@ forge-task.workspace = true
 forge-demo-messages = { workspace = true, optional = true }
 forge-demo-memory-client = { workspace = true, optional = true }
 forge-provider = { workspace = true, optional = true }
+
+forge-kernel = { workspace = true, optional = true }
+forge-io-client = { workspace = true, optional = true }
+
+[[example]]
+name = "disk_access"
+required-features = ["disk"]
 
 [lints]
 workspace = true
