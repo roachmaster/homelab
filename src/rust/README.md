@@ -55,6 +55,101 @@ after dependency-order checks. Construction stays explicit; dependent task recip
 bind client handles without changing `Factory<T>::create`. No global service map,
 forced client for pure tasks or concrete transport is introduced.
 
+## Root Makefile
+
+From the repository root, run `make` for help. Requirements: **GNU Make**, a
+current stable Rust toolchain with `rustfmt`/`clippy`, and **Python 3.9+** (standard-library scripts only). The Makefile uses the workspace manifest
+explicitly; no global Cargo configuration is changed or tooling installed locally.
+All Cargo build/check/run commands use `--offline --locked`; the current workspace
+has no third-party Rust dependencies. Toolchain installation itself needs network
+access when the selected toolchain is not already available.
+
+| Target | Behavior |
+| --- | --- |
+| `build`, `check` | Cargo build/check, all targets of selected packages |
+| `fmt`, `fmt-check` | Format or check the entire workspace; `fmt` edits source |
+| `lint` | All-target Clippy with warnings denied |
+| `test`, `test-release` | Debug/release tests, including applicable doctests |
+| `doc` | No-dependency Rustdoc with warnings denied |
+| `check-deps` | DAG, consumer feature trees and negative guard fixtures |
+| `ci` | Fixed full-workspace and minimal-feature checks below |
+| `run`, `session` | Forge terminal command / interactive session |
+| `asm` | Selected library or binary release assembly |
+
+### Select packages and features
+
+Ordinary build/check/lint/test/doc targets default to **the workspace with each
+package's default features**. `PACKAGE` selects one exact Cargo package;
+`FEATURES` is Cargo's comma- or space-separated feature list. Booleans accept only
+`0` or `1`. `ALL_FEATURES=1` is exclusive with `FEATURES` and
+`NO_DEFAULT_FEATURES=1`, so conflicting selections fail rather than silently win.
+Use a single package for reliable feature omission: workspace builds unify the
+features required by every selected consumer.
+
+```bash
+make test PACKAGE=forge-provider
+make test ALL_FEATURES=1
+make test PACKAGE=forge-kernel NO_DEFAULT_FEATURES=1 FEATURES=node
+make run ARGS='--node-id desk node.info'
+make run NO_DEFAULT_FEATURES=1 ARGS='--help'
+make session ARGS='--cwd "/path with spaces"'
+```
+
+`run`/`session` always select `forge-terminal`, ignoring `PACKAGE`;
+`run` defaults to `--help`. For `session`, `ARGS` holds startup options, not a
+command; the helper appends `--session`. `ARGS` is tokenized with POSIX-style
+quoting by Python, **not evaluated by a shell**: no variable expansion, globbing,
+pipes or command substitution. Make itself remains a trusted developer interface;
+do not feed untrusted Make expressions/variable definitions to it. Inside the
+running terminal, the separate literal-path session grammar still applies.
+
+### Generate actual assembly
+
+```bash
+make asm                                              # forge-kernel --lib
+make asm PACKAGE=forge-terminal ASM_TARGET=bin:forge    # concrete application
+make asm PACKAGE=forge-kernel FEATURES=node NO_DEFAULT_FEATURES=1
+make asm NATIVE=1                                      # explicit host-CPU tuning
+```
+
+The helper validates an exact workspace package and **one** target (`lib` or
+`bin:<name>`), then runs stable `cargo rustc --release ... -- --emit=asm=...`.
+Each invocation gets a fresh directory beneath ignored `src/rust/target/asm/` and
+prints its nonempty `.s` path; its own build directory prevents stale artifacts
+from another feature selection being reported. It does not delete earlier output
+or commit generated files. These are the selected target's emitted instructions,
+not a whole-program/dependency disassembly; optimized/inlined generic trait code
+may be absent until monomorphized in a concrete consumer. Choose the terminal
+binary when inspecting concrete task/bridge instantiations. These constraints
+follow [Cargo's single-target rustc forwarding](https://doc.rust-lang.org/cargo/commands/cargo-rustc.html).
+
+Default generation adds no CPU-specific tuning and uses the installed toolchain's
+host target; it is not Raspberry Pi cross-compilation or a portability test.
+`NATIVE=1` adds `-C target-cpu=native` to the selected crate, which may produce
+instructions unavailable on other CPUs. Existing `RUSTFLAGS`/Cargo configuration
+can also affect output. See [rustc code-generation options](https://doc.rust-lang.org/rustc/codegen-options/index.html#target-cpu).
+
+### CI, not deployment
+
+`make ci` deliberately ignores `PACKAGE`/feature overrides and runs:
+
+1. Make-helper regression tests, workspace format check and dependency guard
+   (including negative fixtures).
+2. All-feature workspace build, check, strict Clippy, debug/release tests and
+   strict no-dependency Rustdoc.
+3. Node-only terminal tests/Clippy and local-application tests.
+4. Pure demo tests/Clippy, then separate messages-only and disk-only demo tests.
+5. Node-only kernel tests.
+
+[GitHub Actions](../../.github/workflows/rust.yml) invokes exactly `make ci` on
+Rust/Makefile/workflow changes in pull requests and pushes to `main`, or by manual
+workflow dispatch. It uses an Ubuntu runner, stable Rust, a pinned official
+checkout action, read-only repository permissions and no persisted checkout
+credentials. There is no deploy job, secret, package publishing, destructive clean
+or Git mutation target. The workflow definition is checked locally; an actual
+hosted run is separate evidence after publication. Its structure follows the
+[official workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+
 ## Run and check
 
 Working directory: **`src/rust/`**. Requires a current stable Rust toolchain with

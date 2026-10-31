@@ -15,14 +15,22 @@ The [first Rust core](src/rust/README.md) now implements typed contracts, a sync
 
 ## Run the local Forge system
 
-From `src/rust/` with stable Rust:
+From the repository root with stable Rust, GNU Make and Python 3.9+:
 
 ```bash
-cargo run -p forge-terminal -- --help
-cargo run -p forge-terminal -- --node-id workstation node.info
-cargo run -p forge-terminal -- --session
-cargo run -p forge-terminal --no-default-features -- node.status
+make                         # discover the available targets
+make run ARGS='node.info'
+make session                 # local stateful terminal
+make run NO_DEFAULT_FEATURES=1 ARGS='node.status'
+make test                    # workspace tests
+make ci                      # the same gates used by GitHub Actions
+make asm                     # release assembly for the kernel library
 ```
+
+The [root Makefile](Makefile) wraps Cargo in `src/rust/`; [target/feature selection,
+assembly output and CI details](src/rust/README.md#root-makefile) include the direct
+Cargo equivalents. The workflow performs CI checks only: no deployment or release
+publication is configured.
 
 The terminal discovers its selected registered commands and sends typed requests through the shared bridge. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
 
