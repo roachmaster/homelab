@@ -8,7 +8,7 @@ The framework is a library family. No particular transport is required or select
 
 ## Read in this order
 
-1. [Repository reuse map](reuse-map.md) — where all 15 reviewed repositories fit; what to retain, adapt, keep optional, or exclude from the kernel.
+1. [Repository reuse map](reuse-map.md) — where all 16 reviewed repositories fit; what to retain, adapt, keep optional, or exclude from the kernel.
 2. [Framework blueprint](forge-framework-blueprint.md) — the target shape, package boundaries, C4 views, request sequence, and reliability contract.
 3. [DSL semantic reference and framework skills](framework-dsl.md) — shared vocabulary, status labels, a worked composition model and task-specific workflows.
 4. [Module and starter authoring](module-authoring.md) — how a developer plugs in one cohesive capability without editing the bridge.

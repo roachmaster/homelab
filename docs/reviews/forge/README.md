@@ -2,7 +2,7 @@
 
 **Transport scope:** the proposed framework is transport-neutral. No Kafka, REST, or other particular transport is required. Historical transport capabilities and absences below remain source findings, not a mandate to add those technologies. The first framework proof can use an in-process ingress driver.
 
-Read-only architectural reviews of 15 Forge experiments, inspected on 30 October 2026. These are original technical assessments, not source releases. Source observations describe the reviewed snapshots; reuse recommendations and the target framework are proposals. No fresh builds or tests were executed for these reviews.
+Read-only architectural reviews of 16 related repositories: 15 Forge experiments inspected on 30 October 2026, plus Pi Cluster Control inspected on 31 October 2026. These are original technical assessments, not source releases. Source observations describe the reviewed snapshots; reuse recommendations and the target framework are proposals. No fresh builds or tests were executed for these reviews.
 
 ## Reports
 
@@ -23,6 +23,7 @@ Read-only architectural reviews of 15 Forge experiments, inspected on 30 October
 | `forge` | [forge — a useful execution substrate, not yet the application framework](forge.md) |
 | `forge_rust` | [forge_rust — historical experiments, not the runtime baseline](forge_rust.md) |
 | `mission-control` | [Mission Control: recover the seams, not the whole assembly](mission-control.md) |
+| `pi-cluster-control` | [Pi Cluster Control — a cluster use-case blueprint, not an implemented control plane](pi-cluster-control.md) |
 
 ## From evidence to assembly
 

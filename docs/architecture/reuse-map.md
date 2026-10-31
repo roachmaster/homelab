@@ -1,6 +1,6 @@
 # From the Forge repositories to one framework
 
-**Status:** Architecture synthesis from all 15 finalized repository reports, dated 30 October 2026. This is an architectural selection, not a claim that extracted code builds or is ready for public distribution.
+**Status:** Architecture synthesis from 16 finalized repository reports: the original reviews dated 30 October 2026, plus Pi Cluster Control reviewed on 31 October 2026. This is an architectural selection, not a claim that extracted code builds or is ready for public distribution.
 
 ## Recommendation
 
@@ -27,6 +27,7 @@
 | [forge-llm](../reviews/forge/forge-llm.md) | **Optional demanding application** | Checked configuration snapshots, load/prepare/ready boundary, request-state poisoning, ownership/shutdown tests | Local single-crate HPVS and standalone HPVS are different generations; keep models, hardware placement, numerical types and blocking worker teardown behind a domain adapter |
 | [forge-os](../reviews/forge/forge-os.md) | **Optional numerical experiment; exclude kernel** | Small pure numerical functions and one-way library dependencies | It is not an operating/application runtime; validate dimensions/input bounds and scientific expectations before exposing a numerical handler |
 | [forge-oss](../reviews/forge/forge-oss.md) | **Historical tooling reference; exclude router** | Inspectable normalization/rendering pipeline and generation ergonomics | IDE dispatch helpers are unfinished and CLI does not wire them; generation edge cases and status semantics need correction; not a working ingress bus |
+| [pi-cluster-control](../reviews/forge/pi-cluster-control.md) | **Cluster requirements/reference application; no wholesale runtime extraction** | Agent/coordinator/adapter responsibility boundaries, node observations and inventory scenarios, configuration-owned composition lessons | Active code is C++/JavaScript construction tooling and Python scaffolding, not an implemented fleet controller; adapt into the planned optional node/jobs/remote slices, keep provisioning external and avoid runtime service lookup or arbitrary shell execution |
 
 ## Typed payload lineage
 
@@ -80,7 +81,7 @@ The ledger synthesizes the detailed findings above; it is not a new static-code 
 
 ## Scope and confidence
 
-This synthesis covers **14 Forge repositories plus Mission Control**. The reports inspect actual manifests, representative executable paths, registration, lifecycle and tests; depth varies by repository and is stated in each report. Historical/non-default branches were inventoried where available, not all exhaustively reviewed. A name, README assertion, test count, generated file, or historical run log was not treated as implemented end-to-end behavior.
+This synthesis covers **14 Forge repositories, Mission Control and Pi Cluster Control**. The reports inspect actual manifests, representative executable paths, registration, lifecycle and tests; depth varies by repository and is stated in each report. Historical/non-default branches were inventoried where available, not all exhaustively reviewed. A name, README assertion, test count, generated file, or historical run log was not treated as implemented end-to-end behavior.
 
 No source code, build scripts, tests, generators, inference runs, or deployment scripts were executed as part of these architectural reviews. Most reviewed snapshots lacked observed current test-check evidence, but not all CI was absent: the Bitwave-system snapshot has an observed failed CI run whose cause was not established. The Python agent runtime has a historical successful run whose job contents were not audited as suite proof. This is **not** a blanket passing-build assessment. [Bitwave-system verification](../reviews/forge/forge-bitwave-system.md), [agent-runtime verification](../reviews/forge/forge-agent-runtime.md)
 

@@ -15,6 +15,8 @@ selects no transport, runtime, deployment target or device.
 [Source ledger](forge-kernel-sources.md) · [Plan diagram](diagrams/07-hosted-kernel-plan.svg) ·
 [Existing bootstrap](bootstrap-registrars.md) · [Current disk client](../../src/rust/forge-kernel/README.md)
 
+The [Pi Cluster Control review](../reviews/forge/pi-cluster-control.md) supplies historical node/coordinator use cases for this sequence. Its cluster behavior remains specification, not an implemented control plane; it adds no mandatory crate, transport or provisioning dependency.
+
 ## What kernel means here
 
 An OS kernel manages execution, protected memory, I/O resources and the system-call
