@@ -7,18 +7,18 @@ digraph HostedKernelPlan {
   driver [label="Implemented terminal / typed caller\nCatalog help + local commands\nNo network boundary", fillcolor="#087f8c", fontcolor="white"];
   peer [label="Phase 3: configured remote peer\nIdentity + timeout/unknown outcomes\nNo transport selected", fillcolor="#f2f3f5", color="#6f7782", style="rounded,dashed,filled"];
   subgraph cluster_host {
-    label="Local application host — explicit composition; later jobs/network are proposed";
+    label="Local application host — explicit composition; bounded local jobs; remote network is proposed";
     fontname="DejaVu Sans"; fontsize=14; color="#ae7b26"; style="rounded,dashed"; margin=18;
     adapter [label="Phase 3: selected thin adapter\nVerify caller / bound / decode\nNo direct client bypass", fillcolor="#fff1d6", color="#ae7b26", style="rounded,dashed,filled"];
     bridge [label="Existing typed Bridge\nHeader route -> admission -> variant\nSynchronous, not Send / Sync", fillcolor="#087f8c", fontcolor="white"];
     node_service [label="Implemented local node + discovery\nnode.info / node.status / system.commands\nConfigured label + client uptime, not health", fillcolor="#087f8c", fontcolor="white"];
-    jobs [label="Phase 2: bounded job module\nSubmit / inspect / cooperative cancel\nOne allowlisted task, volatile first", fillcolor="#fff1d6", color="#ae7b26"];
+    jobs [label="Implemented local counter jobs\nSubmit / list / inspect / step / cancel\nBounded volatile state; local owner checks", fillcolor="#087f8c", fontcolor="white"];
     ports [label="Injected typed task / client boundary\nTask prepares; IoClient executes\nFactories construct; providers own lifetime", fillcolor="#e8f4f7"];
     disk [label="Existing forge-kernel::disk\nNative list / pwd / cd / metadata\nClient-local cwd; NOT a sandbox", fillcolor="#087f8c", fontcolor="white"];
     adapter -> bridge [style=dashed, label="same checked ingress"];
     bridge -> node_service [label="registered typed bindings"];
     node_service -> ports [label="prepared observation request"];
-    bridge -> jobs [style=dashed, label="later lifecycle bindings"];
+    bridge -> jobs [label="admitted lifecycle bindings"];
     jobs -> ports [style=dashed, label="later I/O jobs only"];
     ports -> disk [label="selected native client"];
     node_client [label="Existing forge-kernel::node\nCompile-target constants + instance clock\nInjected provider can report failure", fillcolor="#087f8c", fontcolor="white"];

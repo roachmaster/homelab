@@ -1,6 +1,11 @@
 # Foundation interfaces: jobs, access and remote calls
 
-**Design proposal — no new runtime implementation.** Reviewed against public
+**Broader proposal; a narrow local jobs subset is implemented.** The
+[bounded counter guide](../../src/rust/forge-local/JOBS.md) covers actual explicit
+stepping, volatile history and trusted-local owner checks. Generic jobs, production
+identity and remote interfaces below remain proposals.
+
+**Original design baseline.** Reviewed against public
 homelab `67b80a8e6f16f1d81995596dfb7865e0f986a399` on 2026-10-31. Names and Rust
 signatures below are candidate contracts, not existing exports or a stability
 promise. Preserve the invariants; earn API stability through implementation,

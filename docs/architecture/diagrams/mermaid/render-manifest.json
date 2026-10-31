@@ -34,9 +34,9 @@
     },
     {
       "source": "m04-kernel-phases.mmd",
-      "source_sha256": "358ac319174c4ca42ee93bf8294f9f221fc155015d5cb12e5f4066879b3f3024",
+      "source_sha256": "7f8d2eb07c231c066b41b5cd3bb5d1adafe1def5c7da66aceb9728ed7157ba2a",
       "svg": "images/m04-kernel-phases.svg",
-      "svg_sha256": "99e95dfa0e436ba9f921ddd65fe5986e01e0bda7f20024391e6b3bc1caaa3155"
+      "svg_sha256": "2f59fcc9e48e4c67096913007d6ea84b2672b20e29a0deb8e73fc2ad2583bb8e"
     },
     {
       "source": "m05-foundation-modules.mmd",
@@ -52,7 +52,7 @@
     },
     {
       "source": "m07-job-lifecycle.mmd",
-      "source_sha256": "6525022ed9f9c00f24d367076099211ba119b3b7258a9b0590c0a54ba44399d6",
+      "source_sha256": "008b07eeb66f2c039b2f760978726958f1b39a9c4e4fb61b3f8b4e5375f761d1",
       "svg": "images/m07-job-lifecycle.svg",
       "svg_sha256": "75ad1ab724947c3e1bacae9f396d8b3e2920e4b298581b97181042b16a2d1109"
     },

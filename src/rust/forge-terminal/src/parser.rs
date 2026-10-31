@@ -15,6 +15,8 @@ pub enum Mode {
 #[derive(Debug)]
 pub struct Options {
     pub node_id: String,
+    #[cfg(feature = "jobs")]
+    pub jobs: bool,
     pub mode: Mode,
     #[cfg(feature = "disk")]
     pub directory: Option<PathBuf>,
@@ -52,6 +54,8 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
     let mut args = args.into_iter();
     let mut options = Options {
         node_id: "local".into(),
+        #[cfg(feature = "jobs")]
+        jobs: true,
         mode: Mode::Help,
         #[cfg(feature = "disk")]
         directory: None,
@@ -59,6 +63,7 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
         disk: true,
     };
     let mut node_seen = false;
+    let mut jobs_seen = false;
     #[cfg(feature = "disk")]
     let mut disk_seen = false;
     while let Some(argument) = args.next() {
@@ -72,6 +77,15 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
                 .ok_or("--node-id needs a value")?
                 .into_string()
                 .map_err(|_| "--node-id must be UTF-8")?;
+        } else if argument == "--no-jobs" {
+            if jobs_seen {
+                return Err("--no-jobs was supplied twice".into());
+            }
+            jobs_seen = true;
+            #[cfg(feature = "jobs")]
+            {
+                options.jobs = false;
+            }
         } else if argument == "--cwd" {
             #[cfg(feature = "disk")]
             {
@@ -125,6 +139,12 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
 /// mapping does not execute a task/client; the application bridge checks again.
 pub fn decode(info: &CommandInfo, args: &[OsString]) -> Result<Command, String> {
     match info.kind {
+        #[cfg(feature = "jobs")]
+        CommandKind::JobSubmit
+        | CommandKind::JobInspect
+        | CommandKind::JobList
+        | CommandKind::JobStep
+        | CommandKind::JobCancel => crate::jobs::decode(info.kind, args),
         CommandKind::Commands => {
             no_arguments(args)?;
             Ok(Command::Commands)
@@ -221,6 +241,19 @@ pub fn session_arguments(line: &str) -> Vec<OsString> {
 /// Session-only option splitting follows the selected registered kind, not a
 /// separate destination catalog. All other remainders stay literal path text.
 pub fn decode_session(info: &CommandInfo, args: &[OsString]) -> Result<Command, String> {
+    #[cfg(feature = "jobs")]
+    if crate::jobs::is_job(info.kind) {
+        let mut words = Vec::new();
+        for arg in args {
+            words.extend(
+                arg.to_str()
+                    .ok_or("job arguments must be UTF-8")?
+                    .split_whitespace()
+                    .map(OsString::from),
+            );
+        }
+        return decode(info, &words);
+    }
     #[cfg(feature = "disk")]
     if info.kind == CommandKind::DiskPermissions && args.len() == 1 {
         if let Some(text) = args[0].to_str() {

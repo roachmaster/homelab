@@ -7,7 +7,7 @@ six core crates and optional `forge-kernel` clients; do not start a new kernel,
 distributed scheduler or shell platform.
 
 **Research baseline:** checked against homelab
-`1267205e1ee0af849bdefd347167836dab82bd28` on 2026-10-31. The local node/disk/terminal checkpoint described below is now implemented. Job and remote command names remain illustrative contracts, not exported APIs. The research plan still selects no remote transport, async runtime, deployment target or device.
+`1267205e1ee0af849bdefd347167836dab82bd28` on 2026-10-31. The local node/disk/terminal and bounded counter-jobs checkpoints are implemented. [Actual job commands and limits](../../src/rust/forge-local/JOBS.md) are distinct from broader generic/remote contracts below. The research plan still selects no remote transport, async runtime, deployment target or device.
 
 [Source ledger](forge-kernel-sources.md) · [Plan diagram](diagrams/07-hosted-kernel-plan.svg) ·
 [Existing bootstrap](bootstrap-registrars.md) · [Current disk client](../../src/rust/forge-kernel/README.md)
@@ -16,8 +16,8 @@ The [Pi Cluster Control review](../reviews/forge/pi-cluster-control.md) supplies
 
 The next foundations now have a [detailed module/interface proposal](foundation-interfaces.md)
 and [Rust contract sketches](foundation-contracts.md). They refine bounded jobs,
-identity/policy and remote-read interfaces without implementing them or freezing
-an untested API. The existing local system and its source contracts are unchanged.
+identity/policy and remote-read interfaces without freezing an untested API.
+The first local counter subset exists; broader identity and remote APIs remain proposals.
 
 ## What kernel means here
 
@@ -60,9 +60,9 @@ The demo's caller-controlled admission flag is **not authentication**.
 | --- | --- | --- |
 | Already implemented | `DiskRequest::{Pwd,List,ChangeDirectory,Permissions}` | Native disk client; current demo routes use `demo.disk.*` |
 | Implemented local slice | `node.info`, `node.status`, `system.commands` | Configured node label/target, client-instance uptime/responding, actual registered commands |
-| After lifecycle design | `jobs.submit`, `jobs.inspect`, `jobs.cancel` | Manage one allowlisted application job kind; not arbitrary program execution |
+| Implemented local module | `jobs.submit`, `jobs.inspect`, `jobs.list`, `jobs.step`, `jobs.cancel` | Volatile pure counter, owner-scoped and explicitly stepped; not arbitrary execution |
 | After a remote boundary is chosen | `nodes.list` plus remote node reads | Configured peers with last observation and explicit reachability state |
-| Later if a consumer needs them | Bounded `jobs.list`, `resources.inspect`, structured recent events | Query limits and retention first; no unbounded monitoring platform |
+| Later if a consumer needs them | `resources.inspect`, structured recent events | Query limits and retention first; no unbounded monitoring platform |
 
 The implemented terminal help is a presentation of the admitted registered catalog. Keep any richer generic home/menu as a future presentation over these operations. It must
 not become a requirement, a second router or a source of permissions. Avoid
@@ -99,6 +99,11 @@ pure consumer still excludes optional clients. Keep calls local and read-only.
 
 ## Phase 2 One bounded application job lifecycle
 
+**Narrow implemented checkpoint:** [local counter jobs](../../src/rust/forge-local/JOBS.md)
+now provide volatile admission/history, local owner checks, manual bounded stepping
+and cooperative cancellation. Generic hosting, background input pumps, persistence
+and managed shutdown remain extensions, not completed features.
+
 A **task** is code; a **job** is one execution record with an owner, input,
 state and outcome. Neither is an OS process. Start with one short, pure,
 checkpointable computation—not arbitrary executable paths or blocking disk work.
@@ -106,7 +111,7 @@ Use an application/capability-owned job module; extract a separate reusable
 `forge-jobs` package only when the boundary has a real second consumer. Do not put
 workflow policy into `forge-kernel`, the bridge or a global business enum.
 
-Proposed state model: accepted/queued → running → succeeded or failed. A cancel
+Implemented local counter state model: accepted/queued → running → succeeded or failed. A cancel
 request records intent; it becomes **cancelled only after execution has stopped**.
 Completion may win a cancellation race. Define repeated cancel, already-terminal,
 unknown ID, expired history and wrong-owner outcomes. Admission failure creates no
@@ -260,8 +265,8 @@ catalog coverage.
 
 | Decision | Recommendation now | Revisit before |
 | --- | --- | --- |
-| Next design/implementation | One bounded pure job lifecycle; preserve current local APIs | Separate Phase 2 authorization and useful job selection |
-| First job | Small pure computation with bounded checkpoints, volatile history | Phase 2; user chooses useful job later |
+| Next separately scoped work | Identity/codec proof before remote node reads; useful job choice if needed | No automatic network/durability expansion |
+| First job implemented | Pure counter with explicit checkpoints and volatile history | Useful domain job can be chosen later |
 | Executor | Single owner with cooperative steps first | Blocking work or parallelism |
 | Discovery | Explicit peer config; show observed freshness | More than a small managed peer set |
 | Transport and identity | No product chosen; require authenticated, bounded calls | Any listener or remote operation |
@@ -276,4 +281,4 @@ and a bare-metal kernel are different projects. Target compatibility must be
 built and tested on selected hardware; no cross-compilation, flashing or kernel
 replacement is authorized here. [Raspberry Pi kernel documentation](https://www.raspberrypi.com/documentation/computers/linux_kernel.html)
 
-**Current checkpoint:** the narrow local node/discovery/terminal system is implemented with focused tests. Broader readiness and telemetry remain future work. **Next implementation, when separately requested:** design one bounded pure job lifecycle; do not infer authorization for remote services or all policies in this research plan.
+**Current checkpoint:** local node/discovery/terminal and the explicitly stepped counter are implemented. Broader telemetry, production identity, durable jobs and remote services remain future work, not authorized merely by this plan.

@@ -26,6 +26,8 @@ pub use forge_kernel::node::{
 };
 #[cfg(feature = "disk")]
 mod disk;
+#[cfg(feature = "jobs")]
+pub mod jobs;
 #[cfg(feature = "disk")]
 pub use disk::DiskCommand;
 #[cfg(feature = "disk")]
@@ -56,6 +58,16 @@ pub enum CommandKind {
     Commands,
     NodeInfo,
     NodeStatus,
+    #[cfg(feature = "jobs")]
+    JobSubmit,
+    #[cfg(feature = "jobs")]
+    JobInspect,
+    #[cfg(feature = "jobs")]
+    JobList,
+    #[cfg(feature = "jobs")]
+    JobStep,
+    #[cfg(feature = "jobs")]
+    JobCancel,
     #[cfg(feature = "disk")]
     DiskPwd,
     #[cfg(feature = "disk")]
@@ -69,6 +81,8 @@ pub enum CommandKind {
 pub enum Command {
     Commands,
     Node(NodeCommand),
+    #[cfg(feature = "jobs")]
+    Jobs(jobs::JobCommand),
     #[cfg(feature = "disk")]
     Disk(DiskCommand),
 }
@@ -79,6 +93,14 @@ impl Payload for Command {
             Self::Commands => CommandKind::Commands,
             Self::Node(NodeCommand::Info) => CommandKind::NodeInfo,
             Self::Node(NodeCommand::Status) => CommandKind::NodeStatus,
+            #[cfg(feature = "jobs")]
+            Self::Jobs(command) => match command {
+                jobs::JobCommand::Submit { .. } => CommandKind::JobSubmit,
+                jobs::JobCommand::Inspect { .. } => CommandKind::JobInspect,
+                jobs::JobCommand::List => CommandKind::JobList,
+                jobs::JobCommand::Step { .. } => CommandKind::JobStep,
+                jobs::JobCommand::Cancel { .. } => CommandKind::JobCancel,
+            },
             #[cfg(feature = "disk")]
             Self::Disk(command) => command.kind(),
         }
@@ -97,6 +119,8 @@ pub struct CommandInfo {
 pub enum Output {
     Commands(Vec<CommandInfo>),
     Node(NodeResponse),
+    #[cfg(feature = "jobs")]
+    Jobs(jobs::JobOutput),
     #[cfg(feature = "disk")]
     Disk(DiskResponse),
 }
@@ -104,6 +128,8 @@ pub enum Output {
 #[derive(Debug)]
 pub enum RunError {
     Node(NodeError),
+    #[cfg(feature = "jobs")]
+    Jobs(jobs::JobError),
     #[cfg(feature = "disk")]
     Disk(DiskError),
     UnexpectedCommand,
@@ -113,6 +139,8 @@ impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Node(e) => e.fmt(f),
+            #[cfg(feature = "jobs")]
+            Self::Jobs(e) => e.fmt(f),
             #[cfg(feature = "disk")]
             Self::Disk(e) => e.fmt(f),
             Self::UnexpectedCommand => f.write_str("unexpected command at admitted binding"),
@@ -126,6 +154,8 @@ impl Error for RunError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Node(e) => Some(e),
+            #[cfg(feature = "jobs")]
+            Self::Jobs(e) => Some(e),
             #[cfg(feature = "disk")]
             Self::Disk(e) => Some(e),
             _ => None,
@@ -160,6 +190,8 @@ impl Error for AppError {
 pub enum BootstrapError {
     NodeConfig(NodeConfigError),
     NodeFactory(NodeError),
+    #[cfg(feature = "jobs")]
+    Jobs(jobs::JobsConfigError),
     #[cfg(feature = "disk")]
     DiskConfig(forge_kernel::disk::ConfigError),
     #[cfg(feature = "disk")]
@@ -176,6 +208,8 @@ impl BootstrapError {
     pub fn is_configuration(&self) -> bool {
         match self {
             Self::NodeConfig(_) => true,
+            #[cfg(feature = "jobs")]
+            Self::Jobs(_) => true,
             #[cfg(feature = "disk")]
             Self::DiskConfig(_) => true,
             _ => false,
@@ -187,6 +221,8 @@ impl fmt::Display for BootstrapError {
         match self {
             Self::NodeConfig(e) => e.fmt(f),
             Self::NodeFactory(e) => e.fmt(f),
+            #[cfg(feature = "jobs")]
+            Self::Jobs(e) => e.fmt(f),
             #[cfg(feature = "disk")]
             Self::DiskConfig(e) => e.fmt(f),
             #[cfg(feature = "disk")]
@@ -205,6 +241,8 @@ impl Error for BootstrapError {
         Some(match self {
             Self::NodeConfig(e) => e,
             Self::NodeFactory(e) => e,
+            #[cfg(feature = "jobs")]
+            Self::Jobs(e) => e,
             #[cfg(feature = "disk")]
             Self::DiskConfig(e) => e,
             #[cfg(feature = "disk")]
@@ -221,6 +259,8 @@ impl Error for BootstrapError {
 
 struct Context {
     commands: Vec<CommandInfo>,
+    #[cfg(feature = "jobs")]
+    principal: jobs::LocalPrincipal,
 }
 struct LocalAdmission;
 impl AdmissionPolicy<Context> for LocalAdmission {
@@ -319,6 +359,9 @@ impl Bindings {
             bridge: Bridge::new(self.routes.freeze(), LocalAdmission),
             context: Context {
                 commands: self.commands,
+                #[cfg(feature = "jobs")]
+                principal: jobs::LocalPrincipal::new("local-process")
+                    .expect("valid local principal"),
             },
             request_number: Cell::new(0),
         })
@@ -355,6 +398,49 @@ impl Application {
         C: IoClient<Request = NodeRequest, Response = NodeResponse, Error = NodeError> + 'static,
         R: FnOnce(NodeConfig) -> Result<PreparedGroup<NodeFactories<F>>, NodeConfigError>,
     {
+        Self::bootstrap_selected(
+            config,
+            registrar,
+            #[cfg(feature = "jobs")]
+            None,
+        )
+    }
+
+    /// Opt into volatile cooperative jobs. Supply a fresh incarnation base for
+    /// every independently configured factory; this is not durable identity or auth.
+    #[cfg(feature = "jobs")]
+    pub fn bootstrap_with_jobs(
+        config: LocalConfig,
+        jobs: jobs::JobsConfig,
+    ) -> Result<Self, BootstrapError> {
+        Self::bootstrap_selected(config, node::register, Some(jobs))
+    }
+
+    /// Select the node implementation and the local jobs configuration explicitly.
+    #[cfg(feature = "jobs")]
+    pub fn bootstrap_with_node_registrar_and_jobs<F, C, R>(
+        config: LocalConfig,
+        registrar: R,
+        jobs: jobs::JobsConfig,
+    ) -> Result<Self, BootstrapError>
+    where
+        F: Factory<C, Error = NodeError>,
+        C: IoClient<Request = NodeRequest, Response = NodeResponse, Error = NodeError> + 'static,
+        R: FnOnce(NodeConfig) -> Result<PreparedGroup<NodeFactories<F>>, NodeConfigError>,
+    {
+        Self::bootstrap_selected(config, registrar, Some(jobs))
+    }
+
+    fn bootstrap_selected<F, C, R>(
+        config: LocalConfig,
+        registrar: R,
+        #[cfg(feature = "jobs")] jobs: Option<jobs::JobsConfig>,
+    ) -> Result<Self, BootstrapError>
+    where
+        F: Factory<C, Error = NodeError>,
+        C: IoClient<Request = NodeRequest, Response = NodeResponse, Error = NodeError> + 'static,
+        R: FnOnce(NodeConfig) -> Result<PreparedGroup<NodeFactories<F>>, NodeConfigError>,
+    {
         let group = registrar(NodeConfig::Local { id: config.node_id })
             .map_err(BootstrapError::NodeConfig)?;
         let pending = Registry::new()
@@ -366,25 +452,34 @@ impl Application {
                 initial_directory,
             })
             .map_err(BootstrapError::DiskConfig)?;
-            let frozen = pending
+            let pending = pending
                 .register(disk)
-                .map_err(|e| BootstrapError::Registration(e.reason().clone()))?
-                .freeze()
-                .map_err(|e| BootstrapError::Validation(e.reason().clone()))?;
-            let (((), node), disk) = frozen.into_factories();
-            let client = node.client.create().map_err(BootstrapError::NodeFactory)?;
-            let disk = disk.client.create().map_err(BootstrapError::DiskFactory)?;
-            return assemble(client, Some(disk));
+                .map_err(|e| BootstrapError::Registration(e.reason().clone()))?;
+            return finish_registration(
+                pending,
+                #[cfg(feature = "jobs")]
+                jobs,
+                |(((), node), disk)| {
+                    let node = node.client.create().map_err(BootstrapError::NodeFactory)?;
+                    let disk = disk.client.create().map_err(BootstrapError::DiskFactory)?;
+                    Ok(Resources {
+                        node,
+                        disk: Some(disk),
+                    })
+                },
+            );
         }
-        let frozen = pending
-            .freeze()
-            .map_err(|e| BootstrapError::Validation(e.reason().clone()))?;
-        let ((), node) = frozen.into_factories();
-        let client = node.client.create().map_err(BootstrapError::NodeFactory)?;
-        assemble(
-            client,
-            #[cfg(feature = "disk")]
-            None,
+        finish_registration(
+            pending,
+            #[cfg(feature = "jobs")]
+            jobs,
+            |((), node)| {
+                Ok(Resources {
+                    node: node.client.create().map_err(BootstrapError::NodeFactory)?,
+                    #[cfg(feature = "disk")]
+                    disk: None,
+                })
+            },
         )
     }
 
@@ -407,6 +502,41 @@ impl Application {
             .map(|response| response.payload)
             .map_err(AppError::Dispatch)
     }
+    /// Trusted in-process owner selection, NOT authentication. In-process callers
+    /// can choose any label. Never expose this unchanged as a network boundary.
+    #[cfg(feature = "jobs")]
+    pub fn dispatch_as_local(
+        &self,
+        principal: &jobs::LocalPrincipal,
+        request: Envelope<Command>,
+    ) -> Result<Response<Output>, DispatchError<RunError>> {
+        let context = Context {
+            commands: self.context.commands.clone(),
+            principal: principal.clone(),
+        };
+        self.bridge.dispatch(request, &context)
+    }
+
+    /// Invoke through the same checked bridge with a host-selected local owner.
+    #[cfg(feature = "jobs")]
+    pub fn invoke_as_local(
+        &self,
+        principal: &jobs::LocalPrincipal,
+        route: RouteKey,
+        command: Command,
+    ) -> Result<Output, AppError> {
+        let next = self
+            .request_number
+            .get()
+            .checked_add(1)
+            .ok_or(AppError::RequestIdsExhausted)?;
+        self.request_number.set(next);
+        let header = Header::new(route, format!("local-{next}")).map_err(AppError::Header)?;
+        self.dispatch_as_local(principal, Envelope::new(header, command))
+            .map(|response| response.payload)
+            .map_err(AppError::Dispatch)
+    }
+
     /// Discovery itself is an admitted command; metadata is built with bindings.
     pub fn commands(&self) -> Result<Vec<CommandInfo>, AppError> {
         let route = RouteKey::new("system.commands", 1).expect("constant route is valid");
@@ -419,14 +549,50 @@ impl Application {
     }
 }
 
-fn assemble<C>(
-    client: C,
-    #[cfg(feature = "disk")] disk: Option<forge_kernel::disk::DiskClient>,
+struct Resources<C> {
+    node: C,
+    #[cfg(feature = "disk")]
+    disk: Option<forge_kernel::disk::DiskClient>,
+}
+fn finish_registration<G, C>(
+    pending: Registry<G>,
+    #[cfg(feature = "jobs")] jobs: Option<jobs::JobsConfig>,
+    create: impl FnOnce(G) -> Result<Resources<C>, BootstrapError>,
 ) -> Result<Application, BootstrapError>
 where
     C: IoClient<Request = NodeRequest, Response = NodeResponse, Error = NodeError> + 'static,
 {
-    let handle = Ready(Rc::new(Singleton::new(client)));
+    #[cfg(feature = "jobs")]
+    if let Some(config) = jobs {
+        let group = jobs::register(config).map_err(BootstrapError::Jobs)?;
+        let frozen = pending
+            .register(group)
+            .map_err(|e| BootstrapError::Registration(e.reason().clone()))?
+            .freeze()
+            .map_err(|e| BootstrapError::Validation(e.reason().clone()))?;
+        let (groups, jobs) = frozen.into_factories();
+        let resources = create(groups)?;
+        let jobs = jobs.service.create().map_err(BootstrapError::Jobs)?;
+        return assemble(resources, Some(jobs));
+    }
+    let frozen = pending
+        .freeze()
+        .map_err(|e| BootstrapError::Validation(e.reason().clone()))?;
+    assemble(
+        create(frozen.into_factories())?,
+        #[cfg(feature = "jobs")]
+        None,
+    )
+}
+
+fn assemble<C>(
+    resources: Resources<C>,
+    #[cfg(feature = "jobs")] jobs: Option<jobs::JobsHandle>,
+) -> Result<Application, BootstrapError>
+where
+    C: IoClient<Request = NodeRequest, Response = NodeResponse, Error = NodeError> + 'static,
+{
+    let handle = Ready(Rc::new(Singleton::new(resources.node)));
     let info = NodeTask::new(handle.clone());
     let status = NodeTask::new(handle);
     let mut bindings = Bindings::new();
@@ -453,10 +619,41 @@ where
         },
     )?;
     #[cfg(feature = "disk")]
-    if let Some(client) = disk {
+    if let Some(client) = resources.disk {
         disk::bind(&mut bindings, Ready(Rc::new(Singleton::new(client))))?;
     }
+    #[cfg(feature = "jobs")]
+    if let Some(jobs) = jobs {
+        bind_jobs(&mut bindings, jobs)?;
+    }
     bindings.finish()
+}
+
+#[cfg(feature = "jobs")]
+fn bind_jobs(bindings: &mut Bindings, jobs: jobs::JobsHandle) -> Result<(), BootstrapError> {
+    let provider = Rc::new(Singleton::new(jobs));
+    for (name, kind) in [
+        ("jobs.submit", CommandKind::JobSubmit),
+        ("jobs.inspect", CommandKind::JobInspect),
+        ("jobs.list", CommandKind::JobList),
+        ("jobs.step", CommandKind::JobStep),
+        ("jobs.cancel", CommandKind::JobCancel),
+    ] {
+        let handle = Rc::clone(&provider);
+        let lease = provider.acquire().unwrap_or_else(|never| match never {});
+        let descriptor = descriptor_for(lease, name)?;
+        bindings.register(descriptor, kind, move |command, context| match command {
+            Command::Jobs(command) => {
+                let lease = handle.acquire().unwrap_or_else(|never| match never {});
+                lease
+                    .execute(&context.principal, command)
+                    .map(Output::Jobs)
+                    .map_err(RunError::Jobs)
+            }
+            _ => Err(RunError::UnexpectedCommand),
+        })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -26,3 +26,7 @@
 Keep review evidence in `reviews/`, target designs in `architecture/`, delivery gates in `roadmap/`, and implementations in the existing language-oriented `src/` tree. Do not duplicate source projects under documentation.
 
 [Back to Homelab](../README.md)
+
+See the implemented [bounded local jobs guide](../src/rust/forge-local/JOBS.md) for
+manual counter stepping, owner-scoped receipts and volatile retention. Remote and
+production identity remain proposals.

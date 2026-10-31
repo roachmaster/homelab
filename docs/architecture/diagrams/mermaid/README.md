@@ -1,13 +1,13 @@
 # Mermaid UML-like views
 
-Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05–M08 detail proposed future interfaces, not runtime implementations.** These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
+Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle.** These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
 
 | View | Status and purpose | Source | Image |
 | --- | --- | --- | --- |
 | M01 — Contracts | Independent execution/description traits, ownership and native examples | [Mermaid](m01-contracts.mmd) | [SVG](images/m01-contracts.svg) |
 | M02 — Bootstrap | Implemented disk singleton assembly, successful path | [Mermaid](m02-bootstrap.mmd) | [SVG](images/m02-bootstrap.svg) |
 | M03 — Request | Implemented checked list-current path, with rejection gates | [Mermaid](m03-disk-request.mmd) | [SVG](images/m03-disk-request.svg) |
-| M04 — Kernel phases | Implemented local system versus proposed jobs/remote phases | [Mermaid](m04-kernel-phases.mmd) | [SVG](images/m04-kernel-phases.svg) |
+| M04 — Kernel phases | Implemented local system/jobs versus proposed remote phases | [Mermaid](m04-kernel-phases.mmd) | [SVG](images/m04-kernel-phases.svg) |
 
 ## M01 — Implemented contracts
 
@@ -40,14 +40,14 @@ The main arrows show **success**, with rejection points annotated rather than al
 
 ![Existing core and disk foundation followed by proposed hosted kernel phases](images/m04-kernel-phases.svg)
 
-The foundation and narrow local node/discovery/terminal checkpoint are implemented. Teal marks existing code; amber marks proposed phases; gray marks host responsibilities or later gates. Later phase arrows show recommended delivery order, not runtime calls. No transport is selected, jobs are not OS processes, and cancellation is cooperative. The host OS still supplies protected memory, processes and drivers. This is not a bootable kernel or a tested Raspberry Pi deployment. Follow the [researched kernel plan](../../forge-kernel-plan.md) for acceptance gates and open decisions.
+The foundation, local node/discovery/terminal and explicitly stepped counter jobs are implemented. Teal marks existing code; amber marks proposed phases; gray marks host responsibilities or later gates. Later phase arrows show recommended delivery order, not runtime calls. No transport is selected, jobs are not OS processes, and cancellation is cooperative. The host OS still supplies protected memory, processes and drivers. This is not a bootable kernel or a tested Raspberry Pi deployment. Follow the [researched kernel plan](../../forge-kernel-plan.md) for acceptance gates and open decisions.
 
 ## Proposed foundation interfaces
 
 The [module design](../../foundation-interfaces.md) and [Rust contract sketches](../../foundation-contracts.md)
-are the source of semantics for these four views. Every new module/port/state
-machine is **proposed**; names are not exported APIs and diagrams do not establish
-stability. Existing Task, description, I/O, provider and bridge contracts remain
+are the source of semantics for these four views. Broader module/port APIs remain **proposed**; the narrow M07 counter lifecycle is
+now [implemented](../../../../src/rust/forge-local/JOBS.md). Proposed names are not
+exported APIs and diagrams do not establish stability. Existing Task, description, I/O, provider and bridge contracts remain
 independent and unchanged.
 
 ### M05 — Module and dependency boundaries
@@ -74,9 +74,9 @@ concurrent; the provider GAT remains a separate non-universal-dyn contract.
 
 ### M07 — Job lifecycle and cancellation
 
-![Proposed volatile job lifecycle](images/m07-job-lifecycle.svg)
+![Implemented local counter lifecycle](images/m07-job-lifecycle.svg)
 
-[Mermaid source](m07-job-lifecycle.mmd). Arrows show allowed state transitions; the [state table](../../foundation-interfaces.md#state-and-cancellation-rules) defines their triggers. This is a state-machine-style flowchart,
+[Mermaid source](m07-job-lifecycle.mmd). Arrows show allowed state transitions; the [state table](../../foundation-interfaces.md#state-and-cancellation-rules) defines their triggers. Local owner labels are trusted input, not production authentication. This is a state-machine-style flowchart,
 chosen from the renderer's supported Mermaid subset. “Running, cancel requested”
 is a flag on Running, not confirmation of stopping. Queued expiry means never
 started; a runtime overrun requests cooperative cancellation. Terminal states

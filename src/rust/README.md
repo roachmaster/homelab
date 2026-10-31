@@ -2,7 +2,7 @@
 
 This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, a local application/terminal pair and three
 clearly separated demo packages**, all original, std-only and synchronous. Typed registration/freeze and
-optional-package assembly, local node observations, admitted command discovery and native disk inspection/navigation now work; the broader managed framework/durable reference
+optional-package assembly, local node observations, admitted command discovery, explicitly stepped local counter jobs and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
 
 | Package | Responsibility | Normal dependencies |
@@ -29,7 +29,7 @@ payload fallback, transport library, global enum, global registry or service loc
 
 ## Runnable local system
 
-- [`forge-local`](forge-local/README.md) owns explicit node/disk composition, per-application providers, typed command/result sums and registered command descriptors. It imports the six execution contracts, independent command-description contract and selected kernel modules; no core imports it.
+- [`forge-local`](forge-local/README.md) owns explicit node/disk/optional-jobs composition, per-application providers, typed command/result sums and registered command descriptors. It imports the six execution contracts, independent command-description contract and selected kernel modules; no core imports it.
 - [`forge-terminal`](forge-terminal/README.md) is the std-only terminal adapter and `forge` binary. It imports only the local application contract and I/O-client contract. Console I/O is an injected typed client, not business policy.
 
 ```bash
@@ -39,7 +39,7 @@ cargo run -p forge-terminal -- --session
 cargo run -p forge-terminal --no-default-features -- node.status
 ```
 
-The default terminal enables native disk; `--no-disk` omits it at assembly. `--no-default-features` omits its code/module from the terminal's kernel feature graph. The node module still requires the kernel package; the older pure demo below remains the proof of whole-package omission. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. No process commands, network, jobs or destructive file operations are added.
+The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them at assembly. `--no-default-features` omits both modules; add `--features jobs` or `--features disk` to select one. The node module still requires the kernel package; the older pure demo below remains the proof of whole-package omission. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. [Local jobs](forge-local/JOBS.md) are volatile pure counters, not OS processes; only explicit step advances computation. No network or destructive file operations are added.
 
 ## Optional consumer proof
 
@@ -138,7 +138,7 @@ can also affect output. See [rustc code-generation options](https://doc.rust-lan
    (including negative fixtures).
 2. All-feature workspace build, check, strict Clippy, debug/release tests and
    strict no-dependency Rustdoc.
-3. Node-only terminal tests/Clippy and local-application tests.
+3. Node-only terminal tests/Clippy and local-application tests, plus separate jobs-only and disk-only terminal tests/Clippy.
 4. Pure demo tests/Clippy, then separate messages-only and disk-only demo tests.
 5. Node-only kernel tests.
 
@@ -186,7 +186,7 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **167 unit/integration tests and six doctests** (four compile-fail, two runnable), including the local application and terminal; the pure and node-only
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **210 unit/integration tests and six doctests** (four compile-fail, two runnable), including the local application and terminal; the pure and node-only
 consumers are additionally checked separately. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
 header/variant mismatch, preserved duplicate binding, typed error propagation,
@@ -269,8 +269,8 @@ not a sandbox or automatic teardown guarantee. Runtime effects are never rolled 
 **Not implemented:** a module/DSL parser, universal container, automatic dependency
 resolution, generic override/default engine, route-descriptor coverage validator,
 provider pools, async dispatch or `Send`/`Sync`
-handler hosting, real authentication, deadline/cancellation/idempotency metadata
-and enforcement, durable acceptance, persistent content stores, remote transports, workers or supervised
+handler hosting, real authentication, generic header-level deadline/cancellation/idempotency
+metadata and enforcement (local jobs have their own capability semantics), durable acceptance, persistent content stores, remote transports, workers or supervised
 startup/shutdown. The dependency guard checks the **compile-time crate graph**,
 and actual pure/messages/disk/combined consumer dependency trees; bootstrap separately checks
 its declared assembly order, not an auto-wired runtime service graph. Deferred

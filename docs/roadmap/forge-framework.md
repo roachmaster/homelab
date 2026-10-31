@@ -12,7 +12,7 @@ The [first std-only Rust workspace](../../src/rust/README.md) establishes part o
 
 Proof covers node-provider replacement without task edits, missing/conflicting group failures before creation, earlier-client cleanup after later startup failure, unknown/mismatched routing before effects, per-session native cwd and failed-cd preservation, actual terminal process execution, error codes and safe output. Compile-time node-only builds omit the disk module; the earlier pure consumer still omits the whole kernel package. No six-core-library API changed.
 
-This is **not** production health, authentication, bounded directory listings, jobs, networking, remote execution or a bootable Pi OS. Node status reports only this client's response and instance uptime. Next work remains a separately designed bounded job lifecycle, followed by a chosen authenticated remote boundary. [Run instructions](../../src/rust/forge-terminal/README.md) · [Assembly contract](../../src/rust/forge-local/README.md).
+This is **not** production health, authentication, bounded directory listings, networking, remote execution or a bootable Pi OS. Node status reports only this client's response and instance uptime. The local jobs checkpoint below follows this; an authenticated remote boundary remains separately scoped. [Run instructions](../../src/rust/forge-terminal/README.md) · [Assembly contract](../../src/rust/forge-local/README.md).
 
 ## Independent command description checkpoint — implemented
 
@@ -26,16 +26,28 @@ Explicit codecs and tests establish agreement; this is not reflection, a univers
 schema/parser or automatic execution. Pure tasks remain metadata-free. See the
 [description contract](../../src/rust/forge-command/README.md).
 
-## Future foundation interfaces — designed, not implemented
+## Bounded local jobs checkpoint — implemented
+
+The optional [forge-local jobs module](../../src/rust/forge-local/JOBS.md) provides
+submit/inspect/list/step/cancel for a pure counter. Typed configuration and registrar
+stage its factory before freeze; a singleton owns the ready service. Bounded
+volatile records, owner isolation, intent replay/conflict/retention, time checkpoints
+and cooperative cancellation are tested. Task/core traits remain unchanged.
+
+Progress is manual, receipts disappear on exit, and local owner labels are trusted
+input—not credentials. Enabling jobs adds documented public application-enum
+variants, requiring downstream exhaustive-match migration. No remote/durable work
+is implied by this proof.
+
+## Broader foundation interfaces — still proposed
 
 The [module/interface design](../architecture/foundation-interfaces.md) and
-[contract sketches](../architecture/foundation-contracts.md) detail the next
+[contract sketches](../architecture/foundation-contracts.md) detail a more generic
 bounded job engine, independent verified-identity/resource-policy boundary and
-transport-neutral addressed call. Four new UML-like views show proposed imports,
-typed ports, job transitions and authenticated remote reads. These do not create
-new source crates or make Task cancellable. Start with private cohesive modules,
-a scripted single-owner pure-job proof and explicit policy tests; choose a remote
-transport only after those semantics are demonstrated. Exact public APIs remain
+transport-neutral addressed call. The views distinguish proposed imports/ports/remote reads from the implemented
+local counter lifecycle. No extra source crate or cancellable Task is implied.
+The first private-module proof exists; choose remote transport only after identity
+and codec semantics are separately demonstrated. Exact public APIs remain
 provisional, including any coordinated migration of exhaustive application enums.
 
 ## Next core slice: bootstrap and registrars
@@ -65,7 +77,7 @@ Native temporary-fixture tests cover deterministic listings, state isolation, fa
 
 ## Kernel planning sequence
 
-The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) now records the narrow implemented **local node/status/discovery and terminal checkpoint**, reusing typed bootstrap/bridge/provider contracts. The next separately authorized work is one bounded cooperative job lifecycle, then a deliberately chosen remote boundary starting with node reads. Those later additions remain proposed. No remote transport, async runtime, GUI, automatic peer discovery, file mutation or bootable Pi kernel is selected.
+The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) now records the narrow implemented **local node/status/discovery and terminal checkpoint**, reusing typed bootstrap/bridge/provider contracts. The bounded local counter now exists; an authenticated remote boundary starting with node reads remains proposed. Durability and generic job hosting are not supplied by this local proof. No remote transport, async runtime, GUI, automatic peer discovery, file mutation or bootable Pi kernel is selected.
 
 The small volatile job proof in that plan precedes—not satisfies—the durable acceptance gate below. The existing durable jobs example remains a separate later consumer, not a requirement to turn every local command into a stored job.
 

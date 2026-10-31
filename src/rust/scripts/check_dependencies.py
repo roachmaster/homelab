@@ -67,6 +67,10 @@ def validate_packages(packages):
             edges[name].add(target)
     if packages["forge-bootstrap-demo"]["features"].get("default", []) != []:
         raise SystemExit("Demo default must remain pure; do not enable the optional capability by default.")
+    if packages["forge-local"]["features"].get("jobs") != []:
+        raise SystemExit("Jobs must remain an optional application module.")
+    if packages["forge-terminal"]["features"].get("jobs") != ["forge-local/jobs"]:
+        raise SystemExit("Terminal jobs must explicitly forward the application feature.")
     visiting, visited = set(), set()
 
     def visit(name):
@@ -99,13 +103,16 @@ def negative_fixtures(packages):
     bad = copy.deepcopy(packages)
     bad["unreviewed-package"] = {}
     fixtures.append(("unreviewed membership", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-terminal"]["features"]["jobs"] = ["forge-kernel/disk"]
+    fixtures.append(("incorrect jobs forwarding", bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
         except SystemExit:
             continue
         raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
-    print("PASS: four in-memory negative architecture fixtures rejected")
+    print("PASS: five in-memory negative architecture fixtures rejected")
 
 
 def main():
@@ -125,7 +132,7 @@ def main():
         if actual != expected:
             raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
     local_expected = (set(ALLOWED) - DEMO_PACKAGES)
-    for args in [(), ("--features", "disk")]:
+    for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
     features = cargo("tree", "-p", "forge-terminal", "--no-default-features", "--edges", "features", "--prefix", "none")
@@ -133,8 +140,18 @@ def main():
         raise SystemExit("Node-only terminal unexpectedly includes native disk module")
     if 'forge-kernel feature "node"' not in features:
         raise SystemExit("Node-only terminal must select its explicit node capability")
+    # Resolved features, not just edges: forwarded root features may lack a
+    # printed feature edge in cargo tree's --edges features representation.
+    for selection, expected in [((), set()), (("--features", "jobs"), {"jobs"}),
+                                (("--features", "disk"), {"disk"})]:
+        tree = cargo("tree", "-p", "forge-terminal", "--no-default-features", *selection,
+                     "--edges", "normal", "--prefix", "none", "--format", "{p}|{f}")
+        local = next(line for line in tree.splitlines() if line.startswith("forge-local "))
+        actual = set(filter(None, local.partition("|")[2].split(",")))
+        if actual != expected:
+            raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
     print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
-    print("PASS: node-only terminal omits disk Cargo feature and all demonstration implementations")
+    print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk; no demo implementations")
     print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 
 

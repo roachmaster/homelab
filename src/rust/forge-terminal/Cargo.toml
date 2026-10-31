@@ -5,8 +5,9 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
-default = ["disk"]
+default = ["disk", "jobs"]
 disk = ["forge-local/disk"]
+jobs = ["forge-local/jobs"]
 
 [dependencies]
 forge-local = { workspace = true, default-features = false }

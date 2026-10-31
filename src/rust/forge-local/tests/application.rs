@@ -353,6 +353,12 @@ mod native_disk {
         let app = Application::bootstrap(f.config()).unwrap();
         for c in app.commands().unwrap() {
             let command = match c.kind {
+                #[cfg(feature = "jobs")]
+                CommandKind::JobSubmit
+                | CommandKind::JobInspect
+                | CommandKind::JobList
+                | CommandKind::JobStep
+                | CommandKind::JobCancel => panic!("legacy bootstrap must not select jobs"),
                 CommandKind::Commands => Command::Commands,
                 CommandKind::NodeInfo => Command::Node(NodeCommand::Info),
                 CommandKind::NodeStatus => Command::Node(NodeCommand::Status),
@@ -469,5 +475,19 @@ fn description_discovery_is_admitted_without_running_business_clients() {
     assert!(app
         .dispatch(Envelope::new(bad_header, Command::Commands))
         .is_err());
+    assert_eq!(counts.calls.get(), 0);
+}
+
+#[cfg(feature = "jobs")]
+#[test]
+fn invalid_jobs_config_fails_before_selected_client_creation() {
+    let counts = Counts::new();
+    let result = Application::bootstrap_with_node_registrar_and_jobs(
+        LocalConfig::default(),
+        |config| fake_group(config, counts.clone(), false, false),
+        jobs::JobsConfig::local(""),
+    );
+    assert!(matches!(result, Err(BootstrapError::Jobs(_))));
+    assert_eq!(counts.creates.get(), 0);
     assert_eq!(counts.calls.get(), 0);
 }

@@ -39,7 +39,7 @@ A session shares one application's disk provider, so successful cd persists unti
 ```text
 # Selected at startup: no disk registrar, client or routes in this assembly.
 cargo run -p forge-terminal --bin forge -- --no-disk --help
-# Selected at compile time: disk modules are absent from this binary's feature graph.
+# Selected at compile time: disk and jobs are absent from this binary's feature graph.
 cargo run -p forge-terminal --no-default-features --bin forge -- --help
 ```
 
@@ -65,7 +65,7 @@ Metadata is documentation, not reflection or an automatic converter. Decoding re
 - Status reports only that the configured node client answered and elapsed time since its construction. Target OS/architecture are compile-target constants, not hardware probes. This is not global health/readiness, OS uptime or authenticated machine identity. Permission metadata is not effective-access authorization.
 - Exit codes: **0** success, **2** malformed input/invalid configuration/unavailable command, **1** construction/application/console I/O failure. Sessions continue after command or rejected-line errors and return the highest command-error code seen; a console transport failure stops immediately with 1. EOF and `exit` otherwise finish successfully. Console transport failures stop execution; writes may have partially completed. No hidden retry, timeout, cancellation or rollback is provided.
 
-The local admission policy is not production authentication or a security boundary. This milestone has no jobs, process launcher, network/remote transport, async runtime or bootable OS behavior. See the [application assembly](../forge-local/README.md) and [kernel plan](../../../docs/architecture/forge-kernel-plan.md).
+The local admission policy is not production authentication or a security boundary. This milestone has no process launcher, network/remote transport, async runtime or bootable OS behavior. See the [application assembly](../forge-local/README.md) and [kernel plan](../../../docs/architecture/forge-kernel-plan.md).
 
 ## Check
 
@@ -76,3 +76,44 @@ cargo clippy -p forge-terminal --all-targets --all-features -- -D warnings
 ```
 
 Tests also prove command help leaves an injected capability client uncalled after startup, descriptor/codec agreement, exact help forms, malformed extra help arguments and typed help-option metadata. Tests cover real binary invocation and a stateful binary session, typed console substitution, bounded/rejected input, malformed commands, discovered omission, native filesystem fixtures, failed-cd preservation, literal paths and terminal-control escaping. Only test-owned temporary directories are created/removed.
+
+
+## Cooperative local jobs
+
+Default build features are `disk` and `jobs`; select either independently with
+`--no-default-features --features jobs` or `--features disk`. `--no-jobs` disables
+job registration at startup without disabling node commands; it can coexist with
+`--no-disk`. Minimal builds accept that opt-out but expose no job commands.
+
+Use `--session` to retain volatile job state across commands:
+
+```text
+jobs.submit counter-key 10
+jobs.list
+jobs.inspect ID-FROM-RECEIPT
+jobs.step ID-FROM-RECEIPT
+jobs.cancel ID-FROM-RECEIPT
+jobs.step ID-FROM-RECEIPT
+```
+
+`jobs.submit KEY TOTAL` accepts exactly two arguments: a bounded non-flag-looking
+UTF-8 intent key and unsigned decimal u64. Inspect/step/cancel accept exactly one
+validated job ID; list takes no arguments. Session job arguments split on
+whitespace only. Disk paths retain their literal remaining-text grammar, so
+spaces inside paths are not split. There is no shell quoting or expansion.
+
+Each `jobs.step` requests one bounded cooperative quantum through the shared
+bridge. No background work happens while `ReadLine` blocks. Cancellation output
+separates `requested_not_confirmed` from confirmed cancellation and an already
+terminal outcome. Job help reads the admitted descriptor catalog without
+submitting, stepping or cancelling work; startup validation and console I/O
+still occur.
+
+Receipts explicitly report `acceptance=volatile`, ID, acceptance revision and
+terminal retention. State belongs to this application lifetime and disappears
+when the process exits. A one-shot submit prints a receipt but does not execute
+or preserve its queued work for a subsequent process. Startup incarnation bases
+use checked process ID/time/counter formatting (at most 42 ASCII bytes), followed
+by the application's checked instance suffix. This is best-effort restart
+separation, not durable globally unique identity or authentication. No caller
+`--user` identity override is exposed.

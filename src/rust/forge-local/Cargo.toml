@@ -5,8 +5,9 @@ edition.workspace = true
 publish.workspace = true
 
 [features]
-default = ["disk"]
+default = ["disk", "jobs"]
 disk = ["forge-kernel/disk"]
+jobs = []
 
 [dependencies]
 forge-command.workspace = true

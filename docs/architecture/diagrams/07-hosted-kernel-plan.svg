@@ -13,16 +13,16 @@
 <text text-anchor="middle" x="508" y="-790" font-family="DejaVu Sans" font-size="20.00">Component/phase view, not remote deployment. Amber = proposed; teal = implemented local code.</text>
 <g id="clust1" class="cluster">
 <title>cluster_host</title>
-<path fill="white" stroke="#ae7b26" stroke-dasharray="5,2" d="M138,-100C138,-100 878,-100 878,-100 884,-100 890,-106 890,-112 890,-112 890,-668 890,-668 890,-674 884,-680 878,-680 878,-680 138,-680 138,-680 132,-680 126,-674 126,-668 126,-668 126,-112 126,-112 126,-106 132,-100 138,-100"/>
-<text text-anchor="middle" x="404.5" y="-664.8" font-family="DejaVu Sans" font-size="14.00">Local application host — explicit composition; later jobs/network are proposed</text>
+<path fill="white" stroke="#ae7b26" stroke-dasharray="5,2" d="M121,-100C121,-100 895,-100 895,-100 901,-100 907,-106 907,-112 907,-112 907,-668 907,-668 907,-674 901,-680 895,-680 895,-680 121,-680 121,-680 115,-680 109,-674 109,-668 109,-668 109,-112 109,-112 109,-106 115,-100 121,-100"/>
+<text text-anchor="middle" x="444.5" y="-664.8" font-family="DejaVu Sans" font-size="14.00">Local application host — explicit composition; bounded local jobs; remote network is proposed</text>
 </g>
 <!-- driver -->
 <g id="node1" class="node">
 <title>driver</title>
-<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M508,-780C508,-780 288,-780 288,-780 282,-780 276,-774 276,-768 276,-768 276,-735 276,-735 276,-729 282,-723 288,-723 288,-723 508,-723 508,-723 514,-723 520,-729 520,-735 520,-735 520,-768 520,-768 520,-774 514,-780 508,-780"/>
-<text text-anchor="middle" x="398" y="-761.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Implemented terminal / typed caller</text>
-<text text-anchor="middle" x="398" y="-748.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Catalog help + local commands</text>
-<text text-anchor="middle" x="398" y="-735.4" font-family="DejaVu Sans" font-size="12.00" fill="white">No network boundary</text>
+<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M516,-780C516,-780 296,-780 296,-780 290,-780 284,-774 284,-768 284,-768 284,-735 284,-735 284,-729 290,-723 296,-723 296,-723 516,-723 516,-723 522,-723 528,-729 528,-735 528,-735 528,-768 528,-768 528,-774 522,-780 516,-780"/>
+<text text-anchor="middle" x="406" y="-761.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Implemented terminal / typed caller</text>
+<text text-anchor="middle" x="406" y="-748.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Catalog help + local commands</text>
+<text text-anchor="middle" x="406" y="-735.4" font-family="DejaVu Sans" font-size="12.00" fill="white">No network boundary</text>
 </g>
 <!-- bridge -->
 <g id="node4" class="node">
@@ -35,69 +35,69 @@
 <!-- driver&#45;&gt;bridge -->
 <g id="edge9" class="edge">
 <title>driver&#45;&gt;bridge</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M393.59,-722.93C389.41,-687.08 387.53,-624.08 417,-582 434.3,-557.29 460.75,-539.29 487.84,-526.32"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="489.03,-528.66 494.73,-523.13 486.82,-523.9 489.03,-528.66"/>
-<text text-anchor="middle" x="487.5" y="-608" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">Envelope&lt;capability enum&gt;</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M401.68,-722.71C397.66,-686.9 396.02,-624.24 425,-582 441.79,-557.52 467.73,-539.5 494.16,-526.45"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="495.61,-528.66 501.25,-523.06 493.35,-523.92 495.61,-528.66"/>
+<text text-anchor="middle" x="495.5" y="-608" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">Envelope&lt;capability enum&gt;</text>
 </g>
 <!-- peer -->
 <g id="node2" class="node">
 <title>peer</title>
-<path fill="#f2f3f5" stroke="#6f7782" stroke-width="1.4" stroke-dasharray="5,2" d="M798,-780C798,-780 564,-780 564,-780 558,-780 552,-774 552,-768 552,-768 552,-735 552,-735 552,-729 558,-723 564,-723 564,-723 798,-723 798,-723 804,-723 810,-729 810,-735 810,-735 810,-768 810,-768 810,-774 804,-780 798,-780"/>
-<text text-anchor="middle" x="681" y="-761.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Phase 3: configured remote peer</text>
-<text text-anchor="middle" x="681" y="-748.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Identity + timeout/unknown outcomes</text>
-<text text-anchor="middle" x="681" y="-735.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">No transport selected</text>
+<path fill="#f2f3f5" stroke="#6f7782" stroke-width="1.4" stroke-dasharray="5,2" d="M806,-780C806,-780 572,-780 572,-780 566,-780 560,-774 560,-768 560,-768 560,-735 560,-735 560,-729 566,-723 572,-723 572,-723 806,-723 806,-723 812,-723 818,-729 818,-735 818,-735 818,-768 818,-768 818,-774 812,-780 806,-780"/>
+<text text-anchor="middle" x="689" y="-761.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Phase 3: configured remote peer</text>
+<text text-anchor="middle" x="689" y="-748.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Identity + timeout/unknown outcomes</text>
+<text text-anchor="middle" x="689" y="-735.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">No transport selected</text>
 </g>
 <!-- adapter -->
 <g id="node3" class="node">
 <title>adapter</title>
-<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" stroke-dasharray="5,2" d="M772.5,-639C772.5,-639 585.5,-639 585.5,-639 579.5,-639 573.5,-633 573.5,-627 573.5,-627 573.5,-594 573.5,-594 573.5,-588 579.5,-582 585.5,-582 585.5,-582 772.5,-582 772.5,-582 778.5,-582 784.5,-588 784.5,-594 784.5,-594 784.5,-627 784.5,-627 784.5,-633 778.5,-639 772.5,-639"/>
-<text text-anchor="middle" x="679" y="-620.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Phase 3: selected thin adapter</text>
-<text text-anchor="middle" x="679" y="-607.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Verify caller / bound / decode</text>
-<text text-anchor="middle" x="679" y="-594.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">No direct client bypass</text>
+<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" stroke-dasharray="5,2" d="M780.5,-639C780.5,-639 593.5,-639 593.5,-639 587.5,-639 581.5,-633 581.5,-627 581.5,-627 581.5,-594 581.5,-594 581.5,-588 587.5,-582 593.5,-582 593.5,-582 780.5,-582 780.5,-582 786.5,-582 792.5,-588 792.5,-594 792.5,-594 792.5,-627 792.5,-627 792.5,-633 786.5,-639 780.5,-639"/>
+<text text-anchor="middle" x="687" y="-620.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Phase 3: selected thin adapter</text>
+<text text-anchor="middle" x="687" y="-607.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Verify caller / bound / decode</text>
+<text text-anchor="middle" x="687" y="-594.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">No direct client bypass</text>
 </g>
 <!-- peer&#45;&gt;adapter -->
 <g id="edge10" class="edge">
 <title>peer&#45;&gt;adapter</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M680.6,-722.71C680.29,-700.92 679.85,-670.47 679.51,-646.94"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="682.13,-646.71 679.4,-639.25 676.88,-646.78 682.13,-646.71"/>
-<text text-anchor="middle" x="754.5" y="-691" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">future authenticated boundary</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M688.6,-722.71C688.29,-700.92 687.85,-670.47 687.51,-646.94"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="690.13,-646.71 687.4,-639.25 684.88,-646.78 690.13,-646.71"/>
+<text text-anchor="middle" x="762.5" y="-691" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">future authenticated boundary</text>
 </g>
 <!-- adapter&#45;&gt;bridge -->
 <g id="edge1" class="edge">
 <title>adapter&#45;&gt;bridge</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M657.7,-581.9C645.47,-566.06 630.01,-546.04 617.06,-529.26"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="619.07,-527.57 612.41,-523.24 614.92,-530.78 619.07,-527.57"/>
-<text text-anchor="middle" x="691.5" y="-550" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">same checked ingress</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M663.76,-581.9C650.42,-566.06 633.56,-546.04 619.43,-529.26"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="621.2,-527.28 614.36,-523.24 617.18,-530.66 621.2,-527.28"/>
+<text text-anchor="middle" x="695.5" y="-550" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">same checked ingress</text>
 </g>
 <!-- node_service -->
 <g id="node5" class="node">
 <title>node_service</title>
-<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M422,-407C422,-407 156,-407 156,-407 150,-407 144,-401 144,-395 144,-395 144,-362 144,-362 144,-356 150,-350 156,-350 156,-350 422,-350 422,-350 428,-350 434,-356 434,-362 434,-362 434,-395 434,-395 434,-401 428,-407 422,-407"/>
-<text text-anchor="middle" x="289" y="-388.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Implemented local node + discovery</text>
-<text text-anchor="middle" x="289" y="-375.4" font-family="DejaVu Sans" font-size="12.00" fill="white">node.info / node.status / system.commands</text>
-<text text-anchor="middle" x="289" y="-362.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Configured label + client uptime, not health</text>
+<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M405,-407C405,-407 139,-407 139,-407 133,-407 127,-401 127,-395 127,-395 127,-362 127,-362 127,-356 133,-350 139,-350 139,-350 405,-350 405,-350 411,-350 417,-356 417,-362 417,-362 417,-395 417,-395 417,-401 411,-407 405,-407"/>
+<text text-anchor="middle" x="272" y="-388.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Implemented local node + discovery</text>
+<text text-anchor="middle" x="272" y="-375.4" font-family="DejaVu Sans" font-size="12.00" fill="white">node.info / node.status / system.commands</text>
+<text text-anchor="middle" x="272" y="-362.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Configured label + client uptime, not health</text>
 </g>
 <!-- bridge&#45;&gt;node_service -->
 <g id="edge2" class="edge">
 <title>bridge&#45;&gt;node_service</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M517.89,-465.9C472.9,-448.92 415.19,-427.14 368.98,-409.69"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="369.9,-407.23 361.96,-407.04 368.04,-412.14 369.9,-407.23"/>
-<text text-anchor="middle" x="511.5" y="-434" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">registered typed bindings</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M513.78,-465.9C466.15,-448.88 405.04,-427.05 356.18,-409.58"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="357.01,-407.09 349.06,-407.04 355.24,-412.04 357.01,-407.09"/>
+<text text-anchor="middle" x="503.5" y="-434" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">registered typed bindings</text>
 </g>
 <!-- jobs -->
 <g id="node6" class="node">
 <title>jobs</title>
-<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M704,-407C704,-407 478,-407 478,-407 472,-407 466,-401 466,-395 466,-395 466,-362 466,-362 466,-356 472,-350 478,-350 478,-350 704,-350 704,-350 710,-350 716,-356 716,-362 716,-362 716,-395 716,-395 716,-401 710,-407 704,-407"/>
-<text text-anchor="middle" x="591" y="-388.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Phase 2: bounded job module</text>
-<text text-anchor="middle" x="591" y="-375.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Submit / inspect / cooperative cancel</text>
-<text text-anchor="middle" x="591" y="-362.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">One allowlisted task, volatile first</text>
+<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M721,-407C721,-407 461,-407 461,-407 455,-407 449,-401 449,-395 449,-395 449,-362 449,-362 449,-356 455,-350 461,-350 461,-350 721,-350 721,-350 727,-350 733,-356 733,-362 733,-362 733,-395 733,-395 733,-401 727,-407 721,-407"/>
+<text text-anchor="middle" x="591" y="-388.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Implemented local counter jobs</text>
+<text text-anchor="middle" x="591" y="-375.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Submit / list / inspect / step / cancel</text>
+<text text-anchor="middle" x="591" y="-362.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Bounded volatile state; local owner checks</text>
 </g>
 <!-- bridge&#45;&gt;jobs -->
 <g id="edge4" class="edge">
 <title>bridge&#45;&gt;jobs</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M591,-465.9C591,-450.61 591,-431.44 591,-415.04"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M591,-465.9C591,-450.61 591,-431.44 591,-415.04"/>
 <polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="593.63,-414.74 591,-407.24 588.38,-414.74 593.63,-414.74"/>
-<text text-anchor="middle" x="647" y="-434" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">later lifecycle bindings</text>
+<text text-anchor="middle" x="657.5" y="-434" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">admitted lifecycle bindings</text>
 </g>
 <!-- ports -->
 <g id="node7" class="node">
@@ -110,15 +110,15 @@
 <!-- bridge&#45;&gt;ports -->
 <g id="edge8" class="edge">
 <title>bridge&#45;&gt;ports</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M678.01,-465.91C702.52,-452.77 724.56,-433.85 732,-407 738.76,-382.59 743.25,-372.7 732,-350 720.1,-326 698.15,-308 675.05,-294.82"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="676.03,-292.36 668.19,-291.06 673.5,-296.96 676.03,-292.36"/>
-<text text-anchor="middle" x="784" y="-376" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">admitted disk task</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M695.6,-465.87C708.79,-459.46 721.36,-451.61 732,-442 744.84,-430.41 745.12,-423.85 749,-407 754.68,-382.31 761.85,-371.83 749,-350 734.59,-325.51 710.5,-307.5 685.41,-294.47"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="686.55,-292.1 678.67,-291.09 684.2,-296.79 686.55,-292.1"/>
+<text text-anchor="middle" x="802" y="-376" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">admitted disk task</text>
 </g>
 <!-- node_service&#45;&gt;ports -->
 <g id="edge3" class="edge">
 <title>node_service&#45;&gt;ports</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M352.03,-349.87C378.42,-338.61 409.53,-325.75 438,-315 457.38,-307.68 478.33,-300.3 498.32,-293.49"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="499.38,-295.91 505.64,-291.01 497.69,-290.94 499.38,-295.91"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M343.7,-349.87C372.87,-338.8 406.96,-326.06 438,-315 458.07,-307.85 479.72,-300.4 500.23,-293.46"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="501.17,-295.92 507.44,-291.03 499.49,-290.94 501.17,-295.92"/>
 <text text-anchor="middle" x="510.5" y="-318" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">prepared observation request</text>
 </g>
 <!-- jobs&#45;&gt;ports -->
@@ -131,47 +131,47 @@
 <!-- disk -->
 <g id="node8" class="node">
 <title>disk</title>
-<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M511.5,-175C511.5,-175 314.5,-175 314.5,-175 308.5,-175 302.5,-169 302.5,-163 302.5,-163 302.5,-130 302.5,-130 302.5,-124 308.5,-118 314.5,-118 314.5,-118 511.5,-118 511.5,-118 517.5,-118 523.5,-124 523.5,-130 523.5,-130 523.5,-163 523.5,-163 523.5,-169 517.5,-175 511.5,-175"/>
-<text text-anchor="middle" x="413" y="-156.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Existing forge&#45;kernel::disk</text>
-<text text-anchor="middle" x="413" y="-143.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Native list / pwd / cd / metadata</text>
-<text text-anchor="middle" x="413" y="-130.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Client&#45;local cwd; NOT a sandbox</text>
+<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M519.5,-175C519.5,-175 322.5,-175 322.5,-175 316.5,-175 310.5,-169 310.5,-163 310.5,-163 310.5,-130 310.5,-130 310.5,-124 316.5,-118 322.5,-118 322.5,-118 519.5,-118 519.5,-118 525.5,-118 531.5,-124 531.5,-130 531.5,-130 531.5,-163 531.5,-163 531.5,-169 525.5,-175 519.5,-175"/>
+<text text-anchor="middle" x="421" y="-156.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Existing forge&#45;kernel::disk</text>
+<text text-anchor="middle" x="421" y="-143.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Native list / pwd / cd / metadata</text>
+<text text-anchor="middle" x="421" y="-130.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Client&#45;local cwd; NOT a sandbox</text>
 </g>
 <!-- ports&#45;&gt;disk -->
 <g id="edge6" class="edge">
 <title>ports&#45;&gt;disk</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M547.91,-233.9C522.1,-217.37 489.19,-196.29 462.33,-179.1"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="463.73,-176.87 456,-175.04 460.9,-181.29 463.73,-176.87"/>
-<text text-anchor="middle" x="560" y="-202" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">selected native client</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M549.85,-233.9C525.3,-217.44 494.03,-196.47 468.44,-179.31"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="469.76,-177.04 462.07,-175.04 466.83,-181.4 469.76,-177.04"/>
+<text text-anchor="middle" x="564" y="-202" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">selected native client</text>
 </g>
 <!-- node_client -->
 <g id="node9" class="node">
 <title>node_client</title>
-<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M824.5,-175C824.5,-175 567.5,-175 567.5,-175 561.5,-175 555.5,-169 555.5,-163 555.5,-163 555.5,-130 555.5,-130 555.5,-124 561.5,-118 567.5,-118 567.5,-118 824.5,-118 824.5,-118 830.5,-118 836.5,-124 836.5,-130 836.5,-130 836.5,-163 836.5,-163 836.5,-169 830.5,-175 824.5,-175"/>
-<text text-anchor="middle" x="696" y="-156.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Existing forge&#45;kernel::node</text>
-<text text-anchor="middle" x="696" y="-143.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Compile&#45;target constants + instance clock</text>
-<text text-anchor="middle" x="696" y="-130.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Injected provider can report failure</text>
+<path fill="#087f8c" stroke="#24576b" stroke-width="1.4" d="M832.5,-175C832.5,-175 575.5,-175 575.5,-175 569.5,-175 563.5,-169 563.5,-163 563.5,-163 563.5,-130 563.5,-130 563.5,-124 569.5,-118 575.5,-118 575.5,-118 832.5,-118 832.5,-118 838.5,-118 844.5,-124 844.5,-130 844.5,-130 844.5,-163 844.5,-163 844.5,-169 838.5,-175 832.5,-175"/>
+<text text-anchor="middle" x="704" y="-156.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Existing forge&#45;kernel::node</text>
+<text text-anchor="middle" x="704" y="-143.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Compile&#45;target constants + instance clock</text>
+<text text-anchor="middle" x="704" y="-130.4" font-family="DejaVu Sans" font-size="12.00" fill="white">Injected provider can report failure</text>
 </g>
 <!-- ports&#45;&gt;node_client -->
 <g id="edge7" class="edge">
 <title>ports&#45;&gt;node_client</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M616.42,-233.9C631.14,-217.92 649.78,-197.69 665.31,-180.82"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="667.3,-182.53 670.45,-175.24 663.44,-178.98 667.3,-182.53"/>
-<text text-anchor="middle" x="711" y="-202" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">injected observation client</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M618.35,-233.9C634.2,-217.92 654.25,-197.69 670.97,-180.82"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="673.09,-182.41 676.51,-175.24 669.36,-178.72 673.09,-182.41"/>
+<text text-anchor="middle" x="715" y="-202" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">injected observation client</text>
 </g>
 <!-- os -->
 <g id="node10" class="node">
 <title>os</title>
-<path fill="#f2f3f5" stroke="#6f7782" stroke-width="1.4" d="M588,-57C588,-57 238,-57 238,-57 232,-57 226,-51 226,-45 226,-45 226,-12 226,-12 226,-6 232,0 238,0 238,0 588,0 588,0 594,0 600,-6 600,-12 600,-12 600,-45 600,-45 600,-51 594,-57 588,-57"/>
-<text text-anchor="middle" x="413" y="-38.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Existing host operating system</text>
-<text text-anchor="middle" x="413" y="-25.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Processes / protected memory / drivers / filesystem</text>
-<text text-anchor="middle" x="413" y="-12.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Forge remains a hosted application, not a bootable kernel</text>
+<path fill="#f2f3f5" stroke="#6f7782" stroke-width="1.4" d="M596,-57C596,-57 246,-57 246,-57 240,-57 234,-51 234,-45 234,-45 234,-12 234,-12 234,-6 240,0 246,0 246,0 596,0 596,0 602,0 608,-6 608,-12 608,-12 608,-45 608,-45 608,-51 602,-57 596,-57"/>
+<text text-anchor="middle" x="421" y="-38.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Existing host operating system</text>
+<text text-anchor="middle" x="421" y="-25.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Processes / protected memory / drivers / filesystem</text>
+<text text-anchor="middle" x="421" y="-12.4" font-family="DejaVu Sans" font-size="12.00" fill="#163744">Forge remains a hosted application, not a bootable kernel</text>
 </g>
 <!-- disk&#45;&gt;os -->
 <g id="edge11" class="edge">
 <title>disk&#45;&gt;os</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M413,-117.72C413,-101.79 413,-81.65 413,-64.63"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="415.63,-64.56 413,-57.06 410.38,-64.56 415.63,-64.56"/>
-<text text-anchor="middle" x="481" y="-84" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">native Rust filesystem calls</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M421,-117.72C421,-101.79 421,-81.65 421,-64.63"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="423.63,-64.56 421,-57.06 418.38,-64.56 423.63,-64.56"/>
+<text text-anchor="middle" x="489" y="-84" font-family="DejaVu Sans" font-size="10.00" fill="#34505f">native Rust filesystem calls</text>
 </g>
 </g>
 </svg>

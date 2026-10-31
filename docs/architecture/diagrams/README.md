@@ -2,7 +2,7 @@
 
 ## Mermaid UML-like views
 
-The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locally rendered SVGs for implemented contracts, disk bootstrap and typed requests, plus a clearly proposed kernel milestone view. It includes source/image hashes and a rebuild/drift-check command. **M01–M04 complement the DOT views below; they do not replace them. M05–M08 are explicitly proposed future-foundation views.**
+The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locally rendered SVGs for implemented contracts, disk bootstrap and typed requests, plus a clearly proposed kernel milestone view. It includes source/image hashes and a rebuild/drift-check command. **M01–M04 complement the DOT views below; they do not replace them. M05/M06/M08 remain proposed future-foundation views; M07 describes the implemented local counter lifecycle.**
 
 | View | Source | Image |
 | --- | --- | --- |
@@ -15,12 +15,12 @@ The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locall
 | --- | --- | --- |
 | M05 module boundaries | [Mermaid](mermaid/m05-foundation-modules.mmd) | [SVG](mermaid/images/m05-foundation-modules.svg) |
 | M06 typed interfaces | [Mermaid](mermaid/m06-foundation-interfaces.mmd) | [SVG](mermaid/images/m06-foundation-interfaces.svg) |
-| M07 job lifecycle | [Mermaid](mermaid/m07-job-lifecycle.mmd) | [SVG](mermaid/images/m07-job-lifecycle.svg) |
+| M07 implemented local counter lifecycle | [Mermaid](mermaid/m07-job-lifecycle.mmd) | [SVG](mermaid/images/m07-job-lifecycle.svg) |
 | M08 remote admission | [Mermaid](mermaid/m08-remote-admission.mmd) | [SVG](mermaid/images/m08-remote-admission.svg) |
 
 These detail [proposed internal modules/contracts](../foundation-interfaces.md),
-not additional implemented crates or deployed services. Existing DOT views remain
-unchanged; the compile-time DAG continues to show only actual source packages.
+not additional implemented crates or deployed services. M07 and diagram07 mark
+the local counter subset; the compile-time DAG still shows actual packages.
 
 ## C4 and supporting DOT views
 
@@ -42,7 +42,7 @@ The provider assembly view is a startup/ownership model, not another C4 containe
 
 The crate DAG is not a C4 deployment view. It shows six execution core crates plus the independent command-description contract, one optional hosted kernel package, a local application/terminal pair and three demo packages. Dashed edges are actual optional Cargo dependencies: `messages` selects the fake message branch; `disk` selects native disk access. Pure, message-only, disk-only and combined profiles retain only their selected dependencies. Core never imports these implementations. The dependency guard checks the manifests and all four normal-dependency trees; dev-only test edges are omitted from this diagram. The internal envelope/bridge is generic over a capability-owned payload enum. The demo application owns its command sum and implements `Payload`; the message capability stays independent of ingress. In another application, direct `Bridge<CapabilityPayload>` use requires that enum's owning crate to import/implement the narrow ingress contract; an application cannot implement a foreign trait for another crate's enum. The header selects the registered route; variant mismatch is rejected before effects. Optional wire codecs live outside this typed path. The sequence depicts a successful new-key durable submission; rejection, replay, and failure semantics are described in the [blueprint](../forge-framework-blueprint.md).
 
-Diagram07 is a component/phase planning view, not deployed infrastructure or a package dependency graph. It shows the implemented local node/terminal and typed core/native disk pieces while labeling job lifecycle and the remote boundary as proposed. Follow the [kernel plan](../forge-kernel-plan.md) for gates and the distinction between hosted services and a real OS kernel. No remote transport is selected.
+Diagram07 is a component/phase planning view, not deployed infrastructure or a package dependency graph. It shows the implemented local node/terminal and typed core/native disk pieces plus explicitly stepped local jobs, while the remote boundary remains proposed. Follow the [kernel plan](../forge-kernel-plan.md) for gates and the distinction between hosted services and a real OS kernel. No remote transport is selected.
 
 Regenerate from the repository root with Graphviz installed:
 

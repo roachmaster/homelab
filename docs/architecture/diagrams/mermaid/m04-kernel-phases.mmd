@@ -4,7 +4,7 @@ title: M04 Implemented local system and proposed next phases
 flowchart TB
     E["EXISTING FOUNDATION<br/>Six core crates plus optional forge-kernel::disk<br/>Typed bootstrap, bridge, factories, providers, tasks and clients"]
     P1["IMPLEMENTED LOCAL CHECKPOINT<br/>node.info, node.status, system.commands<br/>Typed terminal + optional disk sessions<br/>Client observations, not system health"]
-    P2["PROPOSED PHASE 2<br/>One bounded pure job: submit, inspect, cooperative cancel<br/>Volatile history; checkpoints; no arbitrary process execution"]
+    P2["IMPLEMENTED LOCAL COUNTER JOBS<br/>Submit, list, inspect, explicit step, cooperative cancel<br/>Bounded volatile records and owner checks<br/>No background progress or authentication"]
     P3["PROPOSED PHASE 3 — READ-ONLY FIRST<br/>Explicitly configured peers and authenticated node reads<br/>Choose transport later; expose stale or unknown outcomes"]
     R["LATER REMOTE EXECUTION GATES<br/>Owner authorization, limits, intent-key deduplication<br/>Deadline, restart and cancellation semantics; no exactly-once claim"]
     OS["HOST OS REMAINS RESPONSIBLE<br/>Processes, protected memory, drivers and access controls<br/>No bootable kernel or Raspberry Pi deployment claimed"]
@@ -14,6 +14,6 @@ flowchart TB
     classDef existing fill:#087f8c,color:#ffffff,stroke:#086975,stroke-width:2px;
     classDef proposed fill:#fff1d6,color:#183342,stroke:#ae7b26,stroke-width:1.5px;
     classDef later fill:#f2f3f5,color:#263442,stroke:#6f7782,stroke-dasharray:5 4;
-    class E,P1 existing;
-    class P2,P3 proposed;
+    class E,P1,P2 existing;
+    class P3 proposed;
     class R,OS later;

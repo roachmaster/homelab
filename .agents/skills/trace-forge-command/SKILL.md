@@ -25,6 +25,8 @@ For `help COMMAND` or `COMMAND --help`, trace admitted `system.commands` discove
 
 For native disk requests, trace the optional consumer’s bridge check before `ChangeDirectory` changes client-local state. A failed cd preserves cwd; readonly/mode metadata is not effective authorization. Use the [disk contract](../../../src/rust/forge-kernel/README.md) for symlink/native-path semantics, and distinguish real temporary-filesystem tests from fake task-substitution tests.
 
+For implemented [local jobs](../../../src/rust/forge-local/JOBS.md), trace the shared bridge into owner-checked submit/inspect/list/step/cancel. Submit accepts volatile work; only explicit step runs one quantum. Running cancel is Requested, not confirmed stopped. Retained same-owner intent replay returns the receipt; request IDs do not deduplicate. Trusted in-process owner selection is not authentication.
+
 ## Small example
 
 `jobs.submit @ 1` with `JobsPayload::Status(id)` is a mismatch. Reject before either handler's effects; never repair the header or dispatch status by inspecting the variant. Check that neither capability storage nor its per-operation acquisition is invoked.

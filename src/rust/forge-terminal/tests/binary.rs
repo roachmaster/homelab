@@ -122,3 +122,29 @@ fn actual_binary_command_help_is_metadata_not_execution() {
         assert!(!text.contains("metadata_only="));
     }
 }
+
+#[cfg(feature = "jobs")]
+#[test]
+fn single_shot_job_receipt_is_volatile_and_does_not_execute() {
+    let output = Command::new(env!("CARGO_BIN_EXE_forge"))
+        .args(["--no-disk", "jobs.submit", "one-shot", "1"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("acceptance=volatile"));
+    assert!(text.contains("scope=this application lifetime"));
+    assert!(!text.contains("state=Succeeded"));
+}
+
+#[test]
+fn no_jobs_flag_leaves_node_commands_available() {
+    let output = Command::new(env!("CARGO_BIN_EXE_forge"))
+        .args(["--no-disk", "--no-jobs", "node.status"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("observation=responding"));
+}

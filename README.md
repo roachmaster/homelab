@@ -10,7 +10,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
 - [Detailed future jobs, access and remote interfaces](docs/architecture/foundation-interfaces.md) — proposed modules, typed contracts and ownership/state diagrams.
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
-- [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): local node/status first, then jobs and an explicit remote boundary.
+- [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): implemented local node/status and bounded jobs, then a future remote boundary.
 
 The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
@@ -23,6 +23,7 @@ make                         # discover the available targets
 make run ARGS='node.info'
 make run ARGS='disk.list --help' # typed command arguments and defaults
 make session                 # local stateful terminal
+make run ARGS='jobs.submit --help' # bounded local counter
 make run NO_DEFAULT_FEATURES=1 ARGS='node.status'
 make test                    # workspace tests
 make ci                      # the same gates used by GitHub Actions
@@ -36,7 +37,7 @@ publication is configured.
 
 The terminal discovers its selected registered commands and sends typed requests through the shared bridge. A separate [command-description contract](src/rust/forge-command/README.md) supplies names, help, named argument types and required/optional/default declarations; `Task` remains an independent execution stereotype. `help COMMAND` or `COMMAND --help` describes an admitted catalog entry without running the business task/client. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
 
-**Implemented:** local configured node observations, command discovery and optional native disk navigation. Node status reports client-instance uptime/responding, not machine health. **Later:** jobs, remote execution and Raspberry Pi deployment; no bootable OS or production authentication is claimed.
+**Implemented:** local node observations, command discovery, optional native disk navigation and [bounded local counter jobs](src/rust/forge-local/JOBS.md). In one session use `jobs.submit KEY TOTAL`, copy its ID, then `jobs.inspect ID`, `jobs.step ID`, `jobs.cancel ID` and `jobs.list`. Only explicit stepping runs work; receipts are volatile and local owner labels are not authentication. Node status reports client-instance uptime/responding, not machine health. **Later:** durable jobs, remote execution and Raspberry Pi deployment.
 
 ## Framework diagrams
 
@@ -49,13 +50,13 @@ The terminal discovers its selected registered commands and sends typed requests
 - [Typed disk request: SVG](docs/architecture/diagrams/mermaid/images/m03-disk-request.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m03-disk-request.mmd)
 - [Local checkpoint and planned phases: SVG](docs/architecture/diagrams/mermaid/images/m04-kernel-phases.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m04-kernel-phases.mmd)
 
-The **future foundation** now has a detailed, explicitly proposed module/interface set:
+The **broader foundation** has a proposed module/interface set, with the narrow local counter lifecycle now implemented:
 
 - [Module boundaries](docs/architecture/diagrams/mermaid/images/m05-foundation-modules.svg) · [Typed ports](docs/architecture/diagrams/mermaid/images/m06-foundation-interfaces.svg)
 - [Job lifecycle](docs/architecture/diagrams/mermaid/images/m07-job-lifecycle.svg) · [Remote admission sequence](docs/architecture/diagrams/mermaid/images/m08-remote-admission.svg)
 - [Design and stability decisions](docs/architecture/foundation-interfaces.md) · [Rust interface sketches](docs/architecture/foundation-contracts.md)
 
-These are design artifacts, not implemented jobs, remote access or authentication.
+M07 describes the implemented local counter lifecycle. The generic module/interface model and remote/authentication flows remain design artifacts, not completed services.
 
 [Diagram captions and reproducible local rendering](docs/architecture/diagrams/mermaid/README.md) distinguish implemented code from the [kernel plan](docs/architecture/forge-kernel-plan.md). No remote transport or bootable OS is implemented by these diagrams.
 

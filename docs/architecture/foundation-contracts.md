@@ -1,10 +1,12 @@
 # Proposed foundation contract sketches
 
-**Not implemented APIs.** This companion makes the [module design and invariants](foundation-interfaces.md)
+**Illustrative APIs, not the exact implemented exports.** A narrower fixed-counter
+[local jobs subset](../../src/rust/forge-local/JOBS.md) now exists; generic job/access/remote
+contracts below remain proposals. This companion makes the [module design and invariants](foundation-interfaces.md)
 concrete. Supporting value types are summarized rather than implemented here;
 these fragments are not a new compilable crate, a wire specification or a stability
 promise. Exact signatures should change if the first consumer tests expose a
-better boundary. No source packages, dependencies or runtime behavior are changed.
+better boundary. These sketches do not claim that the entire foundation has been implemented.
 
 ## A. Access: verified context, then resource decisions
 

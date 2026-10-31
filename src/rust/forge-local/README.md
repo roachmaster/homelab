@@ -5,6 +5,13 @@ contracts and from its terminal adapter. It composes `forge-kernel::node` and an
 optional `forge-kernel::disk` through typed configuration and package registrars.
 The application owns its finite `Command`/`Output` enums; core has no business enum.
 
+## Bounded local jobs (optional)
+
+The [jobs guide](JOBS.md) documents the implemented counter lifecycle, typed
+registrar/factory, explicit stepping, owner-scoped receipts, finite limits and feature
+omission. `bootstrap_with_jobs` opts in; existing bootstrap remains node/disk-only.
+No background progress, production authentication or durable acceptance is claimed.
+
 ## Assembly and requests
 
 1. Prepare `LocalConfig` at the environment boundary. The library reads no env vars.
@@ -85,5 +92,5 @@ cargo run -p forge-terminal --no-default-features -- node.status
 Tests cover real native disk fixtures, independent sessions, header/variant checks,
 truthful injected status/factory failures, retained error causes, construction
 cleanup, selected route coverage and replaceable node observations. Fake provider
-checks are not a remote-adapter certification. No jobs, remote-node protocol,
+checks are not a remote-adapter certification. No remote-node protocol,
 concurrent bridge, destructive disk operations or OS boot support is implemented.

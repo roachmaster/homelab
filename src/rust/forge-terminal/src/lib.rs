@@ -2,6 +2,8 @@
 //! application ingress. No task/client lookup, shell execution or remote transport.
 pub mod console;
 pub mod help;
+#[cfg(feature = "jobs")]
+mod jobs;
 pub mod parser;
 
 use console::{ConsoleRequest, ConsoleResponse, InputLine};
@@ -16,13 +18,14 @@ use parser::{decode, decode_session, parse_options, safe_text, session_arguments
 use std::{ffi::OsString, io};
 
 const STARTUP_HELP: &str = "Forge local system\n\
-Usage: forge [--node-id ID] [--cwd PATH | --no-disk] COMMAND [ARGUMENTS]\n\
+Usage: forge [--node-id ID] [--cwd PATH | --no-disk] [--no-jobs] COMMAND [ARGUMENTS]\n\
        forge [OPTIONS] --session\n\
        forge [OPTIONS] --help\n\
 Options precede the command. --cwd requires the disk build feature.\n\
 Session: one command per line; paths are literal remaining text, not shell syntax.\n\
 Use help, help COMMAND or COMMAND --help; exit or quit ends a session.\n\
-No job, remote-node, shell, create or delete commands are implemented.\n";
+Jobs are volatile and only advance through jobs.step; no work runs while waiting for input.\n\
+No remote-node, shell, create or delete commands are implemented.\n";
 
 struct Failure {
     code: u8,
@@ -71,10 +74,21 @@ where
     C: IoClient<Request = ConsoleRequest, Response = ConsoleResponse, Error = io::Error>,
 {
     let options = parse_options(args).map_err(Failure::usage)?;
+    #[cfg(feature = "jobs")]
+    let enable_jobs = options.jobs;
     let (config, mode) = options
         .into_config()
         .map_err(|error| Failure::runtime(error.to_string()))?;
-    let app = Application::bootstrap(config).map_err(|error| {
+    #[cfg(feature = "jobs")]
+    let assembled = if enable_jobs {
+        let base = jobs::fresh_base().map_err(Failure::runtime)?;
+        Application::bootstrap_with_jobs(config, forge_local::jobs::JobsConfig::local(base))
+    } else {
+        Application::bootstrap(config)
+    };
+    #[cfg(not(feature = "jobs"))]
+    let assembled = Application::bootstrap(config);
+    let app = assembled.map_err(|error| {
         if error.is_configuration() {
             Failure::usage(error.to_string())
         } else {
@@ -251,6 +265,8 @@ where
 /// bytes (non-ASCII/control bytes escaped), never lossy-converted or executed.
 pub fn format_output(output: Output) -> String {
     match output {
+        #[cfg(feature = "jobs")]
+        Output::Jobs(output) => jobs::format_output(output),
         Output::Commands(commands) => help::catalog(&commands),
         Output::Node(NodeResponse::Info(info)) => format!(
             "node_id={}\ntarget_os={}\ntarget_arch={}\n",
