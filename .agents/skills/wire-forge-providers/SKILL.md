@@ -29,4 +29,6 @@ For the implemented [disk client](../../../src/rust/forge-kernel/README.md), reg
 
 For explicitly requested pooled rendering sessions, decide whether pooling stays private to the rendering adapter or a use case needs a session port. A failed render can contaminate retained state: require reset/validation or quarantine and explicit async cleanup ownership if needed. Test exhaustion, reuse state, cancellation and close—not just successful acquisition.
 
+For a concrete local substitution, inspect `Application::bootstrap_with_node_registrar`: the application supplies typed node config to one selected registrar, freezes its `NodeFactories<F>` group, creates a client, owns it in a singleton and injects the unchanged `NodeTask`. A fake status provider is a substitution test, not proof of real remote health.
+
 Older Forge factories and HPVS operation freeze are source patterns, not a general DI container or service-graph validator. Keep typed payload/header routing unchanged by provider substitution. No runtime implementation or remote action is authorized by this skill alone.

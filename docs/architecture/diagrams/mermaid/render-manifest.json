@@ -34,9 +34,9 @@
     },
     {
       "source": "m04-kernel-phases.mmd",
-      "source_sha256": "0b641375ecc1c0c83160e6a059cd75c4ac55314faea6d0486f7834c8f3ec24e5",
+      "source_sha256": "358ac319174c4ca42ee93bf8294f9f221fc155015d5cb12e5f4066879b3f3024",
       "svg": "images/m04-kernel-phases.svg",
-      "svg_sha256": "aa82fb3edfc61f9a6e640250a8ae764e4bbde1529ea845aa77f9809c0d731cb8"
+      "svg_sha256": "99e95dfa0e436ba9f921ddd65fe5986e01e0bda7f20024391e6b3bc1caaa3155"
     }
   ]
 }

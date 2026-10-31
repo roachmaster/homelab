@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Read-only stdlib check of local edges, DAG and optional consumer profiles."""
+import copy
 import json
 from pathlib import Path
 import subprocess
@@ -14,7 +15,11 @@ ALLOWED = {
                      ("forge-io-client", "dev"), ("forge-task", "dev")},
     "forge-bootstrap": set(),
     "forge-kernel": {(name, "normal") for name in
-                     ("forge-bootstrap", "forge-provider", "forge-io-client")},
+                     ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task")},
+    "forge-local": {(name, "normal") for name in
+                    ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider",
+                     "forge-io-client", "forge-task", "forge-kernel")},
+    "forge-terminal": {("forge-local", "normal"), ("forge-io-client", "normal")},
     "forge-demo-messages": {(name, "normal") for name in
                             ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task")},
     "forge-demo-memory-client": {(name, "normal") for name in
@@ -37,15 +42,13 @@ def cargo(*args):
     ).stdout
 
 
-def consumer_tree(*feature_args):
-    output = cargo("tree", "-p", "forge-bootstrap-demo", "--edges", "normal", "--prefix", "none",
+def consumer_tree(*feature_args, package="forge-bootstrap-demo"):
+    output = cargo("tree", "-p", package, "--edges", "normal", "--prefix", "none",
                    "--format", "{p}", "--no-default-features", *feature_args)
     return {line.split()[0] for line in output.splitlines() if line.strip()}
 
 
-def main():
-    metadata = json.loads(cargo("metadata", "--format-version", "1", "--no-deps"))
-    packages = {p["name"]: p for p in metadata["packages"]}
+def validate_packages(packages):
     if set(packages) != set(ALLOWED):
         raise SystemExit("Workspace membership changed; review the architecture guard explicitly.")
     edges = {name: set() for name in packages}
@@ -78,6 +81,37 @@ def main():
 
     for name in packages:
         visit(name)
+
+
+def negative_fixtures(packages):
+    fixtures = []
+    bad = copy.deepcopy(packages)
+    bad["forge-task"]["dependencies"].append({"name": "forge-kernel", "kind": None,
+        "path": str(ROOT / "forge-kernel"), "optional": False})
+    fixtures.append(("core-to-implementation edge", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-bootstrap-demo"]["features"]["default"] = ["disk"]
+    fixtures.append(("impure default", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-terminal"]["dependencies"][0]["path"] = str(ROOT / "wrong-package")
+    fixtures.append(("wrong dependency origin", bad))
+    bad = copy.deepcopy(packages)
+    bad["unreviewed-package"] = {}
+    fixtures.append(("unreviewed membership", bad))
+    for label, fixture in fixtures:
+        try:
+            validate_packages(fixture)
+        except SystemExit:
+            continue
+        raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
+    print("PASS: four in-memory negative architecture fixtures rejected")
+
+
+def main():
+    metadata = json.loads(cargo("metadata", "--format-version", "1", "--no-deps"))
+    packages = {p["name"]: p for p in metadata["packages"]}
+    validate_packages(packages)
+    negative_fixtures(packages)
     pure = consumer_tree()
     messages = consumer_tree("--features", "messages")
     disk = consumer_tree("--features", "disk")
@@ -86,10 +120,20 @@ def main():
         raise SystemExit(f"Pure consumer dependency mismatch: {sorted(pure)}")
     for name, actual, expected in [("messages", messages, MESSAGES_PROFILE),
                                    ("disk", disk, DISK_PROFILE),
-                                   ("combined", combined, set(ALLOWED))]:
+                                   ("combined", combined, MESSAGES_PROFILE | DISK_PROFILE)]:
         if actual != expected:
             raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
-    print("PASS: six core + optional kernel + three demo packages; local-only allowed edges; acyclic graph")
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES)
+    for args in [(), ("--features", "disk")]:
+        if consumer_tree(*args, package="forge-terminal") != local_expected:
+            raise SystemExit("Local terminal consumer has unexpected package dependencies")
+    features = cargo("tree", "-p", "forge-terminal", "--no-default-features", "--edges", "features", "--prefix", "none")
+    if 'forge-kernel feature "disk"' in features or 'forge-kernel feature "default"' in features:
+        raise SystemExit("Node-only terminal unexpectedly includes native disk module")
+    if 'forge-kernel feature "node"' not in features:
+        raise SystemExit("Node-only terminal must select its explicit node capability")
+    print("PASS: six core + optional kernel + local application/terminal + three demos; local allowed DAG")
+    print("PASS: node-only terminal omits disk Cargo feature and all demonstration implementations")
     print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 
 

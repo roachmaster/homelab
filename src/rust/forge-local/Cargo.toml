@@ -1,0 +1,21 @@
+[package]
+name = "forge-local"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+default = ["disk"]
+disk = ["forge-kernel/disk"]
+
+[dependencies]
+forge-bootstrap.workspace = true
+forge-bridge.workspace = true
+forge-ingress-contract.workspace = true
+forge-provider.workspace = true
+forge-io-client.workspace = true
+forge-task.workspace = true
+forge-kernel = { path = "../forge-kernel", default-features = false, features = ["node"] }
+
+[lints]
+workspace = true

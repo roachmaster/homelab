@@ -3,23 +3,27 @@ digraph HostedKernelPlan {
   node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=12, margin="0.2,0.13", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4];
   edge [fontname="DejaVu Sans", fontsize=10, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
   rankdir=TB;
-  label="07  Hosted kernel plan — reuse the foundation; add one phase at a time\nComponent/phase view, not a deployed system. Amber = proposed; teal = existing code to reuse.";
-  driver [label="Existing in-process typed driver\nNo required CLI, GUI or network", fillcolor="#087f8c", fontcolor="white"];
+  label="07  Hosted kernel plan — reuse the foundation; add one phase at a time\nComponent/phase view, not remote deployment. Amber = proposed; teal = implemented local code.";
+  driver [label="Implemented terminal / typed caller\nCatalog help + local commands\nNo network boundary", fillcolor="#087f8c", fontcolor="white"];
   peer [label="Phase 3: configured remote peer\nIdentity + timeout/unknown outcomes\nNo transport selected", fillcolor="#f2f3f5", color="#6f7782", style="rounded,dashed,filled"];
   subgraph cluster_host {
-    label="Proposed application host — explicit composition and one owner first";
+    label="Local application host — explicit composition; later jobs/network are proposed";
     fontname="DejaVu Sans"; fontsize=14; color="#ae7b26"; style="rounded,dashed"; margin=18;
     adapter [label="Phase 3: selected thin adapter\nVerify caller / bound / decode\nNo direct client bypass", fillcolor="#fff1d6", color="#ae7b26", style="rounded,dashed,filled"];
     bridge [label="Existing typed Bridge\nHeader route -> admission -> variant\nSynchronous, not Send / Sync", fillcolor="#087f8c", fontcolor="white"];
-    node_service [label="Phase 1: node.info / node.status\nExplicit node config + capability versions\nTruthful readiness, not machine control", fillcolor="#fff1d6", color="#ae7b26"];
+    node_service [label="Implemented local node + discovery\nnode.info / node.status / system.commands\nConfigured label + client uptime, not health", fillcolor="#087f8c", fontcolor="white"];
     jobs [label="Phase 2: bounded job module\nSubmit / inspect / cooperative cancel\nOne allowlisted task, volatile first", fillcolor="#fff1d6", color="#ae7b26"];
     ports [label="Injected typed task / client boundary\nTask prepares; IoClient executes\nFactories construct; providers own lifetime", fillcolor="#e8f4f7"];
     disk [label="Existing forge-kernel::disk\nNative list / pwd / cd / metadata\nClient-local cwd; NOT a sandbox", fillcolor="#087f8c", fontcolor="white"];
     adapter -> bridge [style=dashed, label="same checked ingress"];
-    bridge -> node_service [label="next two bindings"];
+    bridge -> node_service [label="registered typed bindings"];
+    node_service -> ports [label="prepared observation request"];
     bridge -> jobs [style=dashed, label="later lifecycle bindings"];
-    jobs -> ports [style=dashed, label="prepared requests, if needed"];
+    jobs -> ports [style=dashed, label="later I/O jobs only"];
     ports -> disk [label="selected native client"];
+    node_client [label="Existing forge-kernel::node\nCompile-target constants + instance clock\nInjected provider can report failure", fillcolor="#087f8c", fontcolor="white"];
+    ports -> node_client [label="injected observation client"];
+    bridge -> ports [label="admitted disk task"];
     {rank=same; node_service; jobs;}
   }
   os [label="Existing host operating system\nProcesses / protected memory / drivers / filesystem\nForge remains a hosted application, not a bootable kernel", fillcolor="#f2f3f5", color="#6f7782"];

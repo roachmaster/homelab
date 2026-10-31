@@ -4,10 +4,24 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+default = ["disk"]
+disk = []
+node = ["dep:forge-task"]
+
 [dependencies]
 forge-bootstrap.workspace = true
 forge-io-client.workspace = true
 forge-provider.workspace = true
+forge-task = { workspace = true, optional = true }
+
+[[test]]
+name = "disk"
+required-features = ["disk"]
+
+[[test]]
+name = "node"
+required-features = ["node"]
 
 [lints]
 workspace = true

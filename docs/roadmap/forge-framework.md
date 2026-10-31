@@ -6,6 +6,14 @@
 
 The [first std-only Rust workspace](../../src/rust/README.md) establishes part of Stage 1: validated headers, generic typed request/response, explicit payload-kind agreement, frozen duplicate-safe routes and an injected admission seam. Separate factory/provider/lease primitives support singleton/transient injection. The in-process greeting example proves composition without a transport. Independent `IoClient` and `Task` contracts now also support prepared-request execution, pure computation and injected-client orchestration, initially proven with fake-only examples; the native disk follow-on is documented below. A synchronous `Task` is not the supervised/durable worker in Stage 4. It does **not** complete Stage 1 deadline/security requirements, the provider graph validator, or the durable jobs slice below. The workspace documents exact executed checks and deferred behavior. A sixth core crate now implements atomic typed group registration/freeze, and three optional-demo packages prove configured registrar assembly without adding production transports.
 
+## Local runnable system checkpoint — implemented
+
+`forge-kernel::node` now provides explicit configured identity and local observation contracts. `forge-local` composes selected node/disk registrars, freezes before creation, owns providers, injects tasks and registers typed bridge bindings with their discovery metadata. `forge-terminal` is a separate std-only adapter with help, argv commands and bounded literal-line sessions. Help uses the admitted catalog; every business request uses the shared bridge.
+
+Proof covers node-provider replacement without task edits, missing/conflicting group failures before creation, earlier-client cleanup after later startup failure, unknown/mismatched routing before effects, per-session native cwd and failed-cd preservation, actual terminal process execution, error codes and safe output. Compile-time node-only builds omit the disk module; the earlier pure consumer still omits the whole kernel package. No six-core-library API changed.
+
+This is **not** production health, authentication, bounded directory listings, jobs, networking, remote execution or a bootable Pi OS. Node status reports only this client's response and instance uptime. Next work remains a separately designed bounded job lifecycle, followed by a chosen authenticated remote boundary. [Run instructions](../../src/rust/forge-terminal/README.md) · [Assembly contract](../../src/rust/forge-local/README.md).
+
 ## Next core slice: bootstrap and registrars
 
 **Implemented narrow checkpoint:** `src/rust/forge-bootstrap` now provides prepared groups, atomic consuming registration, declared-order validation/freeze and typed tuple extraction. The five earlier library contracts are unchanged. Three demo packages prove optional capability/implementation registration and explicit provider/task assembly; that bootstrap checkpoint added no CLI, HTTP, IPC, remote execution, home renderer or async runtime. Native disk access is the separate follow-on checkpoint below. The [bootstrap reference](../architecture/bootstrap-registrars.md) distinguishes the real APIs from deferred policies.
@@ -33,7 +41,7 @@ Native temporary-fixture tests cover deterministic listings, state isolation, fa
 
 ## Kernel planning sequence
 
-The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) makes the immediate next implementation **local `node.info` and `node.status` only**, reusing typed bootstrap/bridge/provider contracts. Later gates add one bounded cooperative job lifecycle, then a deliberately chosen remote boundary starting with node reads. Those additions are proposed, not implemented or authorized by this plan. No transport, runtime, GUI, automatic discovery, file mutation or bootable Pi kernel is selected.
+The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) now records the narrow implemented **local node/status/discovery and terminal checkpoint**, reusing typed bootstrap/bridge/provider contracts. The next separately authorized work is one bounded cooperative job lifecycle, then a deliberately chosen remote boundary starting with node reads. Those later additions remain proposed. No remote transport, async runtime, GUI, automatic peer discovery, file mutation or bootable Pi kernel is selected.
 
 The small volatile job proof in that plan precedes—not satisfies—the durable acceptance gate below. The existing durable jobs example remains a separate later consumer, not a requirement to turn every local command into a stored job.
 

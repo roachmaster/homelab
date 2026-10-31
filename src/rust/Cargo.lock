@@ -66,6 +66,20 @@ dependencies = [
  "forge-bootstrap",
  "forge-io-client",
  "forge-provider",
+ "forge-task",
+]
+
+[[package]]
+name = "forge-local"
+version = "0.1.0"
+dependencies = [
+ "forge-bootstrap",
+ "forge-bridge",
+ "forge-ingress-contract",
+ "forge-io-client",
+ "forge-kernel",
+ "forge-provider",
+ "forge-task",
 ]
 
 [[package]]
@@ -78,4 +92,12 @@ version = "0.1.0"
 dependencies = [
  "forge-io-client",
  "forge-provider",
+]
+
+[[package]]
+name = "forge-terminal"
+version = "0.1.0"
+dependencies = [
+ "forge-io-client",
+ "forge-local",
 ]

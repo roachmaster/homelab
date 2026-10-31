@@ -1,18 +1,52 @@
 # forge-kernel — optional hosted system clients
 
-The first module, **`disk`**, provides native filesystem inspection and a
-client-owned working directory. The name groups related low-level system clients;
+The default module, **`disk`**, provides native filesystem inspection and a
+client-owned working directory. Opt-in **`node`** adds local configured identity
+and narrow instance observations. The name groups related low-level system clients;
 it is **not a bootable operating-system kernel**, `no_std` runtime or Raspberry Pi
 image. It uses hosted Rust `std::fs`, `std::path` and metadata APIs—not Bash,
-shell commands, subprocesses or command-output parsing. No other system-client
-placeholder modules are added.
+shell commands, subprocesses or command-output parsing. No unrelated system-client placeholder modules are added.
 
-This optional implementation crate depends only on `forge-bootstrap`,
-`forge-provider` and `forge-io-client`. None of the six core packages imports it.
-Tasks remain consumer-owned; a client executes the caller's already prepared
-`DiskRequest` rather than assembling an automation workflow.
+This optional implementation crate depends on `forge-bootstrap`,
+`forge-provider` and `forge-io-client`; enabling `node` also selects `forge-task`.
+None of the six core packages imports it. Tasks remain capability-owned; clients
+execute prepared requests rather than assembling automation workflows. The
+`disk` feature remains enabled by default for compatibility. A node-only consumer
+uses `default-features = false, features = ["node"]`; disk code is not compiled
+into that feature selection.
 
-## Implemented operations
+## Local node observations (`node` feature)
+
+`NodeConfig::Local { id }` supplies an explicit logical label. The registrar
+accepts 1–128 ASCII letters/digits/dots/underscores/hyphens, stages the
+`kernel.node.client` factory binding, and reads no environment, clock or file.
+After consuming registration/freeze, `NodeFactories::client.create()` creates a
+fresh `NodeClient` and starts its monotonic instance timer. `NodeFactories<F>`
+keeps another selected registrar's compatible factory typed; its default factory
+type is `NodeClientFactory`, not a universal erased provider. Startup settings are
+not runtime command payloads.
+
+| Prepared request | Result / limit |
+| --- | --- |
+| `NodeRequest::Info` | Configured `id`, `target_os` and `target_arch` from Rust compile-target constants; not authenticated identity or a hardware probe |
+| `NodeRequest::Status` | `NodeState::Responding` and `instance_uptime` since this client was created; not whole-application readiness, OS uptime or dependency health |
+
+No CPU/memory collector, disk probe, scheduler, job service, network discovery or
+remote identity is implied. The application adds its selected route/capability
+information from actual registration; this client does not discover that catalog.
+The current native constant/clock adapter has no fallible resource collector.
+Other injected adapters can return `NodeError::Unavailable` instead of silently
+reporting healthy or zero measurements.
+
+`NodeTask<C>` accepts capability-owned `NodeCommand::{Info,Status}`, prepares the
+corresponding typed `NodeRequest`, calls its constructor-injected `IoClient`, and
+verifies the response variant. It preserves observation errors and performs no
+hidden retry, provider lookup or routing. A fake observation client substitutes
+without changing task logic. Host-owned singleton versus transient scope is
+explicit; transient acquisition starts a fresh instance timer, not an application
+session or global machine lifetime. Task and client remain envelope-independent.
+
+## Implemented disk operations
 
 | Request | Result / behavior |
 | --- | --- |
@@ -51,7 +85,8 @@ The [optional consumer](../examples/forge-bootstrap-demo/src/disk.rs) stages the
 registrar, freezes the group, constructs a provider and injects a ready typed
 client into a task and checked bridge bindings. Its list-current task prepares
 `List { path: "." }`; a fake client can substitute without changing that task.
-No envelope/bridge/task dependency is added to this implementation crate.
+The disk implementation has no envelope, bridge or task dependency. The separate
+node feature imports the task contract for its small injected observation task.
 
 ## Path, symlink and concurrency contract
 
@@ -103,7 +138,8 @@ is protected by Rust ownership/mutexes, not a promise to catch arbitrary panics.
 From `src/rust/`:
 
 ```bash
-cargo test -p forge-kernel --offline --locked
+cargo test -p forge-kernel --all-features --offline --locked
+cargo test -p forge-kernel --no-default-features --features node --offline --locked
 cargo test -p forge-bootstrap-demo --no-default-features --features disk --offline --locked
 cargo run -p forge-bootstrap-demo --example disk_access --no-default-features --features disk --offline --locked
 python3 scripts/check_dependencies.py
@@ -115,3 +151,8 @@ Native tests cover registration-before-I/O, directory validation, ordering,
 state isolation, failed navigation, provider lifetimes, typed errors and metadata.
 Unix tests additionally cover symlinks and non-UTF8 names. Tests run on Linux;
 Windows-specific behavior and Raspberry Pi deployment are not certified here.
+
+Node tests cover bounded configuration, metadata staging and duplicate preservation,
+clock creation only after freeze, independent client/provider lifetimes, actual
+compile-target/monotonic observations, exact task-prepared requests, fake-client
+substitution, response-kind rejection and error propagation without retry.

@@ -1,8 +1,8 @@
 # Rust source sets — first Forge core
 
-This directory contains **six core packages, one optional hosted system package and three
+This directory contains **six core packages, one optional hosted system package, a local application/terminal pair and three
 clearly separated demo packages**, all original, std-only and synchronous. Typed registration/freeze and
-optional-package assembly and native disk inspection/navigation now work; the broader managed framework/durable reference
+optional-package assembly, local node observations, admitted command discovery and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
 
 | Package | Responsibility | Normal dependencies |
@@ -24,7 +24,21 @@ payload fallback, transport library, global enum, global registry or service loc
 
 ## Optional native system clients
 
-[`forge-kernel`](forge-kernel/README.md) groups hosted low-level clients; `disk` is the first module. Its real native filesystem operations are list, pwd, client-local cd and permission inspection. It imports bootstrap/provider/I/O-client contracts; core never imports it. No shell wrapper, process cwd mutation, file mutation API, bootable OS or Raspberry Pi image is included. Other system clients remain unimplemented, not empty scaffolds.
+[`forge-kernel`](forge-kernel/README.md) groups hosted low-level clients; `disk` is the first module. Its real native filesystem operations are list, pwd, client-local cd and permission inspection. It imports bootstrap/provider/I/O-client contracts; core never imports it. No shell wrapper, process cwd mutation, file mutation API, bootable OS or Raspberry Pi image is included. The opt-in `node` module adds configured identity, compile-target facts and client-instance uptime; it does not claim machine health. `disk` remains enabled by default for existing consumers. New local consumers select kernel features explicitly.
+
+## Runnable local system
+
+- [`forge-local`](forge-local/README.md) owns explicit node/disk composition, per-application providers, typed command/result sums and registered command descriptors. It imports the six core contracts and selected kernel modules; no core imports it.
+- [`forge-terminal`](forge-terminal/README.md) is the std-only terminal adapter and `forge` binary. It imports only the local application contract and I/O-client contract. Console I/O is an injected typed client, not business policy.
+
+```bash
+cargo run -p forge-terminal -- --help
+cargo run -p forge-terminal -- --node-id desk node.info
+cargo run -p forge-terminal -- --session
+cargo run -p forge-terminal --no-default-features -- node.status
+```
+
+The default terminal enables native disk; `--no-disk` omits it at assembly. `--no-default-features` omits its code/module from the terminal's kernel feature graph. The node module still requires the kernel package; the older pure demo below remains the proof of whole-package omission. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. No process commands, network, jobs or destructive file operations are added.
 
 ## Optional consumer proof
 
@@ -57,6 +71,8 @@ cargo test -p forge-bootstrap-demo --no-default-features --offline --locked
 cargo test -p forge-bootstrap-demo --no-default-features --features disk --offline --locked
 cargo clippy --workspace --all-targets --all-features --offline --locked -- -D warnings
 cargo clippy -p forge-bootstrap-demo --all-targets --no-default-features --offline --locked -- -D warnings
+cargo test -p forge-local -p forge-terminal --no-default-features --offline --locked
+cargo clippy -p forge-terminal --all-targets --no-default-features --offline --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --offline --locked
 cargo run -p forge-bootstrap-demo --no-default-features --offline --locked
 cargo run -p forge-bootstrap-demo --features messages --offline --locked
@@ -74,9 +90,8 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite has 99
-integration tests and five doctests (four compile-fail, one runnable); the pure
-consumer is additionally checked separately. The suite covers invalid
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **138 unit/integration tests and five doctests** (four compile-fail, one runnable), including the local application and terminal; the pure and node-only
+consumers are additionally checked separately. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
 header/variant mismatch, preserved duplicate binding, typed error propagation,
 nested application sums, factory substitution, scope identity and lease cleanup.
@@ -86,7 +101,7 @@ effects after rejected bridge admission. Bootstrap tests add late multi-binding
 conflict preservation, typed recovery after rejection, missing/self/forward
 requirements, freeze restrictions, config/default selection, lazy transient
 creation, startup failure cleanup, and actual optional dependency omission.
-Native disk tests add real temporary-fixture listing/navigation/permission checks, non-UTF8/symlink cases on Unix, isolated sessions and admission-before-cd; fake substitution tests remain separate evidence. Windows-specific cases are present but not executed on this Linux host.
+Local system tests add native/configured node observations, substituted provider failures, catalog/binding consistency, actual terminal process commands and stateful sessions, bounded input and escaped native names. Native disk tests add real temporary-fixture listing/navigation/permission checks, non-UTF8/symlink cases on Unix, isolated sessions and admission-before-cd; fake substitution tests remain separate evidence. Windows-specific cases are present but not executed on this Linux host.
 No minimum-supported-Rust-version guarantee or production certification is claimed.
 
 ## Task/client boundary
@@ -126,7 +141,7 @@ implementation is pure or that a future client respects its semantics.
   may still share captured backing state. Ordinary destruction is synchronous.
 
 `forge-bootstrap` validates assembly binding metadata, not a route-descriptor
-catalog. Existing bridge registration still rejects route duplicates; the demo
+catalog. The local application now registers its presentation descriptors together with checked bindings and tests that every advertised command is invokable; this is an application-specific guarantee, not a generic core catalog. Existing bridge registration still rejects route duplicates; the demo
 tests its known route set. Metadata cannot prove arbitrary factory code follows
 its declarations. Registrar purity and construction/drop order are tested behavior,
 not a sandbox or automatic teardown guarantee. Runtime effects are never rolled back.

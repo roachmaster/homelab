@@ -1,5 +1,5 @@
 [workspace]
-members = ["forge-ingress-contract", "forge-bridge", "forge-provider", "forge-io-client", "forge-task", "forge-bootstrap", "forge-kernel", "examples/forge-demo-messages", "examples/forge-demo-memory-client", "examples/forge-bootstrap-demo"]
+members = ["forge-ingress-contract", "forge-bridge", "forge-provider", "forge-io-client", "forge-task", "forge-bootstrap", "forge-kernel", "examples/forge-demo-messages", "examples/forge-demo-memory-client", "examples/forge-bootstrap-demo", "forge-local", "forge-terminal"]
 resolver = "2"
 
 [workspace.package]
@@ -23,3 +23,5 @@ forge-demo-messages = { path = "examples/forge-demo-messages" }
 forge-demo-memory-client = { path = "examples/forge-demo-memory-client" }
 
 forge-kernel = { path = "forge-kernel" }
+
+forge-local = { path = "forge-local", default-features = false }

@@ -6,11 +6,8 @@ bounded job lifecycle, then one explicitly selected remote boundary. Reuse the
 six core crates and optional `forge-kernel` clients; do not start a new kernel,
 distributed scheduler or shell platform.
 
-**Status:** research and proposed work, checked against homelab
-`1267205e1ee0af849bdefd347167836dab82bd28` on 2026-10-31. Only the existing pieces
-listed below are implemented. Command names outside the existing disk demo are
-illustrative contracts, not exported APIs. This plan changes no Rust code and
-selects no transport, runtime, deployment target or device.
+**Research baseline:** checked against homelab
+`1267205e1ee0af849bdefd347167836dab82bd28` on 2026-10-31. The local node/disk/terminal checkpoint described below is now implemented. Job and remote command names remain illustrative contracts, not exported APIs. The research plan still selects no remote transport, async runtime, deployment target or device.
 
 [Source ledger](forge-kernel-sources.md) · [Plan diagram](diagrams/07-hosted-kernel-plan.svg) ·
 [Existing bootstrap](bootstrap-registrars.md) · [Current disk client](../../src/rust/forge-kernel/README.md)
@@ -49,8 +46,7 @@ does not replace those controls. [Linux cgroup v2 documentation](https://docs.ke
 | [Task](../../src/rust/forge-task/src/lib.rs) and [IoClient](../../src/rust/forge-io-client/src/lib.rs) | Task prepares/computes/orchestrates; client executes typed prepared requests | `run`/`execute` may block; neither supplies a scheduler or cancellation |
 | [Kernel disk module](../../src/rust/forge-kernel/src/disk.rs) | Native list/pwd/cd/permissions; config/factory/registrar | No sandbox, file mutation, bounded listing, remote codec or per-user session manager |
 
-The recorded workspace checks cover 99 integration tests and five doctests;
-this documentation pass does not rerun them or extend their certification.
+Current executed checks, including the new local application/terminal tests, are recorded in the [Rust workspace guide](../../src/rust/README.md). The earlier research-only pass did not execute source tests.
 The demo's caller-controlled admission flag is **not authentication**.
 
 ## Minimal command surface
@@ -58,19 +54,21 @@ The demo's caller-controlled admission flag is **not authentication**.
 | When | Operations | Meaning |
 | --- | --- | --- |
 | Already implemented | `DiskRequest::{Pwd,List,ChangeDirectory,Permissions}` | Native disk client; current demo routes use `demo.disk.*` |
-| Next local slice | `node.info`, `node.status` | Identify this application node and report its assembled capabilities/status |
+| Implemented local slice | `node.info`, `node.status`, `system.commands` | Configured node label/target, client-instance uptime/responding, actual registered commands |
 | After lifecycle design | `jobs.submit`, `jobs.inspect`, `jobs.cancel` | Manage one allowlisted application job kind; not arbitrary program execution |
 | After a remote boundary is chosen | `nodes.list` plus remote node reads | Configured peers with last observation and explicit reachability state |
 | Later if a consumer needs them | Bounded `jobs.list`, `resources.inspect`, structured recent events | Query limits and retention first; no unbounded monitoring platform |
 
-Keep a generic home/menu as a future presentation over these operations. It must
+The implemented terminal help is a presentation of the admitted registered catalog. Keep any richer generic home/menu as a future presentation over these operations. It must
 not become a requirement, a second router or a source of permissions. Avoid
 `exec`, kill-arbitrary-PID, mount, reboot, package installation, file deletion,
 network reconfiguration and device management in these initial phases.
 
 ## Phase 1 Local node information and status
 
-**Smallest next patch:** add one coherent node module to the in-process consumer,
+**Implemented narrow checkpoint:** [`forge-kernel::node`](../../src/rust/forge-kernel/README.md), [`forge-local`](../../src/rust/forge-local/README.md) and [`forge-terminal`](../../src/rust/forge-terminal/README.md) now provide the local runnable system. The terminal selects typed startup config, obtains admitted command discovery and invokes node/disk requests through the shared bridge. Node status means the observation client responded and reports its own uptime—not whole-host readiness. Actual selected route/version descriptors are returned by `system.commands`. Disk remains optional at Cargo feature and startup-selection boundaries. Generic readiness, resource telemetry and a managed lifecycle remain deferred.
+
+**Original phase direction (broader than this checkpoint):** add one coherent node module to the consumer,
 with two typed request variants and two bridge bindings. No new core crate is
 needed just for two operations. The application selects its packages and supplies
 typed `NodeConfig`; bootstrap calls registrars, freezes, constructs providers and
@@ -257,7 +255,7 @@ catalog coverage.
 
 | Decision | Recommendation now | Revisit before |
 | --- | --- | --- |
-| Next implementation | Two local node operations; preserve existing APIs | Starting Phase 1 |
+| Next design/implementation | One bounded pure job lifecycle; preserve current local APIs | Separate Phase 2 authorization and useful job selection |
 | First job | Small pure computation with bounded checkpoints, volatile history | Phase 2; user chooses useful job later |
 | Executor | Single owner with cooperative steps first | Blocking work or parallelism |
 | Discovery | Explicit peer config; show observed freshness | More than a small managed peer set |
@@ -273,6 +271,4 @@ and a bare-metal kernel are different projects. Target compatibility must be
 built and tested on selected hardware; no cross-compilation, flashing or kernel
 replacement is authorized here. [Raspberry Pi kernel documentation](https://www.raspberrypi.com/documentation/computers/linux_kernel.html)
 
-**Next implementation, when requested:** Phase 1 only. Its deliverable is a
-small typed local node module, truthful status and focused tests—not all the
-future services or remote policies in this research plan.
+**Current checkpoint:** the narrow local node/discovery/terminal system is implemented with focused tests. Broader readiness and telemetry remain future work. **Next implementation, when separately requested:** design one bounded pure job lifecycle; do not infer authorization for remote services or all policies in this research plan.
