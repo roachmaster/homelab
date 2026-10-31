@@ -19,6 +19,8 @@ Return **status/evidence; input; hops and checks; possible effects; outcome; pro
 
 For a client-using task, trace **admitted binding → `Task::run` → prepared typed request → injected `IoClient::execute` → typed response/error**. The client may encode that prepared request for its boundary, but must not assemble business content. Use fake clients to check the exact prepared request, preserved error causes, no send after a failed fetch in a fail-fast flow, and no hidden retry. A fake is not proof of real I/O conformance; a pure task has no client hop.
 
+Keep startup separate from this trace: registrars stage configured factories during bootstrap; request headers do not choose providers or carry startup configuration. Trace the already-assembled task/client binding, not a service-locator lookup. A presentation menu entry is not authorization; an action invoking application work still uses the admitted typed bridge.
+
 ## Small example
 
 `jobs.submit @ 1` with `JobsPayload::Status(id)` is a mismatch. Reject before either handler's effects; never repair the header or dispatch status by inspecting the variant. Check that neither capability storage nor its per-operation acquisition is invoked.

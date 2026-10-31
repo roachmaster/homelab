@@ -1,20 +1,27 @@
 digraph Packages {
-graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.65, ranksep=0.9, bgcolor="white"]; node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4]; edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
-rankdir=TB; label="04  Package dependencies — compile-time imports, not runtime calls\nDashed edges are optional; an in-process driver can prove ingress without a transport starter";
-app [label="reference-app\nTyped factories/provider bindings\n+ handlers / edge codecs / driver", fillcolor="#fff1d6", color="#ae7b26"];
-adapter [label="chosen-ingress-adapter\nOptional; no transport selected"];
-runtime [label="forge-runtime\nConfig + validated lifetime plan\nNo domain service lookup"];
-bridge [label="forge-bridge\nBridge<P> / Registry<P>\nHeader + variant admission"];
-contract [label="forge-ingress-contract\nEnvelope<P> / Ingress<P> / Handler<P>\nAdmissionPolicy / Outcome<R>", fillcolor="#087f8c", color="#087f8c", fontcolor="white"];
-feature [label="jobs\nJobsPayload enum + policy\nFeature-owned outbound ports", fillcolor="#087f8c", color="#087f8c", fontcolor="white"];
-transport [label="Selected I/O or codec library\nOnly at an optional boundary", fillcolor="#f0f2f4", color="#8b98a3"];
-app -> { runtime bridge feature contract };
-app -> adapter [style=dashed];
-app -> transport [style=dashed, label="edge codec if selected"];
-adapter -> contract;
-adapter -> runtime [style=dashed];
-adapter -> transport [style=dashed];
+graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.5, ranksep=0.8, bgcolor="white"];
+node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4];
+edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
+rankdir=TB; label="04  Package dependencies — current contracts + proposed assembly\nArrows are imports, not calls; dashed imports are conditional. No transport is selected.";
+app [label="Application composition [proposed]\nTyped config / factory-group slots\nBootstrap calls selected registrars\nOwns bindings + in-process driver", fillcolor="#fff1d6", color="#ae7b26"];
+feature [label="Capability [application-owned]\nTyped payload + result / task policy\nConsumer-owned I/O contracts"];
+impl [label="Optional implementation crate [proposed]\nConcrete client + typed config\nCohesive factories + registrar"];
+bootstrap [label="forge-bootstrap [NEXT]\nGroup metadata / stage / freeze\nNo automatic service resolver", fillcolor="#fff1d6", color="#ae7b26"];
+bridge [label="forge-bridge [implemented]\nHeader-selected typed dispatch"];
+contract [label="forge-ingress-contract [implemented]\nEnvelope<P> / Header / Response<R>\nPayload / AdmissionPolicy", fillcolor="#087f8c", color="#087f8c", fontcolor="white"];
+provider [label="forge-provider [implemented]\nFactory / InstanceProvider\nSingleton / Transient"];
+task [label="forge-task [implemented]\nTask::run"];
+io [label="forge-io-client [implemented]\nIoClient::execute"];
+boundary [label="Selected boundary dependency\nOnly in optional implementation", fillcolor="#f0f2f4", color="#8b98a3"];
+app -> {feature bootstrap bridge provider contract};
+app -> impl [style=dashed];
+feature -> task;
+feature -> contract [style=dashed, label="if it implements Payload"];
+feature -> io [style=dashed, label="only client-using tasks"];
+impl -> {io provider bootstrap};
+impl -> feature;
+impl -> boundary [style=dashed];
 bridge -> contract;
-{rank=same; adapter; runtime; bridge; feature;}
-{rank=same; contract; transport;}
+{rank=same; impl; feature; bridge;}
+{rank=same; bootstrap; provider; task; io; contract; boundary;}
 }

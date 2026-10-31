@@ -29,6 +29,10 @@ Record ownership transfer versus borrowing; only close resources owned by this a
 
 In Rust, a generic associated lease can express borrowed ownership, but it does not automatically permit a `dyn` provider. Choose a generic/concrete provider or a genuinely object-safe capability-specific contract. `Arc` is not a thread-safety adapter for `RefCell`; native async trait syntax does not by itself make a trait dyn-compatible. Inspect actual bounds and executor requirements. Ordinary `Drop` cannot await reset/rollback/flush; define explicit asynchronous cleanup plus a safe fallback when needed. Avoid claiming RAII guarantees cleanup after process abort, leaked guards or already committed remote effects.
 
+## Configured registrar boundary, when needed
+
+An optional implementation package can own its concrete client, dependencies, typed startup config, factories and reusable registrar. Application bootstrap loads environment/configuration once and invokes selected registrars; registration stages complete recipes, not live resources. Keep unrelated factory types in typed application groups rather than an erased service map. Validate group/selection conflicts before construction and do not publish partial assembly. A default is skipped by explicit selection, not overwritten by a failing duplicate. This is a boundary pattern, not a requirement that every contract crate implement a registrar or that all projects adopt a DI container.
+
 ## Verify behavior, not labels
 
 Test invalid dependency plans before construction side effects; non-mutating duplicate rejection; explicit override precedence; construction failure without publication; host isolation and reuse identity; transient state independence where promised; lease exhaustion/return/reset or deliberate retention; partial-start cleanup; cancellation and provider close with outstanding work. Distinguish wrapper allocation from shared backend state. Handler tests should inject the port directly; real adapter tests prove the selected provider's behavior. Confirm replacing the provider leaves typed payload, header admission and domain contracts unchanged.

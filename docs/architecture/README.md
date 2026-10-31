@@ -12,9 +12,10 @@ The framework is a library family. No particular transport is required or select
 2. [Framework blueprint](forge-framework-blueprint.md) — the target shape, package boundaries, C4 views, request sequence, and reliability contract.
 3. [DSL semantic reference and framework skills](framework-dsl.md) — shared vocabulary, status labels, a worked composition model and task-specific workflows.
 4. [Module and starter authoring](module-authoring.md) — how a developer plugs in one cohesive capability without editing the bridge.
-5. [Provider/factory dependency injection](dependency-injection.md) — typed construction, acquisition scopes, leases, and bootstrap ownership.
-6. [Architecture decisions](decisions.md) — tradeoffs and explicit non-goals.
-7. [Delivery roadmap](../roadmap/forge-framework.md) — the smallest useful slice and evidence required before expanding.
+5. [Bootstrap and registrars](bootstrap-registrars.md) — package-owned typed configuration, cohesive factory groups and the concrete next core slice.
+6. [Provider/factory dependency injection](dependency-injection.md) — typed construction, acquisition scopes, leases, and bootstrap ownership.
+7. [Architecture decisions](decisions.md) — tradeoffs and explicit non-goals.
+8. [Delivery roadmap](../roadmap/forge-framework.md) — the smallest useful slice and evidence required before expanding.
 
 [All diagrams and editable Graphviz sources](diagrams/README.md) · [Per-repository reports](../reviews/forge/README.md)
 
@@ -31,7 +32,7 @@ Selected thin input adapter, or an in-process caller
 
 The shared envelope/bridge is generic over the capability payload enum. Header metadata selects the registered destination, and header/variant mismatches are rejected before effects. JSON is only an optional external serialization format, never the internal business payload.
 
-Factories construct typed implementations; providers govern acquisition and reuse. Bootstrap resolves dependencies and injects narrow ports into handlers; providers are not a request-time service locator.
+Factories construct typed implementations; providers govern acquisition and reuse. Application bootstrap configures and calls selected registrars, stages their cohesive factory groups, validates/freezes the typed plan, then constructs dependencies and injects narrow ports into tasks/handlers. This next assembly layer is proposed; providers are not a request-time service locator.
 
 “Plug and play” means adding a linked starter/capability, supplying typed configuration, and getting deterministic assembly or an actionable failure. It does not mean dynamic code loading, a universal service locator, mandatory microservices, or automatic exactly-once effects.
 

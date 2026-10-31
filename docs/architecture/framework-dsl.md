@@ -2,7 +2,7 @@
 
 **Provisional composition DSL; a small core subset is implemented.** This is a small shared vocabulary for the framework taking shape. The intended direction is a **Rust-embedded composition DSL** using ordinary typed functions/builders and statically linked modules. No parser, macro set, compiler, module/host-composition builder API or YAML/JSON manifest language is claimed. Names and spelling can evolve.
 
-This page is the canonical reference for the three framework-specific skills. Use the existing [blueprint](forge-framework-blueprint.md), [module contract](module-authoring.md) and [DI design](dependency-injection.md) when more detail is needed.
+This page is the canonical reference for the three framework-specific skills. Use the existing [blueprint](forge-framework-blueprint.md), [module contract](module-authoring.md) and [DI design](dependency-injection.md) when more detail is needed. The [bootstrap/registrar reference](bootstrap-registrars.md) owns the next-slice staging, typed-storage and assembly design; it is not implemented syntax.
 
 ## Implemented subset
 
@@ -21,7 +21,9 @@ The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`,
 | --- | --- |
 | Application / composition root | Selects concrete modules and dependencies; owns assembly/lifecycle, not business workflows |
 | Capability | Cohesive policy/use cases, typed payload/result and consumer-owned ports; not necessarily a separate service |
-| Module / starter | Opt-in declaration of requirements, provided bindings, config and lifecycle; a starter simplifies a real optional integration |
+| Module / starter | Optional cohesive capability/implementation package; owns its typed startup config, dependencies, factories and reusable registrar |
+| Bootstrap / registrar | Application bootstrap configures and calls selected registrars; each registrar stages a complete cohesive factory group, without creating its clients |
+| Startup configuration | Package-owned typed values/enums prepared at the application/environment boundary; separate from runtime command payloads |
 | `Envelope<P>` | Canonical header plus a capability-owned Rust enum payload; JSON is only an optional external encoding |
 | Route / binding | Header destination+version selects an allowed binding; it checks the expected variant before invoking the capability |
 | `Bridge<P>` / operation registry | Shared admission and frozen allowed dispatch; not a domain switch or dependency service locator |
@@ -30,7 +32,7 @@ The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`,
 | `Task` | Pure computation or business orchestration through injected client contracts; owns request preparation, not concrete I/O mechanisms |
 | Factory | Creates a typed value from explicit config and dependencies; errors remain visible |
 | Provider / lease | Controls acquisition/reuse and valid resource use/release; scope is explicit, not inferred from a name |
-| Assembly plan | Selected typed construction bindings plus dependency/lifetime diagnostics; distinct from operation routing |
+| Assembly plan | Application-owned typed factory groups plus registration metadata; validated/frozen before explicit construction, not a heterogeneous service locator |
 | Trusted context / outcome | Verified identity and execution metadata / typed result with explicit completion or acceptance meaning |
 
 These are roles, not a requirement for a trait or crate per row. Keep coherent capability internals together and meaningful external boundaries separate.
@@ -43,7 +45,7 @@ These are roles, not a requirement for a trait or crate per row. Keep coherent c
 
 **Tasks and clients:** `Task::run` is a synchronous operation, not a scheduled/durable job. A task may compute without any I/O dependency or prepare requests and call injected typed `IoClient::execute` interfaces. Clients own the I/O and required boundary encoding, not business payload assembly. The task/client contracts do not depend on envelopes or each other; a composition-owned handler may adapt an admitted variant into a task input. Errors can follow earlier effects; neither trait adds retries or atomicity.
 
-**Dependencies:** factories create, providers acquire/reuse, bootstrap wires. Inject ready ports by default; inject a narrow provider only for actual runtime acquisition. Validate missing requirements, duplicate overrides, cycles and lifetime compatibility before factory effects/plan freeze. Construct in order, inject, finalize routing and check actual readiness before admission. Do not publish partial assembly.
+**Bootstrap and dependencies (next slice):** the application selects optional crates, loads typed config once, and invokes their registrars. Each stages a complete factory group, not running clients. Keep heterogeneous factories in typed application fields/tuples; metadata is for validation, not `Any` lookup. Validate config, duplicates, required selections and explicit construction order; consume/freeze, construct clients, establish provider lifetimes, bind dependencies into task factories, construct tasks and finalize the existing route registry. Inject ready ports by default. No partial application is exposed. Automatic graph execution, full managed lifecycle and broad graph policies remain deferred; see the [concrete next-core plan](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars).
 
 **Lifetime:** host-shared is per application; transient is not request scope; OS-thread locality is not async request locality. Pools need explicit capacity, exclusivity, cancellation, retained/reset state and close policy. `Arc` does not make `RefCell` concurrent; generic borrowed leases are not automatically dyn-compatible; ordinary `Drop` cannot await cleanup. Keep borrowed versus owned resources and shutdown responsibility explicit. Details live in the [DI contract](dependency-injection.md).
 
@@ -58,6 +60,8 @@ Application reference_app: P = JobsPayload, result = JobsOutcome
     handler: JobsHandler(store)                   # constructor injection
     route jobs.submit @ 1 -> expects Submit -> submit_binding
     route jobs.status @ 1 -> expects Status -> status_binding
+  bootstrap: call selected registrars with package-owned startup config
+  registration: stage typed store/task recipes; do not construct resources
   store binding: typed build_store(StoreConfig), host-owned provider
   input: in-process driver -> Envelope<JobsPayload> -> Bridge<P>
   assembly: validate -> freeze plan -> construct/inject -> ready -> admit
@@ -67,6 +71,6 @@ A submit header with a status variant is rejected before handler effects, not re
 
 ## Source grounding and next use
 
-The reviewed framework/Mission Control have typed-request seams but not this exact capability-enum envelope. Older Forge contributes provider/factory experiments, not a verified general container. HPVS distinguishes factories, providers and leases, but its operation freeze does not validate service dependencies and its retained-state `RefCell` pool is not a concurrent async pool. See [payload lineage](reuse-map.md#typed-payload-lineage) and [provider lineage](reuse-map.md#providerfactory-lineage). These are adaptation inputs, not compatibility guarantees.
+The reviewed framework/Mission Control have typed-request and explicit registration/assembly seams, not a general discovered registrar/container or this exact capability-enum envelope. Their successful composition is being refined, not replaced wholesale; [bootstrap lineage](reuse-map.md#bootstrap-and-registrar-lineage) separates source behavior from the next contract. Older Forge contributes provider/factory experiments, not a verified general container. HPVS distinguishes factories, providers and leases, but its operation freeze does not validate service dependencies and its retained-state `RefCell` pool is not a concurrent async pool. See [payload lineage](reuse-map.md#typed-payload-lineage) and [provider lineage](reuse-map.md#providerfactory-lineage). These are adaptation inputs, not compatibility guarantees.
 
 Use **[$model-forge-module](../../.agents/skills/model-forge-module/SKILL.md)** to explain/model assembly, **[$trace-forge-command](../../.agents/skills/trace-forge-command/SKILL.md)** for request flow, and **[$wire-forge-providers](../../.agents/skills/wire-forge-providers/SKILL.md)** for dependency/lifetime decisions. They are provisional repository-local starters, not runtime implementations. Keep them with this reference and refine them as real code and experience arrive.

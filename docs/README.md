@@ -15,6 +15,7 @@
 - [C4 and supporting diagrams](architecture/diagrams/README.md)
 - [Architecture decisions](architecture/decisions.md)
 - [Module-authoring contract](architecture/module-authoring.md)
+- [Bootstrap, typed configuration and cohesive registrars](architecture/bootstrap-registrars.md)
 - [Provider/factory dependency injection](architecture/dependency-injection.md)
 - [Forge DSL semantic reference and framework skills](architecture/framework-dsl.md)
 - [Implementation roadmap and acceptance gates](roadmap/forge-framework.md)

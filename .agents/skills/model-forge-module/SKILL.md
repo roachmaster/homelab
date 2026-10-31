@@ -1,6 +1,6 @@
 ---
 name: model-forge-module
-description: Explain the evolving Forge composition DSL or model a capability/module, pure task or injected-client workflow and its assembly. Separate observed source patterns from proposed homelab semantics and syntax; this starter skill does not imply a DSL parser or runtime exists.
+description: Explain the evolving Forge composition DSL or model a capability/module, pure task, injected-client workflow or bootstrap/registrar assembly. Separate observed source patterns from proposed homelab semantics and syntax; this starter skill does not imply a DSL parser or runtime exists.
 ---
 
 # Model a Forge module
@@ -10,6 +10,8 @@ description: Explain the evolving Forge composition DSL or model a capability/mo
 ## Implemented task/client pattern
 
 [Task](../../../src/rust/forge-task/src/lib.rs) has associated `Input`, `Output`, `Error` and `run(&self, input)`. [IoClient](../../../src/rust/forge-io-client/src/lib.rs) has `Request`, `Response`, `Error` and `execute(&self, request)`. These synchronous contracts exist; the full composition DSL remains proposed. The contract crates have no normal dependency on each other. A consumer capability imports both only when its task uses clients; a pure task requires no I/O contract or envelope.
+
+For bootstrap work, read the [registrar next-slice reference](../../../docs/architecture/bootstrap-registrars.md). Model application-selected packages → typed startup config → registrar-staged cohesive factory groups → validation/freeze → explicit client/provider/task construction. Concrete clients, their dependencies/config/factories and reusable registrar live in optional implementation crates, never mandatory core. Contract-only crates need no empty registrar. This is proposed above the five implemented crates, not a callable container API.
 
 ## Workflow
 

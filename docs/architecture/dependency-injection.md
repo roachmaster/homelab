@@ -2,6 +2,12 @@
 
 **Status:** Proposed Rust assembly contract, informed by a focused source reinspection of older Forge patterns and standalone HPVS. This is not an implemented DI container or a claim of drop-in compatibility. The [initial `forge-provider` crate](../../src/rust/forge-provider/README.md) now implements only synchronous factory/provider/lease primitives plus singleton/transient scopes; graph validation, pools and managed host lifecycle below remain proposed.
 
+## Practical next step: registrars stage factories
+
+The next core addition is the small [bootstrap/registrar design](bootstrap-registrars.md), not the entire lifecycle engine described below. Application bootstrap maps environment/configuration into package-owned typed config and calls selected implementation-crate registrars. Each stages a cohesive factory group without constructing resources. Application-owned typed fields/tuples retain heterogeneous groups; no universal `Any` map or dyn-compatible GAT provider is assumed. Validate the complete selected plan, freeze, then execute explicit typed constructor calls. A dependent task recipe first binds ready client handles before becoming an existing zero-argument `Factory<Task>`; `Factory<T>::create` does not gain a dependency-resolution argument.
+
+The immediate checks cover atomic group staging, required selections, duplicates and declared construction order. Automatic dependency-graph execution, arbitrary graph diagnostics, pools and managed async startup/shutdown remain later target contracts. Keep startup config distinct from runtime capability payloads, and no environment reads inside registrars/factories. The [roadmap](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars) defines the bounded implementation gates.
+
 ## The decision
 
 Use **explicit typed construction with small factory/provider boundaries**. A factory creates a value; a provider governs how callers obtain a value or lease over time; the composition root chooses implementations and owns their lifecycle. Normally, resolve dependencies during bootstrap and inject the resulting capability ports into handlers. Inject a narrow provider or factory into a use case only when runtime acquisition or creation is itself a real requirement.
@@ -27,7 +33,7 @@ Source context: [older Forge review](../reviews/forge/forge_rust.md), [Forge run
 | Factory | Construct one typed owned instance from explicit configuration and already supplied dependencies; preserve construction failure | Concrete implementation/boundary module; a normal function or closure often suffices |
 | Provider | Select acquisition behavior and lifetime: shared handle, fresh value, or exclusive lease; expose capacity/closed/acquisition failures where relevant | Resource-owning adapter or narrow consumer-owned acquisition port |
 | Lease | Bound use of an acquired resource and its return/disposal behavior | Provider implementation; must not outlive borrowed owner or permit use after return |
-| Registration | Describe identity, provided/required contracts, scope, override rules and executable assembly binding | Local composition plan; not a handler's runtime lookup facility |
+| Registration | Registrar stages one complete group of typed configured factories/recipes and its identity, requirements, scope and override metadata; no resource construction | Optional implementation/capability package supplies it; bootstrap owns the unpublished typed registry |
 | Bootstrap / host | Validate selection, construct in order, inject handles, freeze bindings, start/supervise and shut down | Application composition plus focused lifecycle machinery |
 
 Do not inject a bag of every application service. A `JobsHandler` receives its `JobStore` and other actual collaborators, not a host registry. The store adapter may privately use a connection provider; jobs policy need not learn connection pooling. If a capability genuinely requires a per-operation session, model that purposeful session/acquisition contract beside the capability, rather than expose generic database connections or `get<T>(name)`.
@@ -78,11 +84,11 @@ HPVS's singleton borrows a prebuilt value, transient invokes its factory on acqu
 
 `Arc<T>` makes shared ownership possible, not arbitrary contents thread-safe; its thread-safety depends on the relevant bounds of `T`. Wrapping `RefCell` in `Arc` does not make the HPVS pool suitable for a multithreaded host. Do not hold synchronous borrows or locks across suspension without a justified API guarantee. A lease crossing `.await` must satisfy the selected executor's ownership and mobility rules. [Rust `Arc` thread safety](https://doc.rust-lang.org/std/sync/struct.Arc.html#thread-safety)
 
-## Assembly and shutdown are explicit phases
+## Full target: assembly and shutdown are explicit phases
 
 ![Provider/factory assembly and lifetime ownership](diagrams/06-provider-assembly.svg)
 
-1. **Describe:** selected modules supply typed configuration, provider identity/scope, declared requirements, defaults and a corresponding typed assembly function. Provider IDs support diagnostics/allowlisted override selection; they are not ingress destinations or strings for loading code.
+1. **Describe:** bootstrap supplies package-owned typed configuration to selected registrars. They stage cohesive factory groups, provider identity/scope, declared requirements, defaults and corresponding typed assembly functions without constructing resources. Provider IDs support diagnostics/allowlisted override selection; they are not ingress destinations or strings for loading code.
 2. **Validate before freezing or starting:** choose explicit overrides before defaults; reject duplicate explicit providers, missing requirements, incompatible contracts, dependency cycles, and invalid lifetime captures. A long-lived owner cannot retain a short-lived borrowed resource. Diagnostic dependency keys do not replace Rust's constructor type checking. Validate without opening resources; failure leaves the prior plan unchanged.
 3. **Freeze the validated plan:** consume its mutable builder. Instantiate only the chosen factories/providers in dependency order, then construct handlers with resolved typed ports and finalize the frozen route bindings. No handler resolves arbitrary services on demand. Runtime acquisition through an already injected narrow provider is not new dependency discovery.
 4. **Start and admit:** start managed resources/workers and check the actual injected implementation. Open admission only after all required resources are ready. If creation/start fails, stop and release already-acquired resources in reverse dependency order; preserve the original failure and report cleanup failures too. Do not claim that HPVS's existing eager registration already provides this entire side-effect-free planning and rollback protocol.

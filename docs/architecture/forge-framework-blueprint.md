@@ -4,13 +4,13 @@
 
 ## The product decision
 
-Build **a Rust application-assembly framework**, not a new all-purpose application. Its promise is: add a supported starter, provide typed configuration and a capability handler, and receive predictable admission, lifecycle, diagnostics, and test seams. Keep business workflows out of the framework. Keep developer tools, model execution, client SDKs, and domain-specific engines outside its mandatory dependency graph.
+Build **a Rust application-assembly framework**, not a new all-purpose application. Its promise is: select optional capability/implementation crates, give their registrars typed configuration through bootstrap, and receive predictable assembly, admission and test seams. Registrars stage cohesive factory groups; construction and provider ownership follow only after validation/freeze. Full managed lifecycle remains a later target. Keep business workflows out of the framework. Keep developer tools, model execution, client SDKs, and domain-specific engines outside its mandatory dependency graph.
 
 The framework is linked into a **reference application** that proves the developer experience. That application owns an illustrative jobs capability and proves the shared logical ingress with an in-process contract driver. No transport has been selected: a network API, broker, or CLI is added only for an actual consumer, not to satisfy the framework design. A separate deployment for every crate is neither required nor desirable.
 
 “Spring Boot-like” means convenient starters, conditional defaults, explicit overrides, consistent configuration, and dependable application startup—not copying Java reflection or building a universal service locator. Spring Boot's own guidance describes packaged auto-configuration, conditional defaults that can yield to user configuration, and focused tests for those combinations. The Rust mechanism proposed here is explicit and statically linked. [Spring Boot auto-configuration](https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html)
 
-The selection is evidence-led: retain the small framework command seams, Mission Control’s shared command-port/lifecycle patterns, and HPVS’s registration/ownership discipline rather than combining whole workspaces. See the [repository reuse map](reuse-map.md), [provider/factory DI design](dependency-injection.md), [module authoring contract](module-authoring.md), [decisions](decisions.md), and [delivery roadmap](../roadmap/forge-framework.md).
+The selection is evidence-led: retain the small framework command seams, Mission Control’s shared command-port/lifecycle patterns, and HPVS’s registration/ownership discipline rather than combining whole workspaces. See the [bootstrap/registrar next slice](bootstrap-registrars.md), [repository reuse map](reuse-map.md), [provider/factory DI design](dependency-injection.md), [module authoring contract](module-authoring.md), [decisions](decisions.md), and [delivery roadmap](../roadmap/forge-framework.md).
 
 ## 1. One logical ingress, independent of transport
 
@@ -55,7 +55,7 @@ enum JobsPayload {
 type JobsEnvelope = Envelope<JobsPayload>;
 ```
 
-`Header`, `SubmitJob`, and `JobId` stand for the relevant validated contract types. The framework owns the generic envelope and admission machinery; it does not import `JobsPayload`. A single-capability host can use `Bridge<JobsPayload>` directly.
+`Header`, `SubmitJob`, and `JobId` stand for the relevant validated contract types. The framework owns the generic envelope and admission machinery; it does not import `JobsPayload`. A single-capability host can use `Bridge<JobsPayload>` directly when the owning capability implements `Payload` and imports the narrow ingress contract. To keep that capability free of ingress dependencies, use an application-owned wrapper/sum implementing `Payload` instead. Rust's orphan rules prevent the application from implementing that foreign trait directly for another crate's enum.
 
 One heterogeneous registry cannot accept unrelated payload types without an explicit unifying design. **Only if one host genuinely needs a single ingress for several capabilities**, its composition package may define a finite sum such as `AppPayload::Jobs(JobsPayload)` and `AppPayload::Notifications(NotificationsPayload)`, then instantiate `Bridge<AppPayload>`. All entries in that registry share `AppPayload`; capability bindings unwrap only their registered variants and pass the owned enum to the relevant feature API. This sum belongs to that application and contains only its selected capabilities; adding a capability can extend this local sum as a composition-only change. It is not a framework-wide enum that every new domain must edit. Do not hide the type mismatch behind JSON or runtime downcasts. If the common ingress also returns heterogeneous result types, apply the same explicit application-owned result sum or retain per-route typed results; a generic `Outcome<R>` alone does not unify unrelated result types.
 
@@ -97,13 +97,16 @@ The application is the composition boundary. Handler bindings and small feature-
 
 ## 3. A deliberately small package surface
 
-Names below describe proposed roles; they are not claims that these packages already exist or final public API names.
+The five current packages are `forge-ingress-contract`, `forge-bridge`, `forge-provider`, `forge-io-client` and `forge-task`. The next proposed package is `forge-bootstrap`; the broader runtime and capabilities below remain later roles, not existing exports.
 
 | Unit | Owns | May depend on | Must not depend on |
 | --- | --- | --- | --- |
 | `forge-ingress-contract` | Generic `Envelope<P>`/header, typed ingress/handler/admission contracts, controlled outcomes | Small transport-neutral value dependencies | Transport libraries, concrete handlers, domain models, storage drivers |
 | `forge-bridge` | Generic typed registry, header/variant checks and admitted dispatch | Ingress contract | Concrete capabilities or transport implementations |
-| `forge-runtime` | Validated assembly/lifetime plan, typed config assembly, startup/shutdown supervision; no domain service locator | Focused runtime facilities | Domain policy or transport-specific mandatory dependencies |
+| `forge-provider`, `forge-io-client`, `forge-task` (implemented, independent) | Construction/acquisition contracts; prepared-request I/O; computation/orchestration | No normal dependencies on each other | Concrete implementation crates, mandatory transports or service lookup |
+| `forge-bootstrap` (next, proposed) | Prepared factory-group metadata, atomic validation/freeze helpers; typed application assembly support | Initially std only; existing crates in examples/tests | Concrete clients, business enums, environment reads or universal DI execution |
+| Optional implementation crate + registrar | Concrete client, dependencies, typed config, cohesive factories and reusable registrar | Implemented contracts and bootstrap helpers as needed | Mandatory core imports back into this implementation |
+| `forge-runtime` (deferred) | Managed startup/shutdown supervision and later lifecycle facilities | Focused runtime facilities | Domain policy or transport-specific mandatory dependencies |
 | Chosen ingress adapter, optional | Input framing, delegation to an injected codec over `P`, protocol lifecycle and outcome encoding | Generic ingress/codec contracts; runtime or transport library only as needed | Concrete business handlers or capability imports hidden in the generic adapter |
 | `jobs` | `JobsPayload` enum, invariants, use cases and owned persistence/effect ports | Domain values and stable policy dependencies | Framework bridge, transport DTOs, SQL client |
 | `reference-app` | Typed factory/provider selection and constructor injection, handler bindings, concrete edge-codec bindings and selected adapters | Selected framework packages and capability | Unrelated tools or domains merely because they exist |
@@ -112,10 +115,12 @@ The ingress contract is justified by actual shared consumers, not a license for 
 
 ## 4. Assembly without a second monolith
 
+**Immediate scope:** [bootstrap invokes typed registrars](bootstrap-registrars.md) and stages factory groups into application-owned typed fields/tuples. Validate selections and explicit construction order, freeze, construct clients/providers/tasks, then publish the existing shared bridge. The numbered lifecycle below is the full target, not a demand to implement a universal container now. The application front door may eventually serve local or remote tools; it is not defined by a CLI parser or any mandatory transport.
+
 Use a two-phase host plan: **describe and validate**, then **construct and start**. Separate the construction/lifetime graph from the operation registry: factories construct typed values, providers control scoped acquisition/reuse, and bootstrap injects resolved ports into handlers. The bridge never looks up arbitrary services. The [DI design](dependency-injection.md) explains the source evidence, Rust lease contracts and scope choices.
 
-1. Load typed, namespaced configuration. Proposed precedence is framework defaults → explicit file → environment overrides → explicit programmatic overrides. Record the winning source without exposing secret values. Reject unknown critical keys, invalid values, and incompatible enabled modules.
-2. Explicitly opt in to linked modules/starters. Each module declares its identity, required/provided capabilities, default registrations, and lifecycle resources. Nothing scans arbitrary packages or executes names from a configuration file.
+1. Load typed, namespaced startup configuration once at the application boundary, separately from runtime command payloads. Registrars/factories receive explicit values rather than reading environment variables. A possible application policy is package defaults → explicit file → environment overrides → explicit programmatic overrides; this precedence is not a core requirement. Record the winning source without exposing secret values. Reject unknown critical keys, invalid values, and incompatible enabled modules.
+2. Explicitly opt in to linked modules/starters. Bootstrap configures/calls their reusable registrars; each stages a complete cohesive factory group and declares identity, requirements, defaults, and lifecycle ownership. Registration must not construct its clients or start resources. Nothing scans arbitrary packages or executes names from a configuration file.
 3. Apply explicit user-provided implementations before conditional defaults. A default backs off only for a documented matching provider. Two explicit providers or duplicate route/version registrations fail with a diagnostic; never let insertion order choose silently.
 4. Validate missing provider requirements, version compatibility, aliases, dependency cycles and lifetime compatibility **before factory side effects, freezing the plan or opening admission**. Registration failure leaves the existing plan unchanged. Consume the validated mutable builder into an immutable assembly plan.
 5. Construct the selected factories/providers in dependency order; inject ready capability ports into handlers and finalize frozen route bindings from the same validated plan. Start managed resources, then admit only after required readiness checks succeed. Construction/startup failure closes already-acquired resources in reverse order; retain both the original failure and any cleanup failures.

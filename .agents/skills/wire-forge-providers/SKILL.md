@@ -1,6 +1,6 @@
 ---
 name: wire-forge-providers
-description: Model or review Forge factory/provider dependency wiring, constructor injection, scopes, leases and startup/shutdown ownership. Keep provisioning separate from command routing; use for substitution, pooled resources and assembly failure questions.
+description: Model or review Forge factory/provider dependency wiring, constructor injection, scopes, leases, typed registrars and bootstrap ownership. Keep provisioning separate from command routing; use for substitution, pooled resources and assembly failure questions.
 ---
 
 # Wire Forge providers
@@ -14,6 +14,8 @@ description: Model or review Forge factory/provider dependency wiring, construct
 3. Specify typed config/dependencies, default/override, scope, error and ownership transfer/borrowing. Host-shared is per assembly; transient may share captured state and is not request scope; OS-thread locality is not async request locality.
 4. Validate missing dependencies, duplicates, cycles and lifetime compatibility before factory effects/freeze. Construct in order, inject ports, finalize routing and establish actual readiness; never publish a partial host or silently fall back after construction failure.
 5. Assign cleanup: factory owns partial resources until transfer; host closes resources it owns after users stop. Preserve cleanup failures, handle outstanding leases and state whether admitted work finishes acquisition or is canceled. Grace exhaustion is not success.
+
+For registrar assembly, use the [next-slice design](../../../docs/architecture/bootstrap-registrars.md): bootstrap passes package-owned typed config and calls registrars; each stages one complete factory group without creating clients. Keep heterogeneous groups in application-owned typed fields/tuples, with a metadata index for checks—not `Any`, a global enum or dyn GAT provider lookup. Validate/freeze before construction; dependent task recipes bind ready client handles before yielding the existing zero-argument factory. Singleton creates once; transient retains its factory until acquisition. Verify group failure atomicity, unused-default zero calls and no partial publication. Full automatic graph execution and async lifecycle remain deferred.
 
 For pools, define capacity/exhaustion, exclusive/shared access, cancellation, retained/reset state, quarantine and close policy. Do not copy HPVS's `RefCell` pool into a concurrent async host. `Arc` does not fix that; borrowed generic leases are not automatically dyn-compatible; ordinary `Drop` cannot await reset/rollback. Use the detailed DI reference when these constraints matter.
 

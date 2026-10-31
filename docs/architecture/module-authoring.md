@@ -1,11 +1,11 @@
 # Writing a Forge module or starter
 
-**Status:** Proposed extension contract; no stable SDK or executable API is claimed yet.
+**Status:** Proposed extension contract; no stable module/registrar SDK is claimed yet. The five core crates already exist. Start with the [bounded bootstrap/registrar slice](bootstrap-registrars.md), not every future lifecycle hook below.
 
 ## Plug-and-play should mean three explicit steps
 
 1. Add a supported dependency and opt in to its module in the application composition root.
-2. Supply typed namespaced configuration and any required capability implementation.
+2. Supply package-owned typed configuration and let application bootstrap call the package's registrar to stage its cohesive factory group.
 3. Start the host, or receive an actionable validation error before the application becomes ready.
 
 Do not require copying a large example application, editing bridge internals, reflecting over type names, or adding a new domain to a central all-knowing switch. No transport is mandatory; the first proof can use an in-process driver. Static linking is the default. A runtime trait object is acceptable; a stable cross-library ABI is a different, deferred requirement.
@@ -19,10 +19,11 @@ Do not require copying a large example application, editing bridge internals, re
 | Handler binding | Header/typed-variant consistency and mapping into a capability API | Independent routing policy, JSON fallback, or admission bypass |
 | Optional wire codec | Decode/encode an external format to/from the capability enum using the registered header/version mapping | Domain dispatch, payload-derived routing, or a generic JSON internal representation |
 | Driven adapter | One capability's external conversation and real contract tests | All repositories' data models or a generic universal repository |
+| Implementation crate + registrar | Concrete client, its dependencies, typed config enum/struct, configured factory group and reusable registration function | Mandatory imports in core, eager client construction during registration, or scattered environment reads |
 | Factory/provider binding | Typed creation and scoped acquisition for a narrow dependency; explicit lifecycle owner | Arbitrary service lookup, ingress routing or domain policy |
 | Operational module | Focused configuration/lifecycle/diagnostic integration | Unrelated domain logic hidden behind hooks |
 
-A module need not be a separately published crate. A starter earns its dependency cost by making a real infrastructure integration easier to install and verify. Optional dependencies stay optional when the starter is absent.
+Contract-only crates need not expose a registrar. An optional implementation crate should expose a reusable registrar when it participates in application assembly; it can own several cohesive factories rather than one crate per factory. A module need not be a separately published crate. A starter earns its dependency cost by making a real infrastructure integration easier to install and verify. Optional dependencies stay optional when the starter is absent.
 
 ## A module declaration should be inspectable
 
@@ -43,13 +44,17 @@ This is a design checklist, not a request to invent one giant trait with every h
 
 ## Registration and override rules
 
-Provider selection and operation registration are distinct parts of one local composition plan. Validate the plan transactionally before factory side effects; consume it, construct dependencies, inject typed ports, and finalize frozen operation bindings before opening admission. Neither catalog is a handler service locator. See [provider/factory DI](dependency-injection.md) for ownership and assembly details.
+Bootstrap invokes registrars; registrars stage complete factory groups into narrow typed application slots. Metadata and typed recipes travel together, and a failed group leaves earlier groups unchanged. The application resolves documented default/replace/extend choices before construction. Startup config is not a command envelope; environment loading belongs to the composition boundary.
 
-A registry is built locally by composition, validated transactionally, then frozen. Reject duplicate destination/version pairs, duplicate aliases, unsatisfied requirements, incompatible versions, and cycles. Failure must not insert or replace a binding before returning an error.
+Provider selection and operation registration are distinct parts of one local composition plan. Validate before factory effects; consume/freeze, construct dependencies, establish provider ownership, bind task dependencies and finalize frozen operation bindings before exposing the application. Neither catalog is a service locator. Heterogeneous groups stay in application-owned typed fields/tuples; the immediate design validates an explicit order rather than inventing auto-wiring. See [bootstrap registrars](bootstrap-registrars.md) for the single illustrative assembly sketch and [provider/factory DI](dependency-injection.md) for ownership.
+
+A registry is built locally by composition, validated transactionally, then frozen. Reject duplicate destination/version pairs and unsatisfied selected requirements without inserting or replacing a binding on error. The next slice checks declared dependency order and typed constructor compatibility; generalized alias/version negotiation, graph diagnostics and lifecycle orchestration remain full-target extensions, not prerequisites for a useful registrar.
 
 Choose explicit provider overrides before defaults are installed. A default may back off for one documented matching provider; two explicit providers remain an error. A string in configuration may select among compiled, allowlisted providers, but cannot load arbitrary code. Effective configuration should explain what was selected and why without logging credentials.
 
 Route authorization is checked against trusted context before dispatch. Resource-level permission and domain validation belong to the capability. A binding does not make a route public merely by registering it.
+
+For a later home/menu capability, replacement chooses one home provider explicitly; extension adds identified entries to a documented extension surface. It does not register multiple winners for the home command. Navigation is not authorization or a DI lookup, and no CLI/HTTP/IPC front end is required for core registration.
 
 ## Example: add a `notifications.send` capability
 
@@ -62,7 +67,9 @@ Route authorization is checked against trusted context before dispatch. Resource
 
 If an external format is selected, add a boundary codec mapping that format to the enum using the registered header/version contract. In-process calls construct enum values directly. All internal registry entries share the bridge's payload type; no `serde_json::Value` or `Any` escape is allowed. These are illustrative names, not an existing implementation or a mandatory public API. If durable acceptance is promised, install and test a real durable handoff before returning it.
 
-## Minimum extension test matrix
+## Full-target extension test matrix
+
+Apply only rows whose mechanism exists; the [next-core gates](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars) are narrower.
 
 | Scenario | Expected invariant |
 | --- | --- |
