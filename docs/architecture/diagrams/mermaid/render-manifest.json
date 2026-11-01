@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "941298b125c796552baf010da59a4cd83f96b95d610b6320c5d65f014aff37e9",
-    "validate.mjs": "a3e11fc0eb7f29d70870f162f7042afe651914317a3068b82730130c0425a651"
+    "render.py": "a1d3778b5142ce981e859111d2155758c79013b2ffe2d3c0b93dae78397dc918",
+    "validate.mjs": "0dad6c87dd494716823d843d0a75100dc6cd2adaae2c6d8696c78b58af4bebeb"
   },
   "diagrams": [
     {
@@ -61,6 +61,18 @@
       "source_sha256": "8e527f2055c5a8a61e90e70d805188b0e602891c469a9204603ee45d99bcaf85",
       "svg": "images/m08-remote-admission.svg",
       "svg_sha256": "f36bed582372f24f1269f24487a60a4a6835794e682d182ae6fd04d4311ab35d"
+    },
+    {
+      "source": "m09-template-architecture.mmd",
+      "source_sha256": "10acefdfd2f1ccddea03db1a58d96694e456362877347ec16d490fb9abb2c346",
+      "svg": "images/m09-template-architecture.svg",
+      "svg_sha256": "c3938784bfa3d295ee90996f0f2567fb3cef83e92e7b7fedf48e98ef15426888"
+    },
+    {
+      "source": "m10-template-render.mmd",
+      "source_sha256": "8c7bbc433cf248369323aad065211e25f1ad27db814c4d3edb5f43debbea703c",
+      "svg": "images/m10-template-render.svg",
+      "svg_sha256": "2c3a7debcbed11e1d2a8c2364684e7508928cc4e324ff1131d22680ef3acecb0"
     }
   ]
 }

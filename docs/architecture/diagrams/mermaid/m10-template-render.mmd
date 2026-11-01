@@ -1,0 +1,33 @@
+---
+title: M10 Implemented parse-once and method-enabled render success path
+---
+sequenceDiagram
+    participant C as Caller
+    participant T as Template
+    participant S as Schema validation
+    participant R as Render engine
+    participant M as MethodRegistry
+    participant O as Private output
+    C->>T: parse / parse_with_limits(source)
+    T->>T: Check limits and parse bounded AST
+    T-->>C: Reusable Template
+    C->>T: render_with_methods(Value, Schema, registry)
+    T->>S: Validate schema and context
+    S-->>T: Remaining work budget
+    T->>R: Preflight every branch
+    R->>M: Check names, arity and known types
+    Note over R,M: No callbacks during preflight.<br/>Dynamic result types checked later.
+    Note over C,R: Absent optional receiver skips chain.<br/>Argument paths use context, not prior result.
+    R->>R: Resolve receiver and arguments
+    R->>M: Call each method with current Value and args
+    M->>M: Builtin or explicit trusted callback
+    M->>M: Validate returned value and limits
+    M-->>R: Result Value or typed error
+    Note over R,M: Repeat for each chain link.<br/>Callback code cannot be preempted.
+    R->>R: Use result for section or interpolation
+    R->>O: Append text and escape scalar once unless raw
+    O->>O: Enforce final output-byte limit
+    O-->>R: Complete string
+    R-->>T: Complete string
+    T-->>C: String or TemplateError
+    Note over C,O: Failures return no partial document.<br/>No rollback of trusted callback effects.

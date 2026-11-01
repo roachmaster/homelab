@@ -1,6 +1,6 @@
 # Mermaid UML-like views
 
-Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle.** These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
+Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
 
 | View | Status and purpose | Source | Image |
 | --- | --- | --- | --- |
@@ -8,6 +8,8 @@ Editable Mermaid sources and committed SVGs for the current Forge framework. **M
 | M02 — Bootstrap | Implemented disk singleton assembly, successful path | [Mermaid](m02-bootstrap.mmd) | [SVG](images/m02-bootstrap.svg) |
 | M03 — Request | Implemented checked list-current path, with rejection gates | [Mermaid](m03-disk-request.mmd) | [SVG](images/m03-disk-request.svg) |
 | M04 — Kernel phases | Implemented local system/jobs versus proposed remote phases | [Mermaid](m04-kernel-phases.mmd) | [SVG](images/m04-kernel-phases.svg) |
+| M09 — Template architecture | Implemented independent renderer and dev-only Forge wiring | [Mermaid](m09-template-architecture.mmd) | [SVG](images/m09-template-architecture.svg) |
+| M10 — Template rendering | Implemented validation, method chains and escaped output | [Mermaid](m10-template-render.mmd) | [SVG](images/m10-template-render.svg) |
 
 ## M01 — Implemented contracts
 
@@ -94,6 +96,57 @@ OutcomeUnknown. Destination identity and original/delegated caller authority are
 not interchangeable. No protocol is selected; first remote exposure is node
 reads only, not disk navigation or job submission. No exactly-once claim follows.
 
+## Implemented template renderer
+
+These views describe an **optional library and runnable development examples**, not
+another deployed application or a new Forge terminal command. The library has no
+normal dependencies. Existing core contracts are dev-dependencies of its example,
+not dependencies imposed on renderer consumers.
+
+### M09 — Architecture and Forge composition
+
+![Implemented template library and development-only Forge composition](images/m09-template-architecture.svg)
+
+[Mermaid source](m09-template-architecture.mmd). Arrows show construction, use or
+module collaboration, not package dependency or deployment edges. The upper panel
+is the actual `registered_render` example: the registrar stages configuration and
+factory ownership; consuming freeze precedes factory creation and template parsing.
+The host owns the singleton task; the binding borrows an acquired lease only after
+header lookup, admission and payload-kind checks. Help uses admitted static metadata
+without acquisition or task execution. `RenderTask` prepares the capability-local
+value tree from its typed input; there is no I/O client or global business enum.
+The example's default render uses builtins; the separate `method_extensions`
+example supplies its own registry and custom callback directly.
+
+The lower panel is the library: parsing is separate from per-render schema/data
+validation, expression preflight and execution. The explicit registry serves both
+known builtin signatures and runtime calls. Custom callbacks are trusted native
+code; limits are not a sandbox or wall-clock timeout. See the [renderer contract](../../../../src/rust/forge-template/README.md),
+[all38 builtin semantics](../../../../src/rust/forge-template/METHODS.md) and
+[composition example](../../../../src/rust/forge-template/examples/registered_render.rs).
+
+### M10 — Parse, validate, chain methods, render
+
+![Implemented method-enabled template rendering sequence](images/m10-template-render.svg)
+
+[Mermaid source](m10-template-render.mmd). This is a successful render with failure
+stops described in the notes, not a claim that execution continues after an error.
+The parser constructs a reusable AST without executing methods. Each render first
+validates its explicit schema and context, then preflights expressions in **all**
+branches, including skipped ones. Known builtin signatures are checked statically;
+custom/dynamic results are checked when available. Method arguments are literals or
+paths resolved in the context stack, not nested calls or prior method-result fields.
+
+Each chained method receives the preceding result. An absent optional receiver
+skips the entire chain; this differs from an existing null value passed to `default`.
+A method result may select/iterate a section or become an interpolation. Escaped
+interpolation receives one HTML-escaping pass **after** transformation; raw tags
+bypass it, and literal template text is unchanged. This is not whole-document or
+context-specific HTML safety. The private bounded buffer is returned only on
+success; errors do not return a partial document, but cannot undo trusted callback
+effects. Traversal/output budgets do not preempt callback allocation, blocking,
+panics or destruction. See [limits and compatibility](../../../../src/rust/forge-template/METHODS.md).
+
 ## Rebuild locally
 
 The canonical renderer for these SVGs is **`mermaid-rs-renderer` 0.3.1 (`mmdr`)**, a native Mermaid parser/layout renderer supporting class, sequence and flowchart diagrams. It is not the official browser renderer and does not promise pixel parity with it. We use a deliberately small syntax subset and separately validate it with official **Mermaid 12.2.0**. No repository contents are sent to a rendering service. The official CLI was not usable in the restricted authoring host; no browser isolation was disabled. [Renderer documentation](https://docs.rs/mermaid-rs-renderer/0.3.1/mermaid_rs_renderer/), [Mermaid class syntax](https://mermaid.js.org/syntax/classDiagram.html), [sequence syntax](https://mermaid.js.org/syntax/sequenceDiagram.html).
@@ -109,4 +162,4 @@ python3 "$D/render.py" --renderer "$D/.tools/bin/mmdr" --png-dir "$D/previews"
 python3 "$D/render.py" --renderer "$D/.tools/bin/mmdr" --check
 ```
 
-`render.py` first runs the official grammar validator, then generates all eight SVGs in a temporary directory. It rejects active/external SVG references before writing the images and [hash manifest](render-manifest.json). `--check` independently rerenders and compares exact bytes and input hashes without changing tracked files. Fonts/platform changes can change layout: review the difference, do not silently bless it. PNGs are local previews; scalable SVGs are committed. Keep sources, configuration, manifest and images in the same change. **Inspect every render** for lost labels, clipping, ordering and semantics; parser success and matching hashes alone cannot prove visual correctness. Do not hand-edit generated SVGs.
+`render.py` first runs the official grammar validator, then generates all ten SVGs in a temporary directory. It rejects active/external SVG references before writing the images and [hash manifest](render-manifest.json). `--check` independently rerenders and compares exact bytes and input hashes without changing tracked files. Fonts/platform changes can change layout: review the difference, do not silently bless it. PNGs are local previews; scalable SVGs are committed. Keep sources, configuration, manifest and images in the same change. **Inspect every render** for lost labels, clipping, ordering and semantics; parser success and matching hashes alone cannot prove visual correctness. Do not hand-edit generated SVGs.

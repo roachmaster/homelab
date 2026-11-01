@@ -22,6 +22,16 @@ These detail [proposed internal modules/contracts](../foundation-interfaces.md),
 not additional implemented crates or deployed services. M07 and diagram07 mark
 the local counter subset; the compile-time DAG still shows actual packages.
 
+## Implemented template library
+
+| View | Source | Image |
+| --- | --- | --- |
+| M09 optional renderer and development-only Forge composition | [Mermaid](mermaid/m09-template-architecture.mmd) | [SVG](mermaid/images/m09-template-architecture.svg) |
+| M10 schema validation, method chaining and output | [Mermaid](mermaid/m10-template-render.mmd) | [SVG](mermaid/images/m10-template-render.svg) |
+
+These describe actual `forge-template` code and examples, not a new deployed app
+or terminal command. Read the [captions and limits](mermaid/README.md#implemented-template-renderer).
+
 ## C4 and supporting DOT views
 
 The C4 views and durable sequence show a **proposed reference application**, not verified deployed infrastructure. Diagram04 now shows the actual core/capability/local-system/demo normal-dependency graph; diagram06 distinguishes the implemented small registration/assembly slice from later lifecycle. No remote transport is selected or required. The first proof used an in-process driver; the local runnable system now also has a thin terminal adapter. The component view shows the extension point for an input adapter only if a real consumer needs one.

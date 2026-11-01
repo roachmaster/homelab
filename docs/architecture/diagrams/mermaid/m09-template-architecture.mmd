@@ -1,0 +1,36 @@
+---
+title: M09 Implemented optional template renderer and dev-only Forge example
+---
+flowchart TB
+    subgraph Example["registered_render example only - not a terminal command"]
+        Host["Host bootstrap\nconfig -> registrar -> freeze\nfactory parses template"]
+        Provider["Singleton owns RenderTask\nbinding borrows typed lease"]
+        Bridge["Shared typed bridge\nheader route -> admit -> kind\nthen render binding"]
+        Task["RenderTask\ntyped RenderInput -> Value\nexplicit Schema, no I/O"]
+        Help["RenderDescription\nadmitted help skips task"]
+        Host --> Provider
+        Provider --> Task
+        Bridge --> Task
+        Bridge --> Help
+    end
+    subgraph Library[" "]
+        API["forge-template API\nzero normal dependencies\nparse once, render repeatedly\nString or TemplateError"]
+        Parse["parser + expression\nbounded AST\npaths, sections, method chains"]
+        Validate["schema + typing\nvalidate input, preflight all branches\nknown types and method signatures"]
+        Render["render\nborrowed context scopes\nprivate bounded output"]
+        Methods["MethodRegistry + builtins\n38 defaults or explicit registry\ncollision-safe custom methods"]
+        API --> Parse
+        API --> Validate
+        API --> Render
+        Validate --> Methods
+        Render --> Methods
+    end
+    Task --> API
+    Trust["Custom callbacks are trusted code.\nNo preemption, sandbox or effect rollback.\nTemplate values never replace ingress enums."]
+    Methods --- Trust
+    classDef example fill:#e8f4f7,stroke:#408592,color:#163744;
+    classDef implemented fill:#087f8c,stroke:#087f8c,color:#ffffff;
+    classDef note fill:#f1f3f6,stroke:#909aa8,color:#243342;
+    class Host,Provider,Bridge,Task,Help example;
+    class API,Parse,Validate,Render,Methods implemented;
+    class Trust note;

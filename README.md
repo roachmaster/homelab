@@ -53,6 +53,18 @@ make test PACKAGE=forge-template
 cargo run --manifest-path src/rust/Cargo.toml --offline --locked -p forge-template --example registered_render
 ```
 
+### Template architecture and render flow
+
+The new component is an optional renderer library plus examples, not a standalone
+application. These Mermaid views show its actual implementation and development-only
+Forge wiring:
+
+![Implemented optional template renderer architecture](docs/architecture/diagrams/mermaid/images/m09-template-architecture.svg)
+
+- [Architecture SVG](docs/architecture/diagrams/mermaid/images/m09-template-architecture.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m09-template-architecture.mmd)
+- [Method-enabled render sequence SVG](docs/architecture/diagrams/mermaid/images/m10-template-render.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m10-template-render.mmd)
+- [Detailed captions](docs/architecture/diagrams/mermaid/README.md#implemented-template-renderer) distinguish library behavior, trusted callbacks and example-only composition.
+
 ## Framework diagrams
 
 **Implemented contracts**, shown as UML-like Mermaid (Rust type parameters and lifetimes are explained in the captions):
