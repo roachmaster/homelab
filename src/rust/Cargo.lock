@@ -101,6 +101,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-template"
+version = "0.1.0"
+dependencies = [
+ "forge-bootstrap",
+ "forge-bridge",
+ "forge-command",
+ "forge-ingress-contract",
+ "forge-provider",
+ "forge-task",
+]
+
+[[package]]
 name = "forge-terminal"
 version = "0.1.0"
 dependencies = [

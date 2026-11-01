@@ -1,6 +1,6 @@
 # Rust source sets — first Forge core
 
-This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, a local application/terminal pair and three
+This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one independent optional template renderer, a local application/terminal pair and three
 clearly separated demo packages**, all original, std-only and synchronous. Typed registration/freeze and
 optional-package assembly, local node observations, admitted command discovery, explicitly stepped local counter jobs and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
@@ -40,6 +40,16 @@ cargo run -p forge-terminal --no-default-features -- node.status
 ```
 
 The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them at assembly. `--no-default-features` omits both modules; add `--features jobs` or `--features disk` to select one. The node module still requires the kernel package; the older pure demo below remains the proof of whole-package omission. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. [Local jobs](forge-local/JOBS.md) are volatile pure counters, not OS processes; only explicit step advances computation. No network or destructive file operations are added.
+
+## Optional template renderer
+
+[`forge-template`](forge-template/README.md) implements bounded schema-checked
+Mustache-like rendering with its own typed data model and no normal dependencies.
+It does not replace ingress enums or write generated source. Its dev-only
+[`registered_render` example](forge-template/examples/registered_render.rs) proves
+existing registrar/factory/provider/task/description/bridge composition; normal
+terminal and demo dependency trees omit it. The package README defines the exact
+subset and differences from the historical renderer.
 
 ## Optional consumer proof
 
@@ -186,7 +196,7 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **210 unit/integration tests and six doctests** (four compile-fail, two runnable), including the local application and terminal; the pure and node-only
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **281 unit/integration tests and eight doctests** (four compile-fail, four runnable), including the local application and terminal; the pure and node-only
 consumers are additionally checked separately. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
 header/variant mismatch, preserved duplicate binding, typed error propagation,

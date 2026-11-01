@@ -7,6 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bootstrap", "forge-provider", "forge-bridge", "forge-ingress-contract")},
     "forge-command": set(),
     "forge-ingress-contract": set(),
     "forge-provider": set(),
@@ -106,13 +107,17 @@ def negative_fixtures(packages):
     bad = copy.deepcopy(packages)
     bad["forge-terminal"]["features"]["jobs"] = ["forge-kernel/disk"]
     fixtures.append(("incorrect jobs forwarding", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-template"]["dependencies"].append({"name": "forge-kernel", "kind": None,
+        "path": str(ROOT / "forge-kernel"), "optional": False})
+    fixtures.append(("renderer runtime dependency", bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
         except SystemExit:
             continue
         raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
-    print("PASS: five in-memory negative architecture fixtures rejected")
+    print("PASS: six in-memory negative architecture fixtures rejected")
 
 
 def main():
@@ -120,6 +125,8 @@ def main():
     packages = {p["name"]: p for p in metadata["packages"]}
     validate_packages(packages)
     negative_fixtures(packages)
+    if consumer_tree(package="forge-template") != {"forge-template"}:
+        raise SystemExit("Renderer must have no normal dependencies")
     pure = consumer_tree()
     messages = consumer_tree("--features", "messages")
     disk = consumer_tree("--features", "disk")
@@ -131,7 +138,7 @@ def main():
                                    ("combined", combined, MESSAGES_PROFILE | DISK_PROFILE)]:
         if actual != expected:
             raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES)
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
@@ -151,6 +158,7 @@ def main():
         if actual != expected:
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
     print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
+    print("PASS: standalone renderer has no normal dependencies and is absent from terminal/demo trees")
     print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk; no demo implementations")
     print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 

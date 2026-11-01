@@ -6,6 +6,8 @@
 
 **Implemented core slices:** [six std-only Rust core packages](../src/rust/README.md), synchronous typed in-process examples and focused tests, including prepared-request I/O clients, pure/client-using tasks and typed registrar/freeze helpers. Three optional-demo packages prove configuration-driven assembly and compile-time dependency omission. Optional [forge-kernel disk access](../src/rust/forge-kernel/README.md) now performs real native filesystem inspection and client-local navigation. It is separate from core and is not a bootable kernel. The [local application and terminal](../src/rust/forge-terminal/README.md) now add configured node observations, admitted discovery and optional disk sessions. This does not implement the full DSL, durable jobs, remote execution or managed host lifecycle.
 
+**Optional rendering:** [`forge-template`](../src/rust/forge-template/README.md) now supplies a bounded, typed-schema renderer with method chains, 38 builtins and custom methods with a pure composition example. Build-script compilation and source materialization remain outside this library.
+
 **Proposed:** a small, Spring Boot-inspired Rust assembly model with explicit capability modules, thin ingress adapters, a shared header-routed bridge, and deliberate lifecycle ownership. The blueprint is a design, not a deployed or completed framework.
 
 - [Repository reviews — 16 reports](reviews/forge/README.md)

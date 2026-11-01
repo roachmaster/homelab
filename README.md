@@ -39,6 +39,20 @@ The terminal discovers its selected registered commands and sends typed requests
 
 **Implemented:** local node observations, command discovery, optional native disk navigation and [bounded local counter jobs](src/rust/forge-local/JOBS.md). In one session use `jobs.submit KEY TOTAL`, copy its ID, then `jobs.inspect ID`, `jobs.step ID`, `jobs.cancel ID` and `jobs.list`. Only explicit stepping runs work; receipts are volatile and local owner labels are not authentication. Node status reports client-instance uptime/responding, not machine health. **Later:** durable jobs, remote execution and Raspberry Pi deployment.
 
+## Optional template rendering
+
+[`forge-template`](src/rust/forge-template/README.md) is a schema-checked,
+bounded Mustache-like renderer with method chains and 38 builtins—not a project generator or a new terminal command.
+Default builtins are pure; custom methods are explicit trusted callbacks.
+It accepts capability-local typed values, returns a complete string or typed error,
+and has no normal dependencies. Its runnable example shows the existing
+registrar/factory/provider/task/bridge pattern without forcing I/O or transport:
+
+```bash
+make test PACKAGE=forge-template
+cargo run --manifest-path src/rust/Cargo.toml --offline --locked -p forge-template --example registered_render
+```
+
 ## Framework diagrams
 
 **Implemented contracts**, shown as UML-like Mermaid (Rust type parameters and lifetimes are explained in the captions):

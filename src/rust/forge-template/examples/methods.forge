@@ -1,0 +1,3 @@
+Name: {{name.trim().pascal_case()}}
+Initials: {{name.trim().initials()}}
+Items ({{items.length()}}): {{items.join(", ")}}

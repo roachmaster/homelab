@@ -12,6 +12,13 @@ The optional [`forge-kernel::disk`](../../src/rust/forge-kernel/README.md) modul
 
 The [local application](../../src/rust/forge-local/README.md) and [terminal adapter](../../src/rust/forge-terminal/README.md) now implement configured node information/status, admitted command discovery and optional disk sessions. Node observations are capability-owned typed inputs/results; `forge-local` owns their sum with disk commands. A successful binding adds its descriptor to the same application catalog; terminal help obtains it through `system.commands`, not a second hardcoded menu registry. The optional [local jobs module](../../src/rust/forge-local/JOBS.md) now implements a bounded pure counter with explicit stepping, typed registrar/factory/provider assembly, owner-scoped intent receipts and cooperative cancellation. It is not a Task supertrait or generic scheduler; local owner selection is not authentication. The [hosted-kernel plan](forge-kernel-plan.md) still defers durable jobs, production identity, remote boundaries and codecs. The [source ledger](forge-kernel-sources.md) separates primary-source facts from these design choices.
 
+The optional [`forge-template`](../../src/rust/forge-template/README.md) now parses a
+**template language with method extensions**, not the composition DSL. Its schema-checked rendering
+`Value` tree is capability-local data, not an internal ingress fallback or a global
+business enum. Rendering has no normal dependencies; its dev-only example composes
+existing Task/metadata/registrar/provider/bridge contracts. File installation, source generation and schema-file formats are deferred; the
+38 historical builtin methods and explicit custom method registration are implemented.
+
 ### Command description versus execution — implemented
 
 [`DescribeCommand`](../../src/rust/forge-command/README.md) is separate from
