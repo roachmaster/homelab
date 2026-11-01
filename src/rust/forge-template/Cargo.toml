@@ -5,12 +5,26 @@ edition.workspace = true
 publish.workspace = true
 description = "Bounded, typed, schema-checked Mustache-like rendering"
 
+[features]
+default = []
+cli = ["dep:forge-task", "dep:forge-command", "dep:forge-bridge", "dep:forge-ingress-contract", "dep:forge-io-client"]
+
+[[bin]]
+name = "forge-template"
+path = "src/bin/forge-template.rs"
+required-features = ["cli"]
+
 [lints]
 workspace = true
 
 [dependencies]
 forge-bootstrap.workspace = true
 forge-provider.workspace = true
+forge-task = { workspace = true, optional = true }
+forge-command = { workspace = true, optional = true }
+forge-bridge = { workspace = true, optional = true }
+forge-ingress-contract = { workspace = true, optional = true }
+forge-io-client = { workspace = true, optional = true }
 
 [dev-dependencies]
 forge-task.workspace = true

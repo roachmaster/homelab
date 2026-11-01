@@ -8,7 +8,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
     "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bridge", "forge-ingress-contract")} |
-                      {("forge-bootstrap", "normal"), ("forge-provider", "normal")},
+                      {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client")},
     "forge-command": set(),
     "forge-ingress-contract": set(),
     "forge-provider": set(),
@@ -67,6 +67,15 @@ def validate_packages(packages):
             if name == "forge-bootstrap-demo" and target in OPTIONAL and not dependency["optional"]:
                 raise SystemExit(f"Demo capability dependency must be optional: {target}")
             edges[name].add(target)
+    template = packages["forge-template"]
+    if template["features"].get("default", []) != []:
+        raise SystemExit("Template CLI must not be enabled by default")
+    for dep in template["dependencies"]:
+        if (dep["kind"] or "normal") == "normal" and dep["name"] not in {"forge-bootstrap", "forge-provider"} and not dep["optional"]:
+            raise SystemExit("Template CLI contracts must remain optional")
+    binaries = [t for t in template["targets"] if "bin" in t["kind"]]
+    if len(binaries) != 1 or binaries[0].get("required-features") != ["cli"]:
+        raise SystemExit("Template binary must require its explicit cli feature")
     if packages["forge-bootstrap-demo"]["features"].get("default", []) != []:
         raise SystemExit("Demo default must remain pure; do not enable the optional capability by default.")
     if packages["forge-local"]["features"].get("jobs") != []:
@@ -112,13 +121,19 @@ def negative_fixtures(packages):
     bad["forge-template"]["dependencies"].append({"name": "forge-kernel", "kind": None,
         "path": str(ROOT / "forge-kernel"), "optional": False})
     fixtures.append(("renderer runtime dependency", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-template"]["features"]["default"] = ["cli"]
+    fixtures.append(("template CLI enabled by default", bad))
+    bad = copy.deepcopy(packages)
+    next(d for d in bad["forge-template"]["dependencies"] if d["name"] == "forge-io-client" and d["kind"] is None)["optional"] = False
+    fixtures.append(("mandatory CLI dependency", bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
         except SystemExit:
             continue
         raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
-    print("PASS: six in-memory negative architecture fixtures rejected")
+    print("PASS: eight in-memory negative architecture fixtures rejected")
 
 
 def main():
@@ -128,6 +143,8 @@ def main():
     negative_fixtures(packages)
     if consumer_tree(package="forge-template") != {"forge-template", "forge-bootstrap", "forge-provider"}:
         raise SystemExit("Renderer public assembly must depend only on bootstrap/provider contracts")
+    if consumer_tree("--features", "cli", package="forge-template") != {"forge-template", "forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client"}:
+        raise SystemExit("Template CLI must include only its selected narrow contracts")
     pure = consumer_tree()
     messages = consumer_tree("--features", "messages")
     disk = consumer_tree("--features", "disk")
@@ -159,7 +176,7 @@ def main():
         if actual != expected:
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
     print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
-    print("PASS: renderer exposes bootstrap/provider assembly and remains absent from terminal/demo trees")
+    print("PASS: renderer default exposes only bootstrap/provider assembly; opt-in CLI has narrow contracts; terminal/demo omit it")
     print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk; no demo implementations")
     print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 

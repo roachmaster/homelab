@@ -42,24 +42,28 @@ The terminal discovers its selected registered commands and sends typed requests
 ## Optional template rendering
 
 [`forge-template`](src/rust/forge-template/README.md) is a schema-checked,
-bounded Mustache-like renderer with method chains and 38 builtins—not a project generator or a new terminal command.
+bounded Mustache-like renderer with method chains and 38 builtins, plus an opt-in
+[single-shot template CLI](src/rust/forge-template/CLI.md). It is not a project
+generator or a command added to the separate Forge terminal.
 Default builtins are pure; custom methods are explicit trusted callbacks.
 It accepts capability-local typed values, returns a complete string or typed error,
 and exposes reusable `forge_template::assembly` config/factory/registrar APIs.
-Only bootstrap/provider contracts are normal dependencies; the render algorithm
+Only bootstrap/provider contracts are unconditional dependencies; the render algorithm
 remains pure. Its example consumes those exports, then adds application-owned
 task/description/bridge wiring without forcing I/O or transport:
 
 ```bash
 make test PACKAGE=forge-template
+make template ARGS='render --template "Hello, {{name.to_uppercase()}}!" --text name=Forge'
 cargo run --manifest-path src/rust/Cargo.toml --offline --locked -p forge-template --example registered_render
 ```
 
 ### Template architecture and render flow
 
-The new component is an optional renderer library plus examples, not a standalone
-application. These Mermaid views show its actual implementation and development-only
-Forge wiring:
+These Mermaid views cover the optional renderer library and its development
+example. The separate opt-in CLI now consumes the same public assembly API; its
+[execution and ownership flow](src/rust/forge-template/CLI.md#execution-and-ownership)
+is documented alongside usage.
 
 ![Implemented optional template renderer architecture](docs/architecture/diagrams/mermaid/images/m09-template-architecture.svg)
 

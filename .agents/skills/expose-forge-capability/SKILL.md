@@ -48,4 +48,10 @@ bridge/admission tests, but do not mistake them for reusable integration accepta
 For the implemented reference, inspect
 [`forge_template::assembly`](../../../src/rust/forge-template/src/assembly.rs) and
 its [standalone consumer](../../../src/rust/forge-template/tests/consumer/Cargo.toml).
+For a requested executable, keep it a thin consumer of those public exports.
+Feature-gate CLI-only dependencies and prove the default library tree remains
+unchanged. Source loading should cross an injected I/O boundary after admission;
+use explicit typed construction when configuration is only available then, not
+a hidden service lookup. Keep this executable proof distinct from the reusable
+capability proof.
 This skill does not authorize publication or unrelated restructuring.

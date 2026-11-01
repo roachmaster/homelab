@@ -43,6 +43,17 @@ class CargoToolsTests(unittest.TestCase):
         self.assertEqual(command[-3:], ["--", "disk.list", "a path; $(not-a-command)"])
         self.assertIn("forge-terminal", command)
 
+    def test_template_uses_fixed_opt_in_binary_and_literal_argv(self):
+        with patch.dict(os.environ, {"ARGS": 'render --template "{{name}}" --text "name=a; $(literal)"',
+                                     "PACKAGE": "ignored", "FEATURES": "ignored"}, clear=True):
+            with patch.object(TOOLS, "execute") as execute:
+                TOOLS.template()
+        command = execute.call_args.args[0]
+        self.assertIn("forge-template", command)
+        self.assertEqual(command[command.index("--features") + 1], "cli")
+        self.assertIn("--no-default-features", command)
+        self.assertEqual(command[-5:], ["render", "--template", "{{name}}", "--text", "name=a; $(literal)"])
+
     def test_session_appends_mode_after_startup_options(self):
         with patch.dict(os.environ, {"ARGS": '--cwd "a path"'}, clear=True):
             with patch.object(TOOLS, "execute") as execute:

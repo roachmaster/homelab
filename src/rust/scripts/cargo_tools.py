@@ -38,8 +38,8 @@ def cargo(command, *args):
             "--offline", "--locked", *args]
 
 
-def execute(command):
-    print("+ " + shlex.join(command), flush=True)
+def execute(command, *, diagnostic_stream=None):
+    print("+ " + shlex.join(command), flush=True, file=diagnostic_stream)
     subprocess.run(command, check=True)
 
 
@@ -51,6 +51,14 @@ def run(session):
         args.append("--session")
     execute(cargo("run", "--package", "forge-terminal", "--bin", "forge",
                   *feature_args(), "--", *args))
+
+
+def template():
+    # Fixed opt-in binary, never a shell-evaluated command or library default.
+    args = shlex.split(os.environ.get("ARGS", "--help"))
+    execute(cargo("run", "--package", "forge-template", "--bin", "forge-template",
+                  "--no-default-features", "--features", "cli", "--", *args),
+            diagnostic_stream=sys.stderr)
 
 
 def assembly():
@@ -93,10 +101,12 @@ def assembly():
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "asm"):
-        raise ValueError("expected run, session or asm")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "template", "asm"):
+        raise ValueError("expected run, session, template or asm")
     if sys.argv[1] == "asm":
         assembly()
+    elif sys.argv[1] == "template":
+        template()
     else:
         run(sys.argv[1] == "session")
 

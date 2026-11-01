@@ -8,6 +8,8 @@
 #![doc = include_str!("../METHODS.md")]
 pub mod assembly;
 mod builtins;
+#[cfg(feature = "cli")]
+pub mod cli;
 mod expression;
 mod methods;
 mod parser;

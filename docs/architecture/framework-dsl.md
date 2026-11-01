@@ -16,7 +16,10 @@ The optional [`forge-template`](../../src/rust/forge-template/README.md) now par
 **template language with method extensions**, not the composition DSL. Its schema-checked rendering
 `Value` tree is capability-local data, not an internal ingress fallback or a global
 business enum. Its public `assembly` module exports typed config, configured-renderer
-factory and registrar, with only bootstrap/provider normal dependencies. The pure
+factory and registrar, with only bootstrap/provider dependencies in the default
+library profile. The opt-in [template CLI](../../src/rust/forge-template/CLI.md)
+uses typed scalar requests, an admitted shared bridge, injected native I/O and
+a typed renderer-construction port; it does not expose a JSON payload fallback. The pure
 engine modules remain separate; the example consumes these exports and adds
 application-owned Task/metadata/bridge wiring. A standalone Cargo consumer proves
 public imports and compile-time omission. File installation, source generation and schema-file formats are deferred; the

@@ -4,7 +4,9 @@ A **std-only, optional rendering capability**: parse once, validate typed
 context/schema, and render to a `String`. It does not read templates from disk,
 write generated files, invoke commands, discover modules or install source code.
 Default builtins are pure; explicitly supplied custom methods are trusted callbacks.
-No existing core contract, local command or terminal dependency changes.
+No existing core contract, local command or terminal dependency changes. An
+opt-in [single-shot CLI](CLI.md) now lives in this crate; the default library
+profile does not include its adapter/contracts.
 
 ## Use
 
@@ -41,9 +43,10 @@ make ci
 Import `forge_template::assembly::{register_renderer, RenderConfig, RenderFactory,
 Renderer, AssemblyError}` from the **library**, not from an example. The public
 module depends only on `forge-bootstrap` and `forge-provider`. Parser, schema,
-expression and rendering modules do not import those contracts. This package has
-**two normal dependencies**, not a zero-dependency profile; optionality means a
-consumer can omit the whole capability. No core package imports it.
+expression and rendering modules do not import those contracts. The default package profile has
+**two normal dependencies**, not a zero-dependency profile; the optional `cli`
+feature selects additional narrow contracts only for the standalone binary. A
+consumer can also omit the whole capability. No core package imports it.
 
 ```rust
 use forge_bootstrap::Registry;

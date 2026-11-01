@@ -100,9 +100,11 @@ reads only, not disk navigation or job submission. No exactly-once claim follows
 
 These views describe an **optional library and runnable development examples**, not
 another deployed application or a new Forge terminal command. The library exposes reusable config/factory/registrar integration and has exactly
-two normal dependencies: bootstrap and provider contracts. Its rendering engine
+two unconditional dependencies: bootstrap and provider contracts. The opt-in
+[single-shot CLI](../../../../src/rust/forge-template/CLI.md) adds only its selected
+contracts and is not pictured in this example-focused view. Its rendering engine
 modules do not import those contracts. Application Task, description and bridge
-imports remain dev-dependencies of the example.
+imports remain dev-dependencies of the example and optional dependencies of the CLI.
 
 ### M09 — Architecture and Forge composition
 

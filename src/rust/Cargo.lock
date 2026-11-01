@@ -108,6 +108,7 @@ dependencies = [
  "forge-bridge",
  "forge-command",
  "forge-ingress-contract",
+ "forge-io-client",
  "forge-provider",
  "forge-task",
 ]
