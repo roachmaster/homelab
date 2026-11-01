@@ -33,10 +33,8 @@ For implemented [local jobs](../../../src/rust/forge-local/JOBS.md), trace the s
 
 For a requested adapter substitution, compare equivalent typed input, verified identity policy, preserved deadline/correlation/idempotency and outcome guarantees. Verify only the chosen adapter's actual parsing/lifecycle/settlement behavior; no second transport or broker mechanism is required. No implementation or infrastructure execution is implied by tracing the design.
 
-For the implemented [HTTP gateway](../../../src/rust/forge-remote-https/README.md#http-header-projection),
-trace one capability-neutral `/forge/v1/dispatch` path → bounded singleton HTTP
-routing headers → canonical typed Header/NodeCall → the same destination bridge.
-The body is typed payload only and cannot override routing or TLS-derived identity.
-Do not create per-task URLs or guess destinations from bodies. POST is currently
-supported; unsupported verbs return 405/Allow without task execution. Future verb
-support requires real operation semantics/authorization, not aliases or mutating GET.
+For HTTP entry architecture or a proposed method/destination, use
+[Design Forge Front Door](../design-forge-front-door/SKILL.md). It owns the
+single-gateway review workflow and current-versus-future method distinction;
+this skill owns the detailed request/effect trace. Verify actual projection in the
+[HTTP adapter contract](../../../src/rust/forge-remote-https/README.md#http-header-projection).

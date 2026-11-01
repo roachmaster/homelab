@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Forge Front Door"
+  short_description: "Keep one entry point with typed header dispatch"
+  default_prompt: "Use $design-forge-front-door to review this adapter or task addition for single-entry routing, admission and bootstrap boundaries."

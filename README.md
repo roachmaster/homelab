@@ -154,6 +154,7 @@ license and pinned reconstruction provenance.
 
 - [Design Package Boundaries](.agents/skills/design-package-boundaries/SKILL.md): capability-first packages and practical hexagonal boundaries, without unnecessary layers.
 - [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
+- [Design Forge Front Door](.agents/skills/design-forge-front-door/SKILL.md): preserve one HTTP gateway and header-selected destinations, with current versus future method semantics.
 - [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.
 - [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md): specify typed factories, acquisition scopes, leases and lifecycle wiring.
 - [Expose Forge Capability](.agents/skills/expose-forge-capability/SKILL.md): deliver public config/factory/registrar exports with an independent consumer proof, not example-only integration.
@@ -161,6 +162,8 @@ license and pinned reconstruction provenance.
 The framework-specific skills share one [DSL semantic reference](docs/architecture/framework-dsl.md). Keep these repository-local skills with their linked documentation; the broader DSL is an evolving Rust-embedded composition model, not an implemented parser; the linked core documents its real public API subset.
 
 Examples: `Use $model-forge-module to explain the DSL and model a notifications capability.`
+
+`Use $design-forge-front-door to review a new destination or input adapter without adding per-task endpoints.`
 
 `Use $trace-forge-command to trace this request and identify rejection before effects.`
 
