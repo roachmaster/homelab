@@ -1,0 +1,7 @@
+interface:
+  display_name: "Diagnose Bugs"
+  short_description: "Reproduce bugs and test causes with focused evidence"
+  default_prompt: "Use $diagnosing-bugs to investigate this failure with a redacted, symptom-specific reproduction."
+
+policy:
+  allow_implicit_invocation: false

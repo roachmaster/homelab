@@ -1,0 +1,7 @@
+interface:
+  display_name: "Simplify Code"
+  short_description: "Improve clarity while preserving behavior and boundaries"
+  default_prompt: "Use $code-simplification to simplify this requested slice without changing its behavior or public contracts."
+
+policy:
+  allow_implicit_invocation: false

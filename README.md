@@ -121,6 +121,19 @@ M07 describes the implemented local counter lifecycle. The generic module/interf
 
 Repository skills live separately from application code in `.agents/skills/`.
 
+
+### Explicit workflow skills
+
+These three adapted workflow skills are **explicit-invocation-only** and local to
+this repository; they are not installed globally. Each includes its upstream MIT
+license and pinned reconstruction provenance.
+
+- [Diagnose Bugs](.agents/skills/diagnosing-bugs/SKILL.md): build a symptom-specific reproduction, test causes and verify a scoped correction. Invoke `$diagnosing-bugs`.
+- [Verify Before Completion](.agents/skills/verification-before-completion/SKILL.md): match final claims to current evidence and disclose unrun checks. Invoke `$verification-before-completion`.
+- [Simplify Code](.agents/skills/code-simplification/SKILL.md): improve clarity without changing behavior, public integration or typed boundaries. Invoke `$code-simplification`.
+
+### Forge design and implementation skills
+
 - [Design Package Boundaries](.agents/skills/design-package-boundaries/SKILL.md): capability-first packages and practical hexagonal boundaries, without unnecessary layers.
 - [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
 - [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.
