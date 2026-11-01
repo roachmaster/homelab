@@ -63,6 +63,15 @@ class CargoToolsTests(unittest.TestCase):
         self.assertEqual(command[-3:], ["--", "inspect", "a; $(literal)"])
         self.assertEqual(command[command.index("--features") + 1], "cli")
 
+    def test_remote_selects_only_fixed_loopback_example(self):
+        with patch.dict(os.environ, {"ARGS": "--endpoint unsafe", "PACKAGE": "ignored", "FEATURES": "ignored"}, clear=True):
+            with patch.object(TOOLS, "execute") as execute:
+                TOOLS.remote()
+        command = execute.call_args.args[0]
+        self.assertIn("forge-remote-https", command)
+        self.assertEqual(command[-2:], ["--example", "loopback"])
+        self.assertNotIn("unsafe", command)
+
     def test_session_appends_mode_after_startup_options(self):
         with patch.dict(os.environ, {"ARGS": '--cwd "a path"'}, clear=True):
             with patch.object(TOOLS, "execute") as execute:

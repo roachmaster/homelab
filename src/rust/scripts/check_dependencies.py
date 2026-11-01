@@ -7,6 +7,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-remote": {(name, "normal") for name in ("forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task")},
+    "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-bootstrap", "forge-provider", "forge-io-client", "forge-ingress-contract")} | {(name, "dev") for name in ("forge-kernel", "forge-task")},
     "forge-ide": {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-io-client", "forge-bridge", "forge-command", "forge-ingress-contract")},
     "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bridge", "forge-ingress-contract")} |
                       {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client")},
@@ -32,7 +34,8 @@ ALLOWED = {
                              ("forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract",
                               "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
-EXTERNAL = {"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
+EXTERNAL_DEV = {"forge-remote-https": {"rcgen"}}
+EXTERNAL = {"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
 
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
 PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}
@@ -62,7 +65,7 @@ def validate_packages(packages):
         for dependency in package["dependencies"]:
             target = dependency["name"]
             kind = dependency["kind"] or "normal"
-            if target in EXTERNAL.get(name, set()) and kind == "normal":
+            if (target in EXTERNAL.get(name, set()) and kind == "normal") or (target in EXTERNAL_DEV.get(name, set()) and kind == "dev"):
                 if dependency.get("path") or not (dependency.get("source") or "").startswith("registry+"):
                     raise SystemExit(f"Unexpected external dependency origin: {target}")
                 continue
@@ -152,13 +155,17 @@ def negative_fixtures(packages):
     bad = copy.deepcopy(packages)
     bad["forge-task"]["dependencies"].append({"name": "syn", "kind": None, "source": "registry+https://github.com/rust-lang/crates.io-index", "optional": False})
     fixtures.append(("parser in core", bad))
+    for source, target in [("forge-remote", "serde_json"), ("forge-ingress-contract", "rustls"), ("forge-local", "hyper")]:
+        bad = copy.deepcopy(packages)
+        bad[source]["dependencies"].append({"name": target, "kind": None, "source": "registry+https://github.com/rust-lang/crates.io-index", "optional": False})
+        fixtures.append((f"network/codec leakage into {source}", bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
         except SystemExit:
             continue
         raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
-    print("PASS: eleven in-memory negative architecture fixtures rejected")
+    print("PASS: fourteen in-memory negative architecture fixtures rejected")
 
 
 def main():
@@ -191,7 +198,13 @@ def main():
                                    ("combined", combined, MESSAGES_PROFILE | DISK_PROFILE)]:
         if actual != expected:
             raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide"})
+    remote = consumer_tree(package="forge-remote")
+    if remote != {"forge-remote", "forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task"}:
+        raise SystemExit("Remote conversation port includes a transport/codec or implementation")
+    https = consumer_tree(package="forge-remote-https")
+    if not {"rustls", "hyper", "tokio", "serde_json"} <= https or "rcgen" in https or "forge-kernel" in https:
+        raise SystemExit("HTTPS normal profile must own TLS/HTTP only; demo identity issuance/kernel stay dev-only")
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide", "forge-remote", "forge-remote-https"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
@@ -210,6 +223,7 @@ def main():
         actual = set(filter(None, local.partition("|")[2].split(",")))
         if actual != expected:
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
+    print("PASS: remote typed port is transport-free; HTTPS is absent from existing local/IDE/template consumers")
     print("PASS: optional IDE parser/rooted native client isolated; YAML/CLI absent from library default")
     print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
     print("PASS: renderer default exposes only bootstrap/provider assembly; opt-in CLI has narrow contracts; terminal/demo omit it")

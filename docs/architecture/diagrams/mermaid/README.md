@@ -42,7 +42,7 @@ The main arrows show **success**, with rejection points annotated rather than al
 
 ![Existing core and disk foundation followed by proposed hosted kernel phases](images/m04-kernel-phases.svg)
 
-The foundation, local node/discovery/terminal and explicitly stepped counter jobs are implemented. Teal marks existing code; amber marks proposed phases; gray marks host responsibilities or later gates. Later phase arrows show recommended delivery order, not runtime calls. No transport is selected, jobs are not OS processes, and cancellation is cooperative. The host OS still supplies protected memory, processes and drivers. This is not a bootable kernel or a tested Raspberry Pi deployment. Follow the [researched kernel plan](../../forge-kernel-plan.md) for acceptance gates and open decisions.
+The foundation, local node/discovery/terminal and explicitly stepped counter jobs are implemented. Teal marks existing code; amber marks proposed phases; gray marks host responsibilities or later gates. Later phase arrows show recommended delivery order, not runtime calls. The narrow M12 node-info proof selects optional mutual-TLS HTTPS on loopback; reachable remote deployment remains future. Jobs are not OS processes, and cancellation is cooperative. The host OS still supplies protected memory, processes and drivers. This is not a bootable kernel or a tested Raspberry Pi deployment. Follow the [researched kernel plan](../../forge-kernel-plan.md) for acceptance gates and open decisions.
 
 ## Proposed foundation interfaces
 
@@ -93,8 +93,8 @@ uncertain remote outcomes are deliberately not execution states.
 bounded typed decoding, unchanged bridge checks and resource policy. Denials stop
 before business effects; possible delivery followed by a lost/malformed reply is
 OutcomeUnknown. Destination identity and original/delegated caller authority are
-not interchangeable. No protocol is selected; first remote exposure is node
-reads only, not disk navigation or job submission. No exactly-once claim follows.
+not interchangeable. This broader proposal does not mandate a protocol; M12 now implements one narrow
+HTTPS node-read proof, not disk navigation or job submission. No exactly-once claim follows.
 
 ## Implemented template renderer
 
@@ -185,3 +185,20 @@ are ownership/result annotations, not additional entry points; no callbacks bypa
 the bridge. The local policy flag is not authentication. Filesystem handles prevent
 symlink traversal, not all snapshot/mount races, and parser budgets are not a
 hostile-source execution sandbox. See [actual contracts and limits](../../../../src/rust/forge-ide/README.md).
+
+## M12 — Implemented authenticated node-info boundary
+
+![Implemented typed node-info over mutual-TLS HTTPS](images/m12-remote-node-info.svg)
+
+[Mermaid source](m12-remote-node-info.mmd). The upper panel is explicit host
+assembly through public registrars, consuming freeze, factories and chosen providers.
+The lower panel is one successful typed call, not alternate bypass paths. Standard
+TLS verifies certificate identity; the exact configured peer mapping is distinct
+from the destination's operation policy. The same existing bridge performs header
+lookup/admission/variant checks before injected observation. JSON and the private
+runtime remain in the optional HTTPS adapter. One server owner services one
+connection/request at a time; trusted synchronous callbacks are not preempted.
+The client validates original metadata and target/incarnation. Unknown outcomes
+are not retries, cancellation or durable acceptance. The demo is loopback-only
+with ephemeral in-memory credentials, not a deployed daemon or an implementation
+of all M08 delegation/resource-policy sketches. [Actual API and limits](../../remote-node-info.md).

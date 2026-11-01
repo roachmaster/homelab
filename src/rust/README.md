@@ -1,7 +1,7 @@
 # Rust source sets — first Forge core
 
-This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one optional template renderer, one optional IDE inspector, a local application/terminal pair and three
-clearly separated demo packages**, all original and synchronous. The core remains std-only; IDE parser/filesystem/YAML dependencies stay optional to consumers. Typed registration/freeze and
+This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one optional template renderer, one optional IDE inspector, a typed remote conversation plus optional HTTPS adapter, a local application/terminal pair and three
+clearly separated demo packages**, with original synchronous application contracts. The optional HTTPS adapter privately owns its I/O runtime. The core remains std-only; IDE parser/filesystem/YAML dependencies stay optional to consumers. Typed registration/freeze and
 optional-package assembly, local node observations, admitted command discovery, explicitly stepped local counter jobs and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
 
@@ -21,7 +21,7 @@ consumers have no normal I/O dependency, and client adapters need no task model.
 Production routing imports none of these abstractions. Factories, providers and leases stay in
 one cohesive crate; they are not a class-per-package hierarchy. Capability enums
 and ports live in consumers, not this framework. There is no JSON/value-map
-payload fallback, transport library, global enum, global registry or service locator.
+payload fallback, transport library in core, global enum, global registry or service locator.
 
 ## Optional native system clients
 
@@ -40,6 +40,17 @@ cargo run -p forge-terminal --no-default-features -- node.status
 ```
 
 The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them at assembly. `--no-default-features` omits both modules; add `--features jobs` or `--features disk` to select one. The node module still requires the kernel package; the older pure demo below remains the proof of whole-package omission. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. [Local jobs](forge-local/JOBS.md) are volatile pure counters, not OS processes; only explicit step advances computation. No network or destructive file operations are added.
+
+## Optional authenticated node-info boundary
+
+[`forge-remote`](forge-remote/README.md) owns the synchronous typed client/task,
+addressed call/reply and destination policy/bridge. [`forge-remote-https`](forge-remote-https/README.md)
+is a separately selected implementation owning standard HTTP/mTLS, private JSON
+DTOs and a per-owner runtime. Public config/registrars stage its factories before
+freeze and explicit construction. `make remote` runs one actual loopback call using
+ephemeral in-memory demo credentials and exits. It accepts no endpoint/credential
+ARGS; this is not a deployed agent or a remote filesystem/jobs API. Existing local,
+template and IDE consumers omit both packages. The core is still std-only.
 
 ## Optional template renderer
 
@@ -295,8 +306,8 @@ not a sandbox or automatic teardown guarantee. Runtime effects are never rolled 
 **Not implemented:** a module/DSL parser, universal container, automatic dependency
 resolution, generic override/default engine, route-descriptor coverage validator,
 provider pools, async dispatch or `Send`/`Sync`
-handler hosting, real authentication, generic header-level deadline/cancellation/idempotency
-metadata and enforcement (local jobs have their own capability semantics), durable acceptance, persistent content stores, remote transports, workers or supervised
+handler hosting, general identity/delegation (the optional HTTPS node-info adapter has narrow mTLS peer authentication), generic header-level deadline/cancellation/idempotency
+metadata and enforcement (local jobs have their own capability semantics), durable acceptance, persistent content stores, general remote execution/deployment, workers or supervised
 startup/shutdown. The dependency guard checks the **compile-time crate graph**,
 and actual pure/messages/disk/combined consumer dependency trees; bootstrap separately checks
 its declared assembly order, not an auto-wired runtime service graph. Deferred

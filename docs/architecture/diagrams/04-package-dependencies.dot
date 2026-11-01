@@ -2,7 +2,9 @@ digraph Packages {
 graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.55, ranksep=0.9, bgcolor="white"];
 node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4];
 edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
-rankdir=TB; label="04  Implemented package dependencies — core + command description + optional capabilities + local system + demos\nArrows are normal imports; dashed edges are optional Cargo dependencies. Dev-only example/test imports are excluded. IDE-only third-party parser/filesystem and optional YAML imports are not shown.";
+rankdir=TB; label="04  Implemented package dependencies — core + command description + optional capabilities + local system + demos\nArrows are normal imports; dashed edges are optional Cargo dependencies. Dev-only example/test imports are excluded. Third-party parser/filesystem, YAML and HTTPS/TLS/runtime imports are not shown.";
+remote [label="forge-remote\nTyped node.info call / reply / task\nInjected observation / policy\nExisting synchronous destination bridge"];
+https [label="forge-remote-https\nOptional HTTP / TLS implementation\nPrivate wire DTOs and owner runtime\nPublic config / factories / registrars"];
 ide [label="forge-ide\nOptional project inspection task\nRooted native client + syn parser\nPublic config / factory / registrar\nOpt-in YAML and CLI"];
 renderer [label="forge-template\nOptional template renderer\nTyped schema / explicit methods\nPublic config / factory / registrar\nOpt-in template CLI binary"];
 app [label="forge-bootstrap-demo\nApplication-owned config / command enum\nCalls registrars; constructs explicitly\nPure default; opt-in messages / disk", fillcolor="#fff1d6", color="#ae7b26"];
@@ -18,6 +20,8 @@ provider [label="forge-provider\nFactory / InstanceProvider\nSingleton / Transie
 task [label="forge-task\nTask::run (unchanged)"];
 command [label="forge-command\nDescribeCommand / descriptors\nNo Task dependency"];
 io [label="forge-io-client\nIoClient::execute"];
+remote -> {bridge contract task io};
+https -> {remote bootstrap provider io contract};
 app -> {bootstrap bridge task contract};
 app -> {impl feature} [style=dashed, label="messages"];
 app -> {kernel io} [style=dashed, label="disk"];

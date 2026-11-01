@@ -1,0 +1,21 @@
+# Separate public-API acceptance consumer, not an application shipped by Forge.
+[package]
+name = "remote-https-public-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+https = ["dep:forge-remote-https", "dep:forge-remote", "dep:forge-provider", "dep:forge-bootstrap", "dep:forge-ingress-contract", "dep:forge-io-client", "dep:rcgen"]
+
+[dependencies]
+forge-remote-https = { path = "../..", optional = true }
+forge-remote = { path = "../../../forge-remote", optional = true }
+forge-provider = { path = "../../../forge-provider", optional = true }
+forge-bootstrap = { path = "../../../forge-bootstrap", optional = true }
+forge-ingress-contract = { path = "../../../forge-ingress-contract", optional = true }
+forge-io-client = { path = "../../../forge-io-client", optional = true }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"], optional = true }

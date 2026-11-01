@@ -37,3 +37,5 @@ Keep review evidence in `reviews/`, target designs in `architecture/`, delivery 
 See the implemented [bounded local jobs guide](../src/rust/forge-local/JOBS.md) for
 manual counter stepping, owner-scoped receipts and volatile retention. Remote and
 production identity remain proposals.
+
+- [Implemented authenticated node-info boundary](architecture/remote-node-info.md): optional HTTPS loopback proof, public integration and limits.

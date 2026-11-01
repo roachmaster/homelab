@@ -2,6 +2,17 @@
 
 **Status:** Proposed sequencing based on the complete repository synthesis. This is a plan, not completed implementation or authority to modify source repositories.
 
+## Authenticated node-info boundary — implemented narrow proof
+
+[Typed remote conversation and optional HTTPS adapter](../architecture/remote-node-info.md)
+now exercise one read-only node.info call over mutual TLS on loopback. Configured
+certificate mapping and independent operation policy precede the existing bridge;
+wire DTOs/runtime remain in the adapter. Public config/factory/registrar and a
+separate consumer establish reusable integration and dependency omission. No
+production daemon, remote jobs/files/IDE, credential deployment or Bitwave is
+included. Reachable deployment and broader operations remain separate security
+and lifecycle gates, not automatic next work.
+
 ## Forge IDE initial capability — implemented
 
 The optional [IDE inspector](../../src/rust/forge-ide/README.md) assembles a rooted

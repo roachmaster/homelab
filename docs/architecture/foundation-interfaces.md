@@ -1,5 +1,10 @@
 # Foundation interfaces: jobs, access and remote calls
 
+**Implementation checkpoint:** the narrower [node-info network slice](remote-node-info.md)
+now implements a transport-neutral typed call/client/task and optional mutual-TLS
+HTTPS loopback adapter. The broader generic access/delegation and remote-execution
+interfaces below remain proposals, not exports or production guarantees.
+
 **Broader proposal; a narrow local jobs subset is implemented.** The
 [bounded counter guide](../../src/rust/forge-local/JOBS.md) covers actual explicit
 stepping, volatile history and trusted-local owner checks. Generic jobs, production

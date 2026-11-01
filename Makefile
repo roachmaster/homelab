@@ -11,7 +11,7 @@ export ARGS ?= --help
 export ASM_TARGET ?= lib
 export NATIVE ?= 0
 
-.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide asm
+.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide remote asm
 
 help:
 	@printf '%s\n' \
@@ -28,6 +28,7 @@ help:
 	  '  make session           Interactive terminal; Ctrl-D or exit finishes' \
 	  '  make template ARGS="methods"  Run the opt-in template CLI' \
 	  '  make ide ARGS="inspect ."  Read a project tree + Rust syntax as YAML' \
+	  '  make remote            One-shot mutual-TLS node.info loopback demo' \
 	  '  make asm               Release assembly for forge-kernel library' \
 	  '' \
 	  'Selections: PACKAGE=forge-terminal FEATURES=disk NO_DEFAULT_FEATURES=1' \
@@ -87,5 +88,5 @@ ci:
 
 session: ARGS =
 
-run session template ide asm:
+run session template ide remote asm:
 	@python3 "$$FORGE_RUST_ROOT/scripts/cargo_tools.py" $@

@@ -72,3 +72,7 @@ registrar/factory/provider, admitted task, rooted native I/O, real syntax parser
 and YAML boundary. DOT04 includes its actual Forge imports; external parser,
 capability-filesystem and optional YAML libraries remain inside this capability.
 [Usage and precise scope](../../../src/rust/forge-ide/README.md).
+
+## Implemented remote node-info slice
+
+[Mermaid M12](mermaid/m12-remote-node-info.mmd) · [SVG](mermaid/images/m12-remote-node-info.svg) · [Design and limits](../remote-node-info.md). This is a mutual-TLS loopback proof, not a deployed agent or the full proposed remote execution model.

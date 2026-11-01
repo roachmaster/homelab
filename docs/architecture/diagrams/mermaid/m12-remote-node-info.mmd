@@ -1,0 +1,30 @@
+---
+title: M12 Implemented authenticated node-info boundary
+---
+flowchart TB
+    subgraph APP["EXPLICIT HOST COMPOSITION"]
+        C["Typed config + DER trust and credentials<br/>Configured node / incarnation and peer allowlist"]
+        R["Public register_client / register_server<br/>Stage factories, validate and freeze"]
+        F["Create endpoints; choose providers<br/>One private runtime per owner<br/>Server binds loopback only"]
+        C --> R --> F
+    end
+    subgraph CALL["ONE READ-ONLY REQUEST"]
+        T["ReadNodeTask with injected RemoteNodeClient<br/>Prepare node.info header + typed Info payload"]
+        H["Optional HTTPS adapter<br/>Private JSON codec; bounded HTTP/1 call<br/>No retry; unchanged expiry and IDs"]
+        TLS["Mutual TLS verification<br/>Expected server trust / name<br/>Verified client leaf maps to subject"]
+        D["Bounded typed decode and target check<br/>Unknown body variants rejected<br/>Caller claims never become identity"]
+        B["Existing shared Bridge<br/>Header route + version lookup<br/>Separate operation authorization<br/>Deadline recheck + payload agreement"]
+        N["Injected local NodeInfoSource<br/>Configured identity + compile-target facts<br/>Not health or hardware probes"]
+        O["Typed reply checks<br/>Responder / incarnation and original IDs<br/>Bounded fields; reject late result"]
+        T --> H --> TLS --> D --> B --> N --> O
+    end
+    F -.-> T
+    F -.-> TLS
+    L["LIMITS AND SCOPE<br/>Sequential connection; synchronous trusted callbacks are not preempted<br/>Timeout / lost reply may follow observation<br/>No remote files, IDE, jobs, deployment or Bitwave"]
+    O --- L
+    classDef contract fill:#087f8c,color:#ffffff,stroke:#086975,stroke-width:2px;
+    classDef adapter fill:#e8f4f7,color:#163744,stroke:#24576b,stroke-width:1.5px;
+    classDef scope fill:#fff1d6,color:#183342,stroke:#ae7b26,stroke-width:1.5px;
+    class T,B,N,O contract;
+    class C,R,F,H,TLS,D adapter;
+    class L scope;

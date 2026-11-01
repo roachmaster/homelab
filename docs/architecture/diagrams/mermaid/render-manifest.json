@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "027d8b936136591f6a9ba18737dbc6d9c6f5b587405bcd5001436de5c7f569d6",
-    "validate.mjs": "6de4ac46f120526b4cbe5e363e638554c37fadea1e49b765273c2d96713bc5b3"
+    "render.py": "e87209024f378289abfe4281375cd8f0cd34d75c034e63bfcce251e00609f479",
+    "validate.mjs": "3ac36d9f5816d52dbe8f455adff3be7be0435990443d992c4f4ce8b6fc0dea92"
   },
   "diagrams": [
     {
@@ -34,9 +34,9 @@
     },
     {
       "source": "m04-kernel-phases.mmd",
-      "source_sha256": "7f8d2eb07c231c066b41b5cd3bb5d1adafe1def5c7da66aceb9728ed7157ba2a",
+      "source_sha256": "a07a75946dbfcaf2de91a6011c46c248ad64268bff82dc86bee42cc30bce9561",
       "svg": "images/m04-kernel-phases.svg",
-      "svg_sha256": "2f59fcc9e48e4c67096913007d6ea84b2672b20e29a0deb8e73fc2ad2583bb8e"
+      "svg_sha256": "c09d5e95611f8fc9534486f63a66d6ca9c12652119a0fedf5d35159bfba2d8b5"
     },
     {
       "source": "m05-foundation-modules.mmd",
@@ -79,6 +79,12 @@
       "source_sha256": "adade6c3b185f067c0f76537303b0677ab6115d4dec79e72b7daa05c73f725b4",
       "svg": "images/m11-ide-inspection.svg",
       "svg_sha256": "15a40382ef04a58d9ae970d705be18f867e9fbf6ca0bb4a7a3895aea517ebecf"
+    },
+    {
+      "source": "m12-remote-node-info.mmd",
+      "source_sha256": "842e6c745e4219224e572b8380c6aba500e5675f0f6477759e8475386e7aaf2b",
+      "svg": "images/m12-remote-node-info.svg",
+      "svg_sha256": "24c413c2de15eae185685a22dbdacf454028136141d2b58217aae8221a7b705c"
     }
   ]
 }

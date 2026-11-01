@@ -7,7 +7,7 @@ six core crates and optional `forge-kernel` clients; do not start a new kernel,
 distributed scheduler or shell platform.
 
 **Research baseline:** checked against homelab
-`1267205e1ee0af849bdefd347167836dab82bd28` on 2026-10-31. The local node/disk/terminal and bounded counter-jobs checkpoints are implemented. [Actual job commands and limits](../../src/rust/forge-local/JOBS.md) are distinct from broader generic/remote contracts below. The research plan still selects no remote transport, async runtime, deployment target or device.
+`1267205e1ee0af849bdefd347167836dab82bd28` on 2026-10-31. The local node/disk/terminal and bounded counter-jobs checkpoints are implemented. [Actual job commands and limits](../../src/rust/forge-local/JOBS.md) are distinct from broader generic/remote contracts below. The original research plan selected no transport/runtime/device. The later [node-info network proof](remote-node-info.md) now selects optional HTTPS with mutual TLS and an adapter-private runtime for loopback only; no remote deployment target or device is configured.
 
 [Source ledger](forge-kernel-sources.md) · [Plan diagram](diagrams/07-hosted-kernel-plan.svg) ·
 [Existing bootstrap](bootstrap-registrars.md) · [Current disk client](../../src/rust/forge-kernel/README.md)
@@ -17,7 +17,7 @@ The [Pi Cluster Control review](../reviews/forge/pi-cluster-control.md) supplies
 The next foundations now have a [detailed module/interface proposal](foundation-interfaces.md)
 and [Rust contract sketches](foundation-contracts.md). They refine bounded jobs,
 identity/policy and remote-read interfaces without freezing an untested API.
-The first local counter subset exists; broader identity and remote APIs remain proposals.
+The first local counter and narrow node-info network subsets exist; broader identity/delegation and remote-execution APIs remain proposals.
 
 ## What kernel means here
 
@@ -265,11 +265,11 @@ catalog coverage.
 
 | Decision | Recommendation now | Revisit before |
 | --- | --- | --- |
-| Next separately scoped work | Identity/codec proof before remote node reads; useful job choice if needed | No automatic network/durability expansion |
+| Next separately scoped work | Deployment trust/credential lifecycle before extending the node-info proof beyond loopback; useful job choice if needed | No automatic exposure/durability expansion |
 | First job implemented | Pure counter with explicit checkpoints and volatile history | Useful domain job can be chosen later |
 | Executor | Single owner with cooperative steps first | Blocking work or parallelism |
 | Discovery | Explicit peer config; show observed freshness | More than a small managed peer set |
-| Transport and identity | No product chosen; require authenticated, bounded calls | Any listener or remote operation |
+| Transport and identity | Optional HTTPS/mTLS node-info proof chosen; production issuance/rotation/exposure still undecided | Any extension beyond current loopback scope |
 | Disk exposure | Local/trusted only, no file mutations | Remote filesystem access or multi-user use |
 | Durability | Label volatile acceptance honestly | Restart-safe promises or effectful remote retries |
 | Raspberry Pi | Run the hosted application on a supported OS first | Actual hardware/target selection and tests |
@@ -281,4 +281,4 @@ and a bare-metal kernel are different projects. Target compatibility must be
 built and tested on selected hardware; no cross-compilation, flashing or kernel
 replacement is authorized here. [Raspberry Pi kernel documentation](https://www.raspberrypi.com/documentation/computers/linux_kernel.html)
 
-**Current checkpoint:** local node/discovery/terminal and the explicitly stepped counter are implemented. Broader telemetry, production identity, durable jobs and remote services remain future work, not authorized merely by this plan.
+**Current checkpoint:** local node/discovery/terminal, the explicitly stepped counter and a narrow authenticated HTTPS node-info loopback proof are implemented. Broader telemetry, identity/delegation, durable jobs and remotely deployed services remain future work, not authorized merely by this plan.

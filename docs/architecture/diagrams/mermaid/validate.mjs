@@ -12,7 +12,7 @@ const { default: mermaid } = await import("mermaid");
 mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
 for (const name of ["m01-contracts", "m02-bootstrap", "m03-disk-request", "m04-kernel-phases",
   "m05-foundation-modules", "m06-foundation-interfaces", "m07-job-lifecycle", "m08-remote-admission",
-  "m09-template-architecture", "m10-template-render", "m11-ide-inspection"]) {
+  "m09-template-architecture", "m10-template-render", "m11-ide-inspection", "m12-remote-node-info"]) {
   const source = fs.readFileSync(path.join(root, `${name}.mmd`), "utf8");
   const result = await mermaid.parse(source);
   console.log(`PASS official Mermaid syntax: ${name} (${result.diagramType})`);

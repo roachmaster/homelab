@@ -68,6 +68,12 @@ def ide():
             diagnostic_stream=sys.stderr)
 
 
+def remote():
+    # Fixed ephemeral loopback demonstration, not an endpoint/credential CLI.
+    execute(cargo("run", "--package", "forge-remote-https", "--example", "loopback"),
+            diagnostic_stream=sys.stderr)
+
+
 def assembly():
     package = os.environ.get("PACKAGE") or "forge-kernel"
     selection = os.environ.get("ASM_TARGET", "lib")
@@ -108,10 +114,12 @@ def assembly():
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "template", "ide", "asm"):
-        raise ValueError("expected run, session, template, ide or asm")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "template", "ide", "remote", "asm"):
+        raise ValueError("expected run, session, template, ide, remote or asm")
     if sys.argv[1] == "asm":
         assembly()
+    elif sys.argv[1] == "remote":
+        remote()
     elif sys.argv[1] == "ide":
         ide()
     elif sys.argv[1] == "template":

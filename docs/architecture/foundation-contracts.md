@@ -2,7 +2,9 @@
 
 **Illustrative APIs, not the exact implemented exports.** A narrower fixed-counter
 [local jobs subset](../../src/rust/forge-local/JOBS.md) now exists; generic job/access/remote
-contracts below remain proposals. This companion makes the [module design and invariants](foundation-interfaces.md)
+contracts below remain proposals. A narrower [node-info network slice](remote-node-info.md)
+now exists with different exact public names and limited peer authorization; it
+does not implement every generic sketch. This companion makes the [module design and invariants](foundation-interfaces.md)
 concrete. Supporting value types are summarized rather than implemented here;
 these fragments are not a new compilable crate, a wire specification or a stability
 promise. Exact signatures should change if the first consumer tests expose a
