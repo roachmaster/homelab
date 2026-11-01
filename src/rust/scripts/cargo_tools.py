@@ -61,6 +61,13 @@ def template():
             diagnostic_stream=sys.stderr)
 
 
+def ide():
+    args = shlex.split(os.environ.get("ARGS", "--help"))
+    execute(cargo("run", "--package", "forge-ide", "--bin", "forge-ide",
+                  "--no-default-features", "--features", "cli", "--", *args),
+            diagnostic_stream=sys.stderr)
+
+
 def assembly():
     package = os.environ.get("PACKAGE") or "forge-kernel"
     selection = os.environ.get("ASM_TARGET", "lib")
@@ -101,10 +108,12 @@ def assembly():
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "template", "asm"):
-        raise ValueError("expected run, session, template or asm")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "template", "ide", "asm"):
+        raise ValueError("expected run, session, template, ide or asm")
     if sys.argv[1] == "asm":
         assembly()
+    elif sys.argv[1] == "ide":
+        ide()
     elif sys.argv[1] == "template":
         template()
     else:

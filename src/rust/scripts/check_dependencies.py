@@ -7,6 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-ide": {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-io-client", "forge-bridge", "forge-command", "forge-ingress-contract")},
     "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bridge", "forge-ingress-contract")} |
                       {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client")},
     "forge-command": set(),
@@ -31,6 +32,8 @@ ALLOWED = {
                              ("forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract",
                               "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
+EXTERNAL = {"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
+
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
 PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}
 OPTIONAL = {"forge-demo-messages", "forge-demo-memory-client", "forge-provider", "forge-kernel", "forge-io-client"}
@@ -59,6 +62,10 @@ def validate_packages(packages):
         for dependency in package["dependencies"]:
             target = dependency["name"]
             kind = dependency["kind"] or "normal"
+            if target in EXTERNAL.get(name, set()) and kind == "normal":
+                if dependency.get("path") or not (dependency.get("source") or "").startswith("registry+"):
+                    raise SystemExit(f"Unexpected external dependency origin: {target}")
+                continue
             if (target, kind) not in ALLOWED[name]:
                 raise SystemExit(f"Forbidden dependency: {name} -> {target} ({kind})")
             expected_path = (ROOT / ("examples" if target in DEMO_PACKAGES else "") / target).resolve()
@@ -67,6 +74,15 @@ def validate_packages(packages):
             if name == "forge-bootstrap-demo" and target in OPTIONAL and not dependency["optional"]:
                 raise SystemExit(f"Demo capability dependency must be optional: {target}")
             edges[name].add(target)
+    ide = packages["forge-ide"]
+    if ide["features"].get("default", []) != []:
+        raise SystemExit("IDE YAML/CLI must remain opt-in")
+    for dep in ide["dependencies"]:
+        if dep["name"] in {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract"} and not dep["optional"]:
+            raise SystemExit("IDE presentation dependencies must remain optional")
+    ide_bins = [t for t in ide["targets"] if "bin" in t["kind"]]
+    if len(ide_bins) != 1 or ide_bins[0].get("required-features") != ["cli"]:
+        raise SystemExit("IDE binary must require cli")
     template = packages["forge-template"]
     if template["features"].get("default", []) != []:
         raise SystemExit("Template CLI must not be enabled by default")
@@ -127,13 +143,22 @@ def negative_fixtures(packages):
     bad = copy.deepcopy(packages)
     next(d for d in bad["forge-template"]["dependencies"] if d["name"] == "forge-io-client" and d["kind"] is None)["optional"] = False
     fixtures.append(("mandatory CLI dependency", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-ide"]["features"]["default"] = ["cli"]
+    fixtures.append(("IDE CLI enabled by default", bad))
+    bad = copy.deepcopy(packages)
+    next(d for d in bad["forge-ide"]["dependencies"] if d["name"] == "serde_yaml_ng")["optional"] = False
+    fixtures.append(("mandatory YAML dependency", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-task"]["dependencies"].append({"name": "syn", "kind": None, "source": "registry+https://github.com/rust-lang/crates.io-index", "optional": False})
+    fixtures.append(("parser in core", bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
         except SystemExit:
             continue
         raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
-    print("PASS: eight in-memory negative architecture fixtures rejected")
+    print("PASS: eleven in-memory negative architecture fixtures rejected")
 
 
 def main():
@@ -145,6 +170,16 @@ def main():
         raise SystemExit("Renderer public assembly must depend only on bootstrap/provider contracts")
     if consumer_tree("--features", "cli", package="forge-template") != {"forge-template", "forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client"}:
         raise SystemExit("Template CLI must include only its selected narrow contracts")
+    ide_default = consumer_tree(package="forge-ide")
+    ide_cli = consumer_tree("--features", "cli", package="forge-ide")
+    if {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract"} & ide_default:
+        raise SystemExit("IDE default library includes presentation")
+    if not {"syn", "cap-std", "cap-fs-ext"} <= ide_default:
+        raise SystemExit("IDE lacks real parser/rooted native boundary")
+    if not {"serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract"} <= ide_cli:
+        raise SystemExit("IDE CLI lacks required boundary contracts")
+    if {name for name in ide_default if name.startswith("forge-")} != {"forge-ide", "forge-task", "forge-io-client", "forge-bootstrap", "forge-provider"}:
+        raise SystemExit("IDE default has unexpected Forge dependencies")
     pure = consumer_tree()
     messages = consumer_tree("--features", "messages")
     disk = consumer_tree("--features", "disk")
@@ -156,7 +191,7 @@ def main():
                                    ("combined", combined, MESSAGES_PROFILE | DISK_PROFILE)]:
         if actual != expected:
             raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template"})
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
@@ -175,6 +210,7 @@ def main():
         actual = set(filter(None, local.partition("|")[2].split(",")))
         if actual != expected:
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
+    print("PASS: optional IDE parser/rooted native client isolated; YAML/CLI absent from library default")
     print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
     print("PASS: renderer default exposes only bootstrap/provider assembly; opt-in CLI has narrow contracts; terminal/demo omit it")
     print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk; no demo implementations")

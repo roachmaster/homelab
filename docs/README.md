@@ -8,6 +8,11 @@
 
 **Optional rendering:** [`forge-template`](../src/rust/forge-template/README.md) now supplies a bounded, typed-schema renderer with method chains, 38 builtins and custom methods plus public typed config/factory/registrar integration and an independent consumer proof. An opt-in [template CLI](../src/rust/forge-template/CLI.md) now renders inline/native-file sources with typed scalar bindings through the shared bridge. Build-script compilation and source materialization remain outside this library.
 
+**First IDE capability:** [Forge IDE](../src/rust/forge-ide/README.md) now inspects
+bounded read-only project trees and Rust declaration syntax. Typed results become
+YAML only at its optional boundary; public registrar/factory and CLI use the same
+core contracts. [Implemented Mermaid flow](architecture/diagrams/mermaid/README.md#implemented-forge-ide).
+
 **Proposed:** a small, Spring Boot-inspired Rust assembly model with explicit capability modules, thin ingress adapters, a shared header-routed bridge, and deliberate lifecycle ownership. The blueprint is a design, not a deployed or completed framework.
 
 - [Repository reviews — 16 reports](reviews/forge/README.md)

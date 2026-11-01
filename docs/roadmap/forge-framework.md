@@ -2,9 +2,20 @@
 
 **Status:** Proposed sequencing based on the complete repository synthesis. This is a plan, not completed implementation or authority to modify source repositories.
 
+## Forge IDE initial capability — implemented
+
+The optional [IDE inspector](../../src/rust/forge-ide/README.md) assembles a rooted
+native filesystem client and inspection task through public config/registrar/factory
+exports. A feature-gated CLI uses typed shared ingress and emits YAML for the typed
+file tree, text line counts and Rust declaration hierarchy. Real syntax parsing is
+not macro expansion or semantic analysis. Symlinks are not followed; budgets and
+incomplete inspection statuses are explicit. Editor/LSP, watch mode, incremental
+analysis, cross-file resolution and untrusted-source process isolation are **not
+implemented** and are not automatically authorized next work.
+
 ## Current implementation checkpoint
 
-The [first std-only Rust workspace](../../src/rust/README.md) establishes part of Stage 1: validated headers, generic typed request/response, explicit payload-kind agreement, frozen duplicate-safe routes and an injected admission seam. Separate factory/provider/lease primitives support singleton/transient injection. The in-process greeting example proves composition without a transport. Independent `IoClient` and `Task` contracts now also support prepared-request execution, pure computation and injected-client orchestration, initially proven with fake-only examples; the native disk follow-on is documented below. A synchronous `Task` is not the supervised/durable worker in Stage 4. It does **not** complete Stage 1 deadline/security requirements, the provider graph validator, or the durable jobs slice below. The workspace documents exact executed checks and deferred behavior. A sixth core crate now implements atomic typed group registration/freeze, and three optional-demo packages prove configured registrar assembly without adding production transports.
+The [first Rust core](../../src/rust/README.md) establishes part of Stage 1: validated headers, generic typed request/response, explicit payload-kind agreement, frozen duplicate-safe routes and an injected admission seam. Separate factory/provider/lease primitives support singleton/transient injection. The in-process greeting example proves composition without a transport. Independent `IoClient` and `Task` contracts now also support prepared-request execution, pure computation and injected-client orchestration, initially proven with fake-only examples; the native disk follow-on is documented below. A synchronous `Task` is not the supervised/durable worker in Stage 4. It does **not** complete Stage 1 deadline/security requirements, the provider graph validator, or the durable jobs slice below. The workspace documents exact executed checks and deferred behavior. A sixth core crate now implements atomic typed group registration/freeze, and three optional-demo packages prove configured registrar assembly without adding production transports.
 
 ## Local runnable system checkpoint — implemented
 

@@ -109,3 +109,13 @@ A submit header with a status variant is rejected before handler effects, not re
 The reviewed framework/Mission Control have typed-request and explicit registration/assembly seams, not a general discovered registrar/container or this exact capability-enum envelope. Their successful composition is being refined, not replaced wholesale; [bootstrap lineage](reuse-map.md#bootstrap-and-registrar-lineage) separates source behavior from the next contract. Older Forge contributes provider/factory experiments, not a verified general container. HPVS distinguishes factories, providers and leases, but its operation freeze does not validate service dependencies and its retained-state `RefCell` pool is not a concurrent async pool. See [payload lineage](reuse-map.md#typed-payload-lineage) and [provider lineage](reuse-map.md#providerfactory-lineage). These are adaptation inputs, not compatibility guarantees.
 
 Use **[$model-forge-module](../../.agents/skills/model-forge-module/SKILL.md)** to explain/model assembly, **[$trace-forge-command](../../.agents/skills/trace-forge-command/SKILL.md)** for request flow, and **[$wire-forge-providers](../../.agents/skills/wire-forge-providers/SKILL.md)** for dependency/lifetime decisions. They are provisional repository-local starters, not runtime implementations. Keep them with this reference and refine them as real code and experience arrive.
+
+## Implemented IDE inspection composition
+
+[`forge-ide`](../../src/rust/forge-ide/README.md) adds a cohesive optional capability:
+`IdeConfig` → public `register_ide` → freeze → `InspectFactory` → chosen provider
+→ `InspectTask<C>`. The task prepares rooted filesystem requests and passes source
+to a computational Rust parser. Its CLI uses a local typed enum, shared header
+bridge and `DescribeCommand`; YAML serializes the typed result only at the edge.
+Core contracts and Task are unchanged. Root opening is explicit startup I/O,
+walking/reading is admitted work, and a help invocation opens no root.

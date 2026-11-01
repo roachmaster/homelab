@@ -1,5 +1,5 @@
 [workspace]
-members = ["forge-template", "forge-command", "forge-ingress-contract", "forge-bridge", "forge-provider", "forge-io-client", "forge-task", "forge-bootstrap", "forge-kernel", "examples/forge-demo-messages", "examples/forge-demo-memory-client", "examples/forge-bootstrap-demo", "forge-local", "forge-terminal"]
+members = ["forge-ide", "forge-template", "forge-command", "forge-ingress-contract", "forge-bridge", "forge-provider", "forge-io-client", "forge-task", "forge-bootstrap", "forge-kernel", "examples/forge-demo-messages", "examples/forge-demo-memory-client", "examples/forge-bootstrap-demo", "forge-local", "forge-terminal"]
 resolver = "2"
 
 [workspace.package]

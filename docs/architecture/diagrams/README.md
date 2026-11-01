@@ -63,3 +63,12 @@ done
 ```
 
 Review the rendered images after changing source; successful rendering alone does not establish readable labels, correct boundaries, or sensible dependency direction. PNG previews can be rendered locally with `dot -Tpng` for visual QA; they need not be committed alongside the scalable SVGs.
+
+## Forge IDE first capability
+
+[M11 Mermaid source](mermaid/m11-ide-inspection.mmd) and
+[rendered SVG](mermaid/images/m11-ide-inspection.svg) show the implemented public
+registrar/factory/provider, admitted task, rooted native I/O, real syntax parser
+and YAML boundary. DOT04 includes its actual Forge imports; external parser,
+capability-filesystem and optional YAML libraries remain inside this capability.
+[Usage and precise scope](../../../src/rust/forge-ide/README.md).

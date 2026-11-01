@@ -19,6 +19,7 @@ The [first Rust core](src/rust/README.md) now implements typed contracts, a sync
 From the repository root with stable Rust, GNU Make and Python 3.9+:
 
 ```bash
+cargo fetch --manifest-path src/rust/Cargo.toml --locked # once for dependencies
 make                         # discover the available targets
 make run ARGS='node.info'
 make run ARGS='disk.list --help' # typed command arguments and defaults
@@ -70,6 +71,23 @@ is documented alongside usage.
 - [Architecture SVG](docs/architecture/diagrams/mermaid/images/m09-template-architecture.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m09-template-architecture.mmd)
 - [Method-enabled render sequence SVG](docs/architecture/diagrams/mermaid/images/m10-template-render.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m10-template-render.mmd)
 - [Detailed captions](docs/architecture/diagrams/mermaid/README.md#implemented-template-renderer) distinguish library behavior, trusted callbacks and example-only composition.
+
+## Forge IDE — project inspection
+
+The first [Forge IDE capability](src/rust/forge-ide/README.md) emits a read-only
+project tree and Rust AST-derived declaration hierarchy as YAML. Traits, impls,
+methods, types, modules, spans and line counts are inspected with a real parser;
+this is not type checking or a full expression AST.
+
+```bash
+cargo fetch --manifest-path src/rust/Cargo.toml --locked # first dependency setup
+make ide ARGS='inspect src/rust/forge-task'
+```
+
+![Implemented Forge IDE inspection flow](docs/architecture/diagrams/mermaid/images/m11-ide-inspection.svg)
+
+[Mermaid source](docs/architecture/diagrams/mermaid/m11-ide-inspection.mmd) ·
+[Scope, output, limits and public integration](src/rust/forge-ide/README.md).
 
 ## Framework diagrams
 

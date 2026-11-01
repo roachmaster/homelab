@@ -1,0 +1,14 @@
+[package]
+name = "ide-public-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[workspace]
+[features]
+default = []
+inspection = ["dep:forge-ide", "dep:forge-bootstrap", "dep:forge-provider", "dep:forge-task"]
+[dependencies]
+forge-ide = { path = "../..", optional = true }
+forge-bootstrap = { path = "../../../forge-bootstrap", optional = true }
+forge-provider = { path = "../../../forge-provider", optional = true }
+forge-task = { path = "../../../forge-task", optional = true }

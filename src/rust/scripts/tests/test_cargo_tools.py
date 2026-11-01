@@ -54,6 +54,15 @@ class CargoToolsTests(unittest.TestCase):
         self.assertIn("--no-default-features", command)
         self.assertEqual(command[-5:], ["render", "--template", "{{name}}", "--text", "name=a; $(literal)"])
 
+    def test_ide_uses_fixed_binary_and_literal_root(self):
+        with patch.dict(os.environ, {"ARGS": 'inspect "a; $(literal)"'}, clear=True):
+            with patch.object(TOOLS, "execute") as execute:
+                TOOLS.ide()
+        command = execute.call_args.args[0]
+        self.assertIn("forge-ide", command)
+        self.assertEqual(command[-3:], ["--", "inspect", "a; $(literal)"])
+        self.assertEqual(command[command.index("--features") + 1], "cli")
+
     def test_session_appends_mode_after_startup_options(self):
         with patch.dict(os.environ, {"ARGS": '--cwd "a path"'}, clear=True):
             with patch.object(TOOLS, "execute") as execute:

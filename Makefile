@@ -11,7 +11,7 @@ export ARGS ?= --help
 export ASM_TARGET ?= lib
 export NATIVE ?= 0
 
-.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template asm
+.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide asm
 
 help:
 	@printf '%s\n' \
@@ -27,6 +27,7 @@ help:
 	  '  make run ARGS="node.info"  Run the Forge terminal (default: --help)' \
 	  '  make session           Interactive terminal; Ctrl-D or exit finishes' \
 	  '  make template ARGS="methods"  Run the opt-in template CLI' \
+	  '  make ide ARGS="inspect ."  Read a project tree + Rust syntax as YAML' \
 	  '  make asm               Release assembly for forge-kernel library' \
 	  '' \
 	  'Selections: PACKAGE=forge-terminal FEATURES=disk NO_DEFAULT_FEATURES=1' \
@@ -73,6 +74,7 @@ ci:
 	@python3 -B -m unittest discover -s "$$FORGE_RUST_ROOT/scripts/tests" -v
 	$(MAKE) fmt-check check-deps
 	$(MAKE) build check lint test test-release doc PACKAGE= FEATURES= ALL_FEATURES=1 NO_DEFAULT_FEATURES=0
+	$(MAKE) test lint PACKAGE=forge-ide FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test lint PACKAGE=forge-template FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test lint PACKAGE=forge-terminal FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test PACKAGE=forge-local FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
@@ -85,5 +87,5 @@ ci:
 
 session: ARGS =
 
-run session template asm:
+run session template ide asm:
 	@python3 "$$FORGE_RUST_ROOT/scripts/cargo_tools.py" $@

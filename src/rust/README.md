@@ -1,7 +1,7 @@
 # Rust source sets — first Forge core
 
-This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one independent optional template renderer, a local application/terminal pair and three
-clearly separated demo packages**, all original, std-only and synchronous. Typed registration/freeze and
+This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one optional template renderer, one optional IDE inspector, a local application/terminal pair and three
+clearly separated demo packages**, all original and synchronous. The core remains std-only; IDE parser/filesystem/YAML dependencies stay optional to consumers. Typed registration/freeze and
 optional-package assembly, local node observations, admitted command discovery, explicitly stepped local counter jobs and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
 
@@ -57,6 +57,14 @@ consumer fixture imports the API and proves capability omission; normal terminal
 and demo dependency trees still omit it. The package README defines the exact
 subset and differences from the historical renderer.
 
+## Forge IDE inspection
+
+[`forge-ide`](forge-ide/README.md) is an optional application capability with a
+rooted native client, injected inspection task, real Rust parser and public
+config/factory/registrar. Its default library omits YAML/CLI; `cli` opts in to
+`forge-ide inspect ROOT`. Internal reports are typed. `make ide ARGS='inspect .'`
+emits YAML; no shell wrapper, editor or full compiler AST is implied.
+
 ## Optional consumer proof
 
 The demo packages live under `examples/`, not inside core:
@@ -77,8 +85,9 @@ forced client for pure tasks or concrete transport is introduced.
 From the repository root, run `make` for help. Requirements: **GNU Make**, a
 current stable Rust toolchain with `rustfmt`/`clippy`, and **Python 3.9+** (standard-library scripts only). The Makefile uses the workspace manifest
 explicitly; no global Cargo configuration is changed or tooling installed locally.
-All Cargo build/check/run commands use `--offline --locked`; the current workspace
-has no third-party Rust dependencies. Toolchain installation itself needs network
+All Cargo build/check/run commands use `--offline --locked`. Run
+`cargo fetch --manifest-path src/rust/Cargo.toml --locked` once from repository root
+to fetch the IDE capability's locked third-party dependencies (CI does this explicitly). Toolchain installation itself needs network
 access when the selected toolchain is not already available.
 
 | Target | Behavior |
@@ -91,6 +100,7 @@ access when the selected toolchain is not already available.
 | `check-deps` | DAG, consumer feature trees and negative guard fixtures |
 | `ci` | Fixed full-workspace and minimal-feature checks below |
 | `run`, `session` | Forge terminal command / interactive session |
+| `template`, `ide` | Opt-in capability CLIs; default is help |
 | `asm` | Selected library or binary release assembly |
 
 ### Select packages and features

@@ -1,0 +1,29 @@
+flowchart TB
+    subgraph startup[Implemented startup - explicit native root authority]
+        Config[IdeConfig and public register_ide]
+        Freeze[Typed bootstrap registration and freeze]
+        Factory[InspectFactory creates task and opens root]
+        Config --> Freeze --> Factory
+    end
+    subgraph runtime[Implemented single-shot inspection]
+        CLI[Thin CLI - inspect ROOT or help]
+        Bridge[Shared bridge - header, admission, variant]
+        Provider[Host Singleton acquires task]
+        Task[InspectTask - typed traversal policy]
+        Files[Injected IoClient - rooted native List and Read]
+        Parser[Pure Rust parser - token checks and syn]
+        Report[Typed tree and declaration hierarchy]
+        YAML[Optional bounded YAML boundary]
+        Console[Console IoClient - prepared bytes]
+        CLI --> Bridge --> Provider --> Task
+        Task --> Files
+        Task --> Parser
+        Task --> Report --> YAML --> Console
+    end
+    Factory -. ready task .-> Provider
+    Bridge -. help .-> Console
+    classDef actual fill:#e8f4f7,stroke:#24576b,color:#163744
+    classDef boundary fill:#fff1d6,stroke:#ae7b26,color:#493b1c
+    classDef note fill:#f1f3f5,stroke:#7c8a94,color:#36434a
+    class Config,Freeze,Factory,Provider,Task,Parser,Report actual
+    class CLI,Bridge,Files,YAML,Console boundary

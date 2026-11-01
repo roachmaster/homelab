@@ -1,6 +1,6 @@
 # Mermaid UML-like views
 
-Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
+Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** M11 shows implemented Forge IDE inspection. These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
 
 | View | Status and purpose | Source | Image |
 | --- | --- | --- | --- |
@@ -169,3 +169,19 @@ python3 "$D/render.py" --renderer "$D/.tools/bin/mmdr" --check
 ```
 
 `render.py` first runs the official grammar validator, then generates all ten SVGs in a temporary directory. It rejects active/external SVG references before writing the images and [hash manifest](render-manifest.json). `--check` independently rerenders and compares exact bytes and input hashes without changing tracked files. Fonts/platform changes can change layout: review the difference, do not silently bless it. PNGs are local previews; scalable SVGs are committed. Keep sources, configuration, manifest and images in the same change. **Inspect every render** for lost labels, clipping, ordering and semantics; parser success and matching hashes alone cannot prove visual correctness. Do not hand-edit generated SVGs.
+
+## Implemented Forge IDE
+
+![Implemented rooted project inspection and typed syntax report](images/m11-ide-inspection.svg)
+
+[Mermaid source](m11-ide-inspection.mmd). Startup validates config, stages/freezes
+the public factory, then explicitly opens the authorized root and constructs the
+task/provider. Runtime header routing, local admission and variant checks precede
+walking/reading. Help is admitted but selects no root/task. Task prepares typed
+filesystem requests, the native client executes them, and the pure syn parser
+exports declaration/member hierarchy, not expression bodies or semantic types.
+The typed report becomes YAML only at the optional output boundary. Dashed edges
+are ownership/result annotations, not additional entry points; no callbacks bypass
+the bridge. The local policy flag is not authentication. Filesystem handles prevent
+symlink traversal, not all snapshot/mount races, and parser budgets are not a
+hostile-source execution sandbox. See [actual contracts and limits](../../../../src/rust/forge-ide/README.md).

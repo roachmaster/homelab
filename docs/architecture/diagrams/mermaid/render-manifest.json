@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "a1d3778b5142ce981e859111d2155758c79013b2ffe2d3c0b93dae78397dc918",
-    "validate.mjs": "0dad6c87dd494716823d843d0a75100dc6cd2adaae2c6d8696c78b58af4bebeb"
+    "render.py": "027d8b936136591f6a9ba18737dbc6d9c6f5b587405bcd5001436de5c7f569d6",
+    "validate.mjs": "6de4ac46f120526b4cbe5e363e638554c37fadea1e49b765273c2d96713bc5b3"
   },
   "diagrams": [
     {
@@ -73,6 +73,12 @@
       "source_sha256": "8c7bbc433cf248369323aad065211e25f1ad27db814c4d3edb5f43debbea703c",
       "svg": "images/m10-template-render.svg",
       "svg_sha256": "2c3a7debcbed11e1d2a8c2364684e7508928cc4e324ff1131d22680ef3acecb0"
+    },
+    {
+      "source": "m11-ide-inspection.mmd",
+      "source_sha256": "adade6c3b185f067c0f76537303b0677ab6115d4dec79e72b7daa05c73f725b4",
+      "svg": "images/m11-ide-inspection.svg",
+      "svg_sha256": "15a40382ef04a58d9ae970d705be18f867e9fbf6ca0bb4a7a3895aea517ebecf"
     }
   ]
 }
