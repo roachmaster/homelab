@@ -44,11 +44,14 @@ The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them 
 ## Optional template renderer
 
 [`forge-template`](forge-template/README.md) implements bounded schema-checked
-Mustache-like rendering with its own typed data model and no normal dependencies.
-It does not replace ingress enums or write generated source. Its dev-only
-[`registered_render` example](forge-template/examples/registered_render.rs) proves
-existing registrar/factory/provider/task/description/bridge composition; normal
-terminal and demo dependency trees omit it. The package README defines the exact
+Mustache-like rendering with its own typed data model and a public `assembly`
+module for typed config/factory/registrar integration. Only bootstrap/provider
+are normal dependencies; the engine modules do not import them. It does not
+replace ingress enums or write generated source. The
+[`registered_render` example](forge-template/examples/registered_render.rs) consumes
+public exports and adds application-owned task/description/bridge wiring. A separate
+consumer fixture imports the API and proves capability omission; normal terminal
+and demo dependency trees still omit it. The package README defines the exact
 subset and differences from the historical renderer.
 
 ## Optional consumer proof
@@ -196,7 +199,7 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **281 unit/integration tests and eight doctests** (four compile-fail, four runnable), including the local application and terminal; the pure and node-only
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **283 unit/integration tests and nine doctests** (four compile-fail, five runnable), plus nine separate public-consumer assertions in debug/release, including the local application and terminal; the pure and node-only
 consumers are additionally checked separately. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
 header/variant mismatch, preserved duplicate binding, typed error propagation,

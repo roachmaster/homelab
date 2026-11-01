@@ -90,3 +90,15 @@ Apply only rows whose mechanism exists; the [next-core gates](../roadmap/forge-f
 | Real external dependency unavailable | Classified failure, not false readiness or successful-empty data |
 
 The host is complete when the module's lifecycle remains understandable without reverse-engineering hidden callbacks. Boilerplate reduction alone is not success.
+
+## Public capability acceptance
+
+For an optional implementation delivered as a reusable Forge capability, export
+its typed configuration, configured factory and registrar from its library.
+Example-local `pub` items are not dependency-facing exports. Application-specific
+Task inputs and routing may remain in the consumer; the reusable startup recipe
+must not require copying its example. A separate Cargo consumer must import the
+public API, stage/freeze/create/use it and demonstrate dependency omission.
+See [Expose Forge Capability](../../.agents/skills/expose-forge-capability/SKILL.md)
+and the [template assembly reference](../../src/rust/forge-template/README.md#public-forge-integration).
+Contract-only and standalone utility packages do not need empty registrars.

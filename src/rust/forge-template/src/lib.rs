@@ -6,6 +6,7 @@
 //! See the package README for escaping, lookup and resource-limit contracts.
 #![doc = include_str!("../README.md")]
 #![doc = include_str!("../METHODS.md")]
+pub mod assembly;
 mod builtins;
 mod expression;
 mod methods;

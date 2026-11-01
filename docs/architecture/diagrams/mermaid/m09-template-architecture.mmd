@@ -1,12 +1,12 @@
 ---
-title: M09 Implemented optional template renderer and dev-only Forge example
+title: M09 Implemented public template integration and application-owned example
 ---
 flowchart TB
     subgraph Example["registered_render example only - not a terminal command"]
-        Host["Host bootstrap\nconfig -> registrar -> freeze\nfactory parses template"]
-        Provider["Singleton owns RenderTask\nbinding borrows typed lease"]
+        Host["Host bootstrap\nselect config and methods\nregister, freeze, create"]
+        Provider["Singleton owns RenderTask\ntask owns configured Renderer"]
         Bridge["Shared typed bridge\nheader route -> admit -> kind\nthen render binding"]
-        Task["RenderTask\ntyped RenderInput -> Value\nexplicit Schema, no I/O"]
+        Task["RenderTask\ntyped RenderInput -> Value\ncalls Renderer, no I/O"]
         Help["RenderDescription\nadmitted help skips task"]
         Host --> Provider
         Provider --> Task
@@ -14,7 +14,9 @@ flowchart TB
         Bridge --> Help
     end
     subgraph Library[" "]
-        API["forge-template API\nzero normal dependencies\nparse once, render repeatedly\nString or TemplateError"]
+        Assembly["forge_template::assembly\nRenderConfig / register_renderer\nRenderFactory creates Renderer"]
+        API["Template engine API\nparse once, render repeatedly\nString or TemplateError"]
+        Assembly --> API
         Parse["parser + expression\nbounded AST\npaths, sections, method chains"]
         Validate["schema + typing\nvalidate input, preflight all branches\nknown types and method signatures"]
         Render["render\nborrowed context scopes\nprivate bounded output"]
@@ -25,12 +27,13 @@ flowchart TB
         Validate --> Methods
         Render --> Methods
     end
-    Task --> API
+    Host --> Assembly
+    Task --> Assembly
     Trust["Custom callbacks are trusted code.\nNo preemption, sandbox or effect rollback.\nTemplate values never replace ingress enums."]
     Methods --- Trust
     classDef example fill:#e8f4f7,stroke:#408592,color:#163744;
     classDef implemented fill:#087f8c,stroke:#087f8c,color:#ffffff;
     classDef note fill:#f1f3f6,stroke:#909aa8,color:#243342;
     class Host,Provider,Bridge,Task,Help example;
-    class API,Parse,Validate,Render,Methods implemented;
+    class Assembly,API,Parse,Validate,Render,Methods implemented;
     class Trust note;

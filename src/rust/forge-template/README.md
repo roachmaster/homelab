@@ -36,23 +36,72 @@ cargo run --manifest-path src/rust/Cargo.toml --offline --locked \
 make ci
 ```
 
-The [runnable composition example](examples/registered_render.rs) uses a typed
-`RenderInput`, a pure `Task`, independent `DescribeCommand` metadata, a typed
-config enum and registrar, `Factory`, `Singleton` and the shared header bridge.
-Registration stores recipes; freeze precedes parse/construction. Admission and
-variant checks precede acquisition/execution. Help is a separately admitted
-metadata binding. Integration tests exercise that exact example, including
-failure before publication and preserved renderer error causes.
+## Public Forge integration
 
-The default [`greeting.forge`](examples/greeting.forge) is ordinary UTF-8 template
-text embedded with Rust `include_str!`; the extension is a convention, not a
-build-script/compiler requirement. The renderer never opens the file at runtime.
+Import `forge_template::assembly::{register_renderer, RenderConfig, RenderFactory,
+Renderer, AssemblyError}` from the **library**, not from an example. The public
+module depends only on `forge-bootstrap` and `forge-provider`. Parser, schema,
+expression and rendering modules do not import those contracts. This package has
+**two normal dependencies**, not a zero-dependency profile; optionality means a
+consumer can omit the whole capability. No core package imports it.
 
-Those contracts are **dev dependencies only**. The renderer's normal dependency
-graph contains only `forge-template`; the local application, terminal and pure
-consumer do not acquire it. Rendering is computation, so no `IoClient` is invented.
-An application task may prepare template values; a separately chosen client may
-later persist the completed string. That I/O/installation policy is not here.
+```rust
+use forge_bootstrap::Registry;
+use forge_provider::{Factory, InstanceProvider, Singleton};
+use forge_template::{assembly::{register_renderer, RenderConfig},
+                     Limits, MethodRegistry, Schema, Value};
+
+let config = RenderConfig::Embedded {
+    source: "Hello, {{ .trim().to_uppercase() }}!",
+    schema: Schema::Text,
+    limits: Limits::default(),
+};
+let group = register_renderer("templates.greeting", config, MethodRegistry::new())?;
+let frozen = Registry::new().register(group)?.freeze()?;
+let ((), factory) = frozen.into_factories();
+let provider = Singleton::new(factory.create()?);
+assert_eq!(provider.acquire()?.render(&Value::Text(" Forge ".into()))?, "Hello, FORGE!");
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+`RenderConfig::Embedded` holds a static source; `Inline` owns a `String`. Both
+require explicit schema and limits. Neither reads files or environment variables.
+The caller chooses a stable registration ID; it names both the group and provided
+binding, **not a command route**. Distinct IDs permit several configured templates;
+duplicate registration rejects without replacing the original group.
+
+Registration checks limit caps, source size and schema structure, then stages the
+factory. It does **not** parse, construct, render or invoke custom methods. After
+freeze, `Factory<Renderer>::create` parses the source; syntax failure returns no
+renderer. Full expression/context validation remains per render because runtime
+input is not available at startup. A successfully staged group is not a promise
+that every later input or expression succeeds.
+
+Configure a `MethodRegistry` before passing it to the registrar. Its membership
+moves into immutable shared ownership; configured renderers retain the same
+schema/registry without global lookup. `MethodRegistry::new()` selects builtins;
+`empty()` stays empty. Custom methods are preserved, not replaced with defaults.
+Each factory creation owns a newly parsed template. Callback captures can remain
+shared: **transient creation does not reset callback state**. The host chooses
+singleton or `Transient::new(factory)`; the latter parses only on acquisition.
+No lifecycle manager, automatic routing or callback sandbox is implied.
+
+The [runnable composition example](examples/registered_render.rs) consumes this
+public API. Its application-specific `RenderTask` prepares template values from a
+typed `RenderInput`; independent `DescribeCommand` and admitted header/variant
+bindings stay in the example. Help performs no task acquisition/execution.
+The default [`greeting.forge`](examples/greeting.forge) is ordinary UTF-8 embedded
+with `include_str!`, not runtime filesystem loading or a build-script requirement.
+
+The [standalone consumer fixture](tests/consumer/Cargo.toml) imports public exports
+as a separate Cargo package—no inclusion of private/example source. Workspace
+integration tests build/run it with and without its `rendering` feature, check
+normal dependency trees and exercise configuration, construction, custom methods,
+provider lifetimes, errors and duplicate preservation. Example binding tests are
+additional admission proofs, not a replacement for this external-consumer gate.
+Rendering is computation; no `IoClient` or template task stereotype is forced on
+consumers. A task may prepare values, and a separately injected client may later
+persist the completed string. That I/O/installation policy remains outside.
 
 ## Method extensions—not just Mustache
 

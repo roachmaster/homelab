@@ -8,10 +8,12 @@ description = "Bounded, typed, schema-checked Mustache-like rendering"
 [lints]
 workspace = true
 
+[dependencies]
+forge-bootstrap.workspace = true
+forge-provider.workspace = true
+
 [dev-dependencies]
 forge-task.workspace = true
 forge-command.workspace = true
-forge-bootstrap.workspace = true
-forge-provider.workspace = true
 forge-bridge.workspace = true
 forge-ingress-contract.workspace = true

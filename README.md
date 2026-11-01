@@ -45,8 +45,10 @@ The terminal discovers its selected registered commands and sends typed requests
 bounded Mustache-like renderer with method chains and 38 builtins—not a project generator or a new terminal command.
 Default builtins are pure; custom methods are explicit trusted callbacks.
 It accepts capability-local typed values, returns a complete string or typed error,
-and has no normal dependencies. Its runnable example shows the existing
-registrar/factory/provider/task/bridge pattern without forcing I/O or transport:
+and exposes reusable `forge_template::assembly` config/factory/registrar APIs.
+Only bootstrap/provider contracts are normal dependencies; the render algorithm
+remains pure. Its example consumes those exports, then adds application-owned
+task/description/bridge wiring without forcing I/O or transport:
 
 ```bash
 make test PACKAGE=forge-template
@@ -101,6 +103,7 @@ Repository skills live separately from application code in `.agents/skills/`.
 - [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
 - [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.
 - [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md): specify typed factories, acquisition scopes, leases and lifecycle wiring.
+- [Expose Forge Capability](.agents/skills/expose-forge-capability/SKILL.md): deliver public config/factory/registrar exports with an independent consumer proof, not example-only integration.
 
 The framework-specific skills share one [DSL semantic reference](docs/architecture/framework-dsl.md). Keep these repository-local skills with their linked documentation; the broader DSL is an evolving Rust-embedded composition model, not an implemented parser; the linked core documents its real public API subset.
 

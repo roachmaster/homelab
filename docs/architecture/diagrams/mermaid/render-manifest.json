@@ -64,9 +64,9 @@
     },
     {
       "source": "m09-template-architecture.mmd",
-      "source_sha256": "10acefdfd2f1ccddea03db1a58d96694e456362877347ec16d490fb9abb2c346",
+      "source_sha256": "af3cdfb0cc2446c5bd7eaa11d2ebf346aac1147b54382faa41794861c02f8c2c",
       "svg": "images/m09-template-architecture.svg",
-      "svg_sha256": "c3938784bfa3d295ee90996f0f2567fb3cef83e92e7b7fedf48e98ef15426888"
+      "svg_sha256": "f177e19e9bb3eefcb1673ec2ef7659660ae809c249dcfcd0c0d4f700fd2e3695"
     },
     {
       "source": "m10-template-render.mmd",

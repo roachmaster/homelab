@@ -43,7 +43,7 @@ pub(crate) fn validate(
     value: &Value,
     limits: Limits,
 ) -> Result<usize, TemplateError> {
-    check_schema(schema, "$", 0, &mut Budget::new(limits))?;
+    validate_schema(schema, limits)?;
     check_data(value, 0, &mut Budget::new(limits))?;
     let mut work = limits.max_steps;
     matches(schema, value, "$", &mut work)?;
@@ -152,4 +152,9 @@ fn matches(s: &Schema, v: &Value, path: &str, work: &mut usize) -> Result<(), Te
 
 pub(crate) fn validate_value(value: &Value, limits: Limits) -> Result<(), TemplateError> {
     check_data(value, 0, &mut Budget::new(limits))
+}
+
+// Startup structural validation, without a runtime context or method execution.
+pub(crate) fn validate_schema(schema: &Schema, limits: Limits) -> Result<(), TemplateError> {
+    check_schema(schema, "$", 0, &mut Budget::new(limits))
 }

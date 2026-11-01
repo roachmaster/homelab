@@ -1,0 +1,17 @@
+# Standalone acceptance consumer, not a shipped framework application.
+[package]
+name = "template-public-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+default = []
+rendering = ["dep:forge-template", "dep:forge-bootstrap", "dep:forge-provider"]
+
+[dependencies]
+forge-template = { path = "../..", optional = true }
+forge-bootstrap = { path = "../../../forge-bootstrap", optional = true }
+forge-provider = { path = "../../../forge-provider", optional = true }

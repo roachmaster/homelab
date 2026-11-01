@@ -1,8 +1,9 @@
 //! Development-only composition: typed input -> admitted binding -> pure render.
-//! The renderer library itself depends on none of these framework contracts.
-//! This example is also imported by the composition integration tests.
+//! Renderer startup uses the public assembly API; only the greeting task,
+//! descriptors and admitted bindings belong to this example application.
+//! The composition tests reuse these application-specific bindings.
 
-use forge_bootstrap::{PreparedGroup, RegistrationError, Registry};
+use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_command::{
     validate_descriptors, ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand,
@@ -11,8 +12,11 @@ use forge_command::{
 use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
 use forge_provider::{Factory, InstanceProvider, Singleton};
 use forge_task::Task;
-use forge_template::{Field, Schema, Template, TemplateError, Value};
-use std::{cell::Cell, collections::BTreeMap, convert::Infallible, error::Error, fmt, rc::Rc};
+use forge_template::{
+    assembly::{register_renderer, RenderConfig, Renderer},
+    Field, Limits, MethodRegistry, Schema, TemplateError, Value,
+};
+use std::{collections::BTreeMap, convert::Infallible, error::Error, fmt};
 
 /// Runtime business input, not a renderer value tree or startup configuration.
 #[derive(Debug, PartialEq, Eq)]
@@ -20,11 +24,18 @@ pub struct RenderInput {
     pub name: String,
 }
 
-/// This task only assembles its render context and computes text in memory.
-/// It has no client, provider lookup, filesystem access or help input field.
+/// The task assembles its render context and delegates to its configured renderer.
+/// It requires no client, provider lookup, filesystem access or help input field.
+/// Builtins are pure computation; custom methods retain the registry's trusted-
+/// callback contract rather than gaining a purity guarantee from this task.
 pub struct RenderTask {
-    template: Template,
-    schema: Schema,
+    renderer: Renderer,
+}
+
+impl RenderTask {
+    pub fn new(renderer: Renderer) -> Self {
+        Self { renderer }
+    }
 }
 
 impl Task for RenderTask {
@@ -34,7 +45,7 @@ impl Task for RenderTask {
 
     fn run(&self, input: RenderInput) -> Result<String, TemplateError> {
         let context = Value::Object(BTreeMap::from([("name".into(), Value::Text(input.name))]));
-        self.template.render(&context, &self.schema)
+        self.renderer.render(&context)
     }
 }
 
@@ -62,93 +73,6 @@ impl DescribeCommand for RenderDescription {
     fn descriptors(&self) -> &'static [CommandDescriptor] {
         &[RENDER, HELP]
     }
-}
-
-/// The application selects startup policy explicitly, never through a header.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RenderConfig {
-    Greeting,
-    Inline { source: String },
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum ConfigError {
-    BlankSource,
-    Registration(RegistrationError),
-}
-
-impl fmt::Display for ConfigError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BlankSource => {
-                formatter.write_str("the demo requires a nonblank inline template")
-            }
-            Self::Registration(error) => error.fmt(formatter),
-        }
-    }
-}
-
-impl Error for ConfigError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        match self {
-            Self::Registration(error) => Some(error),
-            Self::BlankSource => None,
-        }
-    }
-}
-
-pub struct RenderFactory {
-    config: RenderConfig,
-    // Example-only observation of construction timing; not renderer state.
-    construction_attempts: Rc<Cell<usize>>,
-}
-
-impl Factory<RenderTask> for RenderFactory {
-    type Error = TemplateError;
-
-    fn create(&self) -> Result<RenderTask, TemplateError> {
-        self.construction_attempts
-            .set(self.construction_attempts.get() + 1);
-        let source = match &self.config {
-            RenderConfig::Greeting => include_str!("greeting.forge"),
-            RenderConfig::Inline { source } => source,
-        };
-        Ok(RenderTask {
-            template: Template::parse(source)?,
-            schema: Schema::Object {
-                fields: BTreeMap::from([(
-                    "name".into(),
-                    Field {
-                        schema: Schema::Text,
-                        required: true,
-                    },
-                )]),
-                allow_unknown: false,
-            },
-        })
-    }
-}
-
-/// Stage one configured recipe. No parse, render, create or resource acquisition
-/// occurs here. A blank inline source is this demo's startup policy, not a
-/// restriction imposed on all templates by the renderer library.
-pub fn register_renderer(
-    config: RenderConfig,
-    construction_attempts: Rc<Cell<usize>>,
-) -> Result<PreparedGroup<RenderFactory>, ConfigError> {
-    if matches!(&config, RenderConfig::Inline { source } if source.trim().is_empty()) {
-        return Err(ConfigError::BlankSource);
-    }
-    PreparedGroup::new(
-        "demo.greeting",
-        &["demo.greeting.task"],
-        &[],
-        RenderFactory {
-            config,
-            construction_attempts,
-        },
-    )
-    .map_err(ConfigError::Registration)
 }
 
 /// This finite enum belongs to the example consumer, not the renderer/framework.
@@ -259,16 +183,35 @@ where
     Ok(Bridge::new(bindings.freeze(), demo_policy as DemoPolicy))
 }
 
+/// This shape belongs to the greeting capability, not the renderer package.
+pub fn greeting_schema() -> Schema {
+    Schema::Object {
+        fields: BTreeMap::from([(
+            "name".into(),
+            Field {
+                schema: Schema::Text,
+                required: true,
+            },
+        )]),
+        allow_unknown: false,
+    }
+}
+
 pub fn main() -> Result<(), Box<dyn Error>> {
-    let construction_attempts = Rc::new(Cell::new(0));
-    let group = register_renderer(RenderConfig::Greeting, construction_attempts.clone())?;
-    let pending = Registry::new().register(group)?;
-    assert_eq!(construction_attempts.get(), 0);
-    let frozen = pending.freeze()?;
-    assert_eq!(construction_attempts.get(), 0);
+    // Assembly identity is a provider binding key, not an ingress destination.
+    let group = register_renderer(
+        "demo.greeting.renderer",
+        RenderConfig::Embedded {
+            source: include_str!("greeting.forge"),
+            schema: greeting_schema(),
+            limits: Limits::default(),
+        },
+        MethodRegistry::new(),
+    )?;
+    let frozen = Registry::new().register(group)?.freeze()?;
     let ((), factory) = frozen.into_factories();
-    let provider = Singleton::new(factory.create()?);
-    assert_eq!(construction_attempts.get(), 1);
+    let task = RenderTask::new(factory.create()?);
+    let provider = Singleton::new(task);
     let bridge = bind_renderer(&provider)?;
 
     let descriptors = RenderDescription.descriptors();

@@ -2,7 +2,7 @@
 
 **Provisional composition DSL; a small core subset is implemented.** This is a small shared vocabulary for the framework taking shape. The intended direction is a **Rust-embedded composition DSL** using ordinary typed functions/builders and statically linked modules. No parser, macro set, compiler, universal host-container API or YAML/JSON manifest language is claimed. The typed registry/freeze helpers below are real APIs, not the entire DSL. Names and spelling can evolve.
 
-This page is the canonical reference for the three framework-specific skills. Use the existing [blueprint](forge-framework-blueprint.md), [module contract](module-authoring.md) and [DI design](dependency-injection.md) when more detail is needed. The [bootstrap/registrar reference](bootstrap-registrars.md) documents the implemented small staging/typed-storage subset and the remaining assembly design.
+This page is the canonical reference for the framework-specific skills. Use the existing [blueprint](forge-framework-blueprint.md), [module contract](module-authoring.md) and [DI design](dependency-injection.md) when more detail is needed. The [bootstrap/registrar reference](bootstrap-registrars.md) documents the implemented small staging/typed-storage subset and the remaining assembly design.
 
 ## Implemented subset
 
@@ -15,8 +15,11 @@ The [local application](../../src/rust/forge-local/README.md) and [terminal adap
 The optional [`forge-template`](../../src/rust/forge-template/README.md) now parses a
 **template language with method extensions**, not the composition DSL. Its schema-checked rendering
 `Value` tree is capability-local data, not an internal ingress fallback or a global
-business enum. Rendering has no normal dependencies; its dev-only example composes
-existing Task/metadata/registrar/provider/bridge contracts. File installation, source generation and schema-file formats are deferred; the
+business enum. Its public `assembly` module exports typed config, configured-renderer
+factory and registrar, with only bootstrap/provider normal dependencies. The pure
+engine modules remain separate; the example consumes these exports and adds
+application-owned Task/metadata/bridge wiring. A standalone Cargo consumer proves
+public imports and compile-time omission. File installation, source generation and schema-file formats are deferred; the
 38 historical builtin methods and explicit custom method registration are implemented.
 
 ### Command description versus execution — implemented

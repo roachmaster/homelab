@@ -8,7 +8,7 @@ Editable Mermaid sources and committed SVGs for the current Forge framework. **M
 | M02 — Bootstrap | Implemented disk singleton assembly, successful path | [Mermaid](m02-bootstrap.mmd) | [SVG](images/m02-bootstrap.svg) |
 | M03 — Request | Implemented checked list-current path, with rejection gates | [Mermaid](m03-disk-request.mmd) | [SVG](images/m03-disk-request.svg) |
 | M04 — Kernel phases | Implemented local system/jobs versus proposed remote phases | [Mermaid](m04-kernel-phases.mmd) | [SVG](images/m04-kernel-phases.svg) |
-| M09 — Template architecture | Implemented independent renderer and dev-only Forge wiring | [Mermaid](m09-template-architecture.mmd) | [SVG](images/m09-template-architecture.svg) |
+| M09 — Template architecture | Implemented public integration and application-owned wiring | [Mermaid](m09-template-architecture.mmd) | [SVG](images/m09-template-architecture.svg) |
 | M10 — Template rendering | Implemented validation, method chains and escaped output | [Mermaid](m10-template-render.mmd) | [SVG](images/m10-template-render.svg) |
 
 ## M01 — Implemented contracts
@@ -99,29 +99,33 @@ reads only, not disk navigation or job submission. No exactly-once claim follows
 ## Implemented template renderer
 
 These views describe an **optional library and runnable development examples**, not
-another deployed application or a new Forge terminal command. The library has no
-normal dependencies. Existing core contracts are dev-dependencies of its example,
-not dependencies imposed on renderer consumers.
+another deployed application or a new Forge terminal command. The library exposes reusable config/factory/registrar integration and has exactly
+two normal dependencies: bootstrap and provider contracts. Its rendering engine
+modules do not import those contracts. Application Task, description and bridge
+imports remain dev-dependencies of the example.
 
 ### M09 — Architecture and Forge composition
 
 ![Implemented template library and development-only Forge composition](images/m09-template-architecture.svg)
 
 [Mermaid source](m09-template-architecture.mmd). Arrows show construction, use or
-module collaboration, not package dependency or deployment edges. The upper panel
-is the actual `registered_render` example: the registrar stages configuration and
-factory ownership; consuming freeze precedes factory creation and template parsing.
-The host owns the singleton task; the binding borrows an acquired lease only after
-header lookup, admission and payload-kind checks. Help uses admitted static metadata
-without acquisition or task execution. `RenderTask` prepares the capability-local
-value tree from its typed input; there is no I/O client or global business enum.
-The example's default render uses builtins; the separate `method_extensions`
-example supplies its own registry and custom callback directly.
+module collaboration, not deployment edges. The upper panel is application-owned
+example code: the host supplies explicit config and method registry to the public
+registrar; consuming freeze precedes factory creation and template parsing. The
+host wraps the configured renderer in its own task and singleton; the binding
+acquires its lease only after header/admission/payload-kind checks. Help uses
+admitted static metadata without acquisition or task execution. `RenderTask`
+prepares the capability-local value tree from typed input; no I/O client or global
+business enum is introduced.
 
-The lower panel is the library: parsing is separate from per-render schema/data
-validation, expression preflight and execution. The explicit registry serves both
-known builtin signatures and runtime calls. Custom callbacks are trusted native
-code; limits are not a sandbox or wall-clock timeout. See the [renderer contract](../../../../src/rust/forge-template/README.md),
+The lower panel is the reusable library. `assembly` exports `RenderConfig`,
+`register_renderer`, `RenderFactory` and `Renderer`; consumers import them without
+copying an example. Factories share immutable schema/method membership and create
+fresh parsed templates. Provider choice stays with the host; transient acquisition
+does not reset shared callback state. The engine separates parsing from per-render
+schema/data validation, expression preflight and execution. Custom callbacks are
+trusted native code, not sandboxed or preempted by limits. See the [public API and
+standalone consumer proof](../../../../src/rust/forge-template/README.md#public-forge-integration),
 [all38 builtin semantics](../../../../src/rust/forge-template/METHODS.md) and
 [composition example](../../../../src/rust/forge-template/examples/registered_render.rs).
 

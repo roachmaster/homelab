@@ -44,8 +44,12 @@ is implied by this proof.
 The [rendering capability](../../src/rust/forge-template/README.md) now supports
 parse-once templates, explicit typed schema/context, escaped/raw scalar tags,
 sections/inverted sections, parent lookup and finite resource budgets. It is
-independent of the six execution core libraries and command descriptions. The
-registered-render example uses these only as dev dependencies. It does not install
+algorithmically independent of startup and routing. Its public `assembly` module
+now provides typed config/factory/registrar exports, with bootstrap/provider as
+the only normal dependencies. The registered-render example consumes those exports
+and keeps its Task, descriptions and bridge bindings application-owned. A separate
+Cargo fixture verifies importability, injected methods, failure phases and optional
+dependency omission; an example alone was not sufficient public integration. It does not install
 files, implement build/codegen policy or add a terminal command. The 38 historical builtins and explicit custom-method chains are included. Bundled
 source templates and serialized schema formats remain separate future slices.
 

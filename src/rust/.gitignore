@@ -1,1 +1,2 @@
-/target/
+# Workspace builds and standalone acceptance-consumer builds.
+**/target/

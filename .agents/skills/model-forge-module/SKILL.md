@@ -30,6 +30,8 @@ For hosted-kernel expansion, consult the [research plan](../../../docs/architect
 
 Deliver a short model: **status/evidence; capability; routes; required/provided dependencies; assembly order; package boundaries; checks/gaps**. For a simple explanation, one example is enough. Use [module authoring](../../../docs/architecture/module-authoring.md) only when more detail is needed.
 
+For delivery of a reusable capability, use [Expose Forge Capability](../expose-forge-capability/SKILL.md): verify public library config/factory/registrar exports and a separate consumer import proof. Example-local assembly alone is not that deliverable.
+
 ## Small example
 
 Adding `notifications.send` beside jobs means a notifications-owned enum and `Delivery` port, a registered header/variant binding, and explicit dependency wiring. If they share one ingress, the application may extend its local `AppPayload` sum. Do not change bridge business logic or add a transport just to demonstrate extension. Clarify whether success means delivered, attempted or durably queued when that changes the model.

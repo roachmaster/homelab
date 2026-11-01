@@ -7,7 +7,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
-    "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bootstrap", "forge-provider", "forge-bridge", "forge-ingress-contract")},
+    "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bridge", "forge-ingress-contract")} |
+                      {("forge-bootstrap", "normal"), ("forge-provider", "normal")},
     "forge-command": set(),
     "forge-ingress-contract": set(),
     "forge-provider": set(),
@@ -125,8 +126,8 @@ def main():
     packages = {p["name"]: p for p in metadata["packages"]}
     validate_packages(packages)
     negative_fixtures(packages)
-    if consumer_tree(package="forge-template") != {"forge-template"}:
-        raise SystemExit("Renderer must have no normal dependencies")
+    if consumer_tree(package="forge-template") != {"forge-template", "forge-bootstrap", "forge-provider"}:
+        raise SystemExit("Renderer public assembly must depend only on bootstrap/provider contracts")
     pure = consumer_tree()
     messages = consumer_tree("--features", "messages")
     disk = consumer_tree("--features", "disk")
@@ -158,7 +159,7 @@ def main():
         if actual != expected:
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
     print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
-    print("PASS: standalone renderer has no normal dependencies and is absent from terminal/demo trees")
+    print("PASS: renderer exposes bootstrap/provider assembly and remains absent from terminal/demo trees")
     print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk; no demo implementations")
     print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 
