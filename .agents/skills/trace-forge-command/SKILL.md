@@ -32,3 +32,11 @@ For implemented [local jobs](../../../src/rust/forge-local/JOBS.md), trace the s
 `jobs.submit @ 1` with `JobsPayload::Status(id)` is a mismatch. Reject before either handler's effects; never repair the header or dispatch status by inspecting the variant. Check that neither capability storage nor its per-operation acquisition is invoked.
 
 For a requested adapter substitution, compare equivalent typed input, verified identity policy, preserved deadline/correlation/idempotency and outcome guarantees. Verify only the chosen adapter's actual parsing/lifecycle/settlement behavior; no second transport or broker mechanism is required. No implementation or infrastructure execution is implied by tracing the design.
+
+For the implemented [HTTP gateway](../../../src/rust/forge-remote-https/README.md#http-header-projection),
+trace one capability-neutral `/forge/v1/dispatch` path → bounded singleton HTTP
+routing headers → canonical typed Header/NodeCall → the same destination bridge.
+The body is typed payload only and cannot override routing or TLS-derived identity.
+Do not create per-task URLs or guess destinations from bodies. POST is currently
+supported; unsupported verbs return 405/Allow without task execution. Future verb
+support requires real operation semantics/authorization, not aliases or mutating GET.

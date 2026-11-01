@@ -24,7 +24,7 @@ use std::{
 use tokio::{net::TcpStream, runtime::Runtime, time::timeout};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 
-const PATH: &str = "/forge/v1/node";
+const PATH: &str = "/forge/v1/dispatch";
 const MAX_HTTP_HEADERS: usize = 16;
 const MAX_HTTP_BUFFER: usize = 8192;
 const MEDIA: &str = "application/json";
@@ -101,6 +101,7 @@ impl IoClient for HttpsClient {
             return Err(RemoteError::WrongTarget);
         }
         let duration = remaining(call.expires_unix_ms, self.limits.connection_timeout)?;
+        let projected_headers = wire::encode_headers(&call)?;
         let bytes = wire::encode_call(&call)?;
         if bytes.len() > self.limits.max_body_bytes {
             return Err(RemoteError::Limit);
@@ -114,7 +115,8 @@ impl IoClient for HttpsClient {
                 let socket = TcpStream::connect(self.address).await.map_err(|_| RemoteError::Transport { may_have_executed: false })?;
                 let stream = TlsConnector::from(Arc::clone(&self.tls)).connect(self.server_name.clone(), socket).await.map_err(|_| RemoteError::Unauthenticated)?;
                 let (mut sender, connection) = client_http1::Builder::new().max_headers(MAX_HTTP_HEADERS).max_buf_size(MAX_HTTP_BUFFER).handshake(TokioIo::new(stream)).await.map_err(|_| RemoteError::Transport { may_have_executed: false })?;
-                let request = Request::builder().method("POST").uri(PATH).header("host", "forge").header("content-type", MEDIA).header("connection", "close").body(Full::new(Bytes::from(bytes))).map_err(|_| RemoteError::InvalidRequest)?;
+                let mut request = Request::builder().method("POST").uri(PATH).header("host", "forge").header("content-type", MEDIA).header("connection", "close").body(Full::new(Bytes::from(bytes))).map_err(|_| RemoteError::InvalidRequest)?;
+                request.headers_mut().extend(projected_headers);
                 let exchange = async {
                     // Sending may begin at the first poll. Conservatively mark it
                     // before polling, not after receiving a response.
@@ -207,10 +209,20 @@ impl HttpsServer {
                 let subject = self.identities.iter().find(|entry| entry.certificate_der.as_slice() == leaf.as_ref()).map(|entry| entry.subject.as_str()).ok_or(RemoteError::Unauthenticated)?;
                 let served = Cell::new(false);
                 let service = service_fn(|request| async {
-                    let result = if served.replace(true) { Err(RemoteError::InvalidRequest) } else { handle(request, destination, subject, self.limits, &invoked, deadline).await };
+                    let (status, allow, result) = if served.replace(true) {
+                        (StatusCode::BAD_REQUEST, false, Err(RemoteError::InvalidRequest))
+                    } else if request.uri().path() != PATH || request.uri().query().is_some() {
+                        (StatusCode::NOT_FOUND, false, Err(RemoteError::InvalidRequest))
+                    } else if request.method() != hyper::Method::POST {
+                        (StatusCode::METHOD_NOT_ALLOWED, true, Err(RemoteError::InvalidRequest))
+                    } else {
+                        (StatusCode::OK, false, handle(request, destination, subject, self.limits, &invoked, deadline).await)
+                    };
                     let bytes = wire::encode_reply(result).unwrap_or_else(|_| b"{\"wire_version\":1,\"result\":{\"outcome\":\"error\",\"value\":\"invalid_response\"}}".to_vec());
                     let bytes = if bytes.len() > self.limits.max_body_bytes { wire::encode_reply(Err(RemoteError::Limit)).expect("bounded error serialization") } else { bytes };
-                    Ok::<_, Infallible>(Response::builder().status(StatusCode::OK).header("content-type", MEDIA).header("connection", "close").body(Full::new(Bytes::from(bytes))).expect("static response headers"))
+                    let mut response = Response::builder().status(status).header("content-type", MEDIA).header("connection", "close");
+                    if allow { response = response.header("allow", "POST"); }
+                    Ok::<_, Infallible>(response.body(Full::new(Bytes::from(bytes))).expect("static response headers"))
                 });
                 server_http1::Builder::new().keep_alive(false).max_headers(MAX_HTTP_HEADERS).max_buf_size(MAX_HTTP_BUFFER).timer(TokioTimer::new()).header_read_timeout(self.limits.connection_timeout).serve_connection(TokioIo::new(stream), service).await.map_err(|_| RemoteError::Transport { may_have_executed: served.get() })
             }).await.unwrap_or_else(|_| Err(RemoteError::Deadline { may_have_executed: invoked.get() }))
@@ -225,9 +237,7 @@ async fn handle<A: Authorize>(
     invoked: &Cell<bool>,
     deadline: Instant,
 ) -> Result<NodeReply, RemoteError> {
-    if request.method() != hyper::Method::POST
-        || request.uri().path() != PATH
-        || request.uri().query().is_some()
+    if request.headers().get_all("content-type").iter().count() != 1
         || request
             .headers()
             .get("content-type")
@@ -236,6 +246,7 @@ async fn handle<A: Authorize>(
     {
         return Err(RemoteError::InvalidRequest);
     }
+    let projected = wire::decode_headers(request.headers())?;
     if let Some(size) = request.headers().get("content-length") {
         if size
             .to_str()
@@ -255,7 +266,7 @@ async fn handle<A: Authorize>(
                 e
             }
         })?;
-    let call = wire::decode_call(&bytes)?;
+    let call = wire::decode_call(projected, &bytes)?;
     remaining(call.expires_unix_ms, limits.connection_timeout)?;
     invoked.set(true);
     destination.dispatch_verified_before(call, subject, deadline)

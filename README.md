@@ -43,7 +43,8 @@ The terminal discovers its selected registered commands and sends typed requests
 ## First authenticated network boundary
 
 The optional [remote node-info slice](docs/architecture/remote-node-info.md) now
-sends typed `node.info` through HTTPS with mutual TLS and separate destination
+sends typed `node.info` through one `/forge/v1/dispatch` HTTPS gateway, with routing
+metadata in HTTP headers, mutual TLS and separate destination
 operation authorization, then the existing shared bridge. It is a **loopback
 proof**, not a deployed remote agent. No file/job execution is exposed.
 

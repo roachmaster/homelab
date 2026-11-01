@@ -47,7 +47,8 @@ At runtime:
 
 1. `ReadNodeTask<C>` prepares `node.info @ 1`, the typed `Info` variant, original
    request/correlation IDs, target node/incarnation and caller expiry.
-2. The HTTPS client checks its configured target, encodes a private DTO and performs
+2. The HTTPS client checks its configured target, projects canonical routing metadata
+   into bounded HTTP headers, encodes the typed payload body and performs
    one deadline-bounded call. Server trust/name checking and client-certificate
    authentication use rustls, never a custom cryptographic verifier.
 3. The server requires an exact configured mapping for the **verified** client leaf.
@@ -72,11 +73,30 @@ default operation access: even a mapped peer can be denied by destination policy
 
 ## Wire and security limits
 
-The adapter uses one `POST /forge/v1/node` request, `wire_version = 1`, and a strict
-private JSON shape. Operation and contract version come from the header, separately
-from target node/incarnation and typed payload. Duplicate/unknown fields, unknown
-payloads and unsupported wire versions fail decoding. There is no arbitrary command,
-URL, filesystem path, global business enum or reflective dispatch field.
+The only entry path is **`/forge/v1/dispatch`**, not a task/capability URL.
+Current invocation uses POST. This is a single RPC-style HTTP gateway, not a claim
+of resource-oriented REST. Unsupported methods return 405 with `Allow: POST`;
+unknown paths return 404. Neither response executes a business task. Future GET,
+PUT, PATCH or DELETE support requires an actual operation and method semantics;
+GET must remain read-only and have no request-body convention. No file deletion
+or other new capability follows from naming an HTTP verb.
+
+The [exact HTTP header projection](../../src/rust/forge-remote-https/README.md#http-header-projection)
+puts destination/contract version, target/incarnation, request/correlation IDs,
+absolute expiry and envelope version in bounded, uniquely occurring `Forge-*`
+headers. It creates the unchanged typed Header/NodeCall. The body contains only
+`{"payload":"info"}`; it cannot override routing or identity. Missing, duplicate
+(including case variants), malformed or over-bound required metadata fails closed.
+Unsupported envelope versions fail rather than silently disagreeing with the v1
+path. Only the registered header route selects the destination; a typed body must
+still agree and never supplies a fallback route.
+
+The Rust client/config/port APIs remain compatible. **The experimental wire format
+changes deliberately:** `/forge/v1/node` and body-carried routing metadata are no
+longer accepted. Raw HTTP callers must migrate together with this first slice;
+there is no legacy alias that restores body-driven routing. Successful reply DTOs
+and their exact metadata checks remain unchanged. There is no arbitrary command,
+filesystem path, global business enum or reflective dispatch field.
 
 Configured CA roots plus the expected server name establish server trust; bootstrap
 maps that endpoint to a logical target. Client chain verification plus an exact leaf
@@ -137,7 +157,11 @@ actual mutual TLS, denied/unmapped peers, wrong server trust/name/target, malfor
 wire input, bounded reads, expiry and public consumer assembly. Consult current
 check output rather than treating this document as a stored CI result.
 
-Primary API references (facts about libraries, not endorsements of our design):
+Primary API references (facts about protocols/libraries, not endorsements of our design):
+
+- HTTP defines method semantics; 405 responses advertise supported methods through
+  Allow. Our choice is POST-only invocation now, not fabricated support for every
+  verb. [HTTP semantics and 405](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.6).
 
 - rustls config separates server verification and client-certificate presentation;
   built-in root verification does not itself configure revocation. [rustls ConfigBuilder](https://docs.rs/rustls/latest/rustls/struct.ConfigBuilder.html).

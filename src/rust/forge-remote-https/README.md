@@ -73,10 +73,52 @@ can still violate its contract.
 
 ## Bounded behavior and failure semantics
 
-The only wire endpoint is `POST /forge/v1/node`, with versioned strict typed JSON
-and `application/json`. Unknown fields/variants/versions fail; a body cannot choose
-an unregistered handler or spoof an authenticated subject. There are no redirects,
-retries, keep-alive request loops, compression, discovery or arbitrary URL paths.
+The single capability-neutral gateway is **`POST /forge/v1/dispatch`**. The path
+identifies the gateway protocol, never a task/capability. This is an RPC-style
+HTTP entry point, not a collection of resource-oriented REST endpoints.
+
+### HTTP header projection
+
+HTTP field names are case-insensitive. Every required field must occur exactly
+once; the optional correlation field at most once. Duplicate field lines, including
+case variants or comma-combined routing values, fail rather than picking a winner.
+Values are bounded ASCII; this adapter rejects non-ASCII canonical metadata before
+opening a client connection rather than inventing an encoding.
+
+| Header | Meaning / bound |
+| --- | --- |
+| `Forge-Envelope-Version` | Canonical unsigned decimal `1`, matching `/forge/v1/dispatch` |
+| `Forge-Destination` | Canonical Header destination, currently registered `node.info`; 1–256 bytes |
+| `Forge-Contract-Version` | Nonzero canonical unsigned decimal u16, currently registered `1` |
+| `Forge-Target-Node` | Configured logical target; 1–128 ASCII token bytes |
+| `Forge-Target-Incarnation` | Expected host incarnation; same token bound |
+| `Forge-Request-Id` | Original request ID; 1–256 bytes, no whitespace/control |
+| `Forge-Correlation-Id` (optional) | Original correlation ID; same bound |
+| `Forge-Expires-Unix-Ms` | Original absolute expiry; canonical unsigned decimal u64, at most 20 digits |
+
+The `application/json` body is only `{"payload":"info"}`. It cannot provide or
+override destination, target, version, deadline, request IDs or identity. Strict
+body decoding rejects unknown fields and payload variants. The adapter projects
+headers into the existing typed Header/NodeCall; the destination bridge remains
+the authoritative route/version/authorization/variant gate. Payload contents never
+select a destination. The authenticated principal still comes solely from verified
+TLS peer mapping—not from any HTTP header. The successful response retains the
+existing private, versioned DTO and checked request/target metadata.
+
+Only POST invocation is implemented. Other methods on this path return **405**
+with **`Allow: POST`**, without executing a task; other paths return **404**.
+GET, PUT, PATCH and DELETE are not fake aliases. A future GET operation must be
+read-only and use no request-body convention; replacement/update/deletion methods
+need an actual operation contract and independent authorization. Such methods can
+share this gateway path without changing header-selected dispatch. There are no
+redirects, retries, keep-alive request loops, compression, discovery or per-task URLs.
+
+**Wire compatibility correction:** the first experimental `/forge/v1/node` path
+and body-carried routing metadata are removed, without a silent fallback. Existing
+Rust config/client/task APIs and `make remote` remain unchanged; raw HTTP callers
+must switch to this path and header projection. Request-envelope and task-contract
+versions are separate; an unsupported envelope version is rejected, not inferred
+from a body or repaired from the URL.
 
 Default body cap is 4096 bytes; configuration permits 256–65536 bytes. Incoming
 bodies are counted while collected. HTTP parsing uses hyper with 16 headers and an

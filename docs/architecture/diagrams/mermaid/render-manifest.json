@@ -82,9 +82,9 @@
     },
     {
       "source": "m12-remote-node-info.mmd",
-      "source_sha256": "842e6c745e4219224e572b8380c6aba500e5675f0f6477759e8475386e7aaf2b",
+      "source_sha256": "6fce893f874003bf04a2a34ed21766dd4e690d3831e68edcdb3db68e7f072cd3",
       "svg": "images/m12-remote-node-info.svg",
-      "svg_sha256": "24c413c2de15eae185685a22dbdacf454028136141d2b58217aae8221a7b705c"
+      "svg_sha256": "6e109fa8628988485d8f10efe29e781ecfdfb009d35df14e04dfdd35f2872691"
     }
   ]
 }

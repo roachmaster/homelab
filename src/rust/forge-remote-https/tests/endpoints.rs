@@ -52,7 +52,7 @@ fn limits() -> Limits {
         ..Limits::default()
     }
 }
-fn server(
+fn start_server(
     config: ServerConfig,
     allowed: bool,
     large: bool,
@@ -116,7 +116,7 @@ fn call() -> NodeCall {
 #[test]
 fn authenticated_two_endpoints_preserve_identity_ids_and_only_invoke_once() {
     let certs = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), true, false);
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
     let reply = client(certs.client_config(address, limits()))
         .execute(call())
         .unwrap();
@@ -130,7 +130,7 @@ fn authenticated_two_endpoints_preserve_identity_ids_and_only_invoke_once() {
 #[test]
 fn authenticated_identity_is_not_operation_permission() {
     let certs = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), false, false);
+    let (address, calls, server) = start_server(certs.server_config(limits()), false, false);
     assert_eq!(
         client(certs.client_config(address, limits())).execute(call()),
         Err(RemoteError::Forbidden)
@@ -141,7 +141,7 @@ fn authenticated_identity_is_not_operation_permission() {
 #[test]
 fn unknown_header_route_does_not_guess_from_info_payload() {
     let certs = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), true, false);
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
     let mut request = call();
     request.request.header =
         Header::new(RouteKey::new("disk.list", 1).unwrap(), "bad-route").unwrap();
@@ -158,7 +158,7 @@ fn trusted_chain_but_unmapped_leaf_is_rejected() {
     let mut config = certs.server_config(limits());
     let ServerConfig::LoopbackMutualTls { identities, .. } = &mut config;
     identities[0].certificate_der = certs.server.certificate_chain[0].clone();
-    let (address, calls, server) = server(config, true, false);
+    let (address, calls, server) = start_server(config, true, false);
     assert!(client(certs.client_config(address, limits()))
         .execute(call())
         .is_err());
@@ -168,7 +168,7 @@ fn trusted_chain_but_unmapped_leaf_is_rejected() {
 #[test]
 fn wrong_server_dns_identity_fails_without_observation() {
     let certs = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), true, false);
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
     let mut config = certs.client_config(address, limits());
     let ClientConfig::MutualTls { server_name, .. } = &mut config;
     *server_name = "not-localhost.test".into();
@@ -183,7 +183,7 @@ fn wrong_server_dns_identity_fails_without_observation() {
 fn untrusted_client_ca_fails_without_observation() {
     let certs = Certificates::new();
     let other = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), true, false);
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
     let mut config = certs.client_config(address, limits());
     let ClientConfig::MutualTls { credentials, .. } = &mut config;
     *credentials = other.client;
@@ -211,7 +211,7 @@ fn total_timeout_bounds_accept_and_silent_peer() {
         connection_timeout: Duration::from_millis(80),
         ..limits()
     };
-    let (address, calls, server) = server(certs.server_config(small), true, false);
+    let (address, calls, server) = start_server(certs.server_config(small), true, false);
     let _socket = std::net::TcpStream::connect(address).unwrap();
     assert_eq!(
         server.join().unwrap(),
@@ -242,6 +242,9 @@ fn total_timeout_bounds_accept_and_silent_peer() {
         })
     );
 }
+fn metadata() -> String {
+    format!("Forge-Envelope-Version: 1\r\nForge-Destination: node.info\r\nForge-Contract-Version: 1\r\nForge-Target-Node: local-node\r\nForge-Target-Incarnation: test-host-1\r\nForge-Request-Id: raw-1\r\nForge-Expires-Unix-Ms: {}\r\n", now_unix_ms().unwrap() + 1000)
+}
 fn raw(certs: &Certificates, address: SocketAddr, body: &str) -> String {
     raw_headers(certs, address, body, "")
 }
@@ -250,6 +253,23 @@ fn raw_headers(
     address: SocketAddr,
     body: &str,
     extra_headers: &str,
+) -> String {
+    raw_request(
+        certs,
+        address,
+        "POST",
+        "/forge/v1/dispatch",
+        &(metadata() + extra_headers),
+        body,
+    )
+}
+fn raw_request(
+    certs: &Certificates,
+    address: SocketAddr,
+    method: &str,
+    path: &str,
+    fields: &str,
+    body: &str,
 ) -> String {
     use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName};
     let mut roots = rustls::RootCertStore::empty();
@@ -282,7 +302,7 @@ fn raw_headers(
         .set_write_timeout(Some(Duration::from_secs(2)))
         .unwrap();
     let mut stream = rustls::StreamOwned::new(connection, socket);
-    write!(stream, "POST /forge/v1/node HTTP/1.1\r\nHost: forge\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{extra_headers}Connection: close\r\n\r\n{}", body.len(), body).unwrap();
+    write!(stream, "{method} {path} HTTP/1.1\r\nHost: forge\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{fields}Connection: close\r\n\r\n{}", body.len(), body).unwrap();
     stream.flush().unwrap();
     let mut output = String::new();
     let _ = stream.read_to_string(&mut output);
@@ -290,14 +310,14 @@ fn raw_headers(
 }
 #[test]
 fn payload_mismatch_and_spoofed_identity_fields_fail_before_dispatch() {
-    for tail in [
-        ",\"payload\":\"status\"",
-        ",\"payload\":\"info\",\"subject\":\"operator\"",
+    for body in [
+        r#"{"payload":"status"}"#,
+        r#"{"payload":"info","subject":"operator"}"#,
+        r#"{"payload":"info","operation":"node.info","request_id":"body-route"}"#,
     ] {
         let certs = Certificates::new();
-        let (address, calls, server) = server(certs.server_config(limits()), true, false);
-        let body = format!("{{\"wire_version\":1,\"node\":\"local-node\",\"incarnation\":\"test-host-1\",\"operation\":\"node.info\",\"contract_version\":1,\"request_id\":\"x\",\"correlation_id\":null,\"expires_unix_ms\":{}{tail}}}", now_unix_ms().unwrap()+1000);
-        assert!(raw(&certs, address, &body).contains("invalid_request"));
+        let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+        assert!(raw(&certs, address, body).contains("invalid_request"));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         server.join().unwrap().unwrap();
     }
@@ -305,16 +325,24 @@ fn payload_mismatch_and_spoofed_identity_fields_fail_before_dispatch() {
 #[test]
 fn wrong_destination_incarnation_is_rejected_after_authentication() {
     let certs = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), true, false);
-    let body = format!("{{\"wire_version\":1,\"node\":\"local-node\",\"incarnation\":\"old-host\",\"operation\":\"node.info\",\"contract_version\":1,\"request_id\":\"x\",\"correlation_id\":null,\"expires_unix_ms\":{},\"payload\":\"info\"}}", now_unix_ms().unwrap()+1000);
-    assert!(raw(&certs, address, &body).contains("wrong_target"));
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+    let fields = metadata().replace("test-host-1", "old-host");
+    assert!(raw_request(
+        &certs,
+        address,
+        "POST",
+        "/forge/v1/dispatch",
+        &fields,
+        r#"{"payload":"info"}"#
+    )
+    .contains("wrong_target"));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     server.join().unwrap().unwrap();
 }
 #[test]
 fn oversized_request_is_rejected_before_observation() {
     let certs = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), true, false);
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
     assert!(raw(&certs, address, &"x".repeat(5000)).contains("limit"));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     server.join().unwrap().unwrap();
@@ -326,7 +354,7 @@ fn response_budget_returns_error_not_partial_success() {
         max_body_bytes: 300,
         ..limits()
     };
-    let (address, calls, server) = server(certs.server_config(small), true, true);
+    let (address, calls, server) = start_server(certs.server_config(small), true, true);
     assert_eq!(
         client(certs.client_config(address, limits())).execute(call()),
         Err(RemoteError::Limit)
@@ -471,20 +499,256 @@ fn caller_identity_headers_cannot_upgrade_a_mapped_unprivileged_subject() {
     let mut config = certs.server_config(limits());
     let ServerConfig::LoopbackMutualTls { identities, .. } = &mut config;
     identities[0].subject = "unprivileged".into();
-    let (address, calls, server) = server(config, true, false);
-    let body = format!("{{\"wire_version\":1,\"node\":\"local-node\",\"incarnation\":\"test-host-1\",\"operation\":\"node.info\",\"contract_version\":1,\"request_id\":\"x\",\"correlation_id\":null,\"expires_unix_ms\":{},\"payload\":\"info\"}}", now_unix_ms().unwrap()+1000);
-    assert!(
-        raw_headers(&certs, address, &body, "X-Forge-Subject: operator\r\n").contains("forbidden")
-    );
+    let (address, calls, server) = start_server(config, true, false);
+    assert!(raw_headers(
+        &certs,
+        address,
+        r#"{"payload":"info"}"#,
+        "X-Forge-Subject: operator\r\n"
+    )
+    .contains("forbidden"));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     server.join().unwrap().unwrap();
 }
 #[test]
 fn unknown_wire_version_is_rejected_before_observation() {
     let certs = Certificates::new();
-    let (address, calls, server) = server(certs.server_config(limits()), true, false);
-    let body = format!("{{\"wire_version\":2,\"node\":\"local-node\",\"incarnation\":\"test-host-1\",\"operation\":\"node.info\",\"contract_version\":1,\"request_id\":\"x\",\"correlation_id\":null,\"expires_unix_ms\":{},\"payload\":\"info\"}}", now_unix_ms().unwrap()+1000);
-    assert!(raw(&certs, address, &body).contains("invalid_request"));
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+    let fields = metadata().replace("Forge-Envelope-Version: 1", "Forge-Envelope-Version: 2");
+    assert!(raw_request(
+        &certs,
+        address,
+        "POST",
+        "/forge/v1/dispatch",
+        &fields,
+        r#"{"payload":"info"}"#
+    )
+    .contains("invalid_request"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    server.join().unwrap().unwrap();
+}
+
+#[test]
+fn all_required_headers_are_mandatory_and_singleton_case_insensitively() {
+    let fields = [
+        "Forge-Envelope-Version",
+        "Forge-Destination",
+        "Forge-Contract-Version",
+        "Forge-Target-Node",
+        "Forge-Target-Incarnation",
+        "Forge-Request-Id",
+        "Forge-Expires-Unix-Ms",
+    ];
+    for field in fields {
+        for duplicate in [false, true] {
+            let certs = Certificates::new();
+            let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+            let original = metadata();
+            let line = original
+                .split("\r\n")
+                .find(|line| line.starts_with(field))
+                .unwrap();
+            let headers = if duplicate {
+                format!("{original}{}\r\n", line.to_ascii_lowercase())
+            } else {
+                original.replace(&format!("{line}\r\n"), "")
+            };
+            assert!(
+                raw_request(
+                    &certs,
+                    address,
+                    "POST",
+                    "/forge/v1/dispatch",
+                    &headers,
+                    r#"{"payload":"info"}"#
+                )
+                .contains("invalid_request"),
+                "field {field} duplicate {duplicate}"
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 0);
+            server.join().unwrap().unwrap();
+        }
+    }
+}
+#[test]
+fn optional_correlation_is_singleton_and_valid_header_casing_is_insensitive() {
+    let certs = Certificates::new();
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+    let fields = metadata().to_ascii_lowercase() + "fOrGe-CoRrElAtIoN-Id: correlation-7\r\n";
+    let response = raw_request(
+        &certs,
+        address,
+        "POST",
+        "/forge/v1/dispatch",
+        &fields,
+        r#"{"payload":"info"}"#,
+    );
+    assert!(response.contains("\"correlation_id\":\"correlation-7\""));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    server.join().unwrap().unwrap();
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+    let fields = metadata() + "Forge-Correlation-Id: one\r\nfOrGe-CoRrElAtIoN-Id: two\r\n";
+    assert!(raw_request(
+        &certs,
+        address,
+        "POST",
+        "/forge/v1/dispatch",
+        &fields,
+        r#"{"payload":"info"}"#
+    )
+    .contains("invalid_request"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    server.join().unwrap().unwrap();
+}
+#[test]
+fn header_bounds_and_canonical_numeric_grammar_are_enforced() {
+    let cases = [
+        ("Forge-Target-Node", "n".repeat(129)),
+        ("Forge-Target-Incarnation", "i".repeat(129)),
+        ("Forge-Destination", "d".repeat(257)),
+        ("Forge-Request-Id", "r".repeat(257)),
+        ("Forge-Contract-Version", "0".into()),
+        ("Forge-Contract-Version", "65536".into()),
+        ("Forge-Contract-Version", "01".into()),
+        ("Forge-Contract-Version", "+1".into()),
+        ("Forge-Expires-Unix-Ms", "18446744073709551616".into()),
+        ("Forge-Expires-Unix-Ms", "-1".into()),
+        ("Forge-Expires-Unix-Ms", "01".into()),
+        ("Forge-Envelope-Version", "01".into()),
+        ("Forge-Request-Id", "".into()),
+        ("Forge-Request-Id", "two words".into()),
+        ("Forge-Request-Id", "one,two".into()),
+        ("Forge-Destination", "node.info,node.info".into()),
+    ];
+    for (name, value) in cases {
+        let certs = Certificates::new();
+        let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+        let original = metadata();
+        let line = original
+            .split("\r\n")
+            .find(|line| line.starts_with(name))
+            .unwrap();
+        let fields = original.replace(line, &format!("{name}: {value}"));
+        assert!(
+            raw_request(
+                &certs,
+                address,
+                "POST",
+                "/forge/v1/dispatch",
+                &fields,
+                r#"{"payload":"info"}"#
+            )
+            .contains("invalid_request"),
+            "field {name}"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        server.join().unwrap().unwrap();
+    }
+    let certs = Certificates::new();
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+    let fields = metadata() + &format!("Forge-Correlation-Id: {}\r\n", "c".repeat(257));
+    assert!(raw_request(
+        &certs,
+        address,
+        "POST",
+        "/forge/v1/dispatch",
+        &fields,
+        r#"{"payload":"info"}"#
+    )
+    .contains("invalid_request"));
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    server.join().unwrap().unwrap();
+}
+#[test]
+fn unsupported_methods_and_paths_never_decode_or_dispatch_a_body() {
+    for method in ["GET", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"] {
+        let certs = Certificates::new();
+        let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+        let response = raw_request(
+            &certs,
+            address,
+            method,
+            "/forge/v1/dispatch",
+            "",
+            "not valid JSON",
+        );
+        assert!(response.starts_with("HTTP/1.1 405"), "{method}: {response}");
+        assert!(response
+            .to_ascii_lowercase()
+            .contains("\r\nallow: post\r\n"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        server.join().unwrap().unwrap();
+    }
+    for path in [
+        "/forge/v1/node",
+        "/forge/v2/dispatch",
+        "/forge/v1/dispatch?task=node.info",
+        "/other",
+    ] {
+        let certs = Certificates::new();
+        let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+        let response = raw_request(&certs, address, "POST", path, &metadata(), "not valid JSON");
+        assert!(response.starts_with("HTTP/1.1 404"), "{path}: {response}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        server.join().unwrap().unwrap();
+    }
+}
+#[test]
+fn non_ascii_canonical_metadata_is_rejected_by_http_projection_before_connect() {
+    let certs = Certificates::new();
+    let mut request = call();
+    request.request.header = Header::new(RouteKey::new("node.info", 1).unwrap(), "café").unwrap();
+    assert_eq!(
+        client(certs.client_config("127.0.0.1:1".parse().unwrap(), limits())).execute(request),
+        Err(RemoteError::InvalidRequest)
+    );
+}
+
+#[test]
+fn maximum_ascii_request_and_correlation_tokens_roundtrip_without_body_metadata() {
+    let certs = Certificates::new();
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+    let mut request = call();
+    request.request.header = Header::new(RouteKey::new("node.info", 1).unwrap(), "r".repeat(256))
+        .unwrap()
+        .with_correlation_id("c".repeat(256))
+        .unwrap();
+    let reply = client(certs.client_config(address, limits()))
+        .execute(request)
+        .unwrap();
+    assert_eq!(reply.response.header.request_id(), "r".repeat(256));
+    assert_eq!(
+        reply.response.header.correlation_id(),
+        Some("c".repeat(256).as_str())
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    server.join().unwrap().unwrap();
+}
+#[test]
+fn combined_optional_metadata_and_missing_headers_fail_before_body_limits() {
+    for extra in [
+        "Forge-Correlation-Id: one,two\r\n",
+        "Forge-Correlation-Id: \r\n",
+    ] {
+        let certs = Certificates::new();
+        let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+        assert!(raw_headers(&certs, address, r#"{"payload":"info"}"#, extra)
+            .contains("invalid_request"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        server.join().unwrap().unwrap();
+    }
+    let certs = Certificates::new();
+    let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+    let response = raw_request(
+        &certs,
+        address,
+        "POST",
+        "/forge/v1/dispatch",
+        "",
+        &"x".repeat(5000),
+    );
+    assert!(response.contains("invalid_request"));
+    assert!(!response.contains("\"value\":\"limit\""));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     server.join().unwrap().unwrap();
 }

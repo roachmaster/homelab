@@ -1,21 +1,132 @@
 //! DTOs are private to this boundary. JSON never enters Forge task/bridge types.
 use forge_ingress_contract::{Envelope, Header, Response, ResponseHeader, RouteKey};
 use forge_remote::{NodeCall, NodeCommand, NodeInfo, NodeReply, RemoteError, Target};
+use hyper::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
-    wire_version: u16,
-    node: String,
-    incarnation: String,
-    operation: String,
-    contract_version: u16,
-    request_id: String,
-    correlation_id: Option<String>,
-    expires_unix_ms: u64,
     payload: Payload,
 }
+
+pub(crate) struct ProjectedHeader {
+    target: Target,
+    header: Header,
+    expires_unix_ms: u64,
+}
+
+const ENVELOPE: &str = "forge-envelope-version";
+const DESTINATION: &str = "forge-destination";
+const CONTRACT: &str = "forge-contract-version";
+const NODE: &str = "forge-target-node";
+const INCARNATION: &str = "forge-target-incarnation";
+const REQUEST_ID: &str = "forge-request-id";
+const CORRELATION_ID: &str = "forge-correlation-id";
+const EXPIRES: &str = "forge-expires-unix-ms";
+
+fn single<'a>(
+    headers: &'a HeaderMap,
+    name: &str,
+    max: usize,
+    required: bool,
+) -> Result<Option<&'a str>, RemoteError> {
+    let mut values = headers.get_all(name).iter();
+    let first = values.next();
+    if values.next().is_some() {
+        return Err(RemoteError::InvalidRequest);
+    }
+    match first {
+        None if required => Err(RemoteError::InvalidRequest),
+        None => Ok(None),
+        Some(value) => {
+            let text = value.to_str().map_err(|_| RemoteError::InvalidRequest)?;
+            if text.is_empty()
+                || text.len() > max
+                || !text.is_ascii()
+                || text
+                    .bytes()
+                    .any(|b| b.is_ascii_whitespace() || b.is_ascii_control() || b == b',')
+            {
+                return Err(RemoteError::InvalidRequest);
+            }
+            Ok(Some(text))
+        }
+    }
+}
+fn required<'a>(headers: &'a HeaderMap, name: &str, max: usize) -> Result<&'a str, RemoteError> {
+    single(headers, name, max, true)?.ok_or(RemoteError::InvalidRequest)
+}
+fn decimal(value: &str) -> Result<u64, RemoteError> {
+    if !value.bytes().all(|b| b.is_ascii_digit()) || (value.len() > 1 && value.starts_with('0')) {
+        return Err(RemoteError::InvalidRequest);
+    }
+    value.parse().map_err(|_| RemoteError::InvalidRequest)
+}
+/// Decode routing before touching the body. HeaderMap treats names case
+/// insensitively; get_all rejects duplicated names even under different casing.
+pub(crate) fn decode_headers(headers: &HeaderMap) -> Result<ProjectedHeader, RemoteError> {
+    if decimal(required(headers, ENVELOPE, 5)?)? != 1 {
+        return Err(RemoteError::InvalidRequest);
+    }
+    let version: u16 = decimal(required(headers, CONTRACT, 5)?)?
+        .try_into()
+        .map_err(|_| RemoteError::InvalidRequest)?;
+    let route = RouteKey::new(required(headers, DESTINATION, 256)?, version)
+        .map_err(|_| RemoteError::InvalidRequest)?;
+    let mut header = Header::new(route, required(headers, REQUEST_ID, 256)?)
+        .map_err(|_| RemoteError::InvalidRequest)?;
+    if let Some(value) = single(headers, CORRELATION_ID, 256, false)? {
+        header = header
+            .with_correlation_id(value)
+            .map_err(|_| RemoteError::InvalidRequest)?;
+    }
+    Ok(ProjectedHeader {
+        target: Target::new(
+            required(headers, NODE, 128)?,
+            required(headers, INCARNATION, 128)?,
+        )?,
+        header,
+        expires_unix_ms: decimal(required(headers, EXPIRES, 20)?)?,
+    })
+}
+/// This HTTP projection intentionally supports ASCII canonical metadata only;
+/// the transport-neutral Header itself remains able to represent UTF-8 tokens.
+pub(crate) fn encode_headers(call: &NodeCall) -> Result<HeaderMap, RemoteError> {
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        (ENVELOPE, "1".to_owned()),
+        (
+            DESTINATION,
+            call.request.header.route().destination().to_owned(),
+        ),
+        (CONTRACT, call.request.header.route().version().to_string()),
+        (NODE, call.target.node().to_owned()),
+        (INCARNATION, call.target.incarnation().to_owned()),
+        (REQUEST_ID, call.request.header.request_id().to_owned()),
+        (EXPIRES, call.expires_unix_ms.to_string()),
+    ] {
+        if !value.is_ascii() {
+            return Err(RemoteError::InvalidRequest);
+        }
+        headers.insert(
+            name,
+            HeaderValue::from_str(&value).map_err(|_| RemoteError::InvalidRequest)?,
+        );
+    }
+    if let Some(value) = call.request.header.correlation_id() {
+        if !value.is_ascii() {
+            return Err(RemoteError::InvalidRequest);
+        }
+        headers.insert(
+            CORRELATION_ID,
+            HeaderValue::from_str(value).map_err(|_| RemoteError::InvalidRequest)?,
+        );
+    }
+    decode_headers(&headers)?;
+    Ok(headers)
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Payload {
@@ -118,41 +229,25 @@ impl From<Fault> for RemoteError {
         }
     }
 }
-pub(crate) fn encode_call(call: &NodeCall) -> Result<Vec<u8>, RemoteError> {
+pub(crate) fn encode_call(_call: &NodeCall) -> Result<Vec<u8>, RemoteError> {
     serde_json::to_vec(&Request {
-        wire_version: 1,
-        node: call.target.node().into(),
-        incarnation: call.target.incarnation().into(),
-        operation: call.request.header.route().destination().into(),
-        contract_version: call.request.header.route().version(),
-        request_id: call.request.header.request_id().into(),
-        correlation_id: call.request.header.correlation_id().map(str::to_owned),
-        expires_unix_ms: call.expires_unix_ms,
         payload: Payload::Info,
     })
     .map_err(|_| RemoteError::InvalidRequest)
 }
-pub(crate) fn decode_call(bytes: &[u8]) -> Result<NodeCall, RemoteError> {
+pub(crate) fn decode_call(
+    projected: ProjectedHeader,
+    bytes: &[u8],
+) -> Result<NodeCall, RemoteError> {
     let request: Request =
         serde_json::from_slice(bytes).map_err(|_| RemoteError::InvalidRequest)?;
-    if request.wire_version != 1 {
-        return Err(RemoteError::InvalidRequest);
-    }
-    let mut header = Header::new(
-        RouteKey::new(request.operation, request.contract_version)
-            .map_err(|_| RemoteError::InvalidRequest)?,
-        request.request_id,
-    )
-    .map_err(|_| RemoteError::InvalidRequest)?;
-    if let Some(id) = request.correlation_id {
-        header = header
-            .with_correlation_id(id)
-            .map_err(|_| RemoteError::InvalidRequest)?;
-    }
+    let payload = match request.payload {
+        Payload::Info => NodeCommand::Info,
+    };
     Ok(NodeCall {
-        target: Target::new(request.node, request.incarnation)?,
-        request: Envelope::new(header, NodeCommand::Info),
-        expires_unix_ms: request.expires_unix_ms,
+        target: projected.target,
+        request: Envelope::new(projected.header, payload),
+        expires_unix_ms: projected.expires_unix_ms,
     })
 }
 pub(crate) fn encode_reply(result: Result<NodeReply, RemoteError>) -> Result<Vec<u8>, RemoteError> {

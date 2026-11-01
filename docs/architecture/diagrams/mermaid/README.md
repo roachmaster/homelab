@@ -192,7 +192,11 @@ hostile-source execution sandbox. See [actual contracts and limits](../../../../
 
 [Mermaid source](m12-remote-node-info.mmd). The upper panel is explicit host
 assembly through public registrars, consuming freeze, factories and chosen providers.
-The lower panel is one successful typed call, not alternate bypass paths. Standard
+The lower panel is one successful typed call through `/forge/v1/dispatch`, not
+per-task endpoints or alternate bypass paths. Bounded uniquely occurring HTTP
+headers project routing/target/version/deadline metadata; the JSON body contains
+only the typed payload and cannot override it. Only POST is currently supported;
+other verbs fail with 405/Allow before task execution. Standard
 TLS verifies certificate identity; the exact configured peer mapping is distinct
 from the destination's operation policy. The same existing bridge performs header
 lookup/admission/variant checks before injected observation. JSON and the private

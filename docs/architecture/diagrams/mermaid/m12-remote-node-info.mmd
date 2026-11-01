@@ -10,9 +10,9 @@ flowchart TB
     end
     subgraph CALL["ONE READ-ONLY REQUEST"]
         T["ReadNodeTask with injected RemoteNodeClient<br/>Prepare node.info header + typed Info payload"]
-        H["Optional HTTPS adapter<br/>Private JSON codec; bounded HTTP/1 call<br/>No retry; unchanged expiry and IDs"]
+        H["Single HTTPS gateway<br/>POST /forge/v1/dispatch<br/>HTTP headers carry destination and metadata<br/>JSON body is typed payload only"]
         TLS["Mutual TLS verification<br/>Expected server trust / name<br/>Verified client leaf maps to subject"]
-        D["Bounded typed decode and target check<br/>Unknown body variants rejected<br/>Caller claims never become identity"]
+        D["Validate unique bounded routing headers<br/>Project canonical Header; decode typed body<br/>Reject overrides and unknown variants"]
         B["Existing shared Bridge<br/>Header route + version lookup<br/>Separate operation authorization<br/>Deadline recheck + payload agreement"]
         N["Injected local NodeInfoSource<br/>Configured identity + compile-target facts<br/>Not health or hardware probes"]
         O["Typed reply checks<br/>Responder / incarnation and original IDs<br/>Bounded fields; reject late result"]
