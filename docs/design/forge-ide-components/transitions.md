@@ -1,10 +1,12 @@
 # State, event and transition contract
 
-Part of the [design decomposition](README.md). **Existing** means observed in the
-baseline [model](../../../src/rust/forge-ide-ui/src/model.rs),
-[protocol](../../../src/rust/forge-ide-ui/src/protocol.rs) or
+Part of the [workbench architecture](README.md). These contracts map to the
+[model](../../../src/rust/forge-ide-ui/src/model.rs),
+[protocol](../../../src/rust/forge-ide-ui/src/protocol.rs) and
 [generated adapters](../../../src/rust/forge-ide-web/src/generate/javascript.rs).
-**Proposed** names and keyboard/focus rules below require implementation/tests.
+Reference-style `EntryRef`/`SymbolRef` names are design shorthand; actual keyed
+`UiEvent` fields are authoritative. Runtime/browser checks are separate from this
+specification and its simplified diagrams.
 
 ## Separate three state domains
 
@@ -13,7 +15,7 @@ baseline [model](../../../src/rust/forge-ide-ui/src/model.rs),
    expansions and row limits. Existing `Phase` is exactly `Unpaired`, `Pairing`,
    `Idle`, `Loading`, `Ready`, `Partial`, `Failed`, `Cancelled`.
 2. **Presentation state, generated main-thread owner:** focus, scroll, DOM lifetime;
-   proposed pane geometry/visibility and active narrow pane. Changing geometry is
+   pane geometry/visibility and active narrow pane. Changing geometry is
    not a report mutation or HTTP request. The main thread must not maintain a
    competing copy of application selection, filter or request policy.
 3. **Transport/lifecycle state, worker adapter owner:** WASM availability, pending
@@ -25,30 +27,31 @@ Connection versus Workbench is a **composition of these states**. A report can b
 partial while a user switches panes; no Cartesian-product enum such as
 `MobileOutlinePartialLoadingPage` is needed.
 
-## Existing request transitions and proposed presentation
+## Request transitions and presentation
 
 | Current condition + input | Guard and resulting state | Effect / display and focus contract |
 | --- | --- | --- |
 | Startup + `Resume` | No catalog or active pairing; new pairing request ID → `Pairing` | Existing Resume effect. Connection shows session check. No report/cached catalog is restored from browser storage. |
-| Unpaired + `Pair { value }` | Bounded nonempty input, no concurrent pair/catalog → `Pairing` | Existing Pair effect; clear input after send. Proposed focus stays in connection region; never echo code in status/logs. |
-| Pairing + `Paired` | Matching pairing ID and valid bounded catalog → `Idle` | Select catalog's first node and its first project if any. Workbench composition appears. Proposed focus moves to context selection after user pairing, without background focus stealing. |
+| Unpaired + `Pair { value }` | Bounded nonempty input, no concurrent pair/catalog → `Pairing` | Existing Pair effect; clear input after send. Focus stays in connection region; never echo code in status/logs. |
+| Pairing + `Paired` | Matching pairing ID and valid bounded catalog → `Idle` | Select catalog's first node and its first project if any. Workbench composition appears. Focus moves to context selection after user pairing, without background focus stealing. |
 | Pairing + `PairFailed` / matching network failure | Clear pairing → `Unpaired`; unmatched reply is ignored | Connection displays bounded safe failure. Retry/pair is explicit. An invalid catalog also stays unpaired. |
 | Catalog accepted, selected node has no projects | Remain `Idle`; no valid project selection | Show “No allowed project”; Inspect disabled and model rejects invalid input. A catalog with no nodes is invalid, not an empty Workbench. No arbitrary path/URL field. |
 | Workbench + valid node/project selection | Catalog membership checked; invalidate report/pending/selection, increment revision → `Idle` | Existing Abort if pending. Clear old data. Keep focus on the selector; pane geometry may remain but old row focus/filters cannot. |
 | Idle/Ready/Partial/Failed/Cancelled + `Inspect` | Catalog/project valid, no pending request, valid bounded clock/expiry; invalidate old report, new token → `Loading` | Exactly one Inspect effect. Show selected context and Cancel local wait; no stale report or guessed percentage. |
 | Loading + repeated `Inspect` | Existing `Busy` error; state/pending unchanged | No second effect. Disabled UI is not sufficient; retain model guard. Preserve current focus. |
-| Loading + matching `Result::Report` | Token equality; protocol/node/project match; current time before expiry; full report validation → `Ready` or `Partial` | Accept complete/partial report, select root and expand it, clear pending. Proposed announcements describe outcome without forcing focus away from a valid control. |
+| Loading + matching `Result::Report` | Token equality; protocol/node/project match; current time before expiry; full report validation → `Ready` or `Partial` | Accept complete/partial report, select root and expand it, clear pending. Announcements describe outcome without forcing focus away from a valid control. |
 | Loading + mismatched token / no pending | Ignore stale result | No effect, no data replacement, no focus change. Different token is not repaired or treated as a new report. |
 | Loading + matching token but bad target/project/version, expired or invalid report | Clear pending → `Failed` | Reject content. Explain invalid/late result; no source data displayed, no silent retry. Timeout cannot prove non-execution. |
 | Loading + matching typed error or network failure | Clear pending → `Failed` | Denied/unavailable/timeout/limit/invalid-response category shown safely. Retry is a new explicit Inspect, not an effect replay. |
 | Loading + `Cancel` | Invalidate, increment revision, remove pending/report → `Cancelled` | Existing Abort effect. “Stopped waiting locally”; agent work may continue. Subsequent old completion/failure ignored. |
 | No pending + `Cancel` | Existing no-op | No request or state invention. Do not show an enabled Cancel as though work is pending. |
-| Ready/Partial + select/toggle/more | IDs checked against current accepted report; local state changes only | Existing local events; proposed keyed variants below. No backend calls. Files/fields/symbols are not filesystem navigation commands. |
+| Ready/Partial + select/toggle/more | IDs checked against current accepted report; local state changes only | Accepted-report keyed variants below. No backend calls. Files/fields/symbols are not filesystem navigation commands. |
 | Fatal WASM/startup/ABI failure | Adapter closes, aborts local pending work; outside `Phase` | Recovery message and explicit Reload. No further dispatch into that instance. Remote completion remains unknown. |
 
-The existing model **clears `pending` when accepting a report and does not retain
-its accepted request token**. Therefore the stronger local row-event validation
-below is a real proposed change, not something supplied by `ReportView` today.
+Acceptance clears `pending` but now retains its token as `accepted_report`.
+All local actions validate this context; new reports/context invalidation clear
+it before another projection can become visible. This is a local ABI 2 change,
+not a change to the native `ReportView` wire schema.
 
 ## Session expiry is not the same as operation denial
 
@@ -57,7 +60,7 @@ does not distinguish an expired host session from a denied operation/project in
 that category. During inspection this becomes **Failed in Workbench**, not an
 automatic Connection transition. Do not infer credentials, expiry or permission
 changes from error prose. Keep the report cleared and offer an explicit **Reload
-to check session** recovery (proposed visible control using browser lifecycle).
+to check session** recovery (generated lifecycle control).
 
 Reload creates a new worker and Resume checks the actual host session. A valid
 catalog returns to idle Workbench; failed resume returns to Connection. It does
@@ -66,7 +69,7 @@ reason would require a bounded protocol/adapter change and tests; this design
 does not claim it exists. Pairing a new session is not an authority escalation or
 credential provisioning workflow. Host and agent authorization remain separate.
 
-## Local view transitions — proposed additions
+## Local view transitions — implemented keyed actions
 
 | Intent | Validation and local change | Focus / effect |
 | --- | --- | --- |
@@ -74,7 +77,7 @@ credential provisioning workflow. Host and agent authorization remain separate.
 | `SelectSymbol(SymbolRef)` | Key/entry/declaration exist and belong together. Select entry + symbol. | Show structural details; no source fetch, editor or inferred signature. |
 | `SelectProblem(ProblemRef)` | Key/entry/diagnostic index exist. Select entry, clear symbol, reveal supplied string. | Explicitly expose file details/diagnostic; no invented source location or remote effect. Keep Problems context reversible by pane controls. |
 | Set/clear file or symbol filter | Correct report/entry key, bounded query. Compute against full accepted scope before paging. | WASM projection only. Preserve selection with “hidden by filter” state where needed; no remote search or automatic request. |
-| More visible rows | Matching accepted context; increase bounded local window | Keep focus on More/control or next requested row consistently; announce additional items. No new inspection. |
+| Previous/next rows | Matching accepted context; move the bounded local window | Keep focus on the page control consistently; announce the displayed range. No new inspection. |
 | Hide/show/resize/reset pane | Typed declared pane ID and bounded geometry; main presentation only | Retain valid semantic selection. Move focus from a hidden subtree to its reopen control; never leave hidden tabbable rows. |
 | Narrow pane switch | Target pane exists; update active presentation region | Restore last valid local focus in that pane or its heading. Do not remount the worker or discard accepted report. |
 | Old row/problem/filter/toggle/pagination event after new report | Report key differs, or IDs no longer valid; outline paging/filtering must also match selected entry | Reject/no-op without effects or selection/expansion/window change. A reused integer ID must not affect a different report's file. |
@@ -91,20 +94,18 @@ are outside analyzed content. Explicitly unsupported Rust syntax is not “no co
 - **Pagehide / refresh / browser Back:** terminate the local worker and release
   browser ownership. This is not a remote cancellation receipt. On return, obtain
   a fresh catalog and no report; no URL/history entry restores a stale report ID.
-  **Presentation hardening proposed:** clear protected catalog/report DOM on
-  teardown and before a fresh resume, including a page restored from browser
-  cache. Current `pagehide` terminates the worker but does not clear that DOM;
-  current fatal handling reports a message rather than a full recovery screen.
-  The redesign must explicitly clear/disable stale content, not assume a new
-  worker instantly replaces every old pixel.
+  Generated lifecycle primitives clear protected catalog/report DOM on teardown
+  and before a fresh resume, including browser-cache restoration. Fatal handling
+  clears/disables content and offers explicit fresh-instance recovery; it does not
+  assume a replacement worker instantly erases stale pixels.
+
 - **Current session, same report:** pane toggling preserves model selection;
   presentation stores only bounded valid focus/scroll references. New report or
   context discards old focus keys. No persistence of pairing/CSRF/report in URLs.
 - **Keyboard path:** labeled context controls → Explorer → selected file workspace
   → optional Outline/Problems → view controls. Native Tab order plus tree arrow
   navigation; Enter activates selection, not remote Inspect. Up/Down focus alone
-  does not select a different file; Left/Right tree hierarchy behavior must be
-  completed beyond the current expand/collapse-only primitive where required.
+  does not select a different file; Left/Right tree hierarchy behavior follows visible children/parents as well as expansion.
 - **Resize:** focused separators expose name, range/current value and keyboard
   adjustment/reset; pointer drag is not the sole interaction. Hidden panes have
   visible controls to reopen. Do not intercept browser Back/refresh/zoom shortcuts.
@@ -113,7 +114,7 @@ are outside analyzed content. Explicitly unsupported Rust syntax is not “no co
   or failure once, not every tree row. Long/native-encoded names stay safe text and
   fully available through selected-item details, not exclusively pointer hover.
 
-## Acceptance scenarios for later implementation
+## Acceptance scenarios and implementation gates
 
 | Scenario | Required observable result |
 | --- | --- |

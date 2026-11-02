@@ -1,10 +1,11 @@
 # Forge IDE UI: a proposed browser boundary, not a new backend
 
-**Status: original design proposal, with an initial generated-UI implementation now in the repository.**
+**Status: historical design proposal, followed by the generated UI and its read-only workbench implementation.**
 The [implementation guide](../../../src/rust/forge-ide-web/README.md) and
 [M25](../diagrams/mermaid/README.md#m25--generated-ui-implementation) describe the
 actual typed component/YAML generator, portable Rust/WASM model and loopback native
-host. This document and the retained PDF explain the original plan; proposal API
+host. The [workbench guide](../../../src/rust/forge-ide-web/WORKBENCH.md) records current
+report-keyed interactions, reusable panes and the local ABI 2 compatibility change. This document and the retained PDF explain the original plan; proposal API
 names below are not automatically exported contracts. Actual browser acceptance
 is reported separately from native, Node ABI and simulated worker-fault checks.
 Baseline: public [homelab `175315b`](https://github.com/roachmaster/homelab/tree/175315b4fe1c993f15bb2ff52d824ee4cdaecc88).

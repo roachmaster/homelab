@@ -365,11 +365,13 @@ verification record. M19–M24 and the PDF remain labeled historical proposal vi
 [Design specification](../../../design/forge-ide-components/README.md) ·
 [Component contracts](../../../design/forge-ide-components/components.md) ·
 [Guarded transitions](../../../design/forge-ide-components/transitions.md).
-These are **design-only** extensions to the wireframes, not runtime changes.
+These now map the implemented read-only workbench. Composition names remain
+design vocabulary, not one public Rust type/crate per box. The original wireframes
+and earlier PDF remain historical; see the [workbench guide](../../../../src/rust/forge-ide-web/WORKBENCH.md) for concrete APIs and compatibility.
 
 ### M26 — Components and state ownership
 
-![Proposed UI component compositions and existing model](images/m26-ui-components.svg)
+![Implemented UI compositions and model ownership](images/m26-ui-components.svg)
 
 [Source](m26-ui-components.mmd). UML-like compositions group C01–C09 for readability;
 the catalog specifies each component. Diamonds mean composition; other arrows
@@ -381,7 +383,7 @@ No component becomes an authorization or service-locator boundary.
 
 ### M27 — Screens, panels and navigation
 
-![Proposed screen and local view map](images/m27-ui-navigation.svg)
+![Screen and local view map](images/m27-ui-navigation.svg)
 
 [Source](m27-ui-navigation.mmd). Connection and Workbench are two compositions of
 one document at `/`. Overview/file details, Explorer, Outline and Problems are local
@@ -399,7 +401,7 @@ is outside the model's Phase enum.
 and Pairing entry are in M27 and the transition table. A result requires a matching
 token plus target/project/version/deadline/report validation. Cancel and context
 change invalidate local ownership, not remote computation. Repeated Inspect is
-rejected while busy; retries are explicit. The proposed accepted-report key guard
-for local row/filter/diagnostic events requires new model/event work; current
-integer selection events do not already provide it. Read the table for invalid,
+rejected while busy; retries are explicit. The accepted-report key guard now covers local selection/toggle/filter/diagnostic
+and pagination actions; outline actions also check the selected entry. This is a
+local public event/ABI 2 change, not a native HTTP schema change. Read the table for invalid,
 stale, network failure and focus/lifecycle cases omitted from simplified arrows.

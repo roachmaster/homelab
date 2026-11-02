@@ -22,9 +22,9 @@ async function until(predicate, label) {
     await new Promise(resolve => setTimeout(resolve, 2));
   }
 }
-async function harness(respond) {
+async function harness(respond, initialMode = 'normal') {
   const messages = [], requests = [], timers = new Set();
-  let mode = 'normal';
+  let mode = initialMode;
   const context = vm.createContext({
     TextEncoder, TextDecoder, Uint8Array, AbortController, Response, TypeError,
     Date: class extends Date { static now() { return 1000; } },
@@ -34,6 +34,7 @@ async function harness(respond) {
         const compiled = await WebAssembly.instantiate(...args);
         const actual = compiled.instance.exports;
         return { instance: { exports: { ...actual,
+          abi_version: () => mode === 'legacy' ? 1 : actual.abi_version(),
           dispatch_input: () => mode === 'zero' ? 0 : actual.dispatch_input(),
           output_len: () => mode === 'malformed' ? 1 : actual.output_len(),
         } } };
@@ -117,3 +118,40 @@ for (const mode of ['zero', 'malformed']) {
   } finally { h.close(); }
 }
 console.log('Generated-worker fault harness passed: HTTP classification, actual WASM pair/inspect/cancel/stale state, and ABI fail-closed lifecycle. Fetch is simulated; this is not browser/network proof.');
+
+{
+  const h = await harness(request => json(paired(request)), 'legacy');
+  try {
+    await until(() => h.messages.some(m => m.kind === 'fatal'), 'legacy ABI rejects before session resume');
+    assert.equal(h.requests.length, 0, 'ABI mismatch must not invoke a backend effect');
+    const messages = h.messages.length;
+    await h.send({ kind: 'inspect' });
+    assert.equal(h.requests.length, 0);
+    assert.equal(h.messages.length, messages);
+  } finally { h.close(); }
+}
+console.log('Generated worker rejects legacy ABI 1 before session or inspection effects.');
+
+{
+  const h = await harness(request => request.kind === 'resume' ? json(paired(request)) : json(inspected(request)));
+  try {
+    await until(() => /Connected/.test(h.status()), 'resume before presentation envelope');
+    await h.send({ event: { kind: 'inspect' }, presentation_sequence: 5 });
+    await until(() => /Inspection ready/.test(h.status()), 'enveloped event reaches actual WASM');
+    assert.ok(h.messages.some(m => m.kind === 'view' && m.presentation_sequence === 5));
+    assert.equal(h.messages.filter(m => m.kind === 'view').at(-1).presentation_sequence, null,
+      'asynchronous effect result must not acknowledge an input draft');
+    const reportKey = h.requests.find(r => r.body.kind === 'inspect').body.request.token;
+    const before = h.requests.length;
+    await h.send({ event: { kind: 'set_file_filter', report: reportKey, value: 'text' }, presentation_sequence: 6 });
+    const accepted = h.messages.filter(m => m.kind === 'view').at(-1);
+    assert.equal(accepted.presentation_sequence, 6);
+    assert.equal(accepted.view.inputs.find(i => i.id === 'file-filter').value, 'text');
+    assert.equal(h.requests.length, before, 'local filter adds no transport effect');
+    await h.send({ event: { kind: 'inspect' }, presentation_sequence: 0 });
+    await until(() => h.messages.some(m => m.kind === 'fatal'), 'invalid presentation sequence fails closed');
+    await h.send({ kind: 'inspect' });
+    assert.equal(h.requests.length, before, 'invalid envelope cannot start or resume effects');
+  } finally { h.close(); }
+}
+console.log('Generated worker strips bounded presentation envelopes before actual WASM; only the matching synchronous view acknowledges them.');

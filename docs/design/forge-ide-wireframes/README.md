@@ -1,6 +1,6 @@
 # Forge IDE workbench — wireframe first
 
-**Design proposal, 2026-11-02. No runtime UI changes.** These low/mid-fidelity
+**Historical design proposal, 2026-11-02. These images are not runtime screenshots.** These low/mid-fidelity
 views apply [Design Forge IDE UX](../../../.agents/skills/design-forge-ide-ux/SKILL.md)
 to the [implemented generated inspection UI](../../../src/rust/forge-ide-web/README.md)
 at [baseline 2913393e](https://github.com/roachmaster/homelab/tree/2913393e24556313ce0f63d86b65022ec6d2aa21).
@@ -12,7 +12,7 @@ declarations and any missing analysis**. This is not a source editor, type check
 debugger or terminal. The current product's successful browser tests do not prove
 the new layout, controls or keyboard behavior proposed here.
 
-The next design step is the [component, view and transition decomposition](../forge-ide-components/README.md), which assigns C01–C09 responsibilities and turns these pictures into guarded interactions. It does not implement the pictured controls.
+The [component/view/transition contracts](../forge-ide-components/README.md) assign C01–C09 responsibilities. The subsequent [generated workbench implementation](../../../src/rust/forge-ide-web/WORKBENCH.md) now supplies these interactions; the original existing/proposed annotations below describe the earlier design baseline, not a current feature inventory.
 
 ## Visuals
 

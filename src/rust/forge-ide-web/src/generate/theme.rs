@@ -17,6 +17,16 @@ pub struct Theme {
     pub spacing_px: u16,
     pub sidebar_px: u16,
     pub details_px: u16,
+    #[serde(default = "default_row")]
+    pub row_px: u16,
+    #[serde(default = "default_control")]
+    pub control_px: u16,
+}
+fn default_row() -> u16 {
+    28
+}
+fn default_control() -> u16 {
+    32
 }
 impl Theme {
     pub fn parse(yaml: &str) -> Result<Self, &'static str> {
@@ -47,6 +57,8 @@ impl Theme {
             || !(4..=24).contains(&t.spacing_px)
             || !(160..=400).contains(&t.sidebar_px)
             || !(220..=480).contains(&t.details_px)
+            || !(24..=48).contains(&t.row_px)
+            || !(28..=56).contains(&t.control_px)
         {
             return Err("theme numeric limit");
         }

@@ -201,3 +201,11 @@ See [Playwright browser channels](https://playwright.dev/docs/browsers#google-ch
 and the [GitHub runner inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#browsers-and-drivers).
 The earlier hosted attempt failed at downloaded headless-shell sandbox startup,
 before UI assertions; changing a supported browser selection is not a passing test.
+
+### Workbench asset compatibility
+
+The host accepts asset manifest ABI 2. Rebuild and replace the complete generated
+bundle for the report-keyed workbench; old ABI 1 or unknown asset versions fail
+before listening. Hashes bind the five files as a bundle, not publisher identity.
+The native session/inspection HTTP protocol remains 1. See the
+[local UI migration](../forge-ide-web/WORKBENCH.md#compatibility-and-verification).

@@ -6,7 +6,7 @@ mod css;
 mod html;
 mod javascript;
 mod theme;
-pub use component::{Component, Document};
+pub use component::{Component, Document, PanePosition};
 use forge_bootstrap::{PreparedGroup, Registry};
 use forge_provider::{Factory, InstanceProvider, Singleton};
 use forge_template::{
@@ -248,7 +248,7 @@ impl Factory<AssetBundle> for AssetFactory {
         ]);
         let manifest = Manifest {
             format_version: 1,
-            abi_version: 1,
+            abi_version: 2,
             files: files
                 .iter()
                 .map(|(path, bytes)| ManifestFile {

@@ -1,10 +1,10 @@
 ---
-title: M26 Proposed component composition - not exported Rust APIs
+title: M26 Workbench composition - design names, implemented primitives
 ---
 classDiagram
   direction LR
   class ShellRegion {
-    <<proposed composition>>
+    <<implemented composition>>
     C01 AppShell
     C02 ConnectionView
     C03 ContextToolbar
@@ -12,7 +12,7 @@ classDiagram
     C09 StatusRegion
   }
   class InspectionRegion {
-    <<proposed composition>>
+    <<implemented composition>>
     C04 ExplorerPane
     C05 InspectionWorkspace
     C06 OutlinePane
@@ -21,14 +21,14 @@ classDiagram
   class Presentation {
     <<generated primitives>>
     DOM focus scroll lifetime
-    existing typed view bindings
-    proposed panes and splitters
+    typed ABI2 view bindings
+    panes filters and splitters
   }
   class UiModel {
     <<existing WASM owner>>
     UiEvent and ViewModel
     request and selection policy
-    proposed report-keyed intents
+    accepted report-keyed intents
     UiEffect to existing worker
   }
   ShellRegion *-- InspectionRegion

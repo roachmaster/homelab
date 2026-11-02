@@ -4,7 +4,8 @@ use forge_ide_web::{
     component,
     generate::{
         application::{ide_document, ide_transport, IDE_THEME},
-        register_assets, AssetBundle, AssetConfig, Document, Theme,
+        register_assets, AssetBundle, AssetConfig, Document, HeaderBinding, RequestBinding, Theme,
+        Transport,
     },
 };
 use forge_provider::{Factory, InstanceProvider, Singleton};
@@ -106,4 +107,156 @@ fn generated_main_has_no_backend_fetch_or_raw_html_interpretation() {
     let worker = std::str::from_utf8(&a.files["worker.js"]).unwrap();
     assert!(worker.contains("WebAssembly.instantiate"));
     assert!(worker.contains("/forge/v1/dispatch"));
+}
+
+fn widget_document() -> Document {
+    Document {
+        title: "Collection review".into(),
+        subtitle: "Independent generated component consumer".into(),
+        children: vec![
+            component!(screen "collection-connection", "Collection connection", false; [
+                component!(text "collection-status", "Starting"),
+            ]),
+            component!(screen "collection-screen", "Collection", true; [
+                component!(toolbar [
+                    component!(select "collection-choice", "Collection", "choose_collection"),
+                    component!(button "collection-load", "Load", "load_collection"),
+                    component!(reload "collection-reload", "Reload"),
+                ]),
+                component!(layout "collection-layout"; [
+                    component!(pane "collection-nav", "Items", Leading, 180, 240, 380; [
+                        component!(filter "collection-filter", "Filter item names", "filter_collection"),
+                        component!(tree "collection-items", "Collection items"),
+                        component!(button "collection-next", "Next page", "next_collection"),
+                    ]),
+                    component!(pane "collection-detail", "Selected item", Main, 240, 480, 960; [
+                        component!(text "collection-name", "Choose an item"),
+                        component!(details "collection-properties"),
+                    ]),
+                    component!(pane "collection-related", "Related items", Trailing, 220, 260, 420; [
+                        component!(tree "collection-relations", "Related items"),
+                    ]),
+                    component!(pane "collection-notes", "Notes", Bottom, 120, 160, 300; [
+                        component!(text "collection-note", "No notes"),
+                    ]),
+                ]),
+            ]),
+        ],
+    }
+}
+
+#[test]
+fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
+    let mut c = config();
+    c.document = widget_document();
+    // A distinct consumer supplies its own typed transport declarations too.
+    c.transport = Transport {
+        initial_event: "mount_collection".into(),
+        bindings: vec![RequestBinding {
+            kind: "load_collection".into(),
+            request_id: "request_id".into(),
+            headers: vec![HeaderBinding::literal(
+                "Forge-Destination",
+                "collection.read",
+            )],
+            csrf: false,
+            deadline: None,
+            accept_events: vec!["collection_loaded".into()],
+        }],
+    };
+    let assets = build(c);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    assert!(html.contains("data-protected hidden"));
+    assert!(html.contains("id=\"collection-layout\""));
+    assert!(html.contains("id=\"collection-nav-separator\""));
+    assert!(html.contains("aria-valuemin=\"180\""));
+    assert!(html.contains("aria-valuemax=\"380\""));
+    assert!(html.contains("id=\"collection-nav-toggle\""));
+    assert!(html.contains("id=\"collection-nav-switch\""));
+    assert!(html.contains("id=\"collection-layout-reset\""));
+    assert!(!html.contains("Project files"));
+    assert!(!html.contains("Rust declarations"));
+    assert_eq!(assets.files["main.js"], build(config()).files["main.js"]);
+    assert_eq!(
+        assets.files["style.css"],
+        build(config()).files["style.css"]
+    );
+    // Optional test-artifact output for the independent real-browser widget harness.
+    if let Some(path) = std::env::var_os("FORGE_WIDGET_FIXTURE_OUTPUT") {
+        let path = std::path::PathBuf::from(path);
+        std::fs::create_dir_all(&path).unwrap();
+        for (name, bytes) in &assets.files {
+            std::fs::write(path.join(name), bytes).unwrap();
+        }
+    }
+}
+
+#[test]
+fn rejects_invalid_pane_geometry_positions_and_generated_id_collisions() {
+    for pane in [
+        component!(pane "nav", "Items", Leading, 180, 160, 400; []),
+        component!(pane "nav", "Items", Leading, 180, 250, 1200; []),
+    ] {
+        let mut c = config();
+        c.document.children = vec![component!(layout "layout"; [
+            pane,
+            component!(pane "main", "Main", Main, 240, 480, 960; []),
+        ])];
+        assert!(register_assets("assets", c).is_err());
+    }
+    let mut c = config();
+    c.document.children = vec![component!(layout "layout"; [
+        component!(pane "nav", "Items", Leading, 180, 250, 400; []),
+    ])];
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.document.children = vec![component!(pane "orphan", "Items", Main, 240, 480, 960; [])];
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.document
+        .children
+        .push(component!(text "explorer-panel-separator", "Collision"));
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.document
+        .children
+        .push(component!(text "runtime-recovery", "Collision"));
+    assert!(register_assets("assets", c).is_err());
+    assert!(Theme::parse(&IDE_THEME.replace("row_px: 28", "row_px: 1")).is_err());
+    assert!(Theme::parse(&IDE_THEME.replace("control_px: 32", "control_px: 100")).is_err());
+}
+
+#[test]
+fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
+    let assets = build(config());
+    let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
+    for forbidden in [
+        "select_entry",
+        "more_tree",
+        "set_file_filter",
+        "session_epoch",
+        "localStorage",
+        "sessionStorage",
+        "history.pushState",
+        "fetch(",
+        "innerHTML",
+    ] {
+        assert!(
+            !main.contains(forbidden),
+            "application semantics/unsafe storage in primitive: {forbidden}"
+        );
+    }
+    assert!(main.contains("{...action,value}"));
+    assert!(main.contains("window.addEventListener('pagehide',stop)"));
+    assert!(
+        main.contains("function start(){\n  if(worker||fatalState)return;\n  clearProtected();")
+    );
+    assert!(main.contains("if(old)old.terminate();clearProtected();"));
+    assert!(main.contains("if(worker!==owned||fatalState)return"));
+    assert!(main.contains("function fatal(message)"));
+    assert!(main.contains("new ResizeObserver"));
+    let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
+    assert!(worker.contains("wasm.abi_version()!==2"));
+    let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
+    assert_eq!(manifest["abi_version"], 2);
 }

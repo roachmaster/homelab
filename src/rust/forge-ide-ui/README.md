@@ -14,8 +14,8 @@ codec, not internal state. The same model runs in native unit tests and real
 ## Ownership
 
 - Rust owns node/project selections, request epochs/revisions/IDs, active request,
-  deadline acceptance, report validation, tree expansion, outline/details and
-  summary counts. One active inspection; explicit retry creates a new request.
+  deadline acceptance, report validation, tree expansion, bounded name filters,
+  entry/declaration/diagnostic selection, outline/details and summary counts. One active inspection; explicit retry creates a new request.
 - Generated worker glue performs prepared `Resume`, `Pair`, `Inspect` and `Abort`
   effects. It retains CSRF only as transport metadata. A pairing code is emitted
   once as an effect and is not stored in the model or view; this is not a claim
@@ -48,9 +48,14 @@ unreadable/too-large/unparsed-Rust entries prove incompleteness. It accepts at
 most 4,096 entries, 16,384 declarations, hierarchy depth 64, 4 KiB per text/name,
 2 MiB aggregate report text and 16 diagnostics per entry. An unreadable root is
 represented honestly as a one-entry incomplete report. Catalogs have at most
-32 nodes and 128 aliases per node. Tree and outline render in 256-row increments;
-the bounded report remains intact. These are deliberate UI limits, not silent
-truncation of an otherwise claimed complete report.
+32 nodes and 128 aliases per node. Explorer, Outline/central declarations and
+Problems use local Previous/Next windows of at most 256 rows, reduced when their
+conservative JSON cost reaches 384 KiB per list. Range summaries disclose the
+window; all accepted rows remain available by pagination. Four list projections
+(including the central/Outline copy) total at most 1.5 MiB, reserving room for the
+catalog, full selected safe ancestor path, diagnostics and view/action overhead.
+No pagination request leaves the model. These are deliberate UI limits, not
+silent truncation of an otherwise claimed complete report.
 
 The WASM boundary caps input and serialized output at 8 MiB. Domain checks happen
 after bounded byte decoding, not in a streaming allocation-proof decoder. The
@@ -59,7 +64,50 @@ not create a security sandbox. Clock values come from the worker and must fit an
 exact JavaScript integer; the host independently checks its own deadline. Local
 request IDs are correlation tokens, not globally unique deduplication keys.
 
+## Accepted report and local intent contract
+
+An accepted report retains its complete `RequestToken`. Every report-local event
+requires `report: RequestToken`, including select/toggle/filter/next/previous and
+Problems selection. Declaration selection and symbol filter/outline pagination
+also require `entry` matching the currently selected file. Reused integer IDs
+cannot identify a new report; stale context is a no-op, not repaired or retried.
+Invalid current IDs and oversized current queries return bounded input errors
+without changing state. Starting Inspect, changing context or cancelling clears
+accepted content, keys, filters and selections. No report or selection is persisted
+in URLs, history or browser storage. Generic operation denial stays in Workbench;
+it does not imply session expiry. Explicit Reload rechecks the host session.
+
+`SetFileFilter` and `SetSymbolFilter` use literal case-sensitive substring matching
+on the displayed safe name (including explicit native hex labels), at most 256
+UTF-8 **bytes**, not characters. Matching covers the full bounded accepted report
+or selected entry before paging. Ancestors of matches remain visible. File
+filtering reveals matching paths without altering saved tree expansions; clear
+the filter to restore those expansions. Selection survives filtering, with an
+explicit hidden-by-filter indication in the workspace/details. Changing files
+clears symbol selection/filter/paging. There is no regex, content search or new
+filesystem access.
+
+Problems is an index of supplied strings, keyed by report, entry and diagnostic
+index. Selecting one exposes its associated entry and exact supplied text, clears
+the selected declaration, and performs no source fetch. Rows include parent/name
+context plus report-local entry ID to disambiguate repeated names; selected details
+show the complete safe ancestor path. No compiler severity, source location or
+signature is inferred. No accepted report means an unavailable count, not zero;
+an empty diagnostic list in a partial report is explicitly not a clean result.
+Binary, unreadable, too-large and Rust-analysis-unavailable entries remain distinct
+from an inspected text file that emitted no declarations.
+
+`RowAction`, `FilterAction` and `InputBinding` are typed projections: generated
+controls forward the exact accepted context rather than deriving IDs from a DOM
+selection. All existing remote effects and the eight `Phase` values are unchanged.
+The internal model uses enums/structs and `BoundedQuery`, never JSON value state.
+
 ## ABI and verification
+
+The local WASM ABI is **2** because report-keyed local intents and workbench view
+bindings are a coordinated breaking change. Deploy the generated scripts,
+HTML/CSS and WASM together as one verified bundle; older ABI 1 workers fail closed.
+The HTTP catalog/report protocol remains version 1.
 
 Worker order: `abi_version()` → `reserve_input(len)` → copy JSON bytes into the
 exported memory → `dispatch_input()` → copy `output_ptr()/output_len()` bytes →

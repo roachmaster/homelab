@@ -7,6 +7,10 @@ It is an inspection UI, not a source editor. The worker runs the actual compiled
 The [native host](../forge-ide-web-host/README.md) supplies protected selectors and
 adapts inspection to the existing remote agent; native credentials stay there.
 
+The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
+Explorer/Outline filters, file/declaration workspace, Problems and reversible
+keyboard/narrow panes, plus the local ABI2 migration.
+
 ## Authoring and build boundary
 
 - `src/generate/application.rs`: application structure and declarative action/header
@@ -63,8 +67,10 @@ controls and keyed rows; it owns focus, keyboard navigation, DOM and page/worker
 lifecycle. No backend fetch or business reducer runs there. Worker glue executes
 Rust's prepared effects, projects headers, performs bounded HTTP I/O, retains CSRF
 transport metadata and returns typed results to WASM. Rust owns request tokens,
-selection revisions, stale-result rejection, reports, tree expansion and details.
-A WASM ABI failure closes that instance and aborts its pending fetches; transport
+selection revisions, stale-result rejection, accepted report keys, local filters,
+bounded row windows, diagnostic navigation, tree expansion and details.
+Page teardown/resume and fatal recovery clear protected DOM. A WASM ABI failure
+closes that instance and aborts its pending fetches; transport
 failures become recoverable typed model events. No automatic retry exists.
 
 Main and worker generated files are generic control/transport primitives, not
@@ -84,6 +90,8 @@ CLI tests preserve existing output and reject malformed WASM. A header check onl
 recognizes WASM format/version; it does not certify the supplied program. The
 actual build is exercised by the Node ABI harness. Generated-worker fault tests
 use simulated HTTP/ABI failures and do **not** claim browser/network coverage.
+The generated-main input harness similarly uses a minimal DOM boundary to test
+in-flight draft ordering; it is not a browser substitute.
 Actual browser → generated worker/WASM → host → real agent journeys are a separate
 acceptance gate, not inferred from string assertions or native endpoint tests.
 

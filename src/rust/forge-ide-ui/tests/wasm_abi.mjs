@@ -6,7 +6,7 @@ assert.ok(path, 'supply the built forge_ide_web.wasm path');
 const { instance } = await WebAssembly.instantiate(await readFile(path), {});
 const w = instance.exports;
 for (const name of ['memory', 'abi_version', 'reserve_input', 'dispatch_input', 'output_ptr', 'output_len', 'release_output']) assert.ok(w[name], name);
-assert.equal(w.abi_version(), 1);
+assert.equal(w.abi_version(), 2);
 assert.equal(w.reserve_input(0), 0);
 assert.equal(w.reserve_input(8 * 1024 * 1024 + 1), 0);
 const encoder = new TextEncoder();
@@ -40,3 +40,36 @@ const stale = send({ kind: 'result', result: { protocol_version: 1, token: inspe
 assert.match(stale.view.texts.find(x => x.id === 'status').text, /Stopped waiting locally/);
 for (let i = 0; i < 200; i++) assert.equal(send({ kind: 'cancel' }).effects.length, 0);
 console.log('Actual WASM ABI: exports, bounded buffers, strict codecs, startup, inspection, cancellation and stale acceptance pass.');
+const nativeName = value => ({ encoding: 'utf8', value });
+const entry = (id, name) => ({ id, parent: 0, name: nativeName(name), kind: 'file', size_bytes: 12, lines: 1, content_status: 'text', diagnostics: ['<img src=x onerror=evil()>'], declarations: [{ id: 0, parent: null, kind: 'function', name: 'run', span: { start: { line: 1, column: 0 }, end: { line: 1, column: 12 } }, module_inline: null, implementation: null }] });
+const report = { format_version: 1, complete: false, files: 2, bytes_read: 24, entries: [{ id: 0, parent: null, name: nativeName('project'), kind: 'directory', size_bytes: null, lines: null, content_status: '', diagnostics: [], declarations: [] }, entry(1, 'lib.rs'), entry(2, 'other.rs')] };
+function accept(request) { return send({ kind: 'result', result: { protocol_version: 1, token: request.token, node_key: request.node_key, project: request.project, outcome: { kind: 'report', report } } }); }
+const request = send({ kind: 'inspect' }).effects[0].request;
+let ready = accept(request);
+assert.ok(send({ kind: 'select_entry', value: 1 }).error, 'legacy unkeyed local intent is rejected');
+const firstAction = ready.view.lists.find(x => x.id === 'files').rows[1].action;
+assert.deepEqual(firstAction.report, request.token);
+ready = send(firstAction);
+const symbolAction = ready.view.lists.find(x => x.id === 'outline').rows[0].action;
+assert.equal(symbolAction.entry, 1);
+ready = send(symbolAction);
+assert.ok(ready.view.tables.find(x => x.id === 'declaration-details').rows.some(x => x.value === 'run'));
+ready = send({ kind: 'set_file_filter', report: request.token, value: 'other' });
+assert.match(ready.view.texts.find(x => x.id === 'workspace-summary').text, /hidden by the file filter/);
+assert.equal(ready.effects.length, 0);
+assert.ok(send({ kind: 'set_file_filter', report: request.token, value: 'é'.repeat(129) }).error);
+const other = ready.view.lists.find(x => x.id === 'files').rows.find(x => x.label === 'other.rs').action;
+const changed = send(other);
+assert.deepEqual(send(symbolAction).view, changed.view, 'queued outline cannot follow a file change');
+const problem = changed.view.lists.find(x => x.id === 'problems').rows[0].action;
+const problemSelected = send(problem);
+assert.ok(problemSelected.view.tables.find(x => x.id === 'details').rows.some(x => x.label === 'Selected diagnostic' && x.value === '<img src=x onerror=evil()>'));
+assert.equal(problemSelected.view.tables.find(x => x.id === 'declaration-details').rows.length, 0);
+const nextRequest = send({ kind: 'inspect' }).effects[0].request;
+const nextReady = accept(nextRequest);
+for (const action of [firstAction, symbolAction, problem, { kind: 'toggle_entry', report: request.token, value: 0 }, { kind: 'more_tree', report: request.token }, { kind: 'previous_tree', report: request.token }, { kind: 'more_outline', report: request.token, entry: 1 }, { kind: 'set_file_filter', report: request.token, value: 'old' }]) {
+  const stale = send(action);
+  assert.deepEqual(stale.view, nextReady.view);
+  assert.equal(stale.effects.length, 0);
+}
+console.log('Actual WASM workbench: mandatory report keys, file-scoped outline, safe diagnostic selection, UTF-8 query bounds, hidden selection and stale local intent no-ops pass.');

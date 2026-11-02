@@ -11,6 +11,8 @@ pub const MAX_TOTAL_TEXT_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_NODES: usize = 32;
 pub const MAX_PROJECTS: usize = 128;
 pub const MAX_DEPTH: usize = 64;
+pub const MAX_FILTER_BYTES: usize = 256;
+pub const MAX_PROBLEMS: usize = MAX_ENTRIES * 16;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -96,16 +98,52 @@ pub enum UiEvent {
     Inspect {},
     Cancel {},
     SelectEntry {
+        report: RequestToken,
         value: u32,
     },
     ToggleEntry {
+        report: RequestToken,
         value: u32,
     },
     SelectDeclaration {
+        report: RequestToken,
+        entry: u32,
         value: u32,
     },
-    MoreTree {},
-    MoreOutline {},
+    SelectProblem {
+        report: RequestToken,
+        entry: u32,
+        value: u16,
+    },
+    SetFileFilter {
+        report: RequestToken,
+        value: String,
+    },
+    SetSymbolFilter {
+        report: RequestToken,
+        entry: u32,
+        value: String,
+    },
+    MoreTree {
+        report: RequestToken,
+    },
+    MoreOutline {
+        report: RequestToken,
+        entry: u32,
+    },
+    MoreProblems {
+        report: RequestToken,
+    },
+    PreviousTree {
+        report: RequestToken,
+    },
+    PreviousOutline {
+        report: RequestToken,
+        entry: u32,
+    },
+    PreviousProblems {
+        report: RequestToken,
+    },
     Result {
         result: ResultEvent,
     },

@@ -9,7 +9,9 @@ accent: "#5cdbc4"
 warning: "#f0c77d"
 error: "#ff9b9b"
 font_px: 14
-radius_px: 9
-spacing_px: 12
+radius_px: 3
+spacing_px: 8
 sidebar_px: 250
-details_px: 310
+details_px: 280
+row_px: 28
+control_px: 32

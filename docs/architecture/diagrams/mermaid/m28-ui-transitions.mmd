@@ -1,5 +1,5 @@
 ---
-title: M28 Inspection lifecycle - existing phases and proposed local-intent guard
+title: M28 Inspection lifecycle - matching results and accepted local context
 ---
 flowchart TB
   subgraph lifecycle["CURRENT INSPECTION PHASES · session entry is in M27"]
@@ -20,11 +20,11 @@ flowchart TB
     direction LR
     G["Result guard · existing<br/>Token and context must match<br/>Validate expiry and report bounds<br/>Late token is ignored"]
     N["Context change · existing<br/>Invalidate and enter Idle<br/>Abort pending local fetch<br/>Busy Inspect is rejected"]
-    X["Local intents · proposed<br/>All report-scoped intents<br/>Match accepted report token<br/>No network effect"]
+    X["Local intents · implemented<br/>All report-scoped intents<br/>Match accepted token<br/>Outline also matches entry<br/>No network effect"]
   end
   classDef existing fill:#ddf5ee,stroke:#247d6a,color:#15352c;
   classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#473216;
   classDef note fill:#f1f4f6,stroke:#71828d,color:#253943;
   class I,L,R,A,F,C existing;
-  class X proposed;
+  class X existing;
   class G,N note;

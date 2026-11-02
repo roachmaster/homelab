@@ -28,7 +28,7 @@ presentation**, and **new capability requirements** separately.
   Do not invent source text, signatures, compiler diagnostics or an editable tab.
 - Node/project choices come from the admitted session catalog, not arbitrary
   addresses/paths. A visible option is not authorization.
-- Existing diagnostics may be plain strings. A proposed Problems view must not
+- Existing diagnostics may be plain strings. The Problems view must not
   invent compiler severity or line locations. Missing/unreadable/binary analysis
   is not an empty successful file. Derived counts describe inspected data only.
 - Label every proposed action and widget. A wireframe demonstrates a design, not
@@ -56,7 +56,7 @@ presentation**, and **new capability requirements** separately.
    Keep accepted content tied to its node/project and request revision. A changed
    selection or late response must not display another project's report. Retry is
    explicit; no fake progress percentage or claim that Cancel stopped the agent.
-5. **Keep new tools honest.** A proposed file/symbol filter operates on the bounded
+5. **Keep new tools honest.** The implemented file/symbol filter operates on the bounded
    accepted report unless a separate backend contract is requested. It is not
    full-repository or source-content search. Specify what pagination, exclusions
    and partial data mean for matches. Do not add backend effects just to make a
@@ -80,6 +80,11 @@ are implementation gaps—not permission to hide app-specific JS in an emitter.
 Use the [first workbench wireframes](../../../docs/design/forge-ide-wireframes/README.md)
 as a concrete status-labeled example, not a permanent pixel specification.
 For a component/page breakdown, consult the [decomposition](../../../docs/design/forge-ide-components/README.md): separate screen compositions from local panes and asynchronous states, identify typed inputs/events and their owner, and make navigation/history policy explicit without inventing stable report IDs or backend routes.
+The [current workbench guide](../../../src/rust/forge-ide-web/WORKBENCH.md) distinguishes
+implemented controls from the earlier wireframe notation. Verify actual desktop
+and narrow browser behavior when implementing; do not call new layout accepted
+from native model tests or static visuals alone. Keep focus distinct from selection,
+all report-local actions keyed, and pagination bounded and reversible.
 
 ## Review and handoff
 

@@ -12,6 +12,15 @@ read-only; source editing, multi-user identity and public hosting are deferred.
 Native checks, real WASM ABI tests and generated-worker fault tests are distinct
 from real-browser end-to-end acceptance; never promote one into the other.
 
+The [workbench follow-on](../../src/rust/forge-ide-web/WORKBENCH.md) adds the compact
+context toolbar, bounded report-local entry/symbol filters, Problems navigation,
+central declaration details, reusable pane geometry/narrow controls and protected
+DOM teardown. Every local action carries accepted report context; stale integer
+IDs cannot select data from a new report. This changes the experimental UI event
+contract and raw WASM ABI to 2, not the existing native inspection protocol.
+Main promotion requires same-head Rust and actual sandboxed desktop/narrow browser
+checks plus visual review. No editor, source-body API or new remote action is added.
+
 ## Authenticated node-info boundary — implemented narrow proof
 
 [Typed remote conversation and optional HTTPS adapter](../architecture/remote-node-info.md)

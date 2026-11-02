@@ -50,7 +50,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":1,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":2,"files":files})).unwrap(),
         )
         .unwrap();
         Self(p)
@@ -335,6 +335,36 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
         Box::new(Fake(Rc::new(Cell::new(0)))) as Box<dyn InspectionPort>,
     )]);
     assert!(factory.create_with_ports(ports).is_err());
+}
+
+#[test]
+fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
+    for abi in [0, 1, 3] {
+        let f = Files::new();
+        let path = f.0.join("manifest.json");
+        let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        manifest["abi_version"] = abi.into();
+        fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let group = register_host("ui", config(&f)).unwrap();
+        let ((), factory) = Registry::new()
+            .register(group)
+            .unwrap()
+            .freeze()
+            .unwrap()
+            .into_factories();
+        let calls = Rc::new(Cell::new(0));
+        let ports: BTreeMap<String, Box<dyn InspectionPort>> = BTreeMap::from([(
+            "lab".into(),
+            Box::new(Fake(Rc::clone(&calls))) as Box<dyn InspectionPort>,
+        )]);
+        assert!(matches!(
+            factory.create_with_ports(ports),
+            Err(forge_ide_web_host::HostError::Configuration(
+                "asset versions/count"
+            ))
+        ));
+        assert_eq!(calls.get(), 0);
+    }
 }
 
 #[test]

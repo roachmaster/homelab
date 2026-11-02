@@ -10,8 +10,9 @@ user's Forge authoring constraint, not a universal web-development rule. Read th
 [current UI proposal](../../../docs/architecture/proposals/forge-ide-ui.md#5-build-output-is-not-runtime-behavior)
 for context. Its older PDF/diagram snapshot does not override this rule. The [initial implementation](../../../src/rust/forge-ide-web/README.md) now supplies
 `component!`, strict YAML tokens and generated assets, with a portable Rust model
-and native host. Broader widget/style APIs remain unimplemented; inspect the actual
-exports. Native/Node tests do not substitute for actual browser acceptance.
+and native host. The [workbench](../../../src/rust/forge-ide-web/WORKBENCH.md) also
+provides typed filters, pane geometry/narrow switches and guarded local actions;
+inspect actual exports instead of inventing broader docking/widget APIs. Native/Node tests do not substitute for actual browser acceptance.
 
 For workbench layout, inspection-state UX or wireframe-first design, also use
 [Design Forge IDE UX](../design-forge-ide-ux/SKILL.md). It owns interaction and
@@ -71,7 +72,9 @@ startup is not a business API call.
    IoClient implementation. Pure model logic needs no empty registrar or ABI DI container.
 3. **Assign state and lifetime.** Name main-thread presentation state versus WASM
    domain/request state. Bound messages, reports and buffers; preserve session epoch,
-   revision, request ID and deadline. Ignore stale replies. Cancel/unmount stops local
+   revision, request ID and deadline. Retain the accepted report token and guard
+   every local selection/toggle/filter/pagination/diagnostic event; file-local
+   outline actions also require the current entry. Ignore stale replies. Cancel/unmount stops local
    ownership and fetch where possible, not proof of remote task cancellation.
 4. **Preserve admission.** Use the [front-door skill](../design-forge-front-door/SKILL.md)
    and [command trace](../trace-forge-command/SKILL.md): one command path,
@@ -82,7 +85,10 @@ startup is not a business API call.
    rejection, deterministic generation/drift, no overwritten authored files, real
    WASM ABI compatibility, dependency omission and actual browser interactions.
    Cover repeated clicks, stale replies, partial/error views, focus/accessibility,
-   mount/unmount, bounds and zero backend calls on rejected admission. Export real
+   mount/unmount, protected-DOM clearing before resume/fatal recovery, bounds and
+   zero backend calls on rejected admission. Public local-event changes require
+   explicit ABI compatibility and atomic assets/WASM; unchanged native HTTP schemas
+   do not imply unchanged public UI APIs. Export real
    public config/factory/registrar integration where a reusable native capability
    is delivered; use [capability delivery](../expose-forge-capability/SKILL.md).
 

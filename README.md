@@ -16,13 +16,13 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 
 The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
-## Forge IDE workbench wireframes
+## Forge IDE read-only workbench
 
 [![Proposed read-only IDE workbench](docs/design/forge-ide-wireframes/forge-ide-workbench-desktop.svg)](docs/design/forge-ide-wireframes/README.md)
 
-[Three design-only wireframes and interaction contract](docs/design/forge-ide-wireframes/README.md) apply the new [Forge IDE UX skill](.agents/skills/design-forge-ide-ux/SKILL.md) to the existing inspection capabilities. Desktop, partial/Problems and narrow-window states distinguish current data from proposed panes/filtering. **Wireframe first: no runtime redesign is implemented by these visuals.**
+The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) implements the compact context toolbar, local Explorer/Outline filters, file/declaration workspace, Problems, and keyboard/narrow pane controls. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above remain design images, not screenshots. Read-only report data is not a source editor or Run/Debug capability.
 
-[Component, page and transition decomposition](docs/design/forge-ide-components/README.md) now maps the wireframes into nine proposed component compositions, two screen compositions and guarded state flows, with three editable Mermaid/SVG views. This remains design-only; the running UI is unchanged.
+[Component, page and transition contracts](docs/design/forge-ide-components/README.md) map nine compositions onto the reusable generator/model, with two screens in one document and report-keyed state flows. Local WASM ABI 2 requires an atomic asset rebuild; the native inspection gateway/protocol is unchanged. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
 
 ## Forge IDE generated browser boundary
 

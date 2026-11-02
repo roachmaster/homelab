@@ -20,6 +20,8 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+const LONG_FILE_NAME: &str = "remote_project_request_validation_and_admission_contract_with_a_deliberately_long_safe_name_for_filtering.rs";
+
 struct Fixture {
     root: PathBuf,
     child: Option<Child>,
@@ -33,6 +35,49 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.root);
     }
 }
+/// Owned source data shared by the live fixture and focused native validation.
+fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)> {
+    let empty_project = root.join("empty");
+    fs::create_dir(&empty_project)?;
+    let project = root.join("workspace");
+    fs::create_dir(&project)?;
+    fs::create_dir(project.join("src"))?;
+    fs::write(project.join("src/lib.rs"),b"pub struct Widget { pub value: u32 }\npub trait View { fn show(&self); }\nimpl View for Widget { fn show(&self) {} }\npub fn inspect_me() {}\n")?;
+    fs::write(
+        project.join("README <safe>.md"),
+        b"Fixture <script> text is never HTML.\n",
+    )?;
+    fs::write(project.join("broken.rs"), b"pub fn broken(\n")?;
+    fs::write(project.join("blank.rs"), b"")?;
+    fs::write(project.join("binary.dat"), [0, 255, 0])?;
+    fs::write(
+        project.join(LONG_FILE_NAME),
+        b"// No declarations in this valid Rust file.\n",
+    )?;
+    // The matching child is beyond one visible page and initially collapsed.
+    // Filtering must inspect the accepted report, not just rendered DOM rows.
+    fs::create_dir(project.join("bulk"))?;
+    for index in 0..270 {
+        fs::write(project.join(format!("bulk/item-{index:03}.txt")), b"")?;
+    }
+    fs::write(project.join("bulk/zz-pagination-match.txt"), b"")?;
+    fs::write(
+        project.join("<svg onload=alert(1)>.txt"),
+        b"safe metadata label\n",
+    )?;
+    fs::create_dir(project.join("target"))?;
+    fs::write(project.join("target/ignored.rs"), b"not Rust")?;
+    #[cfg(unix)]
+    {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+        fs::write(
+            project.join(OsString::from_vec(vec![b'n', 0xff, b'.', b't', b'x', b't'])),
+            b"native name\n",
+        )?;
+    }
+    Ok((project, empty_project))
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if !(args.len() == 2 || (args.len() == 3 && args[2] == "--faults")) {
@@ -56,29 +101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o700))?;
     }
-    let project = fixture.root.join("workspace");
-    fs::create_dir(&project)?;
-    fs::create_dir(project.join("src"))?;
-    fs::write(project.join("src/lib.rs"),b"pub struct Widget { pub value: u32 }\npub trait View { fn show(&self); }\nimpl View for Widget { fn show(&self) {} }\npub fn inspect_me() {}\n")?;
-    fs::write(
-        project.join("README <safe>.md"),
-        b"Fixture <script> text is never HTML.\n",
-    )?;
-    fs::write(project.join("broken.rs"), b"pub fn broken(\n")?;
-    fs::write(
-        project.join("<svg onload=alert(1)>.txt"),
-        b"safe metadata label\n",
-    )?;
-    fs::create_dir(project.join("target"))?;
-    fs::write(project.join("target/ignored.rs"), b"not Rust")?;
-    #[cfg(unix)]
-    {
-        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
-        fs::write(
-            project.join(OsString::from_vec(vec![b'n', 0xff, b'.', b't', b'x', b't'])),
-            b"native name\n",
-        )?;
-    }
+    let (project, empty_project) = write_projects(&fixture.root)?;
     let mut ca = CertificateParams::new(Vec::<String>::new())?;
     ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     ca.key_usages = vec![
@@ -108,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let credentials = |name: &str| json!({"chain":[format!("{name}.der")],"key":format!("{name}.key.der"),"roots":["ca.der"]});
-    let server = json!({"mode":"server","bind":"127.0.0.1:0","node":"fixture-node","incarnation":"fixture-host","allow_non_loopback":false,"credentials":credentials("server"),"peers":[{"certificate":"client.der","subject":"reader","node_info":true,"projects":["workspace"]}],"projects":[{"alias":"workspace","root":project}],"limits":{"request_bytes":4096,"response_bytes":4194304,"timeout_ms":5000,"poll_ms":50}});
+    let server = json!({"mode":"server","bind":"127.0.0.1:0","node":"fixture-node","incarnation":"fixture-host","allow_non_loopback":false,"credentials":credentials("server"),"peers":[{"certificate":"client.der","subject":"reader","node_info":true,"projects":["workspace","empty"]}],"projects":[{"alias":"workspace","root":project},{"alias":"empty","root":empty_project}],"limits":{"request_bytes":4096,"response_bytes":4194304,"timeout_ms":5000,"poll_ms":50}});
     let server_path = fixture.root.join("server.json");
     fs::write(&server_path, serde_json::to_vec(&server)?)?;
     let mut child = Command::new(agent)
@@ -126,9 +149,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .strip_prefix("READY ")
         .ok_or("agent readiness")?;
     let projects = if faults {
-        vec!["workspace", "slow", "timeout"]
+        vec!["workspace", "slow", "timeout", "unavailable"]
     } else {
-        vec!["workspace", "denied"]
+        vec!["workspace", "empty", "denied"]
     };
     let host_config = json!({"bind":"127.0.0.1:0","assets":assets,"credentials":credentials("client"),"nodes":[{"key":"lab","label":"Local fixture","projects":projects,"address":address,"server_name":"localhost","node":"fixture-node","incarnation":"fixture-host"}],"timeout_ms":5000});
     let config_path = fixture.root.join("host.json");
@@ -179,6 +202,7 @@ impl forge_ide_web_host::InspectionPort for FaultPort {
             "slow" => std::thread::sleep(Duration::from_millis(700)),
             "timeout" => std::thread::sleep(Duration::from_millis(5500)),
             "workspace" => (),
+            "unavailable" => return Err(forge_remote::RemoteError::Unavailable),
             _ => return Err(forge_remote::RemoteError::Forbidden),
         }
         let header = Header::new(RouteKey::new("ide.inspect", 1).unwrap(), r.request_id).unwrap();
@@ -210,5 +234,109 @@ impl forge_ide_web_host::InspectionPort for FaultPort {
                 },
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_ide::assembly::{register_ide, IdeConfig, ProjectAlias};
+    use forge_ide::remote::RemoteInspectInput;
+    use forge_ide::task::InspectRequest;
+    use forge_ide_ui::protocol::NativeName;
+    use forge_ide_web_host::{project_report, InspectionPort};
+    use forge_remote::{RemoteError, Target};
+    use forge_task::Task;
+
+    #[test]
+    fn live_fixture_sources_exercise_full_report_filtering_and_empty_unavailable_distinctions() {
+        let root = std::env::temp_dir().join(format!(
+            "forge-ui-fixture-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let fixture = Fixture { root, child: None };
+        let (project, empty) = write_projects(&fixture.root).unwrap();
+        let inspect = |root| {
+            let group = register_ide("test", IdeConfig::project(root)).unwrap();
+            let ((), factory) = Registry::new()
+                .register(group)
+                .unwrap_or_else(|_| panic!("fixture registration"))
+                .freeze()
+                .unwrap()
+                .into_factories();
+            project_report(
+                factory
+                    .create()
+                    .unwrap()
+                    .run(InspectRequest::Project)
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let report = inspect(project);
+        forge_ide_ui::validate_report(&report).unwrap();
+        assert!(!report.complete);
+        assert!(report.entries.len() > 256);
+        let by_name = |name: &str| {
+            report
+                .entries
+                .iter()
+                .find(|e| e.name == NativeName::Utf8(name.into()))
+                .unwrap()
+        };
+        assert!(by_name("zz-pagination-match.txt").id > 256);
+        assert_eq!(by_name("blank.rs").lines, Some(0));
+        assert!(by_name("blank.rs").declarations.is_empty());
+        assert_eq!(by_name("binary.dat").content_status, "binary");
+        assert_eq!(by_name("binary.dat").lines, None);
+        assert_eq!(by_name("broken.rs").content_status, "rust_unavailable");
+        assert!(!by_name("broken.rs").diagnostics.is_empty());
+        assert_eq!(by_name(LONG_FILE_NAME).content_status, "text");
+        assert!(by_name("lib.rs")
+            .declarations
+            .iter()
+            .any(|d| d.name == "inspect_me"));
+        assert_eq!(by_name("<svg onload=alert(1)>.txt").content_status, "text");
+        #[cfg(unix)]
+        assert!(report
+            .entries
+            .iter()
+            .any(|e| matches!(&e.name, NativeName::UnixBytes(bytes) if bytes.contains(&255))));
+        let empty_report = inspect(empty);
+        assert!(empty_report.complete);
+        assert_eq!(empty_report.files, 0);
+        assert_eq!(empty_report.entries.len(), 1);
+    }
+
+    #[test]
+    fn controlled_port_preserves_reply_context_and_declares_unavailable_separately() {
+        let input = |project| RemoteInspectInput {
+            target: Target::new("fixture-node", "fixture-host").unwrap(),
+            project: ProjectAlias::new(project).unwrap(),
+            request_id: "fixture-request".into(),
+            correlation_id: None,
+            expires_unix_ms: 10_000,
+        };
+        let request = input("workspace");
+        let reply = FaultPort.inspect(request.clone()).unwrap();
+        assert_eq!(reply.responder, request.target);
+        assert_eq!(reply.response.header.request_id(), request.request_id);
+        let report = project_report(reply.response.payload).unwrap();
+        forge_ide_ui::validate_report(&report).unwrap();
+        assert!(report.complete);
+        assert_eq!(report.entries.len(), 2);
+        assert_eq!(
+            FaultPort.inspect(input("unavailable")),
+            Err(RemoteError::Unavailable)
+        );
+        assert_eq!(
+            FaultPort.inspect(input("not-allowed")),
+            Err(RemoteError::Forbidden)
+        );
     }
 }

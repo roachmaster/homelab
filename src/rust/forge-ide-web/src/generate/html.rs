@@ -1,6 +1,6 @@
 //! Audited semantic HTML emitter shared by component documents. Application
 //! labels escape here; only this generator owns markup syntax.
-use super::Component;
+use super::{Component, PanePosition};
 use std::fmt::Write;
 pub(crate) fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -9,12 +9,37 @@ pub(crate) fn escape(s: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
 }
+fn children(items: &[Component], out: &mut String) {
+    for child in items {
+        emit(child, out);
+    }
+}
 pub(crate) fn emit(c: &Component, out: &mut String) {
     match c {
+        Component::Screen {
+            id,
+            title,
+            protected,
+            children: items,
+        } => {
+            let _ = write!(
+                out,
+                "<section id=\"{}\" class=\"fg-screen\" aria-label=\"{}\"{}>",
+                escape(id),
+                escape(title),
+                if *protected {
+                    " data-protected hidden"
+                } else {
+                    ""
+                }
+            );
+            children(items, out);
+            out.push_str("</section>");
+        }
         Component::Panel {
             id,
             title,
-            children,
+            children: items,
         } => {
             let _ = write!(
                 out,
@@ -22,25 +47,78 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(id),
                 escape(title)
             );
-            for c in children {
-                emit(c, out);
-            }
+            children(items, out);
             out.push_str("</section>");
         }
-        Component::Row(children) | Component::Workspace(children) => {
-            out.push_str(if matches!(c, Component::Row(_)) {
-                "<div class=\"fg-row\">"
-            } else {
-                "<main class=\"fg-workspace\" id=\"workspace\">"
+        Component::Toolbar(items) | Component::Row(items) | Component::Workspace(items) => {
+            out.push_str(match c {
+                Component::Toolbar(_) => "<div class=\"fg-toolbar\">",
+                Component::Row(_) => "<div class=\"fg-row\">",
+                _ => "<main class=\"fg-workspace\" id=\"workspace\">",
             });
-            for c in children {
-                emit(c, out);
-            }
-            out.push_str(if matches!(c, Component::Row(_)) {
-                "</div>"
-            } else {
+            children(items, out);
+            out.push_str(if matches!(c, Component::Workspace(_)) {
                 "</main>"
+            } else {
+                "</div>"
             });
+        }
+        Component::PaneLayout {
+            id,
+            children: items,
+        } => {
+            let id = escape(id);
+            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout><div class=\"fg-layout-controls\"><details id=\"{id}-options\" class=\"fg-view-options\"><summary>View options</summary><div class=\"fg-option-list\">");
+            for pane in items {
+                if let Component::Pane {
+                    id,
+                    title,
+                    position,
+                    ..
+                } = pane
+                {
+                    if *position != PanePosition::Main {
+                        let _=write!(out,"<button type=\"button\" id=\"{}-toggle\" data-pane-toggle=\"{}\" aria-controls=\"{}\" aria-expanded=\"true\">{}</button>",escape(id),escape(id),escape(id),escape(title));
+                    }
+                }
+            }
+            let _=write!(out,"<button type=\"button\" id=\"{id}-reset\" data-layout-reset>Reset panes</button></div></details><nav class=\"fg-pane-switches\" aria-label=\"Visible pane\">");
+            for pane in items {
+                if let Component::Pane { id, title, .. } = pane {
+                    let _=write!(out,"<button type=\"button\" id=\"{}-switch\" data-pane-switch=\"{}\" aria-controls=\"{}\" aria-pressed=\"false\">{}</button>",escape(id),escape(id),escape(id),escape(title));
+                }
+            }
+            out.push_str("</nav></div><div class=\"fg-panes\">");
+            children(items, out);
+            out.push_str("</div></section>");
+        }
+        Component::Pane {
+            id,
+            title,
+            position,
+            min,
+            initial,
+            max,
+            children: items,
+        } => {
+            let id = escape(id);
+            let title = escape(title);
+            let position_key = position.key();
+            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane fg-pane-{position_key}\" data-pane=\"{position_key}\" data-min=\"{min}\" data-default=\"{initial}\" data-max=\"{max}\" aria-labelledby=\"{id}-heading\"><header class=\"fg-pane-header\"><h2 id=\"{id}-heading\" tabindex=\"-1\">{title}</h2>");
+            if *position != PanePosition::Main {
+                let _=write!(out,"<button type=\"button\" id=\"{id}-close\" class=\"fg-pane-close\" data-pane-toggle=\"{id}\" aria-label=\"Collapse {title}\" aria-controls=\"{id}\">−</button>");
+            }
+            out.push_str("</header><div class=\"fg-pane-body\">");
+            children(items, out);
+            out.push_str("</div></section>");
+            if *position != PanePosition::Main {
+                let orientation = if *position == PanePosition::Bottom {
+                    "horizontal"
+                } else {
+                    "vertical"
+                };
+                let _=write!(out,"<div id=\"{id}-separator\" class=\"fg-separator fg-separator-{position_key}\" role=\"separator\" tabindex=\"0\" aria-label=\"Resize {title}; arrows adjust, Enter collapses\" aria-controls=\"{id}\" aria-orientation=\"{orientation}\" aria-valuemin=\"{min}\" aria-valuemax=\"{max}\" aria-valuenow=\"{initial}\" data-resize-pane=\"{id}\"></div>");
+            }
         }
         Component::Text { id, text, live } => {
             let role = if *live {
@@ -48,7 +126,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             } else {
                 ""
             };
-            let _ = write!(out, "<p id=\"{}\"{role}>{}</p>", escape(id), escape(text));
+            let _ = write!(
+                out,
+                "<p id=\"{}\" data-bind-text{role}>{}</p>",
+                escape(id),
+                escape(text)
+            );
         }
         Component::Select { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field\" for=\"{id}\"><span>{}</span><select id=\"{id}\" data-action=\"{}\" disabled><option value=\"\">Not connected</option></select></label>",escape(label),escape(action));
@@ -62,11 +145,22 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(label)
             );
         }
+        Component::Filter { id, label, action } => {
+            let _=write!(out,"<label class=\"fg-field fg-filter\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"search\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" maxlength=\"256\" disabled></label>",escape(label),escape(action));
+        }
+        Component::Reload { id, label } => {
+            let _ = write!(
+                out,
+                "<button type=\"button\" id=\"{}\" data-reload>{}</button>",
+                escape(id),
+                escape(label)
+            );
+        }
         Component::PairForm { id, label, action } => {
             let _=write!(out,"<form id=\"{id}-form\" data-action=\"{}\" class=\"fg-row\"><label class=\"fg-field\" for=\"{id}-code\"><span>{}</span><input id=\"{id}-code\" name=\"value\" type=\"password\" maxlength=\"128\" autocomplete=\"off\" required></label><button id=\"{id}\" type=\"submit\" disabled>Connect</button></form>",escape(action),escape(label));
         }
         Component::Tree { id, label } => {
-            let _=write!(out,"<div id=\"{}\" class=\"fg-tree\" role=\"tree\" aria-label=\"{}\"><p class=\"fg-empty\">No report yet</p></div>",escape(id),escape(label));
+            let _=write!(out,"<div id=\"{}\" class=\"fg-tree\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
         }
         Component::Details { id } => {
             let _ = write!(
@@ -77,6 +171,5 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
     }
 }
-// Generic document primitive, not authored application HTML. No executable
-// inline script/style is interpolated; content only comes from the typed emitter.
-pub(crate) const SHELL:&str="<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/main.js\" defer></script></head><body><header class=\"fg-header\"><div class=\"fg-brand\"><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{{title}}</h1></div><p>{{subtitle}}</p></header><div class=\"fg-app\">{{{content}}}</div><noscript>This application requires JavaScript and WebAssembly.</noscript></body></html>";
+// A reusable shell/recovery primitive; content is exclusively typed emitter output.
+pub(crate) const SHELL: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/main.js\" defer></script></head><body><header class=\"fg-header\"><div class=\"fg-brand\"><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{{title}}</h1></div><p>{{subtitle}}</p></header><section id=\"runtime-recovery\" class=\"fg-recovery\" hidden><p id=\"runtime-message\" role=\"alert\"></p><button id=\"runtime-reload\" type=\"button\" data-reload>Reload application</button></section><div class=\"fg-app\">{{{content}}}</div><noscript>This application requires JavaScript and WebAssembly.</noscript></body></html>";
