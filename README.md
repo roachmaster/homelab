@@ -8,6 +8,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 - [16 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
 - [Framework blueprint and assembly model](docs/architecture/forge-framework-blueprint.md).
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
+- [Next milestone: two-machine Forge IDE proposal](docs/architecture/proposals/remote-ide.md) · [visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) · [five Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
 - [Detailed future jobs, access and remote interfaces](docs/architecture/foundation-interfaces.md) — proposed modules, typed contracts and ownership/state diagrams.
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 - [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): implemented local node/status and bounded jobs, plus a narrow authenticated network proof; remote deployment remains future.
@@ -57,6 +58,18 @@ task and typed results remain replaceable; gRPC or Bitwave is not required.
 [Public adapter API and limits](src/rust/forge-remote-https/README.md) ·
 [Mermaid source](docs/architecture/diagrams/mermaid/m12-remote-node-info.mmd) ·
 [SVG](docs/architecture/diagrams/mermaid/images/m12-remote-node-info.svg).
+
+## Proposed next milestone: two-machine Forge IDE
+
+**Proposal only:** a configured agent and named-node client would reuse local IDE
+inspection through the same authenticated gateway, with server-owned project aliases
+rather than arbitrary remote paths. No remote IDE deployment is implemented yet.
+
+![Proposed two-machine Forge IDE context](docs/architecture/diagrams/mermaid/images/m13-remote-ide-context.svg)
+
+[Open the visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) ·
+[Read the proposal and acceptance gates](docs/architecture/proposals/remote-ide.md) ·
+[Browse all five diagrams and Mermaid sources](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
 
 ## Optional template rendering
 

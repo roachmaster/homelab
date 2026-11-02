@@ -1,0 +1,14 @@
+---
+title: M14 Proposed runtime components - inward delegation
+---
+flowchart LR
+    C["Client app<br/>Prepared call<br/>Injected port"]
+    H["HTTPS adapter<br/>Private codec<br/>Verified peer"]
+    B["Agent entry<br/>Shared Bridge<br/>Operation policy"]
+    P["Project binding<br/>Alias policy<br/>Task handle"]
+    I["InspectTask<br/>NativeFiles + syn<br/>ProjectReport"]
+    C --> H --> B --> P --> I
+    classDef actual fill:#e8f4f7,stroke:#24576b,color:#163744;
+    classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#493b1c;
+    class I actual;
+    class C,H,B,P proposed;

@@ -17,6 +17,7 @@ core contracts. [Implemented Mermaid flow](architecture/diagrams/mermaid/README.
 
 - [Repository reviews — 16 reports](reviews/forge/README.md)
 - [Detailed future foundation modules and interfaces](architecture/foundation-interfaces.md) · [Rust contract sketches](architecture/foundation-contracts.md)
+- [Two-machine Forge IDE proposal](architecture/proposals/remote-ide.md) · [visual PDF](architecture/proposals/remote-ide-proposal.pdf) — next milestone, not deployed remote IDE
 - [Architecture overview](architecture/README.md)
 - [Cross-repository reuse map](architecture/reuse-map.md)
 - [Framework blueprint](architecture/forge-framework-blueprint.md)

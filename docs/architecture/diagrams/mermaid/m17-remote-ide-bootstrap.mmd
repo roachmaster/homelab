@@ -1,0 +1,17 @@
+---
+title: M17 Proposed agent assembly and lifecycle
+---
+flowchart LR
+    C["1. Configure<br/>Identity<br/>Aliases + budgets"]
+    R["2. Stage<br/>Batch registrar<br/>Freeze"]
+    MAKE["3. Create<br/>Roots + endpoint<br/>Providers"]
+    B["4. Bind<br/>Policy + routes<br/>Then ready"]
+    STOP["5. Stop<br/>No new work<br/>Drain or fail"]
+    C --> R --> MAKE --> B --> STOP
+    FAIL["Assembly failure<br/>Release resources<br/>No partial host"]
+    MAKE -.-> FAIL
+    B -.-> FAIL
+    classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#493b1c;
+    classDef note fill:#f1f3f5,stroke:#7c8a94,color:#36434a;
+    class C,R,MAKE,B proposed;
+    class STOP,FAIL note;

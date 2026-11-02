@@ -1,0 +1,49 @@
+---
+title: M15 Existing contracts and proposed typed inspection port
+---
+classDiagram
+    direction LR
+    class Task {
+        <<existing trait>>
+        Input / Output / Error
+        run(input) Result
+    }
+    class IoClient {
+        <<existing trait>>
+        Request / Response / Error
+        execute(request) Result
+    }
+    class RemoteInspectTask {
+        <<proposed>>
+        injected client
+        prepares InspectCall
+        validates InspectReply
+    }
+    class RemoteIdeClient {
+        <<proposed port>>
+        Request = InspectCall
+        Response = InspectReply
+        Error = RemoteInspectError
+    }
+    class HttpsIdeAdapter {
+        <<proposed adapter>>
+        configured endpoint and trust
+        private bounded wire codec
+    }
+    class InspectCall {
+        <<proposed value>>
+        existing Target
+        Envelope of InspectCommand
+        original expiry
+    }
+    class InspectReply {
+        <<proposed value>>
+        responder Target
+        Response of ProjectReport
+    }
+    RemoteInspectTask ..|> Task
+    RemoteInspectTask --> RemoteIdeClient
+    RemoteIdeClient --|> IoClient
+    HttpsIdeAdapter ..|> RemoteIdeClient
+    RemoteIdeClient --> InspectCall
+    RemoteIdeClient --> InspectReply

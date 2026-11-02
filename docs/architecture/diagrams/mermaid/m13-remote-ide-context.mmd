@@ -1,0 +1,20 @@
+---
+title: M13 Proposed two-machine Forge IDE
+---
+flowchart LR
+    U["Developer"]
+    subgraph CLIENT["CLIENT MACHINE"]
+        C["Client CLI process<br/>Named node / project<br/>Typed report to YAML"]
+    end
+    subgraph HOST["AGENT MACHINE"]
+        A["Forge agent process<br/>One mTLS gateway<br/>Header selects task"]
+        P["Configured project roots<br/>Read-only inspection<br/>No caller-supplied path"]
+        A --> P
+    end
+    U --> C
+    C -->|POST dispatch| A
+    A -->|bounded report| C
+    classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#493b1c;
+    classDef later fill:#f1f3f5,stroke:#7c8a94,color:#36434a;
+    class C,A,P proposed;
+    class U later;

@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "e87209024f378289abfe4281375cd8f0cd34d75c034e63bfcce251e00609f479",
-    "validate.mjs": "3ac36d9f5816d52dbe8f455adff3be7be0435990443d992c4f4ce8b6fc0dea92"
+    "render.py": "656a79289a9a53077f572aced4b0a951dd2d3b02054c5730acc91808c665c158",
+    "validate.mjs": "671e1dd891639e795743ee41db3f2ff4cfcd9e486a856e7f915e99e0857e8a06"
   },
   "diagrams": [
     {
@@ -85,6 +85,36 @@
       "source_sha256": "6fce893f874003bf04a2a34ed21766dd4e690d3831e68edcdb3db68e7f072cd3",
       "svg": "images/m12-remote-node-info.svg",
       "svg_sha256": "6e109fa8628988485d8f10efe29e781ecfdfb009d35df14e04dfdd35f2872691"
+    },
+    {
+      "source": "m13-remote-ide-context.mmd",
+      "source_sha256": "bdc535a8552ee1d107a5a4b8ef11da11d08f520526ad8eda9b5fc6c650eabf59",
+      "svg": "images/m13-remote-ide-context.svg",
+      "svg_sha256": "3f26901c1e948dcb0fd486ec9c0f04218539f5de1a11186e7b8450530e6c97d4"
+    },
+    {
+      "source": "m14-remote-ide-components.mmd",
+      "source_sha256": "308f32a5dd9a78fde4df9c1e62621aef8eed0c37b1e6ffdcf1b2fcbe2853ef7b",
+      "svg": "images/m14-remote-ide-components.svg",
+      "svg_sha256": "5aff507d3e3be6f6fe4ad3af6f72d5ff93b31add62eb8e01dbf419145fe7381a"
+    },
+    {
+      "source": "m15-remote-ide-contracts.mmd",
+      "source_sha256": "7c6cf63abc534bf7d766e7b47802cffe481caf1565020be02631bb9fb0e22472",
+      "svg": "images/m15-remote-ide-contracts.svg",
+      "svg_sha256": "59db5a03fc1c5ec1122d561b42d5967e968d1c714175afb7c535590c66470d76"
+    },
+    {
+      "source": "m16-remote-ide-request.mmd",
+      "source_sha256": "006356ad28e03b65e970c594e1a4bcd16b956f4ef46d77fd3356f6f70e5d9959",
+      "svg": "images/m16-remote-ide-request.svg",
+      "svg_sha256": "567a4779f7c28918e4590d08dcbfaf6fb82f6dfb13229512603c9a671af0d146"
+    },
+    {
+      "source": "m17-remote-ide-bootstrap.mmd",
+      "source_sha256": "75824a81b8edca79e7285aa0f7991d96ed8063fdcbcd519fd088555ec01f086d",
+      "svg": "images/m17-remote-ide-bootstrap.svg",
+      "svg_sha256": "fb81d2c759a6c56e53085f829488be4b3dbb3066cb5c45daa1f22b2cb5860d63"
     }
   ]
 }

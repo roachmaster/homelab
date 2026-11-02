@@ -1,6 +1,6 @@
 # Mermaid UML-like views
 
-Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** M11 shows implemented Forge IDE inspection. These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
+Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** M11 shows implemented Forge IDE inspection. M12 shows the implemented HTTPS gateway; M13–M17 show the proposed two-machine IDE milestone. These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
 
 | View | Status and purpose | Source | Image |
 | --- | --- | --- | --- |
@@ -152,6 +152,79 @@ context-specific HTML safety. The private bounded buffer is returned only on
 success; errors do not return a partial document, but cannot undo trusted callback
 effects. Traversal/output budgets do not preempt callback allocation, blocking,
 panics or destruction. See [limits and compatibility](../../../../src/rust/forge-template/METHODS.md).
+
+## Remote IDE proposal
+
+[Proposal and acceptance gates](../../proposals/remote-ide.md) ·
+[Six-page visual PDF](../../proposals/remote-ide-proposal.pdf).
+These five views describe **new assembly and behavior**, not implemented remote
+inspection. M11/M12 above remain the current local-IDE/loopback-network baseline.
+
+| View | Focus | Source | Image |
+| --- | --- | --- | --- |
+| M13 | Two-machine C4-style context/container boundary | [Mermaid](m13-remote-ide-context.mmd) | [SVG](images/m13-remote-ide-context.svg) |
+| M14 | Application and capability components | [Mermaid](m14-remote-ide-components.mmd) | [SVG](images/m14-remote-ide-components.svg) |
+| M15 | Existing traits and proposed typed interface conversation | [Mermaid](m15-remote-ide-contracts.mmd) | [SVG](images/m15-remote-ide-contracts.svg) |
+| M16 | Authentication, admission and project authorization | [Mermaid](m16-remote-ide-request.mmd) | [SVG](images/m16-remote-ide-request.svg) |
+| M17 | Registrar staging, construction, readiness and shutdown | [Mermaid](m17-remote-ide-bootstrap.mmd) | [SVG](images/m17-remote-ide-bootstrap.svg) |
+
+### M13 — Two-machine context
+
+![Proposed two-machine Forge IDE context](images/m13-remote-ide-context.svg)
+
+Process boxes are deployment boundaries, not crates. Amber marks proposed
+behavior; gray is the human actor. This is a C4-style view, not strict C4 notation.
+The proposed application owns both agent serving and its thin remote-client entry
+point; today's `forge-ide` CLI remains local. Named nodes select explicit endpoint
+configuration; project aliases select server-authorized rooted tasks, never paths
+provided by the caller. No two-machine deployment is claimed yet.
+
+### M14 — Components and module ownership
+
+![Proposed agent and client components with reused IDE modules](images/m14-remote-ide-components.svg)
+
+Arrows are **runtime calls**, not Cargo imports. The client application includes
+its local admitted bridge binding before RemoteInspectTask; the remote agent repeats
+its own authenticated destination checks. Compile-time direction is
+`forge-agent → forge-remote-https → forge-ide::remote`, with agent also importing
+IDE and core contracts. The proposed HTTPS IDE feature depends inward on the
+optional typed conversation; IDE never imports HTTPS. This avoids a package cycle.
+The agent supplies its finite payload/result sums, typed codec bindings and project
+policy; the adapter must not import the concrete agent package. Bridge mechanism
+is existing, but this combined host/binding is proposed.
+
+### M15 — Typed interface shape
+
+![Existing Task and IoClient with proposed remote inspection port](images/m15-remote-ide-contracts.svg)
+
+Stereotypes distinguish actual traits from proposed names. This is a contract
+sketch, not compilable Rust or a new core API. `RemoteIdeClient` fixes IoClient's
+request/response/error types; `InspectReply` wraps the existing `ProjectReport`.
+The existing node-specific client and destination remain supported. A new typed
+agent dispatch/codec seam is required; today's HTTPS server is not already generic.
+Provider leases retain their existing GAT constraints, separate from this diagram.
+
+### M16 — Admitted inspection
+
+![Proposed shared-entry inspection sequence](images/m16-remote-ide-request.svg)
+
+The success path is conditional on every preceding gate. Verified TLS identity
+is separate from operation and project authorization; project permission is checked
+before inspection reads. Startup may already have opened explicitly configured
+roots. The report is bounded and checked before client YAML output. A timeout does
+not preempt native I/O or the synchronous parser, and metadata/type spellings may
+expose sensitive information. Trusted configured projects remain the initial scope.
+
+### M17 — Bootstrap and lifecycle
+
+![Proposed configured agent bootstrap and lifecycle](images/m17-remote-ide-bootstrap.svg)
+
+Registrars stage cohesive factories without resource creation, then consuming
+freeze checks declared registration metadata. Explicit construction and policy/route
+wiring precede readiness; freeze is not automatic graph execution. The depicted
+host-scoped/singleton choice opens roots during assembly. Transients remain lazy
+when selected. Shutdown stops admission and closes owned resources; grace exhaustion
+must be reported rather than claiming synchronous callbacks can be forcibly canceled.
 
 ## Rebuild locally
 

@@ -1,0 +1,15 @@
+---
+title: M16 Proposed inspection - conditional success path
+---
+sequenceDiagram
+    participant C as Client
+    participant H as HTTPS + bridge
+    participant P as Project binding
+    participant I as InspectTask
+    C->>H: Typed alias call
+    Note over H: Verify peer<br/>Admit header
+    H->>P: Admitted request
+    P->>I: Authorize alias<br/>Run Project
+    I-->>P: Typed report
+    P-->>H: Bridge result
+    H-->>C: Validate reply
