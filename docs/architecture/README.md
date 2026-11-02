@@ -39,3 +39,7 @@ Factories construct typed implementations; providers govern acquisition and reus
 “Plug and play” means adding a linked starter/capability, supplying typed configuration, and getting deterministic assembly or an actionable failure. It does not mean dynamic code loading, a universal service locator, mandatory microservices, or automatic exactly-once effects.
 
 These are proposed architecture and extraction decisions based on read-only source review. They are not an implemented framework or production certification. Code and implementation evidence belong in the repository's implementation areas when built, separately from these design documents and reusable agent skills.
+
+## Proposed Forge IDE browser UI
+
+[Canonical proposal](proposals/forge-ide-ui.md) · [visual PDF](proposals/forge-ide-ui.pdf) · [Mermaid/SVG gallery](diagrams/mermaid/README.md#forge-ide-ui-proposal). Current agent/IDE capabilities remain implemented; the UI, worker and local web host are proposed, with Mission Control used as a guide rather than an authority.

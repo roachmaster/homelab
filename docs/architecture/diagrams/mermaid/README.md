@@ -296,3 +296,43 @@ verified TLS identity is not a caller header, and project policy precedes reads.
 Typed reports cross contracts; private DTOs and CLI YAML stay boundaries. Signal
 shutdown checks admission before dispatch; trusted synchronous work cannot be
 preempted. No remote jobs, mutations or additional verbs are implemented.
+
+## Forge IDE UI proposal
+
+[Canonical design](../../proposals/forge-ide-ui.md) · [Visual PDF](../../proposals/forge-ide-ui.pdf). **All browser/UI/host names below are proposed.** The existing configured agent is implemented and tested with two localhost processes, not certified for a physical deployment. Mission Control guides the Rust application / worker / presentation split; its wire protocol and template syntax are not reused as authoritative APIs. In colored flowcharts, amber = proposed and teal = existing; class/sequence stereotypes and captions supply their status.
+
+### M19 — Package imports
+
+![Proposed acyclic UI package imports](images/m19-ui-layout.svg)
+
+[Source](m19-ui-layout.mmd). Arrows mean compile-time dependencies, not HTTP requests or deployment containers. The WASM/browser facade and native host both depend inward on the portable model; the host alone imports native IDE/HTTPS/core contracts. Build-only template integration is omitted for clarity and must not enter the WASM normal dependency tree. Existing agent is a separate runtime peer, not a host package dependency.
+
+### M20 — Build versus runtime
+
+![Proposed generation and runtime separation](images/m20-ui-build-runtime.svg)
+
+[Source](m20-ui-build-runtime.mmd). Renderer factory/registrar assembly belongs to the build tool. Runtime host serves the completed manifest-bound assets without regenerating templates. Worker and DOM logic remain reviewed source modules; generated HTML never becomes a vehicle for injecting source-derived report text as executable markup.
+
+### M21 — Request / effect / result
+
+![Proposed typed browser request and admitted upstream call](images/m21-ui-request.svg)
+
+[Source](m21-ui-request.mmd). Browser protocol and agent wire protocol are separate bounded codecs. Host checks its session/origin/allowlist and shared bridge; agent repeats TLS subject, operation and project admission. Only the current token may update the model. A response may be a typed application error even with HTTP200. Original expiry, target and correlation are checked, not reset at the host.
+
+### M22 — UI state
+
+![Proposed UI lifecycle with local cancellation](images/m22-ui-state.svg)
+
+[Source](m22-ui-state.mmd). This compact state view omits teardown/startup error detail; the proposal's transition table is authoritative. Stale replies are ignored in every state, not a transition to Ready. Cancel/select invalidates the token before local fetch abort; this is not remote cancellation. Explicit Retry starts a new user operation; there is no automatic effect retry.
+
+### M23 — Trust boundaries
+
+![Proposed browser admission and existing service identity boundary](images/m23-ui-trust.svg)
+
+[Source](m23-ui-trust.mmd). Initial host scope is a trusted single-user local session. The configured mTLS service identity is not an authenticated browser-user delegation. Session grants, host configuration and destination grants intersect. No keys in browser assets, arbitrary upstream URL/redirect relay, raw remote paths or caller-chosen identities are permitted. Static GET assets do not create extra task endpoints.
+
+### M24 — Typed UI interface sketch
+
+![Proposed portable model, transition and effect types](images/m24-ui-contracts.svg)
+
+[Source](m24-ui-contracts.mmd). Illustrative UML-like names, not implemented Rust signatures. `UiEvent` and `UiEffect` are capability-owned enums; external JSON is only a codec. The pure reducer need not implement Task. The native admitted binding uses existing `RemoteInspectTask` and its injected `RemoteIdeClient`; it does not force native dependencies into WASM or a DI container into raw ABI exports.

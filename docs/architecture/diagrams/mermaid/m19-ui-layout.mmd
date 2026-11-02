@@ -1,0 +1,11 @@
+---
+title: M19 Proposed package imports - arrows point to dependencies
+---
+flowchart LR
+  W["forge-ide-web<br/>WASM + browser assets<br/>PROPOSED"] --> U["forge-ide-ui<br/>Model / effects / views<br/>PROPOSED portable Rust"]
+  H["forge-ide-web-host<br/>Session + bridge + assembly<br/>PROPOSED native app"] --> U
+  H --> N["Existing native contracts<br/>IDE remote + HTTPS<br/>Core bridge / providers"]
+  classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#473216;
+  classDef current fill:#e3f4ee,stroke:#187c64,color:#143b30;
+  class W,U,H proposed;
+  class N current;

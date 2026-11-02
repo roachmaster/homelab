@@ -1,0 +1,10 @@
+---
+title: M22 Proposed single-view lifecycle - no remote cancellation claim
+---
+flowchart LR
+  I["Idle / selected"] -->|Inspect| L["Loading<br/>One token + deadline"]
+  L -->|matching success| R["Ready / Partial"]
+  L -->|matching error| F["Failed"]
+  L -->|Cancel / select| C["Invalidated<br/>Abort local fetch"]
+  classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#473216;
+  class I,L,R,F,C proposed;

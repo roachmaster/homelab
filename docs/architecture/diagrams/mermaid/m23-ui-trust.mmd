@@ -1,0 +1,10 @@
+---
+title: M23 Proposed trust boundaries - browser identity is not the TLS subject
+---
+flowchart LR
+  B["Browser session<br/>Untrusted input<br/>No remote private key"] --> H["Native host boundary<br/>Origin + CSRF + session<br/>Allowed node / alias / route"]
+  H -->|configured mTLS| A["Existing agent boundary<br/>Verified service subject<br/>Operation + project policy"]
+  classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#473216;
+  classDef current fill:#e3f4ee,stroke:#187c64,color:#143b30;
+  class B,H proposed;
+  class A current;

@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "3d878ea03951229bc510710dfe8449c24e2df59ca5764e4d62c852f0a6449bf4",
-    "validate.mjs": "ec2b6cedd460b933ee877fd1e93609f7614927b1cc379967987251b075a307e6"
+    "render.py": "2772d32572526d5483dadffbd8a3c48d0649423f402c326d3553907c92a00f69",
+    "validate.mjs": "a5c3fb11c8f35933988e47a0ab4558018e2446c52f65e9606c8824632332a04a"
   },
   "diagrams": [
     {
@@ -121,6 +121,42 @@
       "source_sha256": "ca81a0c1ac9af6e936cc3eff353f00e8b39787141a765f08b0ab487dcd17ec2a",
       "svg": "images/m18-agent-implementation.svg",
       "svg_sha256": "45760a032a3dc8f5df0b885218fb74724b76642daeb3c2a40f5e995fbcd64be8"
+    },
+    {
+      "source": "m19-ui-layout.mmd",
+      "source_sha256": "a70af646629b340f809c5f028e5877df47a7f9983bad25a0869b3fd9d03a5363",
+      "svg": "images/m19-ui-layout.svg",
+      "svg_sha256": "51bc13307ce97a18116ad6cac6dfd4ea2f1083495dec89c7861f855c18f545b9"
+    },
+    {
+      "source": "m20-ui-build-runtime.mmd",
+      "source_sha256": "142cfd15e15c55dc207645f5b03c44a687b26cc6f6e44e779eff2f82642d4c2a",
+      "svg": "images/m20-ui-build-runtime.svg",
+      "svg_sha256": "0a7c34f0a3a2bd6783d593cdd8a09769300adef9400541e02e379ac202834360"
+    },
+    {
+      "source": "m21-ui-request.mmd",
+      "source_sha256": "96d5c5f7287b2c62f6c18ba6e477c2c714e5754dae1e472c9910172755396472",
+      "svg": "images/m21-ui-request.svg",
+      "svg_sha256": "3b5439f65f4fdec731e4b6ff50bdcf42d49a4bc66b18d95912a02d795956ec52"
+    },
+    {
+      "source": "m22-ui-state.mmd",
+      "source_sha256": "68c9f83eb8ccf3165e8534dff41b0f8da9d62581d85e52bdbfa81bee965dcd52",
+      "svg": "images/m22-ui-state.svg",
+      "svg_sha256": "97df5d5c6cea9ed68d3886698551a374c0e8e236e15114b43b19bada56db6081"
+    },
+    {
+      "source": "m23-ui-trust.mmd",
+      "source_sha256": "6c05c7c3c75cb968fe08ee2f4d3e4d036c642f589ea779014b465506d14cfb34",
+      "svg": "images/m23-ui-trust.svg",
+      "svg_sha256": "98e93664a32ba05e3b2f4d8e6544afe791be2c10dfe91d4534e34800c816dd35"
+    },
+    {
+      "source": "m24-ui-contracts.mmd",
+      "source_sha256": "a2f23ce07192215bfa056058752ec5a2232d0e49f859723328753d2a24bd1a3e",
+      "svg": "images/m24-ui-contracts.svg",
+      "svg_sha256": "90fc8d39be751e8afa4b2f1a79b443d5e149010ceeb2fad8c47d1e2c43a939c9"
     }
   ]
 }

@@ -1,0 +1,23 @@
+---
+title: M24 Proposed UI contracts - existing Task remains independent
+---
+classDiagram
+  direction LR
+  class UiModel {
+    <<proposed portable>>
+    Selection selected
+    RequestToken active
+    update(UiEvent) UiTransition
+  }
+  class UiTransition {
+    <<proposed typed>>
+    UiEffect[] effects
+    ViewModel view
+  }
+  class UiEffect {
+    <<proposed enum>>
+    Inspect(PreparedInspection)
+    Abort(RequestToken)
+  }
+  UiModel --> UiTransition
+  UiTransition --> UiEffect

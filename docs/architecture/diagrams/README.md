@@ -78,3 +78,16 @@ capability-filesystem and optional YAML libraries remain inside this capability.
 [Mermaid M12](mermaid/m12-remote-node-info.mmd) · [SVG](mermaid/images/m12-remote-node-info.svg) · [Design and limits](../remote-node-info.md). This is a mutual-TLS loopback proof, not a deployed agent or the full proposed remote execution model.
 
 - [Implemented configured remote IDE agent: M18](mermaid/README.md#m18--implemented-configured-remote-ide-agent) — actual localhost-tested composition and shared entry.
+
+## Forge IDE UI proposal
+
+[Design report](../proposals/forge-ide-ui.md) · [PDF](../proposals/forge-ide-ui.pdf) · [Captions and sources](mermaid/README.md#forge-ide-ui-proposal). M19–M24 add proposed package, build/runtime, sequence, state, trust and typed-interface views; they do not replace the implemented agent M18 or historical remote proposal.
+
+| Proposed UI view | Source | Image |
+| --- | --- | --- |
+| M19 Package imports | [Mermaid](mermaid/m19-ui-layout.mmd) | [SVG](mermaid/images/m19-ui-layout.svg) |
+| M20 Build versus runtime | [Mermaid](mermaid/m20-ui-build-runtime.mmd) | [SVG](mermaid/images/m20-ui-build-runtime.svg) |
+| M21 Admitted request | [Mermaid](mermaid/m21-ui-request.mmd) | [SVG](mermaid/images/m21-ui-request.svg) |
+| M22 UI lifecycle | [Mermaid](mermaid/m22-ui-state.mmd) | [SVG](mermaid/images/m22-ui-state.svg) |
+| M23 Trust boundaries | [Mermaid](mermaid/m23-ui-trust.mmd) | [SVG](mermaid/images/m23-ui-trust.svg) |
+| M24 Typed interface sketch | [Mermaid](mermaid/m24-ui-contracts.mmd) | [SVG](mermaid/images/m24-ui-contracts.svg) |

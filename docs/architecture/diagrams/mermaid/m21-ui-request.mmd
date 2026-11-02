@@ -1,0 +1,14 @@
+---
+title: M21 Proposed browser journey over the existing agent gateway
+---
+sequenceDiagram
+  participant D as DOM
+  participant W as Worker / WASM
+  participant H as Web host
+  participant A as Agent
+  D->>W: Inspect selection
+  W->>H: Effect + token
+  H->>A: Admitted POST gateway
+  A-->>H: Report / error
+  H-->>W: View + original token
+  W-->>D: Current view only

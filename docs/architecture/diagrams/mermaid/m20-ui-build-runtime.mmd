@@ -1,0 +1,9 @@
+---
+title: M20 Proposed build artifacts are separate from request effects
+---
+flowchart LR
+  S["Authored sources<br/>Templates + typed context<br/>Worker / DOM / Rust"] --> B["Build tools<br/>Template factory + compile<br/>Versioned manifest"]
+  B --> A["Static bundle<br/>HTML / CSS / JS / WASM<br/>No client keys"]
+  A --> R["Browser runtime<br/>Model emits typed effect<br/>Worker calls host gateway"]
+  classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#473216;
+  class S,B,A,R proposed;

@@ -8,12 +8,19 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 - [16 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
 - [Framework blueprint and assembly model](docs/architecture/forge-framework-blueprint.md).
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
+- [Forge IDE UI proposal](docs/architecture/proposals/forge-ide-ui.md) · [visual PDF](docs/architecture/proposals/forge-ide-ui.pdf) · [six Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#forge-ide-ui-proposal) — proposed Rust/WASM browser and same-origin host, not yet implemented.
 - [Remote Forge IDE: implementation and original proposal](docs/architecture/proposals/remote-ide.md) · [visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) · [five Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
 - [Detailed future jobs, access and remote interfaces](docs/architecture/foundation-interfaces.md) — proposed modules, typed contracts and ownership/state diagrams.
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 - [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): implemented local node/status and bounded jobs, plus a narrow authenticated network proof; remote deployment remains future.
 
 The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
+
+## Proposed Forge IDE browser boundary
+
+[![Proposed portable UI and native host package layout](docs/architecture/diagrams/mermaid/images/m19-ui-layout.svg)](docs/architecture/proposals/forge-ide-ui.md)
+
+The [new UI report](docs/architecture/proposals/forge-ide-ui.pdf) uses Mission Control as a guide, not a source of truth: Rust-owned state, thin worker/DOM adapters, and an explicitly secured host bridge to the existing agent. This is a design, not a deployed UI.
 
 ## Run the local Forge system
 
