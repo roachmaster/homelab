@@ -1,0 +1,42 @@
+// Test harness only, not an authored browser asset or application reducer.
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+const path = process.argv[2];
+assert.ok(path, 'supply the built forge_ide_web.wasm path');
+const { instance } = await WebAssembly.instantiate(await readFile(path), {});
+const w = instance.exports;
+for (const name of ['memory', 'abi_version', 'reserve_input', 'dispatch_input', 'output_ptr', 'output_len', 'release_output']) assert.ok(w[name], name);
+assert.equal(w.abi_version(), 1);
+assert.equal(w.reserve_input(0), 0);
+assert.equal(w.reserve_input(8 * 1024 * 1024 + 1), 0);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder('utf-8', { fatal: true });
+function raw(text) {
+  const bytes = encoder.encode(text);
+  const p = w.reserve_input(bytes.length);
+  assert.notEqual(p, 0);
+  new Uint8Array(w.memory.buffer, p, bytes.length).set(bytes);
+  assert.equal(w.dispatch_input(), 1);
+  const copied = new Uint8Array(w.memory.buffer, w.output_ptr(), w.output_len()).slice();
+  w.release_output();
+  assert.equal(w.output_len(), 0);
+  return JSON.parse(decoder.decode(copied));
+}
+const send = event => raw(JSON.stringify({ now_ms: 100, event }));
+assert.ok(raw('{not json').error);
+assert.ok(send({ kind: 'inspect', url: 'http://not-allowed' }).error);
+const startup = send({ kind: 'resume' });
+assert.equal(startup.effects[0].kind, 'resume');
+const id = startup.effects[0].request_id;
+send({ kind: 'paired', request_id: id, catalog: { protocol_version: 1, session_epoch: 'test-session', timeout_ms: 1000, nodes: [{ key: 'lab', label: 'Lab', node: 'node', incarnation: 'boot', projects: [{ alias: 'project', label: 'Project' }] }] } });
+const inspect = send({ kind: 'inspect' });
+assert.equal(inspect.effects[0].kind, 'inspect');
+assert.equal(inspect.effects[0].request.destination, 'ide.inspect');
+assert.equal(inspect.effects[0].request.project, 'project');
+assert.ok(send({ kind: 'inspect' }).error);
+const stopped = send({ kind: 'cancel' });
+assert.equal(stopped.effects[0].kind, 'abort');
+const stale = send({ kind: 'result', result: { protocol_version: 1, token: inspect.effects[0].request.token, node_key: 'lab', project: 'project', outcome: { kind: 'error', category: 'unavailable', message: 'stale result must not replace stopped state' } } });
+assert.match(stale.view.texts.find(x => x.id === 'status').text, /Stopped waiting locally/);
+for (let i = 0; i < 200; i++) assert.equal(send({ kind: 'cancel' }).effects.length, 0);
+console.log('Actual WASM ABI: exports, bounded buffers, strict codecs, startup, inspection, cancellation and stale acceptance pass.');

@@ -1,0 +1,15 @@
+# Author-owned style declarations; no CSS or script escape hatch.
+background: "#0c131c"
+surface: "#131f2c"
+raised: "#1b2a3b"
+border: "#2a3d51"
+text: "#e8eff6"
+muted: "#9db0c4"
+accent: "#5cdbc4"
+warning: "#f0c77d"
+error: "#ff9b9b"
+font_px: 14
+radius_px: 9
+spacing_px: 12
+sidebar_px: 250
+details_px: 310

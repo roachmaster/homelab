@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "2772d32572526d5483dadffbd8a3c48d0649423f402c326d3553907c92a00f69",
-    "validate.mjs": "a5c3fb11c8f35933988e47a0ab4558018e2446c52f65e9606c8824632332a04a"
+    "render.py": "a311defb3fe699c15e13024c6b76083a141e8760a7121653dc976e88af935ab0",
+    "validate.mjs": "4475f7f1ee159d6e46967f000e2b4cc7263171751475077aa52161e3c1a15c7f"
   },
   "diagrams": [
     {
@@ -157,6 +157,12 @@
       "source_sha256": "a2f23ce07192215bfa056058752ec5a2232d0e49f859723328753d2a24bd1a3e",
       "svg": "images/m24-ui-contracts.svg",
       "svg_sha256": "90fc8d39be751e8afa4b2f1a79b443d5e149010ceeb2fad8c47d1e2c43a939c9"
+    },
+    {
+      "source": "m25-ui-implementation.mmd",
+      "source_sha256": "5856cbf5482ebe84ef21510d3a4f5bba81bca20cf2f24a85fa77d49f8f8d794b",
+      "svg": "images/m25-ui-implementation.svg",
+      "svg_sha256": "6724d3483a69d2c6bbbb6c3074446fd2ab84ce8309f0abe00c6a86c6c2c5a7eb"
     }
   ]
 }

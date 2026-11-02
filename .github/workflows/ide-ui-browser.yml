@@ -1,0 +1,62 @@
+name: IDE browser acceptance
+
+on:
+  push:
+    branches: [main, validation/forge-ide-ui]
+    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-bootstrap/**', 'src/rust/forge-provider/**', 'src/rust/forge-bridge/**', 'src/rust/forge-ingress-contract/**', 'src/rust/forge-task/**', 'src/rust/forge-io-client/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', '.github/workflows/ide-ui-browser.yml']
+  pull_request:
+    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-bootstrap/**', 'src/rust/forge-provider/**', 'src/rust/forge-bridge/**', 'src/rust/forge-ingress-contract/**', 'src/rust/forge-task/**', 'src/rust/forge-io-client/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', '.github/workflows/ide-ui-browser.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ide-browser-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Prepare supported Rust and WASM toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+          cargo fetch --manifest-path src/rust/Cargo.toml --locked
+          node --version
+      - name: Generate actual assets and compile real endpoint fixture
+        run: |
+          make ui-build > "$RUNNER_TEMP/ui-build.log"
+          ASSETS=$(sed -n 's/^ASSETS //p' "$RUNNER_TEMP/ui-build.log")
+          test -d "$ASSETS"
+          echo "FORGE_UI_ASSETS=$ASSETS" >> "$GITHUB_ENV"
+          cargo build --manifest-path src/rust/Cargo.toml --locked --offline -p forge-agent --bin forge-agent
+          cargo build --manifest-path src/rust/Cargo.toml --locked --offline -p forge-ide-web-host --example loopback_fixture
+      - name: Install pinned browser test dependency and standard Chromium
+        working-directory: src/rust/forge-ide-web/tests/browser
+        run: |
+          npm ci --ignore-scripts
+          npx --no-install playwright install --with-deps chromium
+      - name: Run real browser to native host to authenticated agent
+        run: |
+          node src/rust/forge-ide-web/tests/browser/journey.mjs \
+            "$FORGE_UI_ASSETS" \
+            "$GITHUB_WORKSPACE/src/rust/target/debug/forge-agent" \
+            "$GITHUB_WORKSPACE/src/rust/target/debug/examples/loopback_fixture" \
+            "$RUNNER_TEMP/forge-ui-browser"
+      - name: Preserve sanitized UI screenshots only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: forge-ide-browser-screenshots
+          path: ${{ runner.temp }}/forge-ui-browser/*.png
+          if-no-files-found: ignore
+          retention-days: 7

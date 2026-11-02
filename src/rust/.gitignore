@@ -1,2 +1,5 @@
 # Workspace builds and standalone acceptance-consumer builds.
 **/target/
+
+# Local browser-test dependencies; never application assets.
+**/node_modules/

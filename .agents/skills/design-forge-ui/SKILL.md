@@ -8,9 +8,10 @@ description: "Design, implement or review Forge UI authoring and execution bound
 **Application authors do not hand-write HTML, CSS or JavaScript.** This is the
 user's Forge authoring constraint, not a universal web-development rule. Read the
 [current UI proposal](../../../docs/architecture/proposals/forge-ide-ui.md#5-build-output-is-not-runtime-behavior)
-for context. Its older PDF/diagram snapshot does not override this rule. The UI
-component macros, style schema and generation pipeline are **proposed**, not
-implemented exports; inspect actual code before choosing syntax or claiming support.
+for context. Its older PDF/diagram snapshot does not override this rule. The [initial implementation](../../../src/rust/forge-ide-web/README.md) now supplies
+`component!`, strict YAML tokens and generated assets, with a portable Rust model
+and native host. Broader widget/style APIs remain unimplemented; inspect the actual
+exports. Native/Node tests do not substitute for actual browser acceptance.
 
 ## Author declarations, generate web assets
 

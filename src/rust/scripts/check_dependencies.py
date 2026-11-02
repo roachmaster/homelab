@@ -7,6 +7,9 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-ide-ui": set(),
+    "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-bootstrap","forge-provider","forge-template")},
+    "forge-ide-web-host": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")},
     "forge-agent": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-command","forge-kernel","forge-ide","forge-remote","forge-remote-https")},
     "forge-remote": {(name, "normal") for name in ("forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task")},
     "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-bootstrap", "forge-provider", "forge-io-client", "forge-ingress-contract", "forge-ide")} | {(name, "dev") for name in ("forge-kernel", "forge-task")},
@@ -35,8 +38,8 @@ ALLOWED = {
                              ("forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract",
                               "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
-EXTERNAL_DEV = {"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
-EXTERNAL = {"forge-agent": {"serde", "serde_json", "ctrlc"},"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
+EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
+EXTERNAL = {"forge-ide-ui":{"serde"},"forge-ide-web":{"serde","serde_json","serde_yaml_ng","sha2"},"forge-ide-web-host":{"serde","serde_json","httparse","getrandom","subtle","sha2","ctrlc"},"forge-agent": {"serde", "serde_json", "ctrlc"},"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
 
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
 PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}
@@ -78,6 +81,12 @@ def validate_packages(packages):
             if name == "forge-bootstrap-demo" and target in OPTIONAL and not dependency["optional"]:
                 raise SystemExit(f"Demo capability dependency must be optional: {target}")
             edges[name].add(target)
+    web = packages["forge-ide-web"]
+    if web["features"].get("default", []) != []:
+        raise SystemExit("WASM facade must not enable native generation by default")
+    for dep in web["dependencies"]:
+        if dep["name"] in {"forge-bootstrap","forge-provider","forge-template","serde_yaml_ng","sha2"} and not dep["optional"]:
+            raise SystemExit("Asset build dependency leaked into WASM default")
     ide = packages["forge-ide"]
     if ide["features"].get("default", []) != []:
         raise SystemExit("IDE YAML/CLI/remote must remain opt-in")
@@ -172,13 +181,20 @@ def negative_fixtures(packages):
     bad = copy.deepcopy(packages)
     bad["forge-ide"]["dependencies"].append({"name":"forge-agent","kind":None,"path":str(ROOT/"forge-agent"),"optional":True})
     fixtures.append(("capability-to-host cycle",bad))
+    for source,target in [("forge-ide-ui","forge-ide"),("forge-ide-web","forge-ide-web-host")]:
+        bad=copy.deepcopy(packages)
+        bad[source]["dependencies"].append({"name":target,"kind":None,"path":str(ROOT/target),"optional":False})
+        fixtures.append(("native dependency in portable UI",bad))
+    bad=copy.deepcopy(packages)
+    next(d for d in bad["forge-ide-web"]["dependencies"] if d["name"]=="forge-template")["optional"]=False
+    fixtures.append(("generator in WASM facade",bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
         except SystemExit:
             continue
         raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
-    print("PASS: seventeen in-memory negative architecture fixtures rejected")
+    print(f"PASS: {len(fixtures)} in-memory negative architecture fixtures rejected")
 
 
 def main():
@@ -222,7 +238,11 @@ def main():
         raise SystemExit("IDE remote contract must remain transport and presentation free")
     if not {"forge-ide", "forge-remote-https", "ctrlc"} <= consumer_tree(package="forge-agent"):
         raise SystemExit("Agent must explicitly select its capabilities")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent"})
+    portable=consumer_tree(package="forge-ide-ui")
+    wasm=consumer_tree(package="forge-ide-web")
+    if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable|wasm) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable|wasm):
+        raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")

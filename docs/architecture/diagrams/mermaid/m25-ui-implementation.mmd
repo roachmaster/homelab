@@ -1,0 +1,22 @@
+flowchart LR
+  subgraph build["BUILD · no app-authored web code"]
+    author["Rust component! declarations<br/>Validated YAML tokens"]
+    gen["forge-ide-web · build-assets<br/>Public registrar + factory"]
+    author --> gen
+  end
+  subgraph browser["BROWSER · generated assets"]
+    main["Main thread<br/>DOM, focus, lifecycle"]
+    worker["Worker + real WASM<br/>forge-ide-ui model<br/>Typed view and effects"]
+    main <--> worker
+  end
+  subgraph native["NATIVE · synchronous owners"]
+    host["forge-ide-web-host<br/>Pair, session, Origin, CSRF<br/>Shared typed bridge"]
+    agent["Existing forge-agent<br/>mTLS + project authorization<br/>Rooted read-only inspection"]
+    host -->|"typed client · mTLS"| agent
+  end
+  gen -.->|"HTML / CSS / JS + WASM"| main
+  worker <-->|"one POST dispatch"| host
+  classDef existing fill:#ddf5ee,stroke:#247d6a,color:#15352c
+  classDef current fill:#e3eefb,stroke:#3d6c9d,color:#172e45
+  class author,gen,main,worker,host current
+  class agent existing

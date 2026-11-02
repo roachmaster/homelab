@@ -8,7 +8,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 - [16 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
 - [Framework blueprint and assembly model](docs/architecture/forge-framework-blueprint.md).
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
-- [Forge IDE UI proposal](docs/architecture/proposals/forge-ide-ui.md) · [earlier PDF snapshot](docs/architecture/proposals/forge-ide-ui.pdf) · [six Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#forge-ide-ui-proposal) — proposed Rust/WASM browser and same-origin host, not yet implemented.
+- [Forge IDE UI proposal](docs/architecture/proposals/forge-ide-ui.md) · [earlier PDF snapshot](docs/architecture/proposals/forge-ide-ui.pdf) · [six Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#forge-ide-ui-proposal) — original proposal, now followed by the [generated inspection UI](src/rust/forge-ide-web/README.md).
 - [Remote Forge IDE: implementation and original proposal](docs/architecture/proposals/remote-ide.md) · [visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) · [five Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
 - [Detailed future jobs, access and remote interfaces](docs/architecture/foundation-interfaces.md) — proposed modules, typed contracts and ownership/state diagrams.
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
@@ -16,15 +16,15 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 
 The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
-## Proposed Forge IDE browser boundary
+## Forge IDE generated browser boundary
 
-[![Proposed portable UI and native host package layout](docs/architecture/diagrams/mermaid/images/m19-ui-layout.svg)](docs/architecture/proposals/forge-ide-ui.md)
+[![Generated UI build and runtime ownership](docs/architecture/diagrams/mermaid/images/m25-ui-implementation.svg)](src/rust/forge-ide-web/README.md)
 
-The [earlier UI report snapshot](docs/architecture/proposals/forge-ide-ui.pdf) uses Mission Control as a guide, not a source of truth: Rust-owned state, thin worker/DOM adapters, and an explicitly secured host bridge to the existing agent. This is a design, not a deployed UI. The [current UI skill](.agents/skills/design-forge-ui/SKILL.md) and [updated proposal](docs/architecture/proposals/forge-ide-ui.md) supersede its manual-asset authoring advice: application HTML/CSS/JS must be generated from declarations.
+The [earlier UI report snapshot](docs/architecture/proposals/forge-ide-ui.pdf) uses Mission Control as a guide, not a source of truth: Rust-owned state, thin worker/DOM adapters, and an explicitly secured host bridge to the existing agent. The [new implementation](src/rust/forge-ide-web/README.md) adds a generated inspection UI and loopback-only host, not an internet deployment. The [current UI skill](.agents/skills/design-forge-ui/SKILL.md) and [updated proposal](docs/architecture/proposals/forge-ide-ui.md) supersede its manual-asset authoring advice: application HTML/CSS/JS must be generated from declarations.
 
 ## Run the local Forge system
 
-From the repository root with stable Rust, GNU Make and Python 3.9+:
+From the repository root with stable Rust, GNU Make and Python 3.9+. UI generation/CI also requires Node20+ and the `wasm32-unknown-unknown` Rust target:
 
 ```bash
 cargo fetch --manifest-path src/rust/Cargo.toml --locked # once for dependencies
@@ -35,7 +35,9 @@ make session                 # local stateful terminal
 make run ARGS='jobs.submit --help' # bounded local counter
 make run NO_DEFAULT_FEATURES=1 ARGS='node.status'
 make test                    # workspace tests
-make ci                      # the same gates used by GitHub Actions
+make ci                      # native + actual WASM/generation gates
+make ui-build                # generated assets; requires WASM target + Node
+make ui ARGS='--help'         # configured loopback IDE web host
 make asm                     # release assembly for the kernel library
 ```
 

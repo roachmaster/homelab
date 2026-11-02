@@ -344,3 +344,17 @@ preempted. No remote jobs, mutations or additional verbs are implemented.
 ![Proposed portable model, transition and effect types](images/m24-ui-contracts.svg)
 
 [Source](m24-ui-contracts.mmd). Illustrative UML-like names, not implemented Rust signatures. `UiEvent` and `UiEffect` are capability-owned enums; external JSON is only a codec. The pure reducer need not implement Task. The native admitted binding uses existing `RemoteInspectTask` and its injected `RemoteIdeClient`; it does not force native dependencies into WASM or a DI container into raw ABI exports.
+
+## M25 — Generated UI implementation
+
+![Generated UI build and runtime ownership](images/m25-ui-implementation.svg)
+
+[Mermaid source](m25-ui-implementation.mmd) · [Run/build instructions](../../../../src/rust/forge-ide-web/README.md).
+Blue is the new implemented code; teal is the existing agent. Arrows are build
+artifacts or runtime messages, not Cargo imports. The portable model has no native
+IDE/TLS/filesystem dependency. The optional native generator and separate native
+host depend inward; neither imports the other. The main thread never fetches a
+business API, and the worker never owns DOM. The same command path carries session
+bootstrap/resume and inspection; static asset GETs are not per-task endpoints.
+Native/WASM checks do not alone establish browser acceptance: see the implementation
+verification record. M19–M24 and the PDF remain labeled historical proposal views.

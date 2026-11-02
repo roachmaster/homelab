@@ -11,7 +11,7 @@ export ARGS ?= --help
 export ASM_TARGET ?= lib
 export NATIVE ?= 0
 
-.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide remote agent asm
+.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check
 
 help:
 	@printf '%s\n' \
@@ -29,6 +29,9 @@ help:
 	  '  make template ARGS="methods"  Run the opt-in template CLI' \
 	  '  make ide ARGS="inspect ."  Read a project tree + Rust syntax as YAML' \
 	  '  make agent ARGS="--help"  Run the configured remote IDE/node agent' \
+	  '  make ui-build          Build real WASM + generated HTML/CSS/JS assets' \
+	  '  make ui ARGS="--help"  Run the local IDE web host' \
+	  '  make ui-check          Rebuild comparison + real WASM/worker checks' \
 	  '  make remote            One-shot mutual-TLS node.info loopback demo' \
 	  '  make asm               Release assembly for forge-kernel library' \
 	  '' \
@@ -88,8 +91,17 @@ ci:
 	$(MAKE) test PACKAGE=forge-bootstrap-demo FEATURES=messages ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test PACKAGE=forge-bootstrap-demo FEATURES=disk ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test PACKAGE=forge-kernel FEATURES=node ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
+	$(MAKE) test lint PACKAGE=forge-ide-web FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
+	$(MAKE) ui-check
 
 session: ARGS =
 
 run session template ide remote agent asm:
 	@python3 "$$FORGE_RUST_ROOT/scripts/cargo_tools.py" $@
+
+ui:
+	@python3 "$$FORGE_RUST_ROOT/scripts/ui_tools.py" serve
+ui-build:
+	@python3 "$$FORGE_RUST_ROOT/scripts/ui_tools.py" build
+ui-check:
+	@python3 "$$FORGE_RUST_ROOT/scripts/ui_tools.py" check

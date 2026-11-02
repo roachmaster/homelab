@@ -105,7 +105,7 @@ forced client for pure tasks or concrete transport is introduced.
 ## Root Makefile
 
 From the repository root, run `make` for help. Requirements: **GNU Make**, a
-current stable Rust toolchain with `rustfmt`/`clippy`, and **Python 3.9+** (standard-library scripts only). The Makefile uses the workspace manifest
+current stable Rust toolchain with `rustfmt`/`clippy`, and **Python 3.9+** (standard-library scripts only). UI generation/CI also needs Node20+ and the `wasm32-unknown-unknown` Rust target. The Makefile uses the workspace manifest
 explicitly; no global Cargo configuration is changed or tooling installed locally.
 All Cargo build/check/run commands use `--offline --locked`. Run
 `cargo fetch --manifest-path src/rust/Cargo.toml --locked` once from repository root
@@ -188,7 +188,8 @@ can also affect output. See [rustc code-generation options](https://doc.rust-lan
    strict no-dependency Rustdoc.
 3. Node-only terminal tests/Clippy and local-application tests, plus separate jobs-only and disk-only terminal tests/Clippy.
 4. Pure demo tests/Clippy, then separate messages-only and disk-only demo tests.
-5. Node-only kernel tests.
+5. Node-only kernel tests and optional UI facade default-profile checks.
+6. Deterministic generated assets, JavaScript grammar, actual WASM ABI and isolated worker-fault tests (`make ui-check`).
 
 [GitHub Actions](../../.github/workflows/rust.yml) invokes exactly `make ci` on
 Rust/Makefile/workflow changes in pull requests and pushes to `main`, or by manual
@@ -203,7 +204,9 @@ hosted run is separate evidence after publication. Its structure follows the
 
 Working directory: **`src/rust/`**. Requires a current stable Rust toolchain with
 `rustfmt` and `clippy`; the dependency guard additionally uses Python 3's standard
-library. No credentials, network service or third-party Rust crate is required.
+library. The core contracts remain dependency-light; the selected optional capabilities
+require the locked registry dependencies. Tests create only owned temporary/ephemeral
+fixtures, not operational credentials or an external service.
 Cargo.lock is committed; build output is ignored.
 
 ```bash
@@ -234,8 +237,11 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **315 unit/integration tests and nine doctests** (four compile-fail, five runnable), plus nine separate public-consumer assertions in debug/release, including the local application and terminal; the pure and node-only
-consumers are additionally checked separately. The suite covers invalid
+These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **493 reported unit/integration results and nine doctests** (four compile-fail, five runnable), including separate public-consumer checks in debug/release, including the local application and terminal; the pure and node-only
+consumers are additionally checked separately. The inherited Unix special-socket
+fixture self-skipped on this local host because socket creation returned EPERM; it
+is not counted as exercised behavior. Actual browser acceptance is a separate
+workflow, not inferred from these results. The suite covers invalid
 metadata, typed success/correlation, unknown route/version, denied admission,
 header/variant mismatch, preserved duplicate binding, typed error propagation,
 nested application sums, factory substitution, scope identity and lease cleanup.
@@ -334,3 +340,21 @@ example into the durable jobs application or algorithm platform by default.
 
 See the [DSL semantic reference](../../docs/architecture/framework-dsl.md) for the
 larger proposed model and the [source-set guide](../README.md) for organization.
+
+## Generated inspection UI
+
+Three cohesive packages add the browser boundary without changing core contracts:
+[`forge-ide-ui`](forge-ide-ui/README.md) is the portable Rust event/view/effect model;
+[`forge-ide-web`](forge-ide-web/README.md) is its real WASM facade plus optional
+native typed-component/YAML generator; [`forge-ide-web-host`](forge-ide-web-host/README.md)
+is the loopback session/static/command application retaining mTLS credentials.
+The browser gets portable report metadata, never native paths as authority or keys.
+No hand-authored application HTML/CSS/JS or source-editing API is introduced.
+
+Root `make ui-build` creates new deterministic assets under ignored target;
+`make ui ARGS='serve --config /absolute/ui-host.json'` runs the native host.
+`make ui-check` requires Node and the installed `wasm32-unknown-unknown` target; it
+compares two generated outputs, checks JS grammar and executes the actual WASM ABI
+plus isolated simulated worker faults. It is now part of `make ci`. Actual browser
+journeys remain a distinct integration gate. No command provisions operational
+certificates, alters trust stores or deploys a public service.

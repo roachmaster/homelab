@@ -2,6 +2,16 @@
 
 **Status:** Proposed sequencing based on the complete repository synthesis. This is a plan, not completed implementation or authority to modify source repositories.
 
+## Generated IDE UI checkpoint
+
+The [initial implementation](../../src/rust/forge-ide-web/README.md) contains typed
+Rust component declarations, YAML style tokens, generated semantic assets, a real
+worker/WASM model and an explicitly admitted loopback host to the existing agent.
+File tree, declaration outline/details and partial/error/cancel/stale state are
+read-only; source editing, multi-user identity and public hosting are deferred.
+Native checks, real WASM ABI tests and generated-worker fault tests are distinct
+from real-browser end-to-end acceptance; never promote one into the other.
+
 ## Authenticated node-info boundary — implemented narrow proof
 
 [Typed remote conversation and optional HTTPS adapter](../architecture/remote-node-info.md)
@@ -105,7 +115,7 @@ Original bootstrap checkpoint: 75 all-feature integration tests plus five doctes
 
 **Demonstrated:** a small consumer can choose implementation packages, pass typed startup config, run bootstrap and obtain a working typed in-process application—or a specific error with no partial publication. A client-using task prepares requests; injected clients execute them. A pure task remains independent of clients. This establishes the plug-and-play core, not a complete operational host.
 
-**Later, only when needed:** automatic graph ordering/diagnostics, runtime registration, pooled/request-scoped providers, async factories/cleanup, managed workers/readiness/shutdown, additional concrete remote/local clients and presentation/navigation adapters. A generic home can later expose explicit default/replace/extend contracts; do not implement a UI to prove factory registration. The intended application front door can support remote tools, but it is not synonymous with a CLI parser and no specific transport is selected.
+**Later, only when needed:** automatic graph ordering/diagnostics, runtime registration, pooled/request-scoped providers, async factories/cleanup, managed workers/readiness/shutdown, additional concrete remote/local clients and presentation/navigation adapters. A generic home can later expose explicit default/replace/extend contracts; do not implement a UI to prove factory registration. That original core checkpoint selected no transport. The later optional HTTPS agent and generated UI host now provide concrete adapters without making them mandatory core dependencies.
 
 ## Native disk access checkpoint
 
@@ -115,7 +125,7 @@ Native temporary-fixture tests cover deterministic listings, state isolation, fa
 
 ## Kernel planning sequence
 
-The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) now records the narrow implemented **local node/status/discovery and terminal checkpoint**, reusing typed bootstrap/bridge/provider contracts. The bounded local counter now exists; an authenticated remote boundary starting with node reads remains proposed. Durability and generic job hosting are not supplied by this local proof. No remote transport, async runtime, GUI, automatic peer discovery, file mutation or bootable Pi kernel is selected.
+The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) now records the narrow implemented **local node/status/discovery and terminal checkpoint**, reusing typed bootstrap/bridge/provider contracts. The bounded local counter, optional authenticated HTTPS node/IDE agent and generated UI prototype now exist. The HTTPS adapter privately owns its runtime; synchronous core traits are unchanged. Durability, generic job hosting, automatic peer discovery, file mutation, public web hosting and a bootable Pi kernel remain deferred. UI browser acceptance is tracked separately from native/WASM tests.
 
 The small volatile job proof in that plan precedes—not satisfies—the durable acceptance gate below. The existing durable jobs example remains a separate later consumer, not a requirement to turn every local command into a stored job.
 

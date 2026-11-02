@@ -2,7 +2,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, validation/forge-ide-ui]
     paths: ['Makefile', 'src/rust/**', '.github/workflows/rust.yml']
   pull_request:
     paths: ['Makefile', 'src/rust/**', '.github/workflows/rust.yml']
@@ -28,6 +28,10 @@ jobs:
           persist-credentials: false
       - name: Select stable Rust and check components
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+      - name: Add the browser WASM target and check Node
+        run: |
+          rustup target add wasm32-unknown-unknown
+          node --version
       - name: Fetch locked optional capability dependencies
         run: cargo fetch --manifest-path src/rust/Cargo.toml --locked
       - name: Shared repository quality gates

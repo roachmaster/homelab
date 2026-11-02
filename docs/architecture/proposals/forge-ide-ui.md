@@ -1,6 +1,12 @@
 # Forge IDE UI: a proposed browser boundary, not a new backend
 
-**Status: design proposal — 2 November 2026. No browser application or web host is implemented by this document.**
+**Status: original design proposal, with an initial generated-UI implementation now in the repository.**
+The [implementation guide](../../../src/rust/forge-ide-web/README.md) and
+[M25](../diagrams/mermaid/README.md#m25--generated-ui-implementation) describe the
+actual typed component/YAML generator, portable Rust/WASM model and loopback native
+host. This document and the retained PDF explain the original plan; proposal API
+names below are not automatically exported contracts. Actual browser acceptance
+is reported separately from native, Node ABI and simulated worker-fault checks.
 Baseline: public [homelab `175315b`](https://github.com/roachmaster/homelab/tree/175315b4fe1c993f15bb2ff52d824ee4cdaecc88).
 [Earlier visual PDF snapshot](forge-ide-ui.pdf) · [PDF rebuild guide](forge-ide-ui-pdf.md) ·
 [Mermaid/SVG gallery](../diagrams/mermaid/README.md#forge-ide-ui-proposal) ·
@@ -16,7 +22,8 @@ The earlier [remote IDE PDF](remote-ide-proposal.pdf) remains an unchanged histo
 > The linked PDF and M19–M24 images are the **earlier 2 November snapshot**:
 > M20/PDF build-page advice about authored shell templates and worker/DOM JS is
 > superseded by this clarification. They are retained unchanged for traceability,
-> not current authoring instructions. No UI macros/generator/runtime are added here.
+> not current authoring instructions. The implementation uses typed `component!`
+> declarations and strict YAML tokens; it does not restore hand-authored app assets.
 
 ## 1. Recommendation and present baseline
 

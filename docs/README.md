@@ -43,3 +43,5 @@ production identity remain proposals.
 - [Implemented authenticated node-info boundary](architecture/remote-node-info.md): optional HTTPS loopback proof, public integration and limits.
 
 - [Configured remote Forge IDE agent](../src/rust/forge-agent/README.md): actual named-node CLI, alias policy and lifecycle; [M18 diagram](architecture/diagrams/mermaid/README.md#m18--implemented-configured-remote-ide-agent).
+
+- [Generated IDE UI implementation](../src/rust/forge-ide-web/README.md) · [build/runtime diagram](architecture/diagrams/mermaid/README.md#m25--generated-ui-implementation).
