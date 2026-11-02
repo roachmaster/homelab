@@ -22,6 +22,8 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: stable
       CARGO_TERM_COLOR: always
+      # Use the runner-installed Chrome and its existing Ubuntu AppArmor profile.
+      FORGE_UI_BROWSER_CHANNEL: chrome
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -40,11 +42,11 @@ jobs:
           echo "FORGE_UI_ASSETS=$ASSETS" >> "$GITHUB_ENV"
           cargo build --manifest-path src/rust/Cargo.toml --locked --offline -p forge-agent --bin forge-agent
           cargo build --manifest-path src/rust/Cargo.toml --locked --offline -p forge-ide-web-host --example loopback_fixture
-      - name: Install pinned browser test dependency and standard Chromium
+      - name: Install pinned browser test dependency and verify supported Chrome
         working-directory: src/rust/forge-ide-web/tests/browser
         run: |
           npm ci --ignore-scripts
-          npx --no-install playwright install --with-deps chromium
+          google-chrome --version
       - name: Run real browser to native host to authenticated agent
         run: |
           node src/rust/forge-ide-web/tests/browser/journey.mjs \

@@ -203,7 +203,9 @@ async function controlledLifecycleJourney() {
 try {
   // Sandbox is deliberately enabled. No ignore-certificate/CSP/security overrides,
   // route interception, fake WASM, external deployment or user browser profile.
-  browser = await chromium.launch({ headless: true, chromiumSandbox: true });
+  const channel = process.env.FORGE_UI_BROWSER_CHANNEL;
+  if (channel !== undefined && channel !== 'chrome') throw new Error('unsupported browser channel');
+  browser = await chromium.launch({ headless: true, chromiumSandbox: true, ...(channel ? { channel } : {}) });
   await realJourney();
   await controlledLifecycleJourney();
   await writeFile(join(output, 'result.json'), `${JSON.stringify({ status: 'passed', checks }, null, 2)}\n`);

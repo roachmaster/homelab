@@ -187,3 +187,17 @@ If sandboxed Chromium cannot launch or a browser cannot reach the isolated
 listener, report that boundary as blocked and run this suite in an approved
 supported environment; never disable the sandbox, ignore TLS or publish a tunnel
 as a substitute. Hosted CI outcome must be checked before calling journeys passed.
+
+### Hosted browser selection
+
+The browser workflow uses the Ubuntu runner's **already installed Google Chrome**
+(`FORGE_UI_BROWSER_CHANNEL=chrome`) through Playwright's supported channel API,
+with `chromiumSandbox: true`. Ubuntu's existing Chrome AppArmor profile permits
+its sandbox; we do not edit AppArmor/sysctl settings, relocate executables or
+disable sandbox/certificate checks. Without the environment selection, the same
+runner script uses its locally installed Playwright Chromium; other values fail.
+See [Playwright browser channels](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge),
+[Chromium's Ubuntu profile explanation](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md)
+and the [GitHub runner inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#browsers-and-drivers).
+The earlier hosted attempt failed at downloaded headless-shell sandbox startup,
+before UI assertions; changing a supported browser selection is not a passing test.
