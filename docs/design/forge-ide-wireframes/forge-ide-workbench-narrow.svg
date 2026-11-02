@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1120" viewBox="0 0 1000 1120" role="img" aria-labelledby="title desc">
+<title id="title">Forge IDE workbench wireframe — narrow unavailable state</title>
+<desc id="desc">Design-only compact desktop width with side panes collapsed. A failed inspection has no accepted report; recovery uses configured selection and a new Inspect request. Proposed visible pane tabs restore views. State notes show initial, loading and cancelled behavior without claiming remote cancellation.</desc>
+<rect x="0" y="0" width="1000" height="1120" rx="0" fill="#ffffff"/>
+<text x="32" y="40" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#202833" font-weight="700" text-anchor="start">C / Preserve context at narrow widths</text>
+<text x="32" y="70" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#566372" font-weight="400" text-anchor="start">Compact desktop · unavailable state · do not squeeze three columns</text>
+<text x="968" y="40" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#295d92" font-weight="700" text-anchor="end">DESIGN ONLY</text>
+<text x="968" y="70" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Fictional sample data</text>
+<g id="workbench-toolbar">
+<rect x="32" y="112" width="936" height="48" rx="0" fill="#e9edf1" stroke="#cbd2da"/>
+<text x="48" y="142" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">FORGE IDE</text>
+<rect x="162" y="121" width="170" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="172" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Node: lab-example</text>
+<path d="M312 133 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<rect x="340" y="121" width="240" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="350" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Project: sample-workspace</text>
+<path d="M560 133 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<rect x="588" y="121" width="98" height="30" rx="3" fill="#295d92" stroke="#cbd2da"/>
+<text x="637.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#ffffff" font-weight="700" text-anchor="middle">Inspect</text>
+<rect x="694" y="121" width="162" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="775.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="middle">View options †</text>
+</g>
+<rect x="32" y="160" width="936" height="36" rx="0" fill="#ffffff" stroke="#cbd2da"/>
+<text x="48" y="184" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">lab-example / sample-workspace</text>
+<text x="952" y="184" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Read-only inspection</text>
+<rect x="32" y="196" width="936" height="40" rx="0" fill="#f4f6f8" stroke="#cbd2da"/>
+<rect x="44" y="201" width="132" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="110.0" y="221" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="middle">Explorer †</text>
+<rect x="184" y="201" width="144" height="30" rx="3" fill="#295d92" stroke="#cbd2da"/>
+<text x="256.0" y="221" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#ffffff" font-weight="700" text-anchor="middle">File overview</text>
+<rect x="336" y="201" width="130" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="401.0" y="221" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="middle">Outline †</text>
+<text x="952" y="222" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="end">Side panes collapsed †</text>
+<rect x="32" y="236" width="936" height="370" rx="0" fill="#ffffff" stroke="#cbd2da"/>
+<text x="76" y="292" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#202833" font-weight="700" text-anchor="start">Inspection unavailable</text>
+<text x="76" y="328" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#566372" font-weight="400" text-anchor="start">No report was accepted for this request.</text>
+<text x="76" y="352" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#566372" font-weight="400" text-anchor="start">Check the configured node, then try again. The UI cannot confirm</text>
+<text x="76" y="376" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#566372" font-weight="400" text-anchor="start">remote completion if a response is missing.</text>
+<rect x="76" y="422" width="154" height="30" rx="3" fill="#295d92" stroke="#cbd2da"/>
+<text x="153.0" y="442" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#ffffff" font-weight="700" text-anchor="middle">Retry inspection</text>
+<rect x="73" y="419" width="160" height="36" rx="4" fill="none" stroke="#295d92" stroke-dasharray="3 2"/>
+<text x="250" y="442" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">New request; no automatic retry loop.</text>
+<path d="M76 481 L924 481" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="76" y="514" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#202833" font-weight="400" text-anchor="start">No stale tree, outline or selected-file details are shown.</text>
+<text x="76" y="547" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">The current node/project selection stays visible above.</text>
+<text x="76" y="579" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">No source file access, editor, terminal, Run or Debug controls.</text>
+<rect x="32" y="606" width="936" height="90" rx="0" fill="#f4f6f8" stroke="#cbd2da"/>
+<text x="48" y="633" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Problems †</text>
+<text x="48" y="668" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">No inspection report available. Request failure is shown above, not as a code problem.</text>
+<rect x="32" y="696" width="936" height="30" rx="0" fill="#e9edf1" stroke="#cbd2da"/>
+<text x="48" y="717" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#80591e" font-weight="400" text-anchor="start">Unavailable  •  No current report</text>
+<text x="952" y="717" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="end">Local host session</text>
+<text x="32" y="770" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#202833" font-weight="700" text-anchor="start">State copy for the same workspace</text>
+<path d="M32 794 L968 794" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="32" y="816" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#566372" font-weight="700" text-anchor="start">BEFORE FIRST INSPECT</text>
+<text x="32" y="841" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Choose an allowed node and project, then Inspect. No report yet.</text>
+<path d="M32 858 L968 858" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="32" y="880" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#566372" font-weight="700" text-anchor="start">WHILE LOADING</text>
+<text x="32" y="905" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Inspect disabled; Cancel local wait enabled. No old report presented as current.</text>
+<path d="M32 922 L968 922" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="32" y="944" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#566372" font-weight="700" text-anchor="start">AFTER LOCAL CANCEL</text>
+<text x="32" y="969" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Stopped locally. Remote work may still finish; retry creates a new request.</text>
+<path d="M32 997 L968 997" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="32" y="1026" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#316557" font-weight="700" text-anchor="start">EXISTING</text>
+<text x="123" y="1026" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Failure, loading, local cancel and retry semantics; no stale report.</text>
+<text x="32" y="1056" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="start">PROPOSED †</text>
+<text x="145" y="1056" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Single-pane switching; focus returns to its visible trigger on close.</text>
+<text x="32" y="1087" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">Design review only. No browser behavior or accessibility conformance was tested by these images.</text>
+</svg>

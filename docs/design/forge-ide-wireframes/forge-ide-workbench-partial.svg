@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1080" viewBox="0 0 1440 1080" role="img" aria-labelledby="title desc">
+<title id="title">Forge IDE workbench wireframe — partial report</title>
+<desc id="desc">Design-only desktop partial inspection. A file with unavailable Rust structure is selected. Existing diagnostic strings appear in a proposed Problems index without invented compiler severity or precise source location. Other accepted report entries remain browsable.</desc>
+<rect x="0" y="0" width="1440" height="1080" rx="0" fill="#ffffff"/>
+<text x="32" y="40" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#202833" font-weight="700" text-anchor="start">B / Partial is a usable result, not success</text>
+<text x="32" y="70" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#566372" font-weight="400" text-anchor="start">Desktop · diagnostics visible · no compiler-error or source-editor claims</text>
+<text x="1408" y="40" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#295d92" font-weight="700" text-anchor="end">DESIGN ONLY</text>
+<text x="1408" y="70" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Fictional sample data</text>
+<g id="workbench-toolbar">
+<rect x="32" y="112" width="1376" height="48" rx="0" fill="#e9edf1" stroke="#cbd2da"/>
+<text x="48" y="142" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">FORGE IDE</text>
+<rect x="168" y="121" width="178" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="178" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Node: lab-example</text>
+<path d="M326 133 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<rect x="354" y="121" width="246" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="364" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Project: sample-workspace</text>
+<path d="M580 133 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<rect x="608" y="121" width="98" height="30" rx="3" fill="#295d92" stroke="#cbd2da"/>
+<text x="657.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#ffffff" font-weight="700" text-anchor="middle">Inspect</text>
+<rect x="714" y="121" width="150" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="789.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#7b8692" font-weight="400" text-anchor="middle">Cancel local wait</text>
+<rect x="882" y="121" width="166" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="965.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="middle">View options †</text>
+<text x="1392" y="142" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Read-only structural inspection</text>
+</g>
+<rect x="32" y="160" width="1376" height="40" rx="0" fill="#fff3d9" stroke="#cbd2da"/>
+<text x="48" y="186" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#80591e" font-weight="700" text-anchor="start">!  Partial inspection — some files or Rust declarations could not be inspected.</text>
+<text x="1392" y="186" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#80591e" font-weight="400" text-anchor="end">Review Problems below</text>
+<g id="explorer">
+<rect x="32" y="200" width="270" height="430" rx="0" fill="#f4f6f8"/>
+<rect x="32" y="200" width="270" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M32 234 L302 234" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="46" y="223" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Explorer</text>
+<text x="288" y="223" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">− †</text>
+<rect x="44" y="246" width="246" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="55" y="266" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Filter entry names… †</text>
+<path d="M44 299 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M58 296 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="81" y="308" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">sample-workspace</text>
+<path d="M76 322 h8 l4 4 v12 h-12 z M84 322 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="336" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Cargo.toml</text>
+<path d="M76 350 h8 l4 4 v12 h-12 z M84 350 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="364" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">README.md</text>
+<path d="M60 383 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M74 380 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="392" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">src</text>
+<path d="M92 406 h8 l4 4 v12 h-12 z M100 406 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="420" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">lib.rs</text>
+<path d="M92 434 h8 l4 4 v12 h-12 z M100 434 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="448" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">model.rs</text>
+<path d="M92 462 h8 l4 4 v12 h-12 z M100 462 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="476" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">remote_project_reg…</text>
+<path d="M76 495 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M90 492 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="504" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">transport</text>
+<path d="M108 518 h8 l4 4 v12 h-12 z M116 518 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="129" y="532" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">mod.rs</text>
+<rect x="36" y="540" width="262" height="28" rx="0" fill="#dce8f6"/>
+<path d="M108 546 h8 l4 4 v12 h-12 z M116 546 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="129" y="560" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">client.rs</text>
+<text x="286" y="560" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#80591e" font-weight="700" text-anchor="end">!</text>
+<path d="M60 579 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M74 576 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="588" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">tests</text>
+<path d="M92 602 h8 l4 4 v12 h-12 z M100 602 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="616" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">inspection.rs</text>
+<text x="286" y="616" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#80591e" font-weight="700" text-anchor="end">!</text>
+<path d="M77 316 L77 618" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<path d="M93 400 L93 562" fill="none" stroke="#cbd2da" stroke-width="1"/>
+</g>
+<rect x="302" y="200" width="6" height="430" rx="0" fill="#e9edf1"/>
+<path d="M304 409.0 L306 409.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M304 414.0 L306 414.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M304 419.0 L306 419.0" fill="none" stroke="#566372" stroke-width="1"/>
+<g id="partial-overview">
+<rect x="308" y="200" width="846" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M308 234 L1154 234" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="322" y="223" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">File overview   /   client.rs</text>
+<text x="1140" y="223" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">− †</text>
+<text x="330" y="268" font-family="DejaVu Sans, sans-serif" font-size="21" fill="#202833" font-weight="700" text-anchor="start">src / transport / client.rs</text>
+<text x="330" y="297" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">File  ·  86 lines  ·  2,640 bytes  ·  Content: rust_unavailable</text>
+<path d="M330 320 L1132 320" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="330" y="357" font-family="DejaVu Sans, sans-serif" font-size="20" fill="#202833" font-weight="700" text-anchor="start">Rust structure unavailable for this file</text>
+<text x="330" y="391" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">The file was counted, but its Rust declarations could not be inspected.</text>
+<text x="330" y="412" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">No declaration list is shown; an empty list is not proof of no symbols.</text>
+<text x="330" y="459" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Inspection diagnostic</text>
+<rect x="330" y="476" width="802" height="54" rx="0" fill="#fff3d9"/>
+<text x="344" y="508" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#80591e" font-weight="400" text-anchor="start">Rust syntax could not be parsed.</text>
+<text x="330" y="562" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Other files in this accepted report remain available in Explorer.</text>
+<text x="330" y="597" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">Read-only structural inspection  ·  No source body or editing API</text>
+</g>
+<rect x="1154" y="200" width="6" height="430" rx="0" fill="#e9edf1"/>
+<path d="M1156 409.0 L1158 409.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M1156 414.0 L1158 414.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M1156 419.0 L1158 419.0" fill="none" stroke="#566372" stroke-width="1"/>
+<rect x="1160" y="200" width="248" height="430" rx="0" fill="#f4f6f8"/>
+<rect x="1160" y="200" width="248" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M1160 234 L1408 234" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="1174" y="223" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Outline</text>
+<text x="1394" y="223" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">− †</text>
+<text x="1174" y="277" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">No Rust outline available</text>
+<text x="1174" y="298" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">for client.rs in this report.</text>
+<text x="1174" y="347" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">Select another Rust file</text>
+<text x="1174" y="368" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">or inspect again after the</text>
+<text x="1174" y="389" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">underlying issue is resolved.</text>
+<rect x="32" y="630" width="1376" height="187" rx="0" fill="#ffffff" stroke="#cbd2da"/>
+<rect x="32" y="630" width="1376" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M700 633 L740 633" fill="none" stroke="#566372" stroke-width="2"/>
+<text x="48" y="653" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Problems  2   †</text>
+<text x="1392" y="653" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Inspection diagnostics only    − †</text>
+<text x="50" y="690" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="700" text-anchor="start">File</text>
+<text x="445" y="690" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="700" text-anchor="start">Diagnostic text</text>
+<text x="1270" y="690" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="700" text-anchor="start">Origin</text>
+<rect x="36" y="703" width="1368" height="34" rx="0" fill="#dce8f6"/>
+<text x="50" y="726" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">src/transport/client.rs</text>
+<text x="445" y="726" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Rust syntax could not be parsed.</text>
+<text x="1270" y="726" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Inspection</text>
+<path d="M48 737 L1392 737" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="50" y="763" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">tests/inspection.rs</text>
+<text x="445" y="763" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">File could not be read.</text>
+<text x="1270" y="763" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Inspection</text>
+<text x="50" y="800" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">Proposed row activation selects the associated file; it does not jump into an editor.</text>
+<rect x="32" y="817" width="1376" height="30" rx="0" fill="#e9edf1" stroke="#cbd2da"/>
+<text x="48" y="838" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#80591e" font-weight="400" text-anchor="start">Local host session  •  Partial report  •  2 diagnostics</text>
+<text x="1392" y="838" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="end">Not a build / test / type-check result</text>
+<text x="32" y="887" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Keep accepted structure available</text>
+<text x="32" y="911" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Incomplete reports remain explicitly partial.</text>
+<text x="32" y="932" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Do not replace missing data with fake zeroes.</text>
+<text x="504" y="887" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Explain the selected file in place</text>
+<text x="504" y="911" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Existing content status + diagnostic strings.</text>
+<text x="504" y="932" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">No invented severity or precise error location.</text>
+<text x="976" y="887" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Problems is a proposed local index †</text>
+<text x="976" y="911" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Aggregate diagnostics from the accepted report.</text>
+<text x="976" y="932" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Selection changes local view; no new remote call.</text>
+<path d="M32 964 L1408 964" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="32" y="993" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#316557" font-weight="700" text-anchor="start">EXISTING</text>
+<text x="123" y="993" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Partial reports, content status and per-entry diagnostics. Example text and counts are fictional.</text>
+<text x="32" y="1023" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="start">PROPOSED †</text>
+<text x="145" y="1023" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Workbench layout, aggregate Problems navigation, filters, view options and pane controls.</text>
+<text x="32" y="1051" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">A retry is a new inspection, not a repair action. Missing declarations are not compiler diagnostics.</text>
+</svg>

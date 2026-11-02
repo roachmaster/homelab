@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Forge IDE UX"
+  short_description: "Shape an honest, keyboard-friendly IDE workbench"
+  default_prompt: "Use $design-forge-ide-ux to create a status-labeled wireframe and interaction plan for Forge IDE before changing its runtime UI."

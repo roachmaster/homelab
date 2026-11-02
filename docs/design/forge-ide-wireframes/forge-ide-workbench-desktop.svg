@@ -1,0 +1,212 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1080" viewBox="0 0 1440 1080" role="img" aria-labelledby="title desc">
+<title id="title">Forge IDE workbench wireframe — ready</title>
+<desc id="desc">Design-only proposed desktop workbench. Fictional structural report with Explorer, central file overview, optional Outline, Problems and status. No source editor. Numbered notes distinguish existing data from proposed interaction.</desc>
+<rect x="0" y="0" width="1440" height="1080" rx="0" fill="#ffffff"/>
+<text x="32" y="40" font-family="DejaVu Sans, sans-serif" font-size="24" fill="#202833" font-weight="700" text-anchor="start">A / A workbench, not a dashboard</text>
+<text x="32" y="70" font-family="DejaVu Sans, sans-serif" font-size="15" fill="#566372" font-weight="400" text-anchor="start">Desktop · complete report · neutral wireframe, not a final theme</text>
+<text x="1408" y="40" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#295d92" font-weight="700" text-anchor="end">DESIGN ONLY</text>
+<text x="1408" y="70" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Fictional sample data</text>
+<g id="workbench-toolbar">
+<rect x="32" y="112" width="1376" height="48" rx="0" fill="#e9edf1" stroke="#cbd2da"/>
+<text x="48" y="142" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">FORGE IDE</text>
+<rect x="168" y="121" width="178" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="178" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Node: lab-example</text>
+<path d="M326 133 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<rect x="354" y="121" width="246" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="364" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Project: sample-workspace</text>
+<path d="M580 133 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<rect x="608" y="121" width="98" height="30" rx="3" fill="#295d92" stroke="#cbd2da"/>
+<text x="657.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#ffffff" font-weight="700" text-anchor="middle">Inspect</text>
+<rect x="714" y="121" width="150" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="789.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#7b8692" font-weight="400" text-anchor="middle">Cancel local wait</text>
+<rect x="882" y="121" width="166" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="965.0" y="141" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="middle">View options †</text>
+<text x="1392" y="142" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Read-only structural inspection</text>
+</g>
+<rect x="32" y="160" width="1376" height="32" rx="0" fill="#ffffff" stroke="#cbd2da"/>
+<text x="48" y="182" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">lab-example / sample-workspace / src / lib.rs</text>
+<text x="1392" y="182" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#316557" font-weight="400" text-anchor="end">Complete report  •  8 files</text>
+<g id="explorer">
+<rect x="32" y="192" width="270" height="542" rx="0" fill="#f4f6f8"/>
+<rect x="32" y="192" width="270" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M32 226 L302 226" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="46" y="215" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Explorer</text>
+<text x="288" y="215" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">− †</text>
+<rect x="44" y="238" width="246" height="30" rx="3" fill="#ffffff" stroke="#cbd2da"/>
+<text x="55" y="258" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Filter entry names… †</text>
+<path d="M44 291 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M58 288 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="81" y="300" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">sample-workspace</text>
+<path d="M76 314 h8 l4 4 v12 h-12 z M84 314 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="328" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Cargo.toml</text>
+<path d="M76 342 h8 l4 4 v12 h-12 z M84 342 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="356" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">README.md</text>
+<path d="M60 375 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M74 372 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="384" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">src</text>
+<rect x="36" y="392" width="262" height="28" rx="0" fill="#dce8f6"/>
+<path d="M92 398 h8 l4 4 v12 h-12 z M100 398 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="412" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">lib.rs</text>
+<path d="M92 426 h8 l4 4 v12 h-12 z M100 426 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="440" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">model.rs</text>
+<rect x="38" y="422" width="258" height="24" rx="2" fill="none" stroke="#295d92" stroke-dasharray="3 2"/>
+<path d="M92 454 h8 l4 4 v12 h-12 z M100 454 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="468" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">remote_project_reg…</text>
+<path d="M76 487 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M90 484 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="496" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">transport</text>
+<path d="M108 510 h8 l4 4 v12 h-12 z M116 510 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="129" y="524" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">mod.rs</text>
+<path d="M108 538 h8 l4 4 v12 h-12 z M116 538 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="129" y="552" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">client.rs</text>
+<path d="M60 571 l4 4 l4 -4" stroke="#566372" stroke-width="1.5" fill="none"/>
+<path d="M74 568 h5 l2 2 h8 v10 h-15 z" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="97" y="580" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">tests</text>
+<path d="M92 594 h8 l4 4 v12 h-12 z M100 594 v4 h4" fill="none" stroke="#566372" stroke-width="1.2"/>
+<text x="113" y="608" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">inspection.rs</text>
+<path d="M77 308 L77 610" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<path d="M93 392 L93 554" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<path d="M44 672 L290 672" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="46" y="695" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">Focused: model.rs</text>
+<text x="46" y="714" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">Selected: src/lib.rs</text>
+</g>
+<rect x="302" y="192" width="6" height="542" rx="0" fill="#e9edf1"/>
+<path d="M304 457.0 L306 457.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M304 462.0 L306 462.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M304 467.0 L306 467.0" fill="none" stroke="#566372" stroke-width="1"/>
+<g id="file-overview">
+<rect x="308" y="192" width="846" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M308 226 L1154 226" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="322" y="215" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">File overview   /   lib.rs</text>
+<text x="1140" y="215" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">− †</text>
+<text x="330" y="260" font-family="DejaVu Sans, sans-serif" font-size="22" fill="#202833" font-weight="700" text-anchor="start">lib.rs</text>
+<text x="330" y="287" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">File  ·  32 lines  ·  684 bytes  ·  Content: text</text>
+<text x="1132" y="260" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#566372" font-weight="700" text-anchor="end">READ ONLY</text>
+<path d="M330 307 L1132 307" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="330" y="334" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="700" text-anchor="start">Declaration</text>
+<text x="726" y="334" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="700" text-anchor="start">Kind</text>
+<text x="950" y="334" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="700" text-anchor="start">Span</text>
+<text x="330" y="367" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">model</text>
+<text x="726" y="367" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">module</text>
+<text x="950" y="367" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">3:0–3:10</text>
+<path d="M330 376 L1132 376" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="330" y="395" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">transport</text>
+<text x="726" y="395" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">module</text>
+<text x="950" y="395" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">4:0–4:14</text>
+<path d="M330 404 L1132 404" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="330" y="423" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Workspace</text>
+<text x="726" y="423" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">struct</text>
+<text x="950" y="423" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">7:0–10:1</text>
+<path d="M330 432 L1132 432" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="348" y="451" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">root</text>
+<text x="726" y="451" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">field</text>
+<text x="950" y="451" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">8:4–8:16</text>
+<path d="M330 460 L1132 460" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="330" y="479" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Inspect</text>
+<text x="726" y="479" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">trait</text>
+<text x="950" y="479" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">13:0–15:1</text>
+<path d="M330 488 L1132 488" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="348" y="507" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">inspect</text>
+<text x="726" y="507" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">trait method</text>
+<text x="950" y="507" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">14:4–14:22</text>
+<path d="M330 516 L1132 516" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<rect x="318" y="516" width="826" height="28" rx="0" fill="#dce8f6"/>
+<text x="330" y="535" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Inspect for Workspace</text>
+<text x="726" y="535" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">impl</text>
+<text x="950" y="535" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">18:0–24:1</text>
+<path d="M330 544 L1132 544" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="348" y="563" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">inspect</text>
+<text x="726" y="563" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">impl method</text>
+<text x="950" y="563" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">19:4–23:5</text>
+<path d="M330 572 L1132 572" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="330" y="591" font-family="DejaVu Sans Mono, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">open_workspace</text>
+<text x="726" y="591" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">function</text>
+<text x="950" y="591" font-family="DejaVu Sans Mono, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">27:0–31:1</text>
+<path d="M330 600 L1132 600" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="330" y="625" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="700" text-anchor="start">Selected declaration</text>
+<text x="330" y="651" font-family="DejaVu Sans, sans-serif" font-size="17" fill="#202833" font-weight="700" text-anchor="start">Inspect for Workspace</text>
+<text x="330" y="679" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Impl target: Workspace    Trait: Inspect</text>
+<text x="330" y="701" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Unsafe: false   ·   Negative: false</text>
+<text x="1132" y="722" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#566372" font-weight="400" text-anchor="end">Spans: 1-based lines; 0-based columns; end exclusive</text>
+</g>
+<rect x="1154" y="192" width="6" height="542" rx="0" fill="#e9edf1"/>
+<path d="M1156 457.0 L1158 457.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M1156 462.0 L1158 462.0" fill="none" stroke="#566372" stroke-width="1"/>
+<path d="M1156 467.0 L1158 467.0" fill="none" stroke="#566372" stroke-width="1"/>
+<g id="outline">
+<rect x="1160" y="192" width="248" height="542" rx="0" fill="#f4f6f8"/>
+<rect x="1160" y="192" width="248" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M1160 226 L1408 226" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="1174" y="215" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Outline</text>
+<text x="1394" y="215" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">− †</text>
+<text x="1174" y="254" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">lib.rs  /  9 declarations</text>
+<rect x="1172" y="276" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1180.5" y="289" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">M</text>
+<text x="1196" y="290" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">model</text>
+<rect x="1172" y="306" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1180.5" y="319" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">M</text>
+<text x="1196" y="320" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">transport</text>
+<rect x="1172" y="336" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1180.5" y="349" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">S</text>
+<text x="1196" y="350" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Workspace</text>
+<rect x="1186" y="366" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1194.5" y="379" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">·</text>
+<text x="1210" y="380" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">root</text>
+<rect x="1172" y="396" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1180.5" y="409" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">T</text>
+<text x="1196" y="410" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Inspect</text>
+<rect x="1186" y="426" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1194.5" y="439" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">m</text>
+<text x="1210" y="440" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">inspect</text>
+<rect x="1164" y="450" width="240" height="30" rx="0" fill="#dce8f6"/>
+<rect x="1172" y="456" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1180.5" y="469" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">I</text>
+<text x="1196" y="470" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Inspect for Workspace</text>
+<rect x="1186" y="486" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1194.5" y="499" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">m</text>
+<text x="1210" y="500" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">inspect</text>
+<rect x="1172" y="516" width="17" height="18" rx="2" fill="#ffffff" stroke="#cbd2da"/>
+<text x="1180.5" y="529" font-family="DejaVu Sans, sans-serif" font-size="11" fill="#566372" font-weight="700" text-anchor="middle">f</text>
+<text x="1196" y="530" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">open_workspace</text>
+<path d="M1174 562 L1394 562" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="1174" y="587" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">Quick navigation; details</text>
+<text x="1174" y="608" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">stay in the main workspace.</text>
+<text x="1174" y="629" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">No source text is requested.</text>
+</g>
+<g id="problems">
+<rect x="32" y="734" width="1376" height="83" rx="0" fill="#ffffff" stroke="#cbd2da"/>
+<rect x="32" y="734" width="1376" height="34" rx="0" fill="#f4f6f8"/>
+<path d="M700 737 L740 737" fill="none" stroke="#566372" stroke-width="2"/>
+<text x="48" y="757" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">Problems  0   †</text>
+<text x="1392" y="757" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="end">Collapse †  −</text>
+<text x="52" y="795" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">No inspection diagnostics in this report. This is not a compiler or test result.</text>
+</g>
+<rect x="32" y="817" width="1376" height="30" rx="0" fill="#e9edf1" stroke="#cbd2da"/>
+<text x="48" y="838" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#316557" font-weight="400" text-anchor="start">Local host session  •  Complete report</text>
+<text x="1392" y="838" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="end">lab-example / sample-workspace  ·  No file editing or execution</text>
+<circle cx="157" cy="137" r="11" fill="#ffffff" stroke="#295d92" stroke-width="1.5"/>
+<text x="157" y="141" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="middle">1</text>
+<circle cx="151" cy="210" r="11" fill="#ffffff" stroke="#295d92" stroke-width="1.5"/>
+<text x="151" y="214" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="middle">2</text>
+<circle cx="580" cy="210" r="11" fill="#ffffff" stroke="#295d92" stroke-width="1.5"/>
+<text x="580" y="214" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="middle">3</text>
+<circle cx="1261" cy="210" r="11" fill="#ffffff" stroke="#295d92" stroke-width="1.5"/>
+<text x="1261" y="214" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="middle">4</text>
+<circle cx="218" cy="751" r="11" fill="#ffffff" stroke="#295d92" stroke-width="1.5"/>
+<text x="218" y="755" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="middle">5</text>
+<text x="32" y="887" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">1  Compact context + one primary action</text>
+<text x="32" y="911" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Node/project choices remain configured.</text>
+<text x="32" y="932" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">View options † only manages local panes.</text>
+<text x="504" y="887" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">2  Real hierarchy; visible keyboard focus</text>
+<text x="504" y="911" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Selection uses fill; focus uses a dashed ring.</text>
+<text x="504" y="932" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Long names reveal fully on focus or hover †.</text>
+<text x="976" y="887" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="700" text-anchor="start">3–4  A dominant, read-only workspace</text>
+<text x="976" y="911" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">File/declaration data exists; this layout is new.</text>
+<text x="976" y="932" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#566372" font-weight="400" text-anchor="start">Resizable / collapsible panes † need generator work.</text>
+<path d="M32 964 L1408 964" fill="none" stroke="#cbd2da" stroke-width="1"/>
+<text x="32" y="991" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#316557" font-weight="700" text-anchor="start">EXISTING CAPABILITY</text>
+<text x="209" y="991" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Inspect, tree selection, Rust declarations, spans, partial results, local cancel/retry.</text>
+<text x="32" y="1020" font-family="DejaVu Sans, sans-serif" font-size="12" fill="#295d92" font-weight="700" text-anchor="start">PROPOSED INTERACTION †</text>
+<text x="235" y="1020" font-family="DejaVu Sans, sans-serif" font-size="14" fill="#202833" font-weight="400" text-anchor="start">Workbench layout, filter, view controls, pane resizing/collapse, Problems index.</text>
+<text x="32" y="1050" font-family="DejaVu Sans, sans-serif" font-size="13" fill="#566372" font-weight="400" text-anchor="start">5  Problems summarizes inspection diagnostics only. Fictional paths, symbols and counts; not an implementation screenshot.</text>
+</svg>

@@ -16,6 +16,12 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 
 The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
+## Forge IDE workbench wireframes
+
+[![Proposed read-only IDE workbench](docs/design/forge-ide-wireframes/forge-ide-workbench-desktop.svg)](docs/design/forge-ide-wireframes/README.md)
+
+[Three design-only wireframes and interaction contract](docs/design/forge-ide-wireframes/README.md) apply the new [Forge IDE UX skill](.agents/skills/design-forge-ide-ux/SKILL.md) to the existing inspection capabilities. Desktop, partial/Problems and narrow-window states distinguish current data from proposed panes/filtering. **Wireframe first: no runtime redesign is implemented by these visuals.**
+
 ## Forge IDE generated browser boundary
 
 [![Generated UI build and runtime ownership](docs/architecture/diagrams/mermaid/images/m25-ui-implementation.svg)](src/rust/forge-ide-web/README.md)
@@ -188,6 +194,7 @@ license and pinned reconstruction provenance.
 
 - [Design Package Boundaries](.agents/skills/design-package-boundaries/SKILL.md): capability-first packages and practical hexagonal boundaries, without unnecessary layers.
 - [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
+- [Design Forge IDE UX](.agents/skills/design-forge-ide-ux/SKILL.md): plan an honest read-only workbench, keyboard flow and state-labeled wireframes before implementation.
 - [Design Forge UI](.agents/skills/design-forge-ui/SKILL.md): generate HTML/CSS/JS from YAML/Rust component declarations; separate main-thread presentation from worker/WASM logic.
 - [Design Forge Front Door](.agents/skills/design-forge-front-door/SKILL.md): preserve one HTTP gateway and header-selected destinations, with current versus future method semantics.
 - [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.

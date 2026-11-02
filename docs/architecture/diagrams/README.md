@@ -1,5 +1,7 @@
 # Architecture diagrams
 
+For product layout rather than runtime architecture, see the [Forge IDE workbench wireframes](../../design/forge-ide-wireframes/README.md): editable SVGs, PNG previews and an interaction spec. They are design-only and do not replace the implementation diagrams.
+
 ## Mermaid UML-like views
 
 The [Mermaid gallery](mermaid/README.md) adds editable `.mmd` sources and locally rendered SVGs for implemented contracts, disk bootstrap and typed requests, plus a clearly proposed kernel milestone view. It includes source/image hashes and a rebuild/drift-check command. **M01–M04 complement the DOT views below; they do not replace them. M05/M06/M08 remain proposed future-foundation views; M07 describes the implemented local counter lifecycle.**

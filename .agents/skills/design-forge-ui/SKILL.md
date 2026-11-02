@@ -13,6 +13,11 @@ for context. Its older PDF/diagram snapshot does not override this rule. The [in
 and native host. Broader widget/style APIs remain unimplemented; inspect the actual
 exports. Native/Node tests do not substitute for actual browser acceptance.
 
+For workbench layout, inspection-state UX or wireframe-first design, also use
+[Design Forge IDE UX](../design-forge-ide-ux/SKILL.md). It owns interaction and
+visual hierarchy; this skill retains the authoring/execution boundary. Design-only
+SVG documentation does not become a hand-authored runtime asset.
+
 ## Author declarations, generate web assets
 
 - Styles come from **YAML style/theme declarations** or **Rust UI-component macro
