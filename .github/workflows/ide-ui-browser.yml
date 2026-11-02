@@ -3,9 +3,9 @@ name: IDE browser acceptance
 on:
   push:
     branches: [main, validation/forge-ide-ui]
-    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-bootstrap/**', 'src/rust/forge-provider/**', 'src/rust/forge-bridge/**', 'src/rust/forge-ingress-contract/**', 'src/rust/forge-task/**', 'src/rust/forge-io-client/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', '.github/workflows/ide-ui-browser.yml']
+    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-bootstrap/**', 'src/rust/forge-provider/**', 'src/rust/forge-bridge/**', 'src/rust/forge-ingress-contract/**', 'src/rust/forge-task/**', 'src/rust/forge-io-client/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', 'src/rust/scripts/ui_qa.py', 'src/rust/scripts/tests/test_ui_qa.py', '.github/workflows/ide-ui-browser.yml']
   pull_request:
-    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-bootstrap/**', 'src/rust/forge-provider/**', 'src/rust/forge-bridge/**', 'src/rust/forge-ingress-contract/**', 'src/rust/forge-task/**', 'src/rust/forge-io-client/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', '.github/workflows/ide-ui-browser.yml']
+    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-bootstrap/**', 'src/rust/forge-provider/**', 'src/rust/forge-bridge/**', 'src/rust/forge-ingress-contract/**', 'src/rust/forge-task/**', 'src/rust/forge-io-client/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', 'src/rust/scripts/ui_qa.py', 'src/rust/scripts/tests/test_ui_qa.py', '.github/workflows/ide-ui-browser.yml']
   workflow_dispatch:
 
 permissions:
@@ -34,31 +34,45 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo fetch --manifest-path src/rust/Cargo.toml --locked
           node --version
-      - name: Generate actual assets and compile real endpoint fixture
-        run: |
-          make ui-build > "$RUNNER_TEMP/ui-build.log"
-          ASSETS=$(sed -n 's/^ASSETS //p' "$RUNNER_TEMP/ui-build.log")
-          test -d "$ASSETS"
-          echo "FORGE_UI_ASSETS=$ASSETS" >> "$GITHUB_ENV"
-          cargo build --manifest-path src/rust/Cargo.toml --locked --offline -p forge-agent --bin forge-agent
-          cargo build --manifest-path src/rust/Cargo.toml --locked --offline -p forge-ide-web-host --example loopback_fixture
       - name: Install pinned browser test dependency and verify supported Chrome
         working-directory: src/rust/forge-ide-web/tests/browser
         run: |
           npm ci --ignore-scripts
           google-chrome --version
-      - name: Run real browser to native host to authenticated agent
+      - name: Verify QA reporting and failure handling
         run: |
-          node src/rust/forge-ide-web/tests/browser/journey.mjs \
-            "$FORGE_UI_ASSETS" \
-            "$GITHUB_WORKSPACE/src/rust/target/debug/forge-agent" \
-            "$GITHUB_WORKSPACE/src/rust/target/debug/examples/loopback_fixture" \
-            "$RUNNER_TEMP/forge-ui-browser"
-      - name: Preserve sanitized UI screenshots only
+          python3 -B -m unittest discover -s src/rust/scripts/tests -v
+          make ui-qa-check
+      - name: Build and run headless QA through the root entry point
+        env:
+          QA_OUTPUT_ROOT: ${{ runner.temp }}/forge-ui-qa
+        run: make ui-qa
+      - name: Publish sanitized QA summary
+        if: always()
+        run: |
+          for report in "$RUNNER_TEMP"/forge-ui-qa/forge-ui-qa-*/run.md "$RUNNER_TEMP"/forge-ui-qa/forge-ui-qa-*/browser/summary.md; do
+            if [ -f "$report" ]; then cat "$report" >> "$GITHUB_STEP_SUMMARY"; printf '\n' >> "$GITHUB_STEP_SUMMARY"; fi
+          done
+      - name: Preserve only allowlisted QA reports and sanitized fixture screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: forge-ide-browser-screenshots
-          path: ${{ runner.temp }}/forge-ui-browser/*.png
+          name: forge-ide-browser-qa
+          path: |
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/run.json
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/run.md
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/result.json
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/summary.md
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/junit.xml
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/failure.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-desktop.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-narrow-details.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-narrow-declaration.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-partial-problems.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-empty.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-narrow-denied.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-controlled-timeout.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-controlled-fatal.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-controlled-no-allowed-project.png
           if-no-files-found: ignore
           retention-days: 7

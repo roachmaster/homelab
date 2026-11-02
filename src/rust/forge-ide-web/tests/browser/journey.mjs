@@ -2,30 +2,26 @@
 // Every happy-path request uses the real generated worker/WASM -> host -> mTLS agent.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { realpath, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
-import { chromium, expect } from '@playwright/test';
+import { acquireOwned, bounded, cleanupResources, runHarness } from './report.mjs';
+import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from './diagnostics.mjs';
+import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
 
-const args = process.argv.slice(2);
-if (args.length !== 4) {
-  throw new Error('usage: node journey.mjs ASSETS_DIRECTORY AGENT_BINARY FIXTURE_BINARY OUTPUT_DIRECTORY');
-}
-const [assets, agent, fixtureBinary] = await Promise.all(args.slice(0, 3).map(p => realpath(p)));
-const output = args[3];
-await mkdir(output, { recursive: true });
-const check = expect.configure({ timeout: 10_000 });
-const checks = [];
-let browser;
+let assets, agent, fixtureBinary, output, browser, browserOwner, check, report;
 const active = new Set();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function startFixture(faults = false) {
+  report.ensureActive();
+  report.setStage('fixture_start');
   const child = spawn(fixtureBinary, [assets, agent, ...(faults ? ['--faults'] : [])], {
     stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
   });
-  const state = { child, stopped: false, origin: '', code: '' };
+  const state = { child, stopped: false, stopping: null, origin: '', code: '', page: null, name: faults ? 'injected_fixture' : 'real_fixture' };
   active.add(state);
   let startupBytes = 0;
   // Do not retain/log stdout containing the pairing code, stderr, credentials or headers.
@@ -48,9 +44,6 @@ async function startFixture(faults = false) {
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('fixture startup deadline')), 15_000); }),
     ]);
     return state;
-  } catch (error) {
-    await stopFixture(state);
-    throw error;
   } finally {
     clearTimeout(timer);
     lines.close();
@@ -58,23 +51,34 @@ async function startFixture(faults = false) {
 }
 async function stopFixture(state) {
   if (state.stopped) return;
-  state.stopped = true;
+  if (state.stopping) return state.stopping;
   state.code = '';
-  if (state.child.exitCode === null && state.child.signalCode === null) {
-    const exited = once(state.child, 'exit');
-    const signal = name => {
+  state.stopping = (async () => {
+    const child = state.child;
+    requireRunningFixtureLeader(child);
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
+      const signal = name => {
+        try {
+          if (process.platform === 'win32') child.kill(name);
+          else process.kill(-child.pid, name); // only our newly created process group
+        } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      };
+      // Register before signalling, and bound both graceful and forceful shutdown.
+      let resolveExit;
+      const exited = new Promise(resolve => { resolveExit = resolve; });
+      const onExit = () => resolveExit();
+      child.once('exit', onExit);
       try {
-        if (process.platform === 'win32') state.child.kill(name);
-        else process.kill(-state.child.pid, name); // only our newly created process group
-      } catch (error) { if (error.code !== 'ESRCH') throw error; }
-    };
-    signal('SIGINT');
-    let timer;
-    const clean = await Promise.race([exited.then(() => true), new Promise(resolve => { timer = setTimeout(() => resolve(false), 10_000); })]);
-    clearTimeout(timer);
-    if (!clean) { signal('SIGKILL'); await exited; }
-  }
-  active.delete(state);
+        signal('SIGINT');
+        try { await bounded(() => exited, 10_000); }
+        catch { signal('SIGKILL'); await bounded(() => exited, 3_000); }
+      } finally { child.off('exit', onExit); }
+    }
+    state.stopped = true;
+    active.delete(state);
+  })();
+  try { await state.stopping; }
+  finally { state.stopping = null; }
 }
 const LONG_FILE_NAME = 'remote_project_request_validation_and_admission_contract_with_a_deliberately_long_safe_name_for_filtering.rs';
 const localActions = ['select_entry', 'toggle_entry', 'select_declaration', 'select_problem', 'set_file_filter', 'set_symbol_filter', 'more_tree', 'previous_tree', 'more_outline', 'previous_outline', 'more_problems', 'previous_problems'];
@@ -143,10 +147,15 @@ async function observe(context) {
   return { count: kind => counts.get(kind) || 0 };
 }
 async function connect(context, fixture) {
+  report.ensureActive();
   const page = await context.newPage();
+  fixture.page = page;
   const errors = [];
   page.on('pageerror', () => { if (errors.length < 64) errors.push('page runtime error'); });
-  page.on('dialog', async dialog => { errors.push('unexpected script dialog'); await dialog.dismiss(); });
+  page.on('dialog', dialog => {
+    if (errors.length < 64) errors.push('unexpected script dialog');
+    void dialog.dismiss().catch(() => { if (errors.length < 64) errors.push('dialog dismissal failed'); });
+  });
   await page.goto(fixture.origin, { waitUntil: 'domcontentloaded' });
   await check(page.locator('#pair')).toBeEnabled();
   await check(page.locator('#files [role="treeitem"]')).toHaveCount(0);
@@ -186,9 +195,10 @@ async function noReport(page) {
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
 }
 async function screenshot(page, name) {
+  assert.equal(await screenshotEligibility(page, [...active]), 'safe', 'Only sanitized owned fixture pages may be captured');
   await check(page.locator('#pair-code')).toHaveValue('');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'no page-level horizontal clipping');
-  await page.screenshot({ path: join(output, name), fullPage: true, mask: [page.locator('#pair-code')] });
+  await page.screenshot({ path: join(output, name), fullPage: true, mask: [page.locator(SCREENSHOT_MASK)] });
 }
 async function assertVisibleFocus(page) {
   assert.equal(await page.evaluate(() => {
@@ -209,6 +219,7 @@ async function replayAction(page, slot) {
 }
 
 async function keyboardAndFilters(page, traffic) {
+  report.start('real.navigation.keyboard');
   const calls = traffic.count('inspect');
   await page.getByRole('button', { name: 'Expand src', exact: true }).click();
   const lib = await selectFile(page, 'lib.rs');
@@ -248,7 +259,8 @@ async function keyboardAndFilters(page, traffic) {
   await check(fileRow(page, 'broken.rs')).toHaveAttribute('aria-selected', 'true');
   await check(page.locator('#details')).toContainText(/diagnostic/i);
   await check(page.locator('#details')).toContainText('Rust syntax analysis unavailable');
-  checks.push('real-agent tree arrows, parent/child/Home/End/typeahead focus independent from Enter selection');
+  report.pass('real.navigation.keyboard');
+  report.start('real.filters.safe_text');
 
   await selectFile(page, 'lib.rs');
   await page.locator('#symbol-filter').fill('inspect_me');
@@ -307,7 +319,8 @@ async function keyboardAndFilters(page, traffic) {
   await selectFile(page, 'binary.dat');
   await check(page.locator('#details')).toContainText(/binary/i);
   await check(page.locator('#outline')).not.toContainText(/no declarations in this file/i);
-  checks.push('real-agent local file/symbol filters search the full report, preserve hidden selection and render complete long/native/HTML-like names safely');
+  report.pass('real.filters.safe_text');
+  report.start('real.pagination.problems');
 
   await page.getByRole('button', { name: 'Expand bulk', exact: true }).click();
   await check(page.locator('#tree-more')).toBeEnabled();
@@ -335,10 +348,11 @@ async function keyboardAndFilters(page, traffic) {
   await check(page.locator('#details')).toContainText(/diagnostic/i);
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
   assert.equal(traffic.count('inspect'), calls, 'all navigation/filter/page/problem actions are local, not backend search');
-  checks.push('real-agent bounded Previous/Next pagination, valid empty/binary/unavailable distinctions and Problems selects the diagnostic file without I/O');
+  report.pass('real.pagination.problems');
 }
 
 async function panesAndNarrow(page, traffic) {
+  report.start('real.panes.desktop');
   const calls = traffic.count('inspect');
   await filterFiles(page, 'lib.rs');
   await selectFile(page, 'lib.rs');
@@ -391,7 +405,8 @@ async function panesAndNarrow(page, traffic) {
   }
   if (await page.locator('#workspace-options').evaluate(e => e.open)) await page.locator('#workspace-options > summary').click();
   await check(page.locator('#selection-title')).toContainText('lib.rs');
-  checks.push('real-agent desktop pane pointer/keyboard resize/bounds/reset/collapse/reopen preserves selection and visible focus');
+  report.pass('real.panes.desktop');
+  report.start('real.panes.narrow');
 
   await page.setViewportSize({ width: 760, height: 1000 });
   await check(page.locator('#workspace-panel')).toBeVisible();
@@ -434,10 +449,12 @@ async function panesAndNarrow(page, traffic) {
   await check(page.locator('#selection-title')).toContainText('broken.rs');
   assert.equal(page.workers().length, 1, 'pane changes never remount the worker');
   assert.equal(traffic.count('inspect'), calls, 'pane changes never inspect remotely');
-  checks.push('real-agent actual narrow viewport single-pane switching, keyboard declaration/problem navigation and widening preserve context');
+  await screenshot(page, 'ide-workbench-partial-problems.png');
+  report.pass('real.panes.narrow');
 }
 
 async function reportAndPageLifecycle(page, traffic) {
+  report.start('probe.report.stale_actions');
   await filterFiles(page, LONG_FILE_NAME);
   await selectFile(page, LONG_FILE_NAME);
   await saveAction(page, 'select_entry', 'old-report-row');
@@ -455,7 +472,8 @@ async function reportAndPageLifecycle(page, traffic) {
     await check(target).toBeFocused();
     await check(page.locator('#files [role="treeitem"]')).toHaveCount(rows);
   }
-  checks.push('actual WASM rejects queued old-report select/filter actions and repeated delegated events retain a single row set');
+  report.pass('probe.report.stale_actions');
+  report.start('probe.page.lifecycle');
 
   let before = traffic.count('resume');
   const inspectBefore = traffic.count('inspect');
@@ -500,7 +518,7 @@ async function reportAndPageLifecycle(page, traffic) {
   assert.equal(page.workers().length, 1);
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0, 'no report/session secrets in browser storage');
   assert.equal(new URL(page.url()).search, '', 'no report/session state in URL');
-  checks.push('actual pagehide/pageshow, repeated mount, refresh and browser leave/return clear protected DOM and resume without report persistence');
+  report.pass('probe.page.lifecycle');
 }
 async function noSelectedFileFromPriorReport(page) {
   await check(page.locator('#selection-title')).not.toContainText(LONG_FILE_NAME);
@@ -508,51 +526,55 @@ async function noSelectedFileFromPriorReport(page) {
 }
 
 async function realJourney() {
+  report.start('real.report.partial');
   const fixture = await startFixture();
+  report.setStage('context_start');
+  report.ensureActive();
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  report.setStage('scenario');
   const traffic = await observe(context);
-  try {
-    const { page, errors } = await connect(context, fixture);
-    assert.equal(traffic.count('resume'), 1, 'startup resumes once');
-    assert.equal(traffic.count('pair'), 1, 'one explicit pairing request');
-    await inspect(page, 'workspace');
-    await check(page.locator('textarea, [contenteditable="true"]')).toHaveCount(0);
-    await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
-    await check(page.locator('#summary')).toContainText('1 traits');
-    await check(page.locator('#summary')).toContainText('1 trait impls');
-    await check(page.locator('#summary')).toContainText('1 free functions');
-    await check(page.locator('#files')).toContainText('README <safe>.md');
-    await check(page.locator('#files')).toContainText('<svg onload=alert(1)>.txt');
-    await check(page.locator('#files svg, #files script, #files img')).toHaveCount(0);
-    if (process.platform !== 'win32') await check(page.locator('#files')).toContainText('unix bytes:');
-    checks.push('real generated UI / WASM / native host / mTLS agent accepts a partial structural report with independent admission');
-    await keyboardAndFilters(page, traffic);
-    await panesAndNarrow(page, traffic);
-    await screenshot(page, 'ide-workbench-partial-problems.png');
-    await reportAndPageLifecycle(page, traffic);
+  const { page, errors } = await connect(context, fixture);
+  assert.equal(traffic.count('resume'), 1, 'startup resumes once');
+  assert.equal(traffic.count('pair'), 1, 'one explicit pairing request');
+  await inspect(page, 'workspace');
+  await check(page.locator('textarea, [contenteditable="true"]')).toHaveCount(0);
+  await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
+  await check(page.locator('#summary')).toContainText('1 traits');
+  await check(page.locator('#summary')).toContainText('1 trait impls');
+  await check(page.locator('#summary')).toContainText('1 free functions');
+  await check(page.locator('#files')).toContainText('README <safe>.md');
+  await check(page.locator('#files')).toContainText('<svg onload=alert(1)>.txt');
+  await check(page.locator('#files svg, #files script, #files img')).toHaveCount(0);
+  if (process.platform !== 'win32') await check(page.locator('#files')).toContainText('unix bytes:');
+  report.pass('real.report.partial');
+  await keyboardAndFilters(page, traffic);
+  await panesAndNarrow(page, traffic);
+  await reportAndPageLifecycle(page, traffic);
+  report.start('real.report.empty');
 
-    await inspect(page, 'empty', 'Inspection ready.');
-    await check(page.locator('#summary')).toContainText('0 files');
-    await check(page.locator('#files [role="treeitem"]')).toHaveCount(1);
-    await check(page.locator('#problems [role="treeitem"]')).toHaveCount(0);
-    await screenshot(page, 'ide-workbench-empty.png');
-    checks.push('real-agent complete empty project retains its root and truthful empty diagnostics');
+  await inspect(page, 'empty', 'Inspection ready.');
+  await check(page.locator('#summary')).toContainText('0 files');
+  await check(page.locator('#files [role="treeitem"]')).toHaveCount(1);
+  await check(page.locator('#problems [role="treeitem"]')).toHaveCount(0);
+  await screenshot(page, 'ide-workbench-empty.png');
+  report.pass('real.report.empty');
+  report.start('real.admission.denied');
 
-    await inspect(page, 'denied', 'operation forbidden');
-    await noReport(page);
-    await check(page.locator('#inspect')).toBeEnabled();
-    await check(page.locator('#pair-panel')).toBeHidden();
-    await page.setViewportSize({ width: 760, height: 1000 });
-    await screenshot(page, 'ide-workbench-narrow-denied.png');
-    checks.push('independent real mTLS agent project denial clears report, retains context and offers explicit recovery');
-    assert.deepEqual(errors, []);
-  } finally { await context.close(); await stopFixture(fixture); }
+  await inspect(page, 'denied', 'operation forbidden');
+  await noReport(page);
+  await check(page.locator('#inspect')).toBeEnabled();
+  await check(page.locator('#pair-panel')).toBeHidden();
+  await page.setViewportSize({ width: 760, height: 1000 });
+  await screenshot(page, 'ide-workbench-narrow-denied.png');
+  assert.deepEqual(errors, []);
+  report.pass('real.admission.denied');
 }
 
 // Deterministic presentation-latency probe: queue real ordered WASM views, not
 // model/reducer output replacements. A Worker channel is FIFO, so release them
 // in exactly their original order; this is NOT a fabricated reorder scenario.
 async function controlledInputDraftJourney(page) {
+  report.start('probe.presentation.ordered_drafts');
   const worker = page.workers()[0];
   await worker.evaluate(() => {
     const original = self.postMessage;
@@ -606,148 +628,192 @@ async function controlledInputDraftJourney(page) {
   await check(input).toHaveValue('');
   await check(page.locator('#files [role="treeitem"]')).toHaveCount(2);
   await worker.evaluate(() => self.__forgeQueuedPresentation.restore());
-  checks.push('controlled ordered real-WASM view latency preserves f→fo→f/backspace and cleared drafts until the correct presentation acknowledgement');
+  report.pass('probe.presentation.ordered_drafts');
 }
 
 async function controlledLifecycleJourney() {
+  report.start('injected.requests.cancel_retry');
   // Explicit native injected-port fixture, NOT remote transport E2E evidence.
   // Real browser, generated worker/WASM, host admission and native timeout remain.
   const fixture = await startFixture(true);
+  report.setStage('context_start');
+  report.ensureActive();
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  report.setStage('scenario');
   const traffic = await observe(context);
-  try {
-    const { page, errors } = await connect(context, fixture);
-    await page.locator('#project').selectOption('slow');
-    const before = traffic.count('inspect');
-    await page.locator('#inspect').evaluate(button => { button.click(); button.click(); button.click(); });
-    await check(page.locator('#phase-label')).toContainText('Inspecting');
-    await check(page.locator('#inspect')).toBeDisabled();
-    await check(page.locator('#cancel')).toBeEnabled();
-    await page.locator('#cancel').click();
-    await check(page.locator('#status')).toContainText('Stopped waiting locally.');
-    await delay(1000); // injected native port completes after local cancellation
-    await check(page.locator('#status')).toContainText('Stopped waiting locally.');
-    await noReport(page);
-    assert.equal(traffic.count('inspect'), before + 1, 'rapid repeated Inspect creates one request');
-    await inspect(page, 'workspace', 'Inspection ready.');
-    await check(page.locator('#files')).toContainText('fault-fixture.txt');
-    checks.push('controlled injected-port cancellation/late completion, repeated Inspect guard and explicit retry');
-    await controlledInputDraftJourney(page);
+  const { page, errors } = await connect(context, fixture);
+  await page.locator('#project').selectOption('slow');
+  const before = traffic.count('inspect');
+  await page.locator('#inspect').evaluate(button => { button.click(); button.click(); button.click(); });
+  await check(page.locator('#phase-label')).toContainText('Inspecting');
+  await check(page.locator('#inspect')).toBeDisabled();
+  await check(page.locator('#cancel')).toBeEnabled();
+  await page.locator('#cancel').click();
+  await check(page.locator('#status')).toContainText('Stopped waiting locally.');
+  await delay(1000); // injected native port completes after local cancellation
+  await check(page.locator('#status')).toContainText('Stopped waiting locally.');
+  await noReport(page);
+  assert.equal(traffic.count('inspect'), before + 1, 'rapid repeated Inspect creates one request');
+  await inspect(page, 'workspace', 'Inspection ready.');
+  await check(page.locator('#files')).toContainText('fault-fixture.txt');
+  report.pass('injected.requests.cancel_retry');
+  await controlledInputDraftJourney(page);
+  report.start('injected.requests.revisions');
 
-    await page.locator('#project').selectOption('slow');
-    await page.locator('#inspect').click();
-    await check(page.locator('#status')).toContainText('Inspecting');
-    await page.locator('#project').selectOption('workspace');
-    await page.locator('#project').selectOption('slow');
-    await page.locator('#project').selectOption('workspace');
-    await delay(1000);
-    await check(page.locator('#status')).toContainText('Selection changed.');
-    await noReport(page);
-    checks.push('controlled rapid project revisions invalidate in-flight work without late report or automatic retry');
+  await page.locator('#project').selectOption('slow');
+  await page.locator('#inspect').click();
+  await check(page.locator('#status')).toContainText('Inspecting');
+  await page.locator('#project').selectOption('workspace');
+  await page.locator('#project').selectOption('slow');
+  await page.locator('#project').selectOption('workspace');
+  await delay(1000);
+  await check(page.locator('#status')).toContainText('Selection changed.');
+  await noReport(page);
+  report.pass('injected.requests.revisions');
+  report.start('injected.requests.refresh_focus');
 
-    await page.locator('#project').selectOption('slow');
-    await page.locator('#inspect').click();
-    await check(page.locator('#phase-label')).toContainText('Inspecting');
-    const refreshRequests = traffic.count('inspect');
-    const refreshResumes = traffic.count('resume');
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await check(page.locator('#status')).toContainText('Connected.');
-    await noReport(page);
-    assert.equal(traffic.count('inspect'), refreshRequests, 'refresh during work never replays Inspect');
-    assert.equal(traffic.count('resume'), refreshResumes + 1);
-    assert.equal(page.workers().length, 1);
-    await page.locator('#project').selectOption('slow');
-    await page.locator('#inspect').click();
-    await check(page.locator('#phase-label')).toContainText('Inspecting');
-    await page.locator('#project').focus();
-    await check(page.locator('#status')).toContainText('Inspection ready.');
-    await check(page.locator('#project')).toBeFocused();
-    checks.push('controlled refresh during pending work resumes without replay; background completion preserves a valid toolbar focus');
+  await page.locator('#project').selectOption('slow');
+  await page.locator('#inspect').click();
+  await check(page.locator('#phase-label')).toContainText('Inspecting');
+  const refreshRequests = traffic.count('inspect');
+  const refreshResumes = traffic.count('resume');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await check(page.locator('#status')).toContainText('Connected.');
+  await noReport(page);
+  assert.equal(traffic.count('inspect'), refreshRequests, 'refresh during work never replays Inspect');
+  assert.equal(traffic.count('resume'), refreshResumes + 1);
+  assert.equal(page.workers().length, 1);
+  await page.locator('#project').selectOption('slow');
+  await page.locator('#inspect').click();
+  await check(page.locator('#phase-label')).toContainText('Inspecting');
+  await page.locator('#project').focus();
+  await check(page.locator('#status')).toContainText('Inspection ready.');
+  await check(page.locator('#project')).toBeFocused();
+  report.pass('injected.requests.refresh_focus');
+  report.start('injected.failures.unavailable_timeout');
 
-    await inspect(page, 'unavailable', 'node observation unavailable');
-    await noReport(page);
-    await check(page.locator('#inspect')).toBeEnabled();
-    const failedCount = traffic.count('inspect');
-    await delay(250);
-    assert.equal(traffic.count('inspect'), failedCount, 'unavailable does not auto-retry');
-    await inspect(page, 'timeout', 'Deadline expired');
-    await check(page.locator('#inspect')).toBeEnabled();
-    await noReport(page);
-    await delay(700); // allow non-preemptible injected port to finish
-    await check(page.locator('#status')).toContainText('Deadline expired');
-    await screenshot(page, 'ide-controlled-timeout.png');
-    checks.push('controlled unavailable and non-preemptible timeout remain explicit recoverable failures, never late success');
+  await inspect(page, 'unavailable', 'node observation unavailable');
+  await noReport(page);
+  await check(page.locator('#inspect')).toBeEnabled();
+  const failedCount = traffic.count('inspect');
+  await delay(250);
+  assert.equal(traffic.count('inspect'), failedCount, 'unavailable does not auto-retry');
+  await inspect(page, 'timeout', 'Deadline expired');
+  await check(page.locator('#inspect')).toBeEnabled();
+  await noReport(page);
+  await delay(700); // allow non-preemptible injected port to finish
+  await check(page.locator('#status')).toContainText('Deadline expired');
+  await screenshot(page, 'ide-controlled-timeout.png');
+  report.pass('injected.failures.unavailable_timeout');
+  report.start('probe.worker.fatal');
 
-    await inspect(page, 'workspace', 'Inspection ready.');
-    // Controlled adapter fatal path, not a claim of spontaneous ABI failure.
-    // Calls the real generated worker's fail-closed routine after real WASM data.
-    const worker = page.workers()[0];
-    await worker.evaluate(() => fatal('Controlled worker failure. Reload to retry.')).catch(error => {
-      if (!/closed|destroyed|disposed/i.test(error.message)) throw error;
-    });
-    await check(page.locator('#runtime-message')).toContainText(/Reload/i);
-    await noReport(page);
-    await check(page.locator('#project option')).toHaveCount(0);
-    await check(page.locator('#node option')).toHaveCount(0);
-    assert.equal(await page.locator('select[data-action]').evaluateAll(selects => selects.every(select => !select.title)), true, 'fatal clears protected select titles');
-    await check(page.locator('#workbench')).toBeHidden();
-    await check(page.locator('#inspect')).toBeDisabled();
-    await check.poll(() => page.workers().length).toBe(0);
-    await screenshot(page, 'ide-controlled-fatal.png');
-    checks.push('controlled worker fatal path terminates the instance and clears/disables protected catalog and report DOM');
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await check(page.locator('#status')).toContainText('Connected.');
-    await noReport(page);
-    assert.equal(page.workers().length, 1);
+  await inspect(page, 'workspace', 'Inspection ready.');
+  // Controlled adapter fatal path, not a claim of spontaneous ABI failure.
+  // Calls the real generated worker's fail-closed routine after real WASM data.
+  const worker = page.workers()[0];
+  await worker.evaluate(() => fatal('Controlled worker failure. Reload to retry.')).catch(error => {
+    if (!/closed|destroyed|disposed/i.test(error.message)) throw error;
+  });
+  await check(page.locator('#runtime-message')).toContainText(/Reload/i);
+  await noReport(page);
+  await check(page.locator('#project option')).toHaveCount(0);
+  await check(page.locator('#node option')).toHaveCount(0);
+  assert.equal(await page.locator('select[data-action]').evaluateAll(selects => selects.every(select => !select.title)), true, 'fatal clears protected select titles');
+  await check(page.locator('#workbench')).toBeHidden();
+  await check(page.locator('#inspect')).toBeDisabled();
+  await check.poll(() => page.workers().length).toBe(0);
+  await screenshot(page, 'ide-controlled-fatal.png');
+  report.pass('probe.worker.fatal');
+  report.start('injected.catalog.empty');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await check(page.locator('#status')).toContainText('Connected.');
+  await noReport(page);
+  assert.equal(page.workers().length, 1);
 
-    // Production HostConfig deliberately forbids a node with zero configured
-    // projects. This separately labeled catalog-only fixture changes a successful
-    // Resume response for UI acceptance; it is NOT host/agent authorization proof.
-    await context.route('**/forge/v1/dispatch', async route => {
-      if (route.request().postDataJSON()?.kind !== 'resume') return route.continue();
-      const response = await route.fetch();
-      const body = await response.json();
-      assert.equal(body.event.kind, 'paired');
-      for (const node of body.event.catalog.nodes) node.projects = [];
-      await route.fulfill({ response, json: body });
-    });
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await check(page.locator('#status')).toContainText('Connected.');
-    await check(page.locator('#workbench')).toContainText(/No allowed project/i);
-    await check(page.locator('#inspect')).toBeDisabled();
-    await check(page.locator('#project option')).toHaveCount(0);
-    await noReport(page);
-    await screenshot(page, 'ide-controlled-no-allowed-project.png');
-    await context.unroute('**/forge/v1/dispatch');
-    checks.push('controlled catalog-only empty allowed-project state disables Inspect with explanatory UI (not native admission evidence)');
+  // Production HostConfig deliberately forbids a node with zero configured
+  // projects. This separately labeled catalog-only fixture changes a successful
+  // Resume response for UI acceptance; it is NOT host/agent authorization proof.
+  await context.route('**/forge/v1/dispatch', async route => {
+    if (route.request().postDataJSON()?.kind !== 'resume') return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    assert.equal(body.event.kind, 'paired');
+    for (const node of body.event.catalog.nodes) node.projects = [];
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await check(page.locator('#status')).toContainText('Connected.');
+  await check(page.locator('#workbench')).toContainText(/No allowed project/i);
+  await check(page.locator('#inspect')).toBeDisabled();
+  await check(page.locator('#project option')).toHaveCount(0);
+  await noReport(page);
+  await screenshot(page, 'ide-controlled-no-allowed-project.png');
+  await context.unroute('**/forge/v1/dispatch');
+  report.pass('injected.catalog.empty');
+  report.start('probe.session.missing');
 
-    await context.clearCookies();
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await check(page.locator('#pair')).toBeEnabled();
-    await check(page.locator('#connection')).toBeVisible();
-    await check(page.locator('#workbench')).toBeHidden();
-    await check(page.locator('#project option')).toHaveCount(0);
-    await check(page.locator('#node option')).toHaveCount(0);
-    await noReport(page);
-    checks.push('missing host session after reload returns to Connection without retaining protected catalog/report DOM');
-    assert.deepEqual(errors, []);
-  } finally { await context.close(); await stopFixture(fixture); }
+  await context.clearCookies();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await check(page.locator('#pair')).toBeEnabled();
+  await check(page.locator('#connection')).toBeVisible();
+  await check(page.locator('#workbench')).toBeHidden();
+  await check(page.locator('#project option')).toHaveCount(0);
+  await check(page.locator('#node option')).toHaveCount(0);
+  await noReport(page);
+  assert.deepEqual(errors, []);
+  report.pass('probe.session.missing');
 }
-try {
-  // Sandbox remains mandatory. No security overrides, fake WASM, deployment or
-  // user profile. Only the explicitly labeled empty-catalog case intercepts HTTP.
-  const channel = process.env.FORGE_UI_BROWSER_CHANNEL ?? 'chrome';
-  if (channel !== 'chrome') throw new Error('unsupported browser channel');
-  browser = await chromium.launch({ headless: true, chromiumSandbox: true, channel });
-  await realJourney();
-  await controlledLifecycleJourney();
-  await writeFile(join(output, 'result.json'), `${JSON.stringify({ status: 'passed', checks }, null, 2)}\n`);
-  console.log(`PASS: ${checks.length} browser acceptance groups (real-agent and controlled-fault scopes distinguished).`);
-} catch (error) {
-  await writeFile(join(output, 'result.json'), `${JSON.stringify({ status: 'failed', completed: checks }, null, 2)}\n`);
-  console.error(String(error.message).replace(/\b[0-9a-f]{64}\b/gi, '<redacted-token>'));
-  process.exitCode = 1;
-} finally {
-  if (browser) await browser.close();
-  for (const state of active) await stopFixture(state);
+// Hash only fixed generated assets and the two explicit executable inputs. Never
+// retain paths or bytes; fingerprints make standalone dirty-tree runs auditable.
+async function sha256(path) {
+  const hash = createHash('sha256');
+  for await (const bytes of createReadStream(path)) hash.update(bytes);
+  return hash.digest('hex');
 }
+const passed = await runHarness({
+  args: process.argv.slice(2),
+  async setup(currentReport, directory) {
+    report = currentReport;
+    output = directory;
+    report.setStage('dependency');
+    const { chromium, expect } = await import('@playwright/test');
+    check = expect.configure({ timeout: 10_000 });
+    report.setStage('input_validation');
+    [assets, agent, fixtureBinary] = await Promise.all(process.argv.slice(2, 5).map(path => realpath(path)));
+    assert.equal((await stat(assets)).isDirectory(), true);
+    for (const path of [agent, fixtureBinary]) assert.equal((await stat(path)).isFile(), true);
+    report.setStage('fingerprints');
+    const names = ['index.html', 'style.css', 'main.js', 'worker.js', 'app.wasm', 'manifest.json'];
+    const hashes = await Promise.all(names.map(name => sha256(join(assets, name))));
+    const fingerprints = Object.fromEntries(names.map((name, index) => [name, hashes[index]]));
+    fingerprints.agent_binary = await sha256(agent);
+    fingerprints.fixture_binary = await sha256(fixtureBinary);
+    report.addFingerprints(fingerprints);
+    report.setStage('browser_channel');
+    const channel = process.env.FORGE_UI_BROWSER_CHANNEL ?? 'chrome';
+    assert.equal(channel, 'chrome');
+    if (report.frozen) throw new Error('Journey stopped before launch');
+    report.setStage('browser_launch');
+    // Sandbox remains mandatory. No security overrides, fake WASM, deployment or
+    // user profile. Only the labeled empty-catalog case intercepts HTTP.
+    browserOwner = acquireOwned(
+      () => chromium.launch({ headless: true, chromiumSandbox: true, channel }),
+      ownedBrowser => ownedBrowser.close(),
+    );
+    browser = await browserOwner.ready;
+    report.browserVersion(browser.version());
+    report.ensureActive();
+  },
+  async journey() {
+    await realJourney();
+    await controlledLifecycleJourney();
+  },
+  diagnose: (currentReport, directory) => captureFailureScreenshot(currentReport, directory, [...active], process.env.FORGE_UI_QA_FAILURE_SCREENSHOT === '1'),
+  async cleanup(currentReport) {
+    await cleanupResources([
+      ...(browserOwner ? [{ name: 'browser', close: () => browserOwner.close() }] : []),
+      ...[...active].map(fixture => ({ name: fixture.name, close: () => stopFixture(fixture) })),
+    ], currentReport);
+  },
+});
+if (!passed) process.exitCode = 1;

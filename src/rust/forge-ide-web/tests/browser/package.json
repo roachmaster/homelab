@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": {"test": "node journey.mjs"},
+  "scripts": {"test": "node journey.mjs", "test:unit": "node --test *.test.mjs"},
   "engines": {"node": ">=20"},
   "devDependencies": {"@playwright/test": "1.64.1"}
 }

@@ -46,6 +46,7 @@ make test                    # workspace tests
 make ci                      # native + actual WASM/generation gates
 make ui-build                # generated assets; requires WASM target + Node
 make ui ARGS='--help'         # configured loopback IDE web host
+make ui-qa                   # build + sandboxed headless Chrome QA and reports
 make asm                     # release assembly for the kernel library
 ```
 
@@ -53,6 +54,13 @@ The [root Makefile](Makefile) wraps Cargo in `src/rust/`; [target/feature select
 assembly output and CI details](src/rust/README.md#root-makefile) include the direct
 Cargo equivalents. The workflow performs CI checks only: no deployment or release
 publication is configured.
+
+[Headless IDE QA](src/rust/forge-ide-web/tests/browser/README.md) reuses the 18-group
+real-browser workbench suite with stable scenario IDs, JSON/Markdown/JUnit results,
+sanitized screenshots and independent cleanup reporting. Install its documented
+browser prerequisites first; `make ui-qa` does not install or weaken browser security.
+Native/unit checks and injected faults remain distinct from actual browser-to-agent
+acceptance. Each run gets fresh ignored output rather than reusing stale evidence.
 
 The terminal discovers its selected registered commands and sends typed requests through the shared bridge. A separate [command-description contract](src/rust/forge-command/README.md) supplies names, help, named argument types and required/optional/default declarations; `Task` remains an independent execution stereotype. `help COMMAND` or `COMMAND --help` describes an admitted catalog entry without running the business task/client. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
 

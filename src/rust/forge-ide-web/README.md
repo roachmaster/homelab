@@ -83,6 +83,7 @@ means typed Rust events/model/components, not editing emitted assets.
 ```sh
 make ui-check       # exact two-build asset comparison + syntax + real WASM + worker fault checks
 make ci             # all native/profile/dependency checks plus ui-check
+make ui-qa          # separate actual headless Chrome gate; see prerequisites below
 ```
 
 The public consumer tests import the real registrar, freeze, factory and provider;
@@ -94,6 +95,8 @@ The generated-main input harness similarly uses a minimal DOM boundary to test
 in-flight draft ordering; it is not a browser substitute.
 Actual browser → generated worker/WASM → host → real agent journeys are a separate
 acceptance gate, not inferred from string assertions or native endpoint tests.
+The [headless QA guide](tests/browser/README.md) gives the single root command,
+scenario inventory, safe JSON/Markdown/JUnit reports and sandboxed hosted workflow.
 
 Asset output is under ignored `src/rust/target/ui-assets`; committed sources remain
 Rust/YAML. `manifest.json` records exactly five asset hashes; the host verifies

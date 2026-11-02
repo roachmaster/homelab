@@ -10,8 +10,9 @@ export NO_DEFAULT_FEATURES ?= 0
 export ARGS ?= --help
 export ASM_TARGET ?= lib
 export NATIVE ?= 0
+export QA_OUTPUT_ROOT ?=
 
-.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check
+.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
 
 help:
 	@printf '%s\n' \
@@ -32,6 +33,8 @@ help:
 	  '  make ui-build          Build real WASM + generated HTML/CSS/JS assets' \
 	  '  make ui ARGS="--help"  Run the local IDE web host' \
 	  '  make ui-check          Rebuild comparison + real WASM/worker checks' \
+	  '  make ui-qa             Build and run sandboxed headless Chrome QA + reports' \
+	  '  make ui-qa-check       Test QA reporting/orchestration (not browser evidence)' \
 	  '  make remote            One-shot mutual-TLS node.info loopback demo' \
 	  '  make asm               Release assembly for forge-kernel library' \
 	  '' \
@@ -93,6 +96,7 @@ ci:
 	$(MAKE) test PACKAGE=forge-kernel FEATURES=node ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test lint PACKAGE=forge-ide-web FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) ui-check
+	$(MAKE) ui-qa-check
 
 session: ARGS =
 
@@ -105,3 +109,7 @@ ui-build:
 	@python3 "$$FORGE_RUST_ROOT/scripts/ui_tools.py" build
 ui-check:
 	@python3 "$$FORGE_RUST_ROOT/scripts/ui_tools.py" check
+ui-qa:
+	@python3 "$$FORGE_RUST_ROOT/scripts/ui_qa.py"
+ui-qa-check:
+	@node --test "$$FORGE_RUST_ROOT/forge-ide-web/tests/browser/"*.test.mjs

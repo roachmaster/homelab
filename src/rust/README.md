@@ -124,6 +124,8 @@ access when the selected toolchain is not already available.
 | `run`, `session` | Forge terminal command / interactive session |
 | `template`, `ide` | Opt-in capability CLIs; default is help |
 | `asm` | Selected library or binary release assembly |
+| `ui-qa` | Rebuild matching inputs and run 18 ordered headless Chrome acceptance groups; fresh safe reports |
+| `ui-qa-check` | Reporting/cleanup regression tests; no browser pass implied |
 
 ### Select packages and features
 
@@ -190,6 +192,12 @@ can also affect output. See [rustc code-generation options](https://doc.rust-lan
 4. Pure demo tests/Clippy, then separate messages-only and disk-only demo tests.
 5. Node-only kernel tests and optional UI facade default-profile checks.
 6. Deterministic generated assets, JavaScript grammar, actual WASM ABI and isolated worker-fault tests (`make ui-check`).
+7. Headless-QA reporting/orchestration regressions (`make ui-qa-check` plus the Python helper tests).
+
+Actual sandboxed browser execution remains a separate gate: `make ui-qa` locally
+or the [browser workflow](../../.github/workflows/ide-ui-browser.yml). See the
+[QA guide](forge-ide-web/tests/browser/README.md) for prerequisites, stable scenario
+inventory, safe artifacts, failure categories and real-versus-injected evidence.
 
 [GitHub Actions](../../.github/workflows/rust.yml) invokes exactly `make ci` on
 Rust/Makefile/workflow changes in pull requests and pushes to `main`, or by manual
