@@ -155,6 +155,9 @@ panics or destruction. See [limits and compatibility](../../../../src/rust/forge
 
 ## Remote IDE proposal
 
+M13–M17 and their PDF preserve the pre-implementation design record. See
+[M18](#m18--implemented-configured-remote-ide-agent) for the actual first milestone.
+
 [Proposal and acceptance gates](../../proposals/remote-ide.md) ·
 [Six-page visual PDF](../../proposals/remote-ide-proposal.pdf).
 These five views describe **new assembly and behavior**, not implemented remote
@@ -241,7 +244,7 @@ python3 "$D/render.py" --renderer "$D/.tools/bin/mmdr" --png-dir "$D/previews"
 python3 "$D/render.py" --renderer "$D/.tools/bin/mmdr" --check
 ```
 
-`render.py` first runs the official grammar validator, then generates all ten SVGs in a temporary directory. It rejects active/external SVG references before writing the images and [hash manifest](render-manifest.json). `--check` independently rerenders and compares exact bytes and input hashes without changing tracked files. Fonts/platform changes can change layout: review the difference, do not silently bless it. PNGs are local previews; scalable SVGs are committed. Keep sources, configuration, manifest and images in the same change. **Inspect every render** for lost labels, clipping, ordering and semantics; parser success and matching hashes alone cannot prove visual correctness. Do not hand-edit generated SVGs.
+`render.py` first runs the official grammar validator, then generates all registered SVGs in a temporary directory. It rejects active/external SVG references before writing the images and [hash manifest](render-manifest.json). `--check` independently rerenders and compares exact bytes and input hashes without changing tracked files. Fonts/platform changes can change layout: review the difference, do not silently bless it. PNGs are local previews; scalable SVGs are committed. Keep sources, configuration, manifest and images in the same change. **Inspect every render** for lost labels, clipping, ordering and semantics; parser success and matching hashes alone cannot prove visual correctness. Do not hand-edit generated SVGs.
 
 ## Implemented Forge IDE
 
@@ -279,3 +282,17 @@ The client validates original metadata and target/incarnation. Unknown outcomes
 are not retries, cancellation or durable acceptance. The demo is loopback-only
 with ephemeral in-memory credentials, not a deployed daemon or an implementation
 of all M08 delegation/resource-policy sketches. [Actual API and limits](../../remote-node-info.md).
+
+## M18 — Implemented configured remote IDE agent
+
+![Implemented agent composition and admitted request flow](images/m18-agent-implementation.svg)
+
+[Mermaid source](m18-agent-implementation.mmd) · [Actual API, config and limits](../../../../src/rust/forge-agent/README.md).
+This is the implemented localhost-tested milestone following historical proposal
+M13–M17, not a two-physical-machine deployment claim. The app owns typed command
+sums and configuration. Public registrars stage a homogeneous project factory batch;
+freeze precedes native root/listener creation. HTTP remains one POST gateway,
+verified TLS identity is not a caller header, and project policy precedes reads.
+Typed reports cross contracts; private DTOs and CLI YAML stay boundaries. Signal
+shutdown checks admission before dispatch; trusted synchronous work cannot be
+preempted. No remote jobs, mutations or additional verbs are implemented.

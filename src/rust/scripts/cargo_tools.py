@@ -68,6 +68,12 @@ def ide():
             diagnostic_stream=sys.stderr)
 
 
+def agent():
+    args = shlex.split(os.environ.get("ARGS", "--help"))
+    execute(cargo("run", "--package", "forge-agent", "--bin", "forge-agent", "--", *args),
+            diagnostic_stream=sys.stderr)
+
+
 def remote():
     # Fixed ephemeral loopback demonstration, not an endpoint/credential CLI.
     execute(cargo("run", "--package", "forge-remote-https", "--example", "loopback"),
@@ -114,10 +120,12 @@ def assembly():
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "template", "ide", "remote", "asm"):
-        raise ValueError("expected run, session, template, ide, remote or asm")
+    if len(sys.argv) != 2 or sys.argv[1] not in ("run", "session", "template", "ide", "remote", "agent", "asm"):
+        raise ValueError("expected run, session, template, ide, remote, agent or asm")
     if sys.argv[1] == "asm":
         assembly()
+    elif sys.argv[1] == "agent":
+        agent()
     elif sys.argv[1] == "remote":
         remote()
     elif sys.argv[1] == "ide":

@@ -6,10 +6,12 @@ publish.workspace = true
 
 [features]
 default = []
+remote = ["dep:forge-remote", "dep:forge-ingress-contract"]
 yaml = ["dep:serde", "dep:serde_yaml_ng"]
 cli = ["yaml", "dep:forge-bridge", "dep:forge-ingress-contract", "dep:forge-command"]
 
 [dependencies]
+forge-remote = { path = "../forge-remote", optional = true }
 forge-bootstrap.workspace = true
 forge-provider.workspace = true
 forge-task.workspace = true

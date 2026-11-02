@@ -191,3 +191,20 @@ a special-file fixture explicitly reports a skip when socket creation is denied.
 Linux is the tested host, not evidence of a Raspberry Pi image or Windows conformance.
 
 [Implemented flow diagram](../../../docs/architecture/diagrams/mermaid/README.md#implemented-forge-ide)
+
+## Optional remote conversation and project catalogs
+
+`assembly::register_projects` validates/stages up to 128 distinct `ProjectAlias`
+configs as one homogeneous `ProjectFactories` group without opening roots. Empty
+catalogs are allowed. After outer freeze, the host invokes factories and chooses
+providers. The `remote` feature adds typed `InspectCall`/`InspectReply`,
+`RemoteIdeClient`, `RemoteInspectTask` and bounded `ReportLimits` validation; it
+adds no HTTP/TLS/YAML dependency. It validates report structure and original
+addressing/correlation, not the truth of a remote filesystem snapshot.
+
+The separate [forge-agent application](../forge-agent/README.md) selects these
+contracts and the HTTPS adapter, authorizes server-owned project aliases, and
+displays YAML. This crate never imports that host or HTTPS. Default consumers
+and the existing local CLI retain their previous behavior. Remote acceptance
+depth is an independent policy (root 0 includes file leaves); a structurally valid
+local report may still exceed its remote policy/budget.

@@ -40,19 +40,26 @@ and verify [wire conversion](../../../src/rust/forge-remote-https/src/wire.rs),
 [destination policy](../../../src/rust/forge-remote/src/lib.rs) and
 [bridge dispatch](../../../src/rust/forge-bridge/src/lib.rs) for the requested change.
 
-- **Current:** loopback-only mutual-TLS demonstration; `POST /forge/v1/dispatch`
-  invokes only `node.info` contract version `1`. The body is `{"payload":"info"}`.
+- **Current:** `POST /forge/v1/dispatch` invokes `node.info@1`; the configured
+  [agent](../../../src/rust/forge-agent/README.md) also binds `ide.inspect@1` for
+  server-owned project aliases. The original node body is `{"payload":"info"}`;
+  the IDE body is `{"payload":{"kind":"project","alias":"workspace"}}`.
   Other verbs return **405 + `Allow: POST`**; other paths return **404**. This is
-  an HTTP command gateway (RPC-style), not resource-oriented REST or a deployed daemon.
+  an HTTP command gateway, not resource-oriented REST. Two real localhost
+  processes are tested; deployed cross-machine operation is not certified.
 - Actual routing fields are `Forge-Envelope-Version`, `Forge-Destination`,
   `Forge-Contract-Version`, `Forge-Target-Node`, `Forge-Target-Incarnation`,
   `Forge-Request-Id`, `Forge-Expires-Unix-Ms`, and optional `Forge-Correlation-Id`.
   Read the linked table for exact bounds. Required fields occur once, correlation
   at most once; reject duplicate/case-variant, comma-combined, malformed or oversized
   values rather than choosing a winner. Check envelope version against the path.
-- Projection produces the canonical `Header` inside `Envelope<NodeCommand>`;
-  target/incarnation and expiry belong to the surrounding `NodeCall`, **not** new
-  generic Header fields. Strict body decoding cannot override any of that metadata.
+- Projection produces canonical `Header` plus typed `Envelope<NodeCommand>` or
+  `Envelope<InspectCommand>`; the agent maps selected contracts into its finite
+  application-owned enum. Target/incarnation and expiry belong to the surrounding
+  call, **not** new generic Header fields. Body decoding cannot override metadata.
+  Agent `VerifiedContext` is privately issued by the TLS adapter; project permission
+  is checked before request-time inspection, separately from subject/operation
+  permission. Startup may already have opened explicitly configured roots.
 - **Future, not implemented:** GET reads without mutation or request-body dependence;
   POST invokes/submits; PUT replaces; PATCH partially updates; DELETE removes.
   Add a verb only with a real operation contract, input encoding, authorization

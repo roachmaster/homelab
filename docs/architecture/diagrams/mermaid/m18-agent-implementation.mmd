@@ -1,0 +1,12 @@
+---
+title: M18 Implemented configured agent - two localhost processes tested
+---
+flowchart LR
+  C["Agent client<br/>Named node config<br/>Task + typed call"]
+  H["HTTPS + mTLS<br/>Single POST gateway<br/>Header route + expiry"]
+  B["Agent shared bridge<br/>Operation permission<br/>Typed variant check"]
+  P["Project binding<br/>Alias permission<br/>Prebuilt task handle"]
+  I["Existing InspectTask<br/>Rooted client + syn<br/>Typed structural report"]
+  C --> H --> B --> P --> I
+  classDef current fill:#e3f4ee,stroke:#187c64,color:#143b30;
+  class C,H,B,P,I current;

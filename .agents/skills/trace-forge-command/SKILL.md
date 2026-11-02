@@ -38,3 +38,13 @@ For HTTP entry architecture or a proposed method/destination, use
 single-gateway review workflow and current-versus-future method distinction;
 this skill owns the detailed request/effect trace. Verify actual projection in the
 [HTTP adapter contract](../../../src/rust/forge-remote-https/README.md#http-header-projection).
+
+For [remote IDE inspection](../../../src/rust/forge-agent/README.md), trace named-node
+config → local admitted `RemoteInspectTask` binding → prepared alias call → HTTPS
+headers/payload → TLS-issued context → destination bridge → operation/project
+authorization → existing rooted inspection task. A project alias is not a remote
+path; unknown/denied aliases must cause zero inspection calls. Check original
+expiry after decoding/report validation and distinguish timeout from preemption.
+Two localhost child processes are evidence of a real network boundary, not of a
+physical-host deployment. Shutdown must recheck admission after a signal, not only
+check around an idle accept loop.

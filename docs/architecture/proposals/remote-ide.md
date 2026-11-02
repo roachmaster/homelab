@@ -1,10 +1,19 @@
 # Proposal: Forge IDE across two machines
 
-**Status: design, not an implemented remote IDE or deployment.** Reviewed against
-public baseline `a11d327a3fd1aadec232a47f1c7cc8d086a7ef0f`. The repository currently
-has a local IDE inspection capability and a separate authenticated, loopback-only
-`node.info` proof. This proposal connects those foundations incrementally without
-changing the one-front-door architecture.
+**Status update: the first configured agent milestone is implemented and tested
+with two real localhost processes.** See the [actual application/API/configuration](../../../src/rust/forge-agent/README.md)
+and [implementation diagram](../diagrams/mermaid/images/m18-agent-implementation.svg).
+Cross-physical-machine deployment, production credential operations, remote jobs
+and mutation remain future work. The text and PDF below preserve the **original
+pre-implementation design record**, reviewed against public baseline
+`a11d327a3fd1aadec232a47f1c7cc8d086a7ef0f`; their “proposed” labels are historical,
+not a claim the corresponding current source is still missing.
+
+Actual naming refinements: `ProjectAlias` replaces the sketch `InspectProject`;
+`ProjectFactories` is the batch group; `GatewayCodec` fixes request/response types
+at a generic dispatch seam; the application uses private `config`, `dispatch`,
+`host` and `cli` modules rather than creating an empty module per diagram box.
+`forge-ide` remains independent of HTTPS. No core trait signatures changed.
 
 [Visual PDF](remote-ide-proposal.pdf) · [Mermaid/SVG gallery](../diagrams/mermaid/README.md#remote-ide-proposal)
 · [Current network implementation](../remote-node-info.md)

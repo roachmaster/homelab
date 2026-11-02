@@ -10,11 +10,7 @@ struct Request {
     payload: Payload,
 }
 
-pub(crate) struct ProjectedHeader {
-    target: Target,
-    header: Header,
-    expires_unix_ms: u64,
-}
+pub(crate) type ProjectedHeader = crate::gateway::RequestMetadata;
 
 const ENVELOPE: &str = "forge-envelope-version";
 const DESTINATION: &str = "forge-destination";
@@ -92,18 +88,15 @@ pub(crate) fn decode_headers(headers: &HeaderMap) -> Result<ProjectedHeader, Rem
 }
 /// This HTTP projection intentionally supports ASCII canonical metadata only;
 /// the transport-neutral Header itself remains able to represent UTF-8 tokens.
-pub(crate) fn encode_headers(call: &NodeCall) -> Result<HeaderMap, RemoteError> {
+pub(crate) fn encode_headers(call: &ProjectedHeader) -> Result<HeaderMap, RemoteError> {
     let mut headers = HeaderMap::new();
     for (name, value) in [
         (ENVELOPE, "1".to_owned()),
-        (
-            DESTINATION,
-            call.request.header.route().destination().to_owned(),
-        ),
-        (CONTRACT, call.request.header.route().version().to_string()),
+        (DESTINATION, call.header.route().destination().to_owned()),
+        (CONTRACT, call.header.route().version().to_string()),
         (NODE, call.target.node().to_owned()),
         (INCARNATION, call.target.incarnation().to_owned()),
-        (REQUEST_ID, call.request.header.request_id().to_owned()),
+        (REQUEST_ID, call.header.request_id().to_owned()),
         (EXPIRES, call.expires_unix_ms.to_string()),
     ] {
         if !value.is_ascii() {
@@ -114,7 +107,7 @@ pub(crate) fn encode_headers(call: &NodeCall) -> Result<HeaderMap, RemoteError> 
             HeaderValue::from_str(&value).map_err(|_| RemoteError::InvalidRequest)?,
         );
     }
-    if let Some(value) = call.request.header.correlation_id() {
+    if let Some(value) = call.header.correlation_id() {
         if !value.is_ascii() {
             return Err(RemoteError::InvalidRequest);
         }
@@ -163,7 +156,7 @@ struct Reply {
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Fault {
+pub(crate) enum Fault {
     InvalidRequest,
     InvalidResponse,
     Unauthenticated,
@@ -250,7 +243,10 @@ pub(crate) fn decode_call(
         expires_unix_ms: projected.expires_unix_ms,
     })
 }
-pub(crate) fn encode_reply(result: Result<NodeReply, RemoteError>) -> Result<Vec<u8>, RemoteError> {
+pub(crate) fn encode_reply_bounded(
+    result: Result<NodeReply, RemoteError>,
+    max_bytes: usize,
+) -> Result<Vec<u8>, RemoteError> {
     let result = match result {
         Ok(reply) => Outcome::Success(Success {
             node: reply.responder.node().into(),
@@ -264,11 +260,13 @@ pub(crate) fn encode_reply(result: Result<NodeReply, RemoteError>) -> Result<Vec
         }),
         Err(e) => Outcome::Error(e.into()),
     };
-    serde_json::to_vec(&Reply {
-        wire_version: 1,
-        result,
-    })
-    .map_err(|_| RemoteError::InvalidResponse)
+    to_json(
+        &Reply {
+            wire_version: 1,
+            result,
+        },
+        max_bytes,
+    )
 }
 pub(crate) fn decode_reply(bytes: &[u8], call: &NodeCall) -> Result<NodeReply, RemoteError> {
     let reply: Reply = serde_json::from_slice(bytes).map_err(|_| RemoteError::InvalidResponse)?;
@@ -304,4 +302,41 @@ pub(crate) fn decode_reply(bytes: &[u8], call: &NodeCall) -> Result<NodeReply, R
             payload: info,
         },
     })
+}
+
+/// Serialize into a private capped buffer. The cap covers emitted bytes, not all
+/// serializer internals or the caller-owned typed value.
+pub(crate) fn to_json<T: Serialize>(value: &T, limit: usize) -> Result<Vec<u8>, RemoteError> {
+    use std::io::{self, Write};
+    struct Bounded {
+        bytes: Vec<u8>,
+        limit: usize,
+        exceeded: bool,
+    }
+    impl Write for Bounded {
+        fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+            if input.len() > self.limit.saturating_sub(self.bytes.len()) {
+                self.exceeded = true;
+                return Err(io::Error::other("wire byte limit"));
+            }
+            self.bytes.extend_from_slice(input);
+            Ok(input.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = Bounded {
+        bytes: Vec::new(),
+        limit,
+        exceeded: false,
+    };
+    if serde_json::to_writer(&mut writer, value).is_err() {
+        return Err(if writer.exceeded {
+            RemoteError::Limit
+        } else {
+            RemoteError::InvalidResponse
+        });
+    }
+    Ok(writer.bytes)
 }

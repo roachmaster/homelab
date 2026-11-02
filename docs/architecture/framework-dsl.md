@@ -10,7 +10,7 @@ The [first Rust workspace](../../src/rust/README.md) exposes real `Envelope<P>`,
 
 The optional [`forge-kernel::disk`](../../src/rust/forge-kernel/README.md) module is now a real `IoClient`: typed requests execute native directory listing, cwd navigation and permission inspection. Its `DiskConfig`, factory and registrar remain implementation-owned. Core imports none of it. `forge-kernel` groups related hosted system clients, not every capability and not a bootable OS. The disk-enabled in-process consumer uses real temporary filesystem fixtures; earlier message examples remain fakes.
 
-The [local application](../../src/rust/forge-local/README.md) and [terminal adapter](../../src/rust/forge-terminal/README.md) now implement configured node information/status, admitted command discovery and optional disk sessions. Node observations are capability-owned typed inputs/results; `forge-local` owns their sum with disk commands. A successful binding adds its descriptor to the same application catalog; terminal help obtains it through `system.commands`, not a second hardcoded menu registry. The optional [local jobs module](../../src/rust/forge-local/JOBS.md) now implements a bounded pure counter with explicit stepping, typed registrar/factory/provider assembly, owner-scoped intent receipts and cooperative cancellation. It is not a Task supertrait or generic scheduler; local owner selection is not authentication. The [hosted-kernel plan](forge-kernel-plan.md) still defers durable jobs, broader identity/delegation and remote deployment. A narrow [typed node-info boundary](remote-node-info.md) now has an optional mutual-TLS HTTPS adapter and private wire codec, verified only as a loopback slice. The [source ledger](forge-kernel-sources.md) separates primary-source facts from these design choices.
+The [local application](../../src/rust/forge-local/README.md) and [terminal adapter](../../src/rust/forge-terminal/README.md) now implement configured node information/status, admitted command discovery and optional disk sessions. Node observations are capability-owned typed inputs/results; `forge-local` owns their sum with disk commands. A successful binding adds its descriptor to the same application catalog; terminal help obtains it through `system.commands`, not a second hardcoded menu registry. The optional [local jobs module](../../src/rust/forge-local/JOBS.md) now implements a bounded pure counter with explicit stepping, typed registrar/factory/provider assembly, owner-scoped intent receipts and cooperative cancellation. It is not a Task supertrait or generic scheduler; local owner selection is not authentication. The [hosted-kernel plan](forge-kernel-plan.md) still defers durable jobs, broader identity/delegation and remote deployment. The [configured remote agent](../../src/rust/forge-agent/README.md) now combines typed node-info and allowed-project IDE contracts with the optional mutual-TLS HTTPS gateway; two localhost processes are verified, not a physical deployment. The [source ledger](forge-kernel-sources.md) separates primary-source facts from these design choices.
 
 The optional [`forge-template`](../../src/rust/forge-template/README.md) now parses a
 **template language with method extensions**, not the composition DSL. Its schema-checked rendering
@@ -119,3 +119,14 @@ to a computational Rust parser. Its CLI uses a local typed enum, shared header
 bridge and `DescribeCommand`; YAML serializes the typed result only at the edge.
 Core contracts and Task are unchanged. Root opening is explicit startup I/O,
 walking/reading is admitted work, and a help invocation opens no root.
+
+### Configured agent checkpoint
+
+[`forge-agent`](../../src/rust/forge-agent/README.md) selects public node/project/HTTPS
+registrars, freezes one typed assembly, constructs singleton handles and binds an
+application-owned command sum. Runtime alias count is represented inside one
+`ProjectFactories` group, not a runtime-varying tuple type. Named-node config stays
+in composition; `RemoteInspectTask` consumes a typed target/alias. Its capability
+contract owns no HTTPS/YAML. The shared header-directed front door performs
+operation and project checks before inspection. This is implemented and tested
+on localhost; the original PDF is historical proposal, not deployment evidence.

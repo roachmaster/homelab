@@ -8,7 +8,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 - [16 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
 - [Framework blueprint and assembly model](docs/architecture/forge-framework-blueprint.md).
 - [C4 and supporting diagrams](docs/architecture/diagrams/README.md).
-- [Next milestone: two-machine Forge IDE proposal](docs/architecture/proposals/remote-ide.md) · [visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) · [five Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
+- [Remote Forge IDE: implementation and original proposal](docs/architecture/proposals/remote-ide.md) · [visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) · [five Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
 - [Detailed future jobs, access and remote interfaces](docs/architecture/foundation-interfaces.md) — proposed modules, typed contracts and ownership/state diagrams.
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 - [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): implemented local node/status and bounded jobs, plus a narrow authenticated network proof; remote deployment remains future.
@@ -46,8 +46,8 @@ The terminal discovers its selected registered commands and sends typed requests
 The optional [remote node-info slice](docs/architecture/remote-node-info.md) now
 sends typed `node.info` through one `/forge/v1/dispatch` HTTPS gateway, with routing
 metadata in HTTP headers, mutual TLS and separate destination
-operation authorization, then the existing shared bridge. It is a **loopback
-proof**, not a deployed remote agent. No file/job execution is exposed.
+operation authorization, then the existing shared bridge. The original example remains a **loopback proof**. The separately configured
+agent below adds read-only IDE inspection; no remote jobs or mutations are exposed.
 
 ```bash
 make remote   # ephemeral in-memory demo identities; one read, then exit
@@ -59,17 +59,29 @@ task and typed results remain replaceable; gRPC or Bitwave is not required.
 [Mermaid source](docs/architecture/diagrams/mermaid/m12-remote-node-info.mmd) ·
 [SVG](docs/architecture/diagrams/mermaid/images/m12-remote-node-info.svg).
 
-## Proposed next milestone: two-machine Forge IDE
+## Configured remote Forge IDE
 
-**Proposal only:** a configured agent and named-node client would reuse local IDE
-inspection through the same authenticated gateway, with server-owned project aliases
-rather than arbitrary remote paths. No remote IDE deployment is implemented yet.
+[`forge-agent`](src/rust/forge-agent/README.md) now assembles node information and
+read-only project inspection through the same mutual-TLS gateway. Select a named
+remote node and an authorized project alias, never a caller-supplied remote path.
+The task/report remain typed; YAML is the CLI output boundary.
 
-![Proposed two-machine Forge IDE context](docs/architecture/diagrams/mermaid/images/m13-remote-ide-context.svg)
+```bash
+make agent # help without credentials or network I/O
+make agent ARGS='serve --config /path/to/server.json'
+make agent ARGS='node.info --config /path/to/client.json --node lab'
+make agent ARGS='inspect --config /path/to/client.json --node lab --project workspace'
+```
 
-[Open the visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) ·
-[Read the proposal and acceptance gates](docs/architecture/proposals/remote-ide.md) ·
-[Browse all five diagrams and Mermaid sources](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
+![Implemented configured agent layout](docs/architecture/diagrams/mermaid/images/m18-agent-implementation.svg)
+
+[Configuration, security boundaries and limits](src/rust/forge-agent/README.md) ·
+[Original visual proposal PDF](docs/architecture/proposals/remote-ide-proposal.pdf) ·
+[Milestone status](docs/architecture/proposals/remote-ide.md) ·
+[Mermaid source](docs/architecture/diagrams/mermaid/m18-agent-implementation.mmd).
+Two real processes are tested on localhost with ephemeral credentials. A real
+cross-machine deployment and production credential lifecycle remain untested;
+no host configuration or deployment is performed by this repository.
 
 ## Optional template rendering
 

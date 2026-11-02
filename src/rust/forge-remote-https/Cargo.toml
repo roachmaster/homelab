@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+ide = ["dep:forge-ide"]
+
 [dependencies]
+forge-ide = { path = "../forge-ide", default-features = false, features = ["remote"], optional = true }
 forge-remote = { path = "../forge-remote" }
 forge-bootstrap.workspace = true
 forge-provider.workspace = true

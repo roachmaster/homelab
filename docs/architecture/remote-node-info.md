@@ -1,5 +1,12 @@
 # First remote boundary: authenticated node.info
 
+**Scope note:** this document records the original node-only boundary. The
+[configured agent](../../src/rust/forge-agent/README.md) now reuses it and adds
+optional allowed-project IDE inspection, persistent serving and named-node CLI
+configuration. The original `make remote` example and node public APIs remain
+compatible. Two-process localhost validation is not a deployed two-host system.
+
+
 **Implemented narrow slice:** typed node-info contracts and an optional HTTPS
 adapter, exercised over real loopback TCP. **Not implemented:** a network-reachable
 agent deployment, generic remote jobs, remote IDE/file access, credential operations,

@@ -76,3 +76,5 @@ capability-filesystem and optional YAML libraries remain inside this capability.
 ## Implemented remote node-info slice
 
 [Mermaid M12](mermaid/m12-remote-node-info.mmd) · [SVG](mermaid/images/m12-remote-node-info.svg) · [Design and limits](../remote-node-info.md). This is a mutual-TLS loopback proof, not a deployed agent or the full proposed remote execution model.
+
+- [Implemented configured remote IDE agent: M18](mermaid/README.md#m18--implemented-configured-remote-ide-agent) — actual localhost-tested composition and shared entry.

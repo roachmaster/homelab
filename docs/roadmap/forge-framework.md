@@ -9,9 +9,10 @@ now exercise one read-only node.info call over mutual TLS on loopback. Configure
 certificate mapping and independent operation policy precede the existing bridge;
 wire DTOs/runtime remain in the adapter. Public config/factory/registrar and a
 separate consumer establish reusable integration and dependency omission. No
-production daemon, remote jobs/files/IDE, credential deployment or Bitwave is
-included. Reachable deployment and broader operations remain separate security
-and lifecycle gates, not automatic next work.
+production deployment, remote jobs/mutations, credential provisioning or Bitwave
+is included. The configured agent checkpoint below now adds read-only IDE aliases,
+not arbitrary file access. Physical-host operation and broader capabilities remain
+separate security/lifecycle gates.
 
 ## Forge IDE initial capability — implemented
 
@@ -174,3 +175,14 @@ Do not create empty implementation trees to imply progress. Keep private raw evi
 ## Control growth before it starts
 
 Every proposed addition must name a real consumer, the responsibility it owns, the dependency cost it imposes, the smallest public contract, and the tests proving it can be removed or replaced. Prefer one coherent capability over a new catch-all package. Retire duplicate prototypes only after their useful behavior is captured and the replacement is demonstrated; review does not itself authorize deletion or migration.
+
+## Configured remote IDE checkpoint
+
+The reviewed two-machine proposal now has a runnable `forge-agent` implementation:
+public batch project registrar, named-node client config, one mTLS POST gateway,
+operation/project authorization, reused IDE task and typed bounded report to YAML.
+Actual tests run two localhost processes, including denied identity/alias, timeouts,
+limits and signal shutdown. [Current details](../../src/rust/forge-agent/README.md).
+The original proposal PDF remains a dated design record. The next operational
+validation is an explicitly authorized two-host trial and credential lifecycle
+review—not remote jobs, mutation or arbitrary filesystem paths by implication.

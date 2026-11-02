@@ -69,6 +69,12 @@ pub fn register_ide(
     id: impl Into<String>,
     config: IdeConfig,
 ) -> Result<PreparedGroup<InspectFactory>, AssemblyError> {
+    let factory = configured_factory(config)?;
+    let id = id.into();
+    PreparedGroup::new(id.clone(), &[&id], &[], factory).map_err(AssemblyError::Registration)
+}
+
+fn configured_factory(config: IdeConfig) -> Result<InspectFactory, AssemblyError> {
     let IdeConfig::Native {
         root,
         limits,
@@ -86,16 +92,83 @@ pub fn register_ide(
     // Validate the same task policy without constructing a filesystem client.
     InspectTask::new((), limits.clone(), excluded_names.clone())
         .map_err(AssemblyError::Configuration)?;
+    Ok(InspectFactory {
+        root,
+        limits,
+        excluded_names,
+    })
+}
+
+/// Logical catalog key, never a path or an authenticated identity.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ProjectAlias(String);
+impl ProjectAlias {
+    pub fn new(value: impl Into<String>) -> Result<Self, AssemblyError> {
+        let value = value.into();
+        if value.is_empty()
+            || value.len() > 128
+            || value == "."
+            || value == ".."
+            || !value
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        {
+            return Err(AssemblyError::Configuration(InspectError::Configuration(
+                "project alias must be a bounded logical token, not a path",
+            )));
+        }
+        Ok(Self(value))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl fmt::Display for ProjectAlias {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A runtime-length homogeneous collection staged as one cohesive catalog group.
+/// The host constructs each factory only after outer registration is frozen.
+#[derive(Clone, Debug)]
+pub struct ProjectFactories {
+    factories: Vec<(ProjectAlias, InspectFactory)>,
+}
+impl ProjectFactories {
+    pub fn factories(&self) -> &[(ProjectAlias, InspectFactory)] {
+        &self.factories
+    }
+    pub fn into_factories(self) -> Vec<(ProjectAlias, InspectFactory)> {
+        self.factories
+    }
+}
+
+/// Validate a whole project catalog before returning its factory group. Empty
+/// catalogs are supported (node-only host); at most 128 distinct aliases. The
+/// group provides its catalog binding id, not dynamically looked-up DI services.
+/// Neither configuration validation nor registration opens a root. If a later
+/// create fails, the host must drop created instances and publish no partial host.
+pub fn register_projects(
+    id: impl Into<String>,
+    configs: Vec<(ProjectAlias, IdeConfig)>,
+) -> Result<PreparedGroup<ProjectFactories>, AssemblyError> {
+    if configs.len() > 128 {
+        return Err(AssemblyError::Configuration(InspectError::Configuration(
+            "project catalog supports at most 128 aliases",
+        )));
+    }
+    let mut factories = Vec::with_capacity(configs.len());
+    let mut aliases = std::collections::BTreeSet::new();
+    for (alias, config) in configs {
+        if !aliases.insert(alias.clone()) {
+            return Err(AssemblyError::Configuration(InspectError::Configuration(
+                "duplicate project alias",
+            )));
+        }
+        factories.push((alias, configured_factory(config)?));
+    }
     let id = id.into();
-    PreparedGroup::new(
-        id.clone(),
-        &[&id],
-        &[],
-        InspectFactory {
-            root,
-            limits,
-            excluded_names,
-        },
-    )
-    .map_err(AssemblyError::Registration)
+    PreparedGroup::new(id.clone(), &[&id], &[], ProjectFactories { factories })
+        .map_err(AssemblyError::Registration)
 }

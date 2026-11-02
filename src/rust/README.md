@@ -1,6 +1,6 @@
 # Rust source sets — first Forge core
 
-This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one optional template renderer, one optional IDE inspector, a typed remote conversation plus optional HTTPS adapter, a local application/terminal pair and three
+This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one optional template renderer, one optional IDE inspector, a typed remote conversation plus optional HTTPS adapter, a local application/terminal pair, a configured remote agent and three
 clearly separated demo packages**, with original synchronous application contracts. The optional HTTPS adapter privately owns its I/O runtime. The core remains std-only; IDE parser/filesystem/YAML dependencies stay optional to consumers. Typed registration/freeze and
 optional-package assembly, local node observations, admitted command discovery, explicitly stepped local counter jobs and native disk inspection/navigation now work; the broader managed framework/durable reference
 application remains a target, not a completed product.
@@ -50,7 +50,18 @@ DTOs and a per-owner runtime. Public config/registrars stage its factories befor
 freeze and explicit construction. `make remote` runs one actual loopback call using
 ephemeral in-memory demo credentials and exits. It accepts no endpoint/credential
 ARGS; this is not a deployed agent or a remote filesystem/jobs API. Existing local,
-template and IDE consumers omit both packages. The core is still std-only.
+template and default IDE consumers omit both packages. The core is still std-only.
+
+## Configured agent application
+
+[`forge-agent`](forge-agent/README.md) selects the node and IDE capabilities plus
+an opt-in HTTPS IDE codec. `make agent` shows help; `serve --config FILE` constructs
+an admitted node/project service, while `node.info` and `inspect` select a named
+remote node. Public batch project registration stages one homogeneous factory group;
+no runtime-length typed tuple or reverse capability-to-host dependency is needed.
+Default IDE and HTTPS consumers still omit the new optional conversation/codec.
+Actual two-process localhost tests cover identities, alias permission, limits and
+shutdown. No two-physical-machine validation or credential provisioning is claimed.
 
 ## Optional template renderer
 

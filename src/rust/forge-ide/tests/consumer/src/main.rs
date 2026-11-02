@@ -93,3 +93,83 @@ mod tests {
         assert!(register_ide("parent", IdeConfig::project(t.0.join(".."))).is_err());
     }
 }
+
+#[cfg(all(test, feature = "remote-inspection"))]
+mod remote_tests {
+    use forge_bootstrap::Registry;
+    use forge_ide::{
+        assembly::{register_projects, IdeConfig, ProjectAlias},
+        remote::{
+            InspectCall, InspectReply, RemoteInspectError, RemoteInspectInput, RemoteInspectTask,
+            ReportLimits,
+        },
+        task::InspectRequest,
+    };
+    use forge_ingress_contract::Response;
+    use forge_io_client::IoClient;
+    use forge_provider::{Factory, InstanceProvider, Singleton};
+    use forge_remote::Target;
+    use forge_task::Task;
+
+    struct InProcess(forge_ide::model::ProjectReport);
+    impl IoClient for InProcess {
+        type Request = InspectCall;
+        type Response = InspectReply;
+        type Error = RemoteInspectError;
+        fn execute(&self, call: InspectCall) -> Result<InspectReply, RemoteInspectError> {
+            Ok(InspectReply {
+                responder: call.target,
+                response: Response {
+                    header: (&call.request.header).into(),
+                    payload: self.0.clone(),
+                },
+            })
+        }
+    }
+
+    #[test]
+    fn public_batch_and_remote_contract_work_without_transport_or_yaml() {
+        let root =
+            std::env::temp_dir().join(format!("forge-ide-batch-consumer-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        {
+            let alias = ProjectAlias::new("workspace").unwrap();
+            let group = register_projects(
+                "consumer.projects",
+                vec![(alias.clone(), IdeConfig::project(root.clone()))],
+            )
+            .unwrap();
+            let ((), projects) = Registry::new()
+                .register(group)
+                .unwrap()
+                .freeze()
+                .unwrap()
+                .into_factories();
+            let provider = Singleton::new(projects.factories()[0].1.create().unwrap());
+            let report = provider
+                .acquire()
+                .unwrap()
+                .run(InspectRequest::Project)
+                .unwrap();
+            let task =
+                RemoteInspectTask::new(InProcess(report.clone()), ReportLimits::default()).unwrap();
+            let output = task
+                .run(RemoteInspectInput {
+                    target: Target::new("test", "incarnation").unwrap(),
+                    project: alias,
+                    request_id: "consumer-1".into(),
+                    correlation_id: None,
+                    expires_unix_ms: 1234,
+                })
+                .unwrap();
+            assert_eq!(output.response.payload, report);
+        }
+    }
+}

@@ -6,9 +6,14 @@ publish = false
 [workspace]
 [features]
 default = []
+remote-inspection = ["inspection", "forge-ide/remote", "dep:forge-io-client", "dep:forge-ingress-contract", "dep:forge-remote"]
 inspection = ["dep:forge-ide", "dep:forge-bootstrap", "dep:forge-provider", "dep:forge-task"]
 [dependencies]
 forge-ide = { path = "../..", optional = true }
 forge-bootstrap = { path = "../../../forge-bootstrap", optional = true }
 forge-provider = { path = "../../../forge-provider", optional = true }
 forge-task = { path = "../../../forge-task", optional = true }
+
+forge-io-client = { path = "../../../forge-io-client", optional = true }
+forge-ingress-contract = { path = "../../../forge-ingress-contract", optional = true }
+forge-remote = { path = "../../../forge-remote", optional = true }

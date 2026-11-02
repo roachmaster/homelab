@@ -7,9 +7,10 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-agent": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-command","forge-kernel","forge-ide","forge-remote","forge-remote-https")},
     "forge-remote": {(name, "normal") for name in ("forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task")},
-    "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-bootstrap", "forge-provider", "forge-io-client", "forge-ingress-contract")} | {(name, "dev") for name in ("forge-kernel", "forge-task")},
-    "forge-ide": {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-io-client", "forge-bridge", "forge-command", "forge-ingress-contract")},
+    "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-bootstrap", "forge-provider", "forge-io-client", "forge-ingress-contract", "forge-ide")} | {(name, "dev") for name in ("forge-kernel", "forge-task")},
+    "forge-ide": {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-io-client", "forge-bridge", "forge-command", "forge-ingress-contract", "forge-remote")},
     "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bridge", "forge-ingress-contract")} |
                       {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client")},
     "forge-command": set(),
@@ -34,8 +35,8 @@ ALLOWED = {
                              ("forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract",
                               "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
-EXTERNAL_DEV = {"forge-remote-https": {"rcgen"}}
-EXTERNAL = {"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
+EXTERNAL_DEV = {"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
+EXTERNAL = {"forge-agent": {"serde", "serde_json", "ctrlc"},"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
 
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
 PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}
@@ -79,10 +80,15 @@ def validate_packages(packages):
             edges[name].add(target)
     ide = packages["forge-ide"]
     if ide["features"].get("default", []) != []:
-        raise SystemExit("IDE YAML/CLI must remain opt-in")
+        raise SystemExit("IDE YAML/CLI/remote must remain opt-in")
     for dep in ide["dependencies"]:
-        if dep["name"] in {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract"} and not dep["optional"]:
+        if dep["name"] in {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract", "forge-remote"} and not dep["optional"]:
             raise SystemExit("IDE presentation dependencies must remain optional")
+    https = packages["forge-remote-https"]
+    if https["features"].get("default", []) != []:
+        raise SystemExit("HTTPS IDE codec must remain opt-in")
+    if not next(d for d in https["dependencies"] if d["name"] == "forge-ide")["optional"]:
+        raise SystemExit("HTTPS default must not require IDE")
     ide_bins = [t for t in ide["targets"] if "bin" in t["kind"]]
     if len(ide_bins) != 1 or ide_bins[0].get("required-features") != ["cli"]:
         raise SystemExit("IDE binary must require cli")
@@ -159,13 +165,20 @@ def negative_fixtures(packages):
         bad = copy.deepcopy(packages)
         bad[source]["dependencies"].append({"name": target, "kind": None, "source": "registry+https://github.com/rust-lang/crates.io-index", "optional": False})
         fixtures.append((f"network/codec leakage into {source}", bad))
+    for package, dependency in [("forge-ide", "forge-remote"), ("forge-remote-https", "forge-ide")]:
+        bad = copy.deepcopy(packages)
+        next(d for d in bad[package]["dependencies"] if d["name"] == dependency)["optional"] = False
+        fixtures.append(("mandatory optional capability edge", bad))
+    bad = copy.deepcopy(packages)
+    bad["forge-ide"]["dependencies"].append({"name":"forge-agent","kind":None,"path":str(ROOT/"forge-agent"),"optional":True})
+    fixtures.append(("capability-to-host cycle",bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
         except SystemExit:
             continue
         raise SystemExit(f"Negative fixture unexpectedly accepted: {label}")
-    print("PASS: fourteen in-memory negative architecture fixtures rejected")
+    print("PASS: seventeen in-memory negative architecture fixtures rejected")
 
 
 def main():
@@ -202,9 +215,14 @@ def main():
     if remote != {"forge-remote", "forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task"}:
         raise SystemExit("Remote conversation port includes a transport/codec or implementation")
     https = consumer_tree(package="forge-remote-https")
-    if not {"rustls", "hyper", "tokio", "serde_json"} <= https or "rcgen" in https or "forge-kernel" in https:
+    if not {"rustls", "hyper", "tokio", "serde_json"} <= https or "rcgen" in https or {"forge-kernel", "forge-ide", "forge-agent"} & https:
         raise SystemExit("HTTPS normal profile must own TLS/HTTP only; demo identity issuance/kernel stay dev-only")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide", "forge-remote", "forge-remote-https"})
+    ide_remote = consumer_tree("--features", "remote", package="forge-ide")
+    if not {"forge-remote", "forge-ingress-contract"} <= ide_remote or {"serde_json", "rustls", "hyper", "forge-agent", "serde_yaml_ng"} & ide_remote:
+        raise SystemExit("IDE remote contract must remain transport and presentation free")
+    if not {"forge-ide", "forge-remote-https", "ctrlc"} <= consumer_tree(package="forge-agent"):
+        raise SystemExit("Agent must explicitly select its capabilities")
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")

@@ -71,19 +71,32 @@ name = "forge-bootstrap"
 version = "0.1.0"
 
 [[package]]
+name = "forge-bridge"
+version = "0.1.0"
+dependencies = [
+ "forge-ingress-contract",
+]
+
+[[package]]
 name = "forge-ide"
 version = "0.1.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
  "forge-bootstrap",
+ "forge-ingress-contract",
  "forge-io-client",
  "forge-provider",
+ "forge-remote",
  "forge-task",
  "proc-macro2",
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "forge-ingress-contract"
+version = "0.1.0"
 
 [[package]]
 name = "forge-io-client"
@@ -92,6 +105,16 @@ version = "0.1.0"
 [[package]]
 name = "forge-provider"
 version = "0.1.0"
+
+[[package]]
+name = "forge-remote"
+version = "0.1.0"
+dependencies = [
+ "forge-bridge",
+ "forge-ingress-contract",
+ "forge-io-client",
+ "forge-task",
+]
 
 [[package]]
 name = "forge-task"
@@ -114,7 +137,10 @@ version = "0.0.0"
 dependencies = [
  "forge-bootstrap",
  "forge-ide",
+ "forge-ingress-contract",
+ "forge-io-client",
  "forge-provider",
+ "forge-remote",
  "forge-task",
 ]
 

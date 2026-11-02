@@ -155,24 +155,7 @@ pub fn register_client(
     id: impl Into<String>,
     config: ClientConfig,
 ) -> Result<PreparedGroup<ClientFactory>, AssemblyError> {
-    let ClientConfig::MutualTls {
-        address,
-        server_name,
-        roots,
-        credentials,
-        limits,
-        ..
-    } = &config;
-    limits.validate()?;
-    if address.port() == 0
-        || server_name.is_empty()
-        || server_name.len() > 253
-        || ServerName::try_from(server_name.clone()).is_err()
-        || !bounded_certificates(roots)
-        || !validate_credentials(credentials)
-    {
-        return Err(AssemblyError::Configuration);
-    }
+    validate_client_config(&config)?;
     let id = id.into();
     PreparedGroup::new(id.clone(), &[&id], &[], ClientFactory { config })
         .map_err(AssemblyError::Registration)
@@ -189,7 +172,107 @@ pub fn register_server(
         limits,
     } = &config;
     limits.validate()?;
-    if !address.ip().is_loopback()
+    validate_server_shape(*address, false, client_roots, credentials, identities)?;
+    let id = id.into();
+    PreparedGroup::new(id.clone(), &[&id], &[], ServerFactory { config })
+        .map_err(AssemblyError::Registration)
+}
+impl Factory<HttpsClient> for ClientFactory {
+    type Error = AssemblyError;
+    fn create(&self) -> Result<HttpsClient, AssemblyError> {
+        create_client(&self.config)
+    }
+}
+pub(crate) fn create_client(config: &ClientConfig) -> Result<HttpsClient, AssemblyError> {
+    let ClientConfig::MutualTls {
+        address,
+        server_name,
+        target,
+        roots: certificates,
+        credentials,
+        limits,
+    } = config;
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let (chain, key) = identity(credentials);
+    let mut tls = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|_| AssemblyError::Tls)?
+        .with_root_certificates(roots(certificates)?)
+        .with_client_auth_cert(chain, key)
+        .map_err(|_| AssemblyError::Tls)?;
+    tls.alpn_protocols = vec![b"http/1.1".to_vec()];
+    tls.resumption = rustls::client::Resumption::disabled();
+    tls.enable_early_data = false;
+    Ok(HttpsClient::new(
+        *address,
+        ServerName::try_from(server_name.clone()).map_err(|_| AssemblyError::Configuration)?,
+        target.clone(),
+        Arc::new(tls),
+        *limits,
+        runtime()?,
+    ))
+}
+impl Factory<HttpsServer> for ServerFactory {
+    type Error = AssemblyError;
+    fn create(&self) -> Result<HttpsServer, AssemblyError> {
+        let ServerConfig::LoopbackMutualTls {
+            address,
+            client_roots,
+            credentials,
+            identities,
+            limits,
+        } = &self.config;
+        create_server(*address, client_roots, credentials, identities, *limits)
+    }
+}
+pub(crate) fn create_server(
+    address: SocketAddr,
+    client_roots: &[Vec<u8>],
+    credentials: &Credentials,
+    identities: &[CertificateIdentity],
+    limits: Limits,
+) -> Result<HttpsServer, AssemblyError> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+        Arc::new(roots(client_roots)?),
+        Arc::clone(&provider),
+    )
+    .build()
+    .map_err(|_| AssemblyError::Tls)?;
+    let (chain, key) = identity(credentials);
+    let mut tls = rustls::ServerConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|_| AssemblyError::Tls)?
+        .with_client_cert_verifier(verifier)
+        .with_single_cert(chain, key)
+        .map_err(|_| AssemblyError::Tls)?;
+    tls.alpn_protocols = vec![b"http/1.1".to_vec()];
+    tls.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
+    tls.send_tls13_tickets = 0;
+    tls.max_early_data_size = 0;
+    let runtime = runtime()?;
+    let listener =
+        std::net::TcpListener::bind(address).map_err(|e| AssemblyError::Bind(e.kind()))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| AssemblyError::Bind(e.kind()))?;
+    Ok(HttpsServer::new(
+        listener,
+        Arc::new(tls),
+        identities.to_vec(),
+        limits,
+        runtime,
+    ))
+}
+
+pub(crate) fn validate_server_shape(
+    address: SocketAddr,
+    allow_non_loopback: bool,
+    client_roots: &[Vec<u8>],
+    credentials: &Credentials,
+    identities: &[CertificateIdentity],
+) -> Result<(), AssemblyError> {
+    if (!allow_non_loopback && !address.ip().is_loopback())
         || !bounded_certificates(client_roots)
         || !validate_credentials(credentials)
         || identities.is_empty()
@@ -208,82 +291,27 @@ pub fn register_server(
             return Err(AssemblyError::Configuration);
         }
     }
-    let id = id.into();
-    PreparedGroup::new(id.clone(), &[&id], &[], ServerFactory { config })
-        .map_err(AssemblyError::Registration)
+    Ok(())
 }
-impl Factory<HttpsClient> for ClientFactory {
-    type Error = AssemblyError;
-    fn create(&self) -> Result<HttpsClient, AssemblyError> {
-        let ClientConfig::MutualTls {
-            address,
-            server_name,
-            target,
-            roots: certificates,
-            credentials,
-            limits,
-        } = &self.config;
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let (chain, key) = identity(credentials);
-        let mut tls = rustls::ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .map_err(|_| AssemblyError::Tls)?
-            .with_root_certificates(roots(certificates)?)
-            .with_client_auth_cert(chain, key)
-            .map_err(|_| AssemblyError::Tls)?;
-        tls.alpn_protocols = vec![b"http/1.1".to_vec()];
-        tls.resumption = rustls::client::Resumption::disabled();
-        tls.enable_early_data = false;
-        Ok(HttpsClient::new(
-            *address,
-            ServerName::try_from(server_name.clone()).map_err(|_| AssemblyError::Configuration)?,
-            target.clone(),
-            Arc::new(tls),
-            *limits,
-            runtime()?,
-        ))
+
+pub(crate) fn validate_client_config(config: &ClientConfig) -> Result<(), AssemblyError> {
+    let ClientConfig::MutualTls {
+        address,
+        server_name,
+        roots,
+        credentials,
+        limits,
+        ..
+    } = config;
+    limits.validate()?;
+    if address.port() == 0
+        || server_name.is_empty()
+        || server_name.len() > 253
+        || ServerName::try_from(server_name.clone()).is_err()
+        || !bounded_certificates(roots)
+        || !validate_credentials(credentials)
+    {
+        return Err(AssemblyError::Configuration);
     }
-}
-impl Factory<HttpsServer> for ServerFactory {
-    type Error = AssemblyError;
-    fn create(&self) -> Result<HttpsServer, AssemblyError> {
-        let ServerConfig::LoopbackMutualTls {
-            address,
-            client_roots,
-            credentials,
-            identities,
-            limits,
-        } = &self.config;
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
-            Arc::new(roots(client_roots)?),
-            Arc::clone(&provider),
-        )
-        .build()
-        .map_err(|_| AssemblyError::Tls)?;
-        let (chain, key) = identity(credentials);
-        let mut tls = rustls::ServerConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .map_err(|_| AssemblyError::Tls)?
-            .with_client_cert_verifier(verifier)
-            .with_single_cert(chain, key)
-            .map_err(|_| AssemblyError::Tls)?;
-        tls.alpn_protocols = vec![b"http/1.1".to_vec()];
-        tls.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
-        tls.send_tls13_tickets = 0;
-        tls.max_early_data_size = 0;
-        let runtime = runtime()?;
-        let listener =
-            std::net::TcpListener::bind(address).map_err(|e| AssemblyError::Bind(e.kind()))?;
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| AssemblyError::Bind(e.kind()))?;
-        Ok(HttpsServer::new(
-            listener,
-            Arc::new(tls),
-            identities.clone(),
-            *limits,
-            runtime,
-        ))
-    }
+    Ok(())
 }

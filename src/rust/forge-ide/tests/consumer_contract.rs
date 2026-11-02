@@ -36,6 +36,16 @@ fn external_consumer_imports_ide_and_omits_parser_when_unselected() {
         tests.push("--release");
     }
     cargo(&tests);
+    let mut remote_tests = vec![
+        "test",
+        "--no-default-features",
+        "--features",
+        "remote-inspection",
+    ];
+    if !cfg!(debug_assertions) {
+        remote_tests.push("--release");
+    }
+    cargo(&remote_tests);
     let base = [
         "tree",
         "--edges",
@@ -58,4 +68,18 @@ fn external_consumer_imports_ide_and_omits_parser_when_unselected() {
     assert!(selected_names.contains("syn"));
     assert!(!selected_names.contains("serde_yaml_ng"));
     assert!(!selected_names.contains("forge-bridge"));
+    let mut remote = base.to_vec();
+    remote.extend(["--features", "remote-inspection"]);
+    let remote_output = cargo(&remote);
+    let remote_names = names(&remote_output);
+    assert!(remote_names.contains("forge-remote"));
+    for absent in [
+        "forge-remote-https",
+        "hyper",
+        "rustls",
+        "serde_yaml_ng",
+        "serde_json",
+    ] {
+        assert!(!remote_names.contains(absent), "{absent}");
+    }
 }

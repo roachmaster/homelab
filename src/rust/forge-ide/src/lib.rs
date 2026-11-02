@@ -9,3 +9,6 @@ pub mod syntax;
 pub mod task;
 #[cfg(feature = "yaml")]
 pub mod yaml;
+
+#[cfg(feature = "remote")]
+pub mod remote;

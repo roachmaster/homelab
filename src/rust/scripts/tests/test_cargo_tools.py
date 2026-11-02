@@ -63,6 +63,14 @@ class CargoToolsTests(unittest.TestCase):
         self.assertEqual(command[-3:], ["--", "inspect", "a; $(literal)"])
         self.assertEqual(command[command.index("--features") + 1], "cli")
 
+    def test_agent_keeps_named_config_as_literal_argument(self):
+        with patch.dict(os.environ, {"ARGS": 'inspect --config "a; $(literal)" --node lab --project src'}, clear=True):
+            with patch.object(TOOLS, "execute") as execute:
+                TOOLS.agent()
+        command = execute.call_args.args[0]
+        self.assertEqual(command[-7:], ["inspect", "--config", "a; $(literal)", "--node", "lab", "--project", "src"])
+        self.assertIn("forge-agent", command)
+
     def test_remote_selects_only_fixed_loopback_example(self):
         with patch.dict(os.environ, {"ARGS": "--endpoint unsafe", "PACKAGE": "ignored", "FEATURES": "ignored"}, clear=True):
             with patch.object(TOOLS, "execute") as execute:

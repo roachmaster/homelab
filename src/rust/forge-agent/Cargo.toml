@@ -1,0 +1,31 @@
+[package]
+name = "forge-agent"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+forge-bootstrap.workspace = true
+forge-provider.workspace = true
+forge-task.workspace = true
+forge-io-client.workspace = true
+forge-ingress-contract.workspace = true
+forge-bridge.workspace = true
+forge-command.workspace = true
+forge-kernel = { path = "../forge-kernel", default-features = false, features = ["node"] }
+forge-ide = { path = "../forge-ide", default-features = false, features = ["remote", "yaml"] }
+forge-remote = { path = "../forge-remote" }
+forge-remote-https = { path = "../forge-remote-https", features = ["ide"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ctrlc = { version = "=3.5.2", features = ["termination"] }
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.31", features = ["signal", "process"] }
+
+[lints]
+workspace = true

@@ -1,9 +1,12 @@
-# Optional HTTPS node-info adapter
+# Optional HTTPS command gateway
 
-**Implemented local demonstration, not a deployed remote-management daemon.**
-One unary read-only operation crosses real TCP, mutual TLS and HTTP/1.1, then the
-same typed Forge bridge. No disk, IDE, job, process or mutation operation is
-exposed. The server intentionally binds **loopback only** in this first slice.
+**Implemented transport library, not a deployed remote-management service.**
+The default profile retains the original unary `node.info` client/server. The
+opt-in `ide` feature adds a typed `ide.inspect` client and private report codec;
+[forge-agent](../forge-agent/README.md) composes these capabilities behind one
+bridge and application policy. No job, process or filesystem-mutation operation
+is exposed. The original `ServerConfig` remains loopback-only; the new gateway
+config requires an explicit opt-in before binding a non-loopback address.
 
 ```bash
 # repository root; fetch locked dependencies once
@@ -35,7 +38,7 @@ The library exports `ClientConfig::MutualTls`, `ServerConfig::LoopbackMutualTls`
 3. Consuming registration rejects conflicts without overwriting the original;
    freeze validates declared assembly metadata before construction.
 4. `Factory::create` validates TLS material and creates one private current-thread
-   runtime. The server factory then binds its configured loopback socket; the
+   runtime. The server factory then binds its configured socket; the
    client factory does **not** connect. Construction failure publishes no endpoint.
 5. The host selects `Singleton` or `Transient` and injects the client into its
    task. A transient client gets a new owner/runtime on acquisition; a transient
@@ -44,7 +47,9 @@ The library exports `ClientConfig::MutualTls`, `ServerConfig::LoopbackMutualTls`
 
 A separate Cargo consumer under `tests/consumer` imports these public exports;
 its disabled feature omits the entire transport dependency tree. Existing local,
-IDE and template consumer profiles also omit this package. TLS/HTTP/serde/Tokio
+IDE and template local consumer profiles also omit this package. The default HTTPS
+profile omits `forge-ide`; enabling `ide` adds only its remote capability profile,
+not its CLI/YAML output or the agent application. TLS/HTTP/serde/Tokio
 are normal dependencies **only of this selected adapter**. `rcgen`, the concrete
 kernel and example task wiring are dev dependencies, not provisioning code shipped
 as part of its normal library tree. JSON DTOs are private; typed enums/results
@@ -88,7 +93,7 @@ opening a client connection rather than inventing an encoding.
 | Header | Meaning / bound |
 | --- | --- |
 | `Forge-Envelope-Version` | Canonical unsigned decimal `1`, matching `/forge/v1/dispatch` |
-| `Forge-Destination` | Canonical Header destination, currently registered `node.info`; 1–256 bytes |
+| `Forge-Destination` | Canonical Header destination, `node.info`, or opt-in `ide.inspect`; 1–256 bytes |
 | `Forge-Contract-Version` | Nonzero canonical unsigned decimal u16, currently registered `1` |
 | `Forge-Target-Node` | Configured logical target; 1–128 ASCII token bytes |
 | `Forge-Target-Incarnation` | Expected host incarnation; same token bound |
@@ -96,7 +101,7 @@ opening a client connection rather than inventing an encoding.
 | `Forge-Correlation-Id` (optional) | Original correlation ID; same bound |
 | `Forge-Expires-Unix-Ms` | Original absolute expiry; canonical unsigned decimal u64, at most 20 digits |
 
-The `application/json` body is only `{"payload":"info"}`. It cannot provide or
+The node `application/json` body is only `{"payload":"info"}`. It cannot provide or
 override destination, target, version, deadline, request IDs or identity. Strict
 body decoding rejects unknown fields and payload variants. The adapter projects
 headers into the existing typed Header/NodeCall; the destination bridge remains
@@ -148,6 +153,79 @@ uses nonblocking runtime shutdown (no adapter-spawned work); it does not interru
 an already-blocked trusted callback.
 
 See [design, limits and primary API sources](../../../docs/architecture/remote-node-info.md)
-and the [transport-neutral conversation](../forge-remote/README.md). A network
-reachable deployment, stronger lifecycle management and any further operation
-require their own explicit security/operational design.
+and the [transport-neutral conversation](../forge-remote/README.md). The new gateway supports deliberate network binding, but deployment, certificate
+operations and production hardening still require explicit operational design.
+Only local-loopback tests are claimed, not two physical machines.
+
+## Reusable agent gateway and IDE integration
+
+`gateway::{GatewayServerConfig, GatewayLimits, register_gateway_server,
+GatewayServerFactory, GatewayServer}` follows the same stage → freeze → create →
+provider lifecycle. Registration does not parse credentials, bind or dispatch.
+A duplicate group is rejected without replacing the original. Existing public
+`ServerConfig`/`ClientConfig`, `register_server`/`register_client` and `serve_one`
+remain compatible, rather than extending an exhaustive config enum silently.
+
+`GatewayCodec` is a static generic port with associated `Request`/`Response` types,
+not a dynamic service locator or framework-global business enum. The application
+supplies its own finite sum and composes `NodeCodec` plus `ide::IdeCodec`. Codec
+selection uses the already validated header destination/version. The adapter
+accepts the same single `POST /forge/v1/dispatch`; it does not add `/ide` or
+project-specific endpoints. Node clients also work through this generic gateway.
+
+After mTLS leaf mapping, `serve_next(&codec, dispatch)` passes a **privately
+constructed** `VerifiedContext` exposing only `subject()` and `deadline()`.
+Applications still must check target/incarnation, authorize operation **and project**,
+and use their shared typed bridge before reading a project. Possession of a mapped
+peer certificate does not itself grant project access. A codec/dispatcher is
+trusted host code; the generic API cannot stop a malicious implementation from
+ignoring these obligations, fabricating data, allocating, blocking or panicking.
+No headers or body fields can manufacture a `VerifiedContext`.
+
+The IDE request body is `{"payload":{"kind":"project","alias":"demo"}}`.
+It carries a validated `ProjectAlias`, not a filesystem path, and cannot override
+header fields. The agent maps an allowlisted alias to a preconfigured inspection
+handle. `ide::{IdeClientConfig, register_ide_client, IdeClientFactory,
+HttpsIdeClient}` supplies a reusable provider-ready client implementing the typed
+`RemoteIdeClient` contract through its `IoClient` associated types. Reports remain
+`forge_ide::model::ProjectReport`; private strict DTOs preserve native name encodings,
+hierarchical declarations/members/spans/counts and incomplete/error entries.
+
+Responses are collected and serialized with explicit byte limits, then validated
+against `ReportLimits`, exact responder/header/request/correlation metadata and
+the original deadline **after decoding and structural validation**. Unknown fields,
+unknown enum cases, invalid counts/hierarchy, and oversized responses fail closed.
+Serialization limits are checked as bytes are written; no partial report is exposed
+as success. JSON deserialization also retains serde_json's recursion limit. An independent,
+string-aware `MAX_JSON_NESTING=96` container cap applies before decoding and before
+returning encoded success. Combined tree/syntax nesting can exceed that wire cap
+even when each domain-depth bound is valid; this returns `Limit`, not an
+unreadable successful response. This
+is bounded protocol validation, not a guarantee of truthful source or a whole-process
+memory/CPU quota: typed tree construction/conversion has overhead, and trusted
+synchronous syntax parsing cannot be preempted. Reports can reveal native names,
+type spelling and diagnostics; there is no secret-redaction guarantee.
+
+`GatewayLimits` separates request bytes (default 4KiB; 256..64KiB) from response
+bytes (default 4MiB; 256 bytes..16MiB), connection timeout (>0..30s, default 5s) and
+idle accept polling (>0..1s, default 100ms). `IdeClientConfig` separately caps received
+response bytes with the same 16MiB ceiling. `IdeCodec` rejects request input above 64KiB
+and reply input above 16MiB even when called directly. A lower application's budget
+may reject a report the producer otherwise considers valid.
+
+`ServeOutcome::Idle` means no connection arrived during `accept_poll`;
+`Handled` means one connection/request completed (including typed rejection).
+An error terminates that connection, not a hidden accept/retry loop. The host owns
+its bounded serving loop and stop policy. Accept polling does **not** preempt an
+active callback; shutdown needs admission rechecks before effects and waits for
+bounded in-flight work, or a host failure policy. One current-thread runtime and
+one connection are used at a time: no per-request runtime/thread spawning and no
+new `Send`/`Sync` requirement for core bridges. Runtime construction/use stay on a
+synchronous owner; ambient Tokio calls fail. Idle Drop closes the socket and uses
+nonblocking runtime shutdown, not forced callback cancellation.
+
+Tests include the external consumer's `https` / `ide` / omitted profiles,
+original node endpoint regressions, real ephemeral-mTLS IDE round trips, policy
+rejection, response caps, expiry/uncertain results, strict codec negatives, idle
+polling and listener cleanup. Test keys exist only transiently; the normal library
+never generates credentials or modifies trust stores.

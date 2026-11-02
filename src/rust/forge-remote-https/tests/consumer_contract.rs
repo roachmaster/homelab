@@ -50,4 +50,29 @@ fn public_consumer_can_select_or_omit_https_without_importing_examples() {
     assert!(selected.contains("forge-remote-https "));
     assert!(selected.contains("rustls "));
     assert!(!selected.contains("forge-kernel "));
+    assert!(!selected.contains("forge-ide "));
+    // serde derive itself uses syn; absence of the IDE capability is the boundary proof.
+}
+
+#[test]
+fn public_consumer_selects_ide_gateway_and_client_explicitly() {
+    let mut args = vec!["test", "--features", "ide"];
+    if !cfg!(debug_assertions) {
+        args.push("--release");
+    }
+    cargo(&args);
+    let selected = cargo(&[
+        "tree",
+        "--edges",
+        "normal",
+        "--prefix",
+        "none",
+        "--format",
+        "{p}",
+        "--features",
+        "ide",
+    ]);
+    assert!(selected.contains("forge-ide "));
+    assert!(!selected.contains("forge-agent "));
+    assert!(!selected.contains("serde_yaml "));
 }
