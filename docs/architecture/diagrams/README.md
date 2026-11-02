@@ -81,7 +81,7 @@ capability-filesystem and optional YAML libraries remain inside this capability.
 
 ## Forge IDE UI proposal
 
-[Design report](../proposals/forge-ide-ui.md) · [PDF](../proposals/forge-ide-ui.pdf) · [Captions and sources](mermaid/README.md#forge-ide-ui-proposal). M19–M24 add proposed package, build/runtime, sequence, state, trust and typed-interface views; they do not replace the implemented agent M18 or historical remote proposal.
+[Design report](../proposals/forge-ide-ui.md) · [earlier PDF snapshot](../proposals/forge-ide-ui.pdf) · [Captions and sources](mermaid/README.md#forge-ide-ui-proposal). M19–M24 add proposed package, build/runtime, sequence, state, trust and typed-interface views; they do not replace the implemented agent M18 or historical remote proposal.
 
 | Proposed UI view | Source | Image |
 | --- | --- | --- |

@@ -136,3 +136,8 @@ by the remote gateway.
 Return **current slice; proposed mapping; assembly/ownership; admission and effect
 boundaries; findings; checks and gaps**. Keep the answer scoped to the requested
 change, not a plan to implement every future transport or HTTP method.
+
+For a browser entry, use [Design Forge UI](../design-forge-ui/SKILL.md) for
+declarative/generated asset ownership and the main-thread → worker/WASM →
+gateway flow. That authoring rule does not add HTTP methods, browser identity
+or a bypass around this skill's admission contract.

@@ -299,6 +299,14 @@ preempted. No remote jobs, mutations or additional verbs are implemented.
 
 ## Forge IDE UI proposal
 
+> **Earlier visual snapshot; authoring rule updated 2 November 2026, 14:56 UTC.**
+> M19–M24 and the PDF remain unchanged. In particular M20's authored web-source
+> labels are superseded: application HTML/CSS/JS must be generated from YAML or
+> Rust component declarations. Follow the [current UI skill](../../../../.agents/skills/design-forge-ui/SKILL.md)
+> and [updated proposal](../../proposals/forge-ide-ui.md), not the older
+> authored-template/worker-JS advice below. The package and admission boundaries
+> remain useful; these images do not establish an implemented generator.
+
 [Canonical design](../../proposals/forge-ide-ui.md) · [Visual PDF](../../proposals/forge-ide-ui.pdf). **All browser/UI/host names below are proposed.** The existing configured agent is implemented and tested with two localhost processes, not certified for a physical deployment. Mission Control guides the Rust application / worker / presentation split; its wire protocol and template syntax are not reused as authoritative APIs. In colored flowcharts, amber = proposed and teal = existing; class/sequence stereotypes and captions supply their status.
 
 ### M19 — Package imports

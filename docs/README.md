@@ -15,7 +15,7 @@ core contracts. [Implemented Mermaid flow](architecture/diagrams/mermaid/README.
 
 **Proposed:** a small, Spring Boot-inspired Rust assembly model with explicit capability modules, thin ingress adapters, a shared header-routed bridge, and deliberate lifecycle ownership. The blueprint is a design, not a deployed or completed framework.
 
-- [Forge IDE UI proposal](architecture/proposals/forge-ide-ui.md) · [visual PDF](architecture/proposals/forge-ide-ui.pdf) — proposed browser state, generated assets, same-origin admission and phased tests
+- [Forge IDE UI proposal](architecture/proposals/forge-ide-ui.md) · [earlier PDF snapshot](architecture/proposals/forge-ide-ui.pdf) — proposed browser state, generated assets, same-origin admission and phased tests
 - [Repository reviews — 16 reports](reviews/forge/README.md)
 - [Detailed future foundation modules and interfaces](architecture/foundation-interfaces.md) · [Rust contract sketches](architecture/foundation-contracts.md)
 - [Two-machine Forge IDE proposal](architecture/proposals/remote-ide.md) · [visual PDF](architecture/proposals/remote-ide-proposal.pdf) — next milestone, not deployed remote IDE

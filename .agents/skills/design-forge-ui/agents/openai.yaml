@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Forge UI"
+  short_description: "Generate UI assets with worker-owned WASM logic"
+  default_prompt: "Use $design-forge-ui to review UI declarations, generated assets, and main-thread versus worker/WASM responsibilities."

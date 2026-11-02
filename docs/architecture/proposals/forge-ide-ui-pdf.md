@@ -6,6 +6,15 @@ The [eight-page report](forge-ide-ui.pdf) accompanies the
 This report describes new UI/host work; it does not implement a browser app,
 provision credentials or deploy a service.
 
+> **Historical snapshot notice — 2 November 2026, 14:56 UTC:** the PDF and its
+> generator preserve the earlier proposal. The later authoring constraint in the
+> [current UI skill](../../../.agents/skills/design-forge-ui/SKILL.md) and
+> [updated proposal](forge-ide-ui.md#5-build-output-is-not-runtime-behavior)
+> supersedes its authored-template/worker-JS guidance: application web assets are
+> generated from YAML/Rust component declarations. Rebuilding this unchanged
+> generator reproduces the older narrative; it does not update that guidance.
+> A future PDF revision must update its generator and diagrams together.
+
 ## Inputs and boundaries
 
 - Current-code baseline: `175315b4fe1c993f15bb2ff52d824ee4cdaecc88`.

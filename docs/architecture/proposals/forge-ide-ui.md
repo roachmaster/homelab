@@ -2,14 +2,25 @@
 
 **Status: design proposal — 2 November 2026. No browser application or web host is implemented by this document.**
 Baseline: public [homelab `175315b`](https://github.com/roachmaster/homelab/tree/175315b4fe1c993f15bb2ff52d824ee4cdaecc88).
-[Visual PDF](forge-ide-ui.pdf) · [PDF rebuild guide](forge-ide-ui-pdf.md) ·
+[Earlier visual PDF snapshot](forge-ide-ui.pdf) · [PDF rebuild guide](forge-ide-ui-pdf.md) ·
 [Mermaid/SVG gallery](../diagrams/mermaid/README.md#forge-ide-ui-proposal) ·
 [Existing agent](../../../src/rust/forge-agent/README.md).
 The earlier [remote IDE PDF](remote-ide-proposal.pdf) remains an unchanged historical design; this report adds the proposed UI boundary on top of the now-implemented agent.
 
+> **Authoring clarification — 2 November 2026, 14:56 UTC.** Application HTML,
+> CSS and JS must be generated, not hand-written. Styles originate in YAML or
+> Rust UI-component macro declarations; simple semantic HTML and minimal JS glue
+> come from the component/generator contract. Main-thread presentation/lifecycle
+> state is distinct from worker/WASM domain and request state. See the
+> [UI skill](../../../.agents/skills/design-forge-ui/SKILL.md) and updated §5–6.
+> The linked PDF and M19–M24 images are the **earlier 2 November snapshot**:
+> M20/PDF build-page advice about authored shell templates and worker/DOM JS is
+> superseded by this clarification. They are retained unchanged for traceability,
+> not current authoring instructions. No UI macros/generator/runtime are added here.
+
 ## 1. Recommendation and present baseline
 
-Build **one read-only inspection journey**: choose an allowed node/project alias, inspect, navigate the returned file tree and Rust declaration outline, and understand partial results or failure. Reuse the Forge pattern: Rust owns application state and use-case decisions; generated assets provide the stable shell; a worker executes prepared asynchronous effects; a small DOM adapter presents typed views. No React migration, editor/LSP, arbitrary file access, remote jobs or mutations is part of this proposal.
+Build **one read-only inspection journey**: choose an allowed node/project alias, inspect, navigate the returned file tree and Rust declaration outline, and understand partial results or failure. Reuse the Forge pattern: Rust owns application state and use-case decisions; generated assets provide the stable shell; a worker executes prepared asynchronous effects; a generated main-thread DOM adapter presents typed views and owns browser presentation/lifecycle state. Application authors supply declarations and Rust logic, not handwritten web assets. No React migration, editor/LSP, arbitrary file access, remote jobs or mutations is part of this proposal.
 
 The recommended first deployment shape is a **single-user local web host** serving its own assets and a narrow same-origin command bridge. The native host retains the remote mTLS client key; neither JavaScript nor WASM receives it. This adds a real trust boundary and admission policy, not an unrestricted reverse proxy. A multiuser or publicly exposed host requires a later identity/delegation design and is not an automatic extension of this first shape.
 
@@ -43,7 +54,7 @@ Use [the repository review index](../../reviews/forge/README.md) for historical 
 | Proposed package / modules | Responsibility and public surface | Allowed imports; exclusions |
 | --- | --- | --- |
 | `forge-ide-ui`: `model`, `update`, `view`, `protocol` | Pure `UiModel`, typed `UiEvent` → `UiTransition`, `UiEffect`, bounded `ReportView` and view projection. Deterministic tests, no DOM/HTTP | Portable Rust types; no `forge-agent`, `forge-ide`, native paths, cap-std, Tokio, TLS or filesystem |
-| `forge-ide-web`: `wasm`, `codec`, `assets`; authored shell/worker/DOM modules | WASM facade over UI policy; versioned event/effect codec; typed asset config/factory/registrar for native build tooling, not the raw ABI | `forge-ide-ui`; optional **build-only** `forge-template` integration. Browser target must exclude build/native integration from its normal dependency tree |
+| `forge-ide-web`: `wasm`, `codec`, `assets`; component/style declarations and generated shell/worker/DOM glue | WASM facade over UI policy; versioned event/effect codec; typed component/style generation and public asset config/factory/registrar for native build tooling, not the raw ABI | `forge-ide-ui`; optional **build-only** `forge-template` integration. Browser target must exclude build/native integration from its normal dependency tree |
 | `forge-ide-web-host`: `config`, `assembly`, `session`, `gateway`, `projection`, `lifecycle` | Native application/library: public typed config, cohesive factory group + registrar, session/route admission, remote task binding and report-to-view translation | UI contract, core bridge/bootstrap/provider/task, existing `forge-ide::remote` and HTTPS adapter. Does not depend on WASM implementation; consumes versioned asset files/manifest |
 
 These are three different change drivers: portable policy, browser mechanism/build assets, native credential-bearing composition. Keep internal roles as modules, not a crate per type. Do not introduce a generic UI framework or global `common` package first. The native host and browser facade both depend **inward** on `forge-ide-ui`; neither imports the other. Existing `forge-ide` remains a native inspection capability, not a dependency of the WASM target. Its unconditional cap-std/parser dependencies and native-name API make simply importing it into the browser the wrong starting assumption.
@@ -81,8 +92,13 @@ The upstream header projection stays authoritative: `Forge-Envelope-Version`, `F
 
 ![Separate build artifacts from runtime effects](../diagrams/mermaid/images/m20-ui-build-runtime.svg)
 
-Recommended initial build flow: authored `.forge` shell/CSS templates + typed build context → the existing bounded template renderer → isolated generated-output directory; compile the real WASM facade separately; package an explicit asset manifest. Keep handwritten worker/DOM logic as source modules copied or bundled intentionally, rather than hiding complex application logic in giant template strings. Specify asset hashes, browser ABI/protocol version and expected exports; test the emitted bundle with a real WASM module.
+**Current authoring rule:** application authors write YAML style/theme data and Rust UI components/macros plus Rust application logic. The proposed compiler/generator validates these declarations, produces simple semantic HTML, CSS and minimal JS message/lifecycle glue, compiles the real WASM facade, and packages an explicit versioned asset manifest. Macro/schema names are not implemented APIs yet; this is a requirement for the next design/implementation, not a new framework delivered here.
 
+Do not hand-author application `.html`, `.css` or `.js` files, inline handlers, or equivalent `.forge`/Rust-string/YAML raw-code blobs. A macro that merely accepts a stylesheet or script string is not compliance. YAML carries validated style properties/tokens; component macros declare structure, semantics, styles and actions. HTML remains a small accessible shell with stable mount/text slots. Generated JavaScript handles only browser plumbing, typed messages, worker lifecycle and approved effects—not independent business logic.
+
+Audited reusable generator primitives necessarily emit web syntax and may contain low-level literals. Keep that mechanism separate from application declarations; it must not become a per-application code-injection backdoor. Missing generator support calls for a small, tested generator change when authorized, not manually editing output. Existing template rendering can remain a build mechanism behind that declarative interface; it does not authorize authors to write arbitrary HTML/CSS/JS templates. Do not migrate or delete existing assets as part of this documentation-only correction.
+
+Generation must be deterministic and bounded, preserve authored declarations, label output ownership and validate asset hashes, browser ABI/protocol version and expected exports. Test the emitted bundle with a real WASM module; a renderer producing strings is not proof of a working UI.
 Use the current public `register_renderer`/factory/provider integration for the native generation capability. Do not copy the legacy `forge-build` or codegen APIs unchanged: their schema/context formats differ. An initial explicit build command is sufficient; no new generic materialization engine, automatic prune, source restoration, installation or auto-commit/push script is required. Rebuilding must not overwrite hand-edited sources. Generated output has deterministic ownership, a reproducibility check, and a clear ignored-versus-committed policy decided during implementation.
 
 At runtime, templates do **not** render each network response into executable HTML. Rust produces typed view updates; the DOM adapter updates stable regions using text nodes and safe attributes. Retain focus, selection, scroll, expanded tree nodes and event listeners across request completion. Asset generation, native host serving and browser runtime are separate lifecycle owners.
@@ -91,7 +107,7 @@ At runtime, templates do **not** render each network response into executable HT
 
 ![Proposed admitted UI request](../diagrams/mermaid/images/m21-ui-request.svg)
 
-One page owns a DOM adapter and one worker; the worker owns the WASM application instance and the current fetch controller. DOM events become bounded typed messages to the worker. The WASM model yields a prepared effect; the worker performs I/O, returns completion/failure as a new model event, and publishes a view. Workers communicate by messages and cannot act as the main-thread DOM owner. [Worker ownership and messaging](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers).
+The main thread owns the generated DOM adapter, browser display/presentation state, focus/accessibility/scroll, mount/unmount and worker startup/teardown. The worker owns the WASM application instance, authoritative domain/request state, computation and the current fetch controller. Application-relevant input becomes bounded typed messages to the worker/WASM; this does not forward every mousemove, DOM object, secret or unrelated page datum. Browser-required local presentation state stays on the main thread, not in a competing business-state store. The WASM model yields a prepared effect; generated worker glue performs the allowed backend I/O, returns completion/failure through WASM as a typed model event, and publishes the accepted view. No main-thread business computation or direct backend fetch bypasses this route. The local worker/WASM backend and remote Forge agent are distinct; data is sent remotely only for a permitted effect. Initial asset loading and worker creation remain main-thread browser lifecycle operations. Workers communicate by messages and cannot act as the main-thread DOM owner. [Worker ownership and messaging](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Using_web_workers).
 
 ![Proposed UI state transitions](../diagrams/mermaid/images/m22-ui-state.svg)
 
@@ -131,13 +147,13 @@ No global registry, runtime service locator or automatically dyn-compatible GAT 
 
 | Slice | Deliverable | Acceptance gate before expanding |
 | --- | --- | --- |
-| A — Portable model | `UiEvent`/effect/view types, reducer, bounded fixture reports | Rust tests for stale token, repeated click, cancel/unmount, partial/error, invalid versions; browser target dependency tree contains no native inspection/TLS/runtime |
-| B — Real browser shell | Generated stable assets + real WASM facade/worker + targeted DOM, fake effect adapter | Actual browser journey: tree/outline, keyboard/focus, selection changes, async out-of-order failures, teardown/restart; no backend needed to prove presentation |
+| A — Portable model and declarations | `UiEvent`/effect/view types, reducer, bounded fixture reports; YAML/component style and structure contract | Rust tests for stale token, repeated click, cancel/unmount, partial/error, invalid versions; browser target dependency tree contains no native inspection/TLS/runtime |
+| B — Real browser shell | Generate HTML/CSS/minimal JS from declarations; real WASM facade/worker + targeted DOM, fake effect adapter | Actual browser journey: tree/outline, keyboard/focus, selection changes, async out-of-order failures, teardown/restart; no backend needed to prove presentation |
 | C — Host admission | Public host integration + same-origin session/gateway + configured clients | Separate consumer proof; rejected origin/CSRF/target/alias has zero outbound calls; no secrets in assets; deterministic generation/no overwrite; cleanup after failed startup |
 | D — End to end | Browser → host bridge → two local agent processes with ephemeral test identities | Real inspect report equals expected view; HTTP200 error handled; wrong identity/denied project/offline/oversized/deadline/stale reply/shutdown tested; no claim of physical deployment |
 | Later | Multiuser/delegation, richer discovery, editing/LSP, remote jobs or other transports | Separate requirements and threat model; not authorized or implemented by this document |
 
-**Choices still open:** exact session bootstrap, browser ABI tooling, minimal view budget/virtualization threshold, generated-artifact storage policy and eventual deployment topology. The recommended package and security invariants are stable targets; signatures and implementation details remain provisional until compile/consumer/browser contract tests prove them. Do not use this proposal to claim UI or production authentication already exists.
+**Choices still open:** exact component macro/style-schema spelling and generator implementation, session bootstrap, browser ABI tooling, minimal view budget/virtualization threshold, generated-artifact storage policy and eventual deployment topology. The no-handwritten-web-assets rule and main-thread versus worker ownership above are decided constraints, not open choices. The recommended package and security invariants are stable targets; signatures and implementation details remain provisional until compile/consumer/browser contract tests prove them. Do not use this proposal to claim UI or production authentication already exists.
 
 ## Evidence and reproducibility
 

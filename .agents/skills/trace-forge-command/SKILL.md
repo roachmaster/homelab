@@ -48,3 +48,8 @@ expiry after decoding/report validation and distinguish timeout from preemption.
 Two localhost child processes are evidence of a real network boundary, not of a
 physical-host deployment. Shutdown must recheck admission after a signal, not only
 check around an idle accept loop.
+
+For browser inputs, read [Design Forge UI](../design-forge-ui/SKILL.md): generated
+main-thread glue forwards typed application events to worker/WASM; only its
+approved effects use worker network I/O and the admitted host/agent gateway.
+Keep display/lifecycle state distinct from authoritative domain/request state.

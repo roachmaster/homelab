@@ -42,4 +42,4 @@ These are proposed architecture and extraction decisions based on read-only sour
 
 ## Proposed Forge IDE browser UI
 
-[Canonical proposal](proposals/forge-ide-ui.md) · [visual PDF](proposals/forge-ide-ui.pdf) · [Mermaid/SVG gallery](diagrams/mermaid/README.md#forge-ide-ui-proposal). Current agent/IDE capabilities remain implemented; the UI, worker and local web host are proposed, with Mission Control used as a guide rather than an authority.
+[Canonical proposal](proposals/forge-ide-ui.md) · [earlier PDF snapshot](proposals/forge-ide-ui.pdf) · [Mermaid/SVG gallery](diagrams/mermaid/README.md#forge-ide-ui-proposal). Current agent/IDE capabilities remain implemented; the UI, worker and local web host are proposed, with Mission Control used as a guide rather than an authority.
