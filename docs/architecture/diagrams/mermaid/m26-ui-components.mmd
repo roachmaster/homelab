@@ -1,0 +1,36 @@
+---
+title: M26 Proposed component composition - not exported Rust APIs
+---
+classDiagram
+  direction LR
+  class ShellRegion {
+    <<proposed composition>>
+    C01 AppShell
+    C02 ConnectionView
+    C03 ContextToolbar
+    C08 ViewControls
+    C09 StatusRegion
+  }
+  class InspectionRegion {
+    <<proposed composition>>
+    C04 ExplorerPane
+    C05 InspectionWorkspace
+    C06 OutlinePane
+    C07 ProblemsPane
+  }
+  class Presentation {
+    <<generated primitives>>
+    DOM focus scroll lifetime
+    existing typed view bindings
+    proposed panes and splitters
+  }
+  class UiModel {
+    <<existing WASM owner>>
+    UiEvent and ViewModel
+    request and selection policy
+    proposed report-keyed intents
+    UiEffect to existing worker
+  }
+  ShellRegion *-- InspectionRegion
+  InspectionRegion ..> Presentation
+  Presentation --> UiModel

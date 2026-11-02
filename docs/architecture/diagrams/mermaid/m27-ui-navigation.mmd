@@ -1,0 +1,18 @@
+---
+title: M27 Logical views - states are not routes
+---
+flowchart LR
+  subgraph document["ONE DOCUMENT · URL / · first slice adds no History API entries"]
+    direction LR
+    C["Connection composition<br/>Unpaired / Pairing<br/>Resume or one-time Pair"]
+    W["Workbench composition<br/>Validated catalog accepted<br/>Idle / Loading / Ready / Partial<br/>Failed / Cancelled are states"]
+    V["Local content · proposed<br/>Overview<br/>File and declaration<br/>Problems pane"]
+    R["Any view: fatal worker or ABI fault<br/>Close worker and stop dispatch<br/>Explicit reload creates new worker<br/>Resume then catalog or Connection<br/>Outside UiModel Phase"]
+    C --> W
+    W --> V
+    W -.-> R
+  end
+  classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#473216;
+  classDef existing fill:#ddf5ee,stroke:#247d6a,color:#15352c;
+  class C,W,V proposed;
+  class R existing;

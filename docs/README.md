@@ -2,6 +2,8 @@
 
 ## Forge: from experiments to a composable Rust framework
 
+[Forge IDE components, pages and transitions](design/forge-ide-components/README.md) — proposed typed component contracts, local navigation, guarded lifecycle and implementation stages; no runtime redesign in this document.
+
 [Forge IDE workbench wireframes](design/forge-ide-wireframes/README.md) — editable desktop, partial/Problems and narrow-window designs, with capability status and keyboard/state acceptance. This is a design-only proposal, not a runtime redesign.
 
 **Observed:** 16 repositories were reviewed read-only for architecture, contracts, boundaries, and implementation evidence. This is not a fresh build/test certification.

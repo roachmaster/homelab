@@ -22,6 +22,8 @@ The [first Rust core](src/rust/README.md) now implements typed contracts, a sync
 
 [Three design-only wireframes and interaction contract](docs/design/forge-ide-wireframes/README.md) apply the new [Forge IDE UX skill](.agents/skills/design-forge-ide-ux/SKILL.md) to the existing inspection capabilities. Desktop, partial/Problems and narrow-window states distinguish current data from proposed panes/filtering. **Wireframe first: no runtime redesign is implemented by these visuals.**
 
+[Component, page and transition decomposition](docs/design/forge-ide-components/README.md) now maps the wireframes into nine proposed component compositions, two screen compositions and guarded state flows, with three editable Mermaid/SVG views. This remains design-only; the running UI is unchanged.
+
 ## Forge IDE generated browser boundary
 
 [![Generated UI build and runtime ownership](docs/architecture/diagrams/mermaid/images/m25-ui-implementation.svg)](src/rust/forge-ide-web/README.md)

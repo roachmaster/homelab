@@ -358,3 +358,48 @@ business API, and the worker never owns DOM. The same command path carries sessi
 bootstrap/resume and inspection; static asset GETs are not per-task endpoints.
 Native/WASM checks do not alone establish browser acceptance: see the implementation
 verification record. M19–M24 and the PDF remain labeled historical proposal views.
+
+
+## Forge IDE workbench decomposition
+
+[Design specification](../../../design/forge-ide-components/README.md) ·
+[Component contracts](../../../design/forge-ide-components/components.md) ·
+[Guarded transitions](../../../design/forge-ide-components/transitions.md).
+These are **design-only** extensions to the wireframes, not runtime changes.
+
+### M26 — Components and state ownership
+
+![Proposed UI component compositions and existing model](images/m26-ui-components.svg)
+
+[Source](m26-ui-components.mmd). UML-like compositions group C01–C09 for readability;
+the catalog specifies each component. Diamonds mean composition; other arrows
+show presentation/model dependencies, not HTTP traffic or authorization. These are
+compositions/modules, not nine crates or deployment services. Generated presentation owns DOM/focus/panes;
+WASM owns application selection, reports and request policy. Existing typed effects
+still cross worker glue to admitted native host/agent; M25 shows that runtime seam.
+No component becomes an authorization or service-locator boundary.
+
+### M27 — Screens, panels and navigation
+
+![Proposed screen and local view map](images/m27-ui-navigation.svg)
+
+[Source](m27-ui-navigation.mmd). Connection and Workbench are two compositions of
+one document at `/`. Overview/file details, Explorer, Outline and Problems are local
+views/panes; loading, partial and failure are states, not URLs. No new History API
+or deep-link behavior is proposed for the first slice. Browser leave/return or
+reload creates a fresh worker/session check, not automatic inspection. Generic
+Denied does not prove session expiry; recovery is explicit. Fatal worker recovery
+is outside the model's Phase enum.
+
+### M28 — Inspection lifecycle
+
+![Inspection phases with matching-result guards](images/m28-ui-transitions.svg)
+
+[Source](m28-ui-transitions.mmd). This focuses on existing request phases; Connection
+and Pairing entry are in M27 and the transition table. A result requires a matching
+token plus target/project/version/deadline/report validation. Cancel and context
+change invalidate local ownership, not remote computation. Repeated Inspect is
+rejected while busy; retries are explicit. The proposed accepted-report key guard
+for local row/filter/diagnostic events requires new model/event work; current
+integer selection events do not already provide it. Read the table for invalid,
+stale, network failure and focus/lifecycle cases omitted from simplified arrows.

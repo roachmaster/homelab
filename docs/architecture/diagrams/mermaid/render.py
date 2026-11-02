@@ -18,6 +18,7 @@ SOURCES = [ROOT / f"{name}.mmd" for name in (
     "m09-template-architecture", "m10-template-render", "m11-ide-inspection", "m12-remote-node-info",
     "m13-remote-ide-context", "m14-remote-ide-components", "m15-remote-ide-contracts", "m16-remote-ide-request", "m17-remote-ide-bootstrap", "m18-agent-implementation",
     "m19-ui-layout", "m20-ui-build-runtime", "m21-ui-request", "m22-ui-state", "m23-ui-trust", "m24-ui-contracts", "m25-ui-implementation",
+    "m26-ui-components", "m27-ui-navigation", "m28-ui-transitions",
 )]
 MANIFEST = ROOT / "render-manifest.json"
 

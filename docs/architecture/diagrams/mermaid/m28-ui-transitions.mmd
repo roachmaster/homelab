@@ -1,0 +1,30 @@
+---
+title: M28 Inspection lifecycle - existing phases and proposed local-intent guard
+---
+flowchart TB
+  subgraph lifecycle["CURRENT INSPECTION PHASES · session entry is in M27"]
+    direction LR
+    I["Inspect from Idle or retry<br/>Ready / Partial / Failed / Cancelled"]
+    L["Loading<br/>Clear old report<br/>New token and expiry"]
+    R["Ready<br/>Validated complete report"]
+    A["Partial<br/>Validated incomplete report"]
+    F["Failed<br/>Current error, invalid or expired"]
+    C["Cancelled<br/>Cancel stops local wait only"]
+    I --> L
+    L --> R
+    L --> A
+    L --> F
+    L --> C
+  end
+  subgraph guards["GUARDS AND OTHER TRANSITIONS · simplified graph, exact table in design spec"]
+    direction LR
+    G["Result guard · existing<br/>Token and context must match<br/>Validate expiry and report bounds<br/>Late token is ignored"]
+    N["Context change · existing<br/>Invalidate and enter Idle<br/>Abort pending local fetch<br/>Busy Inspect is rejected"]
+    X["Local intents · proposed<br/>All report-scoped intents<br/>Match accepted report token<br/>No network effect"]
+  end
+  classDef existing fill:#ddf5ee,stroke:#247d6a,color:#15352c;
+  classDef proposed fill:#fff1d6,stroke:#ae7b26,color:#473216;
+  classDef note fill:#f1f4f6,stroke:#71828d,color:#253943;
+  class I,L,R,A,F,C existing;
+  class X proposed;
+  class G,N note;

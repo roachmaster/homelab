@@ -12,6 +12,8 @@ declarations and any missing analysis**. This is not a source editor, type check
 debugger or terminal. The current product's successful browser tests do not prove
 the new layout, controls or keyboard behavior proposed here.
 
+The next design step is the [component, view and transition decomposition](../forge-ide-components/README.md), which assigns C01–C09 responsibilities and turns these pictures into guarded interactions. It does not implement the pictured controls.
+
 ## Visuals
 
 | View | Editable source | Preview | Decision it illustrates |

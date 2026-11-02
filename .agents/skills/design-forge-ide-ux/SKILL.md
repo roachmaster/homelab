@@ -79,6 +79,7 @@ are implementation gaps—not permission to hide app-specific JS in an emitter.
 
 Use the [first workbench wireframes](../../../docs/design/forge-ide-wireframes/README.md)
 as a concrete status-labeled example, not a permanent pixel specification.
+For a component/page breakdown, consult the [decomposition](../../../docs/design/forge-ide-components/README.md): separate screen compositions from local panes and asynchronous states, identify typed inputs/events and their owner, and make navigation/history policy explicit without inventing stable report IDs or backend routes.
 
 ## Review and handoff
 
