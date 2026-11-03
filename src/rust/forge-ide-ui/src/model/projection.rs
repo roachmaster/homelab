@@ -2,7 +2,7 @@
 //! context lives here; generated DOM primitives only display these typed values.
 use super::*;
 
-// Four lists total at most 1.5 MiB. JSON-escaped catalog choices occupy < 4 MiB
+// Five lists total at most 1.875 MiB. JSON-escaped catalog choices occupy < 4 MiB
 // at existing bounds, leaving room under the 8 MiB ABI cap for selected details,
 // text/input/button bindings and effect/error envelopes. A complete selected
 // ancestor path can itself occupy up to 65 * 4096 * 7 JSON bytes. Each row is costed with
@@ -12,7 +12,7 @@ const ROW_FIXED_BYTES: usize = 1280;
 
 pub(super) struct RowPage {
     pub rows: Vec<RowView>,
-    total: usize,
+    pub(super) total: usize,
     offset: usize,
     matches: usize,
 }
@@ -52,7 +52,7 @@ fn row_cost(row: &RowView) -> usize {
 }
 fn page(
     rows: impl IntoIterator<Item = RowView>,
-    total: usize,
+    pub(super) total: usize,
     matches: usize,
     window: &RowWindow,
 ) -> RowPage {
@@ -246,6 +246,84 @@ impl UiModel {
         });
         page(rows, total, total, &self.problems_window)
     }
+    pub(super) fn shape_page(&self) -> RowPage {
+        let shape = self.source_shape();
+        self.shape_page_from(shape.as_ref())
+    }
+    fn source_shape(&self) -> Option<crate::shape::SourceShape> {
+        self.report.as_ref().and_then(|report| crate::shape::SourceShape::from_report(report).ok())
+    }
+    fn shape_page_from(&self, shape: Option<&crate::shape::SourceShape>) -> RowPage {
+        let (Some(report), Some(key), Some(shape)) = (&self.report, &self.accepted_report, shape) else {
+            return page([], 0, 0, &self.shape_window);
+        };
+        let mut rows = Vec::new();
+        for (index, group) in shape.groups.iter().enumerate() {
+            if group.manifest.is_none() && group.entries.is_empty() {
+                continue;
+            }
+            let group_id = format!("shape-group-{index}");
+            let target = group.manifest.or_else(|| group.entries.first().copied()).unwrap_or(group.directory);
+            let directory = &report.entries[group.directory as usize];
+            let context = format!("Group entry {target}");
+            rows.push(shape_row(group_id.clone(), None, 0,
+                if group.manifest.is_some() { format!("{} · Cargo.toml directory (unverified)", name_label(&directory.name)) }
+                else { "Unassigned sources · no observed Cargo.toml ancestor".into() },
+                format!("Entry {} · {}", target, shape_counts(&group.counts)),
+                "group", target, key, self.selected_entry));
+            for t in &group.traits {
+                let entry = &report.entries[t.location.entry as usize];
+                let declaration = &entry.declarations[t.location.declaration as usize];
+                let trait_id = format!("shape-trait-{}-{}", entry.id, declaration.id);
+                rows.push(shape_row(trait_id.clone(), Some(group_id.clone()), 1,
+                    declaration.name.clone(),
+                    format!("{context} · {} tentative candidate structs · {} header-matching impl blocks · entry {} · {}:{}", t.candidate_structs.len(), t.impl_blocks, entry.id, declaration.span.start.line, declaration.span.start.column),
+                    "trait", entry.id, key, self.selected_entry));
+                for candidate in &t.candidate_structs {
+                    let entry = &report.entries[candidate.entry as usize];
+                    let declaration = &entry.declarations[candidate.declaration as usize];
+                    rows.push(shape_row(format!("{trait_id}-candidate-{}-{}", entry.id, declaration.id), Some(trait_id.clone()), 2,
+                        declaration.name.clone(), format!("{context} · Tentative local header match · entry {} · {}:{}", entry.id, declaration.span.start.line, declaration.span.start.column),
+                        "candidate struct", entry.id, key, self.selected_entry));
+                }
+            }
+            for &id in &group.entries {
+                let entry = &report.entries[id as usize];
+                rows.push(shape_row(format!("shape-source-{id}"), Some(group_id.clone()), 1,
+                    name_label(&entry.name), format!("{context} · Entry {id} · {}", content_label(entry)),
+                    "source", id, key, self.selected_entry));
+            }
+        }
+        let total = rows.len();
+        page(rows, total, total, &self.shape_window)
+    }
+    fn shape_details(&self, shape: Option<&crate::shape::SourceShape>) -> Vec<Property> {
+        let (Some(shape), Some(entry)) = (shape, self.selected_entry) else { return vec![]; };
+        let Some(group) = shape.entry_groups.get(entry as usize).and_then(|&index| shape.groups.get(index)) else { return vec![]; };
+        let c = &group.counts;
+        let count = |wanted| group.impls.iter().filter(|item| matches!((&item.disposition, wanted),
+            (crate::shape::ImplDisposition::GenericOrComplex, 0) |
+            (crate::shape::ImplDisposition::QualifiedPath, 1) |
+            (crate::shape::ImplDisposition::Unresolved, 2) |
+            (crate::shape::ImplDisposition::LocalHeaderCandidate { .. }, 3)
+        )).count().to_string();
+        vec![
+            prop("Selected source group", if group.manifest.is_some() { format!("Cargo.toml directory · entry {} (unverified)", group.directory) } else { "Unassigned sources".into() }),
+            prop("Observed Rust files", c.rust_files.to_string()),
+            prop("Traits", c.traits.to_string()), prop("Structs", c.structs.to_string()),
+            prop("Enums", c.enums.to_string()), prop("Free functions", c.free_functions.to_string()),
+            prop("Methods", c.methods.to_string()), prop("Trait impl blocks", c.trait_impls.to_string()),
+            prop("Inherent impl blocks", c.inherent_impls.to_string()),
+            prop("Negative impl blocks", c.negative_impls.to_string()),
+            prop("Tentative candidate structs", c.candidate_structs.to_string()),
+            prop("Tentative local header impl blocks", count(3)),
+            prop("Generic or complex impl headers", count(0)),
+            prop("Qualified-path impl headers (local/external unknown)", count(1)),
+            prop("Unresolved impl headers", count(2)),
+            prop("Rust files with unavailable analysis", group.unavailable_rust.to_string()),
+            prop("Opaque entries", group.opaque_entries.to_string()),
+        ]
+    }
     pub(super) fn render(&self) -> ViewModel {
         let connected = self.catalog.is_some();
         let loading = self.pending.is_some();
@@ -262,6 +340,9 @@ impl UiModel {
         let tree = self.tree_page();
         let outline = self.outline_page();
         let problems = self.problems_page();
+        let source_shape = self.source_shape();
+        let shape = self.shape_page_from(source_shape.as_ref());
+        let shape_details = self.shape_details(source_shape.as_ref());
         let (_, file_keep) = self.file_matches();
         let (_, symbol_keep) = self.symbol_matches();
         let hidden_entry = self
@@ -415,6 +496,14 @@ impl UiModel {
             .map(|e| outline_empty(e, !self.symbol_filter.is_empty()))
             .unwrap_or("Select an inspected file to inspect its declarations.")
             .to_owned();
+        let opaque_entries = source_shape.as_ref()
+            .map(|shape| shape.groups.iter().map(|group| group.opaque_entries).sum::<usize>())
+            .unwrap_or(0);
+        let shape_summary = match &self.report {
+            None => "No accepted report. Inspect a project to inventory its source shape.".into(),
+            Some(report) => format!("{} · {} inspected report. {opaque_entries} opaque entries may conceal sources or boundaries. Counts describe observed source only; absent or unreadable content is unknown. Select a group or source row for group counts and file details.", shape.range(), if report.complete { "Complete" } else { "Partial" }),
+        };
+        let shape_more = shape.more();
         let tree_more = tree.more();
         let outline_more = outline.more();
         let problems_more = problems.more();
@@ -422,6 +511,7 @@ impl UiModel {
             texts: vec![
                 tone_text("status", self.message.clone(), status_tone),
                 tone_text("phase-label", if no_project { "No allowed project" } else { phase_label(self.phase) }, status_tone),
+                text("source-shape-summary", shape_summary),
                 text("summary", summary), text("workspace-summary",workspace_summary),
                 text("selection-title", entry.map(|e| name_label(&e.name)).unwrap_or_else(|| "Project overview".into())),
                 text("selection-context", if connected { format!("{} / {}",self.node,self.project) } else { "Not connected".into() }),
@@ -434,6 +524,8 @@ impl UiModel {
             ],
             buttons: vec![
                 button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!loading,None),
+                button("shape-more",!shape_more,key.map(|k| RowAction::MoreShape { report:k.clone() })),
+                button("shape-previous",self.shape_window.history.is_empty(),key.map(|k| RowAction::PreviousShape { report:k.clone() })),
                 button("tree-more",!tree_more,key.map(|k| RowAction::MoreTree { report:k.clone() })),
                 button("outline-more",!outline_more,key.zip(entry).map(|(k,e)| RowAction::MoreOutline { report:k.clone(),entry:e.id })),
                 button("problems-more",!problems_more,key.map(|k| RowAction::MoreProblems { report:k.clone() })),
@@ -446,13 +538,21 @@ impl UiModel {
                 ListBinding { id:"outline",rows:outline.rows.clone(),empty_message:outline_empty_message.clone() },
                 ListBinding { id:"declarations",rows:outline.rows,empty_message:outline_empty_message },
                 ListBinding { id:"problems",rows:problems.rows,empty_message:match &self.report { None => "Inspect a project to see supplied diagnostics.",Some(r) if !r.complete => "No diagnostic strings were supplied in this partial report. Uninspected content remains unknown.",Some(_) => "No diagnostic strings were supplied. This is not a compiler or type-check result." }.into() },
+                ListBinding { id:"source-shape",rows:shape.rows,empty_message:"No source shape is available in the accepted report.".into() },
             ],
-            tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details }],
+            tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details },TableBinding { id:"source-shape-details",rows:shape_details }],
             visibility: vec![
                 visible("connection",!connected),visible("pair-panel",!connected),visible("workbench",connected),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading),
             ],
         }
     }
+}
+fn shape_counts(c: &crate::shape::ShapeCounts) -> String {
+    format!("{} traits · {} structs · {} enums · {} free functions · {} methods · {} trait impls · {} inherent impls · {} tentative candidate structs", c.traits, c.structs, c.enums, c.free_functions, c.methods, c.trait_impls, c.inherent_impls, c.candidate_structs)
+}
+#[allow(clippy::too_many_arguments)]
+fn shape_row(id: String, parent: Option<String>, depth: u16, label: String, secondary: String, kind_label: &'static str, entry: u32, key: &RequestToken, selected: Option<u32>) -> RowView {
+    RowView { id, parent, depth, label, secondary, kind_label, glyph: match kind_label { "trait" => "Tr", "candidate struct" => "S?", "group" => "▣", _ => "▤" }.into(), selected: selected == Some(entry), expanded: None, action: RowAction::SelectEntry { report: key.clone(), value: entry }, toggle: None }
 }
 fn text(id: &'static str, text: impl Into<String>) -> TextBinding {
     TextBinding {

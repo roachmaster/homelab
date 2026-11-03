@@ -49,10 +49,10 @@ most 4,096 entries, 16,384 declarations, hierarchy depth 64, 4 KiB per text/name
 2 MiB aggregate report text and 16 diagnostics per entry. An unreadable root is
 represented honestly as a one-entry incomplete report. Catalogs have at most
 32 nodes and 128 aliases per node. Explorer, Outline/central declarations and
-Problems use local Previous/Next windows of at most 256 rows, reduced when their
+Problems and Source shape use local Previous/Next windows of at most 256 rows, reduced when their
 conservative JSON cost reaches 384 KiB per list. Range summaries disclose the
-window; all accepted rows remain available by pagination. Four list projections
-(including the central/Outline copy) total at most 1.5 MiB, reserving room for the
+window; all accepted rows remain available by pagination. Five list projections
+(including the central/Outline copy) total at most 1.875 MiB, reserving room for the
 catalog, full selected safe ancestor path, diagnostics and view/action overhead.
 No pagination request leaves the model. These are deliberate UI limits, not
 silent truncation of an otherwise claimed complete report.
@@ -135,3 +135,34 @@ JavaScript is test instrumentation, never a shipped application asset.
 Native tests cover state transitions, stale/cancel/error handling, malformed
 wire input, projection bounds, native names and declaration hierarchy. Browser
 journeys belong to the composition's separate integration checks.
+
+
+
+## Source shape
+
+The generated main pane presents a source inventory, not a subjective complexity
+score. The portable Rust model derives it entirely from the accepted report;
+no new endpoint, filesystem access, bridge contract or browser computation is
+introduced. Observed `Cargo.toml` locations establish unverified directory groups.
+Manifests are not read: package identity, virtual workspaces, target membership,
+features and conditional compilation remain unknown. Sources with no observed
+manifest ancestor appear in an explicitly unassigned group.
+
+Group rows summarize observed traits, structs, enums, free functions, methods,
+trait/inherent impl blocks and tentative candidate struct declarations. Select a
+group or source row for its group's fixed-size facts, including unavailable Rust
+analysis and opaque-entry counts. Separate impl-header counts disclose tentative
+local matches, generic/complex spellings, qualified paths (local/external unknown)
+and unresolved headers, so zero candidates never implies zero impl blocks.
+Trait rows name their candidate struct
+**declarations**, not proven implementors or concrete instantiations. Matching is
+limited to unique bare names in the same file and lexical module; missing imports
+and impl generic parameters mean even those header matches are tentative.
+
+All shape rows use existing `SelectEntry` actions with the accepted report token.
+`MoreShape` and `PreviousShape` are additive ABI 2 local intents. The independent
+page is bounded by the same 256-row/384-KiB budget as other lists, has reversible
+history, emits no effects, ignores stale report tokens and clears with the report.
+The additive bindings require rebuilding and deploying the generated assets and
+WASM atomically; HTTP protocol version 1 is unchanged. Explorer name filters do
+not restrict this accepted-report inventory.

@@ -92,7 +92,7 @@ function apply(view,acknowledgedSequence){
       const [toggle,select]=item.children;
       toggle.hidden=row.expanded===null||!row.toggle;toggle.disabled=!row.toggle;toggle.textContent=row.expanded?'▾':'▸';toggle.setAttribute('aria-label',(row.expanded?'Collapse ':'Expand ')+row.label);
       // Includes accepted context, but never persists it in URLs, storage or DOM attributes.
-      focusKeyByElement.set(toggle,b.id+':toggle:'+JSON.stringify(row.toggle));focusKeyByElement.set(select,b.id+':select:'+JSON.stringify(row.action));
+      focusKeyByElement.set(toggle,b.id+':'+key+':toggle:'+JSON.stringify(row.toggle));focusKeyByElement.set(select,b.id+':'+key+':select:'+JSON.stringify(row.action));
       actionByElement.set(toggle,row.toggle);actionByElement.set(select,row.action);
       select.setAttribute('aria-level',String(row.depth+1));select.setAttribute('aria-selected',String(row.selected));
       if(row.expanded===null)select.removeAttribute('aria-expanded');else select.setAttribute('aria-expanded',String(row.expanded));

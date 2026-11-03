@@ -39,6 +39,13 @@ pub fn ide_document() -> Document {
                         component!(panel "declaration-details-panel", "Selected declaration"; [
                             component!(details "declaration-details"),
                         ]),
+                        component!(panel "source-shape-panel", "Source shape"; [
+                            component!(caption "source-shape-summary", "Inspect a project to inventory its source shape."),
+                            component!(text "source-shape-limits", "Observed declarations, not a complexity score. Cargo.toml directories are unverified boundaries: manifests, workspace membership and targets are not read. Trait candidates are unique bare names in the same file and lexical module. Impl generics and imports are not available; these are tentative header matches, not resolved implementations."),
+                            component!(facts "source-shape-details"),
+                            component!(tree "source-shape", "Source shape groups and trait candidates"),
+                            component!(row [component!(button "shape-previous", "Previous shape page", "previous_shape"), component!(button "shape-more", "Next shape page", "more_shape")]),
+                        ]),
                         component!(panel "file-metadata-panel", "Entry metadata"; [
                             component!(facts "details"),
                         ]),

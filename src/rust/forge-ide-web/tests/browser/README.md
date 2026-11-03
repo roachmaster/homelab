@@ -77,7 +77,7 @@ cannot be established. Review images before sharing them beyond the test artifac
 
 | IDs | Evidence |
 | --- | --- |
-| `real.report.partial`, `real.navigation.keyboard`, `real.filters.safe_text`, `real.pagination.problems` | Actual report, navigation, full bounded-report filters, safe labels and problem cross-navigation |
+| `real.report.partial`, `real.navigation.keyboard`, `real.filters.safe_text`, `real.pagination.problems` | Actual report, source-shape trait/two-candidate inventory and local navigation, distinct focus for shared entry actions, full bounded-report filters, safe labels and problem cross-navigation |
 | `real.panes.desktop`, `real.panes.narrow` | Pointer/keyboard resize/collapse/reset and narrow pane interaction |
 | `probe.report.stale_actions`, `probe.page.lifecycle` | Real WASM stale-event acceptance; explicitly manipulated lifetime probes plus real reload/history |
 | `real.report.empty`, `real.admission.denied` | Real empty project and independently denied project |

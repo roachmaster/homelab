@@ -51,6 +51,7 @@ pub struct UiModel {
     tree_window: RowWindow,
     outline_window: RowWindow,
     problems_window: RowWindow,
+    shape_window: RowWindow,
 }
 impl Default for UiModel {
     fn default() -> Self {
@@ -75,6 +76,7 @@ impl Default for UiModel {
             tree_window: RowWindow::default(),
             outline_window: RowWindow::default(),
             problems_window: RowWindow::default(),
+            shape_window: RowWindow::default(),
         }
     }
 }
@@ -128,6 +130,7 @@ impl UiModel {
         self.tree_window = RowWindow::default();
         self.outline_window = RowWindow::default();
         self.problems_window = RowWindow::default();
+        self.shape_window = RowWindow::default();
         Ok(())
     }
     pub fn dispatch(&mut self, input: Input) -> Result<Output, UiError> {
@@ -445,6 +448,19 @@ impl UiModel {
                 }
                 let page = self.outline_page();
                 self.outline_window.more(&page, MAX_DECLARATIONS);
+            }
+            UiEvent::MoreShape { report } => {
+                if !self.matches_report(&report) {
+                    return Ok(self.output(None));
+                }
+                let page = self.shape_page();
+                self.shape_window.more(&page, page.total);
+            }
+            UiEvent::PreviousShape { report } => {
+                if !self.matches_report(&report) {
+                    return Ok(self.output(None));
+                }
+                self.shape_window.previous();
             }
             UiEvent::MoreProblems { report } => {
                 if !self.matches_report(&report) {

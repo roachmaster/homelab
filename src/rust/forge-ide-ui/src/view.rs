@@ -115,6 +115,12 @@ pub enum RowAction {
         report: RequestToken,
         entry: u32,
     },
+    MoreShape {
+        report: RequestToken,
+    },
+    PreviousShape {
+        report: RequestToken,
+    },
     MoreProblems {
         report: RequestToken,
     },

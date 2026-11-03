@@ -2,6 +2,7 @@
 //! No filesystem, DOM, HTTP, TLS, asynchronous runtime or JSON value state.
 pub mod model;
 pub mod protocol;
+pub mod shape;
 mod validate;
 pub mod view;
 pub use model::{name_label, Output, Phase, UiModel};

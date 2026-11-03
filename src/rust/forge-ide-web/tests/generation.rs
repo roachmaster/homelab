@@ -294,3 +294,30 @@ fn declarative_hierarchy_emphasis_and_facts_are_reusable_safe_components() {
     assert!(!css.contains("#selection-title"));
     assert!(css.contains("[data-tone=warning]"));
 }
+
+
+#[test]
+fn source_shape_uses_declarative_primitives_and_report_local_actions() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    for id in ["source-shape-panel", "source-shape-summary", "source-shape-details", "source-shape", "shape-previous", "shape-more"] {
+        assert!(html.contains(&format!("id=\"{id}\"")), "missing {id}");
+    }
+    assert!(html.contains("previous_shape"));
+    assert!(html.contains("more_shape"));
+    assert!(html.contains("not a complexity score"));
+    assert!(html.contains("not resolved implementations"));
+    for name in ["main.js", "worker.js"] {
+        let js = std::str::from_utf8(&assets.files[name]).unwrap();
+        assert!(!js.contains("Cargo.toml"));
+        assert!(!js.contains("candidate_structs"));
+    }
+}
+
+#[test]
+fn repeated_row_actions_preserve_distinct_stable_focus_identity() {
+    let assets = build(config());
+    let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
+    assert!(main.contains("b.id+':'+key+':select:'+JSON.stringify(row.action)"));
+    assert!(main.contains("b.id+':'+key+':toggle:'+JSON.stringify(row.toggle)"));
+}

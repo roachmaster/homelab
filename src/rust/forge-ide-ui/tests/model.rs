@@ -741,6 +741,8 @@ fn local_intents(key: &RequestToken) -> Vec<UiEvent> {
             report: key.clone(),
             entry: 1,
         },
+        UiEvent::MoreShape { report: key.clone() },
+        UiEvent::PreviousShape { report: key.clone() },
         UiEvent::MoreProblems {
             report: key.clone(),
         },
@@ -827,6 +829,8 @@ fn local_wire_actions_require_keys_and_projected_action_codecs_are_typed() {
         ("more_tree", ""),
         ("more_outline", r#", "entry":1"#),
         ("more_problems", ""),
+        ("more_shape", ""),
+        ("previous_shape", ""),
         ("previous_tree", ""),
         ("previous_outline", r#", "entry":1"#),
         ("previous_problems", ""),
@@ -1456,7 +1460,7 @@ fn duplicate_basenames_have_diagnostic_context_and_complete_selected_report_path
         .any(|p| p.label == "Path in report" && p.value == "project / tests / lib.rs"));
 }
 #[test]
-fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_four_lists() {
+fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_five_lists() {
     let mut c = catalog();
     c.nodes[0].label = "\u{1f}".repeat(MAX_TEXT_BYTES);
     c.nodes[0].projects = (0..128)
@@ -1498,7 +1502,7 @@ fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_four_list
         let mut e = file.clone();
         e.id = id;
         e.parent = Some(63);
-        e.name = NativeName::Utf8("\u{1f}".repeat(MAX_TEXT_BYTES));
+        e.name = NativeName::Utf8(format!("{}.rs", "\u{1f}".repeat(MAX_TEXT_BYTES - 3)));
         e.declarations.clear();
         r.entries.push(e);
     }
@@ -1643,4 +1647,45 @@ fn status_tones_follow_typed_phase_and_empty_project_availability() {
             .unwrap()
             .visible
     );
+}
+
+
+#[test]
+fn source_shape_pagination_is_bounded_reversible_guarded_and_cleared() {
+    let mut r = report();
+    let template = r.entries[1].clone();
+    r.entries.truncate(1);
+    for id in 1..301 {
+        let mut entry = template.clone();
+        entry.id = id;
+        entry.name = NativeName::Utf8(format!("source-{id}.rs"));
+        entry.declarations.clear();
+        r.entries.push(entry);
+    }
+    r.files = 300;
+    r.complete = false;
+    let mut m = connected();
+    let p = inspect(&mut m);
+    event(&mut m, result(&p, r));
+    let first = rows_named(&m, "source-shape");
+    assert_eq!(first.len(), 256);
+    assert!(text_named(&m, "source-shape-summary").contains("Partial"));
+    assert!(first.iter().all(|row| matches!(row.action, forge_ide_ui::view::RowAction::SelectEntry { .. })));
+    assert!(event(&mut m, UiEvent::MoreShape { report: p.token.clone() }).effects.is_empty());
+    let second = rows_named(&m, "source-shape");
+    assert!(!second.is_empty());
+    assert!(second.len() <= 256);
+    assert_ne!(first[0].id, second[0].id);
+    assert!(event(&mut m, UiEvent::PreviousShape { report: p.token.clone() }).effects.is_empty());
+    assert_eq!(rows_named(&m, "source-shape"), first);
+    assert!(event(&mut m, action_event(&first[1].action)).effects.is_empty());
+    assert!(m.view().tables.iter().find(|table| table.id == "source-shape-details").unwrap().rows.iter().any(|p| p.label == "Observed Rust files" && p.value == "300"));
+    let next = inspect(&mut m);
+    assert!(rows_named(&m, "source-shape").is_empty());
+    assert!(m.view().tables.iter().find(|table| table.id == "source-shape-details").unwrap().rows.is_empty());
+    event(&mut m, result(&next, report()));
+    let prior = m.view();
+    event(&mut m, UiEvent::MoreShape { report: p.token.clone() });
+    event(&mut m, UiEvent::PreviousShape { report: p.token });
+    assert_eq!(m.view(), prior);
 }

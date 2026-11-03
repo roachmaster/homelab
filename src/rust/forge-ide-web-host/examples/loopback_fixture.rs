@@ -42,7 +42,8 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
     let project = root.join("workspace");
     fs::create_dir(&project)?;
     fs::create_dir(project.join("src"))?;
-    fs::write(project.join("src/lib.rs"),b"pub struct Widget { pub value: u32 }\npub trait View { fn show(&self); }\nimpl View for Widget { fn show(&self) {} }\npub fn inspect_me() {}\n")?;
+    fs::write(project.join("Cargo.toml"), b"[package]\nname = \"fixture\"\nversion = \"0.1.0\"\n")?;
+    fs::write(project.join("src/lib.rs"),b"pub struct Widget { pub value: u32 }\npub struct Gadget;\npub trait View { fn show(&self); }\nimpl View for Widget { fn show(&self) {} }\nimpl View for Gadget { fn show(&self) {} }\npub fn inspect_me() {}\n")?;
     fs::write(
         project.join("README <safe>.md"),
         b"Fixture <script> text is never HTML.\n",
@@ -307,6 +308,12 @@ mod tests {
             .entries
             .iter()
             .any(|e| matches!(&e.name, NativeName::UnixBytes(bytes) if bytes.contains(&255))));
+        let shape = forge_ide_ui::shape::SourceShape::from_report(&report).unwrap();
+        let group = shape.groups.iter().find(|group| group.manifest.is_some()).unwrap();
+        assert_eq!(group.counts.traits, 1);
+        assert_eq!(group.counts.structs, 2);
+        assert_eq!(group.counts.trait_impls, 2);
+        assert_eq!(group.traits[0].candidate_structs.len(), 2);
         let empty_report = inspect(empty);
         assert!(empty_report.complete);
         assert_eq!(empty_report.files, 0);

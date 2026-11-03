@@ -205,6 +205,8 @@ async function noReport(page) {
   await check(page.locator('#outline [role="treeitem"]')).toHaveCount(0);
   await check(page.locator('#declarations [role="treeitem"]')).toHaveCount(0);
   await check(page.locator('#problems [role="treeitem"]')).toHaveCount(0);
+  await check(page.locator('#source-shape [role="treeitem"]')).toHaveCount(0);
+  await check(page.locator('#source-shape-details')).toHaveText('');
   await check(page.locator('#details')).not.toContainText('fault-fixture.txt');
   await check(page.locator('#details')).not.toContainText(LONG_FILE_NAME);
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
@@ -598,8 +600,28 @@ async function realJourney() {
   await check(page.locator('textarea, [contenteditable="true"]')).toHaveCount(0);
   await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
   await check(page.locator('#summary')).toContainText('1 traits');
-  await check(page.locator('#summary')).toContainText('1 trait impls');
+  await check(page.locator('#summary')).toContainText('2 trait impls');
   await check(page.locator('#summary')).toContainText('1 free functions');
+  const shapeCalls = traffic.count('inspect');
+  await check(page.locator('#source-shape-summary')).toContainText('Partial');
+  await check(page.locator('#source-shape-limits')).toContainText('not a complexity score');
+  await check(page.locator('#source-shape')).toContainText('Cargo.toml directory (unverified)');
+  const shapeTrait = page.locator('#source-shape [data-row-id^="shape-trait-"]:not([data-row-id*="-candidate-"]) [role="treeitem"]');
+  await check(shapeTrait).toHaveCount(1);
+  await check(shapeTrait).toContainText('View');
+  await check(shapeTrait).toContainText('2 tentative candidate structs');
+  const shapeCandidates = page.locator('#source-shape [data-row-id*="-candidate-"] [role="treeitem"]');
+  await check(shapeCandidates).toHaveCount(2);
+  await check(shapeCandidates.filter({ hasText: 'Widget' })).toHaveCount(1);
+  const gadget = shapeCandidates.filter({ hasText: 'Gadget' });
+  await gadget.focus();
+  await page.keyboard.press('Enter');
+  await check(page.locator('#selection-title')).toContainText('lib.rs');
+  await check(gadget).toBeFocused();
+  await check(page.locator('#source-shape-details')).toContainText('Tentative local header impl blocks');
+  await check(page.locator('#source-shape-details')).toContainText('Qualified-path impl headers (local/external unknown)');
+  assert.equal(traffic.count('inspect'), shapeCalls, 'shape navigation is report-local');
+
   await check(page.locator('#files')).toContainText('README <safe>.md');
   await check(page.locator('#files')).toContainText('<svg onload=alert(1)>.txt');
   await check(page.locator('#files svg, #files script, #files img')).toHaveCount(0);
