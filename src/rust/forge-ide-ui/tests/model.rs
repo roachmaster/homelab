@@ -1779,7 +1779,9 @@ fn workspace_presentation_context_tracks_report_entry_and_declaration() {
 #[test]
 fn shape_navigation_rows_do_not_pretend_multiple_symbols_are_selected() {
     let mut r = report();
-    r.entries[1].declarations.push(declaration(2, None, DeclarationKind::Struct, "Sample"));
+    r.entries[1]
+        .declarations
+        .push(declaration(2, None, DeclarationKind::Struct, "Sample"));
     let mut implementation = declaration(3, None, DeclarationKind::Impl, "Tool for Sample");
     implementation.implementation = Some(Implementation {
         target: "Sample".into(),

@@ -582,7 +582,13 @@ async function deviceViewportJourney(page, traffic) {
     await activate('outline-panel');
     if (narrow) await check(symbol).toBeFocused();
     await symbol.focus();
+    // The tree may be the last tabbable control in narrow mode. Test exit and
+    // reentry through its preceding filter, without requiring a focus trap.
+    await page.keyboard.press('Shift+Tab');
+    await check(page.locator('#symbol-filter')).toBeFocused();
+    await assertViewportFocus();
     await page.keyboard.press('Tab');
+    await check(symbol).toBeFocused();
     await assertViewportFocus();
     await activate('workspace-panel');
     assert.equal(await page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollWidth <= body.clientWidth + 1), true, 'main pane has no horizontal overflow');
