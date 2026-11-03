@@ -186,9 +186,12 @@ async function selectFile(page, name) {
   await page.mouse.up();
   await check(item).toHaveAttribute('aria-selected', 'true');
   const after = await item.boundingBox();
-  const projectionStable = Math.abs(pressed.y - after.y) < 1 && Math.abs(pressed.height - after.height) < 1;
-  if (!projectionStable) process.stderr.write('QA_CHECK pointer_projection_stability_failed\n');
-  assert.ok(projectionStable, 'unchanged projected rows retain scroll position after selection');
+  const tree = await page.locator('#files').boundingBox();
+  // Accepted selection may remove a "selection hidden" summary and move rows.
+  // It must not scroll the focused selected row out of its owned viewport.
+  const projectionVisible = after.y >= tree.y - 1 && after.y + after.height <= tree.y + tree.height + 1;
+  if (!projectionVisible) process.stderr.write('QA_CHECK pointer_projection_visibility_failed\n');
+  assert.ok(projectionVisible, 'selected row stays inside its scrolling tree after projection');
   await check(page.locator('#selection-title')).toContainText(name);
   return item;
 }
