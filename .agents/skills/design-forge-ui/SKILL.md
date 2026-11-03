@@ -19,6 +19,14 @@ For workbench layout, inspection-state UX or wireframe-first design, also use
 visual hierarchy; this skill retains the authoring/execution boundary. Design-only
 SVG documentation does not become a hand-authored runtime asset.
 
+For visual quality, read the UX skill's
+[workbench craft reference](../design-forge-ide-ux/references/workbench-craft.md).
+For transitions, animation or perceived-speed work, read
+[generated motion](references/motion.md). These are
+[pinned local adaptations](../../../docs/design/skill-sources.md), not permission
+to introduce a handwritten frontend or install upstream tools. Use
+[Test Forge UI](../test-forge-ui/SKILL.md) for real-browser acceptance.
+
 ## Author declarations, generate web assets
 
 - Styles come from **YAML style/theme declarations** or **Rust UI-component macro

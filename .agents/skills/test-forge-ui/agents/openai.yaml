@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Forge UI"
+  short_description: "Verify generated IDE behavior with real-browser evidence"
+  default_prompt: "Use $test-forge-ui to test the generated Forge IDE through its existing browser harness and report scoped evidence and gaps."

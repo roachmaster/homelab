@@ -13,7 +13,14 @@ Use [Design Forge UI](../design-forge-ui/SKILL.md) for authoring/execution rules
 application assets come from YAML/typed Rust components; main-thread presentation
 stays separate from worker/WASM application state. This skill owns the experience,
 not a competing frontend architecture. Its [source notes](references/sources.md)
-record an original synthesis, not an installed upstream skill suite.
+and [pinned adaptation record](../../../docs/design/skill-sources.md) distinguish
+local guidance from upstream material. No upstream skill suite is installed.
+
+For a visual critique, polish or design-direction request, read
+[Workbench craft](references/workbench-craft.md): it adapts design-taste and
+Impeccable guidance to an operational IDE, not a landing page. For implementation
+acceptance, use [Test Forge UI](../test-forge-ui/SKILL.md); wireframes and aesthetic
+rules are not usability or browser-test evidence.
 
 ## Establish what the screen can truthfully show
 

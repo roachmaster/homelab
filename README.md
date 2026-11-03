@@ -206,12 +206,20 @@ license and pinned reconstruction provenance.
 - [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
 - [Design Forge IDE UX](.agents/skills/design-forge-ide-ux/SKILL.md): plan an honest read-only workbench, keyboard flow and state-labeled wireframes before implementation.
 - [Design Forge UI](.agents/skills/design-forge-ui/SKILL.md): generate HTML/CSS/JS from YAML/Rust component declarations; separate main-thread presentation from worker/WASM logic.
+- [Test Forge UI](.agents/skills/test-forge-ui/SKILL.md): reuse the existing real-browser QA harness, inspect rendered and keyboard behavior, and distinguish real-agent evidence from controlled probes.
 - [Design Forge Front Door](.agents/skills/design-forge-front-door/SKILL.md): preserve one HTTP gateway and header-selected destinations, with current versus future method semantics.
 - [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.
 - [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md): specify typed factories, acquisition scopes, leases and lifecycle wiring.
 - [Expose Forge Capability](.agents/skills/expose-forge-capability/SKILL.md): deliver public config/factory/registrar exports with an independent consumer proof, not example-only integration.
 
 The framework-specific skills share one [DSL semantic reference](docs/architecture/framework-dsl.md). Keep these repository-local skills with their linked documentation; the broader DSL is an evolving Rust-embedded composition model, not an implemented parser; the linked core documents its real public API subset.
+
+The UI/UX skills also include focused workbench-craft and generated-motion
+guidance adapted from VoltAgent's design reference index, design-taste,
+Impeccable and Emil Kowalski, with optional already-configured Playwright MCP
+exploration in the QA skill. [Pinned sources, changes and licenses](docs/design/skill-sources.md)
+explain the adaptation to Forge's coding philosophy. No upstream suite, launcher,
+hook, MCP server or dependency is installed by these repository-local skills.
 
 Examples: `Use $model-forge-module to explain the DSL and model a notifications capability.`
 

@@ -37,3 +37,14 @@ The compact toolbar, dominant structural workspace, proposed optional panes,
 local report filter and Problems aggregation are **our design choices** for the
 user's task. They are not existing API claims or instructions from those sources.
 Reinspect current code when using this skill after the baseline changes.
+
+## Additional design and browser guidance
+
+The 2026-11-03 [pinned adaptation record](../../../../docs/design/skill-sources.md)
+adds VoltAgent's reference-index approach, design-taste app-screen guidance,
+Impeccable's operational-interface craft, Emil Kowalski's restrained motion and
+Microsoft Playwright MCP's snapshot-driven exploration. The focused references
+are rewritten for Forge's generated YAML/Rust authoring and worker/WASM policy;
+the existing browser harness remains the acceptance gate. Applicable upstream
+licenses and notices are retained beside that record. No upstream tools or full
+skill suites are installed.
