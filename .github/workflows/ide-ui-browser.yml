@@ -66,6 +66,16 @@ jobs:
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/junit.xml
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/failure.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-desktop.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-iphone-se3-portrait.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-iphone-se3-landscape.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-iphone13-portrait.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-iphone13-landscape.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-iphone14-pro-max-portrait.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-iphone14-pro-max-landscape.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-ipad-mini-portrait.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-ipad-mini-landscape.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-ipad-pro11-portrait.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-viewport-ipad-pro11-landscape.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-narrow-details.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-narrow-declaration.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-workbench-partial-problems.png

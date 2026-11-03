@@ -28,9 +28,9 @@ function complete(report) {
   for (const item of SCENARIOS) { report.start(item.id); report.pass(item.id); }
 }
 
-test('catalog is exactly 18 unique ordered groups with honest sequential dependencies and scope labels', () => {
-  assert.equal(SCENARIOS.length, 18);
-  assert.equal(new Set(SCENARIOS.map(item => item.id)).size, 18);
+test('catalog is exactly 28 unique ordered groups with honest sequential dependencies and scope labels', () => {
+  assert.equal(SCENARIOS.length, 28);
+  assert.equal(new Set(SCENARIOS.map(item => item.id)).size, 28);
   for (const [index, item] of SCENARIOS.entries()) {
     assert.equal(item.order, index + 1);
     assert.equal(item.depends_on, SCENARIOS[index - 1]?.id ?? null);
@@ -40,18 +40,18 @@ test('catalog is exactly 18 unique ordered groups with honest sequential depende
   assert.throws(() => report.start(SCENARIOS[1].id));
 });
 
-test('passed report contains all timings, scope labels, summary and 18 JUnit cases', async t => {
+test('passed report contains all timings, scope labels, summary and 28 JUnit cases', async t => {
   const output = join(await workspace(t), 'browser');
   const passed = await runHarness(defaults(output, { journey: complete }));
   assert.equal(passed, true);
   const [json, summary, xml] = await artifacts(output);
   const data = JSON.parse(json);
   assert.equal(data.status, 'passed');
-  assert.deepEqual(data.counts, { passed: 18, failed: 0, not_run: 0 });
+  assert.deepEqual(data.counts, { passed: 28, failed: 0, not_run: 0 });
   assert.ok(data.scenarios.every(item => item.started_at && item.duration_ms >= 0));
   assert.match(summary, /not independently selectable/);
-  assert.equal((xml.match(/<testcase /g) ?? []).length, 18);
-  assert.match(xml, /tests="18" failures="0"/);
+  assert.equal((xml.match(/<testcase /g) ?? []).length, 28);
+  assert.match(xml, /tests="28" failures="0"/);
 });
 
 test('scenario failure preserves passed and not_run records without serializing adversarial errors', async t => {
@@ -71,7 +71,7 @@ test('scenario failure preserves passed and not_run records without serializing 
   assert.equal(passed, false);
   const texts = await artifacts(output);
   const data = JSON.parse(texts[0]);
-  assert.deepEqual(data.counts, { passed: 1, failed: 1, not_run: 16 });
+  assert.deepEqual(data.counts, { passed: 1, failed: 1, not_run: 26 });
   assert.deepEqual(data.failure, { stage: 'scenario', category: 'assertion_or_runtime_failure', scenario_id: SCENARIOS[1].id });
   assert.equal(data.scenarios[2].started_at, null);
   for (const text of [...texts, ...logs]) {
@@ -79,7 +79,7 @@ test('scenario failure preserves passed and not_run records without serializing 
   }
 });
 
-test('all prelaunch stages create failed reports with 18 not_run groups', async t => {
+test('all prelaunch stages create failed reports with 28 not_run groups', async t => {
   const root = await workspace(t);
   for (const stage of ['arguments', 'dependency', 'input_validation', 'fingerprints', 'browser_channel', 'browser_launch']) {
     const output = join(root, stage);
@@ -92,7 +92,7 @@ test('all prelaunch stages create failed reports with 18 not_run groups', async 
     const data = JSON.parse(json);
     assert.equal(journeyRan, false);
     assert.equal(data.failure.stage, stage);
-    assert.deepEqual(data.counts, { passed: 0, failed: 0, not_run: 18 });
+    assert.deepEqual(data.counts, { passed: 0, failed: 0, not_run: 28 });
     assert.match(xml, /name="forge.browser.harness"/);
   }
 });
@@ -151,7 +151,7 @@ test('cleanup failure makes an otherwise fully passed journey fail without inven
   const [json, , xml] = await artifacts(output);
   const data = JSON.parse(json);
   assert.equal(data.failure, null);
-  assert.deepEqual(data.counts, { passed: 18, failed: 0, not_run: 0 });
+  assert.deepEqual(data.counts, { passed: 28, failed: 0, not_run: 0 });
   assert.equal(data.status, 'failed');
   assert.match(xml, /browser: cleanup_failed/);
 });
@@ -182,7 +182,7 @@ test('deadline stops a hanging journey, attempts cleanup and records static dead
   assert.equal(cleaned, true);
   const data = JSON.parse((await artifacts(output))[0]);
   assert.equal(data.failure.category, 'run_deadline_exceeded');
-  assert.deepEqual(data.counts, { passed: 0, failed: 1, not_run: 17 });
+  assert.deepEqual(data.counts, { passed: 0, failed: 1, not_run: 27 });
 });
 
 test('SIGINT/SIGTERM use graceful cleanup and remove handlers', async t => {
@@ -219,7 +219,7 @@ test('returning without all groups is a failure, not partial success', async t =
   assert.equal(await runHarness(defaults(output)), false);
   const data = JSON.parse((await artifacts(output))[0]);
   assert.equal(data.failure.category, 'incomplete_suite');
-  assert.deepEqual(data.counts, { passed: 0, failed: 0, not_run: 18 });
+  assert.deepEqual(data.counts, { passed: 0, failed: 0, not_run: 28 });
 });
 
 
@@ -345,4 +345,30 @@ test('unexpected fixture leader exit records unconfirmed cleanup without signall
   assert.doesNotThrow(() => requireRunningFixtureLeader({ pid: 123, exitCode: null, signalCode: null }));
   assert.doesNotThrow(() => requireRunningFixtureLeader({ pid: undefined, exitCode: -2, signalCode: null }));
   assert.throws(() => requireRunningFixtureLeader({ pid: 123, exitCode: null, signalCode: 'SIGTERM' }));
+});
+
+
+test('each viewport failure retains its profile and exact size while later cases remain not_run', async t => {
+  for (const viewport of SCENARIOS.filter(item => item.viewport)) {
+    const output = join(await workspace(t), viewport.id);
+    const passed = await runHarness(defaults(output, {
+      journey(report) {
+        for (const item of SCENARIOS) {
+          report.start(item.id);
+          if (item.id === viewport.id) throw new Error(SECRET);
+          report.pass(item.id);
+        }
+      },
+    }));
+    assert.equal(passed, false);
+    const [json, markdown, xml] = await artifacts(output);
+    const data = JSON.parse(json);
+    assert.equal(data.failure.scenario_id, viewport.id);
+    assert.deepEqual(data.scenarios[viewport.order - 1].viewport, viewport.viewport);
+    assert.equal(data.scenarios[viewport.order - 1].status, 'failed');
+    assert.ok(data.scenarios.slice(viewport.order).every(item => item.status === 'not_run'));
+    assert.ok(markdown.includes(`${viewport.viewport.width}×${viewport.viewport.height}`));
+    assert.ok(xml.includes(viewport.id));
+    assert.equal(json.includes('do-not-record'), false);
+  }
 });

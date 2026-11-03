@@ -150,18 +150,18 @@ export async function cleanupResources(resources, report, timeoutMs = 15_000) {
 
 const xml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
 export function summary(data) {
-  const rows = data.scenarios.map(item => `| ${item.order} | ${item.id} | ${item.scope} / ${item.backend} | ${item.status} | ${item.duration_ms ?? '-'} |`);
+  const rows = data.scenarios.map(item => `| ${item.order} | ${item.id} | ${item.scope} / ${item.backend} | ${item.viewport ? `${item.viewport.profile} ${item.viewport.width}×${item.viewport.height}` : '-'} | ${item.status} | ${item.duration_ms ?? '-'} |`);
   const primary = data.failure ? `\nFailure: **${data.failure.category}**, stage **${data.failure.stage}**, group **${data.failure.scenario_id ?? 'none'}**.\n` : '';
   const cleanup = data.cleanup.map(item => `- ${item.name}: ${item.status} (${item.duration_ms} ms)`).join('\n') || '- No resource was started.';
-  return `# Browser QA: ${data.status}\n\n${SUITE_DESCRIPTION}\n\nPassed: ${data.counts?.passed ?? 0}; failed: ${data.counts?.failed ?? 0}; not run: ${data.counts?.not_run ?? SCENARIOS.length}.\n${primary}\n| # | Group | Scope / backend | Result | ms |\n| --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n## Cleanup\n${cleanup}\n\nFailure screenshot: ${data.failure_screenshot}. Screenshots are fixture-only evidence, not an accessibility certification. No raw exception or browser/network/fixture logs are retained.\n`;
+  return `# Browser QA: ${data.status}\n\n${SUITE_DESCRIPTION}\n\nPassed: ${data.counts?.passed ?? 0}; failed: ${data.counts?.failed ?? 0}; not run: ${data.counts?.not_run ?? SCENARIOS.length}.\n${primary}\n| # | Group | Scope / backend | Viewport | Result | ms |\n| --- | --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n## Cleanup\n${cleanup}\n\nFailure screenshot: ${data.failure_screenshot}. Screenshots are fixture-only evidence, not an accessibility certification. No raw exception or browser/network/fixture logs are retained.\n`;
 }
 export function junit(data) {
   const cases = data.scenarios.map(item => {
     const content = item.status === 'failed' ? `<failure type="${xml(data.failure?.category ?? 'harness_failure')}" message="${xml(data.failure?.stage ?? 'scenario')}"/>` : item.status === 'not_run' ? '<skipped message="Not reached in sequential journey"/>' : '';
     return `  <testcase classname="forge.browser.${item.scope}" name="${xml(item.id)}" time="${(item.duration_ms ?? 0) / 1000}">${content}</testcase>`;
   });
-  // Harness failure is not a nineteenth acceptance group. A separate suite makes
-  // launch/cleanup failures visible to CI even if all 18 groups passed/not_run.
+  // Harness failure is not an additional acceptance group. A separate suite makes
+  // launch/cleanup failures visible to CI even if all catalog groups passed/not_run.
   const harnessFailure = data.failure && !data.scenarios.some(item => item.status === 'failed');
   const cleanupFailures = data.cleanup.filter(item => item.status === 'failed');
   const errors = [...(harnessFailure ? [`${data.failure.stage}: ${data.failure.category}`] : []), ...cleanupFailures.map(item => `${item.name}: cleanup_failed`)];

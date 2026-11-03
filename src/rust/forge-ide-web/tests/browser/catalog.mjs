@@ -1,3 +1,4 @@
+import { VIEWPORTS } from './viewports.mjs';
 // Ordered acceptance groups, not independently selectable test cases. Later groups
 // reuse accepted reports, browser state and fixtures established by earlier groups.
 const definitions = [
@@ -7,6 +8,7 @@ const definitions = [
   ['real.pagination.problems', 'real', 'real_mtls', 'Bounded reversible pagination and truthful file/problem states without I/O'],
   ['real.panes.desktop', 'real', 'real_mtls', 'Desktop pointer/keyboard pane sizing, bounds, reset and focus'],
   ['real.panes.narrow', 'real', 'real_mtls', 'Narrow viewport pane navigation and widening preserve context'],
+  ...VIEWPORTS.map(item => [item.id, 'real', 'real_mtls', `${item.profile} ${item.width}×${item.height} CSS-pixel Chromium viewport navigation, focus and overflow`]),
   ['probe.report.stale_actions', 'lifecycle_probe', 'real_mtls', 'Replayed stale local actions are rejected by real WASM'],
   ['probe.page.lifecycle', 'lifecycle_probe', 'real_mtls', 'Synthetic page transitions plus real reload and history clear protected DOM'],
   ['real.report.empty', 'real', 'real_mtls', 'Complete empty project retains its root and truthful diagnostics'],
@@ -23,5 +25,6 @@ const definitions = [
 export const SCENARIOS = Object.freeze(definitions.map(([id, scope, backend, title], index) => Object.freeze({
   id, order: index + 1, scope, backend, title,
   depends_on: index ? definitions[index - 1][0] : null,
+  ...(VIEWPORTS.some(item => item.id === id) ? { viewport: VIEWPORTS.find(item => item.id === id) } : {}),
 })));
-export const SUITE_DESCRIPTION = '18 ordered acceptance groups in one sequential journey; groups share state and are not independently selectable. Real scope uses the generated UI, executable Rust WASM, native host and real mTLS agent. Injected scope is controlled fault/presentation evidence, not remote transport E2E evidence. Lifecycle probes explicitly manipulate events, views, worker lifecycle or session state.';
+export const SUITE_DESCRIPTION = '28 ordered acceptance groups in one sequential journey; groups share state and are not independently selectable. Ten device-profile dimensions are Chromium viewport-only coverage, not physical iOS, WebKit, touch, safe-area or browser-chrome emulation. Real scope uses the generated UI, executable Rust WASM, native host and real mTLS agent. Injected scope is controlled fault/presentation evidence, not remote transport E2E evidence. Lifecycle probes explicitly manipulate events, views, worker lifecycle or session state.';

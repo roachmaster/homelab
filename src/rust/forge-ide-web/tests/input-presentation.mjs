@@ -79,6 +79,62 @@ workers.at(-1).onmessage({ data: { kind: 'view', view: { lists: [{
 }] } } });
 assert.equal(tree.children[0], item);
 assert.equal(tree.scrollTop, 144, 'same-order list projections preserve tree scroll');
+// Generic pane context is opaque: external changes reset stale pane focus and
+// scroll, unchanged context and direct in-pane navigation retain ownership.
+const paneBody = { scrollTop: 900 };
+const inside = { isConnected: true, closest() { return null; } };
+const pane = { id: 'collection-pane', dataset: { pane: 'main' }, hidden: false,
+  contains(node) { return node === inside; },
+  querySelector(selector) { return selector === '.fg-pane-body' ? paneBody : null; },
+};
+const paneState = { root: { dataset: {} }, grid: { clientWidth: 0 }, panes: [pane], main: pane,
+  open: new Set([pane.id]), sizes: new Map(), active: pane.id, narrow: { matches: false },
+  focus: new Map([[pane.id, { node: inside }]]), context: new Map(), resetScroll: new Set(),
+};
+context.paneState = paneState;
+vm.runInContext("layouts.set('collection-layout', paneState)", context);
+function paneView(contextValue) {
+  workers.at(-1).onmessage({ data: { kind: 'view', view: {
+    panes: [{ id: pane.id, context: contextValue }],
+  } } });
+}
+paneView({ selected: 1 });
+assert.equal(paneBody.scrollTop, 0, 'external selection reveals new pane content');
+assert.equal(paneState.focus.size, 0, 'external selection discards stale focus');
+paneBody.scrollTop = 500; paneState.focus.set(pane.id, { node: inside });
+paneView({ selected: 1 });
+assert.equal(paneBody.scrollTop, 500, 'same context preserves scroll');
+assert.equal(paneState.focus.size, 1, 'same context preserves saved focus');
+document.activeElement = inside;
+paneView({ selected: 2 });
+assert.equal(paneBody.scrollTop, 500, 'direct in-pane navigation preserves scroll');
+assert.equal(paneState.focus.size, 1, 'direct in-pane navigation preserves focus');
+document.activeElement = body;
+paneView({ selected: 3 });
+assert.equal(paneBody.scrollTop, 0);
+assert.equal(paneState.focus.size, 0);
+// Hidden panes have no scroll box: retain the reset until activation shows it.
+paneState.narrow.matches = true; paneState.active = 'other-pane';
+paneBody.scrollTop = 700; paneState.focus.set(pane.id, { node: inside });
+paneView({ selected: 4 });
+assert.equal(pane.hidden, true);
+assert.equal(paneBody.scrollTop, 700, 'hidden pane reset is deferred');
+assert.equal(paneState.resetScroll.has(pane.id), true);
+assert.equal(paneState.focus.size, 0);
+paneState.active = pane.id;
+vm.runInContext('updateLayout(paneState)', context);
+assert.equal(pane.hidden, false);
+assert.equal(paneBody.scrollTop, 0, 'activation consumes pending reset after showing pane');
+assert.equal(paneState.resetScroll.size, 0);
+paneBody.scrollTop = 350;
+vm.runInContext('updateLayout(paneState)', context);
+assert.equal(paneBody.scrollTop, 350, 'consumed reset does not keep snapping scroll');
+paneState.resetScroll.add(pane.id);
+vm.runInContext('clearProtected()', context);
+assert.equal(paneState.resetScroll.size, 0, 'protected lifecycle clears pending resets');
+assert.equal(paneState.context.size, 0);
+vm.runInContext("layouts.delete('collection-layout')", context);
+view('', null);
 // Repeated values must not falsely acknowledge the newest edit.
 type('a'); type('ab'); type('a');
 assert.deepEqual(workers[0].sent.map(m => m.presentation_sequence), [1, 2, 3]);
@@ -112,3 +168,4 @@ view('', null, 'C'); type('new');
 assert.equal(workers[1].sent[0].presentation_sequence, 1);
 assert.equal(workers[1].sent[0].event.report.token, 'C');
 console.log('Input presentation sequencing: repeated values, backspace, rejection, invalid draft, context and lifecycle passed.');
+

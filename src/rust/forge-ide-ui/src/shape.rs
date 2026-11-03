@@ -212,16 +212,31 @@ impl SourceShape {
 fn name_matches(name: &NativeName, ascii: &[u8], suffix: bool) -> bool {
     match name {
         NativeName::Utf8(text) => {
-            if suffix { text.as_bytes().ends_with(ascii) } else { text.as_bytes() == ascii }
+            if suffix {
+                text.as_bytes().ends_with(ascii)
+            } else {
+                text.as_bytes() == ascii
+            }
         }
         NativeName::UnixBytes(bytes) => {
-            if suffix { bytes.ends_with(ascii) } else { bytes.as_slice() == ascii }
+            if suffix {
+                bytes.ends_with(ascii)
+            } else {
+                bytes.as_slice() == ascii
+            }
         }
         NativeName::WindowsWide(units) => {
-            let start = if suffix { units.len().saturating_sub(ascii.len()) } else { 0 };
+            let start = if suffix {
+                units.len().saturating_sub(ascii.len())
+            } else {
+                0
+            };
             let units = &units[start..];
             units.len() == ascii.len()
-                && units.iter().zip(ascii).all(|(unit, byte)| *unit == u16::from(*byte))
+                && units
+                    .iter()
+                    .zip(ascii)
+                    .all(|(unit, byte)| *unit == u16::from(*byte))
         }
         NativeName::EncodedBytes(_) => false,
     }
@@ -242,7 +257,9 @@ fn bare_identifier(text: &str) -> bool {
     let mut chars = text.chars();
     // Conservative ASCII subset: unsupported Unicode remains unresolved rather
     // than reimplementing Rust's Unicode identifier grammar in presentation.
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 fn lexical_scope(entry: &EntryView, declaration: &DeclarationView) -> bool {
@@ -260,14 +277,20 @@ fn match_headers(report: &ReportView, group: &mut SourceGroup) {
         let entry = &report.entries[item.location.entry as usize];
         let declaration = &entry.declarations[item.location.declaration as usize];
         if lexical_scope(entry, declaration) {
-            traits.entry((entry.id, declaration.parent, &declaration.name)).or_default().push(index);
+            traits
+                .entry((entry.id, declaration.parent, &declaration.name))
+                .or_default()
+                .push(index);
         }
     }
     for location in &group.structs {
         let entry = &report.entries[location.entry as usize];
         let declaration = &entry.declarations[location.declaration as usize];
         if lexical_scope(entry, declaration) {
-            structs.entry((entry.id, declaration.parent, &declaration.name)).or_default().push(*location);
+            structs
+                .entry((entry.id, declaration.parent, &declaration.name))
+                .or_default()
+                .push(*location);
         }
     }
     let mut candidates = BTreeSet::new();
@@ -275,7 +298,9 @@ fn match_headers(report: &ReportView, group: &mut SourceGroup) {
     for item in &mut group.impls {
         let entry = &report.entries[item.location.entry as usize];
         let declaration = &entry.declarations[item.location.declaration as usize];
-        let Some(implementation) = &declaration.implementation else { continue };
+        let Some(implementation) = &declaration.implementation else {
+            continue;
+        };
         let Some(trait_path) = &implementation.trait_path else {
             item.disposition = ImplDisposition::Inherent;
             continue;
@@ -290,7 +315,8 @@ fn match_headers(report: &ReportView, group: &mut SourceGroup) {
             item.disposition = ImplDisposition::GenericOrComplex;
         } else if lexical_scope(entry, declaration) {
             let trait_indices = traits.get(&(entry.id, declaration.parent, trait_path.as_str()));
-            let locations = structs.get(&(entry.id, declaration.parent, implementation.target.as_str()));
+            let locations =
+                structs.get(&(entry.id, declaration.parent, implementation.target.as_str()));
             if let (Some(indices), Some(locations)) = (trait_indices, locations) {
                 if let ([index], [location]) = (indices.as_slice(), locations.as_slice()) {
                     let trait_shape = &mut group.traits[*index];

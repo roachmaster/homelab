@@ -1,6 +1,6 @@
 # Headless Forge IDE QA
 
-Run the existing **18 ordered browser acceptance groups** with one repository-root
+Run the existing **28 ordered browser acceptance groups** with one repository-root
 command. This is test automation around the workbench, not a new UI, scheduler or
 replacement backend. Test-driver JavaScript is not a hand-authored application asset.
 
@@ -40,7 +40,7 @@ review of the generated screenshots; a successful helper test is not that gate.
 | Artifact in the printed run directory | Meaning |
 | --- | --- |
 | `run.json`, `run.md` | Build/preflight/browser stage status and duration, revision, dirty flag and source-byte fingerprint; exists even when prerequisites fail |
-| `browser/result.json` | Versioned structured 18-group records: stable ID, scope/backend, dependencies, timestamps/duration, passed/failed/not_run, primary failure and independent cleanup outcomes |
+| `browser/result.json` | Versioned structured 28-group records: stable ID, scope/backend, dependencies, timestamps/duration, passed/failed/not_run, primary failure and independent cleanup outcomes |
 | `browser/summary.md` | Readable scenario and cleanup table, safe failure category/stage |
 | `browser/junit.xml` | Acceptance cases plus separate harness-error suite for setup/cleanup failures; not-run cases are skipped, not passed |
 | `browser/*.png` | Known desktop/narrow/partial/empty/denied and controlled-state screenshots; optional masked `failure.png` only when safe capture is possible |
@@ -164,3 +164,42 @@ binary/parse-unavailable distinctions, encoded names and a complete empty root.
 They also check the separately injected port's response context/error categories.
 Hosted browser execution and visual review of all generated screenshots remain a
 separate required acceptance gate.
+
+
+### iPhone and tablet viewport matrix
+
+The original 760×1000 narrow regression remains intact. Ten additional sequential
+`real.viewport.*` groups reuse the same accepted real-agent report. Every profile
+gets a separate JSON/Markdown/JUnit result; each successful case captures its own
+allowlisted masked fixture PNG. A failed case may only have the safe `failure.png`
+capture, and not-run cases have no image. The report includes the profile name,
+exact CSS-pixel width/height and expected screenshot filename, so failure and
+not-run states identify the affected orientation.
+
+| Playwright profile | Portrait | Landscape |
+| --- | --- | --- |
+| iPhone SE (3rd gen) | 375×667 | 667×375 |
+| iPhone 13 | 390×664 | 750×342 |
+| iPhone 14 Pro Max | 430×740 | 814×380 |
+| iPad Mini | 768×1024 | 1024×768 |
+| iPad Pro 11 | 834×1194 | 1194×834 |
+
+These are viewport dimensions, **not physical screen resolutions**. Landscape
+values are taken independently from the registry, not obtained by swapping the
+portrait dimensions. Startup fails closed if they differ from the installed
+pinned Playwright 1.64.1 registry. Sources:
+[device descriptors](https://github.com/microsoft/playwright/blob/v1.64.1/packages/isomorphic/deviceDescriptorsSource.json)
+and [Playwright emulation guidance](https://playwright.dev/docs/emulation).
+
+This is sandboxed desktop Chromium **viewport-only** coverage. It does not claim
+physical iPhone/iPad, Safari/WebKit, mobile user-agent, touch, device pixel ratio,
+virtual keyboard, safe-area or browser-chrome emulation. The >800px cases test the
+actual wider-pane breakpoint, including the 814px wide-phone landscape.
+
+Each case verifies actual inner dimensions, breakpoint state, file navigation,
+source-shape candidate navigation and focus, Outline symbol selection, return to
+readable selected details, pane/keyboard focus, horizontal overflow, stable worker
+count and zero additional Inspect requests. Short landscape heights may scroll
+vertically; selected content must remain reachable and readable. Existing taller
+viewport assertions are not weakened. No browser/runtime dependency is installed
+by the matrix, and the normal fixed-suite deadline and cleanup policy still apply.

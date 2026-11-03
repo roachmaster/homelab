@@ -33,7 +33,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();presentationSequence=0;
-  for(const state of layouts.values())state.focus.clear();
+  for(const state of layouts.values()){state.focus.clear();state.context.clear();state.resetScroll.clear();}
 }
 function stop(){const old=worker;worker=null;if(old)old.terminate();clearProtected();}
 function fatal(message){
@@ -114,6 +114,21 @@ function apply(view,acknowledgedSequence){
     const n=element(b.id);if(!n)continue;
     const parts=[];for(const row of b.rows){const property=document.createElement('div');property.className='fg-property';const t=document.createElement('dt');t.textContent=row.label;const d=document.createElement('dd');d.textContent=row.value;property.append(t,d);parts.push(property);}n.replaceChildren(...parts);
   }
+  for(const b of view.panes||[]){
+    for(const state of layouts.values()){
+      const pane=state.panes.find(p=>p.id===b.id);if(!pane)continue;
+      const context=JSON.stringify(b.context);
+      if(state.context.get(b.id)!==context){
+        state.context.set(b.id,context);
+        // An external context change invalidates old pane focus/scroll. Direct
+        // in-pane navigation keeps its current focus and scrolling ownership.
+        if(!pane.contains(focus)){
+          state.focus.delete(b.id);
+          state.resetScroll.add(b.id);
+        }
+      }
+    }
+  }
   for(const state of layouts.values())updateLayout(state);
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
@@ -184,6 +199,11 @@ function updateLayout(state){
   for(const pane of state.panes){
     const open=state.open.has(pane.id);const show=open&&(!state.narrow.matches||state.active===pane.id);
     pane.hidden=!show;
+    // A hidden pane has no scroll box. Apply the queued reset only once visible.
+    if(show&&state.resetScroll.has(pane.id)){
+      const body=pane.querySelector('.fg-pane-body');if(body)body.scrollTop=0;
+      state.resetScroll.delete(pane.id);
+    }
     const position=pane.dataset.pane;const size=state.sizes.get(pane.id);
     if(position!=='main'){state.grid.style.setProperty('--'+position+'-size',open?size+'px':'0px');state.grid.style.setProperty('--'+position+'-divider',open?'6px':'0px');}
     const separator=element(pane.id+'-separator');if(separator){separator.hidden=!show||state.narrow.matches;separator.setAttribute('aria-valuenow',String(size));}
@@ -202,7 +222,7 @@ for(const root of document.querySelectorAll('[data-layout]')){
   const panes=[...root.querySelector('.fg-panes').children].filter(n=>n.hasAttribute('data-pane'));
   const main=panes.find(n=>n.dataset.pane==='main');if(!main)continue;
   const local=selector=>[...root.querySelectorAll(selector)].filter(n=>n.closest('[data-layout]')===root);
-  const state={root,grid:root.querySelector('.fg-panes'),panes,main,open:new Set(panes.map(n=>n.id)),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map()};layouts.set(root.id,state);
+  const state={root,grid:root.querySelector('.fg-panes'),panes,main,open:new Set(panes.map(n=>n.id)),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map(),context:new Map(),resetScroll:new Set()};layouts.set(root.id,state);
   for(const pane of panes)pane.addEventListener('focusin',e=>{if(e.target.closest('[data-layout]')===root)state.focus.set(pane.id,{node:e.target,key:focusKeyByElement.get(e.target)});});
   for(const n of local('[data-pane-toggle]'))n.addEventListener('click',()=>{const pane=panes.find(p=>p.id===n.dataset.paneToggle);if(pane)togglePane(state,pane);});
   for(const n of local('[data-pane-switch]'))n.addEventListener('click',()=>{

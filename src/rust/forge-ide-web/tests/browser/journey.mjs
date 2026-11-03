@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { acquireOwned, bounded, cleanupResources, runHarness } from './report.mjs';
 import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from './diagnostics.mjs';
+import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
 
 let assets, agent, fixtureBinary, output, browser, browserOwner, check, report;
@@ -513,6 +514,87 @@ async function panesAndNarrow(page, traffic) {
   report.pass('real.panes.narrow');
 }
 
+// Reuse the accepted real-agent fixture across fixed CSS viewport profiles. No
+// new requests, device user agent, touch flags or WebKit claims are introduced.
+async function deviceViewportJourney(page, traffic) {
+  const calls = traffic.count('inspect');
+  async function assertViewportFocus() {
+    await assertVisibleFocus(page);
+    await check.poll(() => page.evaluate(() => {
+      const active = document.activeElement;
+      const rect = active.getBoundingClientRect();
+      const owner = active.closest('.fg-pane-body')?.getBoundingClientRect();
+      return rect.left >= Math.max(0, owner?.left ?? 0) - 1 &&
+        rect.right <= Math.min(innerWidth, owner?.right ?? innerWidth) + 1 &&
+        rect.top >= Math.max(0, owner?.top ?? 0) - 1 &&
+        rect.bottom <= Math.min(innerHeight, owner?.bottom ?? innerHeight) + 1;
+    })).toBe(true);
+  }
+  for (const viewport of VIEWPORTS) {
+    report.start(viewport.id);
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    assert.deepEqual(await page.evaluate(() => ({ width: innerWidth, height: innerHeight })), { width: viewport.width, height: viewport.height });
+    const narrow = viewport.width <= 800;
+    await check(page.locator('#workspace')).toHaveAttribute('data-narrow', String(narrow));
+    async function activate(pane) {
+      if (narrow) {
+        const tab = page.locator(`#${pane}-switch`);
+        await tab.focus();
+        await page.keyboard.press('Enter');
+        await check(tab).toHaveAttribute('aria-pressed', 'true');
+        for (const other of ['explorer-panel', 'outline-panel', 'problems-panel', 'workspace-panel'].filter(id => id !== pane)) {
+          await check(page.locator(`#${other}`)).toBeHidden();
+        }
+      } else {
+        await page.locator(`#${pane}-heading`).focus();
+      }
+      await check(page.locator(`#${pane}`)).toBeVisible();
+      await assertViewportFocus();
+    }
+    await activate('explorer-panel');
+    await filterFiles(page, 'lib.rs');
+    await selectFile(page, 'lib.rs');
+    await activate('workspace-panel');
+    await check(page.locator('#source-shape-limits')).toContainText('not a complexity score');
+    const candidate = page.locator('#source-shape [data-row-id*="-candidate-"] [role="treeitem"]').filter({ hasText: 'Gadget' });
+    await candidate.scrollIntoViewIfNeeded();
+    await candidate.focus();
+    await page.keyboard.press('Enter');
+    await check(candidate).toBeFocused();
+    await assertViewportFocus();
+    await check(page.locator('#selection-title')).toContainText('lib.rs');
+    await activate('outline-panel');
+    const symbol = page.locator('#outline').getByRole('treeitem', { name: /^inspect_me\b/ });
+    await symbol.focus();
+    await page.keyboard.press('Enter');
+    await assertViewportFocus();
+    await activate('workspace-panel');
+    await check(page.locator('#declaration-details')).toContainText('inspect_me');
+    await check.poll(() => page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollTop)).toBe(0);
+    // Low landscape heights legitimately scroll the page vertically. The selected
+    // declaration remains reachable and readable without horizontal scrolling.
+    const selectedName = page.locator('#declaration-details dd').first();
+    await selectedName.scrollIntoViewIfNeeded();
+    assert.equal(await selectedName.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && rect.left >= -1 && rect.right <= innerWidth + 1 && rect.top >= -1 && rect.bottom <= innerHeight + 1;
+    }), true, 'selected declaration value is readable at this viewport');
+    await activate('outline-panel');
+    if (narrow) await check(symbol).toBeFocused();
+    await symbol.focus();
+    await page.keyboard.press('Tab');
+    await assertViewportFocus();
+    await activate('workspace-panel');
+    assert.equal(await page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollWidth <= body.clientWidth + 1), true, 'main pane has no horizontal overflow');
+    assert.equal(page.workers().length, 1, 'viewport changes keep one worker');
+    assert.equal(traffic.count('inspect'), calls, 'viewport navigation remains report-local');
+    await screenshot(page, viewport.screenshot);
+    report.pass(viewport.id);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await check(page.locator('#workspace')).toHaveAttribute('data-narrow', 'false');
+}
+
 async function reportAndPageLifecycle(page, traffic) {
   report.start('probe.report.stale_actions');
   await filterFiles(page, LONG_FILE_NAME);
@@ -618,6 +700,8 @@ async function realJourney() {
   await page.keyboard.press('Enter');
   await check(page.locator('#selection-title')).toContainText('lib.rs');
   await check(gadget).toBeFocused();
+  await check(page.locator('#source-shape [role="treeitem"][aria-selected="true"]')).toHaveCount(1);
+  await check(gadget).toHaveAttribute('aria-selected', 'false');
   await check(page.locator('#source-shape-details')).toContainText('Tentative local header impl blocks');
   await check(page.locator('#source-shape-details')).toContainText('Qualified-path impl headers (local/external unknown)');
   assert.equal(traffic.count('inspect'), shapeCalls, 'shape navigation is report-local');
@@ -629,6 +713,7 @@ async function realJourney() {
   report.pass('real.report.partial');
   await keyboardAndFilters(page, traffic);
   await panesAndNarrow(page, traffic);
+  await deviceViewportJourney(page, traffic);
   await reportAndPageLifecycle(page, traffic);
   report.start('real.report.empty');
 
@@ -864,7 +949,8 @@ const passed = await runHarness({
     report = currentReport;
     output = directory;
     report.setStage('dependency');
-    const { chromium, expect } = await import('@playwright/test');
+    const { chromium, expect, devices } = await import('@playwright/test');
+    verifyViewportProfiles(devices);
     check = expect.configure({ timeout: 10_000 });
     report.setStage('input_validation');
     [assets, agent, fixtureBinary] = await Promise.all(process.argv.slice(2, 5).map(path => realpath(path)));

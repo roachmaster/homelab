@@ -72,7 +72,8 @@ run, and report cleanup failure separately from the original test failure.
 
 ## Report what actually ran
 
-The current suite has 18 ordered groups. Read fresh `QA_OUTPUT` reports and inspect
+The current suite has 28 ordered groups, including ten phone/tablet viewport cases.
+Read fresh `QA_OUTPUT` reports and inspect
 its generated screenshots. A stopped sequence leaves later groups `not_run`, not
 passed. Keep real-agent, actual-WASM probes and controlled fault injection labeled
 separately. Local cancellation does not prove remote task termination; a synthetic

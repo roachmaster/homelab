@@ -11,6 +11,20 @@ pub struct ViewModel {
     pub lists: Vec<ListBinding>,
     pub tables: Vec<TableBinding>,
     pub visibility: Vec<VisibilityBinding>,
+    pub panes: Vec<PaneBinding>,
+}
+/// Opaque, model-owned presentation identity. The renderer compares it but does
+/// not infer selection semantics from rows or retain it as domain state.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PaneBinding {
+    pub id: &'static str,
+    pub context: SelectionContext,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SelectionContext {
+    pub report: Option<RequestToken>,
+    pub entry: Option<u32>,
+    pub declaration: Option<u32>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TextBinding {

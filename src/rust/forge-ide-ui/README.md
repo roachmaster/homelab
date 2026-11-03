@@ -142,7 +142,7 @@ journeys belong to the composition's separate integration checks.
 
 The generated main pane presents a source inventory, not a subjective complexity
 score. The portable Rust model derives it entirely from the accepted report;
-no new endpoint, filesystem access, bridge contract or browser computation is
+no new endpoint, filesystem access, bridge contract or main-thread source analysis is
 introduced. Observed `Cargo.toml` locations establish unverified directory groups.
 Manifests are not read: package identity, virtual workspaces, target membership,
 features and conditional compilation remain unknown. Sources with no observed
@@ -166,3 +166,11 @@ history, emits no effects, ignores stale report tokens and clears with the repor
 The additive bindings require rebuilding and deploying the generated assets and
 WASM atomically; HTTP protocol version 1 is unchanged. Explorer name filters do
 not restrict this accepted-report inventory.
+
+The additive pane binding carries an opaque report/file/declaration context from
+Rust to the generic renderer. An external context change clears stale saved pane
+focus and scroll without moving the user's current focus. Direct in-pane
+navigation and unchanged-context pane switches preserve focus ownership. This
+keeps a previously focused source row from hiding a newly selected declaration
+when returning to File overview on a narrow screen. Context stays in private
+in-memory presentation maps and is cleared with protected report content.

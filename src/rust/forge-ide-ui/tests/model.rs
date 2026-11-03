@@ -1731,3 +1731,73 @@ fn source_shape_pagination_is_bounded_reversible_guarded_and_cleared() {
     event(&mut m, UiEvent::PreviousShape { report: p.token });
     assert_eq!(m.view(), prior);
 }
+
+#[test]
+fn workspace_presentation_context_tracks_report_entry_and_declaration() {
+    let mut m = connected();
+    let p = inspect(&mut m);
+    event(&mut m, result(&p, report()));
+    let context = |m: &UiModel| {
+        m.view()
+            .panes
+            .into_iter()
+            .find(|pane| pane.id == "workspace-panel")
+            .unwrap()
+            .context
+    };
+    let root = context(&m);
+    assert_eq!(root.report, Some(p.token.clone()));
+    assert_eq!(root.entry, Some(0));
+    event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 1,
+        },
+    );
+    let file = context(&m);
+    assert_ne!(file, root);
+    event(
+        &mut m,
+        UiEvent::SelectDeclaration {
+            report: p.token.clone(),
+            entry: 1,
+            value: 0,
+        },
+    );
+    let declaration = context(&m);
+    assert_eq!(declaration.declaration, Some(0));
+    assert_ne!(declaration, file);
+    event(&mut m, UiEvent::MoreShape { report: p.token });
+    assert_eq!(context(&m), declaration);
+    inspect(&mut m);
+    assert_eq!(context(&m).report, None);
+    assert_eq!(context(&m).entry, None);
+    assert_eq!(context(&m).declaration, None);
+}
+
+#[test]
+fn shape_navigation_rows_do_not_pretend_multiple_symbols_are_selected() {
+    let mut r = report();
+    r.entries[1].declarations.push(declaration(2, None, DeclarationKind::Struct, "Sample"));
+    let mut implementation = declaration(3, None, DeclarationKind::Impl, "Tool for Sample");
+    implementation.implementation = Some(Implementation {
+        target: "Sample".into(),
+        trait_path: Some("Tool".into()),
+        negative: false,
+        is_unsafe: false,
+    });
+    r.entries[1].declarations.push(implementation);
+    let mut m = connected();
+    let p = inspect(&mut m);
+    event(&mut m, result(&p, r));
+    let candidate = rows_named(&m, "source-shape")
+        .into_iter()
+        .find(|row| row.kind_label == "candidate struct")
+        .unwrap();
+    event(&mut m, action_event(&candidate.action));
+    let rows = rows_named(&m, "source-shape");
+    let selected: Vec<_> = rows.iter().filter(|row| row.selected).collect();
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].id, "shape-source-1");
+}
