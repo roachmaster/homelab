@@ -23,12 +23,24 @@ const input = {
   reportValidity() { return !this.validity; },
 };
 const status = { id: 'collection-status', textContent: 'Starting', dataset: {} };
+// Existing row fixture rejects unnecessary moves. Real selection/filter/page
+// changes remain covered by the actual-browser suite, not this minimal DOM.
+const attributes = () => ({ setAttribute() {}, removeAttribute() {} });
+const select = { ...attributes(), children: [{}, {}, {}], getAttribute() { return 'false'; }, tabIndex: 0 };
+const toggle = attributes();
+const item = { dataset: { rowId: 'record-1' }, children: [toggle, select] };
+const tree = {
+  id: 'collection-items', children: [item], scrollTop: 144,
+  querySelectorAll() { return [select]; },
+  append() { throw new Error('Unchanged list row was reordered'); },
+  insertBefore() { throw new Error('Unchanged list row was moved'); },
+};
 const body = { isConnected: true };
 const document = {
   body, activeElement: body,
   querySelectorAll(selector) { if (selector === '[data-bind-text]') return [status]; return selector === 'input' || selector === 'input[data-action]' ? [input] : []; },
   querySelector() { return null; },
-  getElementById(id) { return id === input.id ? input : id === status.id ? status : null; },
+  getElementById(id) { return id === input.id ? input : id === status.id ? status : id === tree.id ? tree : null; },
 };
 const context = vm.createContext({
   document, TextEncoder,
@@ -60,6 +72,13 @@ textView(); assert.equal(status.dataset.tone, 'neutral');
 textView('error'); assert.equal(status.dataset.tone, 'error');
 textView('warning injected'); assert.equal(status.dataset.tone, 'neutral');
 textView('accent'); assert.equal(status.dataset.tone, 'accent');
+workers.at(-1).onmessage({ data: { kind: 'view', view: { lists: [{
+  id: tree.id, rows: [{ id: 'record-1', label: 'Owned fixture', glyph: 'R',
+    kind_label: 'record', parent: null, secondary: '', depth: 0, selected: false,
+    expanded: null, action: { kind: 'choose_record' }, toggle: null }],
+}] } } });
+assert.equal(tree.children[0], item);
+assert.equal(tree.scrollTop, 144, 'same-order list projections preserve tree scroll');
 // Repeated values must not falsely acknowledge the newest edit.
 type('a'); type('ab'); type('a');
 assert.deepEqual(workers[0].sent.map(m => m.presentation_sequence), [1, 2, 3]);

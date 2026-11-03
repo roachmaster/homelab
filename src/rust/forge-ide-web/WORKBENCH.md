@@ -132,7 +132,8 @@ The selected declaration appears directly below the selected entry heading, befo
 metadata and the mirrored declaration list. Metadata uses a compact, wrapping fact
 grid. Explorer, Outline and Problems keep filters and paging outside their scrolling
 tree. Supporting-pane full-name readouts reserve stable space so focusing a row
-cannot move its pointer target before click. Very short panes retain an outer
+cannot move its pointer target before click. Same-order list projections do not
+move existing row nodes, preserving independently scrolled trees. Very short panes retain an outer
 scroll fallback so controls remain reachable.
 Cancel is shown only while this browser owns a pending wait. A catalog with no
 allowed project says so beside the disabled Inspect action.

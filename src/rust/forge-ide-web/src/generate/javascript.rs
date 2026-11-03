@@ -76,7 +76,7 @@ function apply(view,acknowledgedSequence){
   for(const b of view.lists||[]){
     const n=element(b.id);if(!n)continue;
     const prior=new Map([...n.children].filter(x=>x.dataset.rowId).map(x=>[x.dataset.rowId,x]));
-    const keep=new Set();
+    const keep=new Set();let rowIndex=0;
     for(const row of b.rows){
       const key=String(row.id);keep.add(key);let item=prior.get(key);
       if(!item){
@@ -98,7 +98,9 @@ function apply(view,acknowledgedSequence){
       if(row.expanded===null)select.removeAttribute('aria-expanded');else select.setAttribute('aria-expanded',String(row.expanded));
       select.children[0].textContent=row.glyph||'';select.children[1].textContent=row.label;select.children[2].textContent=row.secondary;
       select.setAttribute('aria-label',row.kind_label?row.label+', '+row.kind_label:row.label);select.title=row.label;
-      n.append(item);
+      // Preserve stable rows and their scroll anchor; moving every existing node
+      // would transiently reorder the list even when its accepted order is unchanged.
+      const at=n.children[rowIndex++];if(at!==item)n.insertBefore(item,at||null);
     }
     for(const x of [...n.children])if(!x.dataset.rowId||!keep.has(x.dataset.rowId))x.remove();
     if(!b.rows.length){const p=document.createElement('p');p.className='fg-empty';p.textContent=b.empty_message;n.append(p);}

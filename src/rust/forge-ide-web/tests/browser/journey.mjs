@@ -177,10 +177,18 @@ async function selectFile(page, name) {
   const item = fileRow(page, name);
   await item.scrollIntoViewIfNeeded();
   const before = await item.boundingBox();
-  await item.click();
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  const pressed = await item.boundingBox();
+  const pressStable = Math.abs(before.y - pressed.y) < 1 && Math.abs(before.height - pressed.height) < 1;
+  if (!pressStable) process.stderr.write('QA_CHECK pointer_pressed_stability_failed\n');
+  assert.ok(pressStable, 'focus readout never moves the pressed pointer target');
+  await page.mouse.up();
   await check(item).toHaveAttribute('aria-selected', 'true');
   const after = await item.boundingBox();
-  assert.ok(Math.abs(before.y - after.y) < 1 && Math.abs(before.height - after.height) < 1, 'pointer row stays stable when empty, short or long focus readout updates');
+  const projectionStable = Math.abs(pressed.y - after.y) < 1 && Math.abs(pressed.height - after.height) < 1;
+  if (!projectionStable) process.stderr.write('QA_CHECK pointer_projection_stability_failed\n');
+  assert.ok(projectionStable, 'unchanged projected rows retain scroll position after selection');
   await check(page.locator('#selection-title')).toContainText(name);
   return item;
 }
