@@ -19,6 +19,20 @@ impl PanePosition {
         }
     }
 }
+/// Declarative text hierarchy; the generator chooses semantic HTML.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextStyle {
+    Body,
+    Caption,
+    Context,
+    Heading,
+}
+/// Emphasis is authored independently of action semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonEmphasis {
+    Standard,
+    Primary,
+}
 #[derive(Clone, Debug)]
 pub enum Component {
     Screen {
@@ -52,6 +66,7 @@ pub enum Component {
         id: String,
         text: String,
         live: bool,
+        style: TextStyle,
     },
     Select {
         id: String,
@@ -62,6 +77,7 @@ pub enum Component {
         id: String,
         label: String,
         action: String,
+        emphasis: ButtonEmphasis,
     },
     Filter {
         id: String,
@@ -84,6 +100,9 @@ pub enum Component {
     Details {
         id: String,
     },
+    Facts {
+        id: String,
+    },
 }
 /// Component structure, not a string-template macro. Every text value is escaped.
 #[macro_export]
@@ -95,14 +114,19 @@ macro_rules! component {
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
     (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),children:vec![$($child),*]} };
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
-    (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false} };
-    (status $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:true} };
+    (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
+    (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
+    (context $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Context} };
+    (heading $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Heading} };
+    (status $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:true,style:$crate::generate::TextStyle::Body} };
     (select $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Select{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into()} };
+    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard} };
+    (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary} };
     (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into()} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
+    (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
     (details $id:expr) => { $crate::generate::Component::Details{id:$id.into()} };
 }
 #[derive(Clone, Debug)]
@@ -154,7 +178,7 @@ impl Document {
                 Component::PaneLayout { id, .. } => (Some(id), None, None),
                 Component::Text { id, text, .. } => (Some(id), Some(text), None),
                 Component::Select { id, label, action }
-                | Component::Button { id, label, action }
+                | Component::Button { id, label, action, .. }
                 | Component::Filter { id, label, action }
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
@@ -162,7 +186,7 @@ impl Document {
                 Component::Tree { id, label } | Component::Reload { id, label } => {
                     (Some(id), Some(label), None)
                 }
-                Component::Details { id } => (Some(id), None, None),
+                Component::Details { id } | Component::Facts { id } => (Some(id), None, None),
             };
             if let Some(id) = id {
                 insert(ids, id)?;

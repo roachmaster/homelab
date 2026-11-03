@@ -260,3 +260,37 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
     assert_eq!(manifest["abi_version"], 2);
 }
+
+#[test]
+fn declarative_hierarchy_emphasis_and_facts_are_reusable_safe_components() {
+    let mut c = config();
+    let document = Document {
+        title: "Record viewer".into(),
+        subtitle: "Independent presentation consumer".into(),
+        children: vec![
+            component!(heading "record-title", "Record <one>"),
+            component!(caption "record-hint", "Bounded metadata"),
+            component!(context "record-context", "collection / record"),
+            component!(primary "record-load", "Load", "load_record"),
+            component!(facts "record-facts"),
+        ],
+    };
+    c.document = document.clone();
+    let assets = build(c);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    assert!(html.contains("<h3 id=\"record-title\""));
+    assert!(html.contains("Record &lt;one&gt;"));
+    assert!(html.contains("class=\"fg-caption\""));
+    assert!(html.contains("class=\"fg-context\""));
+    assert!(html.contains("class=\"fg-button fg-button-primary\""));
+    assert!(html.contains("class=\"fg-details fg-facts\""));
+    assert_eq!(assets.files["main.js"], build(config()).files["main.js"]);
+    let mut c = config();
+    c.document = document;
+    c.document.children.push(component!(facts "record-title"));
+    assert!(register_assets("assets", c).is_err());
+    let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
+    assert!(!css.contains("p:first-child"));
+    assert!(!css.contains("#selection-title"));
+    assert!(css.contains("[data-tone=warning]"));
+}

@@ -249,6 +249,14 @@ impl UiModel {
     pub(super) fn render(&self) -> ViewModel {
         let connected = self.catalog.is_some();
         let loading = self.pending.is_some();
+        let no_project = connected && self.project.is_empty();
+        let status_tone = match self.phase {
+            Phase::Failed => Tone::Error,
+            Phase::Partial | Phase::Cancelled => Tone::Warning,
+            _ if no_project => Tone::Warning,
+            Phase::Ready | Phase::Loading | Phase::Pairing => Tone::Accent,
+            _ => Tone::Neutral,
+        };
         let key = self.accepted_report.as_ref();
         let entry = self.current_entry();
         let tree = self.tree_page();
@@ -412,7 +420,8 @@ impl UiModel {
         let problems_more = problems.more();
         ViewModel {
             texts: vec![
-                text("status", self.message.clone()), text("phase-label", phase_label(self.phase)),
+                tone_text("status", self.message.clone(), status_tone),
+                tone_text("phase-label", if no_project { "No allowed project" } else { phase_label(self.phase) }, status_tone),
                 text("summary", summary), text("workspace-summary",workspace_summary),
                 text("selection-title", entry.map(|e| name_label(&e.name)).unwrap_or_else(|| "Project overview".into())),
                 text("selection-context", if connected { format!("{} / {}",self.node,self.project) } else { "Not connected".into() }),
@@ -440,7 +449,7 @@ impl UiModel {
             ],
             tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details }],
             visibility: vec![
-                visible("connection",!connected),visible("pair-panel",!connected),visible("workbench",connected),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),
+                visible("connection",!connected),visible("pair-panel",!connected),visible("workbench",connected),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading),
             ],
         }
     }
@@ -449,6 +458,14 @@ fn text(id: &'static str, text: impl Into<String>) -> TextBinding {
     TextBinding {
         id,
         text: text.into(),
+        tone: Tone::Neutral,
+    }
+}
+fn tone_text(id: &'static str, text: impl Into<String>, tone: Tone) -> TextBinding {
+    TextBinding {
+        id,
+        text: text.into(),
+        tone,
     }
 }
 fn visible(id: &'static str, visible: bool) -> VisibilityBinding {

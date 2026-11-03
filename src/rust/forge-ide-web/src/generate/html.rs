@@ -1,6 +1,6 @@
 //! Audited semantic HTML emitter shared by component documents. Application
 //! labels escape here; only this generator owns markup syntax.
-use super::{Component, PanePosition};
+use super::{ButtonEmphasis, Component, PanePosition, TextStyle};
 use std::fmt::Write;
 pub(crate) fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -120,7 +120,13 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 let _=write!(out,"<div id=\"{id}-separator\" class=\"fg-separator fg-separator-{position_key}\" role=\"separator\" tabindex=\"0\" aria-label=\"Resize {title}; arrows adjust, Enter collapses\" aria-controls=\"{id}\" aria-orientation=\"{orientation}\" aria-valuemin=\"{min}\" aria-valuemax=\"{max}\" aria-valuenow=\"{initial}\" data-resize-pane=\"{id}\"></div>");
             }
         }
-        Component::Text { id, text, live } => {
+        Component::Text { id, text, live, style } => {
+            let (tag, class) = match style {
+                TextStyle::Body => ("p", "fg-text"),
+                TextStyle::Caption => ("p", "fg-caption"),
+                TextStyle::Context => ("p", "fg-context"),
+                TextStyle::Heading => ("h3", "fg-selection-heading"),
+            };
             let role = if *live {
                 " role=\"status\" aria-live=\"polite\""
             } else {
@@ -128,7 +134,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             };
             let _ = write!(
                 out,
-                "<p id=\"{}\" data-bind-text{role}>{}</p>",
+                "<{tag} id=\"{}\" class=\"{class}\" data-bind-text{role}>{}</{tag}>",
                 escape(id),
                 escape(text)
             );
@@ -136,10 +142,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::Select { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field\" for=\"{id}\"><span>{}</span><select id=\"{id}\" data-action=\"{}\" disabled><option value=\"\">Not connected</option></select></label>",escape(label),escape(action));
         }
-        Component::Button { id, label, action } => {
+        Component::Button { id, label, action, emphasis } => {
+            let class = match emphasis {
+                ButtonEmphasis::Standard => "fg-button",
+                ButtonEmphasis::Primary => "fg-button fg-button-primary",
+            };
             let _ = write!(
                 out,
-                "<button type=\"button\" id=\"{}\" data-action=\"{}\" disabled>{}</button>",
+                "<button type=\"button\" class=\"{class}\" id=\"{}\" data-action=\"{}\" disabled>{}</button>",
                 escape(id),
                 escape(action),
                 escape(label)
@@ -162,10 +172,15 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::Tree { id, label } => {
             let _=write!(out,"<div id=\"{}\" class=\"fg-tree\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
         }
-        Component::Details { id } => {
+        Component::Details { id } | Component::Facts { id } => {
+            let class = if matches!(c, Component::Facts { .. }) {
+                "fg-details fg-facts"
+            } else {
+                "fg-details"
+            };
             let _ = write!(
                 out,
-                "<dl id=\"{}\" class=\"fg-details\"><dt>Selection</dt><dd>No selection</dd></dl>",
+                "<dl id=\"{}\" class=\"{class}\"><div class=\"fg-property\"><dt>Selection</dt><dd>No selection</dd></div></dl>",
                 escape(id)
             );
         }

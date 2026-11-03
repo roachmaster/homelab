@@ -125,3 +125,35 @@ Native, Node and mocked-fault checks never substitute for that real-browser gate
 The additional generated-main input harness uses a minimal simulated DOM boundary
 to prove draft/ack ordering, not browser layout or real network behavior.
 No deployment, operational credentials or user trust-store changes are needed.
+
+## Workbench presentation refinement
+
+The selected declaration appears directly below the selected entry heading, before
+metadata and the mirrored declaration list. Metadata uses a compact, wrapping fact
+grid. Explorer, Outline and Problems keep filters and paging outside their scrolling
+tree; very short panes retain an outer scroll fallback so controls remain reachable.
+Cancel is shown only while this browser owns a pending wait. A catalog with no
+allowed project says so beside the disabled Inspect action.
+
+These are generated presentation changes, not source editing or a new search,
+transport or diagnostics capability. Partial/cancelled states use a labeled warning
+tone; failures use a labeled error tone. This indicates request/report status, never
+inferred compiler severity. Primary Inspect has a separate, contrasting keyboard
+focus ring. Supporting text and disabled controls remain legible without competing
+with the inspected entry.
+
+Public component declarations now include `heading`, `caption`, `context`, `primary`
+and `facts` macro forms. They share the existing audited emitters with other
+applications. `TextStyle` and `ButtonEmphasis` are bounded Rust enums, not arbitrary
+CSS class strings. Existing text/button macros keep their meaning. Direct Rust
+`Component::Text` and `Component::Button` constructors must supply the new `style`
+and `emphasis` fields; this is not Rust source compatibility for those constructors.
+
+`TextBinding::tone` is additive serialized ABI 2 view metadata. The current renderer
+accepts only the four declared values and defaults missing/unknown values to neutral;
+older renderers ignore this field. Rust consumers constructing `TextBinding` must
+supply `Tone`. No input event, request-token guard, WASM memory export or HTTP schema
+changes. Deploy all generated assets and WASM atomically as before. The browser gate
+covers the stylesheet cascade, primary keyboard focus, selected-declaration placement,
+scroll ownership, short-pane control access and state changes. Static/model tests are
+not a substitute for that real-browser evidence.

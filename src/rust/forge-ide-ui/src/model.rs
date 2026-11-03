@@ -97,6 +97,7 @@ impl UiModel {
                 } else {
                     "Input rejected. The current state is unchanged.".into()
                 };
+                status.tone = Tone::Warning;
             }
         }
         Output {

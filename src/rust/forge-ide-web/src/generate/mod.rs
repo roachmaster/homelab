@@ -6,7 +6,7 @@ mod css;
 mod html;
 mod javascript;
 mod theme;
-pub use component::{Component, Document, PanePosition};
+pub use component::{ButtonEmphasis, Component, Document, PanePosition, TextStyle};
 use forge_bootstrap::{PreparedGroup, Registry};
 use forge_provider::{Factory, InstanceProvider, Singleton};
 use forge_template::{

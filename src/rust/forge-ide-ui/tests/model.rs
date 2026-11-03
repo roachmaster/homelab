@@ -1556,3 +1556,87 @@ fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_four_list
         .value;
     assert_eq!(path.split(" / ").count(), 65);
 }
+
+#[test]
+fn status_tones_follow_typed_phase_and_empty_project_availability() {
+    use forge_ide_ui::view::Tone;
+    let tone = |m: &UiModel| {
+        m.view()
+            .texts
+            .into_iter()
+            .find(|t| t.id == "status")
+            .unwrap()
+            .tone
+    };
+    let mut m = connected();
+    assert_eq!(tone(&m), Tone::Neutral);
+    let p = inspect(&mut m);
+    assert_eq!(tone(&m), Tone::Accent);
+    let mut partial = report();
+    partial.complete = false;
+    event(&mut m, result(&p, partial));
+    assert_eq!(tone(&m), Tone::Warning);
+    let p = inspect(&mut m);
+    event(&mut m, result(&p, report()));
+    assert_eq!(tone(&m), Tone::Accent);
+    let rejected = m.output(Some("invalid local input".into()));
+    let status = rejected
+        .view
+        .texts
+        .iter()
+        .find(|t| t.id == "status")
+        .unwrap();
+    assert_eq!(status.tone, Tone::Warning);
+    assert!(status.text.starts_with("Input rejected:"));
+    assert_eq!(
+        rejected
+            .view
+            .texts
+            .iter()
+            .find(|t| t.id == "phase-label")
+            .unwrap()
+            .tone,
+        Tone::Accent
+    );
+    assert_eq!(m.phase(), Phase::Ready);
+    let p = inspect(&mut m);
+    event(
+        &mut m,
+        UiEvent::NetworkFailed {
+            request_id: p.token.request_id,
+            category: FailureKind::Unavailable,
+        },
+    );
+    assert_eq!(tone(&m), Tone::Error);
+
+    let mut empty = UiModel::default();
+    let output = event(&mut empty, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &output.effects[0] else {
+        panic!("resume")
+    };
+    let mut c = catalog();
+    c.nodes[0].projects.clear();
+    event(
+        &mut empty,
+        UiEvent::Paired {
+            request_id: request_id.clone(),
+            catalog: c,
+        },
+    );
+    assert_eq!(tone(&empty), Tone::Warning);
+    assert_eq!(text_named(&empty, "phase-label"), "No allowed project");
+    assert!(empty
+        .view()
+        .buttons
+        .iter()
+        .find(|b| b.id == "inspect")
+        .unwrap()
+        .disabled);
+    assert!(!empty
+        .view()
+        .visibility
+        .iter()
+        .find(|v| v.id == "cancel")
+        .unwrap()
+        .visible);
+}

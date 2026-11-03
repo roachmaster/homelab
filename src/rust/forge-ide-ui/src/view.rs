@@ -16,6 +16,17 @@ pub struct ViewModel {
 pub struct TextBinding {
     pub id: &'static str,
     pub text: String,
+    /// Additive ABI 2 presentation metadata. Older renderers ignore this field.
+    pub tone: Tone,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tone {
+    #[default]
+    Neutral,
+    Accent,
+    Warning,
+    Error,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct OptionView {

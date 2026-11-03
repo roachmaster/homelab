@@ -22,12 +22,13 @@ const input = {
   setCustomValidity(value) { this.validity = value; },
   reportValidity() { return !this.validity; },
 };
+const status = { id: 'collection-status', textContent: 'Starting', dataset: {} };
 const body = { isConnected: true };
 const document = {
   body, activeElement: body,
-  querySelectorAll(selector) { return selector === 'input' || selector === 'input[data-action]' ? [input] : []; },
+  querySelectorAll(selector) { if (selector === '[data-bind-text]') return [status]; return selector === 'input' || selector === 'input[data-action]' ? [input] : []; },
   querySelector() { return null; },
-  getElementById(id) { return id === input.id ? input : null; },
+  getElementById(id) { return id === input.id ? input : id === status.id ? status : null; },
 };
 const context = vm.createContext({
   document, TextEncoder,
@@ -47,6 +48,18 @@ function view(value, sequence, token = 'A', disabled = false) {
 }
 function type(value) { input.value = value; handlers.get('input')(); }
 view('', null);
+// ABI2 views without optional additive tone metadata remain displayable. Unknown
+// values cannot inject presentation selectors, and lifecycle erases old urgency.
+function textView(tone) {
+  workers.at(-1).onmessage({ data: { kind: 'view', view: {
+    texts: [{ id: status.id, text: 'Bounded notice', ...(tone === undefined ? {} : { tone }) }],
+  } } });
+}
+textView('warning'); assert.equal(status.dataset.tone, 'warning');
+textView(); assert.equal(status.dataset.tone, 'neutral');
+textView('error'); assert.equal(status.dataset.tone, 'error');
+textView('warning injected'); assert.equal(status.dataset.tone, 'neutral');
+textView('accent'); assert.equal(status.dataset.tone, 'accent');
 // Repeated values must not falsely acknowledge the newest edit.
 type('a'); type('ab'); type('a');
 assert.deepEqual(workers[0].sent.map(m => m.presentation_sequence), [1, 2, 3]);
@@ -74,7 +87,8 @@ type('é'.repeat(129)); view('', null, 'B', true); assert.equal(input.value, '')
 assert.equal(input.validity, ''); assert.equal(attrs.has('aria-invalid'), false);
 // Teardown erases drafts and counter; a fresh worker does not inherit them.
 lifecycle.get('pagehide')(); assert.equal(workers[0].stopped, true);
-assert.equal(input.value, ''); lifecycle.get('pageshow')();
+assert.equal(input.value, ''); assert.equal(status.dataset.tone, undefined);
+assert.equal(status.textContent, 'Starting'); lifecycle.get('pageshow')();
 view('', null, 'C'); type('new');
 assert.equal(workers[1].sent[0].presentation_sequence, 1);
 assert.equal(workers[1].sent[0].event.report.token, 'C');

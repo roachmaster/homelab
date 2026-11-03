@@ -25,7 +25,7 @@ function clearProtected(){
   // Synchronous: never leave catalog/report pixels behind on pagehide or bfcache restore.
   for(const n of document.querySelectorAll('[data-protected]'))n.hidden=true;
   for(const n of document.querySelectorAll('.fg-screen:not([data-protected])'))n.hidden=false;
-  for(const [n,text] of initialText)n.textContent=text;
+  for(const [n,text] of initialText){n.textContent=text;delete n.dataset.tone;}
   for(const n of document.querySelectorAll('select[data-action]')){n.replaceChildren();n.value='';n.removeAttribute('title');delete n.dataset.options;n.disabled=true;}
   for(const n of document.querySelectorAll('input')){n.value='';n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
@@ -55,7 +55,7 @@ function apply(view,acknowledgedSequence){
   const focusKey=focusKeyByElement.get(focus);
   const priorTree=focus?.closest?.('[role="tree"]');
   for(const b of view.visibility||[]){const n=element(b.id);if(n)n.hidden=!b.visible;}
-  for(const b of view.texts||[]){const n=element(b.id);if(n&&n.textContent!==b.text)n.textContent=b.text;}
+  for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;actionByElement.set(n,b.action);}}
   for(const b of view.inputs||[]){
     const n=element(b.id);if(!n)continue;
@@ -110,7 +110,7 @@ function apply(view,acknowledgedSequence){
   }
   for(const b of view.tables||[]){
     const n=element(b.id);if(!n)continue;
-    const parts=[];for(const row of b.rows){const t=document.createElement('dt');t.textContent=row.label;const d=document.createElement('dd');d.textContent=row.value;parts.push(t,d);}n.replaceChildren(...parts);
+    const parts=[];for(const row of b.rows){const property=document.createElement('div');property.className='fg-property';const t=document.createElement('dt');t.textContent=row.label;const d=document.createElement('dd');d.textContent=row.value;property.append(t,d);parts.push(property);}n.replaceChildren(...parts);
   }
   for(const state of layouts.values())updateLayout(state);
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}

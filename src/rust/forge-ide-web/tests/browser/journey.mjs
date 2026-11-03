@@ -198,13 +198,24 @@ async function screenshot(page, name) {
   assert.equal(await screenshotEligibility(page, [...active]), 'safe', 'Only sanitized owned fixture pages may be captured');
   await check(page.locator('#pair-code')).toHaveValue('');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'no page-level horizontal clipping');
-  await page.screenshot({ path: join(output, name), fullPage: true, mask: [page.locator(SCREENSHOT_MASK)] });
+  await page.screenshot({ path: join(output, name), fullPage: true, mask: [page.locator(SCREENSHOT_MASK)], maskColor: '#1b2a3b' });
 }
 async function assertVisibleFocus(page) {
   assert.equal(await page.evaluate(() => {
     const e = document.activeElement;
     return !!e && e !== document.body && !e.closest('[hidden], [inert]') && e.getClientRects().length > 0;
   }), true, 'focus belongs to a visible active control');
+}
+async function assertTone(page, id, tone) {
+  await check(page.locator(`#${id}`)).toHaveAttribute('data-tone', tone);
+  assert.equal(await page.locator(`#${id}`).evaluate((node, token) => {
+    const reference = document.createElement('span');
+    reference.style.color = `var(--${token})`;
+    document.body.append(reference);
+    const matches = getComputedStyle(node).color === getComputedStyle(reference).color;
+    reference.remove();
+    return matches;
+  }, tone), true, 'typed status tone survives the stylesheet cascade');
 }
 async function inspect(page, project, expected = 'Partial inspection:') {
   await page.locator('#project').selectOption(project);
@@ -224,6 +235,7 @@ async function keyboardAndFilters(page, traffic) {
   await page.getByRole('button', { name: 'Expand src', exact: true }).click();
   const lib = await selectFile(page, 'lib.rs');
   await check(page.locator('#outline')).toContainText('Widget');
+  await check(page.locator('#selection-title')).toHaveJSProperty('tagName', 'H3');
   await check(page.locator('#outline')).toContainText('View');
   await check(page.locator('#outline')).toContainText('inspect_me');
   await check(page.locator('#details')).toContainText('Lines');
@@ -324,6 +336,14 @@ async function keyboardAndFilters(page, traffic) {
 
   await page.getByRole('button', { name: 'Expand bulk', exact: true }).click();
   await check(page.locator('#tree-more')).toBeEnabled();
+  const pagingBefore = await page.locator('#tree-more').boundingBox();
+  await page.locator('#files [role="treeitem"]').first().focus();
+  await page.keyboard.press('End');
+  await check(page.locator('#files [role="treeitem"]').last()).toBeFocused();
+  assert.ok(await page.locator('#files').evaluate(tree => tree.scrollTop > 0), 'large trees own their scroll');
+  const pagingAfter = await page.locator('#tree-more').boundingBox();
+  assert.ok(Math.abs(pagingBefore.y - pagingAfter.y) < 1, 'paging stays visible when the tree scrolls');
+  assert.ok(pagingAfter.y + pagingAfter.height <= (await page.locator('#explorer-panel').boundingBox()).y + (await page.locator('#explorer-panel').boundingBox()).height, 'paging stays inside its pane');
   const firstPage = await page.locator('#files [role="treeitem"]').evaluateAll(rows => rows.map(row => row.parentElement.dataset.rowId));
   assert.ok(firstPage.length > 0 && firstPage.length <= 256, 'row count and byte budget bound the first window');
   await check(page.locator('#files')).not.toContainText('zz-pagination-match.txt');
@@ -360,6 +380,17 @@ async function panesAndNarrow(page, traffic) {
   const explorer = await page.locator('#explorer-panel').boundingBox();
   const outline = await page.locator('#outline-panel').boundingBox();
   assert.ok(center.width > explorer.width && center.width > outline.width, 'file workspace is the dominant desktop surface');
+  await assertTone(page, 'status', 'warning');
+  await check(page.locator('#cancel')).toBeHidden();
+  await assertTone(page, 'phase-label', 'warning');
+  await page.locator('#project').focus();
+  await page.keyboard.press('Tab');
+  await check(page.locator('#inspect')).toBeFocused();
+  assert.equal(await page.locator('#inspect').evaluate(button => {
+    const style = getComputedStyle(button);
+    return button.matches(':focus-visible') && style.outlineStyle === 'solid' &&
+      Number.parseFloat(style.outlineOffset) > 0 && style.outlineColor !== style.backgroundColor;
+  }), true, 'primary action has a contrasting external keyboard focus ring');
   await screenshot(page, 'ide-workbench-desktop.png');
   for (const pane of ['explorer-panel', 'outline-panel', 'problems-panel']) {
     // aria-controls makes the split-pane relation part of the observable contract.
@@ -375,6 +406,14 @@ async function panesAndNarrow(page, traffic) {
     await check(splitter).toHaveAttribute('aria-valuenow', String(initial + 50));
     await page.keyboard.press('Home');
     await check(splitter).toHaveAttribute('aria-valuenow', await splitter.getAttribute('aria-valuemin'));
+    if (pane === 'problems-panel') {
+      const pager = page.locator('#problems-previous');
+      await pager.scrollIntoViewIfNeeded();
+      const control = await pager.boundingBox();
+      const bounds = await page.locator(`#${pane}`).boundingBox();
+      assert.ok(control.y >= bounds.y && control.y + control.height <= bounds.y + bounds.height + 1, 'minimum-height pane keeps paging reachable through its scroll fallback');
+      await splitter.focus();
+    }
     await page.keyboard.press('End');
     await check(splitter).toHaveAttribute('aria-valuenow', await splitter.getAttribute('aria-valuemax'));
     if (!await page.locator('#workspace-options').evaluate(e => e.open)) await page.locator('#workspace-options > summary').click();
@@ -435,7 +474,11 @@ async function panesAndNarrow(page, traffic) {
   await page.locator('#outline-panel-switch').click();
   await check(symbol).toBeFocused();
   await page.locator('#workspace-panel-switch').click();
-  await page.locator('#declaration-details-panel').scrollIntoViewIfNeeded();
+  assert.ok(await page.locator('#declaration-details-panel').evaluate(panel => {
+    const p = panel.getBoundingClientRect();
+    const body = panel.closest('.fg-pane-body').getBoundingClientRect();
+    return p.top >= body.top && p.bottom <= Math.min(body.bottom, innerHeight);
+  }), 'selected declaration is readable without scrolling past file metadata');
   await screenshot(page, 'ide-workbench-narrow-declaration.png');
   await page.locator('#problems-panel-switch').click();
   await page.locator('#problems [role="treeitem"]').filter({ hasText: 'broken.rs' }).first().click();
@@ -561,6 +604,7 @@ async function realJourney() {
   report.start('real.admission.denied');
 
   await inspect(page, 'denied', 'operation forbidden');
+  await assertTone(page, 'status', 'error');
   await noReport(page);
   await check(page.locator('#inspect')).toBeEnabled();
   await check(page.locator('#pair-panel')).toBeHidden();
@@ -648,8 +692,12 @@ async function controlledLifecycleJourney() {
   await check(page.locator('#phase-label')).toContainText('Inspecting');
   await check(page.locator('#inspect')).toBeDisabled();
   await check(page.locator('#cancel')).toBeEnabled();
+  await check(page.locator('#cancel')).toBeVisible();
   await page.locator('#cancel').click();
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
+  await assertTone(page, 'status', 'warning');
+  await check(page.locator('#cancel')).toBeHidden();
+  await assertVisibleFocus(page);
   await delay(1000); // injected native port completes after local cancellation
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
   await noReport(page);
@@ -703,6 +751,7 @@ async function controlledLifecycleJourney() {
   await noReport(page);
   await delay(700); // allow non-preemptible injected port to finish
   await check(page.locator('#status')).toContainText('Deadline expired');
+  await assertTone(page, 'status', 'error');
   await screenshot(page, 'ide-controlled-timeout.png');
   report.pass('injected.failures.unavailable_timeout');
   report.start('probe.worker.fatal');
@@ -746,6 +795,8 @@ async function controlledLifecycleJourney() {
   await check(page.locator('#workbench')).toContainText(/No allowed project/i);
   await check(page.locator('#inspect')).toBeDisabled();
   await check(page.locator('#project option')).toHaveCount(0);
+  await check(page.locator('#phase-label')).toHaveText('No allowed project');
+  await assertTone(page, 'phase-label', 'warning');
   await noReport(page);
   await screenshot(page, 'ide-controlled-no-allowed-project.png');
   await context.unroute('**/forge/v1/dispatch');
