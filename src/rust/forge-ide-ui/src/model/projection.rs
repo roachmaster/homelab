@@ -52,7 +52,7 @@ fn row_cost(row: &RowView) -> usize {
 }
 fn page(
     rows: impl IntoIterator<Item = RowView>,
-    pub(super) total: usize,
+    total: usize,
     matches: usize,
     window: &RowWindow,
 ) -> RowPage {

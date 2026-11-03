@@ -295,12 +295,18 @@ fn declarative_hierarchy_emphasis_and_facts_are_reusable_safe_components() {
     assert!(css.contains("[data-tone=warning]"));
 }
 
-
 #[test]
 fn source_shape_uses_declarative_primitives_and_report_local_actions() {
     let assets = build(config());
     let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
-    for id in ["source-shape-panel", "source-shape-summary", "source-shape-details", "source-shape", "shape-previous", "shape-more"] {
+    for id in [
+        "source-shape-panel",
+        "source-shape-summary",
+        "source-shape-details",
+        "source-shape",
+        "shape-previous",
+        "shape-more",
+    ] {
         assert!(html.contains(&format!("id=\"{id}\"")), "missing {id}");
     }
     assert!(html.contains("previous_shape"));

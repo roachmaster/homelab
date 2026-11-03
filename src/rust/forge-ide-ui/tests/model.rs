@@ -741,8 +741,12 @@ fn local_intents(key: &RequestToken) -> Vec<UiEvent> {
             report: key.clone(),
             entry: 1,
         },
-        UiEvent::MoreShape { report: key.clone() },
-        UiEvent::PreviousShape { report: key.clone() },
+        UiEvent::MoreShape {
+            report: key.clone(),
+        },
+        UiEvent::PreviousShape {
+            report: key.clone(),
+        },
         UiEvent::MoreProblems {
             report: key.clone(),
         },
@@ -1649,7 +1653,6 @@ fn status_tones_follow_typed_phase_and_empty_project_availability() {
     );
 }
 
-
 #[test]
 fn source_shape_pagination_is_bounded_reversible_guarded_and_cleared() {
     let mut r = report();
@@ -1670,22 +1673,61 @@ fn source_shape_pagination_is_bounded_reversible_guarded_and_cleared() {
     let first = rows_named(&m, "source-shape");
     assert_eq!(first.len(), 256);
     assert!(text_named(&m, "source-shape-summary").contains("Partial"));
-    assert!(first.iter().all(|row| matches!(row.action, forge_ide_ui::view::RowAction::SelectEntry { .. })));
-    assert!(event(&mut m, UiEvent::MoreShape { report: p.token.clone() }).effects.is_empty());
+    assert!(first.iter().all(|row| matches!(
+        row.action,
+        forge_ide_ui::view::RowAction::SelectEntry { .. }
+    )));
+    assert!(event(
+        &mut m,
+        UiEvent::MoreShape {
+            report: p.token.clone()
+        }
+    )
+    .effects
+    .is_empty());
     let second = rows_named(&m, "source-shape");
     assert!(!second.is_empty());
     assert!(second.len() <= 256);
     assert_ne!(first[0].id, second[0].id);
-    assert!(event(&mut m, UiEvent::PreviousShape { report: p.token.clone() }).effects.is_empty());
+    assert!(event(
+        &mut m,
+        UiEvent::PreviousShape {
+            report: p.token.clone()
+        }
+    )
+    .effects
+    .is_empty());
     assert_eq!(rows_named(&m, "source-shape"), first);
-    assert!(event(&mut m, action_event(&first[1].action)).effects.is_empty());
-    assert!(m.view().tables.iter().find(|table| table.id == "source-shape-details").unwrap().rows.iter().any(|p| p.label == "Observed Rust files" && p.value == "300"));
+    assert!(event(&mut m, action_event(&first[1].action))
+        .effects
+        .is_empty());
+    assert!(m
+        .view()
+        .tables
+        .iter()
+        .find(|table| table.id == "source-shape-details")
+        .unwrap()
+        .rows
+        .iter()
+        .any(|p| p.label == "Observed Rust files" && p.value == "300"));
     let next = inspect(&mut m);
     assert!(rows_named(&m, "source-shape").is_empty());
-    assert!(m.view().tables.iter().find(|table| table.id == "source-shape-details").unwrap().rows.is_empty());
+    assert!(m
+        .view()
+        .tables
+        .iter()
+        .find(|table| table.id == "source-shape-details")
+        .unwrap()
+        .rows
+        .is_empty());
     event(&mut m, result(&next, report()));
     let prior = m.view();
-    event(&mut m, UiEvent::MoreShape { report: p.token.clone() });
+    event(
+        &mut m,
+        UiEvent::MoreShape {
+            report: p.token.clone(),
+        },
+    );
     event(&mut m, UiEvent::PreviousShape { report: p.token });
     assert_eq!(m.view(), prior);
 }

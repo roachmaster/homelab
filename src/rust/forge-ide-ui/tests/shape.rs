@@ -27,7 +27,12 @@ fn declaration(id: u32, parent: Option<u32>, kind: DeclarationKind, name: &str) 
         implementation: None,
     }
 }
-fn implementation(id: u32, parent: Option<u32>, role: Option<&str>, target: &str) -> DeclarationView {
+fn implementation(
+    id: u32,
+    parent: Option<u32>,
+    role: Option<&str>,
+    target: &str,
+) -> DeclarationView {
     let mut declaration = declaration(id, parent, DeclarationKind::Impl, target);
     declaration.implementation = Some(Implementation {
         target: target.into(),
@@ -58,11 +63,14 @@ fn simple() -> Vec<DeclarationView> {
 fn root_file(declarations: Vec<DeclarationView>) -> ReportView {
     let mut source = entry(2, Some(0), "lib.rs", EntryKind::File);
     source.declarations = declarations;
-    report(vec![
-        entry(0, None, ".", EntryKind::Directory),
-        entry(1, Some(0), "Cargo.toml", EntryKind::File),
-        source,
-    ], true)
+    report(
+        vec![
+            entry(0, None, ".", EntryKind::Directory),
+            entry(1, Some(0), "Cargo.toml", EntryKind::File),
+            source,
+        ],
+        true,
+    )
 }
 
 #[test]
@@ -86,16 +94,35 @@ fn one_trait_two_named_header_candidates_and_repeated_blocks_are_distinct_facts(
     let group = &shape.groups[1];
     assert_eq!(group.manifest, Some(1));
     assert_eq!(shape.entry_groups, vec![1, 1, 1]);
-    assert_eq!(group.counts, ShapeCounts {
-        rust_files: 1, traits: 1, structs: 2, enums: 1, free_functions: 1,
-        methods: 2, trait_impls: 4, inherent_impls: 1, negative_impls: 1,
-        candidate_structs: 2,
-    });
+    assert_eq!(
+        group.counts,
+        ShapeCounts {
+            rust_files: 1,
+            traits: 1,
+            structs: 2,
+            enums: 1,
+            free_functions: 1,
+            methods: 2,
+            trait_impls: 4,
+            inherent_impls: 1,
+            negative_impls: 1,
+            candidate_structs: 2,
+        }
+    );
     assert_eq!(group.traits[0].impl_blocks, 3);
-    assert_eq!(group.traits[0].candidate_structs, vec![
-        SymbolLocation { entry: 2, declaration: 2 },
-        SymbolLocation { entry: 2, declaration: 3 },
-    ]);
+    assert_eq!(
+        group.traits[0].candidate_structs,
+        vec![
+            SymbolLocation {
+                entry: 2,
+                declaration: 2
+            },
+            SymbolLocation {
+                entry: 2,
+                declaration: 3
+            },
+        ]
+    );
     assert_eq!(group.impls[4].disposition, ImplDisposition::Negative);
 }
 
@@ -124,8 +151,20 @@ fn module_file_and_ambiguous_names_never_collapse_to_one_symbol() {
     let group = &shape.groups[1];
     assert_eq!(group.impls[0].disposition, ImplDisposition::Unresolved);
     assert!(group.traits[0].candidate_structs.is_empty());
-    assert_eq!(group.traits[1].candidate_structs[0], SymbolLocation { entry: 2, declaration: 5 });
-    assert_eq!(group.traits[2].candidate_structs[0], SymbolLocation { entry: 2, declaration: 9 });
+    assert_eq!(
+        group.traits[1].candidate_structs[0],
+        SymbolLocation {
+            entry: 2,
+            declaration: 5
+        }
+    );
+    assert_eq!(
+        group.traits[2].candidate_structs[0],
+        SymbolLocation {
+            entry: 2,
+            declaration: 9
+        }
+    );
     assert_eq!(group.traits[4].candidate_structs.len(), 2);
     assert_eq!(group.counts.candidate_structs, 4);
 }
@@ -144,14 +183,27 @@ fn generic_qualified_negative_alias_and_missing_metadata_are_not_proven_relation
         declaration(12, None, DeclarationKind::Impl, "missing metadata"),
     ]);
     let shape = SourceShape::from_report(&root_file(declarations)).unwrap();
-    let kinds: Vec<_> = shape.groups[1].impls.iter().map(|i| i.disposition).collect();
-    assert!(matches!(kinds[0], ImplDisposition::LocalHeaderCandidate { .. }));
-    assert_eq!(&kinds[2..], &[
-        ImplDisposition::GenericOrComplex, ImplDisposition::Unresolved,
-        ImplDisposition::GenericOrComplex, ImplDisposition::QualifiedPath,
-        ImplDisposition::QualifiedPath, ImplDisposition::Unresolved,
-        ImplDisposition::Unresolved,
-    ]);
+    let kinds: Vec<_> = shape.groups[1]
+        .impls
+        .iter()
+        .map(|i| i.disposition)
+        .collect();
+    assert!(matches!(
+        kinds[0],
+        ImplDisposition::LocalHeaderCandidate { .. }
+    ));
+    assert_eq!(
+        &kinds[2..],
+        &[
+            ImplDisposition::GenericOrComplex,
+            ImplDisposition::Unresolved,
+            ImplDisposition::GenericOrComplex,
+            ImplDisposition::QualifiedPath,
+            ImplDisposition::QualifiedPath,
+            ImplDisposition::Unresolved,
+            ImplDisposition::Unresolved,
+        ]
+    );
     assert_eq!(shape.groups[1].counts.inherent_impls, 0);
 }
 
@@ -165,8 +217,10 @@ fn bare_generic_shadowing_is_only_a_tentative_candidate_because_parameters_are_a
         implementation(2, None, Some("Role"), "T"),
     ]);
     let shape = SourceShape::from_report(&report).unwrap();
-    assert!(matches!(shape.groups[1].impls[0].disposition,
-        ImplDisposition::LocalHeaderCandidate { .. }));
+    assert!(matches!(
+        shape.groups[1].impls[0].disposition,
+        ImplDisposition::LocalHeaderCandidate { .. }
+    ));
 }
 
 #[test]
@@ -175,14 +229,17 @@ fn nested_possible_manifests_partition_sources_even_when_unreadable_or_virtual()
     outer.declarations = simple();
     let mut inner = entry(5, Some(3), "lib.rs", EntryKind::File);
     inner.declarations = simple();
-    let report = report(vec![
-        entry(0, None, ".", EntryKind::Directory),
-        entry(1, Some(0), "Cargo.toml", EntryKind::File),
-        outer,
-        entry(3, Some(0), "nested", EntryKind::Directory),
-        entry(4, Some(3), "Cargo.toml", EntryKind::Unreadable),
-        inner,
-    ], false);
+    let report = report(
+        vec![
+            entry(0, None, ".", EntryKind::Directory),
+            entry(1, Some(0), "Cargo.toml", EntryKind::File),
+            outer,
+            entry(3, Some(0), "nested", EntryKind::Directory),
+            entry(4, Some(3), "Cargo.toml", EntryKind::Unreadable),
+            inner,
+        ],
+        false,
+    );
     let shape = SourceShape::from_report(&report).unwrap();
     assert!(shape.report_incomplete);
     assert_eq!(shape.entry_groups, vec![1, 1, 1, 2, 2, 2]);
@@ -203,14 +260,19 @@ fn failed_rust_and_opaque_scope_are_unknown_not_successful_empty_files() {
     let mut large = entry(4, Some(0), "large.rs", EntryKind::File);
     large.content_status = "too_large".into();
     large.lines = None;
-    let report = report(vec![
-        entry(0, None, ".", EntryKind::Directory),
-        entry(1, Some(0), "Cargo.toml", EntryKind::File),
-        failed, binary, large,
-        entry(5, Some(0), "vendor", EntryKind::Excluded),
-        entry(6, Some(0), "link", EntryKind::Symlink),
-        entry(7, Some(0), "hidden", EntryKind::Unreadable),
-    ], false);
+    let report = report(
+        vec![
+            entry(0, None, ".", EntryKind::Directory),
+            entry(1, Some(0), "Cargo.toml", EntryKind::File),
+            failed,
+            binary,
+            large,
+            entry(5, Some(0), "vendor", EntryKind::Excluded),
+            entry(6, Some(0), "link", EntryKind::Symlink),
+            entry(7, Some(0), "hidden", EntryKind::Unreadable),
+        ],
+        false,
+    );
     let shape = SourceShape::from_report(&report).unwrap();
     assert_eq!(shape.groups[1].counts.rust_files, 3);
     assert_eq!(shape.groups[1].unavailable_rust, 3);
@@ -223,11 +285,14 @@ fn failed_rust_and_opaque_scope_are_unknown_not_successful_empty_files() {
 fn no_manifest_directory_named_manifest_and_encoded_names_are_handled_honestly() {
     let mut source = entry(2, Some(0), "lib.rs", EntryKind::File);
     source.declarations = simple();
-    let unassigned = report(vec![
-        entry(0, None, ".", EntryKind::Directory),
-        entry(1, Some(0), "Cargo.toml", EntryKind::Directory),
-        source,
-    ], true);
+    let unassigned = report(
+        vec![
+            entry(0, None, ".", EntryKind::Directory),
+            entry(1, Some(0), "Cargo.toml", EntryKind::Directory),
+            source,
+        ],
+        true,
+    );
     let shape = SourceShape::from_report(&unassigned).unwrap();
     assert_eq!(shape.groups.len(), 1);
     assert_eq!(shape.groups[0].entries, vec![2]);
@@ -250,7 +315,10 @@ fn no_manifest_directory_named_manifest_and_encoded_names_are_handled_honestly()
 fn invalid_report_is_rejected_before_indexing_and_limit_checks_are_preserved() {
     let mut invalid = root_file(simple());
     invalid.entries[2].parent = Some(99);
-    assert_eq!(SourceShape::from_report(&invalid), Err(UiError::InvalidReport));
+    assert_eq!(
+        SourceShape::from_report(&invalid),
+        Err(UiError::InvalidReport)
+    );
     let mut invalid = root_file(simple());
     invalid.entries[2].declarations[0].name = "x".repeat(MAX_TEXT_BYTES + 1);
     assert_eq!(SourceShape::from_report(&invalid), Err(UiError::Limit));
@@ -258,9 +326,13 @@ fn invalid_report_is_rejected_before_indexing_and_limit_checks_are_preserved() {
 
 #[test]
 fn trait_only_source_is_visible_without_an_architectural_verdict() {
-    let shape = SourceShape::from_report(&root_file(vec![
-        declaration(0, None, DeclarationKind::Trait, "Role"),
-    ])).unwrap();
+    let shape = SourceShape::from_report(&root_file(vec![declaration(
+        0,
+        None,
+        DeclarationKind::Trait,
+        "Role",
+    )]))
+    .unwrap();
     let group = &shape.groups[1];
     assert_eq!(group.counts.traits, 1);
     assert_eq!(group.counts.structs, 0);
@@ -274,8 +346,16 @@ fn ambiguous_structs_and_a_dot_rs_filename_do_not_invent_relations() {
     declarations.push(declaration(5, None, DeclarationKind::Struct, "First"));
     let mut report = root_file(declarations);
     let shape = SourceShape::from_report(&report).unwrap();
-    assert_eq!(shape.groups[1].impls[0].disposition, ImplDisposition::Unresolved);
+    assert_eq!(
+        shape.groups[1].impls[0].disposition,
+        ImplDisposition::Unresolved
+    );
     assert_eq!(shape.groups[1].traits[0].candidate_structs.len(), 1);
     report.entries[2].name = NativeName::Utf8(".rs".into());
-    assert_eq!(SourceShape::from_report(&report).unwrap().groups[1].counts.rust_files, 0);
+    assert_eq!(
+        SourceShape::from_report(&report).unwrap().groups[1]
+            .counts
+            .rust_files,
+        0
+    );
 }
