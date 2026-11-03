@@ -131,7 +131,9 @@ No deployment, operational credentials or user trust-store changes are needed.
 The selected declaration appears directly below the selected entry heading, before
 metadata and the mirrored declaration list. Metadata uses a compact, wrapping fact
 grid. Explorer, Outline and Problems keep filters and paging outside their scrolling
-tree; very short panes retain an outer scroll fallback so controls remain reachable.
+tree. Supporting-pane full-name readouts reserve stable space so focusing a row
+cannot move its pointer target before click. Very short panes retain an outer
+scroll fallback so controls remain reachable.
 Cancel is shown only while this browser owns a pending wait. A catalog with no
 allowed project says so beside the disabled Inspect action.
 

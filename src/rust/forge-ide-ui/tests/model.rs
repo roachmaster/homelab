@@ -1625,18 +1625,22 @@ fn status_tones_follow_typed_phase_and_empty_project_availability() {
     );
     assert_eq!(tone(&empty), Tone::Warning);
     assert_eq!(text_named(&empty, "phase-label"), "No allowed project");
-    assert!(empty
-        .view()
-        .buttons
-        .iter()
-        .find(|b| b.id == "inspect")
-        .unwrap()
-        .disabled);
-    assert!(!empty
-        .view()
-        .visibility
-        .iter()
-        .find(|v| v.id == "cancel")
-        .unwrap()
-        .visible);
+    assert!(
+        empty
+            .view()
+            .buttons
+            .iter()
+            .find(|b| b.id == "inspect")
+            .unwrap()
+            .disabled
+    );
+    assert!(
+        !empty
+            .view()
+            .visibility
+            .iter()
+            .find(|v| v.id == "cancel")
+            .unwrap()
+            .visible
+    );
 }

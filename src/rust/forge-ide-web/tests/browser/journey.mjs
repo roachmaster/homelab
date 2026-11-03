@@ -175,8 +175,12 @@ function fileRow(page, name) {
 }
 async function selectFile(page, name) {
   const item = fileRow(page, name);
+  await item.scrollIntoViewIfNeeded();
+  const before = await item.boundingBox();
   await item.click();
   await check(item).toHaveAttribute('aria-selected', 'true');
+  const after = await item.boundingBox();
+  assert.ok(Math.abs(before.y - after.y) < 1 && Math.abs(before.height - after.height) < 1, 'pointer row stays stable when empty, short or long focus readout updates');
   await check(page.locator('#selection-title')).toContainText(name);
   return item;
 }

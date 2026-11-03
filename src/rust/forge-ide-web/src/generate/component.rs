@@ -178,7 +178,9 @@ impl Document {
                 Component::PaneLayout { id, .. } => (Some(id), None, None),
                 Component::Text { id, text, .. } => (Some(id), Some(text), None),
                 Component::Select { id, label, action }
-                | Component::Button { id, label, action, .. }
+                | Component::Button {
+                    id, label, action, ..
+                }
                 | Component::Filter { id, label, action }
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))

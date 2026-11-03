@@ -120,7 +120,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 let _=write!(out,"<div id=\"{id}-separator\" class=\"fg-separator fg-separator-{position_key}\" role=\"separator\" tabindex=\"0\" aria-label=\"Resize {title}; arrows adjust, Enter collapses\" aria-controls=\"{id}\" aria-orientation=\"{orientation}\" aria-valuemin=\"{min}\" aria-valuemax=\"{max}\" aria-valuenow=\"{initial}\" data-resize-pane=\"{id}\"></div>");
             }
         }
-        Component::Text { id, text, live, style } => {
+        Component::Text {
+            id,
+            text,
+            live,
+            style,
+        } => {
             let (tag, class) = match style {
                 TextStyle::Body => ("p", "fg-text"),
                 TextStyle::Caption => ("p", "fg-caption"),
@@ -142,7 +147,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::Select { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field\" for=\"{id}\"><span>{}</span><select id=\"{id}\" data-action=\"{}\" disabled><option value=\"\">Not connected</option></select></label>",escape(label),escape(action));
         }
-        Component::Button { id, label, action, emphasis } => {
+        Component::Button {
+            id,
+            label,
+            action,
+            emphasis,
+        } => {
             let class = match emphasis {
                 ButtonEmphasis::Standard => "fg-button",
                 ButtonEmphasis::Primary => "fg-button fg-button-primary",
