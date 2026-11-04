@@ -9,7 +9,7 @@ const definitions = [
   ['real.panes.desktop', 'real', 'real_mtls', 'Desktop pointer/keyboard pane sizing, bounds, reset and focus'],
   ['real.panes.narrow', 'real', 'real_mtls', 'Narrow viewport pane navigation and widening preserve context'],
   ...VIEWPORTS.map(item => [item.id, 'real', 'real_mtls', `${item.profile} ${item.width}×${item.height} CSS-pixel Chromium viewport navigation, focus and overflow`]),
-  ['probe.report.stale_actions', 'lifecycle_probe', 'real_mtls', 'Replayed stale local actions are rejected by real WASM'],
+  ['probe.report.stale_actions', 'lifecycle_probe', 'real_mtls', 'Real WASM rejects stale actions; FIFO-delayed external selection resets stale restored pane focus'],
   ['probe.page.lifecycle', 'lifecycle_probe', 'real_mtls', 'Synthetic page transitions plus real reload and history clear protected DOM'],
   ['real.report.empty', 'real', 'real_mtls', 'Complete empty project retains its root and truthful diagnostics'],
   ['real.admission.denied', 'real', 'real_mtls', 'Independent real agent project denial clears report with explicit recovery'],

@@ -36,11 +36,12 @@ const tree = {
   insertBefore() { throw new Error('Unchanged list row was moved'); },
 };
 const body = { isConnected: true };
+const extraElements = new Map();
 const document = {
   body, activeElement: body,
   querySelectorAll(selector) { if (selector === '[data-bind-text]') return [status]; return selector === 'input' || selector === 'input[data-action]' ? [input] : []; },
   querySelector() { return null; },
-  getElementById(id) { return id === input.id ? input : id === status.id ? status : id === tree.id ? tree : null; },
+  getElementById(id) { return id === input.id ? input : id === status.id ? status : id === tree.id ? tree : extraElements.get(id) ?? null; },
 };
 const context = vm.createContext({
   document, TextEncoder,
@@ -82,9 +83,14 @@ assert.equal(tree.scrollTop, 144, 'same-order list projections preserve tree scr
 // Generic pane context is opaque: external changes reset stale pane focus and
 // scroll, unchanged context and direct in-pane navigation retain ownership.
 const paneBody = { scrollTop: 900 };
-const inside = { isConnected: true, closest() { return null; } };
+const inside = { isConnected: true, disabled: false, closest(selector) { return selector === '[data-pane]' ? pane : null; }, hasAttribute() { return false; }, dataset: {} };
+const outside = { isConnected: true, disabled: false, closest(selector) { return selector === '[data-pane]' ? outsidePane : null; }, hasAttribute() { return false; }, dataset: {} };
+const outsidePane = {};
+const heading = { isConnected: true, closest() { return null; }, focus() { document.activeElement = heading; } };
+extraElements.set('collection-pane-heading', heading);
+let navigated = null;
 const pane = { id: 'collection-pane', dataset: { pane: 'main' }, hidden: false,
-  contains(node) { return node === inside; },
+  contains(node) { return node === inside || node === heading || node === navigated; },
   querySelector(selector) { return selector === '.fg-pane-body' ? paneBody : null; },
 };
 const paneState = { root: { dataset: {} }, grid: { clientWidth: 0 }, panes: [pane], main: pane,
@@ -93,8 +99,8 @@ const paneState = { root: { dataset: {} }, grid: { clientWidth: 0 }, panes: [pan
 };
 context.paneState = paneState;
 vm.runInContext("layouts.set('collection-layout', paneState)", context);
-function paneView(contextValue) {
-  workers.at(-1).onmessage({ data: { kind: 'view', view: {
+function paneView(contextValue, sequence = null) {
+  workers.at(-1).onmessage({ data: { kind: 'view', presentation_sequence: sequence, view: {
     panes: [{ id: pane.id, context: contextValue }],
   } } });
 }
@@ -105,14 +111,97 @@ paneBody.scrollTop = 500; paneState.focus.set(pane.id, { node: inside });
 paneView({ selected: 1 });
 assert.equal(paneBody.scrollTop, 500, 'same context preserves scroll');
 assert.equal(paneState.focus.size, 1, 'same context preserves saved focus');
+context.inside = inside; context.outside = outside;
+vm.runInContext("actionByElement.set(inside,{kind:'choose'});actionByElement.set(outside,{kind:'choose'});", context);
+function dispatchFrom(node) {
+  vm.runInContext(`sendAction(${node})`, context);
+  return workers.at(-1).sent.at(-1).presentation_sequence;
+}
 document.activeElement = inside;
-paneView({ selected: 2 });
+const directSequence = dispatchFrom('inside');
+paneView({ selected: 2 }, directSequence);
 assert.equal(paneBody.scrollTop, 500, 'direct in-pane navigation preserves scroll');
 assert.equal(paneState.focus.size, 1, 'direct in-pane navigation preserves focus');
-document.activeElement = body;
-paneView({ selected: 3 });
+const externalSequence = dispatchFrom('outside');
+// The user switches back before the external action's accepted view arrives.
+document.activeElement = inside;
+paneView({ selected: 3 }, externalSequence);
+assert.equal(document.activeElement, heading, 'external context repairs only stale focus inside its pane');
 assert.equal(paneBody.scrollTop, 0);
 assert.equal(paneState.focus.size, 0);
+// An older acknowledgement cannot override newer direct user intent.
+paneBody.scrollTop = 500; document.activeElement = inside;
+const olderExternal = dispatchFrom('outside');
+const newerDirect = dispatchFrom('inside');
+paneView({ selected: 30 }, olderExternal);
+assert.equal(paneBody.scrollTop, 500);
+assert.equal(document.activeElement, inside);
+paneView({ selected: 31 }, newerDirect);
+assert.equal(paneBody.scrollTop, 500);
+// Switching away before a valid direct acknowledgement does not discard that
+// pane's saved scroll/focus or steal focus from the newly active pane.
+paneState.focus.set(pane.id, { node: inside });
+const switchedDirect = dispatchFrom('inside');
+document.activeElement = outside;
+paneView({ selected: 35 }, switchedDirect);
+assert.equal(paneBody.scrollTop, 500);
+assert.equal(paneState.focus.size, 1);
+assert.equal(document.activeElement, outside);
+document.activeElement = inside;
+// A settled direct action does not grant background views sticky ownership.
+paneView({ selected: 32 });
+assert.equal(paneBody.scrollTop, 0);
+assert.equal(document.activeElement, heading);
+// Even a newer pending direct action does not authorize a null-ack background
+// context change. It remains pending until its own acknowledgement arrives.
+paneBody.scrollTop = 300; document.activeElement = inside;
+const backgroundPending = dispatchFrom('inside');
+paneView({ selected: 36 });
+assert.equal(paneBody.scrollTop, 0);
+assert.equal(document.activeElement, heading);
+assert.equal(vm.runInContext('pendingActionOrigin.sequence', context), backgroundPending);
+paneView({ selected: 37 }, backgroundPending);
+assert.equal(vm.runInContext('pendingActionOrigin', context), null);
+// Newer action in another pane wins; old direct acknowledgements never steal it.
+paneBody.scrollTop = 400; document.activeElement = inside;
+const olderDirect = dispatchFrom('inside');
+const newerExternal = dispatchFrom('outside');
+document.activeElement = outside;
+paneView({ selected: 33 }, olderDirect);
+assert.equal(paneBody.scrollTop, 0);
+assert.equal(document.activeElement, outside);
+paneView({ selected: 34 }, newerExternal);
+assert.equal(document.activeElement, outside);
+document.activeElement = body;
+// Explicit newer keyboard tree navigation wins over a pending external view;
+// unlike automatic pane restoration, focusRow updates only pending ownership.
+navigated = { isConnected: true, tabIndex: -1,
+  closest(selector) { return selector === '[data-pane]' ? pane : selector === '[role="tree"]' ? navigationTree : null; },
+  focus() { document.activeElement = navigated; },
+  scrollIntoView() { paneBody.scrollTop = 450; },
+};
+const navigationTree = { querySelectorAll() { return [navigated]; } };
+context.navigated = navigated;
+const keyboardPending = dispatchFrom('outside');
+const sentBeforeNavigation = workers[0].sent.length;
+vm.runInContext('focusRow(navigated)', context);
+assert.equal(workers[0].sent.length, sentBeforeNavigation, 'keyboard focus does not dispatch an invented event');
+assert.equal(vm.runInContext('pendingActionOrigin.sequence', context), keyboardPending);
+paneView({ selected: 38 }, keyboardPending);
+assert.equal(document.activeElement, navigated);
+assert.equal(paneBody.scrollTop, 450);
+assert.equal(vm.runInContext('pendingActionOrigin', context), null);
+paneView({ selected: 380 });
+assert.equal(document.activeElement, heading, 'consumed keyboard ownership cannot exempt a background view');
+assert.equal(paneBody.scrollTop, 0);
+const keyboardAwayPending = dispatchFrom('outside');
+vm.runInContext('focusRow(navigated)', context);
+document.activeElement = outside;
+paneView({ selected: 39 }, keyboardAwayPending);
+assert.equal(document.activeElement, outside);
+assert.equal(paneBody.scrollTop, 450);
+assert.equal(vm.runInContext('pendingActionOrigin', context), null);
+document.activeElement = body;
 // Hidden panes have no scroll box: retain the reset until activation shows it.
 paneState.narrow.matches = true; paneState.active = 'other-pane';
 paneBody.scrollTop = 700; paneState.focus.set(pane.id, { node: inside });
@@ -130,10 +219,13 @@ paneBody.scrollTop = 350;
 vm.runInContext('updateLayout(paneState)', context);
 assert.equal(paneBody.scrollTop, 350, 'consumed reset does not keep snapping scroll');
 paneState.resetScroll.add(pane.id);
+dispatchFrom('inside');
 vm.runInContext('clearProtected()', context);
 assert.equal(paneState.resetScroll.size, 0, 'protected lifecycle clears pending resets');
 assert.equal(paneState.context.size, 0);
+assert.equal(vm.runInContext('pendingActionOrigin', context), null, 'protected lifecycle clears action origin');
 vm.runInContext("layouts.delete('collection-layout')", context);
+workers[0].sent.length = 0;
 view('', null);
 // Repeated values must not falsely acknowledge the newest edit.
 type('a'); type('ab'); type('a');

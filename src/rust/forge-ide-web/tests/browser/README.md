@@ -206,3 +206,11 @@ count and zero additional Inspect requests. Short landscape heights may scroll
 vertically; selected content must remain reachable and readable. Existing taller
 viewport assertions are not weakened. No browser/runtime dependency is installed
 by the matrix, and the normal fixed-suite deadline and cleanup policy still apply.
+
+
+The `probe.report.stale_actions` group also deliberately queues an accepted real
+WASM declaration-selection view, returns to the main pane before releasing it,
+and then releases in FIFO order. It checks that external selection resets stale
+restored focus/scroll while direct source-row actions retain their own focus.
+This is controlled presentation latency, not a fabricated result or a new remote
+request. The regular viewport matrix still exercises unsynchronized navigation.

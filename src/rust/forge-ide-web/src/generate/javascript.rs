@@ -9,6 +9,7 @@ let actionByElement=new WeakMap();
 let focusKeyByElement=new WeakMap();
 let inputDrafts=new WeakMap();
 let presentationSequence=0;
+let pendingActionOrigin=null;
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
 const layouts=new Map();
 let typeahead=new WeakMap();
@@ -19,7 +20,14 @@ function sendAction(n,value,sequence){
   if(!visible(n)||n.disabled)return;
   const bound=actionByElement.get(n);
   const action=bound || (n.hasAttribute('data-dynamic-action')?null:{kind:n.dataset.action});
-  if(action && action.kind)tell(value===undefined?action:{...action,value},sequence);
+  if(!action?.kind||!worker||fatalState)return;
+  if(sequence===undefined){
+    if(presentationSequence>=2147483647){fatal('The presentation message limit was reached. Reload to retry.');return;}
+    sequence=++presentationSequence;
+  }
+  const pane=n.closest('[data-pane]');
+  tell(value===undefined?action:{...action,value},sequence);
+  pendingActionOrigin={sequence,pane};
 }
 function clearProtected(){
   // Synchronous: never leave catalog/report pixels behind on pagehide or bfcache restore.
@@ -32,7 +40,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('.fg-tree,.fg-details')){n.replaceChildren();n.scrollTop=0;}
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
-  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();presentationSequence=0;
+  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.resetScroll.clear();}
 }
 function stop(){const old=worker;worker=null;if(old)old.terminate();clearProtected();}
@@ -47,6 +55,9 @@ function focusRow(row){
   if(!row||!visible(row))return;
   const tree=row.closest('[role="tree"]');
   for(const n of tree.querySelectorAll('.fg-row-select'))n.tabIndex=n===row?0:-1;
+  // Explicit keyboard tree navigation is newer user intent; automatic pane
+  // restoration never passes here. Retain the pending dispatch's acknowledgement.
+  if(pendingActionOrigin)pendingActionOrigin={sequence:pendingActionOrigin.sequence,pane:row.closest('[data-pane]')};
   row.focus();row.scrollIntoView({block:'nearest'});
 }
 function apply(view,acknowledgedSequence){
@@ -54,6 +65,11 @@ function apply(view,acknowledgedSequence){
   const focus=document.activeElement;
   const focusKey=focusKeyByElement.get(focus);
   const priorTree=focus?.closest?.('[role="tree"]');
+  const origin=pendingActionOrigin;
+  // Capture provenance before clearing its acknowledgement, including early
+  // focus-return paths. Older views must not consume newer pending intent.
+  if(origin?.sequence===acknowledgedSequence)pendingActionOrigin=null;
+  let invalidatedFocus=null;
   for(const b of view.visibility||[]){const n=element(b.id);if(n)n.hidden=!b.visible;}
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;actionByElement.set(n,b.action);}}
@@ -120,16 +136,19 @@ function apply(view,acknowledgedSequence){
       const context=JSON.stringify(b.context);
       if(state.context.get(b.id)!==context){
         state.context.set(b.id,context);
-        // An external context change invalidates old pane focus/scroll. Direct
-        // in-pane navigation keeps its current focus and scrolling ownership.
-        if(!pane.contains(focus)){
+        // Preserve only an acknowledged direct action (or newer pending direct
+        // intent), not a pane switch that restored a stale row while waiting.
+        const direct=origin?.pane===pane&&Number.isSafeInteger(acknowledgedSequence)&&acknowledgedSequence>0&&acknowledgedSequence<=origin.sequence;
+        if(!direct){
           state.focus.delete(b.id);
           state.resetScroll.add(b.id);
+          if(pane.contains(focus))invalidatedFocus=element(pane.id+'-heading');
         }
       }
     }
   }
   for(const state of layouts.values())updateLayout(state);
+  if(visible(invalidatedFocus)){invalidatedFocus.focus();return;}
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){

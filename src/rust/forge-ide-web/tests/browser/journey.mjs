@@ -631,8 +631,81 @@ async function deviceViewportJourney(page, traffic) {
   await check(page.locator('#workspace')).toHaveAttribute('data-narrow', 'false');
 }
 
+// Controlled FIFO latency on the real worker's accepted WASM views, not fake
+// model state. Deliberately restore an old main-pane row before external intent
+// is presented, then require the renderer to use dispatch provenance.
+async function delayedPaneContextProbe(page, traffic) {
+  const calls = traffic.count('inspect');
+  await page.setViewportSize({ width: 667, height: 375 });
+  await page.locator('#explorer-panel-switch').click();
+  await filterFiles(page, 'lib.rs');
+  await selectFile(page, 'lib.rs');
+  await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
+  await page.locator('#workspace-panel-switch').click();
+  const candidate = page.locator('#source-shape [data-row-id*="-candidate-"] [role="treeitem"]').filter({ hasText: 'Gadget' });
+  await candidate.scrollIntoViewIfNeeded();
+  await candidate.focus();
+  const directBefore = await page.evaluate(() => window.__forgeBrowserProbe.receivedViews());
+  await page.keyboard.press('Enter');
+  await check.poll(() => page.evaluate(() => window.__forgeBrowserProbe.receivedViews())).toBe(directBefore + 1);
+  await check(candidate).toBeFocused();
+  await page.locator('#outline-panel-switch').click();
+  const worker = page.workers()[0];
+  await worker.evaluate(() => {
+    const original = self.postMessage;
+    const queue = [];
+    self.postMessage = function(message, ...rest) {
+      if (message?.kind === 'view') {
+        if (queue.length >= 8) throw new Error('Controlled pane presentation queue bound');
+        queue.push([message, rest]);
+        return;
+      }
+      return original.call(self, message, ...rest);
+    };
+    self.__forgePanePresentation = {
+      count() { return queue.length; },
+      release() {
+        const item = queue.shift();
+        if (!item) throw new Error('Controlled pane presentation queue empty');
+        original.call(self, item[0], ...item[1]);
+      },
+      restore() {
+        if (queue.length) throw new Error('Controlled pane presentations remain');
+        self.postMessage = original;
+        delete self.__forgePanePresentation;
+      },
+    };
+  });
+  const symbol = page.locator('#outline').getByRole('treeitem', { name: /^inspect_me\b/ });
+  await symbol.focus();
+  await page.keyboard.press('Enter');
+  await check.poll(() => worker.evaluate(() => self.__forgePanePresentation.count())).toBe(1);
+  await page.locator('#workspace-panel-switch').click();
+  await check(candidate).toBeFocused();
+  await check.poll(() => page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollTop)).toBeGreaterThan(0);
+  const before = await page.evaluate(() => window.__forgeBrowserProbe.receivedViews());
+  await worker.evaluate(() => self.__forgePanePresentation.release());
+  await check.poll(() => page.evaluate(() => window.__forgeBrowserProbe.receivedViews())).toBe(before + 1);
+  await check(page.locator('#declaration-details')).toContainText('inspect_me');
+  await check.poll(() => page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollTop)).toBe(0);
+  await check(page.locator('#workspace-panel-heading')).toBeFocused();
+  await worker.evaluate(() => self.__forgePanePresentation.restore());
+  // The converse is equally important: a direct in-pane context-changing action
+  // retains its clicked row instead of jumping to the pane heading.
+  await candidate.scrollIntoViewIfNeeded();
+  await candidate.focus();
+  await page.keyboard.press('Enter');
+  await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
+  await check(candidate).toBeFocused();
+  await check.poll(() => page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollTop)).toBeGreaterThan(0);
+  assert.equal(traffic.count('inspect'), calls, 'delayed pane projection remains local');
+  assert.equal(page.workers().length, 1);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+}
+
 async function reportAndPageLifecycle(page, traffic) {
   report.start('probe.report.stale_actions');
+  await delayedPaneContextProbe(page, traffic);
   await filterFiles(page, LONG_FILE_NAME);
   await selectFile(page, LONG_FILE_NAME);
   await saveAction(page, 'select_entry', 'old-report-row');
