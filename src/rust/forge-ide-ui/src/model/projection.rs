@@ -96,7 +96,11 @@ impl UiModel {
     fn entry_name(&self, entry: &EntryView) -> String {
         if entry.parent.is_none() && matches!(&entry.name, NativeName::Utf8(name) if name == ".") {
             self.selected_node()
-                .and_then(|node| node.projects.iter().find(|project| project.alias == self.project))
+                .and_then(|node| {
+                    node.projects
+                        .iter()
+                        .find(|project| project.alias == self.project)
+                })
                 .map(|project| project.label.clone())
                 .unwrap_or_else(|| self.project.clone())
         } else {
@@ -570,7 +574,16 @@ impl UiModel {
         let file_summary = if self.report.is_none() {
             "No accepted report. Filters apply only to inspected names.".into()
         } else {
-            format!("{} · {} name matches{}",tree.range(),tree.matches, if hidden_entry { " Selection hidden by filter." } else { "" })
+            format!(
+                "{} · {} name matches{}",
+                tree.range(),
+                tree.matches,
+                if hidden_entry {
+                    " Selection hidden by filter."
+                } else {
+                    ""
+                }
+            )
         };
         let symbol_summary = if entry.is_none() {
             "Select an inspected file. No source-content search.".into()
@@ -753,12 +766,20 @@ fn content_label(e: &EntryView) -> &'static str {
 }
 fn entry_overview(e: &EntryView) -> String {
     match e.kind {
-        EntryKind::Directory => "Directory · Select a file in Explorer to inspect declarations.".into(),
-        EntryKind::File if !e.declarations.is_empty() => format!("{} · {} declarations · Select a declaration for structural details.", content_label(e), e.declarations.len()),
-        EntryKind::File => format!("{}. {}",content_label(e),outline_empty(e,false)),
+        EntryKind::Directory => {
+            "Directory · Select a file in Explorer to inspect declarations.".into()
+        }
+        EntryKind::File if !e.declarations.is_empty() => format!(
+            "{} · {} declarations · Select a declaration for structural details.",
+            content_label(e),
+            e.declarations.len()
+        ),
+        EntryKind::File => format!("{}. {}", content_label(e), outline_empty(e, false)),
         EntryKind::Symlink => "Symbolic link; target was not traversed.".into(),
         EntryKind::Excluded => "Excluded entry; content was not inspected.".into(),
-        EntryKind::Unreadable => "Unreadable entry; its contents and declaration count are unknown.".into(),
+        EntryKind::Unreadable => {
+            "Unreadable entry; its contents and declaration count are unknown.".into()
+        }
         EntryKind::Other => "Special entry; no source contents were inspected.".into(),
     }
 }

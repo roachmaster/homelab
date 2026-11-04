@@ -356,6 +356,8 @@ fn focused_layout_and_disclosure_are_declarative_reusable_primitives() {
     assert!(!html.contains("onclick="));
     assert_eq!(a.files["main.js"], build(config()).files["main.js"]);
     let mut c = config();
-    c.document.children.push(component!(disclosure "workspace", "Collision"; []));
+    c.document
+        .children
+        .push(component!(disclosure "workspace", "Collision"; []));
     assert!(register_assets("assets", c).is_err());
 }
