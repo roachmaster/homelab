@@ -6,7 +6,7 @@ use crate::component;
 pub fn ide_document() -> Document {
     Document {
         title: "Forge IDE".into(),
-        subtitle: "Read-only structural inspection".into(),
+        subtitle: "Structural inspection · Read only".into(),
         children: vec![
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [
@@ -24,34 +24,36 @@ pub fn ide_document() -> Document {
                     component!(reload "reload-session", "Reload to check session"),
                     component!(caption "phase-label", "Checking session"),
                 ]),
-                component!(context "selection-context", ""),
-                component!(caption "summary", "No report yet"),
-                component!(layout "workspace"; [
+                component!(focused_layout "workspace"; [
                     component!(pane "explorer-panel", "Explorer", Leading, 180, 250, 400; [
                         component!(filter "file-filter", "Filter entry names", "set_file_filter"),
                         component!(caption "file-filter-summary", "Filter applies to the accepted bounded report."),
                         component!(tree "files", "Project files"),
                         component!(row [component!(button "tree-previous", "Previous page", "previous_tree"), component!(button "tree-more", "Next page", "more_tree")]),
                     ]),
-                    component!(pane "workspace-panel", "File overview", Main, 240, 480, 960; [
+                    component!(pane "workspace-panel", "File", Main, 240, 480, 960; [
                         component!(heading "selection-title", "Select a file to inspect its declarations"),
                         component!(text "workspace-summary", "Read-only structural inspection. No source body is requested."),
                         component!(panel "declaration-details-panel", "Selected declaration"; [
                             component!(details "declaration-details"),
                         ]),
-                        component!(panel "source-shape-panel", "Source shape"; [
-                            component!(caption "source-shape-summary", "Inspect a project to inventory its source shape."),
-                            component!(text "source-shape-limits", "Observed declarations, not a complexity score. Cargo.toml directories are unverified boundaries: manifests, workspace membership and targets are not read. Trait candidates are unique bare names in the same file and lexical module. Impl generics and imports are not available; these are tentative header matches, not resolved implementations."),
-                            component!(facts "source-shape-details"),
-                            component!(tree "source-shape", "Source shape groups and trait candidates"),
-                            component!(row [component!(button "shape-previous", "Previous shape page", "previous_shape"), component!(button "shape-more", "Next shape page", "more_shape")]),
-                        ]),
-                        component!(panel "file-metadata-panel", "Entry metadata"; [
-                            component!(facts "details"),
-                        ]),
-                        component!(panel "file-declarations-panel", "Declarations in file"; [
+                        component!(panel "file-declarations-panel", "Declarations"; [
                             component!(caption "declarations-summary", ""),
                             component!(tree "declarations", "File declarations"),
+                        ]),
+                        component!(disclosure "file-metadata-panel", "Entry metadata"; [
+                            component!(facts "details"),
+                        ]),
+                        component!(disclosure "source-shape-panel", "Source shape inventory"; [
+                            component!(caption "source-shape-summary", "Inspect a project to inventory its source shape."),
+                            component!(disclosure "source-shape-caveats", "Inventory limits"; [
+                                component!(text "source-shape-limits", "Observed declarations, not a complexity score. Cargo.toml directories are unverified boundaries: manifests, workspace membership and targets are not read. Trait candidates are unique bare names in the same file and lexical module. Impl generics and imports are not available; these are tentative header matches, not resolved implementations."),
+                            ]),
+                            component!(tree "source-shape", "Source shape groups and trait candidates"),
+                            component!(row [component!(button "shape-previous", "Previous shape page", "previous_shape"), component!(button "shape-more", "Next shape page", "more_shape")]),
+                            component!(disclosure "source-shape-counts", "Observed counts"; [
+                                component!(facts "source-shape-details"),
+                            ]),
                         ]),
                     ]),
                     component!(pane "outline-panel", "Outline", Trailing, 220, 280, 480; [
@@ -66,8 +68,13 @@ pub fn ide_document() -> Document {
                         component!(row [component!(button "problems-previous", "Previous page", "previous_problems"), component!(button "problems-more", "Next page", "more_problems")]),
                     ]),
                 ]),
+                component!(disclosure "inspection-details", "Inspection details"; [
+                    component!(context "selection-context", ""),
+                    component!(caption "summary", "No report yet"),
+                    component!(caption "inspection-limits", "Read-only metadata and declarations; no source bodies, editing or execution. Filters search names in this accepted bounded report. Cancel stops only this browser wait."),
+                ]),
             ]),
-            component!(caption "footer", "Read-only inspection · No editing or execution · Cancel stops this browser wait, not remote computation"),
+            component!(caption "footer", "Read only · Metadata and declarations · No source bodies"),
         ],
     }
 }

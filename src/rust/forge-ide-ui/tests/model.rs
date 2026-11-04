@@ -1803,3 +1803,32 @@ fn shape_navigation_rows_do_not_pretend_multiple_symbols_are_selected() {
     assert_eq!(selected.len(), 1);
     assert_eq!(selected[0].id, "shape-source-1");
 }
+
+#[test]
+fn synthetic_root_uses_admitted_project_label_consistently() {
+    let mut model = connected();
+    let request = inspect(&mut model);
+    let mut accepted = report();
+    accepted.entries[0].name = NativeName::Utf8(".".into());
+    event(&mut model, result(&request, accepted));
+    assert_eq!(rows_named(&model, "files")[0].label, "Workspace");
+    let output = event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: request.token.clone(),
+            value: 0,
+        },
+    );
+    assert!(output.effects.is_empty());
+    assert_eq!(text_named(&model, "selection-title"), "Workspace");
+    let output = event(
+        &mut model,
+        UiEvent::SetFileFilter {
+            report: request.token,
+            value: "Workspace".into(),
+        },
+    );
+    assert!(output.effects.is_empty());
+    assert_eq!(rows_named(&model, "files").len(), 1);
+    assert_eq!(rows_named(&model, "files")[0].label, "Workspace");
+}

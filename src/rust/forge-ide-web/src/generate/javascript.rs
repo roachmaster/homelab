@@ -14,7 +14,11 @@ const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map
 const layouts=new Map();
 let typeahead=new WeakMap();
 function element(id){return typeof id==='string'?document.getElementById(id):null;}
-function visible(n){return !!n && n.isConnected && !n.closest('[hidden]');}
+function visible(n){
+  if(!n||!n.isConnected||n.closest('[hidden]'))return false;
+  for(let p=n.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS'&&!p.open&&!p.querySelector(':scope > summary')?.contains(n))return false;
+  return true;
+}
 function tell(event,sequence){if(worker && !fatalState)worker.postMessage(sequence===undefined?event:{event,presentation_sequence:sequence});}
 function sendAction(n,value,sequence){
   if(!visible(n)||n.disabled)return;
@@ -40,6 +44,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('.fg-tree,.fg-details')){n.replaceChildren();n.scrollTop=0;}
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
+  for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.resetScroll.clear();}
 }
@@ -65,6 +70,7 @@ function apply(view,acknowledgedSequence){
   const focus=document.activeElement;
   const focusKey=focusKeyByElement.get(focus);
   const priorTree=focus?.closest?.('[role="tree"]');
+  const priorPane=focus?.closest?.('[data-pane]');
   const origin=pendingActionOrigin;
   // Capture provenance before clearing its acknowledgement, including early
   // focus-return paths. Older views must not consume newer pending intent.
@@ -104,7 +110,7 @@ function apply(view,acknowledgedSequence){
         const secondary=document.createElement('span');secondary.className='fg-row-secondary';select.append(glyph,label,secondary);item.append(toggle,select);
         toggle.addEventListener('click',()=>sendAction(toggle));select.addEventListener('click',()=>sendAction(select));
       }
-      item.className='fg-tree-row fg-depth-'+Math.min(64,Math.max(0,Number(row.depth)||0));item.dataset.selected=String(row.selected);item.dataset.parent=row.parent??'';
+      item.className='fg-tree-row fg-depth-'+Math.min(64,Math.max(0,Number(row.depth)||0));item.dataset.selected=String(row.selected);item.dataset.parent=row.parent??'';item.dataset.icon=['folder','document'].includes(row.icon)?row.icon:'symbol';
       const [toggle,select]=item.children;
       toggle.hidden=row.expanded===null||!row.toggle;toggle.disabled=!row.toggle;toggle.textContent=row.expanded?'▾':'▸';toggle.setAttribute('aria-label',(row.expanded?'Collapse ':'Expand ')+row.label);
       // Includes accepted context, but never persists it in URLs, storage or DOM attributes.
@@ -152,7 +158,7 @@ function apply(view,acknowledgedSequence){
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){
-    const target=visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:document.querySelector('.fg-screen:not([hidden]) select:not(:disabled),.fg-screen:not([hidden]) input:not(:disabled),.fg-screen:not([hidden]) button:not(:disabled)');
+    const target=visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):document.querySelector('.fg-screen:not([hidden]) select:not(:disabled),.fg-screen:not([hidden]) input:not(:disabled),.fg-screen:not([hidden]) button:not(:disabled)');
     if(visible(target))target.focus({preventScroll:true});
   }
 }
@@ -227,13 +233,20 @@ function updateLayout(state){
     if(position!=='main'){state.grid.style.setProperty('--'+position+'-size',open?size+'px':'0px');state.grid.style.setProperty('--'+position+'-divider',open?'6px':'0px');}
     const separator=element(pane.id+'-separator');if(separator){separator.hidden=!show||state.narrow.matches;separator.setAttribute('aria-valuenow',String(size));}
     const toggle=element(pane.id+'-toggle');if(toggle)toggle.setAttribute('aria-expanded',String(open));
-    const tab=element(pane.id+'-switch');if(tab)tab.setAttribute('aria-pressed',String(state.active===pane.id));
+    const tab=element(pane.id+'-switch');if(tab)tab.setAttribute('aria-pressed',String(state.narrow.matches?state.active===pane.id:open));
   }
 }
+function openPane(state,pane){
+  if(state.singleSecondary&&(pane.dataset.pane==='trailing'||pane.dataset.pane==='bottom')){
+    for(const other of state.panes)if(other!==pane&&(other.dataset.pane==='trailing'||other.dataset.pane==='bottom'))state.open.delete(other.id);
+  }
+  state.open.add(pane.id);
+}
+function defaultPanes(panes,singleSecondary){return new Set(panes.filter(p=>!singleSecondary||p.dataset.pane!=='bottom').map(p=>p.id));}
 function togglePane(state,pane){
   const focused=pane.contains(document.activeElement)||document.activeElement===element(pane.id+'-separator');
   if(state.open.has(pane.id)){state.open.delete(pane.id);if(state.active===pane.id)state.active=state.main.id;}
-  else {state.open.add(pane.id);if(state.narrow.matches)state.active=pane.id;}
+  else {openPane(state,pane);if(state.narrow.matches)state.active=pane.id;}
   updateLayout(state);if(focused)paneControl(state,pane)?.focus();
 }
 function resizePane(state,pane,value){state.sizes.set(pane.id,Math.max(Number(pane.dataset.min),Math.min(Number(pane.dataset.max),Math.round(value))));updateLayout(state);}
@@ -241,15 +254,17 @@ for(const root of document.querySelectorAll('[data-layout]')){
   const panes=[...root.querySelector('.fg-panes').children].filter(n=>n.hasAttribute('data-pane'));
   const main=panes.find(n=>n.dataset.pane==='main');if(!main)continue;
   const local=selector=>[...root.querySelectorAll(selector)].filter(n=>n.closest('[data-layout]')===root);
-  const state={root,grid:root.querySelector('.fg-panes'),panes,main,open:new Set(panes.map(n=>n.id)),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map(),context:new Map(),resetScroll:new Set()};layouts.set(root.id,state);
+  const singleSecondary=root.dataset.singleSecondary==='true';
+  const state={root,grid:root.querySelector('.fg-panes'),panes,main,singleSecondary,open:defaultPanes(panes,singleSecondary),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map(),context:new Map(),resetScroll:new Set()};layouts.set(root.id,state);
   for(const pane of panes)pane.addEventListener('focusin',e=>{if(e.target.closest('[data-layout]')===root)state.focus.set(pane.id,{node:e.target,key:focusKeyByElement.get(e.target)});});
   for(const n of local('[data-pane-toggle]'))n.addEventListener('click',()=>{const pane=panes.find(p=>p.id===n.dataset.paneToggle);if(pane)togglePane(state,pane);});
   for(const n of local('[data-pane-switch]'))n.addEventListener('click',()=>{
     const pane=panes.find(p=>p.id===n.dataset.paneSwitch);if(!pane)return;
-    state.open.add(pane.id);state.active=pane.id;updateLayout(state);
+    if(!state.narrow.matches&&pane!==main){togglePane(state,pane);return;}
+    openPane(state,pane);state.active=pane.id;updateLayout(state);
     const target=state.focus.get(pane.id);if(target?.node.isConnected&&visible(target.node)&&(target.key===undefined||focusKeyByElement.get(target.node)===target.key))target.node.focus();else element(pane.id+'-heading')?.focus();
   });
-  root.querySelector('[data-layout-reset]').addEventListener('click',()=>{state.open=new Set(panes.map(n=>n.id));state.sizes=new Map(panes.map(n=>[n.id,Number(n.dataset.default)]));state.active=main.id;updateLayout(state);});
+  root.querySelector('[data-layout-reset]').addEventListener('click',()=>{state.open=defaultPanes(panes,state.singleSecondary);state.sizes=new Map(panes.map(n=>[n.id,Number(n.dataset.default)]));state.active=main.id;updateLayout(state);});
   for(const separator of local('[data-resize-pane]')){
     const pane=panes.find(p=>p.id===separator.dataset.resizePane);const position=pane.dataset.pane;let drag=null;
     separator.addEventListener('keydown',e=>{
@@ -265,7 +280,7 @@ for(const root of document.querySelectorAll('[data-layout]')){
     separator.addEventListener('pointermove',e=>{if(!drag)return;const delta=(position==='bottom'?e.clientY:e.clientX)-drag.at;resizePane(state,pane,drag.size+delta*(position==='leading'?1:-1));});
     for(const name of ['pointerup','pointercancel','lostpointercapture'])separator.addEventListener(name,()=>{drag=null;});
   }
-  state.narrow.addEventListener('change',()=>{const focus=document.activeElement;const pane=panes.find(p=>p.contains(focus));if(pane){state.active=pane.id;state.open.add(pane.id);}updateLayout(state);if(!visible(focus)&&focus!==document.body)element(state.active+'-switch')?.focus();});
+  state.narrow.addEventListener('change',()=>{const focus=document.activeElement;const pane=panes.find(p=>p.contains(focus));if(pane){state.active=pane.id;openPane(state,pane);}updateLayout(state);if(!visible(focus)&&focus!==document.body)element(state.active+'-switch')?.focus();});
   new ResizeObserver(()=>updateLayout(state)).observe(state.grid);
   updateLayout(state);
 }

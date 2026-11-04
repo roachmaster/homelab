@@ -93,6 +93,16 @@ fn included(parents: impl IntoIterator<Item = Option<u32>>, matches: &[bool]) ->
     keep
 }
 impl UiModel {
+    fn entry_name(&self, entry: &EntryView) -> String {
+        if entry.parent.is_none() && matches!(&entry.name, NativeName::Utf8(name) if name == ".") {
+            self.selected_node()
+                .and_then(|node| node.projects.iter().find(|project| project.alias == self.project))
+                .map(|project| project.label.clone())
+                .unwrap_or_else(|| self.project.clone())
+        } else {
+            name_label(&entry.name)
+        }
+    }
     fn file_matches(&self) -> (Vec<bool>, Vec<bool>) {
         let Some(report) = &self.report else {
             return (vec![], vec![]);
@@ -100,7 +110,7 @@ impl UiModel {
         let matches: Vec<_> = report
             .entries
             .iter()
-            .map(|e| self.file_filter.matches(&name_label(&e.name)))
+            .map(|e| self.file_filter.matches(&self.entry_name(e)))
             .collect();
         let keep = included(report.entries.iter().map(|e| e.parent), &matches);
         (matches, keep)
@@ -145,8 +155,13 @@ impl UiModel {
             rows.push(RowView {
                 id: format!("entry-{}", e.id),
                 parent: e.parent.map(|p| format!("entry-{p}")),
-                label: name_label(&e.name),
+                label: self.entry_name(e),
                 glyph: entry_glyph(e.kind).into(),
+                icon: match e.kind {
+                    EntryKind::Directory => RowIcon::Folder,
+                    EntryKind::File => RowIcon::Document,
+                    _ => RowIcon::Symbol,
+                },
                 kind_label: entry_label(e.kind),
                 secondary: entry_secondary(e),
                 depth: depths[i],
@@ -191,6 +206,7 @@ impl UiModel {
                 parent: d.parent.map(|p| format!("declaration-{}-{p}", e.id)),
                 label: d.name.clone(),
                 glyph: declaration_glyph(d.kind).into(),
+                icon: RowIcon::Symbol,
                 kind_label: declaration_label(d.kind),
                 secondary: format!(
                     "{} · {}:{}",
@@ -232,6 +248,7 @@ impl UiModel {
                     label: text.clone(),
                     secondary: problem_context(report, e),
                     glyph: "!".into(),
+                    icon: RowIcon::Symbol,
                     kind_label: "supplied diagnostic",
                     depth: 0,
                     selected: self.selected_problem == Some((e.id, index as u16)),
@@ -553,13 +570,13 @@ impl UiModel {
         let file_summary = if self.report.is_none() {
             "No accepted report. Filters apply only to inspected names.".into()
         } else {
-            format!("{} · {} matching names in accepted report; ancestors retained. Case-sensitive, name-only filter.{}",tree.range(),tree.matches, if hidden_entry { " Selection hidden by filter." } else { "" })
+            format!("{} · {} name matches{}",tree.range(),tree.matches, if hidden_entry { " Selection hidden by filter." } else { "" })
         };
         let symbol_summary = if entry.is_none() {
             "Select an inspected file. No source-content search.".into()
         } else {
             format!(
-                "{} · {} matching declaration names in selected entry.{}",
+                "{} · {} declaration matches{}",
                 outline.range(),
                 outline.matches,
                 if hidden_symbol {
@@ -609,7 +626,7 @@ impl UiModel {
                 tone_text("phase-label", if no_project { "No allowed project" } else { phase_label(self.phase) }, status_tone),
                 text("source-shape-summary", shape_summary),
                 text("summary", summary), text("workspace-summary",workspace_summary),
-                text("selection-title", entry.map(|e| name_label(&e.name)).unwrap_or_else(|| "Project overview".into())),
+                text("selection-title", entry.map(|e| self.entry_name(e)).unwrap_or_else(|| "Project overview".into())),
                 text("selection-context", if connected { format!("{} / {}",self.node,self.project) } else { "Not connected".into() }),
                 text("file-filter-summary",file_summary), text("symbol-filter-summary",symbol_summary.clone()), text("declarations-summary",symbol_summary), text("problems-summary",problems_summary),
             ],
@@ -665,6 +682,7 @@ fn shape_row(
         label,
         secondary,
         kind_label,
+        icon: RowIcon::Symbol,
         glyph: match kind_label {
             "trait" => "Tr",
             "candidate struct" => "S?",
@@ -735,7 +753,8 @@ fn content_label(e: &EntryView) -> &'static str {
 }
 fn entry_overview(e: &EntryView) -> String {
     match e.kind {
-        EntryKind::Directory => "Directory overview. Browse the accepted structure in Explorer; this is not a source editor.".into(),
+        EntryKind::Directory => "Directory · Select a file in Explorer to inspect declarations.".into(),
+        EntryKind::File if !e.declarations.is_empty() => format!("{} · {} declarations · Select a declaration for structural details.", content_label(e), e.declarations.len()),
         EntryKind::File => format!("{}. {}",content_label(e),outline_empty(e,false)),
         EntryKind::Symlink => "Symbolic link; target was not traversed.".into(),
         EntryKind::Excluded => "Excluded entry; content was not inspected.".into(),
@@ -761,13 +780,14 @@ fn entry_secondary(e: &EntryView) -> String {
     match (e.lines, e.size_bytes) {
         (Some(lines), Some(bytes)) => format!("{lines} lines · {bytes} bytes"),
         (_, Some(bytes)) => format!("{bytes} bytes · {}", content_label(e)),
+        _ if e.kind == EntryKind::Directory => String::new(),
         _ => entry_label(e.kind).into(),
     }
 }
 fn entry_glyph(kind: EntryKind) -> &'static str {
     match kind {
-        EntryKind::Directory => "▣",
-        EntryKind::File => "▤",
+        EntryKind::Directory => "▱",
+        EntryKind::File => "≡",
         EntryKind::Symlink => "↗",
         EntryKind::Other => "◇",
         EntryKind::Excluded => "⊘",
@@ -922,6 +942,7 @@ mod tests {
             label: "\u{1f}".repeat(MAX_TEXT_BYTES),
             secondary: format!("Entry 4294967295 · … / {name} / {name}"),
             glyph: "!".into(),
+            icon: RowIcon::Symbol,
             kind_label: "supplied diagnostic",
             depth: u16::MAX,
             selected: true,

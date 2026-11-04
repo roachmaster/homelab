@@ -36,6 +36,15 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children(items, out);
             out.push_str("</section>");
         }
+        Component::Disclosure {
+            id,
+            title,
+            children: items,
+        } => {
+            let _ = write!(out, "<details id=\"{}\" class=\"fg-disclosure\"><summary>{}</summary><div class=\"fg-disclosure-body\">", escape(id), escape(title));
+            children(items, out);
+            out.push_str("</div></details>");
+        }
         Component::Panel {
             id,
             title,
@@ -65,10 +74,11 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
         Component::PaneLayout {
             id,
+            single_secondary,
             children: items,
         } => {
             let id = escape(id);
-            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout><div class=\"fg-layout-controls\"><details id=\"{id}-options\" class=\"fg-view-options\"><summary>View options</summary><div class=\"fg-option-list\">");
+            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout data-single-secondary=\"{single_secondary}\"><div class=\"fg-layout-controls\"><details id=\"{id}-options\" class=\"fg-view-options\"><summary>View options</summary><div class=\"fg-option-list\">");
             for pane in items {
                 if let Component::Pane {
                     id,
@@ -84,8 +94,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             }
             let _=write!(out,"<button type=\"button\" id=\"{id}-reset\" data-layout-reset>Reset panes</button></div></details><nav class=\"fg-pane-switches\" aria-label=\"Visible pane\">");
             for pane in items {
-                if let Component::Pane { id, title, .. } = pane {
-                    let _=write!(out,"<button type=\"button\" id=\"{}-switch\" data-pane-switch=\"{}\" aria-controls=\"{}\" aria-pressed=\"false\">{}</button>",escape(id),escape(id),escape(id),escape(title));
+                if let Component::Pane {
+                    id,
+                    title,
+                    position,
+                    ..
+                } = pane
+                {
+                    let _=write!(out,"<button type=\"button\" id=\"{}-switch\" data-pane-position=\"{}\" data-pane-switch=\"{}\" aria-controls=\"{}\" aria-pressed=\"false\">{}</button>",escape(id),position.key(),escape(id),escape(id),escape(title));
                 }
             }
             out.push_str("</nav></div><div class=\"fg-panes\">");

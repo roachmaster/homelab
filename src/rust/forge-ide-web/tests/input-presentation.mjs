@@ -261,3 +261,20 @@ assert.equal(workers[1].sent[0].presentation_sequence, 1);
 assert.equal(workers[1].sent[0].event.report.token, 'C');
 console.log('Input presentation sequencing: repeated values, backspace, rejection, invalid draft, context and lifecycle passed.');
 
+
+// Presentation-only tool exclusivity is reusable and never posts an application event.
+context.toolFixture = {
+  panes: [
+    { id: 'main', dataset: { pane: 'main' } },
+    { id: 'nav', dataset: { pane: 'leading' } },
+    { id: 'related', dataset: { pane: 'trailing' } },
+    { id: 'errors', dataset: { pane: 'bottom' } },
+  ],
+  singleSecondary: true, open: new Set(['main', 'nav', 'related']),
+};
+vm.runInContext("openPane(toolFixture, toolFixture.panes[3])", context);
+assert.deepEqual([...context.toolFixture.open], ['main', 'nav', 'errors']);
+vm.runInContext("openPane(toolFixture, toolFixture.panes[2])", context);
+assert.deepEqual([...context.toolFixture.open], ['main', 'nav', 'related']);
+assert.deepEqual([...vm.runInContext("defaultPanes(toolFixture.panes, true)", context)], ['main', 'nav', 'related']);
+assert.deepEqual([...vm.runInContext("defaultPanes(toolFixture.panes, false)", context)], ['main', 'nav', 'related', 'errors']);

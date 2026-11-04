@@ -35,6 +35,12 @@ pub enum ButtonEmphasis {
 }
 #[derive(Clone, Debug)]
 pub enum Component {
+    /// Native keyboard-accessible progressive disclosure; presentation only.
+    Disclosure {
+        id: String,
+        title: String,
+        children: Vec<Component>,
+    },
     Screen {
         id: String,
         title: String,
@@ -51,6 +57,8 @@ pub enum Component {
     Workspace(Vec<Component>),
     PaneLayout {
         id: String,
+        /// Keep the two secondary tools mutually exclusive; main/leading remain independent.
+        single_secondary: bool,
         children: Vec<Component>,
     },
     Pane {
@@ -108,11 +116,13 @@ pub enum Component {
 #[macro_export]
 macro_rules! component {
     (screen $id:expr, $title:expr, $protected:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Screen { id:$id.into(),title:$title.into(),protected:$protected,children:vec![$($child),*] } };
+    (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
     (row [$($child:expr),* $(,)?]) => { $crate::generate::Component::Row(vec![$($child),*]) };
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
-    (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),children:vec![$($child),*]} };
+    (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,children:vec![$($child),*]} };
+    (focused_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,children:vec![$($child),*]} };
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
     (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
     (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
@@ -171,6 +181,7 @@ impl Document {
             let (id, label, action) = match c {
                 Component::Screen { id, title, .. }
                 | Component::Panel { id, title, .. }
+                | Component::Disclosure { id, title, .. }
                 | Component::Pane { id, title, .. } => (Some(id), Some(title), None),
                 Component::Row(_) | Component::Toolbar(_) | Component::Workspace(_) => {
                     (None, None, None)
@@ -228,7 +239,7 @@ impl Document {
                         }
                     }
                 }
-                Component::PaneLayout { id, children } => {
+                Component::PaneLayout { id, children, .. } => {
                     for suffix in ["options", "reset"] {
                         insert(ids, &format!("{id}-{suffix}"))?;
                     }
@@ -251,6 +262,7 @@ impl Document {
             let children = match c {
                 Component::Screen { children, .. }
                 | Component::Panel { children, .. }
+                | Component::Disclosure { children, .. }
                 | Component::PaneLayout { children, .. }
                 | Component::Pane { children, .. }
                 | Component::Row(children)

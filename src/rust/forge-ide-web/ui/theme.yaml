@@ -1,17 +1,17 @@
 # Author-owned style declarations; no CSS or script escape hatch.
-background: "#0c131c"
-surface: "#131f2c"
-raised: "#1b2a3b"
-border: "#2a3d51"
-text: "#e8eff6"
-muted: "#adbdcf"
-accent: "#5cdbc4"
-warning: "#f0c77d"
-error: "#ff9b9b"
+background: "#15181d"
+surface: "#1c2026"
+raised: "#262c34"
+border: "#3a424e"
+text: "#e6eaf0"
+muted: "#b1bac8"
+accent: "#8ebcff"
+warning: "#f2c879"
+error: "#ffb0ad"
 font_px: 14
 radius_px: 3
 spacing_px: 8
 sidebar_px: 250
 details_px: 280
-row_px: 28
+row_px: 26
 control_px: 32

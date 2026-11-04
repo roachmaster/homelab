@@ -67,7 +67,7 @@ fn yaml_is_tokens_not_raw_css_or_script() {
     ] {
         assert!(Theme::parse(&(IDE_THEME.to_owned() + extra)).is_err());
     }
-    assert!(Theme::parse(&IDE_THEME.replace("#0c131c", "red;display:none")).is_err());
+    assert!(Theme::parse(&IDE_THEME.replace("#15181d", "red;display:none")).is_err());
     assert!(Theme::parse(&IDE_THEME.replace("font_px: 14", "font_px: 900")).is_err());
 }
 #[test]
@@ -326,4 +326,36 @@ fn repeated_row_actions_preserve_distinct_stable_focus_identity() {
     let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
     assert!(main.contains("b.id+':'+key+':select:'+JSON.stringify(row.action)"));
     assert!(main.contains("b.id+':'+key+':toggle:'+JSON.stringify(row.toggle)"));
+}
+
+#[test]
+fn focused_layout_and_disclosure_are_declarative_reusable_primitives() {
+    let mut c = config();
+    c.document = Document {
+        title: "Review".into(),
+        subtitle: "Fixture".into(),
+        children: vec![component!(focused_layout "review"; [
+            component!(pane "review-main", "Main", Main, 240, 480, 960; [
+                component!(disclosure "review-extra", "Details <safe>"; [
+                    component!(text "review-text", "Private <text>"),
+                ]),
+            ]),
+            component!(pane "review-related", "Related", Trailing, 220, 280, 480; []),
+            component!(pane "review-errors", "Errors", Bottom, 120, 200, 400; []),
+        ])],
+    };
+    let document = c.document.clone();
+    let a = build(c);
+    let mut repeated = config();
+    repeated.document = document;
+    assert_eq!(a, build(repeated));
+    let html = std::str::from_utf8(&a.files["index.html"]).unwrap();
+    assert!(html.contains("data-single-secondary=\"true\""));
+    assert!(html.contains("<details id=\"review-extra\" class=\"fg-disclosure\"><summary>Details &lt;safe&gt;</summary>"));
+    assert!(html.contains("Private &lt;text&gt;"));
+    assert!(!html.contains("onclick="));
+    assert_eq!(a.files["main.js"], build(config()).files["main.js"]);
+    let mut c = config();
+    c.document.children.push(component!(disclosure "workspace", "Collision"; []));
+    assert!(register_assets("assets", c).is_err());
 }

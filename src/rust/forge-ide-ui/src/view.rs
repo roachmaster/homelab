@@ -87,11 +87,22 @@ pub struct ListBinding {
     pub rows: Vec<RowView>,
     pub empty_message: String,
 }
+/// Reusable presentation icon, independent of application domain kind labels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RowIcon {
+    #[default]
+    Symbol,
+    Document,
+    Folder,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RowView {
     pub id: String,
     pub label: String,
     pub glyph: String,
+    /// Additive ABI 2 presentation metadata; older renderers ignore it.
+    pub icon: RowIcon,
     pub kind_label: &'static str,
     pub parent: Option<String>,
     pub secondary: String,

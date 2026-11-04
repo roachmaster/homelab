@@ -247,6 +247,20 @@ async function replayAction(page, slot) {
   await page.evaluate(s => window.__forgeBrowserProbe.replay(s), slot);
 }
 
+async function disclosure(page, id, open) {
+  const details = page.locator(`#${id}`);
+  if (await details.evaluate(node => node.open) !== open) {
+    const summary = page.locator(`#${id} > summary`);
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await check(summary).toBeFocused();
+  }
+  await check(details).toHaveJSProperty('open', open);
+}
+async function ensurePane(page, id) {
+  if (!await page.locator(`#${id}`).isVisible()) await page.locator(`#${id}-switch`).click();
+  await check(page.locator(`#${id}`)).toBeVisible();
+}
 async function keyboardAndFilters(page, traffic) {
   report.start('real.navigation.keyboard');
   const calls = traffic.count('inspect');
@@ -379,6 +393,8 @@ async function keyboardAndFilters(page, traffic) {
   await filterFiles(page, '');
   await page.getByRole('button', { name: 'Collapse bulk', exact: true }).click();
   await check(fileRow(page, 'broken.rs')).toBeVisible();
+  await ensurePane(page, 'problems-panel');
+  await check(page.locator('#outline-panel')).toBeHidden();
   const problem = page.locator('#problems [role="treeitem"]').filter({ hasText: 'broken.rs' }).first();
   await check(problem).toBeVisible();
   await problem.click();
@@ -394,6 +410,10 @@ async function panesAndNarrow(page, traffic) {
   const calls = traffic.count('inspect');
   await filterFiles(page, 'lib.rs');
   await selectFile(page, 'lib.rs');
+  await ensurePane(page, 'outline-panel');
+  await check(page.locator('#problems-panel')).toBeHidden();
+  await disclosure(page, 'source-shape-panel', false);
+  await disclosure(page, 'file-metadata-panel', false);
   const center = await page.locator('#workspace-panel').boundingBox();
   const explorer = await page.locator('#explorer-panel').boundingBox();
   const outline = await page.locator('#outline-panel').boundingBox();
@@ -411,6 +431,7 @@ async function panesAndNarrow(page, traffic) {
   }), true, 'primary action has a contrasting external keyboard focus ring');
   await screenshot(page, 'ide-workbench-desktop.png');
   for (const pane of ['explorer-panel', 'outline-panel', 'problems-panel']) {
+    await ensurePane(page, pane);
     // aria-controls makes the split-pane relation part of the observable contract.
     const splitter = page.locator(`[role="separator"][aria-controls="${pane}"]`);
     await check(splitter).toHaveCount(1);
@@ -436,6 +457,7 @@ async function panesAndNarrow(page, traffic) {
     await check(splitter).toHaveAttribute('aria-valuenow', await splitter.getAttribute('aria-valuemax'));
     if (!await page.locator('#workspace-options').evaluate(e => e.open)) await page.locator('#workspace-options > summary').click();
     await page.locator('#workspace-reset').click();
+    await ensurePane(page, pane);
     await check(splitter).toHaveAttribute('aria-valuenow', String(initial));
     const bounds = await splitter.boundingBox();
     const x = bounds.x + bounds.width / 2;
@@ -446,6 +468,7 @@ async function panesAndNarrow(page, traffic) {
     await page.mouse.up();
     await check(splitter).toHaveAttribute('aria-valuenow', String(initial + 20));
     await page.locator('#workspace-reset').click();
+    await ensurePane(page, pane);
     await check(splitter).toHaveAttribute('aria-valuenow', String(initial));
     await splitter.focus();
     await page.keyboard.press('Enter');
@@ -506,7 +529,8 @@ async function panesAndNarrow(page, traffic) {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await check(page.locator('#workspace-panel')).toBeVisible();
   await check(page.locator('#explorer-panel')).toBeVisible();
-  await check(page.locator('#outline-panel')).toBeVisible();
+  await check(page.locator('#outline-panel')).toBeHidden();
+  await check(page.locator('#problems-panel')).toBeVisible();
   await check(page.locator('#selection-title')).toContainText('broken.rs');
   assert.equal(page.workers().length, 1, 'pane changes never remount the worker');
   assert.equal(traffic.count('inspect'), calls, 'pane changes never inspect remotely');
@@ -558,6 +582,7 @@ async function deviceViewportJourney(page, traffic) {
           await check(page.locator(`#${other}`)).toBeHidden();
         }
       } else {
+        await ensurePane(page, pane);
         await page.locator(`#${pane}-heading`).focus();
       }
       await check(page.locator(`#${pane}`)).toBeVisible();
@@ -569,6 +594,7 @@ async function deviceViewportJourney(page, traffic) {
     report.checkpoint('file_select');
     await selectFile(page, 'lib.rs');
     await activate('workspace-panel', 'inventory_activate');
+    await disclosure(page, 'source-shape-panel', true);
     report.checkpoint('inventory_caveat');
     await check(page.locator('#source-shape-limits')).toContainText('not a complexity score');
     const candidate = page.locator('#source-shape [data-row-id*="-candidate-"] [role="treeitem"]').filter({ hasText: 'Gadget' });
@@ -623,6 +649,11 @@ async function deviceViewportJourney(page, traffic) {
     assert.equal(page.workers().length, 1, 'viewport changes keep one worker');
     report.checkpoint('local_requests');
     assert.equal(traffic.count('inspect'), calls, 'viewport navigation remains report-local');
+    await disclosure(page, 'source-shape-panel', false);
+    await page.locator('#workspace-panel-heading').focus();
+    await selectedName.scrollIntoViewIfNeeded();
+    await check(selectedName).toBeInViewport();
+    await assertViewportFocus();
     report.checkpoint('viewport_screenshot');
     await screenshot(page, viewport.screenshot);
     report.pass(viewport.id);
@@ -642,6 +673,7 @@ async function delayedPaneContextProbe(page, traffic) {
   await selectFile(page, 'lib.rs');
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
   await page.locator('#workspace-panel-switch').click();
+  await disclosure(page, 'source-shape-panel', true);
   const candidate = page.locator('#source-shape [data-row-id*="-candidate-"] [role="treeitem"]').filter({ hasText: 'Gadget' });
   await candidate.scrollIntoViewIfNeeded();
   await candidate.focus();
@@ -736,6 +768,7 @@ async function reportAndPageLifecycle(page, traffic) {
       rows: document.querySelectorAll('#files [role="treeitem"], #outline [role="treeitem"], #declarations [role="treeitem"], #problems [role="treeitem"]').length,
       details: document.getElementById('details').textContent,
       declarations: document.getElementById('declaration-details').textContent,
+      disclosuresClosed: [...document.querySelectorAll('.fg-disclosure')].every(node => !node.open),
       hidden: document.getElementById('workbench').hidden,
     };
   });
@@ -744,6 +777,7 @@ async function reportAndPageLifecycle(page, traffic) {
   assert.equal(cleared.rows, 0, 'teardown synchronously clears report rows');
   assert.equal(cleared.details, '', 'teardown synchronously clears metadata');
   assert.equal(cleared.declarations, '', 'teardown synchronously clears declaration metadata');
+  assert.equal(cleared.disclosuresClosed, true, 'teardown closes disclosures as well as clearing their protected contents');
   assert.equal(cleared.hidden, true, 'teardown hides protected composition before resume');
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
@@ -790,10 +824,18 @@ async function realJourney() {
   await inspect(page, 'workspace');
   await check(page.locator('textarea, [contenteditable="true"]')).toHaveCount(0);
   await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
+  await check(page.locator('#source-shape-panel')).toHaveJSProperty('open', false);
+  await check(page.locator('#inspection-details')).toHaveJSProperty('open', false);
+  await check(page.locator('#problems-panel')).toBeHidden();
+  await disclosure(page, 'inspection-details', true);
   await check(page.locator('#summary')).toContainText('1 traits');
   await check(page.locator('#summary')).toContainText('2 trait impls');
   await check(page.locator('#summary')).toContainText('1 free functions');
+  await disclosure(page, 'inspection-details', false);
   const shapeCalls = traffic.count('inspect');
+  await disclosure(page, 'source-shape-panel', true);
+  await disclosure(page, 'source-shape-caveats', true);
+  await disclosure(page, 'source-shape-counts', true);
   await check(page.locator('#source-shape-summary')).toContainText('Partial');
   await check(page.locator('#source-shape-limits')).toContainText('not a complexity score');
   await check(page.locator('#source-shape')).toContainText('Cargo.toml directory (unverified)');
@@ -813,7 +855,10 @@ async function realJourney() {
   await check(gadget).toHaveAttribute('aria-selected', 'false');
   await check(page.locator('#source-shape-details')).toContainText('Tentative local header impl blocks');
   await check(page.locator('#source-shape-details')).toContainText('Qualified-path impl headers (local/external unknown)');
-  assert.equal(traffic.count('inspect'), shapeCalls, 'shape navigation is report-local');
+  await disclosure(page, 'source-shape-caveats', false);
+  await disclosure(page, 'source-shape-counts', false);
+  await disclosure(page, 'source-shape-panel', false);
+  assert.equal(traffic.count('inspect'), shapeCalls, 'shape navigation and disclosure are report-local');
 
   await check(page.locator('#files')).toContainText('README <safe>.md');
   await check(page.locator('#files')).toContainText('<svg onload=alert(1)>.txt');
