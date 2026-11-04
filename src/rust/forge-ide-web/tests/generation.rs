@@ -18,6 +18,16 @@ fn config() -> AssetConfig {
         wasm: vec![0, 97, 115, 109, 1, 0, 0, 0],
     }
 }
+// Mutate the named token through YAML, not a stale copy of its current value.
+fn theme_with(key: &str, value: &str) -> String {
+    let mut theme: serde_yaml_ng::Value = serde_yaml_ng::from_str(IDE_THEME).unwrap();
+    assert!(Theme::parse(IDE_THEME).is_ok());
+    assert!(theme.get(key).is_some(), "missing fixture token {key}");
+    let previous = theme[key].clone();
+    theme[key] = serde_yaml_ng::from_str(value).unwrap();
+    assert_ne!(theme[key], previous, "fixture must mutate token {key}");
+    serde_yaml_ng::to_string(&theme).unwrap()
+}
 fn build(c: AssetConfig) -> AssetBundle {
     let group = register_assets("assets", c).unwrap();
     let frozen = Registry::new().register(group).unwrap().freeze().unwrap();
@@ -67,8 +77,8 @@ fn yaml_is_tokens_not_raw_css_or_script() {
     ] {
         assert!(Theme::parse(&(IDE_THEME.to_owned() + extra)).is_err());
     }
-    assert!(Theme::parse(&IDE_THEME.replace("#15181d", "red;display:none")).is_err());
-    assert!(Theme::parse(&IDE_THEME.replace("font_px: 14", "font_px: 900")).is_err());
+    assert!(Theme::parse(&theme_with("background", "red;display:none")).is_err());
+    assert!(Theme::parse(&theme_with("font_px", "900")).is_err());
 }
 #[test]
 fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
@@ -222,8 +232,8 @@ fn rejects_invalid_pane_geometry_positions_and_generated_id_collisions() {
         .children
         .push(component!(text "runtime-recovery", "Collision"));
     assert!(register_assets("assets", c).is_err());
-    assert!(Theme::parse(&IDE_THEME.replace("row_px: 28", "row_px: 1")).is_err());
-    assert!(Theme::parse(&IDE_THEME.replace("control_px: 32", "control_px: 100")).is_err());
+    assert!(Theme::parse(&theme_with("row_px", "1")).is_err());
+    assert!(Theme::parse(&theme_with("control_px", "100")).is_err());
 }
 
 #[test]

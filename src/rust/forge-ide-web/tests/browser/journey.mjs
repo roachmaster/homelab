@@ -571,6 +571,9 @@ async function deviceViewportJourney(page, traffic) {
     const narrow = viewport.width <= 800;
     report.checkpoint('viewport_breakpoint');
     await check(page.locator('#workspace')).toHaveAttribute('data-narrow', String(narrow));
+    if (narrow) {
+      assert.equal(await page.locator('.fg-toolbar select').evaluateAll(fields => fields.every(field => field.getBoundingClientRect().width >= 120)), true, 'narrow context selectors stay readable rather than shrinking around status');
+    }
     async function activate(pane, checkpoint) {
       report.checkpoint(checkpoint);
       if (narrow) {
@@ -651,6 +654,7 @@ async function deviceViewportJourney(page, traffic) {
     assert.equal(traffic.count('inspect'), calls, 'viewport navigation remains report-local');
     await disclosure(page, 'source-shape-panel', false);
     await page.locator('#workspace-panel-heading').focus();
+    await page.locator('#selection-title').scrollIntoViewIfNeeded();
     await selectedName.scrollIntoViewIfNeeded();
     await check(selectedName).toBeInViewport();
     await assertViewportFocus();
