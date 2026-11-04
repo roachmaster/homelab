@@ -55,7 +55,7 @@ assembly output and CI details](src/rust/README.md#root-makefile) include the di
 Cargo equivalents. The workflow performs CI checks only: no deployment or release
 publication is configured.
 
-[Headless IDE QA](src/rust/forge-ide-web/tests/browser/README.md) reuses the 18-group
+[Headless IDE QA](src/rust/forge-ide-web/tests/browser/README.md) reuses the 28-group
 real-browser workbench suite with stable scenario IDs, JSON/Markdown/JUnit results,
 sanitized screenshots and independent cleanup reporting. Install its documented
 browser prerequisites first; `make ui-qa` does not install or weaken browser security.
@@ -204,7 +204,7 @@ license and pinned reconstruction provenance.
 
 - [Design Package Boundaries](.agents/skills/design-package-boundaries/SKILL.md): capability-first packages and practical hexagonal boundaries, without unnecessary layers.
 - [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
-- [Design Forge IDE UX](.agents/skills/design-forge-ide-ux/SKILL.md): plan an honest read-only workbench, keyboard flow and state-labeled wireframes before implementation.
+- [Design Forge IDE UX](.agents/skills/design-forge-ide-ux/SKILL.md): design and review a task-oriented IDE, recognizable Explorer and dominant selected work area, with truthful capabilities and progressively disclosed analysis.
 - [Design Forge UI](.agents/skills/design-forge-ui/SKILL.md): generate HTML/CSS/JS from YAML/Rust component declarations; separate main-thread presentation from worker/WASM logic.
 - [Test Forge UI](.agents/skills/test-forge-ui/SKILL.md): reuse the existing real-browser QA harness, inspect rendered and keyboard behavior, and distinguish real-agent evidence from controlled probes.
 - [Design Forge Front Door](.agents/skills/design-forge-front-door/SKILL.md): preserve one HTTP gateway and header-selected destinations, with current versus future method semantics.

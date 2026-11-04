@@ -11,7 +11,7 @@ established in this review. Nothing is installed globally.
 
 | Primary reference | Verified source / license | What informs this skill; what does not |
 | --- | --- | --- |
-| Anthropic frontend design | [Pinned skill](https://github.com/anthropics/skills/blob/ca45fc496a3436251f191354091d557da31c15b5/skills/frontend-design/SKILL.md), [Apache-2.0 license](https://github.com/anthropics/skills/blob/ca45fc496a3436251f191354091d557da31c15b5/skills/frontend-design/LICENSE.txt) | Ground visual choices in the actual subject, use deliberate hierarchy and critique the design before building. Forge's subject is an inspection workbench; marketing hero treatments and hand-written web code are not adopted. |
+| Anthropic frontend design | [Pinned skill](https://github.com/anthropics/skills/blob/ca45fc496a3436251f191354091d557da31c15b5/skills/frontend-design/SKILL.md), [Apache-2.0 license](https://github.com/anthropics/skills/blob/ca45fc496a3436251f191354091d557da31c15b5/skills/frontend-design/LICENSE.txt) | Ground visual choices in the actual subject, use deliberate hierarchy and critique the design before building. Apply hierarchy to Forge's task-oriented IDE/workbench; marketing hero treatments and hand-written web code are not adopted. |
 | Vercel Web Interface Guidelines | [Pinned rules](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/command.md), [MIT license](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/LICENSE) | Review semantic controls, visible focus, asynchronous feedback, long/empty content and alternatives to drag-only actions. Framework-specific recipes, automatic URL synchronization and arbitrary list thresholds are not Forge requirements. |
 | JetBrains tool windows | [Official platform guide](https://plugins.jetbrains.com/docs/intellij/tool-windows.html) | Secondary tools can occupy side/bottom regions while preserving the main work area. This is a layout precedent, not a dependency on IntelliJ APIs, a copied product skin, or a requirement to expose Run/Debug. |
 | W3C tree view pattern | [Official APG](https://www.w3.org/WAI/ARIA/apg/patterns/treeview/) | Define hierarchy, expansion, focus and selection separately; plan explicit keyboard behavior. ARIA labels alone do not prove a functioning accessible tree. |
@@ -37,6 +37,16 @@ The compact toolbar, dominant structural workspace, proposed optional panes,
 local report filter and Problems aggregation are **our design choices** for the
 user's task. They are not existing API claims or instructions from those sources.
 Reinspect current code when using this skill after the baseline changes.
+
+The 2026-11-04 local guardrail correction distinguishes product direction from
+that historical delivery slice: Forge is a task-oriented IDE/workbench; inspection
+and analysis are supporting capabilities. A recognizable Explorer and dominant
+selected work area take precedence over reports/metrics. Detailed metadata and
+caveats use progressive disclosure while actionable status remains visible.
+The current read-only limit stays truthful; it is not a ban on a future real editor.
+The UI skill and current workbench guide describe the proposed typed WASM-to-editor
+host boundary separately from implemented APIs. These are local product decisions,
+not new claims about, or new adaptations of, the upstream sources.
 
 ## Additional design and browser guidance
 

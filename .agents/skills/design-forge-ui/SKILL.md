@@ -14,10 +14,13 @@ and native host. The [workbench](../../../src/rust/forge-ide-web/WORKBENCH.md) a
 provides typed filters, pane geometry/narrow switches and guarded local actions;
 inspect actual exports instead of inventing broader docking/widget APIs. Native/Node tests do not substitute for actual browser acceptance.
 
-For workbench layout, inspection-state UX or wireframe-first design, also use
-[Design Forge IDE UX](../design-forge-ide-ux/SKILL.md). It owns interaction and
-visual hierarchy; this skill retains the authoring/execution boundary. Design-only
-SVG documentation does not become a hand-authored runtime asset.
+For Forge IDE layout, implementation or review, also use
+[Design Forge IDE UX](../design-forge-ide-ux/SKILL.md). Keep a recognizable Explorer
+and dominant selected-file/work area; inspection reports, metrics and detailed
+caveats are supporting tools disclosed progressively, not the primary UI. That
+skill owns interaction and visual hierarchy; this skill retains the authoring/
+execution boundary. Design-only SVG documentation does not become a hand-authored
+runtime asset.
 
 For visual quality, read the UX skill's
 [workbench craft reference](../design-forge-ide-ux/references/workbench-craft.md).
@@ -68,6 +71,37 @@ page data to WASM or the remote server. Browser-required local presentation work
 remains on the main thread. Application data reaches a remote backend only when
 WASM emits the corresponding permitted effect. Main-thread asset loading/worker
 startup is not a business API call.
+
+## When an editor host is requested
+
+A real JavaScript editor widget is compatible with this architecture. Do not
+misread "WASM owns application logic" as requiring a DOM editor inside WASM, or
+"no handwritten application JS" as banning a generated widget adapter. Follow the
+[proposed editor lifecycle](../../../src/rust/forge-ide-web/WORKBENCH.md#proposed-unimplemented-editor-host-lifecycle):
+
+- WASM accepts authorized source results, owns document identity/revision,
+  selection, dirty/conflict/save policy and stale-message acceptance. It requests
+  editor display/update/close through an explicit typed presentation effect or
+  view binding. The current API has no editor effect/binding; name new contracts
+  proposed until implemented, rather than pretending `UiEffect` already has them.
+- The reusable **generated main-thread editor host** mounts/updates/disposes the
+  widget, owns DOM/focus/caret/composition and a bounded presentation buffer, and
+  returns typed lifecycle/change events. It does not choose documents, fetch/save
+  source or become a second authoritative application model. Keep presentation
+  effects separate from remote I/O; mounting a widget is not a backend request.
+- Preserve instance/document/base-revision guards, edit/ack ordering, non-echoing
+  programmatic updates and cleanup on context loss, pagehide or fatal recovery.
+  Hiding a pane is not permission to discard a document or unsaved changes.
+  Only WASM prepares a typed write effect; native host/agent retain independent
+  authorization and revision checks. No optimistic callback proves a save.
+- Author the mount, configuration and events through typed components/declarations
+  and an audited reusable adapter. Do not insert widget setup or application
+  policy as handwritten HTML/CSS/JS, raw strings or YAML code. Missing source
+  operations, model/ABI or generator support are explicit implementation gaps.
+
+This is future integration guidance, not a claim that source read/write, an editor
+widget or its lifecycle is shipped. Review it when editing is requested; do not
+add an editor merely because this skill is used.
 
 ## Review a proposed change
 

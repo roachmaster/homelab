@@ -1,13 +1,16 @@
 ---
 name: design-forge-ide-ux
-description: Design or review Forge IDE workbench UX, wireframes, information hierarchy, keyboard flows and inspection states. Use for an IDE interaction/layout proposal before implementation, not a marketing page or an instruction to build an editor.
+description: Design or review task-oriented Forge IDE workbench UX, file navigation, information hierarchy, responsive panels and keyboard/touch flows. Apply these guardrails to wireframes, UI implementation and review; not marketing pages or a standalone report dashboard.
 ---
 
 # Design Forge IDE UX
 
-Make it easy to **choose an authorized project, inspect it, find a file or
-declaration, and understand the result's limits**. Design a workbench around this
-job, not a dashboard of equal cards or a decorative imitation of a full IDE.
+Build a **task-oriented IDE/workbench**, not an inspection/report dashboard.
+Start with the user's work in an authorized project: find a file, select it, and
+use the dominant work area. Inspection, source-shape analysis, metrics and
+explanations support that work; they do not define the product's identity.
+The current read-only capability is a delivery limit, not a permanent design goal.
+Do not compensate for missing editing with a fake editor or a report-heavy screen.
 
 Use [Design Forge UI](../design-forge-ui/SKILL.md) for authoring/execution rules:
 application assets come from YAML/typed Rust components; main-thread presentation
@@ -22,6 +25,29 @@ Impeccable guidance to an operational IDE, not a landing page. For implementatio
 acceptance, use [Test Forge UI](../test-forge-ui/SKILL.md); wireframes and aesthetic
 rules are not usability or browser-test evidence.
 
+## Workbench guardrails
+
+- **Recognizable Explorer.** Use familiar folder/file hierarchy, distinct expansion
+  and selection, meaningful file/symbol glyphs and readable names. Do not replace
+  navigation with a generic report table or require reading statistics first.
+- **One dominant work area.** The selected file/declaration, or a real editor when
+  supported, is the visual and interaction center. Keep project/connection/actions
+  compact; keep Outline, Problems and analysis as supporting tools. Do not keep
+  every supporting tool permanently visible or give it equal visual weight.
+- **Progressive disclosure.** Put inventory, counts, metadata, implementation detail
+  and long caveats behind named, keyboard/touch-accessible disclosures or optional
+  tools, closed by default unless the task requires them. Keep a concise visible
+  status for partial/denied/stale data and anything that changes the next action;
+  do not hide a consequential limit or repeat the same warning in every pane.
+- **IDE conventions with truthful behavior.** Prefer familiar navigation and pane
+  patterns over novelty or a dashboard aesthetic. Do not add decorative editor
+  tabs, invented source, unimplemented Run/Debug chrome or controls without a contract.
+  Real inspection and analysis features remain welcome as contextual tools.
+
+Use the [workbench acceptance checklist](../test-forge-ui/SKILL.md#workbench-acceptance-checklist)
+for design review and implementation verification. Aesthetic polish and passing
+interaction tests cannot excuse the wrong primary product shape.
+
 ## Establish what the screen can truthfully show
 
 Inspect the actual [portable protocol](../../../src/rust/forge-ide-ui/src/protocol.rs),
@@ -30,9 +56,11 @@ Inspect the actual [portable protocol](../../../src/rust/forge-ide-ui/src/protoc
 and a current screenshot when available. Record **existing data/actions**, **new
 presentation**, and **new capability requirements** separately.
 
-- The current product inspects read-only file metadata and Rust declarations. It
-  does not return full source bodies, resolve types, edit files or run/debug code.
-  Do not invent source text, signatures, compiler diagnostics or an editable tab.
+- Verify the current implementation, not just this description. At the documented
+  baseline it returns read-only file metadata and Rust declarations, not full source
+  bodies, resolved types, edits or run/debug results. Do not invent source text,
+  signatures, compiler diagnostics or an editable tab. Plan real missing capability
+  explicitly rather than treating today's read-only state as the desired endpoint.
 - Node/project choices come from the admitted session catalog, not arbitrary
   addresses/paths. A visible option is not authorization.
 - Existing diagnostics may be plain strings. The Problems view must not
@@ -55,9 +83,12 @@ presentation**, and **new capability requirements** separately.
    discoverable complete representation; truncation alone loses information.
 3. **Specify navigation.** Distinguish focused from selected rows. Define tree
    expansion versus selection, a non-pointer route through each pane, and focus
-   restoration after collapse, results and errors. Pane resizing needs keyboard
-   and reset alternatives. Narrow windows change the pane arrangement rather than
-   shrinking every pane into unreadable columns. Avoid browser-shortcut conflicts.
+   restoration after collapse, results and errors. Pane resizing needs keyboard,
+   visible non-drag and reset alternatives; touch targets cannot rely on hover.
+   Narrow phone/tablet/portrait windows switch supporting panes without losing the
+   selected work or focus, rather than shrinking every pane into unreadable columns.
+   Keep project selectors, names and actions readable at zoom. Avoid browser-shortcut
+   conflicts and do not equate compact desktop density with touch usability.
 4. **Design adverse states.** Cover unpaired, no allowed project, no report,
    loading, complete, partial, unavailable/denied, timeout and local cancellation.
    Keep accepted content tied to its node/project and request revision. A changed
@@ -68,6 +99,17 @@ presentation**, and **new capability requirements** separately.
    full-repository or source-content search. Specify what pagination, exclusions
    and partial data mean for matches. Do not add backend effects just to make a
    pictured control appear functional.
+
+## A real editor fits the architecture
+
+When source display/editing is requested, use the UI skill's
+[editor-host boundary](../design-forge-ui/SKILL.md#when-an-editor-host-is-requested)
+and the [future lifecycle contract](../../../src/rust/forge-ide-web/WORKBENCH.md#proposed-unimplemented-editor-host-lifecycle).
+WASM orchestrates the document and requests display through typed effects/view
+bindings; a generated main-thread JavaScript host mounts the real widget and
+returns typed events. This is compatible with Forge, not a reason to stay an
+inspection UI. Source operations, bindings and widget integration remain proposed
+until actually implemented and verified; a skill update does not implement them.
 
 ## Wireframe first
 
@@ -95,10 +137,13 @@ all report-local actions keyed, and pagination bounded and reversible.
 
 ## Review and handoff
 
-- Can a user identify the current project, selected file, selected symbol and
-  whether the report is complete without reading a tutorial?
-- Can the same task be described with keyboard-only steps? Are selection, focus,
-  loading and error visually distinct, with meaningful labels?
+- Can a user recognize an IDE/workbench and find/select a file immediately,
+  without reading metrics or an explanation? Does the selected work dominate?
+- Can the user identify the current project, selected file/symbol and concise data
+  status? Are analysis, metadata and long limits discoverable without dominating?
+- Can the same task be completed with keyboard and touch? Are selection, focus,
+  loading and error distinct, controls meaningfully named, and optional panels
+  reopenable without dragging or hover?
 - Do long names, safe text, empty/partial reports, repeated clicks, stale replies
   and narrow windows retain context without fake data or automatic retry?
 - Does each proposed control identify existing support versus required model,

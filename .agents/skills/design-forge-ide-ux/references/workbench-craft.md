@@ -7,9 +7,11 @@ This is a design aid, not an instruction to run their tools or copy a product sk
 
 ## Start from the work
 
-Name the user's immediate question: which admitted project is being inspected,
-which file/declaration is selected, and what can the accepted report establish?
-Make the answer and the next supported action easy to find. Preserve a successful
+Name the user's immediate task in the admitted project: find/select a file, work
+with its supported content, or open a contextual analysis tool. Make that work and
+the next supported action easy to find. Forge is an IDE/workbench, not a report
+viewer with an IDE skin. Today's metadata-only capability does not make reports,
+statistics or explanations the permanent center of the product. Preserve a successful
 existing arrangement during polish; a request to improve spacing does not authorize
 a new navigation system, rewritten product claims or a wholesale redesign.
 
@@ -17,13 +19,14 @@ Inventory real DTO fields, actions, bounded data and unavailable information bef
 choosing a look. A fact repeated in chrome, details or counts comes from the same
 accepted Rust view, not separately authored sample numbers or JS calculations.
 Keep zero, no matches, not inspected, denied and unavailable distinct. A partial
-report must keep its limits visible without drowning the inspected content.
+report needs a concise visible status; detailed limits belong in a discoverable
+supporting disclosure, without drowning the selected work or hiding a consequence.
 
 ## Use references deliberately
 
 The VoltAgent collection is an index of design analyses, not an IDE specification.
 If a reference helps, record its exact document/revision or retrieval date, what
-observable property it informs, and why it fits the inspection task. Some entries
+observable property it informs, and why it fits the workbench task. Some entries
 now redirect to an external site: a pinned Git commit does not pin that site's
 content. Do not claim an external design system was reviewed when only an index
 or redirect was available.
@@ -36,8 +39,10 @@ change still maps to YAML tokens/typed Rust components and the real generator.
 
 ## Precision over decoration
 
-- Give the inspected object space. Keep secondary tools compact, with aligned
-  rows and stable pane geometry. Borders and subtle surface differences can group
+- Give the selected file/work area space. Keep recognizable Explorer navigation
+  and compact secondary tools, with aligned rows and stable pane geometry.
+  Disclose metadata, inventory and metrics progressively instead of placing them
+  beside the work as equal-weight panels. Borders and subtle surface differences can group
   dense tools; removing all boundaries can make the workbench harder to read.
 - Use a small, legible type hierarchy. Distinguish prose, paths and numeric spans
   without making every label tiny, uppercase or monospace. Preserve complete names
@@ -55,6 +60,11 @@ change still maps to YAML tokens/typed Rust components and the real generator.
 These are review criteria, not numerical proof of quality. The upstream app-screen
 study is desktop-focused and excludes dense operations tables and loading/error
 screens. Its observations do not validate Forge's keyboard, narrow or adverse flows.
+
+Before polishing, apply the UX skill's [workbench guardrails](../SKILL.md#workbench-guardrails)
+and the QA skill's [acceptance checklist](../../test-forge-ui/SKILL.md#workbench-acceptance-checklist).
+A beautiful inspection dashboard is still the wrong primary design. Contextual
+inspection tools are valid; the issue is their hierarchy, not their existence.
 
 ## Inspect, correct, verify
 

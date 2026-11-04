@@ -14,8 +14,9 @@ to that existing workflow. It installs no server, extension, browser or service.
 
 ## Choose the evidence needed
 
-- **Document/skill-only change:** validate links, metadata and claimed APIs/commands.
-  Report that no application was changed and browser execution was not required.
+- **Document/skill-only change:** validate links, metadata and claimed APIs/commands,
+  and review realistic design scenarios against the guardrails. Report that no
+  application was changed and browser execution was not required.
 - **Model, generator or adapter change:** run the applicable native/schema/ABI and
   generation checks, plus actual browser acceptance when behavior or rendering is
   affected. `make ui-check` and `make ui-qa-check` are useful but neither proves
@@ -53,6 +54,38 @@ worker/WASM owns application policy; generated I/O glue uses admitted effects;
 host and remote agent authorize independently. Test-driver JavaScript is permitted
 test code, not permission to hand-author application JS. A fix belongs in the
 declaration, Rust model or reusable generator/adapter primitive responsible for it.
+
+## Workbench acceptance checklist
+
+Use [Design Forge IDE UX](../design-forge-ide-ux/SKILL.md) for the product hierarchy
+and [Design Forge UI](../design-forge-ui/SKILL.md) for ownership. For a design-only
+review, record these as static judgments and untested interactions. For runtime
+acceptance, inspect fresh screenshots **and** exercise the affected controls:
+
+- **Primary task:** from an admitted project, find and select a file/declaration.
+  Explorer must read as file navigation; selected work must dominate the initial
+  desktop view. A report/metrics grid with IDE labels fails this check even if all
+  buttons work. Do not accept an invented source buffer as a substitute.
+- **Supporting information:** inventory, counts, metadata and long caveats are
+  behind discoverable disclosures/optional tools by default; opening/closing them
+  preserves selection and does not issue inspection requests. Concise actionable
+  partial/denied/stale status stays visible. Verify useful analysis remains reachable.
+- **Input and layout:** complete the path with keyboard only, then touch/pointer.
+  Test the affected desktop, phone/tablet and portrait layouts and zoom; keep names,
+  context selectors and actions readable. Check focus versus selection, meaningful
+  accessible names, scroll ownership, long text, and hide/reopen/reset of supporting
+  panels without hover or drag-only actions. Narrow switches retain selected work
+  and a visible focus target. Screenshots alone do not establish accessibility.
+- **Truth and lifecycle:** check empty/partial/denied/stale data and repeated
+  selection against the same accepted context. Current read-only inspection must
+  not promise source editing, but it must not force a dashboard layout either.
+  If a real editor is implemented, verify WASM-issued typed display/update/close,
+  generated host lifecycle/change events, composition/edit acknowledgments,
+  stale-instance rejection, focus return and protected-content disposal. Verify
+  source/save admission separately; widget callbacks alone are not save evidence.
+
+Report which criteria passed, failed or were not exercised. Keep product hierarchy
+findings separate from functional test results; neither proves the other.
 
 ## Keep browser evidence bounded and private
 
