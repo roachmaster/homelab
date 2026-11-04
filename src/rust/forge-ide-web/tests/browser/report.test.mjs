@@ -372,3 +372,100 @@ test('each viewport failure retains its profile and exact size while later cases
     assert.equal(json.includes('do-not-record'), false);
   }
 });
+
+function matrixReport() {
+  const report = new Report();
+  for (const item of SCENARIOS) {
+    report.start(item.id);
+    if (item.viewport) return report;
+    report.pass(item.id);
+  }
+  throw new Error('Missing viewport fixture');
+}
+function focusSample() {
+  return { focused: { left: 56, top: 173, right: 654, bottom: 200 },
+    pane: { left: 0, top: -100, right: 667, bottom: 500 }, viewport: { width: 667, height: 375 } };
+}
+test('matrix checkpoints accept only fixed vocabulary and geometry is a bounded defensive numeric copy', () => {
+  const report = matrixReport();
+  assert.throws(() => report.checkpoint(SECRET), /Invalid matrix checkpoint/);
+  report.checkpoint('candidate_focus');
+  const id = report.active.id;
+  const sample = focusSample();
+  report.focusGeometry(id, 'candidate_focus', sample);
+  sample.focused.top = 999;
+  assert.equal(report.active.focus_geometry.focused.top, 173);
+  for (const number of [NaN, Infinity, -Infinity, 100001, -100001, SECRET]) {
+    const invalid = focusSample(); invalid.focused.top = number;
+    assert.throws(() => report.focusGeometry(id, 'candidate_focus', invalid), /Invalid geometry/);
+  }
+  for (const invalid of [
+    { ...focusSample(), url: SECRET },
+    { ...focusSample(), focused: { ...focusSample().focused, text: SECRET } },
+    { ...focusSample(), viewport: { width: -1, height: 375 } },
+    { ...focusSample(), pane: SECRET },
+    Object.assign(Object.create({ secret: SECRET }), focusSample()),
+  ]) assert.throws(() => report.focusGeometry(id, 'candidate_focus', invalid), /Invalid geometry/);
+  let getterRead = false;
+  const invalid = focusSample();
+  Object.defineProperty(invalid.focused, 'top', { enumerable: true, get() { getterRead = true; return SECRET; } });
+  assert.throws(() => report.focusGeometry(id, 'candidate_focus', invalid), /Invalid geometry/);
+  assert.equal(getterRead, false);
+  assert.equal(JSON.stringify(report.data).includes('do-not-record'), false);
+  const nullable = focusSample(); nullable.pane = null;
+  report.focusGeometry(id, 'candidate_focus', nullable);
+  assert.equal(report.active.focus_geometry.pane, null);
+});
+test('late geometry cannot cross checkpoint, scenario, failure or frozen boundaries', () => {
+  const report = matrixReport();
+  const id = report.active.id;
+  report.checkpoint('candidate_focus');
+  report.focusGeometry(id, 'candidate_focus', focusSample());
+  report.checkpoint('symbol_focus');
+  assert.equal(report.active.focus_geometry, undefined);
+  report.focusGeometry(id, 'candidate_focus', focusSample());
+  assert.equal(report.active.focus_geometry, undefined);
+  report.pass(id);
+  const next = SCENARIOS[SCENARIOS.findIndex(item => item.id === id) + 1].id;
+  report.start(next); report.checkpoint('symbol_focus');
+  report.focusGeometry(id, 'symbol_focus', focusSample());
+  assert.equal(report.active.focus_geometry, undefined);
+  report.focusGeometry(next, 'symbol_focus', focusSample());
+  report.fail();
+  const failed = JSON.stringify(report.data);
+  report.checkpoint('details_scroll');
+  report.focusGeometry(next, 'symbol_focus', { arbitrary: SECRET });
+  assert.equal(JSON.stringify(report.data), failed);
+  report.finish();
+  const frozen = JSON.stringify(report.data);
+  report.checkpoint(SECRET);
+  report.focusGeometry(next, 'symbol_focus', focusSample());
+  assert.equal(JSON.stringify(report.data), frozen);
+});
+test('exact failing checkpoint and sanitized focus sample survive JSON Markdown and JUnit', async t => {
+  const output = join(await workspace(t), 'matrix-checkpoint');
+  const viewport = SCENARIOS.find(item => item.viewport);
+  await runHarness(defaults(output, {
+    journey(report) {
+      for (const item of SCENARIOS) {
+        report.start(item.id);
+        if (item.id === viewport.id) {
+          report.checkpoint('candidate_focus');
+          report.focusGeometry(item.id, 'candidate_focus', focusSample());
+          throw new Error(SECRET);
+        }
+        report.pass(item.id);
+      }
+    },
+    cleanup(report) { report.checkpoint('details_scroll'); },
+  }));
+  const [json, markdown, xml] = await artifacts(output);
+  const data = JSON.parse(json);
+  assert.equal(data.failure.checkpoint, 'candidate_focus');
+  assert.deepEqual(data.scenarios[viewport.order - 1].focus_geometry, focusSample());
+  assert.match(markdown, /checkpoint \*\*candidate_focus\*\*/);
+  assert.match(markdown, /"width":667/);
+  assert.match(xml, /message="scenario: candidate_focus"/);
+  assert.match(xml, /<system-out>/);
+  for (const artifact of [json, markdown, xml]) assert.equal(artifact.includes('do-not-record'), false);
+});

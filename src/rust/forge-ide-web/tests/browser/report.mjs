@@ -15,6 +15,38 @@ const CATEGORIES = Object.freeze({
 });
 const CLEANUP_NAMES = new Set(['browser', 'real_fixture', 'injected_fixture']);
 const DIAGNOSTICS = new Set(['disabled', 'captured', 'unavailable', 'skipped_unsafe_page', 'skipped_credential_pattern']);
+// Static test-driver checkpoints, never page-supplied names or DOM identifiers.
+const MATRIX_CHECKPOINTS = new Set([
+  'viewport_resize', 'viewport_dimensions', 'viewport_breakpoint',
+  'explorer_activate', 'file_filter', 'file_select', 'inventory_activate',
+  'inventory_caveat', 'candidate_select', 'candidate_focus', 'candidate_selection',
+  'outline_activate', 'symbol_select', 'symbol_focus', 'details_activate',
+  'details_content', 'details_scroll', 'details_readable', 'outline_return',
+  'outline_restore', 'filter_keyboard_exit', 'symbol_keyboard_return',
+  'workspace_return', 'horizontal_overflow', 'worker_lifetime', 'local_requests', 'viewport_screenshot',
+]);
+function numericRecord(value, keys, minimum) {
+  if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) throw new Error('Invalid geometry');
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(descriptors).length !== keys.length || keys.some(key => !Object.hasOwn(descriptors, key))) throw new Error('Invalid geometry');
+  const result = {};
+  for (const key of keys) {
+    const descriptor = descriptors[key];
+    const number = descriptor.value;
+    if (!Object.hasOwn(descriptor, 'value') || typeof number !== 'number' || !Number.isFinite(number) || number < minimum || number > 100000) throw new Error('Invalid geometry');
+    result[key] = number;
+  }
+  return result;
+}
+function safeFocusGeometry(value) {
+  if (!value || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype) throw new Error('Invalid geometry');
+  const fields = Object.getOwnPropertyDescriptors(value);
+  const keys = ['focused', 'pane', 'viewport'];
+  if (Reflect.ownKeys(fields).length !== keys.length || keys.some(key => !Object.hasOwn(fields, key) || !Object.hasOwn(fields[key], 'value'))) throw new Error('Invalid geometry');
+  const rectangle = value => numericRecord(value, ['left', 'top', 'right', 'bottom'], -100000);
+  return { focused: rectangle(fields.focused.value), pane: fields.pane.value === null ? null : rectangle(fields.pane.value), viewport: numericRecord(fields.viewport.value, ['width', 'height'], 0) };
+}
+
 const timestamp = () => new Date().toISOString();
 const elapsed = start => Math.max(0, Math.round(performance.now() - start));
 
@@ -61,6 +93,17 @@ export class Report {
     // The final artifact has only passed, failed and not_run scenario statuses.
     // While running, started_at distinguishes the active not-yet-completed group.
   }
+  checkpoint(name) {
+    if (this.frozen || this.data.failure) return;
+    if (!this.active?.viewport || !MATRIX_CHECKPOINTS.has(name)) throw new Error('Invalid matrix checkpoint');
+    if (this.active.checkpoint !== name) delete this.active.focus_geometry;
+    this.active.checkpoint = name;
+  }
+  focusGeometry(scenario, checkpoint, value) {
+    if (this.frozen || this.data.failure || !this.active || this.active.id !== scenario || this.active?.checkpoint !== checkpoint) return;
+    if (!this.active.viewport || !MATRIX_CHECKPOINTS.has(checkpoint)) throw new Error('Invalid matrix checkpoint');
+    this.active.focus_geometry = safeFocusGeometry(value);
+  }
   pass(id) {
     if (this.frozen || this.active?.id !== id) throw new Error('Invalid scenario completion');
     this.active.status = 'passed';
@@ -70,7 +113,7 @@ export class Report {
   fail(stage = this.stage) {
     if (this.data.failure) return; // preserve the primary failure through teardown
     const safeStage = STAGES.has(stage) ? stage : 'scenario';
-    this.data.failure = { stage: safeStage, category: CATEGORIES[safeStage] ?? 'harness_failure', scenario_id: this.active?.id ?? null };
+    this.data.failure = { stage: safeStage, category: CATEGORIES[safeStage] ?? 'harness_failure', scenario_id: this.active?.id ?? null, ...(this.active?.checkpoint ? { checkpoint: this.active.checkpoint } : {}) };
     if (this.active) {
       this.active.status = 'failed';
       this.active.duration_ms = elapsed(this.scenarioStarted);
@@ -151,14 +194,16 @@ export async function cleanupResources(resources, report, timeoutMs = 15_000) {
 const xml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
 export function summary(data) {
   const rows = data.scenarios.map(item => `| ${item.order} | ${item.id} | ${item.scope} / ${item.backend} | ${item.viewport ? `${item.viewport.profile} ${item.viewport.width}×${item.viewport.height}` : '-'} | ${item.status} | ${item.duration_ms ?? '-'} |`);
-  const primary = data.failure ? `\nFailure: **${data.failure.category}**, stage **${data.failure.stage}**, group **${data.failure.scenario_id ?? 'none'}**.\n` : '';
+  const primary = data.failure ? `\nFailure: **${data.failure.category}**, stage **${data.failure.stage}**, group **${data.failure.scenario_id ?? 'none'}**${data.failure.checkpoint ? `, checkpoint **${data.failure.checkpoint}**` : ''}.\n` : '';
+  const geometry = data.scenarios.find(item => item.status === 'failed')?.focus_geometry;
+  const geometryText = geometry ? `\nBounded CSS-pixel focus geometry: ${JSON.stringify(geometry)}\n` : '';
   const cleanup = data.cleanup.map(item => `- ${item.name}: ${item.status} (${item.duration_ms} ms)`).join('\n') || '- No resource was started.';
-  return `# Browser QA: ${data.status}\n\n${SUITE_DESCRIPTION}\n\nPassed: ${data.counts?.passed ?? 0}; failed: ${data.counts?.failed ?? 0}; not run: ${data.counts?.not_run ?? SCENARIOS.length}.\n${primary}\n| # | Group | Scope / backend | Viewport | Result | ms |\n| --- | --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n## Cleanup\n${cleanup}\n\nFailure screenshot: ${data.failure_screenshot}. Screenshots are fixture-only evidence, not an accessibility certification. No raw exception or browser/network/fixture logs are retained.\n`;
+  return `# Browser QA: ${data.status}\n\n${SUITE_DESCRIPTION}\n\nPassed: ${data.counts?.passed ?? 0}; failed: ${data.counts?.failed ?? 0}; not run: ${data.counts?.not_run ?? SCENARIOS.length}.\n${primary}${geometryText}\n| # | Group | Scope / backend | Viewport | Result | ms |\n| --- | --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n## Cleanup\n${cleanup}\n\nFailure screenshot: ${data.failure_screenshot}. Screenshots are fixture-only evidence, not an accessibility certification. No raw exception or browser/network/fixture logs are retained.\n`;
 }
 export function junit(data) {
   const cases = data.scenarios.map(item => {
-    const content = item.status === 'failed' ? `<failure type="${xml(data.failure?.category ?? 'harness_failure')}" message="${xml(data.failure?.stage ?? 'scenario')}"/>` : item.status === 'not_run' ? '<skipped message="Not reached in sequential journey"/>' : '';
-    return `  <testcase classname="forge.browser.${item.scope}" name="${xml(item.id)}" time="${(item.duration_ms ?? 0) / 1000}">${content}</testcase>`;
+    const content = item.status === 'failed' ? `<failure type="${xml(data.failure?.category ?? 'harness_failure')}" message="${xml((data.failure?.stage ?? 'scenario') + (item.checkpoint ? ': ' + item.checkpoint : ''))}"/>` : item.status === 'not_run' ? '<skipped message="Not reached in sequential journey"/>' : '';
+    return `  <testcase classname="forge.browser.${item.scope}" name="${xml(item.id)}" time="${(item.duration_ms ?? 0) / 1000}">${content}${item.status === 'failed' && item.focus_geometry ? `<system-out>${xml(JSON.stringify(item.focus_geometry))}</system-out>` : ''}</testcase>`;
   });
   // Harness failure is not an additional acceptance group. A separate suite makes
   // launch/cleanup failures visible to CI even if all catalog groups passed/not_run.

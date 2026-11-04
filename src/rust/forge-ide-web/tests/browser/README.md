@@ -174,7 +174,10 @@ gets a separate JSON/Markdown/JUnit result; each successful case captures its ow
 allowlisted masked fixture PNG. A failed case may only have the safe `failure.png`
 capture, and not-run cases have no image. The report includes the profile name,
 exact CSS-pixel width/height and expected screenshot filename, so failure and
-not-run states identify the affected orientation.
+not-run states identify the affected orientation. Matrix failures also retain a
+fixed checkpoint label. A focus-check failure may include the latest bounded
+numeric control/pane rectangles and viewport dimensions, never source text, DOM
+identifiers, URLs or session data. The sample is cleared when the checkpoint changes.
 
 | Playwright profile | Portrait | Landscape |
 | --- | --- | --- |

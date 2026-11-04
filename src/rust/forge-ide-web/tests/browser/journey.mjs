@@ -519,24 +519,36 @@ async function panesAndNarrow(page, traffic) {
 async function deviceViewportJourney(page, traffic) {
   const calls = traffic.count('inspect');
   async function assertViewportFocus() {
+    const scenario = report.active?.id;
+    const checkpoint = report.active?.checkpoint;
     await assertVisibleFocus(page);
-    await check.poll(() => page.evaluate(() => {
-      const active = document.activeElement;
-      const rect = active.getBoundingClientRect();
-      const owner = active.closest('.fg-pane-body')?.getBoundingClientRect();
-      return rect.left >= Math.max(0, owner?.left ?? 0) - 1 &&
-        rect.right <= Math.min(innerWidth, owner?.right ?? innerWidth) + 1 &&
-        rect.top >= Math.max(0, owner?.top ?? 0) - 1 &&
-        rect.bottom <= Math.min(innerHeight, owner?.bottom ?? innerHeight) + 1;
-    })).toBe(true);
+    await check.poll(async () => {
+      const sample = await page.evaluate(() => {
+        const active = document.activeElement;
+        const rect = active.getBoundingClientRect();
+        const owner = active.closest('.fg-pane-body')?.getBoundingClientRect();
+        const matches = rect.left >= Math.max(0, owner?.left ?? 0) - 1 &&
+          rect.right <= Math.min(innerWidth, owner?.right ?? innerWidth) + 1 &&
+          rect.top >= Math.max(0, owner?.top ?? 0) - 1 &&
+          rect.bottom <= Math.min(innerHeight, owner?.bottom ?? innerHeight) + 1;
+        const rectangle = value => ({ left: value.left, top: value.top, right: value.right, bottom: value.bottom });
+        return { matches, geometry: { focused: rectangle(rect), pane: owner ? rectangle(owner) : null, viewport: { width: innerWidth, height: innerHeight } } };
+      });
+      report.focusGeometry(scenario, checkpoint, sample.geometry);
+      return sample.matches;
+    }).toBe(true);
   }
   for (const viewport of VIEWPORTS) {
     report.start(viewport.id);
+    report.checkpoint('viewport_resize');
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    report.checkpoint('viewport_dimensions');
     assert.deepEqual(await page.evaluate(() => ({ width: innerWidth, height: innerHeight })), { width: viewport.width, height: viewport.height });
     const narrow = viewport.width <= 800;
+    report.checkpoint('viewport_breakpoint');
     await check(page.locator('#workspace')).toHaveAttribute('data-narrow', String(narrow));
-    async function activate(pane) {
+    async function activate(pane, checkpoint) {
+      report.checkpoint(checkpoint);
       if (narrow) {
         const tab = page.locator(`#${pane}-switch`);
         await tab.focus();
@@ -551,49 +563,67 @@ async function deviceViewportJourney(page, traffic) {
       await check(page.locator(`#${pane}`)).toBeVisible();
       await assertViewportFocus();
     }
-    await activate('explorer-panel');
+    await activate('explorer-panel', 'explorer_activate');
+    report.checkpoint('file_filter');
     await filterFiles(page, 'lib.rs');
+    report.checkpoint('file_select');
     await selectFile(page, 'lib.rs');
-    await activate('workspace-panel');
+    await activate('workspace-panel', 'inventory_activate');
+    report.checkpoint('inventory_caveat');
     await check(page.locator('#source-shape-limits')).toContainText('not a complexity score');
     const candidate = page.locator('#source-shape [data-row-id*="-candidate-"] [role="treeitem"]').filter({ hasText: 'Gadget' });
+    report.checkpoint('candidate_select');
     await candidate.scrollIntoViewIfNeeded();
     await candidate.focus();
     await page.keyboard.press('Enter');
+    report.checkpoint('candidate_focus');
     await check(candidate).toBeFocused();
     await assertViewportFocus();
+    report.checkpoint('candidate_selection');
     await check(page.locator('#selection-title')).toContainText('lib.rs');
-    await activate('outline-panel');
+    await activate('outline-panel', 'outline_activate');
     const symbol = page.locator('#outline').getByRole('treeitem', { name: /^inspect_me\b/ });
+    report.checkpoint('symbol_select');
     await symbol.focus();
     await page.keyboard.press('Enter');
+    report.checkpoint('symbol_focus');
     await assertViewportFocus();
-    await activate('workspace-panel');
+    await activate('workspace-panel', 'details_activate');
+    report.checkpoint('details_content');
     await check(page.locator('#declaration-details')).toContainText('inspect_me');
+    report.checkpoint('details_scroll');
     await check.poll(() => page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollTop)).toBe(0);
     // Low landscape heights legitimately scroll the page vertically. The selected
     // declaration remains reachable and readable without horizontal scrolling.
+    report.checkpoint('details_readable');
     const selectedName = page.locator('#declaration-details dd').first();
     await selectedName.scrollIntoViewIfNeeded();
     assert.equal(await selectedName.evaluate(node => {
       const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && rect.left >= -1 && rect.right <= innerWidth + 1 && rect.top >= -1 && rect.bottom <= innerHeight + 1;
     }), true, 'selected declaration value is readable at this viewport');
-    await activate('outline-panel');
+    await activate('outline-panel', 'outline_return');
+    report.checkpoint('outline_restore');
     if (narrow) await check(symbol).toBeFocused();
     await symbol.focus();
     // The tree may be the last tabbable control in narrow mode. Test exit and
     // reentry through its preceding filter, without requiring a focus trap.
+    report.checkpoint('filter_keyboard_exit');
     await page.keyboard.press('Shift+Tab');
     await check(page.locator('#symbol-filter')).toBeFocused();
     await assertViewportFocus();
+    report.checkpoint('symbol_keyboard_return');
     await page.keyboard.press('Tab');
     await check(symbol).toBeFocused();
     await assertViewportFocus();
-    await activate('workspace-panel');
+    await activate('workspace-panel', 'workspace_return');
+    report.checkpoint('horizontal_overflow');
     assert.equal(await page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollWidth <= body.clientWidth + 1), true, 'main pane has no horizontal overflow');
+    report.checkpoint('worker_lifetime');
     assert.equal(page.workers().length, 1, 'viewport changes keep one worker');
+    report.checkpoint('local_requests');
     assert.equal(traffic.count('inspect'), calls, 'viewport navigation remains report-local');
+    report.checkpoint('viewport_screenshot');
     await screenshot(page, viewport.screenshot);
     report.pass(viewport.id);
   }
