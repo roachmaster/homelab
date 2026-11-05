@@ -1,4 +1,4 @@
-use crate::{HostConfig, HostError};
+use crate::{HostConfig, HostError, SessionAuth};
 use forge_ide_ui::protocol::*;
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
@@ -50,7 +50,10 @@ impl Session {
         forge_ide_ui::validate_catalog(&catalog)
             .map_err(|_| HostError::Configuration("catalog"))?;
         Ok(Self {
-            pairing: Some(random_token()?),
+            pairing: match config.session_auth {
+                SessionAuth::Pairing => Some(random_token()?),
+                SessionAuth::TrustedProxy => None,
+            },
             pairing_until: Instant::now() + config.limits.pairing_ttl,
             attempts: 0,
             ttl: config.limits.session_ttl,
@@ -83,6 +86,24 @@ impl Session {
     pub fn authenticated(&self, cookie: Option<&str>) -> bool {
         self.until.is_some_and(|until| Instant::now() < until)
             && cookie.is_some_and(|v| matches(v, &self.cookie))
+    }
+    /// Called only after configured proxy-mode admission. A second browser gets
+    /// the same active single-operator session; it does not invalidate the first.
+    /// An expired session rotates all credentials before publishing a new epoch.
+    pub fn resume_proxy(&mut self) -> Result<(), HostError> {
+        if self.until.is_some_and(|until| Instant::now() < until) {
+            return Ok(());
+        }
+        if self.until.is_some() {
+            let cookie = random_token()?;
+            let csrf = random_token()?;
+            let epoch = random_token()?;
+            self.cookie = cookie;
+            self.csrf = csrf;
+            self.catalog.session_epoch = epoch;
+        }
+        self.until = Some(Instant::now() + self.ttl);
+        Ok(())
     }
     pub fn csrf_matches(&self, csrf: Option<&str>) -> bool {
         csrf.is_some_and(|v| matches(v, &self.csrf))

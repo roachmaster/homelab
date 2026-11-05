@@ -37,6 +37,7 @@ pub struct UiModel {
     phase: Phase,
     message: String,
     pairing: Option<String>,
+    pairing_required: bool,
     pending: Option<PreparedInspection>,
     revision: u64,
     sequence: u64,
@@ -60,8 +61,9 @@ impl Default for UiModel {
             node: String::new(),
             project: String::new(),
             phase: Phase::Unpaired,
-            message: "Connect to the local Forge host using its one-time pairing code.".into(),
+            message: "Checking the Forge session…".into(),
             pairing: None,
+            pairing_required: false,
             pending: None,
             revision: 0,
             sequence: 0,
@@ -146,10 +148,15 @@ impl UiModel {
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
-                    self.message = format!(
-                        "{}; enter the local host pairing code to connect.",
-                        failure_label(category)
-                    );
+                    self.pairing_required = category == FailureKind::Denied;
+                    self.message = if self.pairing_required {
+                        "Access denied. This host requires a pairing code to connect.".into()
+                    } else {
+                        format!(
+                            "{}. Refresh this page to reconnect.",
+                            failure_label(category)
+                        )
+                    };
                 } else if self
                     .pending
                     .as_ref()
@@ -171,6 +178,7 @@ impl UiModel {
             UiEvent::Resume {} => {
                 let request_id = self.next_id(input.now_ms)?;
                 self.pairing = Some(request_id.clone());
+                self.pairing_required = false;
                 self.phase = Phase::Pairing;
                 self.message = "Checking the local host session…".into();
                 effects.push(UiEffect::Resume { request_id });
@@ -183,6 +191,7 @@ impl UiModel {
                     return Err(UiError::InvalidAction);
                 }
                 let request_id = self.next_id(input.now_ms)?;
+                self.pairing_required = true;
                 self.pairing = Some(request_id.clone());
                 self.phase = Phase::Pairing;
                 self.message = "Pairing with the local host…".into();
@@ -212,6 +221,7 @@ impl UiModel {
                     .unwrap_or_default();
                 self.catalog = Some(catalog);
                 self.pairing = None;
+                self.pairing_required = false;
                 self.phase = Phase::Idle;
                 self.message = "Connected. Choose an allowed project, then Inspect.".into();
             }

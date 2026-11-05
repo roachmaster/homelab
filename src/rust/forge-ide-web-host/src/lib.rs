@@ -10,7 +10,7 @@ mod projection;
 mod service;
 mod session;
 
-pub use config::{load_config, HostConfig, HostLimits, NodeConfig};
+pub use config::{load_config, HostConfig, HostLimits, NodeConfig, SessionAuth};
 use forge_bootstrap::PreparedGroup;
 pub use http::ServeOutcome;
 pub use projection::project_report;

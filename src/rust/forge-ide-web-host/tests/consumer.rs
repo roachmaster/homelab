@@ -6,6 +6,7 @@ use forge_ide::{
 };
 use forge_ide_web_host::{
     register_host, Host, HostConfig, HostLimits, InspectionPort, NodeConfig, ServeOutcome,
+    SessionAuth,
 };
 use forge_ingress_contract::{Header, Response, RouteKey};
 use forge_remote::{RemoteError, Target};
@@ -90,6 +91,7 @@ fn config(f: &Files) -> HostConfig {
     HostConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
         public_origin: None,
+        session_auth: SessionAuth::Pairing,
         assets: f.0.clone(),
         limits: HostLimits::default(),
         nodes: vec![NodeConfig {
@@ -161,6 +163,21 @@ fn paired(host: &Host) -> (String, String, String) {
             "",
         ),
     );
+    session_values(host, &r)
+}
+fn resumed(host: &Host, cookie: Option<&str>) -> (String, String, String) {
+    let r = exchange(
+        host,
+        post(
+            host,
+            "ui.session.resume",
+            json!({"kind":"resume","request_id":"request-1"}),
+            &cookie.map_or_else(String::new, |value| format!("Cookie: {value}\r\n")),
+        ),
+    );
+    session_values(host, &r)
+}
+fn session_values(host: &Host, r: &str) -> (String, String, String) {
     assert!(r.starts_with("HTTP/1.1 200"), "{r}");
     let cookie_header = r
         .lines()
@@ -397,9 +414,160 @@ fn startup_file_loads_explicit_https_origin_and_old_config_remains_local() {
             .as_deref(),
         Some("https://portal.example.com")
     );
+    assert_eq!(
+        forge_ide_web_host::load_config(&path).unwrap().session_auth,
+        SessionAuth::Pairing
+    );
+    value["session_auth"] = json!("trusted_proxy");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert_eq!(
+        forge_ide_web_host::load_config(&path).unwrap().session_auth,
+        SessionAuth::TrustedProxy
+    );
+    value["session_auth"] = json!("from_header");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(forge_ide_web_host::load_config(&path).is_err());
+    value["session_auth"] = json!("trusted_proxy");
     value["public_origin"] = json!("http://portal.example.com");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     assert!(forge_ide_web_host::load_config(&path).is_err());
+}
+#[test]
+fn trusted_proxy_mode_requires_explicit_https_origin_and_loopback() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.session_auth = SessionAuth::TrustedProxy;
+    assert!(register_host("ui", c.clone()).is_err());
+    c.public_origin = Some("https://portal.example.com".into());
+    assert!(register_host("ui", c.clone()).is_ok());
+    c.bind = "0.0.0.0:8787".parse().unwrap();
+    assert!(register_host("ui", c).is_err());
+}
+#[test]
+fn trusted_proxy_resume_establishes_session_without_pairing_and_preserves_active_clients() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.session_auth = SessionAuth::TrustedProxy;
+    c.public_origin = Some("https://portal.example.com".into());
+    let (h, calls) = host_with_config(c);
+    assert!(h.pairing_code().is_none());
+    assert!(exchange(
+        &h,
+        post(
+            &h,
+            "ui.session.open",
+            json!({"kind":"pair","request_id":"request-1","code":"unused"}),
+            ""
+        )
+    )
+    .starts_with("HTTP/1.1 401"));
+    assert!(exchange(
+        &h,
+        inspect(&h, "forge_ui=wrong", "wrong", "wrong", "workspace")
+    )
+    .starts_with("HTTP/1.1 401"));
+    let (cookie, csrf, epoch) = resumed(&h, None);
+    assert_eq!(
+        resumed(&h, None),
+        (cookie.clone(), csrf.clone(), epoch.clone())
+    );
+    assert_eq!(
+        resumed(&h, Some("forge_ui=wrong")),
+        (cookie.clone(), csrf.clone(), epoch.clone())
+    );
+    assert_eq!(
+        resumed(&h, Some(&cookie)),
+        (cookie.clone(), csrf.clone(), epoch.clone())
+    );
+    for request in [
+        inspect(&h, "forge_ui=wrong", &csrf, &epoch, "workspace"),
+        inspect(&h, &cookie, "wrong", &epoch, "workspace"),
+        inspect(&h, &cookie, &csrf, "wrong", "workspace"),
+        inspect(&h, &cookie, &csrf, &epoch, "private"),
+        inspect(&h, &cookie, &csrf, &epoch, "workspace")
+            .replace("Forge-Target-Node: node", "Forge-Target-Node: other"),
+    ] {
+        assert!(!exchange(&h, request).starts_with("HTTP/1.1 200"));
+    }
+    assert_eq!(calls.get(), 0);
+    assert!(
+        exchange(&h, inspect(&h, &cookie, &csrf, &epoch, "workspace")).starts_with("HTTP/1.1 200")
+    );
+    assert_eq!(calls.get(), 1);
+    assert!(h.pairing_code().is_none());
+}
+#[test]
+fn trusted_proxy_expired_resume_rotates_credentials_without_manual_pairing() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.session_auth = SessionAuth::TrustedProxy;
+    c.public_origin = Some("https://portal.example.com".into());
+    c.limits.session_ttl = Duration::from_millis(80);
+    let (h, calls) = host_with_config(c);
+    let (old_cookie, old_csrf, old_epoch) = resumed(&h, None);
+    thread::sleep(Duration::from_millis(160));
+    assert!(exchange(
+        &h,
+        inspect(&h, &old_cookie, &old_csrf, &old_epoch, "workspace")
+    )
+    .starts_with("HTTP/1.1 401"));
+    let (cookie, csrf, epoch) = resumed(&h, Some(&old_cookie));
+    assert_ne!(cookie, old_cookie);
+    assert_ne!(csrf, old_csrf);
+    assert_ne!(epoch, old_epoch);
+    assert!(exchange(
+        &h,
+        inspect(&h, &old_cookie, &old_csrf, &old_epoch, "workspace")
+    )
+    .starts_with("HTTP/1.1 401"));
+    assert_eq!(calls.get(), 0);
+    assert!(
+        exchange(&h, inspect(&h, &cookie, &csrf, &epoch, "workspace")).starts_with("HTTP/1.1 200")
+    );
+    assert_eq!(calls.get(), 1);
+}
+#[test]
+fn trusted_proxy_resume_keeps_origin_checks_and_headers_cannot_enable_mode() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.public_origin = Some("https://portal.example.com".into());
+    let (default_host, _) = host_with_config(c.clone());
+    let forwarded = "Cf-Access-Jwt-Assertion: fake\r\nX-Forwarded-Proto: https\r\nX-Forwarded-Host: portal.example.com\r\n";
+    assert!(exchange(
+        &default_host,
+        post(
+            &default_host,
+            "ui.session.resume",
+            json!({"kind":"resume","request_id":"request-1"}),
+            forwarded
+        )
+    )
+    .starts_with("HTTP/1.1 401"));
+    assert!(default_host.pairing_code().is_some());
+    c.session_auth = SessionAuth::TrustedProxy;
+    let (h, calls) = host_with_config(c);
+    let request = post(
+        &h,
+        "ui.session.resume",
+        json!({"kind":"resume","request_id":"request-1"}),
+        forwarded,
+    );
+    for invalid in [
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: https://evil.example",
+        ),
+        request.replace(
+            "Host: portal.example.com\r\nOrigin",
+            "Host: evil.example\r\nOrigin",
+        ),
+    ] {
+        let response = exchange(&h, invalid);
+        assert!(response.starts_with("HTTP/1.1 400"));
+        assert!(!response.contains("Set-Cookie:"));
+    }
+    assert!(exchange(&h, request).starts_with("HTTP/1.1 200"));
+    assert_eq!(calls.get(), 0);
 }
 #[test]
 fn pair_resume_inspect_use_public_port_once_and_filtered_catalog() {

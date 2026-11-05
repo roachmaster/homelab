@@ -38,12 +38,12 @@ cargo run --manifest-path src/rust/Cargo.toml -p forge-ide-web-host -- \
   serve --config /absolute/path/ui-host.json
 ```
 
-Open the printed `READY http://127.0.0.1:PORT` origin. Manually enter the printed
+By default, open the printed `READY http://127.0.0.1:PORT` origin and enter the printed
 one-use `PAIRING` code in the UI. Do not put this secret in a URL or publish a
 terminal capture. Refresh resumes the existing memory-only session via its cookie.
 Restart invalidates the session. `Ctrl-C`/termination requests orderly shutdown.
 
-For a supervised service, append `--pairing-file /run/forge-web/pairing-code`.
+For a supervised service using the default pairing mode, append `--pairing-file /run/forge-web/pairing-code`.
 Its parent must be an existing owner-only directory and the absolute destination
 must not exist. The code is published complete with mode `0600`, without replacing
 files or following destination symlinks; it is then omitted from stdout. A failed
@@ -107,11 +107,23 @@ An optional nondefault port must match the browser. The host checks the original
 It never derives origin or identity from `Forwarded`, `X-Forwarded-*` or Cloudflare
 headers. Preserve original Host/Origin and Content-Length through the proxy.
 
-This explicitly trusts the local TLS proxy and its access policy. The host does
-not verify Cloudflare Access JWTs or authenticate multiple browser users; pairing
-still grants one memory-only session. Keep the backend inaccessible off-host,
-keep upstream access controls enabled, and do not treat a tunnel token as user
-authentication. The agent still checks its separate mTLS and project grants.
+When the TLS proxy already authenticates access, add
+`"session_auth": "trusted_proxy"` alongside `public_origin`. The initial browser
+Resume request then opens the Forge session automatically: no pairing code is
+created or requested, and the Pair command is rejected. Cookies remain Secure,
+HttpOnly and SameSite=Strict; inspection still requires its session cookie, CSRF,
+epoch, target and project checks. Refresh resumes an active session or creates a
+fresh session after expiry, without a server restart or manual code. The default
+`"session_auth": "pairing"` retains the existing local pairing behavior.
+
+Trusted-proxy mode requires an explicit HTTPS public origin and a loopback bind.
+It trusts the local TLS proxy's access policy; it does not verify Cloudflare
+Access JWTs or infer identity from forwarded headers. Keep upstream access controls
+enabled and the backend inaccessible off-host. Local processes and SSH users are
+inside this trust boundary. This remains one shared operator session, not isolated
+multi-user identities or delegated authorization. An active session is preserved
+when another admitted browser connects; expired credentials and epochs rotate.
+The agent still checks its separate mTLS and project grants.
 See [deployment and rollback](deploy/README.md) for service configuration.
 
 ### Request contract
@@ -123,8 +135,10 @@ See [deployment and rollback](deploy/README.md) for service configuration.
   `Allow: POST`; no fake REST verbs or per-task URLs.
 - Exact `Host` and `Origin`, JSON Content-Type, canonical version/routing headers,
   single header values, typed body and header/payload agreement are mandatory.
-- `ui.session.open`: one-use 256-bit random code (default five-minute lifetime,
-  at most 20 attempts). `ui.session.resume`: authenticated cookie and exact Origin.
+- `ui.session.open`: one-use 256-bit random code in default pairing mode (five-minute
+  lifetime, at most 20 attempts); denied in trusted-proxy mode. `ui.session.resume`:
+  exact Origin plus a valid cookie in pairing mode, or automatic session admission
+  through the explicitly trusted proxy in trusted-proxy mode.
 - `ide.inspect`: cookie, session-bound `Forge-CSRF`, session epoch, configured
   node/target incarnation/project, expiry, and shared-bridge admission are checked
   **before** invoking the remote task.

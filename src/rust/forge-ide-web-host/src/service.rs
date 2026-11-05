@@ -1,4 +1,4 @@
-use crate::{assets::Assets, http, session::Session, HostConfig, HostError};
+use crate::{assets::Assets, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_ide::remote::{
@@ -151,6 +151,7 @@ impl Rejection {
 }
 pub(crate) struct Context {
     pub authenticated: bool,
+    pub trusted_proxy: bool,
     pub csrf_valid: bool,
     pub request_id: String,
     pub target: Option<(String, String)>,
@@ -159,8 +160,8 @@ pub(crate) struct Context {
 }
 fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
     match header.route().destination() {
-        "ui.session.open" => Ok(()),
-        "ui.session.resume" if c.authenticated => Ok(()),
+        "ui.session.open" if !c.trusted_proxy => Ok(()),
+        "ui.session.resume" if c.authenticated || c.trusted_proxy => Ok(()),
         "ide.inspect" if c.authenticated && c.csrf_valid => Ok(()),
         _ => Err(AdmissionDenied),
     }
@@ -207,7 +208,13 @@ impl State {
         if request_id != c.request_id {
             return Err(Rejection::Invalid);
         }
-        let session = self.session.borrow();
+        let mut session = self.session.borrow_mut();
+        let cookie = if self.config.session_auth == SessionAuth::TrustedProxy {
+            session.resume_proxy().map_err(|_| Rejection::Unavailable)?;
+            Some(session.cookie_header())
+        } else {
+            None
+        };
         Ok(Reply {
             protocol_version: 1,
             event: UiEvent::Paired {
@@ -215,7 +222,7 @@ impl State {
                 catalog: session.catalog(),
             },
             csrf: Some(session.csrf()),
-            cookie: None,
+            cookie,
         })
     }
     fn inspect(&self, p: Command, c: &Context) -> Result<Reply, Rejection> {
@@ -429,6 +436,7 @@ impl Host {
         let s = self.state.session.borrow();
         Context {
             authenticated: s.authenticated(cookie),
+            trusted_proxy: self.config.session_auth == SessionAuth::TrustedProxy,
             csrf_valid: s.csrf_matches(csrf),
             request_id,
             target,

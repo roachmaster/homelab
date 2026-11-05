@@ -1,10 +1,11 @@
 # Access-controlled HTTPS deployment
 
-This is a single-operator, read-only workbench. Browser pairing remains mandatory
-in addition to the TLS proxy's access policy. Sessions last 30 minutes, expire on
-restart, and are not durable user accounts. Pair within five minutes of startup;
-restart only the web service for a new code. No remote shell, source editing or
-background jobs are exposed.
+This is a single-operator, read-only workbench. For an authenticated TLS proxy such
+as Cloudflare Access, set `"session_auth": "trusted_proxy"` and the exact
+`public_origin`. The workbench opens automatically after proxy sign-in; no manual
+pairing or server access is needed. Sessions last 30 minutes and are automatically
+re-established on reload after expiry or restart. They are not durable or isolated
+user accounts. No remote shell, source editing or background jobs are exposed.
 
 ```text
 Browser → HTTPS + access policy → local tunnel/proxy → loopback web host
@@ -68,22 +69,29 @@ Restart=on-failure
 RestartSec=2
 ```
 
-For the web unit also use `RuntimeDirectory=forge-web`,
-`RuntimeDirectoryMode=0700` and append
-`--pairing-file /run/forge-web/pairing-code` to ExecStart. Do not preserve the
-runtime directory across service stops. Read the code through a local authorized
-administrative terminal; never store it in a journal, URL, repository, screenshot
-or deployment receipt. Restarting the service invalidates the previous session.
+Trusted-proxy mode does not need `--pairing-file` or an operator pairing command.
+The backend must remain loopback-only and the upstream proxy must enforce access
+on every route, including `/forge/v1/dispatch`. Do not substitute client-supplied
+identity headers for the proxy policy. The host trusts local processes; it does
+not independently validate Access JWTs.
+
+For local deployments that retain default pairing mode, use a private systemd
+runtime directory and `--pairing-file` as described in the host README. Restarting
+either mode invalidates the previous session.
 
 ## Verify and switch
 
 1. Start the agent and candidate web service on unused loopback ports. Confirm
    listener ownership, restricted file modes and service startup.
 2. Fetch every static asset using the configured Host and compare its hash with
-   the staged bundle. Wrong Host/Origin, missing session and bad CSRF must fail.
-3. Pair locally in a private test client with the configured HTTPS Origin, check
-   the Secure/HttpOnly/SameSite cookie, resume, and inspect the real allowed
-   snapshot through the actual mTLS agent. Keep session material only in memory.
+   the staged bundle. Wrong Host/Origin, inspection without a session and bad CSRF
+   must fail.
+3. In trusted-proxy mode, send an initial Resume through the local proxy with
+   the exact HTTPS Origin and no session cookie. Verify automatic admission and
+   a Secure/HttpOnly/SameSite cookie, then inspect the allowed snapshot through
+   the real mTLS agent. Inspect without a session or with bad CSRF must fail.
+   Verify automatic browser connection with no Pair request or code entry.
+   Keep session material only in memory.
 4. Preserve the existing proxy/service configuration, then switch its origin to
    the already-healthy web service. Verify through that exact local proxy path.
    A TCP bridge preserves Host/Origin; an HTTP proxy must not rewrite them and
@@ -92,7 +100,8 @@ or deployment receipt. Restarting the service invalidates the previous session.
    authenticated browser journey when credentials are available; an Access login
    page alone does not prove the downstream authenticated flow. Record this gap
    explicitly when it cannot be exercised.
-6. Restart only the web service after test pairing, leaving a fresh operator code.
+6. Restart the web service after verification to discard test sessions. Confirm
+   a fresh Resume reconnects automatically without generating a pairing file.
    Enable the candidate units for boot only after checks pass. Save safe evidence:
    source revision/diff hash, binary/asset hashes, test results, service state,
    source snapshot and credential expiration. Never save session/token contents.
@@ -104,7 +113,7 @@ proxy origin and restart only the bridge, then confirm its old response before
 stopping the candidate. No DNS or tunnel credential change is needed when the
 public tunnel still points at the same local bridge. For later Forge releases,
 restore both the matching binary/assets release and the matching agent config;
-restart the agent then web host, and obtain a new pairing code.
+restart the agent then web host. Trusted-proxy sessions reconnect on reload.
 
 This recipe is operational guidance, not an automatic deployment target or
 multi-user production certification. The applications still serve synchronously,

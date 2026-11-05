@@ -47,6 +47,15 @@ impl NodeConfig {
         }
     }
 }
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAuth {
+    #[default]
+    Pairing,
+    /// The operator trusts an access-controlled HTTPS proxy as the browser
+    /// admission boundary. No request header selects or asserts this mode.
+    TrustedProxy,
+}
 #[derive(Clone, Debug)]
 pub struct HostConfig {
     pub bind: SocketAddr,
@@ -54,6 +63,7 @@ pub struct HostConfig {
     /// reverse proxy. The listener still binds loopback; forwarded headers are
     /// never used to select this origin or authenticate a browser.
     pub public_origin: Option<String>,
+    pub session_auth: SessionAuth,
     pub assets: PathBuf,
     pub nodes: Vec<NodeConfig>,
     pub limits: HostLimits,
@@ -62,6 +72,11 @@ impl HostConfig {
     pub fn validate(&self) -> Result<(), HostError> {
         if let Some(origin) = &self.public_origin {
             https_authority(origin)?;
+        }
+        if self.session_auth == SessionAuth::TrustedProxy && self.public_origin.is_none() {
+            return Err(HostError::Configuration(
+                "trusted proxy sessions require an explicit HTTPS public origin",
+            ));
         }
         let l = self.limits;
         if !self.bind.ip().is_loopback()
@@ -191,6 +206,8 @@ struct FileConfig {
     bind: SocketAddr,
     #[serde(default)]
     public_origin: Option<String>,
+    #[serde(default)]
+    session_auth: SessionAuth,
     assets: PathBuf,
     credentials: CredentialFiles,
     nodes: Vec<NodeFile>,
@@ -293,6 +310,7 @@ pub fn load_config(path: &Path) -> Result<HostConfig, HostError> {
     let config = HostConfig {
         bind: f.bind,
         public_origin: f.public_origin,
+        session_auth: f.session_auth,
         assets: resolve(base, &f.assets),
         nodes,
         limits: HostLimits {

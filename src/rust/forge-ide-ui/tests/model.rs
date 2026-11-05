@@ -120,6 +120,50 @@ fn status(m: &UiModel) -> String {
         .text
 }
 #[test]
+fn session_bootstrap_and_network_failure_do_not_request_a_pairing_code() {
+    let mut model = UiModel::default();
+    let pair_visible = |m: &UiModel| {
+        m.view()
+            .visibility
+            .iter()
+            .find(|v| v.id == "pair-panel")
+            .unwrap()
+            .visible
+    };
+    assert!(!pair_visible(&model));
+    let output = event(&mut model, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &output.effects[0] else {
+        panic!()
+    };
+    assert!(!pair_visible(&model));
+    event(
+        &mut model,
+        UiEvent::NetworkFailed {
+            request_id: request_id.clone(),
+            category: FailureKind::Unavailable,
+        },
+    );
+    assert!(!pair_visible(&model));
+    let view = model.view();
+    let status = &view.texts.iter().find(|v| v.id == "status").unwrap().text;
+    assert!(status.contains("Refresh"));
+    assert!(!status.contains("pairing"));
+    // A subsequent automatic connection still uses Resume, with no code input.
+    let output = event(&mut model, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &output.effects[0] else {
+        panic!()
+    };
+    event(
+        &mut model,
+        UiEvent::Paired {
+            request_id: request_id.clone(),
+            catalog: catalog(),
+        },
+    );
+    assert_eq!(model.phase(), Phase::Idle);
+    assert!(!pair_visible(&model));
+}
+#[test]
 fn resume_is_a_rust_effect_and_failure_returns_pairing_view() {
     let mut m = UiModel::default();
     let o = event(&mut m, UiEvent::Resume {});
