@@ -378,8 +378,17 @@ impl Host {
         );
         let listener = TcpListener::bind(config.bind)?;
         listener.set_nonblocking(true)?;
-        let authority = listener.local_addr()?.to_string();
-        let origin = format!("http://{authority}");
+        let (authority, origin) = match &config.public_origin {
+            Some(origin) => (
+                crate::config::https_authority(origin)?.to_owned(),
+                origin.clone(),
+            ),
+            None => {
+                let authority = listener.local_addr()?.to_string();
+                let origin = format!("http://{authority}");
+                (authority, origin)
+            }
+        };
         Ok(Self {
             listener,
             assets,

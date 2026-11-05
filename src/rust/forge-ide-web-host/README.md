@@ -1,8 +1,9 @@
 # Forge IDE web host
 
-A **loopback-only, single-local-operator prototype** serving the generated IDE UI
+A **loopback-bound, single-operator prototype** serving the generated IDE UI
 and adapting one browser command gateway to the existing authenticated remote
-IDE inspection task. It is not a public web service, editor or multi-user login.
+IDE inspection task. Explicit HTTPS-origin configuration supports an access-controlled
+TLS proxy; this is not an unrestricted public service, editor or multi-user login.
 
 ## Composition and public API
 
@@ -41,6 +42,13 @@ Open the printed `READY http://127.0.0.1:PORT` origin. Manually enter the printe
 one-use `PAIRING` code in the UI. Do not put this secret in a URL or publish a
 terminal capture. Refresh resumes the existing memory-only session via its cookie.
 Restart invalidates the session. `Ctrl-C`/termination requests orderly shutdown.
+
+For a supervised service, append `--pairing-file /run/forge-web/pairing-code`.
+Its parent must be an existing owner-only directory and the absolute destination
+must not exist. The code is published complete with mode `0600`, without replacing
+files or following destination symlinks; it is then omitted from stdout. A failed
+publication aborts startup before `READY`. Use a private systemd runtime directory
+that is removed on stop. Never place this file beneath served assets or a project.
 
 Config JSON is only an external codec. Paths are config-relative:
 
@@ -88,6 +96,26 @@ journeys must be reported separately.
 
 ## Browser boundary
 
+### Optional HTTPS proxy origin
+
+Add `"public_origin": "https://ide.example.com"` to the host JSON only when a
+trusted TLS proxy already restricts access. The listener remains loopback HTTP.
+The configured origin is exact and canonical: lowercase DNS hostname, no path,
+credentials, query, fragment, trailing slash or explicit default `:443` port.
+An optional nondefault port must match the browser. The host checks the original
+`Host` and `Origin` and adds `Secure` to its existing HttpOnly/SameSite cookie.
+It never derives origin or identity from `Forwarded`, `X-Forwarded-*` or Cloudflare
+headers. Preserve original Host/Origin and Content-Length through the proxy.
+
+This explicitly trusts the local TLS proxy and its access policy. The host does
+not verify Cloudflare Access JWTs or authenticate multiple browser users; pairing
+still grants one memory-only session. Keep the backend inaccessible off-host,
+keep upstream access controls enabled, and do not treat a tunnel token as user
+authentication. The agent still checks its separate mTLS and project grants.
+See [deployment and rollback](deploy/README.md) for service configuration.
+
+### Request contract
+
 - Fixed static `GET`/`HEAD`: `/`, `/index.html`, `/style.css`, `/main.js`,
   `/worker.js`, `/app.wasm`. The manifest is **not** served. Static responses carry
   CSP, `nosniff`, `no-store` and no-referrer policy. No catalog/credentials are assets.
@@ -104,7 +132,8 @@ journeys must be reported separately.
   `Path=/forge/v1/dispatch`, default 30-minute fixed lifetime. The loopback HTTP
   prototype cannot claim encrypted browser transport or a Secure cookie. Local
   malware, hostile local users, browser compromise and stolen pairing secrets are
-  outside its trust model. Do not expose it through tunnels/reverse proxies.
+  outside its trust model. The default mode must not be exposed through proxies.
+  For an access-controlled HTTPS proxy, explicitly set `public_origin` as below.
 - Browser `UiEvent` replies are bounded typed projections. Native path names retain
   tagged encodings; report diagnostics/type spellings may expose source metadata.
   This is not secret redaction or a full compiler AST.

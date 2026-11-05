@@ -50,12 +50,19 @@ impl NodeConfig {
 #[derive(Clone, Debug)]
 pub struct HostConfig {
     pub bind: SocketAddr,
+    /// Explicit HTTPS browser origin behind a trusted, access-controlled local
+    /// reverse proxy. The listener still binds loopback; forwarded headers are
+    /// never used to select this origin or authenticate a browser.
+    pub public_origin: Option<String>,
     pub assets: PathBuf,
     pub nodes: Vec<NodeConfig>,
     pub limits: HostLimits,
 }
 impl HostConfig {
     pub fn validate(&self) -> Result<(), HostError> {
+        if let Some(origin) = &self.public_origin {
+            https_authority(origin)?;
+        }
         let l = self.limits;
         if !self.bind.ip().is_loopback()
             || !self.assets.is_absolute()
@@ -113,6 +120,53 @@ impl HostConfig {
         Ok(())
     }
 }
+
+/// A deliberately narrow canonical HTTPS origin: ASCII DNS name, optionally a
+/// non-default port. No URL normalization, userinfo, path or forwarded metadata.
+pub(crate) fn https_authority(origin: &str) -> Result<&str, HostError> {
+    let invalid = || HostError::Configuration("canonical HTTPS public origin required");
+    let authority = origin.strip_prefix("https://").ok_or_else(invalid)?;
+    if origin.len() > 256 {
+        return Err(invalid());
+    }
+    let name = match authority.split_once(':') {
+        Some((name, port)) => {
+            let number = port.parse::<u16>().map_err(|_| invalid())?;
+            if number == 0 || number == 443 || number.to_string() != port {
+                return Err(invalid());
+            }
+            name
+        }
+        None => authority,
+    };
+    // Browsers parse numeric final labels as IPv4, including legacy decimal,
+    // octal and hexadecimal forms that std::net::IpAddr does not recognize.
+    // Match WHATWG's ends-in-a-number check without normalizing trusted input:
+    // https://url.spec.whatwg.org/#ends-in-a-number-checker
+    // Empty/trailing labels and uppercase spelling are rejected separately below.
+    let last_label = name.rsplit('.').next().unwrap_or_default();
+    let numeric_last_label = !last_label.is_empty()
+        && (last_label.bytes().all(|b| b.is_ascii_digit())
+            || last_label
+                .strip_prefix("0x")
+                .is_some_and(|digits| digits.bytes().all(|b| b.is_ascii_hexdigit())));
+    if name.is_empty()
+        || name.len() > 253
+        || numeric_last_label
+        || !name.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        })
+    {
+        return Err(invalid());
+    }
+    Ok(authority)
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CredentialFiles {
@@ -135,6 +189,8 @@ struct NodeFile {
 #[serde(deny_unknown_fields)]
 struct FileConfig {
     bind: SocketAddr,
+    #[serde(default)]
+    public_origin: Option<String>,
     assets: PathBuf,
     credentials: CredentialFiles,
     nodes: Vec<NodeFile>,
@@ -236,6 +292,7 @@ pub fn load_config(path: &Path) -> Result<HostConfig, HostError> {
     }
     let config = HostConfig {
         bind: f.bind,
+        public_origin: f.public_origin,
         assets: resolve(base, &f.assets),
         nodes,
         limits: HostLimits {

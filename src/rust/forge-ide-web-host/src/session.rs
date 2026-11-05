@@ -16,6 +16,7 @@ pub(crate) struct Session {
     pairing_until: Instant,
     attempts: u8,
     ttl: Duration,
+    secure_cookie: bool,
     cookie: String,
     csrf: String,
     until: Option<Instant>,
@@ -53,6 +54,7 @@ impl Session {
             pairing_until: Instant::now() + config.limits.pairing_ttl,
             attempts: 0,
             ttl: config.limits.session_ttl,
+            secure_cookie: config.public_origin.is_some(),
             cookie: random_token()?,
             csrf: random_token()?,
             until: None,
@@ -93,9 +95,10 @@ impl Session {
     }
     pub fn cookie_header(&self) -> String {
         format!(
-            "forge_ui={}; HttpOnly; SameSite=Strict; Path=/forge/v1/dispatch; Max-Age={}",
+            "forge_ui={}; HttpOnly; SameSite=Strict; Path=/forge/v1/dispatch; Max-Age={}{}",
             self.cookie,
-            self.ttl.as_secs().max(1)
+            self.ttl.as_secs().max(1),
+            if self.secure_cookie { "; Secure" } else { "" }
         )
     }
     pub fn epoch(&self) -> &str {

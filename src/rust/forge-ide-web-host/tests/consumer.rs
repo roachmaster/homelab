@@ -89,6 +89,7 @@ impl InspectionPort for Fake {
 fn config(f: &Files) -> HostConfig {
     HostConfig {
         bind: "127.0.0.1:0".parse().unwrap(),
+        public_origin: None,
         assets: f.0.clone(),
         limits: HostLimits::default(),
         nodes: vec![NodeConfig {
@@ -110,7 +111,10 @@ fn config(f: &Files) -> HostConfig {
     }
 }
 fn host(f: &Files) -> (Host, Rc<Cell<usize>>) {
-    let group = register_host("ui", config(f)).unwrap();
+    host_with_config(config(f))
+}
+fn host_with_config(config: HostConfig) -> (Host, Rc<Cell<usize>>) {
+    let group = register_host("ui", config).unwrap();
     let ((), factory) = Registry::new()
         .register(group)
         .unwrap()
@@ -145,7 +149,7 @@ fn exchange(host: &Host, request: String) -> String {
 }
 fn post(host: &Host, destination: &str, body: Value, extra: &str) -> String {
     let body = body.to_string();
-    format!("POST /forge/v1/dispatch HTTP/1.1\r\nHost: {}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nForge-Envelope-Version: 1\r\nForge-Contract-Version: 1\r\nForge-Request-Id: request-1\r\nForge-Destination: {}\r\n{}\r\n{}",host.local_addr().unwrap(),host.origin(),body.len(),destination,extra,body)
+    format!("POST /forge/v1/dispatch HTTP/1.1\r\nHost: {}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nForge-Envelope-Version: 1\r\nForge-Contract-Version: 1\r\nForge-Request-Id: request-1\r\nForge-Destination: {}\r\n{}\r\n{}",host.origin().split_once("://").unwrap().1,host.origin(),body.len(),destination,extra,body)
 }
 fn paired(host: &Host) -> (String, String, String) {
     let r = exchange(
@@ -158,14 +162,15 @@ fn paired(host: &Host) -> (String, String, String) {
         ),
     );
     assert!(r.starts_with("HTTP/1.1 200"), "{r}");
-    let cookie = r
+    let cookie_header = r
         .lines()
         .find_map(|s| s.strip_prefix("Set-Cookie: "))
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_owned();
+        .unwrap();
+    assert_eq!(
+        cookie_header.split(';').any(|part| part.trim() == "Secure"),
+        host.origin().starts_with("https://")
+    );
+    let cookie = cookie_header.split(';').next().unwrap().to_owned();
     let body: Value = serde_json::from_str(r.split_once("\r\n\r\n").unwrap().1).unwrap();
     (
         cookie,
@@ -193,6 +198,208 @@ fn public_registrar_is_effect_free_and_must_freeze() {
         .unwrap()
         .into_factories();
     assert!(factory.create_with_ports(BTreeMap::new()).is_err());
+}
+#[test]
+fn public_origin_requires_canonical_https_and_keeps_loopback_binding() {
+    let f = Files::new();
+    for invalid in [
+        "",
+        "http://portal.example.com",
+        "https://",
+        "https://Portal.example.com",
+        "https://portal.example.com/",
+        "https://portal.example.com/path",
+        "https://portal.example.com?query",
+        "https://portal.example.com#fragment",
+        "https://user@portal.example.com",
+        "https://portal.example.com:443",
+        "https://portal.example.com:0443",
+        "https://portal.example.com:08443",
+        "https://portal.example.com:0",
+        "https://portal.example.com:65536",
+        "https://portal.example.com:+8443",
+        "https://portal.example.com:8443:80",
+        "https://portal.example.com.",
+        "https://portal..example.com",
+        "https://-portal.example.com",
+        "https://portal-.example.com",
+        "https://portal_example.com",
+        "https://127.0.0.1",
+        "https://[::1]",
+        "https://portal.example.com\r\nHost: evil.example",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(invalid.into());
+        assert!(register_host("ui", c).is_err(), "accepted {invalid:?}");
+    }
+    let mut c = config(&f);
+    c.public_origin = Some(format!("https://{}.example.com", "a".repeat(64)));
+    assert!(register_host("ui", c).is_err());
+    let mut c = config(&f);
+    c.public_origin = Some("https://portal.example.com".into());
+    c.bind = "0.0.0.0:8787".parse().unwrap();
+    assert!(register_host("ui", c).is_err());
+}
+#[test]
+fn public_origin_rejects_browser_numeric_hosts_without_rejecting_dns_digits() {
+    let f = Files::new();
+    for invalid in [
+        "https://2130706433",
+        "https://2130706433:8443",
+        "https://0x7f000001",
+        "https://0X7F000001",
+        "https://127.1",
+        "https://0177.0.0.1",
+        "https://0x7f.0.0.1",
+        "https://0",
+        "https://00",
+        "https://09",
+        "https://0x",
+        "https://4294967296",
+        "https://0xffffffffffffffffffffffffffff",
+        "https://portal.123",
+        "https://portal.09",
+        "https://portal.0x",
+        "https://portal.0xface",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(invalid.into());
+        assert!(register_host("ui", c).is_err(), "accepted {invalid:?}");
+    }
+    for valid in [
+        "https://portal.thedevex.com",
+        "https://node123.example.com",
+        "https://123.example.com",
+        "https://0x7f000001.example.com",
+        "https://portal.xn--p1ai",
+        "https://portal.example.com:8443",
+        "https://portal.0xg",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(valid.into());
+        assert!(register_host("ui", c).is_ok(), "rejected {valid:?}");
+    }
+}
+#[test]
+fn https_origin_uses_secure_cookie_and_preserves_session_csrf_project_admission() {
+    let f = Files::new();
+    for origin in [
+        "https://portal.example.com",
+        "https://portal.example.com:8443",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(origin.into());
+        let (h, calls) = host_with_config(c);
+        assert_eq!(h.origin(), origin);
+        assert!(h.local_addr().unwrap().ip().is_loopback());
+        assert!(exchange(
+            &h,
+            inspect(&h, "forge_ui=wrong", "wrong", "wrong", "workspace")
+        )
+        .starts_with("HTTP/1.1 401"));
+        let (cookie, csrf, epoch) = paired(&h);
+        for request in [
+            inspect(&h, "forge_ui=wrong", &csrf, &epoch, "workspace"),
+            inspect(&h, &cookie, "wrong", &epoch, "workspace"),
+            inspect(&h, &cookie, &csrf, "wrong", "workspace"),
+            inspect(&h, &cookie, &csrf, &epoch, "private"),
+        ] {
+            assert!(exchange(&h, request).starts_with("HTTP/1.1 401"));
+        }
+        assert_eq!(calls.get(), 0);
+        assert!(
+            exchange(&h, inspect(&h, &cookie, &csrf, &epoch, "workspace"))
+                .starts_with("HTTP/1.1 200")
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(exchange(
+            &h,
+            post(
+                &h,
+                "ui.session.resume",
+                json!({"kind":"resume","request_id":"request-1"}),
+                &format!("Cookie: {cookie}\r\n")
+            )
+        )
+        .starts_with("HTTP/1.1 200"));
+        assert_eq!(calls.get(), 1);
+    }
+}
+#[test]
+fn https_origin_rejects_wrong_authority_origin_and_forwarded_header_spoofing() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.public_origin = Some("https://portal.example.com".into());
+    let (h, calls) = host_with_config(c);
+    let request = post(
+        &h,
+        "ui.session.open",
+        json!({"kind":"pair","request_id":"request-1","code":h.pairing_code().unwrap()}),
+        "",
+    );
+    for invalid in [
+        request.replace(
+            "Host: portal.example.com",
+            &format!("Host: {}", h.local_addr().unwrap()),
+        ),
+        request.replace(
+            "Host: portal.example.com",
+            "Host: evil.example\r\nX-Forwarded-Host: portal.example.com",
+        ),
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: http://portal.example.com\r\nX-Forwarded-Proto: https",
+        ),
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: https://evil.example\r\nForwarded: proto=https;host=portal.example.com",
+        ),
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: https://portal.example.com:443",
+        ),
+    ] {
+        assert!(exchange(&h, invalid).starts_with("HTTP/1.1 400"));
+    }
+    assert_eq!(calls.get(), 0);
+    assert!(h.pairing_code().is_some());
+    assert!(exchange(
+        &h,
+        "GET / HTTP/1.1\r\nHost: portal.example.com\r\n\r\n".into()
+    )
+    .starts_with("HTTP/1.1 200"));
+    assert!(exchange(&h, request).starts_with("HTTP/1.1 200"));
+}
+#[test]
+fn startup_file_loads_explicit_https_origin_and_old_config_remains_local() {
+    let f = Files::new();
+    fs::write(f.0.join("client.der"), [1]).unwrap();
+    fs::write(f.0.join("client.key.der"), [1]).unwrap();
+    fs::write(f.0.join("ca.der"), [1]).unwrap();
+    let path = f.0.join("host.json");
+    let mut value = json!({
+        "bind":"127.0.0.1:0", "assets":f.0,
+        "credentials":{"chain":["client.der"],"key":"client.key.der","roots":["ca.der"]},
+        "nodes":[{"key":"lab","label":"Lab","projects":["workspace"],
+            "address":"127.0.0.1:7443","server_name":"localhost","node":"node","incarnation":"host"}]
+    });
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(forge_ide_web_host::load_config(&path)
+        .unwrap()
+        .public_origin
+        .is_none());
+    value["public_origin"] = json!("https://portal.example.com");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert_eq!(
+        forge_ide_web_host::load_config(&path)
+            .unwrap()
+            .public_origin
+            .as_deref(),
+        Some("https://portal.example.com")
+    );
+    value["public_origin"] = json!("http://portal.example.com");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(forge_ide_web_host::load_config(&path).is_err());
 }
 #[test]
 fn pair_resume_inspect_use_public_port_once_and_filtered_catalog() {
