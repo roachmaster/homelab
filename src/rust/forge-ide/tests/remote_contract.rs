@@ -29,6 +29,7 @@ fn report(source: &str) -> ProjectReport {
                     detail: Entry::File {
                         size_bytes: source.len() as u64,
                         content: FileContent::Text {
+                            sha256: [0; 32],
                             lines: source.lines().count(),
                             rust: Some(syntax::analyze(source, 100, 16).unwrap()),
                         },
@@ -235,6 +236,7 @@ fn partial_syntax_failure_and_binary_non_rust_preserve_honest_status() {
     let mut r = report("struct A;\n");
     r.complete = false;
     *file(&mut r) = FileContent::RustUnavailable {
+        sha256: [0; 32],
         lines: 1,
         error: syntax::analyze("fn {", 100, 16).unwrap_err(),
     };
@@ -375,6 +377,7 @@ fn text_metrics_and_rust_extension_match_the_existing_producer() {
     );
     r.bytes_read = 10;
     *file(&mut r) = FileContent::Text {
+        sha256: [0; 32],
         lines: 1,
         rust: None,
     };

@@ -1,253 +1,154 @@
 # Read-only Forge IDE workbench
 
-The [approved wireframes](../../../docs/design/forge-ide-wireframes/README.md) and
-[component decomposition](../../../docs/design/forge-ide-components/README.md) now
-map to typed component declarations and a real worker/WASM model. This remains
-**structural inspection**, not a source editor, compiler, terminal or debugger.
-Native files, Rust declaration names/kinds/spans and supplied diagnostics are the
-only report data. No new backend operation or per-task URL is introduced.
+The generated workbench lets an admitted user find a file or Rust declaration and
+read its actual source. Application structure and styles are typed Rust components
+and validated YAML; the compiled Rust/WASM model owns project, selection, source
+and request policy. It does not provide editing, compilation, a terminal or debugging.
 
 ## Use the workbench
 
-[Build and start the local host](README.md#run-from-repository-root), open its
-printed loopback origin, and enter its one-use pairing code. The Connection screen
-is replaced by the Workbench after an admitted catalog. Native mTLS keys never
-enter the page; visible node/project choices do not confer authorization.
+[Build and start the host](README.md#run-from-repository-root), then use its configured
+entry method. A local host can require its one-use pairing code; a trusted proxy
+host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
 
-1. Choose an allowed **Node** and **Project**, then **Inspect**. Changing either
-   clears the previous report. Loading disables duplicate Inspect and offers
-   **Cancel local wait**; cancellation never claims the agent stopped computing.
-2. Use **Explorer** to expand and select files. The dominant **File** pane
-   shows the full safe name and declaration hierarchy. Selecting a declaration shows its details before the declaration list, preserving a direct route to another declaration. Entry metadata and Source shape inventory are keyboard-accessible disclosures, closed by default. Report totals and detailed limits live in Inspection details. Select a
-   declaration there or in **Outline** for its structural details.
-3. Filter entry/declaration names locally. Queries are case-sensitive literal
-   substrings, at most 256 UTF-8 bytes, against the displayed safe name. Matching
-   spans the whole accepted bounded report before pagination; matching ancestors
-   stay visible. This is not remote, source-content or full-repository search.
-4. **Problems** lists the report's supplied diagnostic strings and links each to
-   its file. It never invents severity, compiler success or source locations.
-   Partial reports remain partial even when Problems is empty. Selecting a
-   diagnostic shows that string with its file metadata.
-5. Use **Previous page / Next page** for bounded local row windows, without a
-   network request. A selected file hidden by a filter remains explicitly selected
-   in the workspace. Clear the filter to return to ordinary tree browsing.
-6. Use the visible **Explorer**, **Outline** and **Problems** controls to hide/reopen supporting panes or reset their layout. Outline and Problems are mutually exclusive; reset restores Explorer and Outline. At narrow widths use the
-   visible pane switches; selection/report ownership stays in the same worker.
-   Pane geometry and focus are in-memory presentation, not URL or persistent state.
+1. A catalog with exactly one allowed project opens it automatically after admission.
+   Otherwise choose **Node** and **Project**, then **Refresh project**. Changing
+   context clears previous report and source ownership. Refresh replaces the loaded
+   report; it does not claim the filesystem remained unchanged since the last read.
+2. **Find files or symbols** searches file paths and declaration names in the loaded
+   report, case-insensitively. Results show their file context. Selecting a symbol
+   opens its file and declaration directly. Clear the query to return to Explorer.
+   A bounded report or partial inspection limits the search coverage; this is not
+   source-text search, resolved references or a full-repository index.
+3. Explorer shows the native file hierarchy. Selecting a text file requests its
+   bounded source through the admitted host/agent path. Source must match the
+   inspected content digest. Changed, unreadable, oversized and binary files receive
+   explicit states, rather than stale source with apparently valid line spans.
+4. The dominant **File** pane shows read-only source with line numbers. **Outline**
+   provides declaration navigation. Selecting a declaration highlights its lines
+   and opens the corresponding source window. Previous/Next lines traverses the
+   accepted document locally; no additional file read occurs for line paging.
+5. On phones, selecting a file or declaration reveals the File pane. **Back to files**
+   returns to Explorer. Pane switches still expose Outline and Problems. Selection
+   remains in the same model and survives presentation-only pane changes.
+6. Metadata, source-shape inventory and inspection details remain supporting
+   disclosures. Problems shows supplied inspection strings, without invented
+   compiler severity, test success or source locations.
 
-Timeout, denied and unavailable outcomes clear old report data. Retry is explicit.
-A generic Denied outcome cannot distinguish session expiry from operation denial;
-**Reload to check session** creates a fresh worker and resumes admission, without
-replaying Inspect. Fatal worker/ABI failure offers only fresh-instance recovery.
+The existing Explorer filename and Outline declaration filters remain literal,
+case-sensitive local filters. The global Find query is case-insensitive; all query
+inputs are limited to 256 UTF-8 bytes. No regular-expression evaluation is exposed.
 
-## Keyboard and lifecycle
+## Source and request ownership
 
-- Native Tab reaches context controls, filters, panes and view controls. Tree
-  Up/Down/Home/End moves focus, not selection; Enter/Space selects. Left/Right
-  follows visible hierarchy/expansion. Focus and selected fill are distinct.
-- Full names are available as safe text in a focused-row readout and selected-file
-  details; an ellipsis/hover title is not the only way to read them.
-- Focused separators expose their range and current size. Arrow keys resize,
-  Shift uses a larger step, Home/End uses bounds, and Enter hides/reopens the pane.
-  Visible controls and layout Reset provide non-drag alternatives.
-- Hiding a focused pane moves focus to a visible reopen control. Narrow-pane
-  switches preserve a valid last focus target or focus their heading. Changes in
-  report ownership discard row focus keys instead of selecting a reused integer ID.
-- Pagehide clears protected catalog/report DOM and terminates the worker. A
-  restored page or reload starts a new instance, rechecks the host session and has
-  no report. Fatal failure similarly clears protected content and stops dispatch.
-  No History API, deep links, localStorage, report cache or cross-tab state exists.
-- Filter inputs retain a bounded in-flight presentation draft while older worker
-  views arrive. A presentation-only sequence acknowledges the exact input; the
-  worker removes that envelope before Rust dispatch. Query semantics still live
-  solely in WASM. A changed report/entry, disabled input or teardown clears drafts.
+A source request carries its own request token, the accepted report token, configured
+node/project and report-local entry ID. Browser IDs are not native paths or authority.
+The host and agent independently enforce admission. The portable model accepts a
+source result only for its current report, file and pending request. A stale reply
+cannot replace a later file or a refreshed project's source.
 
-These contracts require actual browser acceptance in addition to pure-model tests.
-Keyboard and narrow-window checks are not a claim of full screen-reader/mobile
-certification.
+The accepted source document is bounded to 1 MiB. WASM projects at most 64 KiB and
+256 lines per source window, retaining exact UTF-8 slices. A very long line can
+continue across windows; the range text identifies continuation and the gutter
+uses a continuation marker. Columns use Unicode character indexes matching source
+spans. Selection highlights are line ranges, not a claim of semantic type resolution.
+The source digest establishes correspondence with inspected bytes; it is not a
+Git commit, atomic repository snapshot or publisher signature.
 
-## Implementation ownership
+The generated main-thread source primitive renders only safe text nodes and line
+numbers. It does not read files, choose the document, paginate source, interpret
+markup or maintain application request state. Identical source bindings preserve
+DOM nodes and horizontal scroll. Changed windows reveal their target lines.
 
-| Layer | Implemented responsibility |
+Cancellation stops this browser's ownership and aborts local transport where
+possible; it does not prove agent task cancellation. Source errors retain the
+inspection context with an actionable status. Report/context changes invalidate
+accepted source. Session reset, pagehide and fatal recovery synchronously clear
+protected source and metadata DOM before starting a new worker.
+
+## Keyboard, focus and responsive layout
+
+Native Tab reaches context controls, search, panes, source windows and controls.
+Tree Up/Down/Home/End changes focus; Enter/Space selects. Left/Right follows the
+visible hierarchy. Focus and selection have separate visual treatments. Complete
+names remain available as safe text in focused-row readouts and selected details.
+
+Separators expose their range and size. Arrow keys resize, Shift uses a larger
+step, Home/End reaches bounds and Enter hides/reopens a supporting pane. Visible
+controls and Reset provide alternatives to dragging. Outline and Problems are
+mutually exclusive in the focused layout. Narrow controls and rows use the validated
+44 px touch token; this is not a claim of complete accessibility certification.
+
+The model supplies an opaque pane reveal revision when an accepted action should
+reveal a result. The renderer compares it to the previously consumed revision.
+Repeated background views therefore cannot undo a subsequent manual pane switch,
+while repeating a file selection can deliberately reopen the same File pane.
+
+Report/entry context changes discard obsolete row focus keys. Filter inputs retain
+bounded in-flight presentation drafts until the matching worker acknowledgment;
+an old view cannot erase newer typing. A new context, disabled input or teardown
+clears the draft. No History API, deep links, localStorage, persistent report cache
+or cross-tab synchronization exists.
+
+## Authoring and runtime boundaries
+
+| Layer | Responsibility |
 | --- | --- |
-| `generate/application.rs` and `ui/theme.yaml` | Declarative composition, labels/actions, bounded geometry and visual tokens; no authored HTML/CSS/JS |
-| `generate/component.rs` and generic emitters | Reusable Screen, Toolbar, Filter, PaneLayout/Pane and Reload primitives; semantic DOM, geometry/focus, lifecycle and message plumbing |
-| `forge-ide-ui::model` and private `model::projection` | Context, accepted report, selection/filter/diagnostic/page policy, bounded typed views and stale-event guards |
-| Generated worker + `src/wasm.rs` | Real ABI 2 instance, bounded codecs, prepared effect execution and transport abort; no second business reducer |
-| Existing native host/agent | Session/Origin/CSRF, configured aliases, mTLS and separate operation/project authorization, canonical shared bridge |
+| `generate/application.rs`, `ui/theme.yaml` | Typed component composition, transport declarations and bounded visual tokens |
+| Component/generator primitives | Semantic Source, Region and PaneLink components, safe DOM, focus, geometry and lifecycle |
+| `forge-ide-ui` model/projection | Context, report/search/selection, source acceptance, source windows and typed presentation |
+| Generated worker and `src/wasm.rs` | Real ABI 3, bounded codecs, declared effects and transport cleanup |
+| Native host/agent | Session/Origin/CSRF, configured aliases, mTLS, independent admission and bounded source reads |
 
-C01–C09 are design composition names, not nine public Rust classes or crates.
-The existing public asset config/registrar/factory and provider integration is
-retained. The default WASM dependency profile still excludes native filesystem,
-parser, TLS and server runtimes. A non-IDE component fixture exercises the same
-emitter; extending a generator primitive is not permission to hide app-specific
-JS in it.
-
-## Accepted report guards and bounds
-
-The model retains the accepted `RequestToken { session_epoch, revision, request_id }`.
-Every report-local action includes it: select, expand/collapse, filter, Problems,
-and both pagination directions. Declaration/outline actions also carry the current
-entry ID. Missing or old keys cannot mutate a new report even when it reuses ID 0.
-Context changes, a new inspection, cancellation or teardown invalidate ownership.
-The key is context, not authentication and not a stable external/deep-link ID.
-
-Reports retain existing 4096-entry, 16384-declaration, 2 MiB aggregate-text and 8 MiB
-codec limits. Each projected list uses at most 256 rows and a conservative encoded
-byte budget; large rows can yield fewer than 256. Previous/Next advances by the
-actual displayed window. There are no silently inaccessible rows behind a fixed
-first-page cutoff; filters run before paging. No diagnostics are interpreted as
-commands or markup. Native names remain explicit encoded values when necessary.
+Source is a reusable read-only display component, not a JavaScript editor widget.
+Region supplies a named visibility group. PaneLink is presentation-only navigation
+inside the declared layout. No handwritten application HTML, CSS or JS is introduced.
+The default WASM dependency profile still excludes native filesystem/parser/TLS/server
+runtimes. Non-IDE component fixtures exercise the same primitives.
 
 ## Compatibility and verification
 
-**Local ABI 2 is a coordinated experimental API change.** Existing public `UiEvent`
-local variants now require report context (and entry context where applicable);
-new view bindings/actions support filters and pane contents. Source callers and
-serialized local-event producers must migrate. ABI 1 workers/WASM are rejected,
-not silently mixed. Replace the five generated assets and their hash manifest
-atomically; do not pair an old worker or main script with new WASM.
+**Local ABI 3 requires an atomic generated asset/WASM deployment.** It adds guarded
+source events/effects, source-window bindings, global Find actions and pane reveal
+metadata. Older ABI 2 workers/WASM cannot be mixed with this bundle. Source callers
+and serialized event producers must use the matching contracts.
 
-The browser/native protocol version remains 1: catalog, inspection request/report,
-agent headers and `POST /forge/v1/dispatch` are unchanged. Core Task/IoClient,
-provider/bootstrap and shared bridge contracts are unchanged. This statement does
-**not** claim the public UI event/view API is source-compatible.
+The browser/native protocol remains version 1 with a new typed source command on
+the existing `POST /forge/v1/dispatch` gateway. Core Task/IoClient, bootstrap/provider
+and shared bridge ownership remain intact. This is not a claim of source-level
+compatibility for exhaustive Rust enum users or direct view constructors.
 
 ```sh
-make ui-check   # deterministic generation + real ABI 2 + generated-worker faults
-make ci         # native/profile/strict gates and ui-check
+make ui-check   # deterministic assets, actual WASM, worker and presentation checks
+make ci         # native/profile/dependency and strict checks plus ui-check
+make ui-qa      # separate sandboxed Chrome and real-agent acceptance
 ```
 
-The hosted browser workflow uses standard installed Chrome with its sandbox
-**enabled**. Its real-agent path and separately controlled fault path must both
-pass, and desktop/narrow screenshots must be reviewed before main promotion.
-Native, Node and mocked-fault checks never substitute for that real-browser gate.
-The additional generated-main input harness uses a minimal simulated DOM boundary
-to prove draft/ack ordering, not browser layout or real network behavior.
-No deployment, operational credentials or user trust-store changes are needed.
+Pure model, native and Node checks are separate from real-browser acceptance.
+Review fresh desktop/narrow screenshots and exercise source reads, Find, keyboard,
+line paging, changed-source errors and lifecycle clearing. The suite's real-agent
+path and controlled fault probes retain distinct evidence. A screenshot alone does
+not establish keyboard, screen-reader or admission correctness.
 
-## Workbench presentation refinement
+## Proposed, unimplemented editor-host lifecycle
 
-The selected declaration appears directly below the selected entry heading, before
-metadata and the mirrored declaration list. Metadata uses a compact, wrapping fact
-grid. Explorer, Outline and Problems keep filters and paging outside their scrolling
-tree. Supporting-pane full-name readouts reserve stable space so focusing a row
-cannot move its pointer target before click. Same-order list projections do not
-move existing row nodes, preserving independently scrolled trees. Very short panes retain an outer
-scroll fallback so controls remain reachable.
-Cancel is shown only while this browser owns a pending wait. A catalog with no
-allowed project says so beside the disabled Inspect action.
+An actual JavaScript editor can fit the same ownership boundary, but the current
+source component is read-only. Editing and saving require separate contracts:
 
-These are generated presentation changes, not source editing or a new search,
-transport or diagnostics capability. Partial/cancelled states use a labeled warning
-tone; failures use a labeled error tone. This indicates request/report status, never
-inferred compiler severity. Primary Inspect has a separate, contrasting keyboard
-focus ring. Supporting text and disabled controls remain legible without competing
-with the inspected entry.
+- WASM would own document/base revision, dirty/conflict/save policy and sequenced
+  edit acknowledgments. It would issue typed display/update/close requests and
+  validate callbacks from the current editor instance.
+- A reusable generated main-thread host would mount/update/dispose the widget and
+  own DOM, caret, focus, composition and a bounded presentation buffer. It would
+  neither fetch source nor decide when a document is saved. Programmatic updates
+  must not echo back as new user edits.
+- Only WASM could prepare a future write effect. Host and agent would independently
+  authorize it and enforce the expected source revision. A widget callback or
+  optimistic label cannot prove successful publication.
+- Context loss would dispose editor content/listeners, reject late callbacks and
+  restore focus appropriately. Hiding a pane alone must not discard unsaved work.
+  Pagehide and fatal recovery would clear protected editor content synchronously.
 
-Public component declarations now include `heading`, `caption`, `context`, `primary`
-and `facts` macro forms. They share the existing audited emitters with other
-applications. `TextStyle` and `ButtonEmphasis` are bounded Rust enums, not arbitrary
-CSS class strings. Existing text/button macros keep their meaning. Direct Rust
-`Component::Text` and `Component::Button` constructors must supply the new `style`
-and `emphasis` fields; this is not Rust source compatibility for those constructors.
-
-`TextBinding::tone` is additive serialized ABI 2 view metadata. The current renderer
-accepts only the four declared values and defaults missing/unknown values to neutral;
-older renderers ignore this field. Rust consumers constructing `TextBinding` must
-supply `Tone`. No input event, request-token guard, WASM memory export or HTTP schema
-changes. Deploy all generated assets and WASM atomically as before. The browser gate
-covers the stylesheet cascade, primary keyboard focus, selected-declaration placement,
-scroll ownership, short-pane control access and state changes. Static/model tests are
-not a substitute for that real-browser evidence.
-
-## WASM orchestration and a future editor host
-
-### Implemented display contract
-
-The orchestrator is the **Rust/WASM model running in the browser worker**, not a
-JavaScript controller or the remote agent. The current flow is:
-
-1. Generated main-thread controls send a typed `UiEvent` to the worker. The worker
-   adds the clock and passes bounded `Input` bytes through the WASM ABI.
-2. `UiModel::dispatch` applies application policy and produces
-   `Output { view: ViewModel, effects, ... }`. The generated worker posts the view
-   to the main thread and executes only declared typed effects. Transport results
-   return through WASM before they can change the accepted view.
-3. Generated main-thread primitives display the `ViewModel` bindings: texts,
-   choices, buttons, inputs, lists, tables, visibility and pane context. DOM,
-   focus, scrolling, pane geometry and bounded in-flight input drafts stay here;
-   selected content, accepted revisions and request policy stay in WASM.
-
-See the actual [protocol](../forge-ide-ui/src/protocol.rs),
-[view bindings](../forge-ide-ui/src/view.rs),
-[model](../forge-ide-ui/src/model.rs), [WASM ABI](src/wasm.rs) and
-[generated adapters](src/generate/javascript.rs).
-`ReportView`/`EntryView` contain inspection metadata and declarations, **not source
-bodies**. There is currently no source read/write operation, editor binding or
-editor lifecycle event. Selecting a file therefore displays its structural
-overview, not an editable document.
-
-### Proposed, unimplemented editor-host lifecycle
-
-A JavaScript editor widget can fit this boundary: WASM requests its display through
-a future typed view binding, and a reusable generated main-thread host mounts it.
-The following is a design contract, **not an existing API or a runtime addition**:
-
-- **Mount:** after accepting an authorized source-read result, WASM projects a
-  bounded editor binding identifying the mount region, document/context, editor
-  instance generation, source revision, text and permitted editing mode. A typed
-  component declaration supplies the mount region. The host creates or updates
-  the widget idempotently and reports mount success/failure as a typed event.
-  Neither the widget nor the main thread fetches source or chooses the document.
-- **Change:** the widget emits bounded, sequenced text-change events with the
-  document identity, instance generation and base revision. WASM checks ownership
-  and ordering, accepts or rejects edits, owns dirty/conflict/save policy and
-  projects the acknowledged revision. The widget may retain a presentation buffer,
-  caret, selection and composition state; an older acknowledgment must not erase
-  newer local input. Programmatic updates must not echo as fresh user edits.
-- **Save:** only WASM may prepare a future typed write effect. Generated worker
-  I/O uses the admitted gateway; the host/agent independently authorize the
-  operation/project and enforce the expected source revision. A saved state
-  requires an accepted write result, not a widget callback or an optimistic label.
-- **Unmount:** WASM withdraws/replaces the binding when document ownership ends.
-  The host disposes listeners/widget buffers and returns focus appropriately;
-  late callbacks/results from that instance cannot affect a new document. A
-  hidden pane alone does not decide document closure or discard unsaved changes.
-  Pagehide, session reset and fatal recovery immediately clear protected editor
-  content and dispose the widget even if WASM cannot respond. Local cancellation
-  does not establish whether a remote write completed.
-
-Source read/write DTOs, revision/conflict semantics, bounds, editor bindings and
-events, the generated host primitive and their ABI compatibility are all **future
-work**. They require model/codec tests and real-browser lifecycle, composition,
-focus and stale-message checks before delivery. This refinement adds neither a
-fake editor nor placeholder APIs. Application UI remains typed Rust/YAML with
-generated assets; integrating a widget does not authorize a JavaScript business
-reducer, arbitrary backend routes or handwritten application HTML/CSS/JS.
-
-
-## Ergonomic layout declarations
-
-The `disclosure` macro emits a native `details`/`summary` control with escaped labels
-and normal keyboard behavior. Its contents still come from accepted WASM view
-bindings and are cleared on pagehide/fatal recovery, even when collapsed. Collapsing
-is local presentation and does not issue an inspection. No application policy or
-source-body data is inferred from DOM state.
-
-The `focused_layout` macro declares a single-secondary presentation policy: the
-leading pane and main work area remain independent while trailing and bottom tools
-are mutually exclusive. Initial/reset layout opens the trailing tool and closes
-the bottom tool. Existing `layout` retains independent supporting panes. Desktop
-tool switches toggle visibility, narrow switches display one pane, and Reset and
-keyboard separators remain available. The policy changes only geometry and focus;
-accepted project/file/declaration state remains in WASM.
-
-`Component::Disclosure` is a new public enum variant and `Component::PaneLayout`
-now requires `single_secondary` for direct Rust constructors. Exhaustive consumers
-must migrate. `RowView::icon` is additive ABI 2 presentation metadata with bounded `RowIcon`
-values: Symbol, Document and Folder. The generic renderer falls back to Symbol for
-missing/unknown values; older renderers ignore the field. Direct Rust RowView
-constructors must supply the icon. Only Rust chooses the icon; domain kind labels
-are never interpreted as generator style instructions. No UI event, memory export
-or HTTP schema was added or changed. Generate the matching assets/WASM atomically as before.
+Writes, revision conflicts, editor widgets and edit/composition/save lifecycle
+remain unimplemented. They need explicit model/codec, admission and real-browser
+verification before being presented as working capabilities.

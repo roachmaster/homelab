@@ -15,8 +15,8 @@ codec, not internal state. The same model runs in native unit tests and real
 
 - Rust owns node/project selections, request epochs/revisions/IDs, active request,
   deadline acceptance, report validation, tree expansion, bounded name filters,
-  entry/declaration/diagnostic selection, outline/details and summary counts. One active inspection; explicit retry creates a new request.
-- Generated worker glue performs prepared `Resume`, `Pair`, `Inspect` and `Abort`
+  entry/declaration/diagnostic selection, project search, source document/window acceptance, outline/details and summary counts. One active inspection or selected-file source request; explicit retry creates a new request.
+- Generated worker glue performs prepared `Resume`, `Pair`, `Inspect`, `Source` and `Abort`
   effects. It retains CSRF only as transport metadata. A pairing code is emitted
   once as an effect and is not stored in the model or view; this is not a claim
   of cryptographic memory erasure in Rust or JavaScript.
@@ -27,7 +27,7 @@ codec, not internal state. The same model runs in native unit tests and real
   browser request IDs and this model are **not authentication or authority**.
 
 `Resume` or `Pair` starts a matching request. Only matching `Paired` initializes
-an authorized catalog. Inspection effects carry configured node identity, alias,
+an authorized catalog. Exactly one allowed project across that catalog opens automatically; multiple choices remain explicit. Inspection effects carry configured node identity, alias,
 version, expiry and a `{session_epoch, revision, request_id}` token. Selection
 changes or Cancel invalidate ownership before emitting local abort; delayed
 results are ignored. Cancellation/expiry means local waiting stopped, not that
@@ -38,7 +38,7 @@ native parsing or remote I/O was preempted. Failed effects never auto-retry.
 The host projects the existing inspection report into `ReportView`: flat preorder
 entries and per-file declaration forests, numeric IDs, tagged native names,
 line counts, diagnostics, spans and implementation labels. No file body or full
-expression AST is present. Labels/type spellings/diagnostics can expose project
+expression AST is present in the report; a separate admitted source read supplies exact UTF-8 text. Labels/type spellings/diagnostics can expose project
 metadata; this is not secret redaction. Non-UTF-8 names are explicit hexadecimal
 labels, not lossy replacement strings; IDs, not labels, address view actions.
 
@@ -48,12 +48,12 @@ unreadable/too-large/unparsed-Rust entries prove incompleteness. It accepts at
 most 4,096 entries, 16,384 declarations, hierarchy depth 64, 4 KiB per text/name,
 2 MiB aggregate report text and 16 diagnostics per entry. An unreadable root is
 represented honestly as a one-entry incomplete report. Catalogs have at most
-32 nodes and 128 aliases per node. Explorer, Outline/central declarations and
+32 nodes and 128 aliases per node. Explorer, Outline, project Find,
 Problems and Source shape use local Previous/Next windows of at most 256 rows, reduced when their
-conservative JSON cost reaches 384 KiB per list. Range summaries disclose the
-window; all accepted rows remain available by pagination. Five list projections
-(including the central/Outline copy) total at most 1.875 MiB, reserving room for the
-catalog, full selected safe ancestor path, diagnostics and view/action overhead.
+conservative JSON cost reaches 192 KiB per list. Range summaries disclose the
+window; all accepted rows remain available by pagination. Five populated list projections
+(the center no longer duplicates Outline) total at most 0.9375 MiB, reserving room for the
+catalog, full selected safe ancestor path, diagnostics, bounded source window and view/action overhead.
 No pagination request leaves the model. These are deliberate UI limits, not
 silent truncation of an otherwise claimed complete report.
 
@@ -73,7 +73,7 @@ also require `entry` matching the currently selected file. Reused integer IDs
 cannot identify a new report; stale context is a no-op, not repaired or retried.
 Invalid current IDs and oversized current queries return bounded input errors
 without changing state. Starting Inspect, changing context or cancelling clears
-accepted content, keys, filters and selections. No report or selection is persisted
+accepted content, keys, filters and selections. Cancelling a source read retains the accepted inspection. No report or selection is persisted
 in URLs, history or browser storage. Generic operation denial stays in Workbench;
 it does not imply session expiry. Explicit Reload rechecks the host session.
 
@@ -89,7 +89,7 @@ filesystem access.
 
 Problems is an index of supplied strings, keyed by report, entry and diagnostic
 index. Selecting one exposes its associated entry and exact supplied text, clears
-the selected declaration, and performs no source fetch. Rows include parent/name
+the selected declaration, and opens its source when it is a readable file. Rows include parent/name
 context plus report-local entry ID to disambiguate repeated names; selected details
 show the complete safe ancestor path. No compiler severity, source location or
 signature is inferred. No accepted report means an unavailable count, not zero;
@@ -99,14 +99,46 @@ from an inspected text file that emitted no declarations.
 
 `RowAction`, `FilterAction` and `InputBinding` are typed projections: generated
 controls forward the exact accepted context rather than deriving IDs from a DOM
-selection. All existing remote effects and the eight `Phase` values are unchanged.
+selection. Source requests have their own pending/document state; the eight inspection `Phase` values are unchanged.
 The internal model uses enums/structs and `BoundedQuery`, never JSON value state.
+
+## Find and read source
+
+`SetProjectQuery` searches file paths and Rust declaration names across the whole
+accepted report using Unicode lowercase substring matching, with a 256-byte
+query limit. Whitespace around the query is ignored. Matching happens before
+bounded local paging. Results include their safe paths and declaration lines;
+extreme paths are explicitly abbreviated in rows and remain complete in selected
+metadata. `SelectSearchResult` is report-keyed and explicitly carries the target
+file/declaration, so it can navigate across files without weakening the existing
+file-local Outline guard. Search uses the loaded inspection, not source-content
+search, resolved references or uninspected files.
+
+Selecting a readable text file emits `Source` addressed by its accepted report
+token and entry ID. There is no browser-supplied native path. The host/agent check
+permissions and the inspection's content digest before returning the source.
+The model independently checks request/report/file identity, destination context,
+deadline, source size (1 MiB), NUL rejection and lowercase SHA-256 shape. It does
+not implement cryptographic digest verification; that belongs to the native source
+operation. Changing file aborts local ownership and clears prior text; stale replies
+cannot repaint a different file. Selecting a declaration in an already accepted
+file reuses the document without another read. Source failure keeps the inspection
+and offers file-selection retry; changed content requires refreshing the project.
+
+One accepted document is held in memory. Exact UTF-8 windows of at most 64 KiB
+and 256 lines are projected into the center pane. Previous/Next source windows
+are report/file guarded and never fetch. Very long lines continue at a disclosed
+zero-based Unicode character column; concatenating all windows reconstructs the
+exact document. Declaration selection chooses its containing window and projects
+its real source span. Generated presentation primitives add line numbers/highlights
+and use text nodes; they neither infer source nor choose files. `PaneBinding.reveal`
+is a monotonically changing navigation marker: the renderer reveals the selected
+work or Explorer on narrow displays without becoming a domain-state controller.
 
 ## ABI and verification
 
-The local WASM ABI is **2** because report-keyed local intents and workbench view
-bindings are a coordinated breaking change. Deploy the generated scripts,
-HTML/CSS and WASM together as one verified bundle; older ABI 1 workers fail closed.
+The local WASM ABI is **3** because source effects, source-window bindings, project search and pane navigation are a coordinated change. Deploy the generated scripts,
+HTML/CSS and WASM together as one verified bundle; older ABI 1/2 workers fail closed.
 The HTTP catalog/report protocol remains version 1.
 
 Worker order: `abi_version()` → `reserve_input(len)` → copy JSON bytes into the
@@ -140,11 +172,11 @@ journeys belong to the composition's separate integration checks.
 
 ## Source shape
 
-The generated main pane presents a source inventory, not a subjective complexity
+The optional Source shape tool presents a source inventory, not a subjective complexity
 score. The portable Rust model derives it entirely from the accepted report;
 no new endpoint, filesystem access, bridge contract or main-thread source analysis is
 introduced. Observed `Cargo.toml` locations establish unverified directory groups.
-Manifests are not read: package identity, virtual workspaces, target membership,
+Manifest content is not consumed by this analysis: package identity, virtual workspaces, target membership,
 features and conditional compilation remain unknown. Sources with no observed
 manifest ancestor appear in an explicitly unassigned group.
 
@@ -161,8 +193,8 @@ and impl generic parameters mean even those header matches are tentative.
 
 All shape rows use existing `SelectEntry` actions with the accepted report token.
 `MoreShape` and `PreviousShape` are additive ABI 2 local intents. The independent
-page is bounded by the same 256-row/384-KiB budget as other lists, has reversible
-history, emits no effects, ignores stale report tokens and clears with the report.
+page is bounded by the same 256-row/192-KiB budget as other lists, has reversible
+history, emits no pagination effects, ignores stale report tokens and clears with the report. Selecting a readable file prepares its source read.
 The additive bindings require rebuilding and deploying the generated assets and
 WASM atomically; HTTP protocol version 1 is unchanged. Explorer name filters do
 not restrict this accepted-report inventory.

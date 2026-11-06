@@ -95,9 +95,14 @@ fn report() -> ReportView {
 }
 fn inspect(m: &mut UiModel) -> PreparedInspection {
     let o = event(m, UiEvent::Inspect {});
-    let UiEffect::Inspect { request } = &o.effects[0] else {
-        panic!("inspect")
-    };
+    let request = o
+        .effects
+        .iter()
+        .find_map(|e| match e {
+            UiEffect::Inspect { request } => Some(request),
+            _ => None,
+        })
+        .expect("inspect");
     request.clone()
 }
 fn result(p: &PreparedInspection, r: ReportView) -> UiEvent {
@@ -118,6 +123,328 @@ fn status(m: &UiModel) -> String {
         .find(|t| t.id == "status")
         .unwrap()
         .text
+}
+
+#[test]
+fn sole_project_opens_after_session_even_when_first_node_has_no_projects() {
+    let mut m = UiModel::default();
+    let resume = event(&mut m, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &resume.effects[0] else {
+        panic!()
+    };
+    let mut c = catalog();
+    c.nodes[0].projects.truncate(1);
+    let mut empty = c.nodes[0].clone();
+    empty.key = "empty".into();
+    empty.projects.clear();
+    c.nodes.insert(0, empty);
+    let opened = event(
+        &mut m,
+        UiEvent::Paired {
+            request_id: request_id.clone(),
+            catalog: c,
+        },
+    );
+    assert_eq!(opened.effects.len(), 1);
+    let UiEffect::Inspect { request } = &opened.effects[0] else {
+        panic!()
+    };
+    assert_eq!(request.node_key, "lab");
+    assert_eq!(request.project, "workspace");
+    assert_eq!(m.phase(), Phase::Loading);
+    assert!(m
+        .dispatch(Input {
+            now_ms: 100,
+            event: UiEvent::Inspect {}
+        })
+        .is_err());
+    assert_eq!(
+        connected().phase(),
+        Phase::Idle,
+        "multiple choices remain explicit"
+    );
+}
+
+fn source_result(request: &PreparedSource, text: String) -> UiEvent {
+    UiEvent::SourceResult {
+        result: SourceResultEvent {
+            protocol_version: PROTOCOL_VERSION,
+            token: request.token.clone(),
+            report: request.report.clone(),
+            node_key: request.node_key.clone(),
+            project: request.project.clone(),
+            entry: request.entry,
+            outcome: SourceOutcome::Source {
+                document: SourceDocument {
+                    text,
+                    sha256: "a".repeat(64),
+                },
+            },
+        },
+    }
+}
+fn source_request(output: &Output) -> PreparedSource {
+    output
+        .effects
+        .iter()
+        .find_map(|e| {
+            if let UiEffect::Source { request } = e {
+                Some(request.clone())
+            } else {
+                None
+            }
+        })
+        .expect("prepared source")
+}
+
+#[test]
+fn project_search_crosses_files_and_pages_with_report_guarded_selection() {
+    let mut m = connected();
+    let p = inspect(&mut m);
+    let mut r = report();
+    let mut other = r.entries[1].clone();
+    other.id = 2;
+    other.name = NativeName::Utf8("Other.rs".into());
+    other.declarations = (0..300)
+        .map(|id| declaration(id, None, DeclarationKind::Function, &format!("Run{id}")))
+        .collect();
+    r.entries.push(other);
+    r.files = 2;
+    event(&mut m, result(&p, r));
+    let searched = event(
+        &mut m,
+        UiEvent::SetProjectQuery {
+            report: p.token.clone(),
+            value: "RUN".into(),
+        },
+    );
+    assert!(searched.effects.is_empty());
+    let rows = rows_named(&m, "search-results");
+    assert!(!rows.is_empty() && rows.len() <= 256);
+    assert!(rows[1].secondary.contains("project / Other.rs"));
+    assert!(
+        !m.view()
+            .visibility
+            .iter()
+            .find(|v| v.id == "files-panel")
+            .unwrap()
+            .visible
+    );
+    let all = collect_paged_rows(
+        &mut m,
+        "search-results",
+        "search-summary",
+        "search-more",
+        "search-previous",
+        301,
+    );
+    assert_eq!(
+        all.iter().map(|r| r.label.clone()).collect::<Vec<_>>(),
+        std::iter::once("run".to_string())
+            .chain((0..300).map(|id| format!("Run{id}")))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(rows_named(&m, "search-results"), rows);
+    let opened = event(&mut m, action_event(&rows[1].action));
+    let source = source_request(&opened);
+    assert_eq!(source.entry, 2);
+    assert_eq!(opened.view.sources[0].context.declaration, Some(0));
+    assert!(opened
+        .view
+        .panes
+        .iter()
+        .find(|p| p.id == "workspace-panel")
+        .unwrap()
+        .reveal
+        .is_some());
+    let current = m.view();
+    assert!(m
+        .dispatch(Input {
+            now_ms: 100,
+            event: UiEvent::SetProjectQuery {
+                report: p.token.clone(),
+                value: "é".repeat(129)
+            }
+        })
+        .is_err());
+    assert_eq!(m.view(), current);
+    let fresh = inspect(&mut m);
+    event(&mut m, result(&fresh, report()));
+    let current = m.view();
+    assert!(event(&mut m, action_event(&rows[1].action))
+        .effects
+        .is_empty());
+    assert_eq!(m.view(), current);
+}
+
+#[test]
+fn source_identity_rejects_stale_files_and_refresh_then_reuses_accepted_document() {
+    let mut m = connected();
+    let p = inspect(&mut m);
+    let mut r = report();
+    let mut second = r.entries[1].clone();
+    second.id = 2;
+    second.name = NativeName::Utf8("other.rs".into());
+    r.entries.push(second);
+    r.files = 2;
+    event(&mut m, result(&p, r));
+    let first = source_request(&event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 1,
+        },
+    ));
+    let changed = event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 2,
+        },
+    );
+    assert!(changed
+        .effects
+        .iter()
+        .any(|e| matches!(e, UiEffect::Abort { token } if *token == first.token)));
+    let second = source_request(&changed);
+    assert!(event(&mut m, source_result(&first, "wrong file".into()))
+        .view
+        .sources[0]
+        .text
+        .is_empty());
+    let exact = "fn run() {\n    println!(\"<script>界</script>\");\n}\n";
+    let ready = event(&mut m, source_result(&second, exact.into()));
+    assert_eq!(ready.view.sources[0].text, exact);
+    assert!(event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 2
+        }
+    )
+    .effects
+    .is_empty());
+    let symbol = event(
+        &mut m,
+        UiEvent::SelectDeclaration {
+            report: p.token.clone(),
+            entry: 2,
+            value: 1,
+        },
+    );
+    assert!(symbol.effects.is_empty());
+    assert!(symbol.view.sources[0].target_span.is_some());
+    let fresh = inspect(&mut m);
+    event(&mut m, result(&fresh, report()));
+    let before = m.view();
+    event(&mut m, source_result(&second, exact.into()));
+    assert_eq!(m.view(), before);
+}
+
+#[test]
+fn source_pages_are_exact_bounded_and_guarded_and_failures_keep_the_report() {
+    let mut m = connected();
+    let p = inspect(&mut m);
+    let mut r = report();
+    r.entries[1].lines = Some(602);
+    r.entries[1].declarations[1].span = SourceSpan {
+        start: Position {
+            line: 600,
+            column: 0,
+        },
+        end: Position {
+            line: 601,
+            column: 1,
+        },
+    };
+    event(&mut m, result(&p, r));
+    let unchanged = m.view();
+    assert_eq!(
+        m.dispatch(Input {
+            now_ms: 9_007_199_254_740_991,
+            event: UiEvent::SelectEntry {
+                report: p.token.clone(),
+                value: 1
+            }
+        }),
+        Err(UiError::InvalidClock)
+    );
+    assert_eq!(m.view(), unchanged);
+    let request = source_request(&event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 1,
+        },
+    ));
+    let text = format!("{}tail\n", "line界\n".repeat(600));
+    let first = event(&mut m, source_result(&request, text.clone()));
+    assert_eq!(first.view.sources[0].first_line, 1);
+    let mut reconstructed = first.view.sources[0].text.clone();
+    while !m
+        .view()
+        .buttons
+        .iter()
+        .find(|b| b.id == "source-more")
+        .unwrap()
+        .disabled
+    {
+        let next = event(
+            &mut m,
+            UiEvent::MoreSource {
+                report: p.token.clone(),
+                entry: 1,
+            },
+        );
+        reconstructed.push_str(&next.view.sources[0].text);
+        assert!(serde_json::to_vec(&next).unwrap().len() < MAX_MESSAGE_BYTES);
+    }
+    assert_eq!(reconstructed, text);
+    event(
+        &mut m,
+        UiEvent::SelectDeclaration {
+            report: p.token.clone(),
+            entry: 1,
+            value: 1,
+        },
+    );
+    assert!(m.view().sources[0].first_line > 256);
+    event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 0,
+        },
+    );
+    let retried = source_request(&event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 1,
+        },
+    ));
+    let mut mismatched = match source_result(&retried, "bad".into()) {
+        UiEvent::SourceResult { result } => result,
+        _ => unreachable!(),
+    };
+    mismatched.entry = 0;
+    let rejected = event(&mut m, UiEvent::SourceResult { result: mismatched });
+    assert!(rejected.view.sources[0].text.is_empty());
+    assert_eq!(m.phase(), Phase::Ready);
+    assert!(text_named(&m, "source-status").contains("mismatched"));
+    let retry = source_request(&event(
+        &mut m,
+        UiEvent::SelectEntry {
+            report: p.token.clone(),
+            value: 1,
+        },
+    ));
+    event(
+        &mut m,
+        source_result(&retry, "x".repeat(MAX_SOURCE_BYTES + 1)),
+    );
+    assert!(m.view().sources[0].text.is_empty());
+    assert!(text_named(&m, "source-status").contains("oversized"));
 }
 #[test]
 fn session_bootstrap_and_network_failure_do_not_request_a_pairing_code() {
@@ -558,57 +885,39 @@ fn tree_and_outline_render_in_bounded_pages_without_dropping_the_report() {
         .collect();
     let mut m = connected();
     let p = inspect(&mut m);
-    let first = event(&mut m, result(&p, r));
-    assert_eq!(first.view.lists[0].rows.len(), 256);
-    assert!(
-        !first
-            .view
-            .buttons
-            .iter()
-            .find(|b| b.id == "tree-more")
-            .unwrap()
-            .disabled
-    );
-    let expanded = event(
+    event(&mut m, result(&p, r));
+    let tree = collect_paged_rows(
         &mut m,
-        UiEvent::MoreTree {
-            report: p.token.clone(),
-        },
+        "files",
+        "file-filter-summary",
+        "tree-more",
+        "tree-previous",
+        300,
     );
-    assert_eq!(expanded.view.lists[0].rows.len(), 44);
-    let selected = event(
+    assert_eq!(
+        tree.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        (0..300).map(|id| format!("entry-{id}")).collect::<Vec<_>>()
+    );
+    event(
         &mut m,
         UiEvent::SelectEntry {
             report: p.token.clone(),
             value: 1,
         },
     );
-    assert_eq!(selected.view.lists[1].rows.len(), 256);
-    assert!(
-        !selected
-            .view
-            .buttons
-            .iter()
-            .find(|b| b.id == "outline-more")
-            .unwrap()
-            .disabled
-    );
-    let expanded = event(
+    let outline = collect_paged_rows(
         &mut m,
-        UiEvent::MoreOutline {
-            report: p.token.clone(),
-            entry: 1,
-        },
+        "outline",
+        "symbol-filter-summary",
+        "outline-more",
+        "outline-previous",
+        300,
     );
-    assert_eq!(expanded.view.lists[1].rows.len(), 44);
-    assert!(
-        expanded
-            .view
-            .buttons
-            .iter()
-            .find(|b| b.id == "outline-more")
-            .unwrap()
-            .disabled
+    assert_eq!(
+        outline.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        (0..300)
+            .map(|id| format!("declaration-1-{id}"))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -824,6 +1133,76 @@ fn rows_named(m: &UiModel, id: &str) -> Vec<view::RowView> {
 }
 fn action_event(action: &view::RowAction) -> UiEvent {
     serde_json::from_str(&serde_json::to_string(action).unwrap()).unwrap()
+}
+/// Exercise the public paging controls without assuming which limit (row count
+/// or serialized bytes) ends a page. Prove complete, disjoint coverage, exact
+/// range captions, effect-free transitions and reversible cursor history.
+fn collect_paged_rows(
+    m: &mut UiModel,
+    list: &str,
+    summary: &str,
+    more: &str,
+    previous: &str,
+    expected: usize,
+) -> Vec<view::RowView> {
+    let mut all = Vec::new();
+    let mut pages = Vec::new();
+    loop {
+        let rows = rows_named(m, list);
+        assert!(!rows.is_empty() && rows.len() <= 256);
+        assert!(serde_json::to_vec(&rows).unwrap().len() <= 192 * 1024);
+        assert!(text_named(m, summary).starts_with(&format!(
+            "Rows {}–{} of {expected}",
+            all.len() + 1,
+            all.len() + rows.len()
+        )));
+        all.extend(rows.clone());
+        pages.push(rows);
+        assert!(
+            all.len() <= expected,
+            "paging must progress without repeating rows"
+        );
+        let button = m.view().buttons.into_iter().find(|b| b.id == more).unwrap();
+        if button.disabled {
+            break;
+        }
+        assert!(event(m, action_event(button.action.as_ref().unwrap()))
+            .effects
+            .is_empty());
+    }
+    assert_eq!(all.len(), expected);
+    let unique = all
+        .iter()
+        .map(|r| &r.id)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        unique.len(),
+        expected,
+        "no duplicate or omitted rows across windows"
+    );
+    assert!(pages.len() > 1, "fixture must exercise real pagination");
+    for page in pages[..pages.len() - 1].iter().rev() {
+        let button = m
+            .view()
+            .buttons
+            .into_iter()
+            .find(|b| b.id == previous)
+            .unwrap();
+        assert!(!button.disabled);
+        assert!(event(m, action_event(button.action.as_ref().unwrap()))
+            .effects
+            .is_empty());
+        assert_eq!(&rows_named(m, list), page);
+    }
+    assert!(
+        m.view()
+            .buttons
+            .iter()
+            .find(|b| b.id == previous)
+            .unwrap()
+            .disabled
+    );
+    all
 }
 #[test]
 fn every_report_intent_is_keyed_and_old_reused_ids_cannot_mutate_any_local_state() {
@@ -1049,22 +1428,20 @@ fn file_filter_searches_beyond_pages_reveals_ancestors_and_preserves_hidden_sele
             value: 1,
         },
     );
-    assert_eq!(rows_named(&m, "files").len(), 256);
-    event(
+    let first_page = rows_named(&m, "files");
+    let all = collect_paged_rows(
         &mut m,
-        UiEvent::MoreTree {
-            report: p.token.clone(),
-        },
+        "files",
+        "file-filter-summary",
+        "tree-more",
+        "tree-previous",
+        302,
     );
-    assert_eq!(rows_named(&m, "files").len(), 46);
-    assert!(text_named(&m, "file-filter-summary").starts_with("Rows 257–302 of 302"));
-    event(
-        &mut m,
-        UiEvent::PreviousTree {
-            report: p.token.clone(),
-        },
+    assert_eq!(
+        all.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+        (0..302).map(|id| format!("entry-{id}")).collect::<Vec<_>>()
     );
-    assert_eq!(rows_named(&m, "files").len(), 256);
+    assert_eq!(rows_named(&m, "files"), first_page);
 }
 #[test]
 fn filters_are_case_sensitive_safe_display_names_and_bounded_utf8_bytes() {
@@ -1183,7 +1560,10 @@ fn symbol_filter_retains_ancestor_context_and_hidden_selected_structural_details
             .collect::<Vec<_>>(),
         ["Tool", "run"]
     );
-    assert_eq!(rows_named(&m, "declarations"), rows_named(&m, "outline"));
+    assert!(
+        rows_named(&m, "declarations").is_empty(),
+        "Source is the center; Outline owns declaration navigation"
+    );
     assert_eq!(
         text_named(&m, "declarations-summary"),
         text_named(&m, "symbol-filter-summary")
@@ -1268,21 +1648,20 @@ fn problems_paginate_all_strings_and_context_changes_reset_local_view_state() {
     let mut m = connected();
     let p = inspect(&mut m);
     event(&mut m, result(&p, r));
-    assert_eq!(rows_named(&m, "problems").len(), 256);
-    event(
+    let all = collect_paged_rows(
         &mut m,
-        UiEvent::MoreProblems {
-            report: p.token.clone(),
-        },
+        "problems",
+        "problems-summary",
+        "problems-more",
+        "problems-previous",
+        336,
     );
-    assert_eq!(rows_named(&m, "problems").len(), 80);
-    event(
-        &mut m,
-        UiEvent::PreviousProblems {
-            report: p.token.clone(),
-        },
+    assert_eq!(
+        all.iter().map(|r| r.label.clone()).collect::<Vec<_>>(),
+        (1..22)
+            .flat_map(|id| (0..16).map(move |i| format!("Diagnostic {id}:{i}")))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(rows_named(&m, "problems").len(), 256);
     event(
         &mut m,
         UiEvent::SetFileFilter {
@@ -1582,11 +1961,23 @@ fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_five_list
             value: "\\u{1f}".into(),
         },
     );
-    event(
+    let selected = event(
         &mut m,
         UiEvent::SelectEntry {
             report: p.token.clone(),
             value: 64,
+        },
+    );
+    let source = source_request(&selected);
+    event(
+        &mut m,
+        source_result(&source, "\u{1f}".repeat(MAX_SOURCE_BYTES)),
+    );
+    event(
+        &mut m,
+        UiEvent::SetProjectQuery {
+            report: p.token.clone(),
+            value: "\u{1f}".into(),
         },
     );
     event(
@@ -1598,8 +1989,17 @@ fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_five_list
         },
     );
     let output = m.output(None);
-    assert!(output.view.lists.iter().all(|list| !list.rows.is_empty()));
-    assert!(serde_json::to_vec(&output).unwrap().len() < MAX_MESSAGE_BYTES);
+    assert!(output
+        .view
+        .lists
+        .iter()
+        .filter(|list| !["declarations"].contains(&list.id))
+        .all(|list| !list.rows.is_empty()));
+    let bytes = serde_json::to_vec(&output).unwrap().len();
+    assert!(
+        bytes < MAX_MESSAGE_BYTES,
+        "complete projected output is {bytes} bytes"
+    );
     let path = &output.view.tables[0]
         .rows
         .iter()
@@ -1715,36 +2115,35 @@ fn source_shape_pagination_is_bounded_reversible_guarded_and_cleared() {
     let p = inspect(&mut m);
     event(&mut m, result(&p, r));
     let first = rows_named(&m, "source-shape");
-    assert_eq!(first.len(), 256);
+    assert!(!first.is_empty() && first.len() <= 256);
     assert!(text_named(&m, "source-shape-summary").contains("Partial"));
     assert!(first.iter().all(|row| matches!(
         row.action,
         forge_ide_ui::view::RowAction::SelectEntry { .. }
     )));
-    assert!(event(
+    let all = collect_paged_rows(
         &mut m,
-        UiEvent::MoreShape {
-            report: p.token.clone()
-        }
-    )
-    .effects
-    .is_empty());
-    let second = rows_named(&m, "source-shape");
-    assert!(!second.is_empty());
-    assert!(second.len() <= 256);
-    assert_ne!(first[0].id, second[0].id);
-    assert!(event(
-        &mut m,
-        UiEvent::PreviousShape {
-            report: p.token.clone()
-        }
-    )
-    .effects
-    .is_empty());
+        "source-shape",
+        "source-shape-summary",
+        "shape-more",
+        "shape-previous",
+        301,
+    );
+    assert_eq!(
+        all[1..]
+            .iter()
+            .map(|row| match row.action {
+                view::RowAction::SelectEntry { value, .. } => value,
+                _ => panic!("source file selection"),
+            })
+            .collect::<Vec<_>>(),
+        (1..301).collect::<Vec<_>>()
+    );
     assert_eq!(rows_named(&m, "source-shape"), first);
     assert!(event(&mut m, action_event(&first[1].action))
         .effects
-        .is_empty());
+        .iter()
+        .any(|e| matches!(e, UiEffect::Source { .. })));
     assert!(m
         .view()
         .tables

@@ -19,3 +19,6 @@ pub use transport::{HttpsClient, HttpsServer};
 pub mod gateway;
 #[cfg(feature = "ide")]
 pub mod ide;
+
+#[cfg(feature = "ide")]
+pub mod source;

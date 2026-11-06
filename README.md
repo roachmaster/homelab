@@ -20,9 +20,9 @@ The [first Rust core](src/rust/README.md) now implements typed contracts, a sync
 
 [![Proposed read-only IDE workbench](docs/design/forge-ide-wireframes/forge-ide-workbench-desktop.svg)](docs/design/forge-ide-wireframes/README.md)
 
-The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) implements the compact context toolbar, local Explorer/Outline filters, file/declaration workspace, Problems, and keyboard/narrow pane controls. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above remain design images, not screenshots. Read-only report data is not a source editor or Run/Debug capability.
+The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) opens a single allowed project automatically and provides project-wide file/symbol search, Explorer, Outline and a read-only source viewer. Opening a file reads bounded source through the admitted host and agent; its SHA-256 must match the bytes used for inspection. Selecting a symbol reveals its numbered source lines, including on phones. Problems, metadata and source-shape analysis remain supporting tools. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above are design images, not screenshots. Editing, saving and Run/Debug remain future capabilities.
 
-[Component, page and transition contracts](docs/design/forge-ide-components/README.md) map nine compositions onto the reusable generator/model, with two screens in one document and report-keyed state flows. Local WASM ABI 2 requires an atomic asset rebuild; the native inspection gateway/protocol is unchanged. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
+[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe the earlier nine-composition workbench, with two screens in one document and report-keyed state flows. The source/search extension uses local WASM ABI 3 and requires an atomic asset rebuild. The native gateway adds a separately admitted `ide.source` operation and inspected-content digests; deploy the host and agent together. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
 
 ## Forge IDE generated browser boundary
 

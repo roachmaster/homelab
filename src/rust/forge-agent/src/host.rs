@@ -55,6 +55,31 @@ impl IoClient for Observation {
         }
     }
 }
+struct Sources(BTreeMap<ProjectAlias, Singleton<forge_ide::source::SourceTask<NativeFiles>>>);
+impl IoClient for Sources {
+    type Request = forge_ide::remote_source::SourceSelection;
+    type Response = forge_ide::source::SourceDocument;
+    type Error = RemoteError;
+    fn execute(&self, selection: Self::Request) -> Result<Self::Response, RemoteError> {
+        forge_ide::remote_source::validate_selection(&selection)?;
+        let task = self
+            .0
+            .get(&selection.project)
+            .ok_or(RemoteError::Forbidden)?
+            .acquire()
+            .unwrap_or_else(|n| match n {});
+        task.run(forge_ide::source::SourceRequest {
+            path: forge_ide::remote_source::native_path(&selection.path)?,
+            sha256: selection.sha256,
+        })
+        .map_err(|e| match e {
+            forge_ide::source::SourceError::InvalidPath => RemoteError::Forbidden,
+            forge_ide::source::SourceError::Limit => RemoteError::Limit,
+            forge_ide::source::SourceError::Changed => RemoteError::InvalidResponse,
+            _ => RemoteError::Unavailable,
+        })
+    }
+}
 struct Projects(BTreeMap<ProjectAlias, Singleton<InspectTask<NativeFiles>>>);
 impl IoClient for Projects {
     type Request = ProjectAlias;
@@ -105,10 +130,21 @@ where
         node.client.create().map_err(assembly)?,
     )));
     let mut handles = BTreeMap::new();
+    let mut sources = BTreeMap::new();
     for (alias, factory) in projects.into_factories() {
+        sources.insert(
+            alias.clone(),
+            Singleton::new(factory.create_source().map_err(assembly)?),
+        );
         handles.insert(alias, Singleton::new(factory.create().map_err(assembly)?));
     }
-    let service = Service::new(target, observation, Projects(handles), grants)?;
+    let service = Service::new_with_source(
+        target,
+        observation,
+        Projects(handles),
+        Sources(sources),
+        grants,
+    )?;
     let codec = Codec::new(ReportLimits::default())?;
     let endpoint = Singleton::new(server.create().map_err(assembly)?);
     let endpoint = endpoint.acquire().unwrap_or_else(|n| match n {});

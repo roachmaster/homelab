@@ -5,6 +5,7 @@ pub mod assembly;
 pub mod cli;
 pub mod filesystem;
 pub mod model;
+pub mod source;
 pub mod syntax;
 pub mod task;
 #[cfg(feature = "yaml")]
@@ -12,3 +13,6 @@ pub mod yaml;
 
 #[cfg(feature = "remote")]
 pub mod remote;
+
+#[cfg(feature = "remote")]
+pub mod remote_source;

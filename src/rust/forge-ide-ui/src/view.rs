@@ -1,5 +1,5 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::RequestToken;
+use crate::protocol::{RequestToken, SourceSpan};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -12,6 +12,19 @@ pub struct ViewModel {
     pub tables: Vec<TableBinding>,
     pub visibility: Vec<VisibilityBinding>,
     pub panes: Vec<PaneBinding>,
+    pub sources: Vec<SourceBinding>,
+}
+/// Exact, bounded UTF-8 window of the accepted read-only source document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SourceBinding {
+    pub id: &'static str,
+    pub context: SelectionContext,
+    pub text: String,
+    pub first_line: u32,
+    /// Zero-based Unicode character column when a very long line continues.
+    pub first_column: u32,
+    pub total_lines: u32,
+    pub target_span: Option<SourceSpan>,
 }
 /// Opaque, model-owned presentation identity. The renderer compares it but does
 /// not infer selection semantics from rows or retain it as domain state.
@@ -19,6 +32,8 @@ pub struct ViewModel {
 pub struct PaneBinding {
     pub id: &'static str,
     pub context: SelectionContext,
+    /// A model-issued navigation revision; comparing it is presentation only.
+    pub reveal: Option<u64>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SelectionContext {
@@ -74,6 +89,7 @@ pub struct InputBinding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FilterAction {
     SetFileFilter { report: RequestToken },
+    SetProjectQuery { report: RequestToken },
     SetSymbolFilter { report: RequestToken, entry: u32 },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -115,6 +131,25 @@ pub struct RowView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    SelectSearchResult {
+        report: RequestToken,
+        entry: u32,
+        declaration: Option<u32>,
+    },
+    MoreSearch {
+        report: RequestToken,
+    },
+    PreviousSearch {
+        report: RequestToken,
+    },
+    MoreSource {
+        report: RequestToken,
+        entry: u32,
+    },
+    PreviousSource {
+        report: RequestToken,
+        entry: u32,
+    },
     SelectEntry {
         report: RequestToken,
         value: u32,

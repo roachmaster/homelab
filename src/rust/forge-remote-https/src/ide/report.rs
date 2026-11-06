@@ -141,10 +141,12 @@ convert_entry!(Entry, m::Entry);
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 enum FileContent {
     Text {
+        sha256: [u8; 32],
         lines: usize,
         rust: Option<RustSummary>,
     },
     RustUnavailable {
+        sha256: [u8; 32],
         lines: usize,
         error: SyntaxError,
     },
@@ -161,11 +163,21 @@ macro_rules! convert_content {
                 use $from as A;
                 use $to as B;
                 match v {
-                    A::Text { lines, rust } => B::Text {
+                    A::Text {
+                        lines,
+                        rust,
+                        sha256,
+                    } => B::Text {
+                        sha256,
                         lines,
                         rust: rust.map(Into::into),
                     },
-                    A::RustUnavailable { lines, error } => B::RustUnavailable {
+                    A::RustUnavailable {
+                        lines,
+                        error,
+                        sha256,
+                    } => B::RustUnavailable {
+                        sha256,
                         lines,
                         error: error.into(),
                     },

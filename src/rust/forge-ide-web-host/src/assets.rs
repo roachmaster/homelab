@@ -42,7 +42,7 @@ impl Assets {
         };
         let m: Manifest = serde_json::from_slice(&read("manifest.json", 16384)?)
             .map_err(|_| HostError::Configuration("asset manifest"))?;
-        if m.format_version != 1 || m.abi_version != 2 || m.files.len() != 5 {
+        if m.format_version != 1 || m.abi_version != 3 || m.files.len() != 5 {
             return Err(HostError::Configuration("asset versions/count"));
         }
         let mut loaded = BTreeMap::new();

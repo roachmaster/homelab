@@ -16,10 +16,10 @@ let assets, agent, fixtureBinary, output, browser, browserOwner, check, report;
 const active = new Set();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function startFixture(faults = false) {
+async function startFixture(faults = false, singleProject = false) {
   report.ensureActive();
   report.setStage('fixture_start');
-  const child = spawn(fixtureBinary, [assets, agent, ...(faults ? ['--faults'] : [])], {
+  const child = spawn(fixtureBinary, [assets, agent, ...(faults ? ['--faults'] : singleProject ? ['--single-project'] : [])], {
     stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
   });
   const state = { child, stopped: false, stopping: null, origin: '', code: '', page: null, name: faults ? 'injected_fixture' : 'real_fixture' };
@@ -93,7 +93,7 @@ async function observe(context) {
     if (new URL(request.url()).pathname !== '/forge/v1/dispatch') return;
     let kind;
     try { kind = request.postDataJSON()?.kind; } catch { kind = 'invalid'; }
-    if (!['resume', 'pair', 'inspect'].includes(kind)) kind = 'other';
+    if (!['resume', 'pair', 'inspect', 'source'].includes(kind)) kind = 'other';
     counts.set(kind, (counts.get(kind) || 0) + 1);
   });
   await context.addInitScript(kinds => {
@@ -147,7 +147,7 @@ async function observe(context) {
   }, localActions);
   return { count: kind => counts.get(kind) || 0 };
 }
-async function connect(context, fixture) {
+async function connect(context, fixture, autoLoad = false) {
   report.ensureActive();
   const page = await context.newPage();
   fixture.page = page;
@@ -164,7 +164,7 @@ async function connect(context, fixture) {
   await page.locator('#pair-code').fill(fixture.code);
   await page.locator('#pair').click();
   fixture.code = '';
-  await check(page.locator('#status')).toContainText('Connected.');
+  await check(page.locator('#status')).toContainText(autoLoad ? 'Partial inspection:' : 'Connected.');
   await check(page.locator('#pair-code')).toHaveValue('');
   await check(page.locator('#pair-panel')).toBeHidden();
   await check(page.locator('#node')).toHaveValue('lab');
@@ -190,10 +190,12 @@ async function selectFile(page, name) {
   const tree = await page.locator('#files').boundingBox();
   // Accepted selection may remove a "selection hidden" summary and move rows.
   // It must not scroll the focused selected row out of its owned viewport.
-  const projectionVisible = after.y >= tree.y - 1 && after.y + after.height <= tree.y + tree.height + 1;
+  const narrow = await page.locator('#workspace').getAttribute('data-narrow') === 'true';
+  const projectionVisible = narrow || (after && tree && after.y >= tree.y - 1 && after.y + after.height <= tree.y + tree.height + 1);
   if (!projectionVisible) process.stderr.write('QA_CHECK pointer_projection_visibility_failed\n');
   assert.ok(projectionVisible, 'selected row stays inside its scrolling tree after projection');
   await check(page.locator('#selection-title')).toContainText(name);
+  if (narrow) await check(page.locator('#workspace-panel')).toBeVisible();
   return item;
 }
 async function filterFiles(page, query) {
@@ -211,6 +213,7 @@ async function noReport(page) {
   await check(page.locator('#details')).not.toContainText('fault-fixture.txt');
   await check(page.locator('#details')).not.toContainText(LONG_FILE_NAME);
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
+  await check(page.locator('#source-view')).toHaveText('');
 }
 async function screenshot(page, name) {
   assert.equal(await screenshotEligibility(page, [...active]), 'safe', 'Only sanitized owned fixture pages may be captured');
@@ -271,7 +274,7 @@ async function keyboardAndFilters(page, traffic) {
   await check(page.locator('#outline')).toContainText('View');
   await check(page.locator('#outline')).toContainText('inspect_me');
   await check(page.locator('#details')).toContainText('Lines');
-  await page.locator('#declarations').getByRole('treeitem', { name: /^inspect_me\b/ }).click();
+  await page.locator('#outline').getByRole('treeitem', { name: /^inspect_me\b/ }).click();
   await check(page.locator('#declaration-details')).toContainText('inspect_me');
   await check(page.locator('#outline').getByRole('treeitem', { name: /^inspect_me\b/ })).toHaveAttribute('aria-selected', 'true');
   const selected = await lib.getAttribute('aria-selected');
@@ -401,7 +404,7 @@ async function keyboardAndFilters(page, traffic) {
   await check(page.locator('#selection-title')).toContainText('broken.rs');
   await check(page.locator('#details')).toContainText(/diagnostic/i);
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
-  assert.equal(traffic.count('inspect'), calls, 'all navigation/filter/page/problem actions are local, not backend search');
+  assert.equal(traffic.count('inspect'), calls, 'navigation/filter/page/problem actions never repeat project inspection');
   report.pass('real.pagination.problems');
 }
 
@@ -515,11 +518,7 @@ async function panesAndNarrow(page, traffic) {
   await page.locator('#outline-panel-switch').click();
   await check(symbol).toBeFocused();
   await page.locator('#workspace-panel-switch').click();
-  assert.ok(await page.locator('#declaration-details-panel').evaluate(panel => {
-    const p = panel.getBoundingClientRect();
-    const body = panel.closest('.fg-pane-body').getBoundingClientRect();
-    return p.top >= body.top && p.bottom <= Math.min(body.bottom, innerHeight);
-  }), 'selected declaration is readable without scrolling past file metadata');
+  await check(page.locator('#source-view [data-line="6"][data-highlight="true"]')).toBeInViewport();
   await screenshot(page, 'ide-workbench-narrow-declaration.png');
   await page.locator('#problems-panel-switch').click();
   await page.locator('#problems [role="treeitem"]').filter({ hasText: 'broken.rs' }).first().click();
@@ -539,7 +538,7 @@ async function panesAndNarrow(page, traffic) {
 }
 
 // Reuse the accepted real-agent fixture across fixed CSS viewport profiles. No
-// new requests, device user agent, touch flags or WebKit claims are introduced.
+// new inspection, device user agent, touch flags or WebKit claims are introduced.
 async function deviceViewportJourney(page, traffic) {
   const calls = traffic.count('inspect');
   async function assertViewportFocus() {
@@ -621,16 +620,16 @@ async function deviceViewportJourney(page, traffic) {
     report.checkpoint('details_content');
     await check(page.locator('#declaration-details')).toContainText('inspect_me');
     report.checkpoint('details_scroll');
-    await check.poll(() => page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollTop)).toBe(0);
+    await check(page.locator('#source-view [data-line="6"]')).toHaveAttribute('data-highlight', 'true');
     // Low landscape heights legitimately scroll the page vertically. The selected
     // declaration remains reachable and readable without horizontal scrolling.
     report.checkpoint('details_readable');
-    const selectedName = page.locator('#declaration-details dd').first();
+    const selectedName = page.locator('#source-view [data-line="6"] .fg-source-text');
     await selectedName.scrollIntoViewIfNeeded();
     assert.equal(await selectedName.evaluate(node => {
       const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && rect.left >= -1 && rect.right <= innerWidth + 1 && rect.top >= -1 && rect.bottom <= innerHeight + 1;
-    }), true, 'selected declaration value is readable at this viewport');
+    }), true, 'selected declaration source is readable at this viewport');
     await activate('outline-panel', 'outline_return');
     report.checkpoint('outline_restore');
     if (narrow) await check(symbol).toBeFocused();
@@ -653,8 +652,7 @@ async function deviceViewportJourney(page, traffic) {
     report.checkpoint('local_requests');
     assert.equal(traffic.count('inspect'), calls, 'viewport navigation remains report-local');
     await disclosure(page, 'source-shape-panel', false);
-    await page.locator('#workspace-panel-heading').focus();
-    await page.locator('#selection-title').scrollIntoViewIfNeeded();
+    await page.locator('#source-view [data-line="6"] .fg-source-number').focus();
     await selectedName.scrollIntoViewIfNeeded();
     await check(selectedName).toBeInViewport();
     await assertViewportFocus();
@@ -723,8 +721,10 @@ async function delayedPaneContextProbe(page, traffic) {
   await worker.evaluate(() => self.__forgePanePresentation.release());
   await check.poll(() => page.evaluate(() => window.__forgeBrowserProbe.receivedViews())).toBe(before + 1);
   await check(page.locator('#declaration-details')).toContainText('inspect_me');
-  await check.poll(() => page.locator('#workspace-panel .fg-pane-body').evaluate(body => body.scrollTop)).toBe(0);
-  await check(page.locator('#workspace-panel-heading')).toBeFocused();
+  const revealedLine = page.locator('#source-view [data-line="6"]');
+  await check(revealedLine).toHaveAttribute('data-highlight', 'true');
+  await check(revealedLine.locator('.fg-source-number')).toBeFocused();
+  await check(revealedLine.locator('.fg-source-number')).toBeInViewport();
   await worker.evaluate(() => self.__forgePanePresentation.restore());
   // The converse is equally important: a direct in-pane context-changing action
   // retains its clicked row instead of jumping to the pane heading.
@@ -814,8 +814,79 @@ async function noSelectedFileFromPriorReport(page) {
   await check(page.locator('#details')).not.toContainText(LONG_FILE_NAME);
 }
 
+// Actual mTLS source reads, including the single-project phone entry path.
+// Search is report-local; opening a result obtains its digest-checked source.
+async function sourceSearchJourney() {
+  const fixture = await startFixture(false, true);
+  report.setStage('scenario');
+  const context = await browser.newContext({ viewport: { width: 390, height: 664 } });
+  try {
+    const traffic = await observe(context);
+    const { page, errors } = await connect(context, fixture, true);
+    process.stderr.write('QA_CHECK source_search_connected\n');
+    assert.equal(traffic.count('inspect'), 1, 'one admitted project opens automatically');
+    await check(page.locator('#explorer-panel')).toBeVisible();
+    process.stderr.write('QA_CHECK source_search_explorer\n');
+    const reads = traffic.count('source');
+    await page.locator('#project-query').fill('INSPECT_ME');
+    const match = page.locator('#search-results [role="treeitem"]').filter({ hasText: 'inspect_me' });
+    await check(match).toHaveCount(1);
+    process.stderr.write('QA_CHECK source_search_match\n');
+    await check(match).toContainText(/src\s*\/\s*lib\.rs/);
+    assert.equal(traffic.count('source'), reads, 'searching symbols does not read files');
+    await match.focus();
+    await page.keyboard.press('Enter');
+    await check(page.locator('#workspace-panel')).toBeVisible();
+    process.stderr.write('QA_CHECK source_search_selected\n');
+    await check(page.locator('#source-view')).toContainText('pub fn inspect_me() {}');
+    process.stderr.write('QA_CHECK source_search_read\n');
+    await check(page.locator('#source-view [data-line="6"]')).toHaveAttribute('data-highlight', 'true');
+    await check(page.locator('#source-view')).not.toHaveAttribute('contenteditable', 'true');
+    assert.equal(traffic.count('source'), reads + 1, 'opening a search result reads one file');
+    assert.equal(traffic.count('inspect'), 1, 'opening source does not repeat inspection');
+    await assertVisibleFocus(page);
+    await page.getByRole('button', { name: 'Back to files', exact: true }).click();
+    await check(page.locator('#explorer-panel')).toBeVisible();
+    await page.locator('#project-query').fill('README <safe>');
+    await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'README <safe>.md' }).click();
+    await check(page.locator('#workspace-panel')).toBeVisible();
+    await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
+    await check(page.locator('#source-view script, #source-view img, #source-view svg')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Back to files', exact: true }).click();
+    await page.locator('#project-query').fill('paged.txt');
+    await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'paged.txt' }).click();
+    await check(page.locator('#source-view')).toContainText('Source line 1:');
+    await check(page.locator('#source-view .fg-source-line')).toHaveCount(256);
+    const pageReads = traffic.count('source');
+    await page.locator('#source-more').click();
+    await check(page.locator('#source-view')).toContainText('Source line 257:');
+    await check(page.locator('#source-more')).toBeFocused();
+    await check(page.locator('#source-more')).toBeInViewport();
+    await page.locator('#source-more').click();
+    await check(page.locator('#source-view')).toContainText('Source line 600:');
+    await check(page.locator('#source-more')).toBeDisabled();
+    await page.locator('#source-previous').click();
+    await check(page.locator('#source-view')).toContainText('Source line 257:');
+    assert.equal(traffic.count('source'), pageReads, 'source paging reuses the exact accepted file');
+    const beforeReload = traffic.count('inspect');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await check(page.locator('#status')).toContainText('Partial inspection:');
+    await check(page.locator('#source-view')).toHaveText('');
+    assert.equal(traffic.count('inspect'), beforeReload + 1, 'reload obtains a fresh single-project report');
+    assert.deepEqual(errors, []);
+  } catch (error) {
+    const location = String(error.stack).match(/journey\.mjs:(\d+):(\d+)/);
+    if (location) process.stderr.write(`QA_CHECK source_journey_location=${location[1]}:${location[2]}\n`);
+    throw error;
+  } finally {
+    await context.close();
+    await stopFixture(fixture);
+  }
+}
+
 async function realJourney() {
   report.start('real.report.partial');
+  await sourceSearchJourney();
   const fixture = await startFixture();
   report.setStage('context_start');
   report.ensureActive();
@@ -875,7 +946,7 @@ async function realJourney() {
   await reportAndPageLifecycle(page, traffic);
   report.start('real.report.empty');
 
-  await inspect(page, 'empty', 'Inspection ready.');
+  await inspect(page, 'empty', 'Project ready.');
   await check(page.locator('#summary')).toContainText('0 files');
   await check(page.locator('#files [role="treeitem"]')).toHaveCount(1);
   await check(page.locator('#problems [role="treeitem"]')).toHaveCount(0);
@@ -982,7 +1053,7 @@ async function controlledLifecycleJourney() {
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
   await noReport(page);
   assert.equal(traffic.count('inspect'), before + 1, 'rapid repeated Inspect creates one request');
-  await inspect(page, 'workspace', 'Inspection ready.');
+  await inspect(page, 'workspace', 'Project ready.');
   await check(page.locator('#files')).toContainText('fault-fixture.txt');
   report.pass('injected.requests.cancel_retry');
   await controlledInputDraftJourney(page);
@@ -1015,7 +1086,7 @@ async function controlledLifecycleJourney() {
   await page.locator('#inspect').click();
   await check(page.locator('#phase-label')).toContainText('Inspecting');
   await page.locator('#project').focus();
-  await check(page.locator('#status')).toContainText('Inspection ready.');
+  await check(page.locator('#status')).toContainText('Project ready.');
   await check(page.locator('#project')).toBeFocused();
   report.pass('injected.requests.refresh_focus');
   report.start('injected.failures.unavailable_timeout');
@@ -1036,7 +1107,7 @@ async function controlledLifecycleJourney() {
   report.pass('injected.failures.unavailable_timeout');
   report.start('probe.worker.fatal');
 
-  await inspect(page, 'workspace', 'Inspection ready.');
+  await inspect(page, 'workspace', 'Project ready.');
   // Controlled adapter fatal path, not a claim of spontaneous ABI failure.
   // Calls the real generated worker's fail-closed routine after real WASM data.
   const worker = page.workers()[0];

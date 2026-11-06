@@ -272,8 +272,13 @@ impl<C: IoClient<Request = FsRequest, Response = FsResponse, Error = FsError>> I
             }
         };
         let lines = text.lines().count();
+        let sha256 = crate::source::digest(&bytes);
         if path.extension() != Some(std::ffi::OsStr::new("rs")) {
-            return Ok(FileContent::Text { lines, rust: None });
+            return Ok(FileContent::Text {
+                lines,
+                rust: None,
+                sha256,
+            });
         }
         match syntax::analyze(
             text,
@@ -281,12 +286,17 @@ impl<C: IoClient<Request = FsRequest, Response = FsResponse, Error = FsError>> I
             self.limits.max_syntax_depth,
         ) {
             Ok(summary) => Ok(FileContent::Text {
+                sha256,
                 lines,
                 rust: Some(summary),
             }),
             Err(error) => {
                 state.complete = false;
-                Ok(FileContent::RustUnavailable { lines, error })
+                Ok(FileContent::RustUnavailable {
+                    lines,
+                    error,
+                    sha256,
+                })
             }
         }
     }

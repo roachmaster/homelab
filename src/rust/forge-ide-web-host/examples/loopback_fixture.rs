@@ -84,13 +84,16 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if !(args.len() == 2 || (args.len() == 3 && args[2] == "--faults")) {
+    if !(args.len() == 2
+        || (args.len() == 3 && (args[2] == "--faults" || args[2] == "--single-project")))
+    {
         return Err(
-            "usage: loopback_fixture GENERATED_ASSETS_DIRECTORY FORGE_AGENT_BINARY [--faults]"
+            "usage: loopback_fixture GENERATED_ASSETS_DIRECTORY FORGE_AGENT_BINARY [--faults|--single-project]"
                 .into(),
         );
     }
-    let faults = args.len() == 3;
+    let faults = args.get(2).is_some_and(|value| value == "--faults");
+    let single_project = args.get(2).is_some_and(|value| value == "--single-project");
     let assets = PathBuf::from(&args[0]).canonicalize()?;
     let agent = PathBuf::from(&args[1]).canonicalize()?;
     let root = std::env::temp_dir().join(format!(
@@ -106,6 +109,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o700))?;
     }
     let (project, empty_project) = write_projects(&fixture.root)?;
+    if single_project {
+        let text = (1..=600)
+            .map(|line| format!("Source line {line}: Unicode 界 and literal <script> text.\n"))
+            .collect::<String>();
+        fs::write(project.join("paged.txt"), text)?;
+    }
     let mut ca = CertificateParams::new(Vec::<String>::new())?;
     ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     ca.key_usages = vec![
@@ -154,6 +163,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("agent readiness")?;
     let projects = if faults {
         vec!["workspace", "slow", "timeout", "unavailable"]
+    } else if single_project {
+        vec!["workspace"]
     } else {
         vec!["workspace", "empty", "denied"]
     };
@@ -228,6 +239,7 @@ impl forge_ide_web_host::InspectionPort for FaultPort {
                                 detail: Entry::File {
                                     size_bytes: 0,
                                     content: FileContent::Text {
+                                        sha256: [0; 32],
                                         lines: 0,
                                         rust: None,
                                     },

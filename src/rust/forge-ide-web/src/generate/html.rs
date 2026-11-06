@@ -59,6 +59,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children(items, out);
             out.push_str("</section>");
         }
+        Component::Region {
+            id,
+            children: items,
+        } => {
+            let _ = write!(out, "<div id=\"{}\" class=\"fg-region\">", escape(id));
+            children(items, out);
+            out.push_str("</div>");
+        }
         Component::Toolbar(items) | Component::Row(items) | Component::Workspace(items) => {
             out.push_str(match c {
                 Component::Toolbar(_) => "<div class=\"fg-toolbar\">",
@@ -197,6 +205,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
         Component::Tree { id, label } => {
             let _=write!(out,"<div id=\"{}\" class=\"fg-tree\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
+        }
+        Component::Source { id, label } => {
+            let _ = write!(out, "<pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre>", escape(id), escape(label));
+        }
+        Component::PaneLink { id, label, target } => {
+            let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-pane-link\" data-pane-reveal=\"{}\">{}</button>", escape(id), escape(target), escape(label));
         }
         Component::Details { id } | Component::Facts { id } => {
             let class = if matches!(c, Component::Facts { .. }) {

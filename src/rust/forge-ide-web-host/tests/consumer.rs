@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":2,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":3,"files":files})).unwrap(),
         )
         .unwrap();
         Self(p)
@@ -201,6 +201,155 @@ fn session_values(host: &Host, r: &str) -> (String, String, String) {
 fn inspect(host: &Host, cookie: &str, csrf: &str, epoch: &str, project: &str) -> String {
     let expires = forge_remote::now_unix_ms().unwrap() + 4000;
     post(host,"ide.inspect",json!({"kind":"inspect","request":{"token":{"session_epoch":epoch,"revision":1,"request_id":"request-1"},"node_key":"lab","target_node":"node","target_incarnation":"host","project":project,"destination":"ide.inspect","contract_version":1,"expires_unix_ms":expires}}),&format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\nForge-Target-Node: node\r\nForge-Target-Incarnation: host\r\nForge-Expires-Unix-Ms: {expires}\r\n"))
+}
+
+struct SourcePort {
+    reads: Rc<Cell<usize>>,
+    corrupt: Rc<Cell<bool>>,
+}
+impl InspectionPort for SourcePort {
+    fn inspect(&self, r: RemoteInspectInput) -> Result<InspectReply, RemoteError> {
+        let text = "exact café <script> text\n";
+        Ok(InspectReply {
+            responder: r.target,
+            response: Response {
+                header: (&Header::new(RouteKey::new("ide.inspect", 1).unwrap(), r.request_id)
+                    .unwrap())
+                    .into(),
+                payload: ProjectReport {
+                    format_version: 1,
+                    complete: true,
+                    entries: 2,
+                    files: 1,
+                    bytes_read: text.len(),
+                    tree: TreeNode {
+                        name: Name::Utf8(".".into()),
+                        detail: Entry::Directory {
+                            children: vec![TreeNode {
+                                name: Name::Utf8("notes.txt".into()),
+                                detail: Entry::File {
+                                    size_bytes: text.len() as u64,
+                                    content: forge_ide::model::FileContent::Text {
+                                        sha256: forge_ide::source::digest(text.as_bytes()),
+                                        lines: 1,
+                                        rust: None,
+                                    },
+                                },
+                            }],
+                        },
+                    },
+                },
+            },
+        })
+    }
+    fn source(
+        &self,
+        r: forge_ide::remote_source::RemoteSourceInput,
+    ) -> Result<forge_ide::remote_source::SourceReply, RemoteError> {
+        self.reads.set(self.reads.get() + 1);
+        assert_eq!(r.selection.path, vec![Name::Utf8("notes.txt".into())]);
+        Ok(forge_ide::remote_source::SourceReply {
+            responder: r.target,
+            response: Response {
+                header: (&Header::new(RouteKey::new("ide.source", 1).unwrap(), r.request_id)
+                    .unwrap())
+                    .into(),
+                payload: forge_ide::source::SourceDocument {
+                    text: if self.corrupt.get() {
+                        "changed".into()
+                    } else {
+                        "exact café <script> text\n".into()
+                    },
+                    sha256: r.selection.sha256,
+                },
+            },
+        })
+    }
+}
+#[test]
+fn source_uses_only_current_report_entry_and_revalidates_substituted_port() {
+    let files = Files::new();
+    let group = register_host("source-host", config(&files)).unwrap();
+    let ((), factory) = Registry::new()
+        .register(group)
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    let reads = Rc::new(Cell::new(0));
+    let corrupt = Rc::new(Cell::new(false));
+    let ports: BTreeMap<String, Box<dyn InspectionPort>> = BTreeMap::from([(
+        "lab".into(),
+        Box::new(SourcePort {
+            reads: Rc::clone(&reads),
+            corrupt: Rc::clone(&corrupt),
+        }) as Box<dyn InspectionPort>,
+    )]);
+    let host = factory.create_with_ports(ports).unwrap();
+    let (cookie, csrf, epoch) = paired(&host);
+    let expires = forge_remote::now_unix_ms().unwrap() + 4000;
+    let headers=format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\nForge-Target-Node: node\r\nForge-Target-Incarnation: host\r\nForge-Expires-Unix-Ms: {expires}\r\n");
+    let body = json!({"kind":"source","request":{"token":{"session_epoch":epoch,"revision":2,"request_id":"request-1"},"report":{"session_epoch":epoch,"revision":1,"request_id":"request-1"},"node_key":"lab","target_node":"node","target_incarnation":"host","project":"workspace","destination":"ide.source","contract_version":1,"expires_unix_ms":expires,"entry":1}});
+    // No accepted report is not source authority.
+    assert!(
+        exchange(&host, post(&host, "ide.source", body.clone(), &headers))
+            .starts_with("HTTP/1.1 401")
+    );
+    assert!(
+        exchange(&host, inspect(&host, &cookie, &csrf, &epoch, "workspace"))
+            .starts_with("HTTP/1.1 200")
+    );
+    for mutation in 0..8 {
+        let mut bad = body.clone();
+        match mutation {
+            0 => bad["request"]["report"]["revision"] = 99.into(),
+            1 => bad["request"]["report"]["session_epoch"] = "old".into(),
+            2 => bad["request"]["token"]["session_epoch"] = "old".into(),
+            3 => bad["request"]["entry"] = 0.into(),
+            4 => bad["request"]["entry"] = 999.into(),
+            5 => bad["request"]["project"] = "other".into(),
+            6 => bad["request"]["node_key"] = "other".into(),
+            _ => bad["request"]["path"] = "/secret".into(),
+        }
+        let response = exchange(&host, post(&host, "ide.source", bad, &headers));
+        assert!(
+            response.starts_with("HTTP/1.1 401") || response.starts_with("HTTP/1.1 400"),
+            "mutation {mutation}: {response}"
+        );
+    }
+    let denied = exchange(
+        &host,
+        post(
+            &host,
+            "ide.source",
+            body.clone(),
+            &headers.replace(&csrf, "wrong-csrf"),
+        ),
+    );
+    assert!(denied.starts_with("HTTP/1.1 401"));
+    assert_eq!(reads.get(), 0);
+    let response = exchange(&host, post(&host, "ide.source", body.clone(), &headers));
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        value["event"]["result"]["outcome"]["document"]["text"],
+        "exact café <script> text\n"
+    );
+    assert_eq!(reads.get(), 1);
+    corrupt.set(true);
+    let response = exchange(&host, post(&host, "ide.source", body.clone(), &headers));
+    let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(value["event"]["result"]["outcome"]["kind"], "error");
+    assert_eq!(
+        value["event"]["result"]["outcome"]["category"],
+        "invalid_response"
+    );
+    let newer = inspect(&host, &cookie, &csrf, &epoch, "workspace")
+        .replace("\"revision\":1", "\"revision\":3");
+    assert!(exchange(&host, newer).starts_with("HTTP/1.1 200"));
+    let before = reads.get();
+    assert!(exchange(&host, post(&host, "ide.source", body, &headers)).starts_with("HTTP/1.1 401"));
+    assert_eq!(reads.get(), before);
 }
 #[test]
 fn public_registrar_is_effect_free_and_must_freeze() {
@@ -714,7 +863,7 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 3] {
+    for abi in [0, 1, 2, 4] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();

@@ -55,6 +55,17 @@ pub struct InspectFactory {
     limits: Limits,
     excluded_names: Vec<OsString>,
 }
+impl InspectFactory {
+    /// Create the bounded source task with the same root/exclusion authority.
+    /// Called explicitly after registration is frozen, just like inspection.
+    pub fn create_source(&self) -> Result<crate::source::SourceTask<NativeFiles>, AssemblyError> {
+        let files = NativeFiles::open(&self.root).map_err(AssemblyError::Filesystem)?;
+        Ok(crate::source::SourceTask::new(
+            files,
+            self.excluded_names.clone(),
+        ))
+    }
+}
 impl Factory<InspectTask<NativeFiles>> for InspectFactory {
     type Error = AssemblyError;
     fn create(&self) -> Result<InspectTask<NativeFiles>, AssemblyError> {

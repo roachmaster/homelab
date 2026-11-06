@@ -42,6 +42,7 @@ fn report() -> ProjectReport {
                         detail: Entry::File {
                             size_bytes: source.len() as u64,
                             content: FileContent::Text {
+                                sha256: [0; 32],
                                 lines: source.lines().count(),
                                 rust: Some(syntax::analyze(source, 100, 10).unwrap()),
                             },
@@ -212,6 +213,7 @@ fn nested_reply(tree_depth: usize, syntax_depth: usize) -> InspectReply {
         detail: Entry::File {
             size_bytes: 1,
             content: FileContent::Text {
+                sha256: [0; 32],
                 lines: 1,
                 rust: Some(RustSummary {
                     declarations,

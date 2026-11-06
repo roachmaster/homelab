@@ -52,6 +52,10 @@ pub enum Component {
         title: String,
         children: Vec<Component>,
     },
+    Region {
+        id: String,
+        children: Vec<Component>,
+    },
     Toolbar(Vec<Component>),
     Row(Vec<Component>),
     Workspace(Vec<Component>),
@@ -105,6 +109,17 @@ pub enum Component {
         id: String,
         label: String,
     },
+    /// Read-only, bounded source window supplied by the accepted model view.
+    Source {
+        id: String,
+        label: String,
+    },
+    /// Presentation-only route to a declared pane; no application event.
+    PaneLink {
+        id: String,
+        label: String,
+        target: String,
+    },
     Details {
         id: String,
     },
@@ -118,6 +133,7 @@ macro_rules! component {
     (screen $id:expr, $title:expr, $protected:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Screen { id:$id.into(),title:$title.into(),protected:$protected,children:vec![$($child),*] } };
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
+    (region $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Region { id:$id.into(),children:vec![$($child),*] } };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
     (row [$($child:expr),* $(,)?]) => { $crate::generate::Component::Row(vec![$($child),*]) };
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
@@ -136,6 +152,8 @@ macro_rules! component {
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
+    (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
+    (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
     (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
     (details $id:expr) => { $crate::generate::Component::Details{id:$id.into()} };
 }
@@ -186,7 +204,9 @@ impl Document {
                 Component::Row(_) | Component::Toolbar(_) | Component::Workspace(_) => {
                     (None, None, None)
                 }
-                Component::PaneLayout { id, .. } => (Some(id), None, None),
+                Component::PaneLayout { id, .. } | Component::Region { id, .. } => {
+                    (Some(id), None, None)
+                }
                 Component::Text { id, text, .. } => (Some(id), Some(text), None),
                 Component::Select { id, label, action }
                 | Component::Button {
@@ -196,9 +216,10 @@ impl Document {
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
                 }
-                Component::Tree { id, label } | Component::Reload { id, label } => {
-                    (Some(id), Some(label), None)
-                }
+                Component::Tree { id, label }
+                | Component::Reload { id, label }
+                | Component::Source { id, label } => (Some(id), Some(label), None),
+                Component::PaneLink { id, label, target } => (Some(id), Some(label), Some(target)),
                 Component::Details { id } | Component::Facts { id } => (Some(id), None, None),
             };
             if let Some(id) = id {
@@ -264,6 +285,7 @@ impl Document {
                 | Component::Panel { children, .. }
                 | Component::Disclosure { children, .. }
                 | Component::PaneLayout { children, .. }
+                | Component::Region { children, .. }
                 | Component::Pane { children, .. }
                 | Component::Row(children)
                 | Component::Toolbar(children)

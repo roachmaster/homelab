@@ -21,6 +21,11 @@ pub struct Theme {
     pub row_px: u16,
     #[serde(default = "default_control")]
     pub control_px: u16,
+    #[serde(default = "default_touch")]
+    pub touch_px: u16,
+}
+fn default_touch() -> u16 {
+    44
 }
 fn default_row() -> u16 {
     28
@@ -59,6 +64,7 @@ impl Theme {
             || !(220..=480).contains(&t.details_px)
             || !(24..=48).contains(&t.row_px)
             || !(28..=56).contains(&t.control_px)
+            || !(40..=64).contains(&t.touch_px)
         {
             return Err("theme numeric limit");
         }

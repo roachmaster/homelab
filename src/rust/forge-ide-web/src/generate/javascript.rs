@@ -8,6 +8,7 @@ let fatalState=false;
 let actionByElement=new WeakMap();
 let focusKeyByElement=new WeakMap();
 let inputDrafts=new WeakMap();
+let sourceViews=new WeakMap();
 let presentationSequence=0;
 let pendingActionOrigin=null;
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
@@ -41,12 +42,12 @@ function clearProtected(){
   for(const n of document.querySelectorAll('select[data-action]')){n.replaceChildren();n.value='';n.removeAttribute('title');delete n.dataset.options;n.disabled=true;}
   for(const n of document.querySelectorAll('input')){n.value='';n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
-  for(const n of document.querySelectorAll('.fg-tree,.fg-details')){n.replaceChildren();n.scrollTop=0;}
+  for(const n of document.querySelectorAll('.fg-tree,.fg-details,[data-source-view]')){n.replaceChildren();n.scrollTop=0;}
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
-  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
-  for(const state of layouts.values()){state.focus.clear();state.context.clear();state.resetScroll.clear();}
+  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
+  for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
 }
 function stop(){const old=worker;worker=null;if(old)old.terminate();clearProtected();}
 function fatal(message){
@@ -76,6 +77,7 @@ function apply(view,acknowledgedSequence){
   // focus-return paths. Older views must not consume newer pending intent.
   if(origin?.sequence===acknowledgedSequence)pendingActionOrigin=null;
   let invalidatedFocus=null;
+  const sourceTargets=[];
   for(const b of view.visibility||[]){const n=element(b.id);if(n)n.hidden=!b.visible;}
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;actionByElement.set(n,b.action);}}
@@ -136,24 +138,69 @@ function apply(view,acknowledgedSequence){
     const n=element(b.id);if(!n)continue;
     const parts=[];for(const row of b.rows){const property=document.createElement('div');property.className='fg-property';const t=document.createElement('dt');t.textContent=row.label;const d=document.createElement('dd');d.textContent=row.value;property.append(t,d);parts.push(property);}n.replaceChildren(...parts);
   }
+  // Source windows are selected and bounded by WASM. The renderer only creates
+  // numbered safe-text lines and projects the accepted declaration span.
+  for(const b of view.sources||[]){
+    const n=element(b.id);if(!n||!n.hasAttribute('data-source-view'))continue;
+    const context=JSON.stringify(b.context);const span=JSON.stringify(b.target_span);
+    const prior=sourceViews.get(n);
+    if(prior&&prior.context===context&&prior.text===b.text&&prior.first===b.first_line&&prior.column===b.first_column&&prior.span===span)continue;
+    if(typeof b.text!=='string'||b.text.length>65536||!Number.isSafeInteger(b.first_line)||b.first_line<1||!Number.isSafeInteger(b.first_column)||b.first_column<0)throw new Error('Invalid source window');
+    const lines=b.text===''?[]:b.text.split('\n');
+    if(lines.length>257)throw new Error('Source line window limit');
+    // A trailing newline belongs to the preceding displayed line, rather than
+    // manufacturing an additional empty line beyond the model's window.
+    if(lines.length&&lines[lines.length-1]==='')lines.pop();
+    const parts=[];let selected=null;
+    for(let i=0;i<lines.length;i++){
+      const line=b.first_line+i;const row=document.createElement('span');row.className='fg-source-line';row.dataset.line=String(line);
+      const number=document.createElement('span');number.className='fg-source-number';number.tabIndex=-1;number.setAttribute('role','group');number.setAttribute('aria-label','Source line '+line+(i===0&&b.first_column>0?', continued':''));number.textContent=String(line)+(i===0&&b.first_column>0?'↪':'');
+      const text=document.createElement('span');text.className='fg-source-text';text.textContent=lines[i];
+      const target=b.target_span;const marked=target&&line>=target.start.line&&(line<target.end.line||(line===target.end.line&&target.end.column>0));
+      row.dataset.highlight=String(Boolean(marked));if(marked&&!selected)selected=row;
+      row.append(number,text);parts.push(row);
+    }
+    n.replaceChildren(...parts);n.scrollLeft=0;n.scrollTop=0;
+    sourceViews.set(n,{context,text:b.text,first:b.first_line,column:b.first_column,span});
+    if(parts.length)sourceTargets.push(selected||parts[0]);
+  }
   for(const b of view.panes||[]){
     for(const state of layouts.values()){
       const pane=state.panes.find(p=>p.id===b.id);if(!pane)continue;
       const context=JSON.stringify(b.context);
+      // Preserve only an acknowledged direct action (or newer pending direct
+      // intent), not a pane switch that restored a stale row while waiting.
+      const direct=origin?.pane===pane&&Number.isSafeInteger(acknowledgedSequence)&&acknowledgedSequence>0&&acknowledgedSequence<=origin.sequence;
       if(state.context.get(b.id)!==context){
         state.context.set(b.id,context);
-        // Preserve only an acknowledged direct action (or newer pending direct
-        // intent), not a pane switch that restored a stale row while waiting.
-        const direct=origin?.pane===pane&&Number.isSafeInteger(acknowledgedSequence)&&acknowledgedSequence>0&&acknowledgedSequence<=origin.sequence;
         if(!direct){
           state.focus.delete(b.id);
           state.resetScroll.add(b.id);
           if(pane.contains(focus))invalidatedFocus=element(pane.id+'-heading');
         }
       }
+      if(Number.isSafeInteger(b.reveal)&&b.reveal>0&&state.reveal.get(b.id)!==b.reveal){
+        state.reveal.set(b.id,b.reveal);
+        if(state.narrow.matches&&!direct){openPane(state,pane);state.active=pane.id;invalidatedFocus=element(pane.id+'-heading');}
+      }
     }
   }
   for(const state of layouts.values())updateLayout(state);
+  // A still-valid row in the destination pane owns keyboard/scroll intent.
+  // Showing new source must not scroll that row out of view. External navigation
+  // invalidates old pane focus above and is free to reveal the accepted source.
+  let sourceFocus=null;
+  for(const target of sourceTargets){
+    const pane=target.closest('[data-pane]');
+    const direct=origin?.pane===pane&&Number.isSafeInteger(acknowledgedSequence)&&acknowledgedSequence>0&&acknowledgedSequence<=origin.sequence;
+    if(!visible(target)||(direct&&!focus.disabled)||(focusKey&&priorPane===pane&&!invalidatedFocus))continue;
+    // The bounded gutter anchor remains visible even when a source line is wider
+    // than the viewport. Focus follows the code instead of an offscreen heading.
+    const anchor=target.children[0];anchor.scrollIntoView({block:'nearest',inline:'nearest'});
+    const heading=pane?element(pane.id+'-heading'):null;
+    if((heading&&(invalidatedFocus===heading||focus===heading))||(direct&&focus.disabled))sourceFocus=anchor;
+  }
+  if(visible(sourceFocus)){sourceFocus.focus({preventScroll:true});return;}
   if(visible(invalidatedFocus)){invalidatedFocus.focus();return;}
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
@@ -255,8 +302,13 @@ for(const root of document.querySelectorAll('[data-layout]')){
   const main=panes.find(n=>n.dataset.pane==='main');if(!main)continue;
   const local=selector=>[...root.querySelectorAll(selector)].filter(n=>n.closest('[data-layout]')===root);
   const singleSecondary=root.dataset.singleSecondary==='true';
-  const state={root,grid:root.querySelector('.fg-panes'),panes,main,singleSecondary,open:defaultPanes(panes,singleSecondary),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map(),context:new Map(),resetScroll:new Set()};layouts.set(root.id,state);
+  const state={root,grid:root.querySelector('.fg-panes'),panes,main,singleSecondary,open:defaultPanes(panes,singleSecondary),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map(),context:new Map(),reveal:new Map(),resetScroll:new Set()};layouts.set(root.id,state);
   for(const pane of panes)pane.addEventListener('focusin',e=>{if(e.target.closest('[data-layout]')===root)state.focus.set(pane.id,{node:e.target,key:focusKeyByElement.get(e.target)});});
+  for(const n of local('[data-pane-reveal]'))n.addEventListener('click',()=>{
+    const pane=panes.find(p=>p.id===n.dataset.paneReveal);if(!pane)return;
+    openPane(state,pane);state.active=pane.id;updateLayout(state);
+    const target=state.focus.get(pane.id);if(target?.node.isConnected&&visible(target.node)&&(target.key===undefined||focusKeyByElement.get(target.node)===target.key))target.node.focus();else element(pane.id+'-heading')?.focus();
+  });
   for(const n of local('[data-pane-toggle]'))n.addEventListener('click',()=>{const pane=panes.find(p=>p.id===n.dataset.paneToggle);if(pane)togglePane(state,pane);});
   for(const n of local('[data-pane-switch]'))n.addEventListener('click',()=>{
     const pane=panes.find(p=>p.id===n.dataset.paneSwitch);if(!pane)return;
@@ -338,7 +390,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==2 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==3 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

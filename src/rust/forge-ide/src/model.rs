@@ -89,10 +89,13 @@ pub enum Entry {
 pub enum FileContent {
     /// `str::lines().count()`: empty=0; final newline adds no phantom line.
     Text {
+        /// SHA-256 of the exact bytes used for this report.
+        sha256: [u8; 32],
         lines: usize,
         rust: Option<RustSummary>,
     },
     RustUnavailable {
+        sha256: [u8; 32],
         lines: usize,
         error: SyntaxError,
     },

@@ -6,7 +6,7 @@ use crate::component;
 pub fn ide_document() -> Document {
     Document {
         title: "Forge IDE".into(),
-        subtitle: "Structural inspection · Read only".into(),
+        subtitle: "Source workbench · Read only".into(),
         children: vec![
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [
@@ -19,27 +19,38 @@ pub fn ide_document() -> Document {
                 component!(toolbar [
                     component!(select "node", "Node", "select_node"),
                     component!(select "project", "Project", "select_project"),
-                    component!(primary "inspect", "Inspect", "inspect"),
+                    component!(primary "inspect", "Refresh project", "inspect"),
                     component!(button "cancel", "Cancel local wait", "cancel"),
                     component!(reload "reload-session", "Reload to check session"),
                     component!(caption "phase-label", "Checking session"),
                 ]),
                 component!(focused_layout "workspace"; [
                     component!(pane "explorer-panel", "Explorer", Leading, 180, 250, 400; [
-                        component!(filter "file-filter", "Filter entry names", "set_file_filter"),
-                        component!(caption "file-filter-summary", "Filter applies to the accepted bounded report."),
-                        component!(tree "files", "Project files"),
-                        component!(row [component!(button "tree-previous", "Previous page", "previous_tree"), component!(button "tree-more", "Next page", "more_tree")]),
+                        component!(filter "project-query", "Find files or symbols", "set_project_query"),
+                        component!(region "search-panel"; [
+                            component!(caption "search-summary", "Search names in the loaded project."),
+                            component!(tree "search-results", "Project search results"),
+                            component!(row [component!(button "search-previous", "Previous matches", "previous_search"), component!(button "search-more", "Next matches", "more_search")]),
+                        ]),
+                        component!(region "files-panel"; [
+                            component!(filter "file-filter", "Filter entry names", "set_file_filter"),
+                            component!(caption "file-filter-summary", ""),
+                            component!(tree "files", "Project files"),
+                            component!(row [component!(button "tree-previous", "Previous page", "previous_tree"), component!(button "tree-more", "Next page", "more_tree")]),
+                        ]),
                     ]),
                     component!(pane "workspace-panel", "File", Main, 240, 480, 960; [
-                        component!(heading "selection-title", "Select a file to inspect its declarations"),
-                        component!(text "workspace-summary", "Read-only structural inspection. No source body is requested."),
+                        component!(pane_link "back-to-files", "Back to files", "explorer-panel"),
+                        component!(heading "selection-title", "Select a file to read its source"),
+                        component!(caption "workspace-summary", "Find a file or symbol in Explorer."),
+                        component!(panel "source-panel", "Source · Read only"; [
+                            component!(status "source-status", ""),
+                            component!(source "source-view", "Read-only source"),
+                            component!(caption "source-range", ""),
+                            component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
+                        ]),
                         component!(panel "declaration-details-panel", "Selected declaration"; [
                             component!(details "declaration-details"),
-                        ]),
-                        component!(panel "file-declarations-panel", "Declarations"; [
-                            component!(caption "declarations-summary", ""),
-                            component!(tree "declarations", "File declarations"),
                         ]),
                         component!(disclosure "file-metadata-panel", "Entry metadata"; [
                             component!(facts "details"),
@@ -71,10 +82,10 @@ pub fn ide_document() -> Document {
                 component!(disclosure "inspection-details", "Inspection details"; [
                     component!(context "selection-context", ""),
                     component!(caption "summary", "No report yet"),
-                    component!(caption "inspection-limits", "Read-only metadata and declarations; no source bodies, editing or execution. Filters search names in this accepted bounded report. Cancel stops only this browser wait."),
+                    component!(caption "inspection-limits", "Read-only source and declarations. Find searches names in this loaded report, not source contents. Source is checked against the inspected version. Cancel stops only this browser wait."),
                 ]),
             ]),
-            component!(caption "footer", "Read only · Metadata and declarations · No source bodies"),
+            component!(caption "footer", "Read only · Source and declaration navigation"),
         ],
     }
 }
@@ -125,10 +136,18 @@ pub fn ide_transport() -> Transport {
             RequestBinding {
                 kind: "inspect".into(),
                 request_id: "request.token.request_id".into(),
-                headers: inspect,
+                headers: inspect.clone(),
                 csrf: true,
                 deadline: Some("request.expires_unix_ms".into()),
                 accept_events: vec!["result".into()],
+            },
+            RequestBinding {
+                kind: "source".into(),
+                request_id: "request.token.request_id".into(),
+                headers: inspect,
+                csrf: true,
+                deadline: Some("request.expires_unix_ms".into()),
+                accept_events: vec!["source_result".into()],
             },
         ],
     }

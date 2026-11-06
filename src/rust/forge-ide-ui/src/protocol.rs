@@ -13,6 +13,7 @@ pub const MAX_PROJECTS: usize = 128;
 pub const MAX_DEPTH: usize = 64;
 pub const MAX_FILTER_BYTES: usize = 256;
 pub const MAX_PROBLEMS: usize = MAX_ENTRIES * 16;
+pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,12 +57,28 @@ pub struct PreparedInspection {
     pub contract_version: u16,
     pub expires_unix_ms: u64,
 }
+/// Source is addressed through an accepted report entry, never a caller path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedSource {
+    pub token: RequestToken,
+    pub report: RequestToken,
+    pub node_key: String,
+    pub target_node: String,
+    pub target_incarnation: String,
+    pub project: String,
+    pub destination: String,
+    pub contract_version: u16,
+    pub expires_unix_ms: u64,
+    pub entry: u32,
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiEffect {
     Resume { request_id: String },
     Pair { request_id: String, code: String },
     Inspect { request: PreparedInspection },
+    Source { request: PreparedSource },
     Abort { token: RequestToken },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,6 +141,29 @@ pub enum UiEvent {
         entry: u32,
         value: String,
     },
+    SetProjectQuery {
+        report: RequestToken,
+        value: String,
+    },
+    SelectSearchResult {
+        report: RequestToken,
+        entry: u32,
+        declaration: Option<u32>,
+    },
+    MoreSource {
+        report: RequestToken,
+        entry: u32,
+    },
+    PreviousSource {
+        report: RequestToken,
+        entry: u32,
+    },
+    MoreSearch {
+        report: RequestToken,
+    },
+    PreviousSearch {
+        report: RequestToken,
+    },
     MoreTree {
         report: RequestToken,
     },
@@ -153,6 +193,37 @@ pub enum UiEvent {
     Result {
         result: ResultEvent,
     },
+    SourceResult {
+        result: SourceResultEvent,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceResultEvent {
+    pub protocol_version: u16,
+    pub token: RequestToken,
+    pub report: RequestToken,
+    pub node_key: String,
+    pub project: String,
+    pub entry: u32,
+    pub outcome: SourceOutcome,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceOutcome {
+    Source {
+        document: SourceDocument,
+    },
+    Error {
+        category: FailureKind,
+        message: String,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceDocument {
+    pub text: String,
+    pub sha256: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

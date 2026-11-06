@@ -247,8 +247,27 @@ before UI assertions; changing a supported browser selection is not a passing te
 
 ### Workbench asset compatibility
 
-The host accepts asset manifest ABI 2. Rebuild and replace the complete generated
+The host accepts asset manifest ABI 3. Rebuild and replace the complete generated
 bundle for the report-keyed workbench; old ABI 1 or unknown asset versions fail
 before listening. Hashes bind the five files as a bundle, not publisher identity.
 The native session/inspection HTTP protocol remains 1. See the
 [local UI migration](../forge-ide-web/WORKBENCH.md#compatibility-and-verification).
+
+## Selected source reads
+
+The host admits `ide.source@1` through the same command bridge, exact Host/Origin,
+session cookie, CSRF, target and deadline gates as inspection. The browser submits
+only the accepted report token and entry ID. The host retains one bounded accepted
+inspection mapping to native path components and SHA-256; it never accepts a
+browser path. Starting another admitted inspection replaces that mapping. A tab
+whose report has been superseded must refresh before reading additional files.
+No source survives host restart as cached authority.
+
+The separately registered source client calls the mTLS agent, which independently
+checks operation/project permission and revision. Both the client and host verify
+returned bytes against the expected digest before exposing source to WASM.
+`InspectionPort::source` is an explicit optional substitution seam; its default
+denies reads, preserving inspection-only consumers. The native response is at most
+1 MiB. The UI displays bounded windows (256 lines / 64 KiB) and safely renders text;
+this is a read-only source viewer, with no save or execution route. Generated assets
+and WASM ABI 3 must be replaced atomically with this host.

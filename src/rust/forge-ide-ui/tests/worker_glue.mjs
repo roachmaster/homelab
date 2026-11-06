@@ -11,7 +11,7 @@ const source = await readFile(join(assetDir, 'worker.js'), 'utf8');
 const wasmBytes = await readFile(join(assetDir, 'app.wasm'));
 const copy = value => JSON.parse(JSON.stringify(value));
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
-const catalog = { protocol_version: 1, session_epoch: 'test-session', timeout_ms: 1000, nodes: [{ key: 'lab', label: 'Lab', node: 'node', incarnation: 'boot', projects: [{ alias: 'project', label: 'Project' }] }] };
+const catalog = { protocol_version: 1, session_epoch: 'test-session', timeout_ms: 1000, nodes: [{ key: 'lab', label: 'Lab', node: 'node', incarnation: 'boot', projects: [{ alias: 'project', label: 'Project' }, { alias: 'other', label: 'Other' }] }] };
 const paired = request => ({ protocol_version: 1, event: { kind: 'paired', request_id: request.request_id, catalog }, csrf: 'a'.repeat(64) });
 const report = { format_version: 1, complete: true, files: 0, bytes_read: 0, entries: [{ id: 0, parent: null, name: { encoding: 'utf8', value: '<script>text, not HTML</script>' }, kind: 'directory', size_bytes: null, lines: null, content_status: '', diagnostics: [], declarations: [] }] };
 const inspected = request => ({ protocol_version: 1, event: { kind: 'result', result: { protocol_version: 1, token: request.request.token, node_key: request.request.node_key, project: request.request.project, outcome: { kind: 'report', report } } } });
@@ -78,7 +78,7 @@ for (const [statusCode, expected] of [[401, /Access denied/], [403, /Access deni
     await h.send({ kind: 'pair', value: 'b'.repeat(64) });
     await until(() => /Connected/.test(h.status()), 'actual WASM pairing');
     await h.send({ kind: 'inspect' });
-    await until(() => /Inspection ready/.test(h.status()), 'actual WASM inspection');
+    await until(() => /Project ready/.test(h.status()), 'actual WASM inspection');
     const request = h.requests.find(r => r.body.kind === 'inspect');
     assert.equal(request.headers['Forge-Destination'], 'ide.inspect');
     assert.equal(request.headers['Forge-Target-Node'], 'node');
@@ -137,7 +137,7 @@ console.log('Generated worker rejects legacy ABI 1 before session or inspection 
   try {
     await until(() => /Connected/.test(h.status()), 'resume before presentation envelope');
     await h.send({ event: { kind: 'inspect' }, presentation_sequence: 5 });
-    await until(() => /Inspection ready/.test(h.status()), 'enveloped event reaches actual WASM');
+    await until(() => /Project ready/.test(h.status()), 'enveloped event reaches actual WASM');
     assert.ok(h.messages.some(m => m.kind === 'view' && m.presentation_sequence === 5));
     assert.equal(h.messages.filter(m => m.kind === 'view').at(-1).presentation_sequence, null,
       'asynchronous effect result must not acknowledge an input draft');
@@ -155,3 +155,43 @@ console.log('Generated worker rejects legacy ABI 1 before session or inspection 
   } finally { h.close(); }
 }
 console.log('Generated worker strips bounded presentation envelopes before actual WASM; only the matching synchronous view acknowledges them.');
+
+{
+  const single = copy(catalog);
+  single.nodes[0].projects.length = 1;
+  const withSource = copy(report);
+  withSource.files = 1;
+  withSource.bytes_read = 12;
+  withSource.entries.push({ id: 1, parent: 0, name: { encoding: 'utf8', value: 'lib.rs' }, kind: 'file', size_bytes: 12, lines: 1, content_status: 'text', diagnostics: [], declarations: [] });
+  let deny = true;
+  const h = await harness(request => {
+    if (request.kind === 'resume') {
+      const reply = paired(request); reply.event.catalog = single; return json(reply);
+    }
+    if (request.kind === 'inspect') {
+      const reply = inspected(request); reply.event.result.outcome.report = withSource; return json(reply);
+    }
+    assert.equal(request.kind, 'source');
+    if (deny) return json({ error: 'denied' }, 401);
+    const r = request.request;
+    return json({ protocol_version: 1, event: { kind: 'source_result', result: { protocol_version: 1, token: r.token, report: r.report, node_key: r.node_key, project: r.project, entry: r.entry, outcome: { kind: 'source', document: { text: 'fn run() {}', sha256: 'a'.repeat(64) } } } } });
+  });
+  try {
+    await until(() => /Project ready/.test(h.status()), 'single project opens automatically');
+    const key = h.requests.find(r => r.body.kind === 'inspect').body.request.token;
+    const current = () => h.messages.filter(m => m.kind === 'view').at(-1).view;
+    await h.send({ kind: 'select_entry', report: key, value: 1 });
+    await until(() => /Access denied/.test(current().texts.find(t => t.id === 'source-status').text), 'source HTTP failure is associated with its source request');
+    assert.match(h.status(), /Project ready/, 'source failure retains the accepted inspection');
+    assert.equal(current().sources[0].text, '');
+    deny = false;
+    await h.send({ kind: 'select_entry', report: key, value: 1 });
+    await until(() => current().sources[0].text === 'fn run() {}', 'explicit source retry displays accepted bytes');
+    const source = h.requests.find(r => r.body.kind === 'source');
+    assert.equal(source.headers['Forge-Destination'], 'ide.source');
+    assert.equal(source.headers['Forge-CSRF'], 'a'.repeat(64));
+    assert.deepEqual(source.body.request.report, key);
+    assert.equal(h.messages.some(m => m.kind === 'fatal'), false);
+  } finally { h.close(); }
+}
+console.log('Generated worker auto-opens one project and sends guarded source effects; source denial retains the inspection and explicit retry succeeds.');

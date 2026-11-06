@@ -86,7 +86,8 @@ fn text_lines_syntax_binary_and_exclusions_are_distinct() {
         Entry::File {
             content: FileContent::Text {
                 lines: 0,
-                rust: None
+                rust: None,
+                ..
             },
             ..
         }
@@ -96,7 +97,8 @@ fn text_lines_syntax_binary_and_exclusions_are_distinct() {
         Entry::File {
             content: FileContent::Text {
                 lines: 2,
-                rust: Some(_)
+                rust: Some(_),
+                ..
             },
             ..
         }
@@ -106,7 +108,8 @@ fn text_lines_syntax_binary_and_exclusions_are_distinct() {
         Entry::File {
             content: FileContent::Text {
                 lines: 2,
-                rust: None
+                rust: None,
+                ..
             },
             ..
         }
