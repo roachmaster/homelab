@@ -628,7 +628,7 @@ impl UiModel {
                 }
             }
         }
-        let summary = self.report.as_ref().map(summary).unwrap_or_else(|| "Read-only project structure and Rust declarations. No file editing or source-body access.".into());
+        let summary = self.report.as_ref().map(summary).unwrap_or_else(|| "Read-only source and Rust declarations. No project inspection has been accepted yet.".into());
         let workspace_summary = if let Some(e) = entry {
             let hidden = if hidden_entry {
                 " Selected entry is hidden by the file filter."
@@ -641,7 +641,7 @@ impl UiModel {
         } else if connected && self.project.is_empty() {
             "No allowed project is available on this node. Choose another admitted node; no arbitrary path can be inspected.".into()
         } else {
-            "Choose an allowed node and project, then Inspect. This workspace shows file metadata and structural declarations, never source bodies.".into()
+            "Choose an allowed node and project, then Refresh project. Find a file or function to read its checked source.".into()
         };
         let file_summary = if self.report.is_none() {
             "No accepted report. Filters apply only to inspected names.".into()

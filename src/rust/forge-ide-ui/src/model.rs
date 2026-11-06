@@ -262,7 +262,16 @@ impl UiModel {
                 self.pairing = None;
                 self.pairing_required = false;
                 self.phase = Phase::Idle;
-                self.message = "Connected. Choose an allowed project, then Open project.".into();
+                self.message = if self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|c| c.nodes.iter().any(|n| !n.projects.is_empty()))
+                {
+                    "Connected. Choose an allowed project, then Refresh project."
+                } else {
+                    "Connected. No projects are available for this session."
+                }
+                .into();
                 if sole.len() == 1 {
                     self.begin_inspection(input.now_ms, &mut effects)?;
                 }
