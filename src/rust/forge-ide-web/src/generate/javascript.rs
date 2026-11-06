@@ -196,6 +196,13 @@ function apply(view,acknowledgedSequence){
     if(!visible(target)||(direct&&!focus.disabled)||(focusKey&&priorPane===pane&&!invalidatedFocus))continue;
     // The bounded gutter anchor remains visible even when a source line is wider
     // than the viewport. Focus follows the code instead of an offscreen heading.
+    const source=target.closest('[data-source-view]');
+    if(source&&target.dataset.highlight==='true'){
+      // Put the declaration start at the top of this source window before
+      // revealing it in outer scroll containers. Nearest alone can leave the
+      // selected declaration at the bottom, showing mostly preceding code.
+      source.scrollTop+=target.getBoundingClientRect().top-source.getBoundingClientRect().top-source.clientTop;
+    }
     const anchor=target.children[0];anchor.scrollIntoView({block:'nearest',inline:'nearest'});
     const heading=pane?element(pane.id+'-heading'):null;
     if((heading&&(invalidatedFocus===heading||focus===heading))||(direct&&focus.disabled))sourceFocus=anchor;

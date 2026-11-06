@@ -40,8 +40,16 @@ const extraElements = new Map();
 const sourceElements = [];
 function sourceNode(tag = 'span') {
   return { tagName: tag.toUpperCase(), dataset: {}, children: [], textContent: '',
-    isConnected: true, scrollLeft: 0, scrollTop: 0, scrolled: false,
-    closest(selector) { return this.parentElement?.closest?.(selector) ?? null; },
+    isConnected: true, scrollLeft: 0, scrollTop: 0, clientTop: 1, scrolled: false,
+    closest(selector) { return selector === '[data-source-view]' && this.hasAttribute(selector.slice(1, -1)) ? this : this.parentElement?.closest?.(selector) ?? null; },
+    getBoundingClientRect() {
+      if (this.tagName === 'PRE') return { top: 100 };
+      if (this.className === 'fg-source-line') {
+        const source = this.parentElement;
+        return { top: 100 + source.clientTop + 6 + source.children.indexOf(this) * 20 - source.scrollTop };
+      }
+      return { top: 0 };
+    },
     setAttribute(name, value) { this[name] = value; },
     hasAttribute(name) { return name === 'data-source-view' && this.tagName === 'PRE'; },
     append(...children) { for (const child of children) child.parentElement = this; this.children.push(...children); },
@@ -333,11 +341,21 @@ assert.equal(sourceMount.children[0].dataset.line, '90');
 assert.equal(sourceMount.children[0].dataset.highlight, 'false');
 assert.equal(sourceMount.children[1].dataset.highlight, 'true');
 assert.equal(sourceMount.children[1].children[0].scrolled, true, 'accepted target becomes visible');
+assert.equal(sourceMount.scrollTop, 26, 'selected declaration starts at the source window top');
+assert.equal(sourceMount.children[1].getBoundingClientRect().top, sourceMount.getBoundingClientRect().top + sourceMount.clientTop);
+
 const stableSourceRow = sourceMount.children[0];
 sourceMount.scrollLeft = 120;
 sourceView(sourceBinding);
 assert.equal(sourceMount.children[0], stableSourceRow, 'unrelated views preserve source nodes');
 assert.equal(sourceMount.scrollLeft, 120, 'unrelated views preserve source horizontal position');
+assert.equal(sourceMount.scrollTop, 26, 'unrelated views preserve source vertical position');
+sourceView({ ...sourceBinding, text: Array.from({ length: 256 }, (_, i) => 'line ' + (257 + i)).join('\n'),
+  first_line: 257, target_span: { start: { line: 300, column: 0 }, end: { line: 310, column: 1 } } });
+assert.equal(sourceMount.children[43].dataset.line, '300');
+assert.equal(sourceMount.scrollTop, 866, 'a late declaration aligns internally before outer nearest scrolling');
+assert.equal(sourceMount.children[43].getBoundingClientRect().top, sourceMount.getBoundingClientRect().top + sourceMount.clientTop);
+
 sourceView({ ...sourceBinding, text: 'continued', first_column: 64, target_span: null });
 assert.equal(sourceMount.children[0].children[0].textContent, '90↪');
 sourceView({ ...sourceBinding, text: '', target_span: null });
@@ -350,7 +368,7 @@ sourceView(sourceBinding);
 assert.equal(sourceMount.children.length, 2, 'new instance does not inherit a stale render cache');
 // Background source display must not pull a still-valid focused navigation row
 // away from the viewport. The source window still updates to accepted contents.
-sourceMount.closest = selector => selector === '[data-pane]' ? pane : null;
+sourceMount.closest = selector => selector === '[data-pane]' ? pane : selector === '[data-source-view]' ? sourceMount : null;
 context.inside = inside;
 vm.runInContext("focusKeyByElement.set(inside, 'current-analysis-row')", context);
 document.activeElement = inside;

@@ -868,6 +868,17 @@ async function sourceSearchJourney() {
     await page.locator('#source-previous').click();
     await check(page.locator('#source-view')).toContainText('Source line 257:');
     assert.equal(traffic.count('source'), pageReads, 'source paging reuses the exact accepted file');
+    await page.getByRole('button', { name: 'Back to files', exact: true }).click();
+    await page.locator('#project-query').fill('late_view');
+    await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'late_view' }).click();
+    const lateLine = page.locator('#source-view [data-line="300"]');
+    await check(lateLine).toHaveAttribute('data-highlight', 'true');
+    await check.poll(() => lateLine.evaluate(line => {
+      const source = line.closest('[data-source-view]');
+      return Math.abs(line.getBoundingClientRect().top - source.getBoundingClientRect().top - source.clientTop);
+    })).toBeLessThan(3);
+    await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
+    await check(page.locator('#source-view [data-line="301"]')).toBeInViewport();
     const beforeReload = traffic.count('inspect');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await check(page.locator('#status')).toContainText('Partial inspection:');

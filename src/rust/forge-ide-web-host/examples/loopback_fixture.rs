@@ -114,6 +114,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|line| format!("Source line {line}: Unicode 界 and literal <script> text.\n"))
             .collect::<String>();
         fs::write(project.join("paged.txt"), text)?;
+        let mut rust = "// Context before the selected function.\n".repeat(299);
+        rust.push_str("pub fn late_view() -> u32 {\n    42\n}\n");
+        rust.push_str(&"// Context after the selected function.\n".repeat(298));
+        fs::write(project.join("late.rs"), rust)?;
     }
     let mut ca = CertificateParams::new(Vec::<String>::new())?;
     ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
