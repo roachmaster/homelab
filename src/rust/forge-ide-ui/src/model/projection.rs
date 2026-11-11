@@ -732,7 +732,7 @@ impl UiModel {
         let navigation =
             (self.navigation_revision > 0 && key.is_some()).then_some(self.navigation_revision);
 
-        ViewModel {
+        let mut view = ViewModel {
             panes: vec![PaneBinding {
                 id: "workspace-panel", context: context.clone(), reveal: if entry.is_some_and(|e| e.kind == EntryKind::File) { navigation } else { None },
             }, PaneBinding { id: "explorer-panel", context, reveal: if entry.is_some_and(|e| e.kind != EntryKind::File) { navigation } else { None } }],
@@ -780,9 +780,12 @@ impl UiModel {
             tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details },TableBinding { id:"source-shape-details",rows:shape_details }],
             visibility: vec![
                 visible("search-panel",!self.project_query.0.trim().is_empty()),visible("files-panel",self.project_query.0.trim().is_empty()),visible("source-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
-                visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading || source_loading),
+                visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading || source_loading),
             ],
-        }
+            transcripts: vec![],
+        };
+        self.chats.project(&mut view, connected);
+        view
     }
 }
 fn shape_counts(c: &crate::shape::ShapeCounts) -> String {

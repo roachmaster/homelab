@@ -6,13 +6,29 @@ use crate::component;
 pub fn ide_document() -> Document {
     Document {
         title: "Forge IDE".into(),
-        subtitle: "Source workbench · Read only".into(),
+        subtitle: "Chat and source workbench".into(),
         children: vec![
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [
                 component!(panel "pair-panel", "Connect to your Forge host"; [
                     component!(text "pair-help", "Enter the one-time code shown by your local Forge web host. Agent keys never enter this page."),
                     component!(pair "pair", "Pairing code", "pair"),
+                ]),
+            ]),
+            component!(navigation "ide-navigation", "Forge IDE views"; [
+                component!(button "open-chat", "Chat", "open_chat"),
+                component!(button "open-workbench", "Workbench", "open_workbench"),
+            ]),
+            component!(screen "chat", "Chat", true; [
+                component!(reading_column [
+                    component!(toolbar [
+                        component!(select "chat-conversation", "Conversation", "select_chat"),
+                        component!(button "new-chat", "New chat", "new_chat"),
+                    ]),
+                    component!(transcript "chat-transcript", "Chat messages"),
+                    component!(status "chat-status", ""),
+                    component!(textarea "chat-draft", "Message", "set_chat_draft"),
+                    component!(row [component!(checked_button "send-chat", "Send", "send_chat", "chat-draft")]),
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
@@ -85,7 +101,6 @@ pub fn ide_document() -> Document {
                     component!(caption "inspection-limits", "Read-only source and declarations. Find searches names in this loaded report, not source contents. Source is checked against the inspected version. Cancel stops only this browser wait."),
                 ]),
             ]),
-            component!(caption "footer", "Read only · Source and declaration navigation"),
         ],
     }
 }
@@ -106,6 +121,12 @@ pub fn ide_transport() -> Transport {
         "ui.session.resume",
     ));
     resume.push(HeaderBinding::field("Forge-Request-Id", "request_id"));
+    let mut chat = common.clone();
+    chat.push(HeaderBinding::literal("Forge-Destination", "ide.chat"));
+    chat.push(HeaderBinding::field(
+        "Forge-Request-Id",
+        "request.request_id",
+    ));
     let mut inspect = common;
     inspect.extend([
         HeaderBinding::field("Forge-Destination", "request.destination"),
@@ -122,6 +143,7 @@ pub fn ide_transport() -> Transport {
                 request_id: "request_id".into(),
                 headers: pair,
                 csrf: false,
+                timeout_ms: None,
                 deadline: None,
                 accept_events: vec!["paired".into(), "pair_failed".into()],
             },
@@ -130,6 +152,7 @@ pub fn ide_transport() -> Transport {
                 request_id: "request_id".into(),
                 headers: resume,
                 csrf: false,
+                timeout_ms: None,
                 deadline: None,
                 accept_events: vec!["paired".into(), "pair_failed".into()],
             },
@@ -138,14 +161,25 @@ pub fn ide_transport() -> Transport {
                 request_id: "request.token.request_id".into(),
                 headers: inspect.clone(),
                 csrf: true,
+                timeout_ms: None,
                 deadline: Some("request.expires_unix_ms".into()),
                 accept_events: vec!["result".into()],
+            },
+            RequestBinding {
+                kind: "chat".into(),
+                request_id: "request.request_id".into(),
+                headers: chat,
+                csrf: true,
+                timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
+                deadline: None,
+                accept_events: vec!["chat_result".into()],
             },
             RequestBinding {
                 kind: "source".into(),
                 request_id: "request.token.request_id".into(),
                 headers: inspect,
                 csrf: true,
+                timeout_ms: None,
                 deadline: Some("request.expires_unix_ms".into()),
                 accept_events: vec!["source_result".into()],
             },

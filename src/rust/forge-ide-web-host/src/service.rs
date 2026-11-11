@@ -1,3 +1,4 @@
+use crate::chat::ChatRelay;
 use crate::{assets::Assets, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
@@ -144,6 +145,7 @@ pub(crate) enum Command {
     Resume { request_id: String },
     Inspect { request: PreparedInspection },
     Source { request: PreparedSource },
+    Chat { request: PreparedChat },
 }
 #[derive(PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -151,6 +153,7 @@ pub(crate) enum Kind {
     Resume,
     Inspect,
     Source,
+    Chat,
 }
 impl Payload for Command {
     type Kind = Kind;
@@ -160,6 +163,7 @@ impl Payload for Command {
             Self::Resume { .. } => Kind::Resume,
             Self::Inspect { .. } => Kind::Inspect,
             Self::Source { .. } => Kind::Source,
+            Self::Chat { .. } => Kind::Chat,
         }
     }
 }
@@ -210,7 +214,7 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
     match header.route().destination() {
         "ui.session.open" if !c.trusted_proxy => Ok(()),
         "ui.session.resume" if c.authenticated || c.trusted_proxy => Ok(()),
-        "ide.inspect" | "ide.source" if c.authenticated && c.csrf_valid => Ok(()),
+        "ide.inspect" | "ide.source" | "ide.chat" if c.authenticated && c.csrf_valid => Ok(()),
         _ => Err(AdmissionDenied),
     }
 }
@@ -265,12 +269,46 @@ fn source_selections(
     Ok(entries)
 }
 struct State {
+    chat: Option<ChatRelay>,
     session: RefCell<Session>,
     accepted_sources: RefCell<Option<AcceptedSources>>,
     config: HostConfig,
     ports: BTreeMap<String, Box<dyn InspectionPort>>,
 }
 impl State {
+    fn chat(&self, command: Command, context: &Context) -> Result<Reply, Rejection> {
+        let Command::Chat { request } = command else {
+            return Err(Rejection::Invalid);
+        };
+        if request.request_id != context.request_id || !valid_chat_messages(&request.messages) {
+            return Err(Rejection::Invalid);
+        }
+        let result = self
+            .chat
+            .as_ref()
+            .ok_or(FailureKind::Unavailable)
+            .and_then(|relay| {
+                let deadline = context
+                    .deadline
+                    .checked_sub(std::time::Duration::from_millis(200))
+                    .ok_or(FailureKind::Timeout)?;
+                relay.complete(&request.messages, deadline)
+            });
+        let outcome = match result {
+            Ok(content) => ChatOutcome::Answer { content },
+            Err(category) => ChatOutcome::Error { category },
+        };
+        Ok(Reply {
+            protocol_version: PROTOCOL_VERSION,
+            event: UiEvent::ChatResult {
+                request_id: request.request_id,
+                outcome,
+            },
+            csrf: None,
+            cookie: None,
+        })
+    }
+
     fn pair(&self, p: Command, c: &Context) -> Result<Reply, Rejection> {
         let Command::Pair { request_id, code } = p else {
             return Err(Rejection::Invalid);
@@ -567,7 +605,9 @@ impl Host {
         }
         let assets = Assets::load(&config.assets)?;
         let session = Session::new(&config)?;
+        let chat = config.chat.as_ref().map(ChatRelay::new).transpose()?;
         let state = Rc::new(State {
+            chat,
             session: RefCell::new(session),
             accepted_sources: RefCell::new(None),
             config: config.clone(),
@@ -579,6 +619,7 @@ impl Host {
             ("ui.session.resume", Kind::Resume),
             ("ide.inspect", Kind::Inspect),
             ("ide.source", Kind::Source),
+            ("ide.chat", Kind::Chat),
         ] {
             let s = Rc::clone(&state);
             registry
@@ -589,6 +630,7 @@ impl Host {
                         "ui.session.open" => s.pair(p, c),
                         "ui.session.resume" => s.resume(p, c),
                         "ide.source" => s.source(p, c),
+                        "ide.chat" => s.chat(p, c),
                         _ => s.inspect(p, c),
                     },
                 )

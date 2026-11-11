@@ -4,7 +4,9 @@
 //! Public registration is effect-free; factory creation validates assets/TLS and
 //! opens the listener. One owner constructs, uses and drops its HTTPS clients.
 mod assets;
+mod chat;
 mod config;
+pub use chat::ChatConfig;
 mod http;
 mod projection;
 mod service;

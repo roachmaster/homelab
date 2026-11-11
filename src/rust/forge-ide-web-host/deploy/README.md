@@ -1,9 +1,9 @@
 # Access-controlled HTTPS deployment
 
-This is a single-operator, read-only workbench. For an authenticated TLS proxy such
+This is a single-operator IDE with chat and a read-only workbench. For an authenticated TLS proxy such
 as Cloudflare Access, set `"session_auth": "trusted_proxy"` and the exact
-`public_origin`. The workbench opens automatically after proxy sign-in; no manual
-pairing or server access is needed. Sessions last 30 minutes and are automatically
+`public_origin`. Chat opens automatically after proxy sign-in. The Workbench button opens the
+source tools. Sessions last 30 minutes and are automatically
 re-established on reload after expiry or restart. They are not durable or isolated
 user accounts. No remote shell, source editing or background jobs are exposed.
 
@@ -15,6 +15,11 @@ Browser → HTTPS + access policy → local tunnel/proxy → loopback web host
                                                           ↓
                                                allowed source snapshot
 ```
+
+For inference, add the [private chat relay configuration](../README.md#chat-relay)
+to the web host and run the llama.cpp adapter on Forge GPU. If the services run
+on different hosts, use a loopback-only SSH forward from the web host to the
+adapter and keep its bearer token in an owner-only file outside served assets.
 
 ## Build and stage
 

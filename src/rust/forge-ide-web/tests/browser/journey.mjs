@@ -164,6 +164,9 @@ async function connect(context, fixture, autoLoad = false) {
   await page.locator('#pair-code').fill(fixture.code);
   await page.locator('#pair').click();
   fixture.code = '';
+  await check(page.locator('#chat')).toBeVisible();
+  await check(page.locator('#workbench')).toBeHidden();
+  await page.locator('#open-workbench').click();
   await check(page.locator('#status')).toContainText(autoLoad ? 'Partial inspection:' : 'Connected.');
   await check(page.locator('#pair-code')).toHaveValue('');
   await check(page.locator('#pair-panel')).toBeHidden();
@@ -571,7 +574,7 @@ async function deviceViewportJourney(page, traffic) {
     report.checkpoint('viewport_breakpoint');
     await check(page.locator('#workspace')).toHaveAttribute('data-narrow', String(narrow));
     if (narrow) {
-      assert.equal(await page.locator('.fg-toolbar select').evaluateAll(fields => fields.every(field => field.getBoundingClientRect().width >= 120)), true, 'narrow context selectors stay readable rather than shrinking around status');
+      assert.equal(await page.locator('#workbench .fg-toolbar select').evaluateAll(fields => fields.every(field => field.getBoundingClientRect().width >= 120)), true, 'narrow context selectors stay readable rather than shrinking around status');
     }
     async function activate(pane, checkpoint) {
       report.checkpoint(checkpoint);
@@ -805,6 +808,8 @@ async function reportAndPageLifecycle(page, traffic) {
   await noReport(page);
   assert.equal(traffic.count('inspect'), inspectBefore, 'browser leave/return never restores the old report');
   assert.equal(page.workers().length, 1);
+  await check(page.locator('#chat')).toBeVisible();
+  await page.locator('#open-workbench').click();
   assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0, 'no report/session secrets in browser storage');
   assert.equal(new URL(page.url()).search, '', 'no report/session state in URL');
   report.pass('probe.page.lifecycle');
@@ -881,6 +886,8 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view [data-line="301"]')).toBeInViewport();
     const beforeReload = traffic.count('inspect');
     await page.reload({ waitUntil: 'domcontentloaded' });
+    await check(page.locator('#chat')).toBeVisible();
+    await page.locator('#open-workbench').click();
     await check(page.locator('#status')).toContainText('Partial inspection:');
     await check(page.locator('#source-view')).toHaveText('');
     assert.equal(traffic.count('inspect'), beforeReload + 1, 'reload obtains a fresh single-project report');
@@ -895,6 +902,70 @@ async function sourceSearchJourney() {
   }
 }
 
+async function chatJourney(page, context) {
+  const gateway = '**/forge/v1/dispatch';
+  const transcript = page.locator('#chat-transcript');
+  const draft = page.locator('#chat-draft');
+  const select = page.locator('#chat-conversation');
+  const send = page.locator('#send-chat');
+  const sent = [];
+  let release;
+  const hold = new Promise(resolve => { release = resolve; });
+  const routeChat = async route => {
+    const body = route.request().postDataJSON();
+    if (body?.kind !== 'chat') return route.continue();
+    sent.push(body.request.messages);
+    if (sent.length === 1) await hold;
+    await route.fulfill({ json: {
+      protocol_version: 1,
+      event: {
+        kind: 'chat_result', request_id: body.request.request_id,
+        outcome: { kind: 'answer', content: 'Reply <img src=x onerror=alert(1)>' },
+      },
+    } });
+  };
+  await page.locator('#open-chat').click();
+  await check(page.locator('#chat')).toBeVisible();
+  await draft.fill('Retry this draft');
+  await send.click();
+  await check(page.locator('#chat-status')).toContainText('inference is unavailable');
+  await check(draft).toHaveValue('Retry this draft');
+  await context.route(gateway, routeChat);
+  try {
+    await draft.fill('Original conversation');
+    await send.click();
+    await check(transcript).toContainText('Original conversation');
+    await page.locator('#new-chat').click();
+    await check(select).toHaveValue('1');
+    await check(transcript).not.toContainText('Original conversation');
+    await draft.fill('Draft for the other conversation');
+    release();
+    await check(send).toBeEnabled();
+    await check(transcript).not.toContainText('Reply');
+    await select.selectOption('0');
+    await check(transcript).toContainText('Reply <img src=x onerror=alert(1)>');
+    await check(transcript.locator('img,script')).toHaveCount(0);
+    await draft.fill('Follow-up');
+    await send.click();
+    await check(transcript.locator('[data-role=assistant]')).toHaveCount(2);
+    assert.deepEqual(sent[1].map(message => message.content), [
+      'Original conversation', 'Reply <img src=x onerror=alert(1)>', 'Follow-up',
+    ]);
+    await select.selectOption('1');
+    await check(draft).toHaveValue('Draft for the other conversation');
+    await screenshot(page, 'ide-chat-desktop.png');
+    await page.setViewportSize({ width: 390, height: 664 });
+    await check(page.locator('#new-chat')).toBeInViewport();
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    await screenshot(page, 'ide-chat-phone.png');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  } finally {
+    release();
+    await context.unroute(gateway, routeChat);
+  }
+  await page.locator('#open-workbench').click();
+}
+
 async function realJourney() {
   report.start('real.report.partial');
   await sourceSearchJourney();
@@ -907,8 +978,9 @@ async function realJourney() {
   const { page, errors } = await connect(context, fixture);
   assert.equal(traffic.count('resume'), 1, 'startup resumes once');
   assert.equal(traffic.count('pair'), 1, 'one explicit pairing request');
+  await chatJourney(page, context);
   await inspect(page, 'workspace');
-  await check(page.locator('textarea, [contenteditable="true"]')).toHaveCount(0);
+  await check(page.locator('#workbench textarea, #workbench [contenteditable="true"]')).toHaveCount(0);
   await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
   await check(page.locator('#source-shape-panel')).toHaveJSProperty('open', false);
   await check(page.locator('#inspection-details')).toHaveJSProperty('open', false);
@@ -1093,6 +1165,8 @@ async function controlledLifecycleJourney() {
   assert.equal(traffic.count('inspect'), refreshRequests, 'refresh during work never replays Inspect');
   assert.equal(traffic.count('resume'), refreshResumes + 1);
   assert.equal(page.workers().length, 1);
+  await check(page.locator('#chat')).toBeVisible();
+  await page.locator('#open-workbench').click();
   await page.locator('#project').selectOption('slow');
   await page.locator('#inspect').click();
   await check(page.locator('#phase-label')).toContainText('Inspecting');
@@ -1154,6 +1228,7 @@ async function controlledLifecycleJourney() {
   });
   await page.reload({ waitUntil: 'domcontentloaded' });
   await check(page.locator('#status')).toContainText('Connected.');
+  await page.locator('#open-workbench').click();
   await check(page.locator('#workbench')).toContainText(/No allowed project/i);
   await check(page.locator('#inspect')).toBeDisabled();
   await check(page.locator('#project option')).toHaveCount(0);

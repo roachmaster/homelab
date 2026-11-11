@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":3,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":4,"files":files})).unwrap(),
         )
         .unwrap();
         Self(p)
@@ -89,6 +89,7 @@ impl InspectionPort for Fake {
 }
 fn config(f: &Files) -> HostConfig {
     HostConfig {
+        chat: None,
         bind: "127.0.0.1:0".parse().unwrap(),
         public_origin: None,
         session_auth: SessionAuth::Pairing,
@@ -863,7 +864,7 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 4] {
+    for abi in [0, 1, 2, 3, 5] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -1219,4 +1220,106 @@ fn binary_help_does_not_load_config_or_bind() {
         .output()
         .unwrap();
     assert!(!out.status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token_dir = files.0.join("native");
+    fs::create_dir(&token_dir).unwrap();
+    let token_path = token_dir.join("token");
+    let token = "0123456789abcdef".repeat(4);
+    fs::write(&token_path, &token).unwrap();
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut settings = config(&files);
+    settings.chat = Some(forge_ide_web_host::ChatConfig {
+        endpoint: upstream.local_addr().unwrap(),
+        token_file: token_path,
+    });
+    let (host, _) = host_with_config(settings);
+    let body = json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}});
+    let (cookie, csrf, _) = paired(&host);
+    assert!(exchange(&host, post(&host, "ide.chat", body.clone(), "")).starts_with("HTTP/1.1 401"));
+    assert!(exchange(
+        &host,
+        post(
+            &host,
+            "ide.chat",
+            body.clone(),
+            &format!("Cookie: {cookie}\r\n")
+        )
+    )
+    .starts_with("HTTP/1.1 401"));
+    let headers = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    let mut invalid = body.clone();
+    invalid["request"]["request_id"] = "mismatch".into();
+    assert!(exchange(&host, post(&host, "ide.chat", invalid, &headers)).starts_with("HTTP/1.1 400"));
+    let mut invalid = body.clone();
+    invalid["request"]["messages"][0]["role"] = "assistant".into();
+    assert!(exchange(&host, post(&host, "ide.chat", invalid, &headers)).starts_with("HTTP/1.1 400"));
+    upstream.set_nonblocking(true).unwrap();
+    assert_eq!(
+        upstream.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    upstream.set_nonblocking(false).unwrap();
+
+    let expected = body["request"]["messages"].clone();
+    let secret = token.clone();
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = upstream.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = BufReader::new(&mut stream);
+        let mut line = String::new();
+        request.read_line(&mut line).unwrap();
+        assert_eq!(line, "POST /v1/chat/completions HTTP/1.1\r\n");
+        let mut length = 0;
+        let mut authenticated = false;
+        loop {
+            line.clear();
+            request.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+            let (name, value) = line.trim_end().split_once(": ").unwrap();
+            if name.eq_ignore_ascii_case("authorization") {
+                authenticated = value == format!("Bearer {secret}");
+            }
+            if name.eq_ignore_ascii_case("content-length") {
+                length = value.parse().unwrap();
+            }
+        }
+        assert!(authenticated);
+        let mut data = vec![0; length];
+        request.read_exact(&mut data).unwrap();
+        let request: Value = serde_json::from_slice(&data).unwrap();
+        assert_eq!(request["messages"], expected);
+        assert_eq!(request["stream"], false);
+        let response = json!({"choices":[{"message":{"role":"assistant","content":"local response","reasoning_content":"private scratchpad"}}]}).to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+            response.len(),
+            response
+        )
+        .unwrap();
+    });
+    let response = exchange(&host, post(&host, "ide.chat", body, &headers));
+    worker.join().unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert!(!response.contains(&token));
+    assert!(!response.contains("private scratchpad"));
+    let reply: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        reply["event"],
+        json!({"kind":"chat_result","request_id":"request-1","outcome":{"kind":"answer","content":"local response"}})
+    );
 }

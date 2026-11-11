@@ -164,6 +164,25 @@ Bodies are tagged `pair {request_id, code}`, `resume {request_id}`, or
 transport plumbing, not the Rust domain model or DOM. HTTP failures use a bounded
 `{error:...}` response; application errors can be typed events with HTTP 200.
 
+## Chat relay
+
+The optional host configuration enables chat against the private Forge llama.cpp
+adapter. The endpoint must be loopback, such as a local SSH forward to Forge GPU.
+The token file is readable only by the native host and stays outside the asset
+directory. The model must already be running on the adapter.
+
+```json
+"chat": {
+  "endpoint": "127.0.0.1:18080",
+  "token_file": "/etc/homelab-forge/web/llama.token"
+}
+```
+
+Chat uses `POST /forge/v1/dispatch` with destination `ide.chat`, the normal
+session cookie and CSRF header. The host forwards the bounded message history to
+the adapter's `POST /v1/chat/completions` and returns the assistant's text.
+When the adapter or model is unavailable, the browser keeps the prompt as a draft.
+
 ## Bounds and limitations
 
 Headers: 16 KiB/48 fields; request: default16 KiB (maximum64 KiB); response:
@@ -247,7 +266,7 @@ before UI assertions; changing a supported browser selection is not a passing te
 
 ### Workbench asset compatibility
 
-The host accepts asset manifest ABI 3. Rebuild and replace the complete generated
+The host accepts asset manifest ABI 4. Rebuild and replace the complete generated
 bundle for the report-keyed workbench; old ABI 1 or unknown asset versions fail
 before listening. Hashes bind the five files as a bundle, not publisher identity.
 The native session/inspection HTTP protocol remains 1. See the
@@ -270,4 +289,4 @@ returned bytes against the expected digest before exposing source to WASM.
 denies reads, preserving inspection-only consumers. The native response is at most
 1 MiB. The UI displays bounded windows (256 lines / 64 KiB) and safely renders text;
 this is a read-only source viewer, with no save or execution route. Generated assets
-and WASM ABI 3 must be replaced atomically with this host.
+and WASM ABI 4 must be replaced atomically with this host.

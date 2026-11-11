@@ -65,6 +65,7 @@ pub struct HostConfig {
     pub public_origin: Option<String>,
     pub session_auth: SessionAuth,
     pub assets: PathBuf,
+    pub chat: Option<crate::ChatConfig>,
     pub nodes: Vec<NodeConfig>,
     pub limits: HostLimits,
 }
@@ -209,6 +210,8 @@ struct FileConfig {
     #[serde(default)]
     session_auth: SessionAuth,
     assets: PathBuf,
+    #[serde(default)]
+    chat: Option<crate::ChatConfig>,
     credentials: CredentialFiles,
     nodes: Vec<NodeFile>,
     #[serde(default = "timeout_default")]
@@ -312,6 +315,10 @@ pub fn load_config(path: &Path) -> Result<HostConfig, HostError> {
         public_origin: f.public_origin,
         session_auth: f.session_auth,
         assets: resolve(base, &f.assets),
+        chat: f.chat.map(|mut chat| {
+            chat.token_file = resolve(base, &chat.token_file);
+            chat
+        }),
         nodes,
         limits: HostLimits {
             response_bytes: f.response_bytes,

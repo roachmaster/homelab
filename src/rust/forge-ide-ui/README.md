@@ -137,8 +137,9 @@ work or Explorer on narrow displays without becoming a domain-state controller.
 
 ## ABI and verification
 
-The local WASM ABI is **3** because source effects, source-window bindings, project search and pane navigation are a coordinated change. Deploy the generated scripts,
-HTML/CSS and WASM together as one verified bundle; older ABI 1/2 workers fail closed.
+The local WASM ABI is **4** and includes chat intents, transcript bindings and
+inference effects. Deploy the generated scripts, HTML/CSS and WASM together as
+one verified bundle.
 The HTTP catalog/report protocol remains version 1.
 
 Worker order: `abi_version()` → `reserve_input(len)` → copy JSON bytes into the

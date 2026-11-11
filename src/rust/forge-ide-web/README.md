@@ -2,14 +2,14 @@
 
 The real browser application is built from **typed Rust components/macros and
 validated YAML style tokens**, not handwritten application HTML, CSS or JS.
-It is a read-only source workbench, not an editor. The worker runs the actual compiled
+It opens to Chat after admission and includes a read-only source workbench. The worker runs the actual compiled
 [`forge-ide-ui`](../forge-ide-ui/README.md) Rust model through the bounded WASM ABI.
 The [native host](../forge-ide-web-host/README.md) supplies protected selectors and
 adapts inspection and bounded source reads to the remote agent; native credentials stay there.
 
 The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
 project-wide file/symbol search, numbered source windows, Outline, Problems and
-reversible keyboard/narrow panes, plus the local ABI3 migration.
+reversible keyboard/narrow panes. Chat uses the local ABI 4 bundle.
 
 ## Authoring and build boundary
 
@@ -53,7 +53,14 @@ Open its printed loopback origin and enter the one-use console pairing code.
 Never publish that code or put it in a URL. The prototype is single-local-operator,
 not an internet service or a general relay.
 
-After admission, a catalog containing one allowed project opens it automatically.
+After admission, use **New chat** to start a separate conversation and use
+**Conversation** to switch between histories and drafts. Follow-ups send the
+selected conversation's bounded history to the active Forge llama.cpp model.
+Conversations live in the current browser tab's worker and clear on reload.
+A failed send leaves the draft ready to retry.
+
+Use **Workbench** to open the source tools. A catalog containing one allowed
+project opens it automatically.
 With multiple projects, choose the intended node/project and use **Refresh project**.
 Use **Find files or symbols** to search names throughout the loaded report, then
 select a result to read its source. Explorer file selection and Outline declaration

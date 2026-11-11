@@ -61,7 +61,7 @@ function sourceNode(tag = 'span') {
 const document = {
   body, activeElement: body,
   createElement(tag) { return sourceNode(tag); },
-  querySelectorAll(selector) { if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; return selector === 'input' || selector === 'input[data-action]' ? [input] : []; },
+  querySelectorAll(selector) { if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; return selector === 'input,textarea' || selector === 'input[data-action],textarea[data-action]' ? [input] : []; },
   querySelector() { return null; },
   getElementById(id) { return id === input.id ? input : id === status.id ? status : id === tree.id ? tree : extraElements.get(id) ?? null; },
 };
@@ -83,7 +83,7 @@ function view(value, sequence, token = 'A', disabled = false) {
 }
 function type(value) { input.value = value; handlers.get('input')(); }
 view('', null);
-// ABI3 views without optional additive tone metadata remain displayable. Unknown
+// Views without optional additive tone metadata remain displayable. Unknown
 // values cannot inject presentation selectors, and lifecycle erases old urgency.
 function textView(tone) {
   workers.at(-1).onmessage({ data: { kind: 'view', view: {

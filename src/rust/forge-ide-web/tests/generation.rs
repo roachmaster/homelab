@@ -171,6 +171,7 @@ fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
             )],
             csrf: false,
             deadline: None,
+            timeout_ms: None,
             accept_events: vec!["collection_loaded".into()],
         }],
     };
@@ -267,9 +268,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==3"));
+    assert!(worker.contains("wasm.abi_version()!==4"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 3);
+    assert_eq!(manifest["abi_version"], 4);
 }
 
 #[test]

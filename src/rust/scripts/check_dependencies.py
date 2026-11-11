@@ -39,7 +39,7 @@ ALLOWED = {
                               "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
-EXTERNAL = {"forge-ide-ui":{"serde"},"forge-ide-web":{"serde","serde_json","serde_yaml_ng","sha2"},"forge-ide-web-host":{"serde","serde_json","httparse","getrandom","subtle","sha2","ctrlc"},"forge-agent": {"serde", "serde_json", "ctrlc"},"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng", "sha2"}}
+EXTERNAL = {"forge-ide-ui":{"serde"},"forge-ide-web":{"serde","serde_json","serde_yaml_ng","sha2"},"forge-ide-web-host":{"serde","serde_json","httparse","getrandom","subtle","sha2","ctrlc","hyper","hyper-util","http-body-util","tokio"},"forge-agent": {"serde", "serde_json", "ctrlc"},"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng", "sha2"}}
 
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
 PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}

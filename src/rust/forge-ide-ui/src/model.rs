@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 
 const PAGE_ROWS: usize = 256;
+mod chat;
 mod projection;
 mod source;
 pub use projection::name_label;
@@ -33,6 +34,7 @@ pub struct Output {
 #[derive(Debug)]
 pub struct UiModel {
     catalog: Option<Catalog>,
+    chats: chat::Chats,
     node: String,
     project: String,
     phase: Phase,
@@ -65,6 +67,7 @@ impl Default for UiModel {
     fn default() -> Self {
         Self {
             catalog: None,
+            chats: chat::Chats::default(),
             node: String::new(),
             project: String::new(),
             phase: Phase::Unpaired,
@@ -157,10 +160,40 @@ impl UiModel {
         }
         let mut effects = Vec::new();
         match input.event {
+            UiEvent::OpenChat {}
+            | UiEvent::OpenWorkbench {}
+            | UiEvent::NewChat {}
+            | UiEvent::SelectChat { .. }
+            | UiEvent::SetChatDraft { .. }
+            | UiEvent::SendChat {}
+                if self.catalog.is_none() =>
+            {
+                return Err(UiError::NotConnected)
+            }
+            UiEvent::OpenChat {} => self.chats.workbench = false,
+            UiEvent::OpenWorkbench {} => self.chats.workbench = true,
+            UiEvent::NewChat {} => self.chats.new_conversation()?,
+            UiEvent::SelectChat { value } => self.chats.select(&value)?,
+            UiEvent::SetChatDraft {
+                conversation,
+                value,
+            } => self.chats.draft(conversation, value)?,
+            UiEvent::SendChat {} => {
+                let request_id = self.next_id(input.now_ms)?;
+                if let Some(request) = self.chats.send(request_id)? {
+                    effects.push(UiEffect::Chat { request });
+                }
+            }
+            UiEvent::ChatResult {
+                request_id,
+                outcome,
+            } => self.chats.complete(&request_id, outcome),
             UiEvent::NetworkFailed {
                 request_id,
                 category,
             } => {
+                self.chats
+                    .complete(&request_id, ChatOutcome::Error { category });
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
@@ -259,6 +292,7 @@ impl UiModel {
                     self.project = sole[0].1.clone();
                 }
                 self.catalog = Some(catalog);
+                self.chats.open();
                 self.pairing = None;
                 self.pairing_required = false;
                 self.phase = Phase::Idle;

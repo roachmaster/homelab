@@ -176,18 +176,42 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             label,
             action,
             emphasis,
+            check_input,
         } => {
             let class = match emphasis {
                 ButtonEmphasis::Standard => "fg-button",
                 ButtonEmphasis::Primary => "fg-button fg-button-primary",
             };
+            let check = check_input.as_ref().map_or_else(String::new, |id| {
+                format!(" data-check-input=\"{}\"", escape(id))
+            });
             let _ = write!(
                 out,
-                "<button type=\"button\" class=\"{class}\" id=\"{}\" data-action=\"{}\" disabled>{}</button>",
+                "<button type=\"button\" class=\"{class}\" id=\"{}\" data-action=\"{}\"{check} disabled>{}</button>",
                 escape(id),
                 escape(action),
                 escape(label)
             );
+        }
+        Component::Navigation {
+            id,
+            title,
+            children: items,
+        } => {
+            let _ = write!(out, "<nav id=\"{}\" class=\"fg-toolbar fg-navigation\" aria-label=\"{}\" data-protected hidden>", escape(id), escape(title));
+            children(items, out);
+            out.push_str("</nav>");
+        }
+        Component::ReadingColumn(items) => {
+            out.push_str("<div class=\"fg-reading-column\">");
+            children(items, out);
+            out.push_str("</div>");
+        }
+        Component::Transcript { id, label } => {
+            let _ = write!(out, "<div id=\"{}\" class=\"fg-transcript\" role=\"region\" aria-label=\"{}\" tabindex=\"0\" data-transcript></div>", escape(id), escape(label));
+        }
+        Component::TextArea { id, label, action } => {
+            let _ = write!(out, "<label class=\"fg-field fg-textarea\" for=\"{id}\"><span>{}</span><textarea id=\"{id}\" rows=\"3\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" disabled></textarea></label>", escape(label), escape(action));
         }
         Component::Filter { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field fg-filter\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"search\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" maxlength=\"256\" disabled></label>",escape(label),escape(action));

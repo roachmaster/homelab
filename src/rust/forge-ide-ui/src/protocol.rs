@@ -72,6 +72,66 @@ pub struct PreparedSource {
     pub expires_unix_ms: u64,
     pub entry: u32,
 }
+pub const MAX_CHAT_PROMPT_BYTES: usize = 2048;
+pub const MAX_CHAT_REPLY_BYTES: usize = 4096;
+pub const MAX_CHAT_TIMEOUT_MS: u64 = 26_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatRole {
+    User,
+    Assistant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatMessage {
+    pub role: ChatRole,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedChat {
+    pub request_id: String,
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChatOutcome {
+    Answer { content: String },
+    Error { category: FailureKind },
+}
+
+pub fn valid_chat_text(text: &str, max: usize) -> bool {
+    !text.trim().is_empty()
+        && text.len() <= max
+        && text
+            .chars()
+            .all(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t'))
+}
+
+pub fn valid_chat_messages(messages: &[ChatMessage]) -> bool {
+    !messages.is_empty()
+        && messages.len() % 2 == 1
+        && messages.len() <= 25
+        && messages
+            .iter()
+            .map(|message| message.content.len())
+            .sum::<usize>()
+            <= 7168
+        && messages.iter().enumerate().all(|(i, message)| {
+            if i % 2 == 0 {
+                message.role == ChatRole::User
+                    && valid_chat_text(&message.content, MAX_CHAT_PROMPT_BYTES)
+            } else {
+                message.role == ChatRole::Assistant
+                    && valid_chat_text(&message.content, MAX_CHAT_REPLY_BYTES)
+            }
+        })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiEffect {
@@ -80,6 +140,7 @@ pub enum UiEffect {
     Inspect { request: PreparedInspection },
     Source { request: PreparedSource },
     Abort { token: RequestToken },
+    Chat { request: PreparedChat },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -90,6 +151,21 @@ pub struct Input {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiEvent {
+    OpenChat {},
+    OpenWorkbench {},
+    NewChat {},
+    SelectChat {
+        value: String,
+    },
+    SetChatDraft {
+        conversation: usize,
+        value: String,
+    },
+    SendChat {},
+    ChatResult {
+        request_id: String,
+        outcome: ChatOutcome,
+    },
     NetworkFailed {
         request_id: String,
         category: FailureKind,

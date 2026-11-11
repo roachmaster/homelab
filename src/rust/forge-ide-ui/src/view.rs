@@ -1,5 +1,5 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{RequestToken, SourceSpan};
+use crate::protocol::{ChatMessage, RequestToken, SourceSpan};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -13,7 +13,15 @@ pub struct ViewModel {
     pub visibility: Vec<VisibilityBinding>,
     pub panes: Vec<PaneBinding>,
     pub sources: Vec<SourceBinding>,
+    pub transcripts: Vec<TranscriptBinding>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TranscriptBinding {
+    pub id: &'static str,
+    pub conversation: usize,
+    pub messages: Vec<ChatMessage>,
+}
+
 /// Exact, bounded UTF-8 window of the accepted read-only source document.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct SourceBinding {
@@ -88,6 +96,7 @@ pub struct InputBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FilterAction {
+    SetChatDraft { conversation: usize },
     SetFileFilter { report: RequestToken },
     SetProjectQuery { report: RequestToken },
     SetSymbolFilter { report: RequestToken, entry: u32 },

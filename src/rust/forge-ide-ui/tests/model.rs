@@ -29,7 +29,7 @@ fn event(m: &mut UiModel, e: UiEvent) -> Output {
     })
     .unwrap()
 }
-fn connected() -> UiModel {
+fn connected_chat() -> UiModel {
     let mut m = UiModel::default();
     let o = event(&mut m, UiEvent::Resume {});
     let UiEffect::Resume { request_id } = &o.effects[0] else {
@@ -43,6 +43,11 @@ fn connected() -> UiModel {
         },
     );
     m
+}
+fn connected() -> UiModel {
+    let mut model = connected_chat();
+    event(&mut model, UiEvent::OpenWorkbench {});
+    model
 }
 fn declaration(id: u32, parent: Option<u32>, kind: DeclarationKind, name: &str) -> DeclarationView {
     DeclarationView {
@@ -2274,4 +2279,106 @@ fn synthetic_root_uses_admitted_project_label_consistently() {
     assert!(output.effects.is_empty());
     assert_eq!(rows_named(&model, "files").len(), 1);
     assert_eq!(rows_named(&model, "files")[0].label, "Workspace");
+}
+
+#[test]
+fn chat_is_the_landing_view_and_in_flight_replies_follow_their_conversation() {
+    let mut model = connected_chat();
+    let visible = |view: &forge_ide_ui::view::ViewModel, id: &str| {
+        view.visibility
+            .iter()
+            .any(|binding| binding.id == id && binding.visible)
+    };
+    assert!(visible(&model.view(), "chat"));
+    assert!(!visible(&model.view(), "workbench"));
+    event(
+        &mut model,
+        UiEvent::SetChatDraft {
+            conversation: 0,
+            value: "First prompt".into(),
+        },
+    );
+    let sent = event(&mut model, UiEvent::SendChat {});
+    let UiEffect::Chat { request } = &sent.effects[0] else {
+        panic!("chat effect")
+    };
+    assert_eq!(request.messages.len(), 1);
+    let request_id = request.request_id.clone();
+    event(&mut model, UiEvent::NewChat {});
+    event(
+        &mut model,
+        UiEvent::SetChatDraft {
+            conversation: 1,
+            value: "Other draft".into(),
+        },
+    );
+    let received = event(
+        &mut model,
+        UiEvent::ChatResult {
+            request_id,
+            outcome: ChatOutcome::Answer {
+                content: "First answer".into(),
+            },
+        },
+    );
+    assert_eq!(received.view.transcripts[0].conversation, 1);
+    assert!(received.view.transcripts[0].messages.is_empty());
+    assert!(received
+        .view
+        .inputs
+        .iter()
+        .any(|b| b.id == "chat-draft" && b.value == "Other draft"));
+
+    event(&mut model, UiEvent::OpenWorkbench {});
+    assert!(visible(&model.view(), "workbench"));
+    event(&mut model, UiEvent::OpenChat {});
+    assert!(visible(&model.view(), "chat"));
+    let first = event(&mut model, UiEvent::SelectChat { value: "0".into() });
+    assert_eq!(
+        first.view.transcripts[0].messages[1].content,
+        "First answer"
+    );
+    event(
+        &mut model,
+        UiEvent::SetChatDraft {
+            conversation: 0,
+            value: "Follow-up".into(),
+        },
+    );
+    let second = event(&mut model, UiEvent::SendChat {});
+    let UiEffect::Chat { request } = &second.effects[0] else {
+        panic!("chat effect")
+    };
+    assert_eq!(
+        request
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>(),
+        ["First prompt", "First answer", "Follow-up"]
+    );
+    let request_id = request.request_id.clone();
+    let failure = event(
+        &mut model,
+        UiEvent::NetworkFailed {
+            request_id: request_id.clone(),
+            category: FailureKind::Timeout,
+        },
+    );
+    assert_eq!(failure.view.transcripts[0].messages.len(), 2);
+    assert!(failure
+        .view
+        .inputs
+        .iter()
+        .any(|b| b.id == "chat-draft" && b.value == "Follow-up"));
+    let late = event(
+        &mut model,
+        UiEvent::ChatResult {
+            request_id,
+            outcome: ChatOutcome::Answer {
+                content: "Late answer".into(),
+            },
+        },
+    );
+    assert_eq!(late.view.transcripts[0].messages.len(), 2);
 }
