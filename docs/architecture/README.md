@@ -19,7 +19,7 @@ The framework is a library family. No particular transport is required or select
 9. [Foundation internal modules and interfaces](foundation-interfaces.md) — proposed bounded jobs, access and remote boundaries, with [concrete Rust-shaped ports](foundation-contracts.md), compatibility costs and stability gates.
 10. [Hosted kernel plan](forge-kernel-plan.md) — implemented narrow local node/terminal checkpoint, followed by proposed bounded jobs and a deliberately selected remote boundary.
 
-[All diagrams and editable Graphviz sources](diagrams/README.md) · [Per-repository reports](../reviews/forge/README.md)
+[Object-oriented analysis, design and UML skills](analysis-and-design.md) · [All diagrams and editable Graphviz sources](diagrams/README.md) · [Per-repository reports](../reviews/forge/README.md)
 
 ## The central path
 

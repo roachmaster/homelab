@@ -19,6 +19,12 @@ For native system clients, use [`forge-kernel::disk`](../../../src/rust/forge-ke
 
 For hosted-kernel expansion, consult the [research plan](../../../docs/architecture/forge-kernel-plan.md): the narrow local node/status slice now exists in `forge-kernel::node`, assembled by `forge-local` and exposed through `forge-terminal`. Inspect these APIs rather than extending their status into production health. The optional [local jobs module](../../../src/rust/forge-local/JOBS.md) now implements a bounded counter with explicit stepping and volatile owner-scoped records; generic jobs and remote execution remain proposals. The [configured agent](../../../src/rust/forge-agent/README.md) now composes node.info and allowed-project IDE inspection using optional typed conversation/HTTPS modules; two localhost processes are tested, not a physical-host deployment. Runtime-length project configuration stages one homogeneous factory group rather than growing a typed registry tuple in a loop. Keep remote CLI composition in the application so capability contracts never import their HTTPS adapter. Keep Task independent of the stepper and local owner selection distinct from authentication. Keep application jobs distinct from OS processes and local contracts distinct from remote failure/identity semantics; do not turn this plan into permission to implement later phases.
 
+## From analysis to module responsibilities
+
+Start with one actor goal and one observable success outcome. List the domain rule, its owner and the failure behavior before choosing a task, client or provider. A task is a useful control role when it coordinates collaborators. A policy can be a pure function or a domain operation. An ingress boundary translates the interaction and the I/O client owns its external effect. Choose each role from the use case rather than expecting one class or crate per analysis role.
+
+For a change to existing code, trace requirement → owner → contract → acceptance case. In the reverse direction, give each new contract or collaborator a reason to exist. Use the [Forge analysis and design guide](../../../docs/architecture/analysis-and-design.md) for the worked example.
+
 ## Workflow
 
 1. Identify the requested explanation, feature or review slice and its success guarantee. Inspect actual APIs/manifests when supplied; do not describe proposed names as existing exports.

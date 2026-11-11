@@ -27,6 +27,12 @@ For native disk requests, trace the optional consumer’s bridge check before `C
 
 For implemented [local jobs](../../../src/rust/forge-local/JOBS.md), trace the shared bridge into owner-checked submit/inspect/list/step/cancel. Submit accepts volatile work; only explicit step runs one quantum. Running cancel is Requested, not confirmed stopped. Retained same-owner intent replay returns the receipt; request IDs do not deduplicate. Trusted in-process owner selection is not authentication.
 
+## Sequence and failure views
+
+Start with the actor and trigger. Name the requested postcondition, the first effect and the point where a success receipt can be issued. For an alternate branch, identify who rejects the request and what the caller receives. Trace header/variant rejection through the admission gate before showing a handler or provider acquisition. Distinguish replay of an existing intent from a new execution when the capability supports replay.
+
+When drawing a sequence, give each participant only the messages it can receive under its real contract. Show a provider lease only when it explains a lifecycle or ownership decision. A separate state view can explain commands such as cancellation that request a later transition. See [Forge UML](../document-forge-uml/SKILL.md).
+
 ## Small example
 
 `jobs.submit @ 1` with `JobsPayload::Status(id)` is a mismatch. Reject before either handler's effects; never repair the header or dispatch status by inspecting the variant. Check that neither capability storage nor its per-operation acquisition is invoked.

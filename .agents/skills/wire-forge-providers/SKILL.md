@@ -27,6 +27,12 @@ For the implemented [disk client](../../../src/rust/forge-kernel/README.md), reg
 
 For delivery of a reusable capability, use [Expose Forge Capability](../expose-forge-capability/SKILL.md): verify public library config/factory/registrar exports and a separate consumer import proof. Example-local assembly alone is not that deliverable.
 
+## Make lifetime and ownership reviewable
+
+For each selected dependency, record who configures it, who constructs the instance, who owns it, how long callers may use it and who releases it. Draw a construction sequence when order matters and a separate usage sequence when acquisition is part of a request. Use a class view only where the distinction among factory, provider, lease and client clarifies ownership or validity.
+
+Check a failed assembly or acquisition where the design depends on that guarantee. Specify whether the failure releases earlier resources, leaves the builder reusable, or prevents the application from being published. Use [Forge UML](../document-forge-uml/SKILL.md) for notation and evidence conventions.
+
 ## Small example
 
 For explicitly requested pooled rendering sessions, decide whether pooling stays private to the rendering adapter or a use case needs a session port. A failed render can contaminate retained state: require reset/validation or quarantine and explicit async cleanup ownership if needed. Test exhaustion, reuse state, cancellation and close—not just successful acquisition.

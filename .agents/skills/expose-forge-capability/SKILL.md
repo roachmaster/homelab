@@ -35,6 +35,10 @@ for vocabulary and [provider wiring](../wire-forge-providers/SKILL.md) for scope
    creation. Build with the optional capability omitted and inspect its normal
    dependency tree; an unused runtime branch is not compile-time omission.
 
+## Trace the delivered contract
+
+Link each intended consumer goal to the public entry point, the capability-owned contract and an independent consumer check. Include a rejection or failure case where it protects a promised invariant. A design diagram can explain who provides a factory or registrar. The independent consumer must exercise the exported integration path and distinguish registration, construction and command execution. Use the [analysis and design guide](../../../docs/architecture/analysis-and-design.md) for the traceability format.
+
 ## Completion gate
 
 Report exact public import paths, dependency/feature policy, construction and

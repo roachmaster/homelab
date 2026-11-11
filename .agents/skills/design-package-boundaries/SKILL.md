@@ -91,6 +91,12 @@ Specify the externally meaningful properties of each changed boundary:
 
 Keep vendor-specific diagnostics available for investigation without leaking secrets or forcing callers to understand vendor recovery policy. Use the language's normal failure model rather than copying Java exceptions into Rust or C.
 
+## Review the placement of invariants
+
+Map each material invariant to the package that can enforce it and the operation where it becomes observable. If a decision and its commit can race, give one boundary authority over both. A validating request DTO, a service with a convenience method and a later store update do not together establish atomicity.
+
+Review the proposal both ways. Walk from each required success or failure to the package and contract that realize it. Then walk new dependencies and public APIs back to their purpose. Show package imports separately from runtime request or deployment diagrams. See the [worked Forge traceability map](../../../docs/architecture/analysis-and-design.md).
+
 ## 5. Verify the boundary, not just the diagram
 
 Select checks that establish the changed contracts:
