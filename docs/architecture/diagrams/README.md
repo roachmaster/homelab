@@ -2,6 +2,10 @@
 
 For product layout rather than runtime architecture, see the [Forge IDE workbench wireframes](../../design/forge-ide-wireframes/README.md): editable SVGs, PNG previews and an interaction spec. They are design-only and do not replace the implementation diagrams.
 
+## Forge GPU inference adapter
+
+[Adapter C4 and UML views](../../../src/rust/forge-llama/ARCHITECTURE.md) show the REST boundary, SYCL child, model lifecycle and chat continuation.
+
 ## Forge IDE component and interaction design
 
 [M26–M28](mermaid/README.md#forge-ide-workbench-decomposition) decompose the wireframes into component ownership, two screen compositions/local navigation and guarded inspection transitions. [Contracts and acceptance](../../design/forge-ide-components/README.md) distinguish current Rust phases from proposed controls. No new runtime or endpoints are implemented by these diagrams.

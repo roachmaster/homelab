@@ -50,22 +50,7 @@ The adapter and backend bind IPv4 loopback. The backend uses the same local bear
 
 ## Ownership and verification
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant REST as Loopback REST
-    participant Bridge as Forge bridge
-    participant Driver as Driver
-    participant Llama as Owned llama-server
-    Client->>REST: Authenticated chat request
-    REST->>Bridge: Typed llama.chat envelope
-    Bridge->>Bridge: Admit caller and check variant
-    Bridge->>Driver: Chat request
-    Driver->>Llama: Non-streaming chat completion
-    Llama-->>Driver: Answer and metrics
-    Driver-->>REST: Typed reply
-    REST-->>Client: JSON response
-```
+See the [C4 and UML architecture views](ARCHITECTURE.md) for the system boundary, worker and driver, model switching, and chat continuation.
 
 The method and path choose the Forge route. JSON is decoded into a typed request at the REST boundary. The driver owns child process creation, model readiness and the GPU lock. The server owns tokenizer, prompt template, inference and decoding. The package exports `Config`, `register_llama`, `LlamaFactory`, `Request` and `register_routes`. The REST executable consumes those exports. Registration stages a configuration before the host freezes and constructs its singleton. The standalone [consumer fixture](tests/consumer/Cargo.toml) exercises those public imports, duplicate rejection, admission and payload mismatch without loading a model.
 
