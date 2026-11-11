@@ -16,6 +16,10 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 
 The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
 
+## Forge GPU inference
+
+The [SYCL llama.cpp adapter](src/rust/forge-llama/README.md) exposes authenticated loopback REST commands to start, switch, prompt and stop a local model on Forge GPU.
+
 ## Forge IDE read-only workbench
 
 [![Proposed read-only IDE workbench](docs/design/forge-ide-wireframes/forge-ide-workbench-desktop.svg)](docs/design/forge-ide-wireframes/README.md)

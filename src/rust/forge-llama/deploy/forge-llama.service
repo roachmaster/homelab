@@ -1,0 +1,16 @@
+[Unit]
+Description=Forge loopback SYCL llama.cpp adapter
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/forge-llama %h/.config/forge-llama/config.json 18080
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

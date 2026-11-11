@@ -7,6 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-llama": {(name, "normal") for name in ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider")},
     "forge-ide-ui": set(),
     "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-bootstrap","forge-provider","forge-template")},
     "forge-ide-web-host": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")},
@@ -39,7 +40,9 @@ ALLOWED = {
                               "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
-EXTERNAL = {"forge-ide-ui":{"serde"},"forge-ide-web":{"serde","serde_json","serde_yaml_ng","sha2"},"forge-ide-web-host":{"serde","serde_json","httparse","getrandom","subtle","sha2","ctrlc"},"forge-agent": {"serde", "serde_json", "ctrlc"},"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
+EXTERNAL = {
+    "forge-llama": {"ctrlc", "nix", "http-body-util", "hyper", "hyper-util", "serde", "serde_json", "subtle", "tokio"},
+    "forge-ide-ui":{"serde"},"forge-ide-web":{"serde","serde_json","serde_yaml_ng","sha2"},"forge-ide-web-host":{"serde","serde_json","httparse","getrandom","subtle","sha2","ctrlc"},"forge-agent": {"serde", "serde_json", "ctrlc"},"forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls", "serde", "serde_json"},"forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng"}}
 
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
 PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}
@@ -242,7 +245,7 @@ def main():
     wasm=consumer_tree(package="forge-ide-web")
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable|wasm) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable|wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host"})
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")

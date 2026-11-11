@@ -436,6 +436,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-llama"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "forge-bootstrap",
+ "forge-bridge",
+ "forge-ingress-contract",
+ "forge-provider",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nix",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tokio",
+]
+
+[[package]]
 name = "forge-local"
 version = "0.1.0"
 dependencies = [

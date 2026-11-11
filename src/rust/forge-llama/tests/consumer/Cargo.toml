@@ -1,0 +1,14 @@
+[workspace]
+
+[package]
+name = "forge-llama-consumer-check"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+forge-llama = { path = "../.." }
+forge-bootstrap = { path = "../../../forge-bootstrap" }
+forge-provider = { path = "../../../forge-provider" }
+forge-bridge = { path = "../../../forge-bridge" }
+forge-ingress-contract = { path = "../../../forge-ingress-contract" }
