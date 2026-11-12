@@ -1,8 +1,8 @@
 {
-  "server": "/home/lrocha/.local/share/forge-llama/llama-sycl-b12110/llama-server",
+  "server": "/opt/forge/llama.cpp/releases/b12110-sycl/llama-server",
   "backend_port": 18081,
   "device": "SYCL0",
-  "library_path": "/home/lrocha/.local/share/forge-llama/llama-sycl-b12110:/opt/intel/oneapi/dnnl/2026.0/lib:/opt/intel/oneapi/compiler/2026.1/lib:/opt/intel/oneapi/mkl/2026.1/lib:/opt/intel/oneapi/tbb/2023.1/lib/intel64/gcc4.8:/opt/intel/oneapi/tcm/1.5/lib:/opt/intel/oneapi/umf/1.1/lib:/opt/intel/oneapi/compiler/2026.1/opt/compiler/lib",
+  "library_path": "/opt/forge/llama.cpp/releases/b12110-sycl:/opt/intel/oneapi/dnnl/2026.0/lib:/opt/intel/oneapi/compiler/2026.1/lib:/opt/intel/oneapi/mkl/2026.1/lib:/opt/intel/oneapi/tbb/2023.1/lib/intel64/gcc4.8:/opt/intel/oneapi/tcm/1.5/lib:/opt/intel/oneapi/umf/1.1/lib:/opt/intel/oneapi/compiler/2026.1/opt/compiler/lib",
   "gpu_device": "/sys/bus/pci/devices/0000:03:00.0",
   "gpu_lock": "/var/tmp/forge-sycl-comparison-20261110/gpu-run.lock",
   "token_file": "/home/lrocha/.config/forge-llama/token",

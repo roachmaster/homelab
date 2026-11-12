@@ -2,6 +2,8 @@
 
 `forge-llama` is a loopback REST service for one local llama.cpp server. The adapter starts with the GPU idle. Select an allowlisted model to start llama.cpp or replace the currently loaded model. Send chat messages to the selected model and receive the text, token usage and available timing fields. The Forge GPU configuration selects the Arc B50 through SYCL.
 
+The [GPT-OSS 20B KV cache benchmark](KV-CACHE-BENCHMARK.md) records the memory, throughput, and retrieval results for FP16 and Q8_0 caches on Forge.
+
 ## REST contract
 
 Every endpoint requires `Authorization: Bearer <token>`. JSON bodies require `Content-Type: application/json`.
@@ -44,7 +46,24 @@ Build with current stable Rust and the workspace lockfile:
 cargo +stable build --release --locked --manifest-path src/rust/Cargo.toml -p forge-llama
 ```
 
-Use the [Forge configuration example](deploy/forge-gpu.example.json) with actual absolute paths. Place the tested llama.cpp executable and its shared libraries together at the configured server path. The SYCL runtime requires the Intel loader library directories shown in the example. Keep the GPU lock path shared with cooperating benchmark launchers. Generate a 32-byte random hex token in a mode-0600 file before starting. Run the adapter with `forge-llama CONFIG.json 18080`, or install the supplied [user unit](deploy/forge-llama.service) and start it with `systemctl --user start forge-llama`. Its logs are available through `journalctl --user -u forge-llama`.
+Use the [Forge configuration example](deploy/forge-gpu.example.json) with actual absolute paths. Place the tested llama.cpp executable and its shared libraries together at the configured server path. The SYCL runtime requires the Intel loader library directories shown in the example. Keep the GPU lock path shared with cooperating benchmark launchers. Generate a 32-byte random hex token in a mode-0600 file before starting. Install the built adapter at `~/.local/bin/forge-llama` and its configuration at `~/.config/forge-llama/config.json`.
+
+### Start the API at boot
+
+Copy [setup-boot.sh](deploy/setup-boot.sh) and [forge-llama.service](deploy/forge-llama.service)
+together to the inference host. Run the script there as the account that owns
+the adapter. The account needs sudo access to enable systemd user lingering.
+
+```bash
+./setup-boot.sh
+./setup-boot.sh --check
+```
+
+The script enables and starts the API and checks the authenticated loopback
+endpoint. Re-running it preserves an active adapter and its loaded model.
+The user service starts at boot without an SSH login. A fresh adapter starts
+with the GPU idle. Use `PUT /v1/runtime` to select a model, and
+`journalctl --user -u forge-llama` to view service logs.
 
 The adapter and backend bind IPv4 loopback. The backend uses the same local bearer token file, and the deployment assumes trusted access to the GPU host. The shared GPU lock coordinates cooperating launchers. Stop any unrelated workload that owns the GPU using its own controls before loading a model. The service is independent of the legacy system service.
 
@@ -60,6 +79,6 @@ The [child lifecycle check](tests/owned_child.py) exercises the running REST bin
 
 ## Forge deployment and incident record
 
-The user service was installed on Forge with the preserved SYCL b12110 build. The configured PCI device is `0000:03:00.0` and the REST port is `18080`. The unit is started manually and the model is selected with PUT.
+The user service was installed on Forge with the preserved SYCL b12110 build. The configured PCI device is `0000:03:00.0` and the REST port is `18080`. The boot setup script enables the user service, and clients select a model with PUT.
 
 The initial hardware run loaded Qwen 2.5 Coder 7B, switched to GPT-OSS 20B and received `42` from both through REST. GPU engine resets appeared around the initial forced process exits. The adapter now sends SIGTERM and waits up to eight seconds before a forced cleanup. A subsequent SYCL load hit an `xe` wedge, and a device-only rebind blocked on a GPU fence. The adapter remains reachable and rejects model startup with `503 gpu_unavailable` while the PCI driver or render node is absent. The test child verified the revised lifecycle. A fresh hardware run is still needed after a Forge power cycle. [Linux Xe device wedging](https://docs.kernel.org/gpu/xe/xe_device.html)
