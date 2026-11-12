@@ -1,6 +1,6 @@
 # Forge IDE inline edit
 
-**Design proposal.** This adds a Workbench prompt and a staged, single-file diff to Forge IDE. Chat remains the place for longer conversations. The [editable wireframe](../../design/forge-ide-wireframes/forge-ide-inline-edit-mobile.svg) shows the prompt and review states at a 390 px phone width.
+**Design proposal.** This adds a Workbench prompt and a staged, single-file diff to Forge IDE. The UML diagrams specify intended behavior for implementation and verification. Chat remains the place for longer conversations. The [editable wireframe](../../design/forge-ide-wireframes/forge-ide-inline-edit-mobile.svg) shows the prompt and review states at a 390 px phone width.
 
 ![Proposed mobile Workbench prompt and diff review](../../design/forge-ide-wireframes/forge-ide-inline-edit-mobile.svg)
 
@@ -104,6 +104,12 @@ stateDiagram-v2
 
 **Discard** clears the staged review without touching disk. **Undo edit** is a separate guarded write after Apply. Switching from Workbench to Chat alone preserves the proposal. Selecting another file or refreshing its base detaches the review from the current pane and rejects late replies against that context. An in-flight write remains tracked by operation ID until its outcome is known.
 
+## Chat follow-ups after a file changes
+
+Keep file excerpts as structured attachments with a file identity, full digest, and line-window coordinates. Keep the visible conversation history intact. When Apply or Undo succeeds, retire prior attachments for that file across open threads and update the proposal message with a short digest label, such as **Applied · rev a1b2c3d4** or **Reverted · rev e5f6a7b8**. The native receipt supplies the digest. A successful inspection and source read supply the excerpt and its new line numbers.
+
+When assembling the next inference request, omit superseded attachment bytes and line coordinates, including when a future history API reconstructs the prompt from PostgreSQL. Mark references to the old diff as historical. Suspend attachments for the affected file as soon as Apply or Undo starts. For a follow-up that uses the file, attach a fresh verified window from that same admitted file and show its revision and line range. If the write outcome is still being reconciled or refresh failed, surface that status and offer a source refresh when available. General Chat turns can continue without a file attachment.
+
 ## Native write and recovery rules
 
 - Start with one existing regular text file in a write-enabled project. The staged replacement must match exact base bytes, remain within source limits, and preserve line endings and bytes outside the authorized edit. Reject invalid, ambiguous, expired, or oversized candidates before creating an actionable preview.
@@ -114,6 +120,7 @@ stateDiagram-v2
 ## Acceptance before enabling writes
 
 - The Workbench prompt and Chat show the same in-session turn. File switching and late replies preserve the originating thread. Phase 1 sends no write effect.
+- Apply a change that shifts line numbers, switch to Chat, and inspect the next inference request. It must carry the fresh verified revision and line range for a file-specific follow-up, with no superseded attachment. Repeat after Undo, after a lost receipt, and when refresh fails. Verify the conversation retains its historical turns and the proposal displays the receipt revision.
 - The diff accurately shows additions and deletions and preserves source text and Wrap. Discard performs no filesystem mutation. Mobile keyboard and touch checks cover the dock, focus, and bottom source visibility.
 - Apply rejects wrong session, project, file identity, CSRF, expired proposal, base drift, and operation-ID mismatch before publication. Test concurrent Apply, response loss, restart, refresh failure, and Undo after a later edit.
 - Run native contract tests, real-WASM tests, and the browser acceptance suite with owned fixtures. The diagrams and wireframe document proposed behavior.
