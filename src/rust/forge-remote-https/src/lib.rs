@@ -20,5 +20,7 @@ pub mod gateway;
 #[cfg(feature = "ide")]
 pub mod ide;
 
+#[cfg(feature = "managed-writes")]
+pub mod managed_write;
 #[cfg(feature = "ide")]
 pub mod source;

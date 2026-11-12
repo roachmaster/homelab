@@ -25,6 +25,7 @@ pub(crate) struct Session {
 impl Session {
     pub fn new(config: &HostConfig) -> Result<Self, HostError> {
         let catalog = Catalog {
+            recent_write: None,
             protocol_version: 1,
             session_epoch: random_token()?,
             timeout_ms: config.limits.request_timeout.as_millis() as u64,

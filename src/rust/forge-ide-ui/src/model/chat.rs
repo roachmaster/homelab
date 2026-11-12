@@ -15,6 +15,7 @@ struct Conversation {
     messages: Vec<ChatMessage>,
     draft: String,
     status: String,
+    workbench_reply: bool,
 }
 
 #[derive(Debug)]
@@ -22,9 +23,31 @@ struct Pending {
     conversation: usize,
     request_id: String,
     prompt: String,
+    contextual: bool,
 }
 
 impl Chats {
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+    pub fn last_message(&self, conversation: usize) -> Option<usize> {
+        self.conversations
+            .get(conversation)?
+            .messages
+            .len()
+            .checked_sub(1)
+    }
+    pub fn mark_proposal(&mut self, conversation: usize, index: usize, status: String) {
+        if let Some(message) = self
+            .conversations
+            .get_mut(conversation)
+            .and_then(|chat| chat.messages.get_mut(index))
+        {
+            if message.role == ChatRole::Assistant {
+                message.content = status;
+            }
+        }
+    }
     pub fn open(&mut self) {
         if self.conversations.is_empty() {
             self.conversations.push(Conversation::default());
@@ -66,10 +89,15 @@ impl Chats {
         }
         chat.draft = value;
         chat.status.clear();
+        chat.workbench_reply = false;
         Ok(())
     }
 
-    pub fn send(&mut self, request_id: String) -> Result<Option<PreparedChat>, UiError> {
+    pub fn send(
+        &mut self,
+        request_id: String,
+        file_context: Option<ChatFileContext>,
+    ) -> Result<Option<PreparedChat>, UiError> {
         if self.pending.is_some() {
             return Err(UiError::Busy);
         }
@@ -96,10 +124,12 @@ impl Chats {
             conversation: self.selected,
             request_id: request_id.clone(),
             prompt,
+            contextual: file_context.is_some(),
         });
         Ok(Some(PreparedChat {
             request_id,
             messages,
+            file_context,
         }))
     }
 
@@ -126,6 +156,7 @@ impl Chats {
                     },
                 ]);
                 chat.draft.clear();
+                chat.workbench_reply = pending.contextual;
                 String::new()
             }
             ChatOutcome::Error {
@@ -134,6 +165,8 @@ impl Chats {
             ChatOutcome::Error {
                 category: FailureKind::Timeout,
             } => "Forge took too long to respond. Your message is still in the composer.".into(),
+            ChatOutcome::Error { category: FailureKind::Denied } if pending.contextual =>
+                "The verified source is no longer available. Refresh the project and retry your draft.".into(),
             _ => "Forge could not return an answer. Your message is still in the composer.".into(),
         };
     }
@@ -237,5 +270,95 @@ impl Chats {
                 action: None,
             });
         }
+    }
+
+    pub fn project_workbench(
+        &self,
+        view: &mut ViewModel,
+        action: Option<RowAction>,
+        proposal: Option<RowAction>,
+        context: String,
+        reviewing: bool,
+        proposing: bool,
+    ) {
+        let current = self.conversations.get(self.selected);
+        let waiting = self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.conversation == self.selected);
+        view.visibility.push(VisibilityBinding {
+            id: "workbench-chat",
+            visible: action.is_some(),
+        });
+        view.visibility.extend([
+            VisibilityBinding {
+                id: "workbench-chat-compose",
+                visible: !reviewing,
+            },
+            VisibilityBinding {
+                id: "workbench-edit-review",
+                visible: reviewing,
+            },
+        ]);
+        view.texts.extend([
+            TextBinding {
+                id: "workbench-chat-context",
+                text: context,
+                tone: Tone::Neutral,
+            },
+            TextBinding {
+                id: "workbench-chat-status",
+                text: if reviewing {
+                    String::new()
+                } else if waiting && proposing {
+                    "Preparing proposal…".into()
+                } else if waiting {
+                    "Waiting for Forge…".into()
+                } else if self.pending.is_some() {
+                    "Forge is answering in another conversation.".into()
+                } else {
+                    current
+                        .map(|chat| {
+                            if !chat.status.is_empty() {
+                                chat.status.clone()
+                            } else if chat.workbench_reply {
+                                "Reply ready in Chat.".into()
+                            } else {
+                                String::new()
+                            }
+                        })
+                        .unwrap_or_default()
+                },
+                tone: Tone::Neutral,
+            },
+        ]);
+        view.inputs.push(InputBinding {
+            id: "workbench-chat-draft",
+            value: current.map(|chat| chat.draft.clone()).unwrap_or_default(),
+            disabled: action.is_none() || waiting,
+            max_bytes: MAX_CHAT_PROMPT_BYTES,
+            action: action.as_ref().map(|_| FilterAction::SetChatDraft {
+                conversation: self.selected,
+            }),
+        });
+        view.buttons.push(ButtonBinding {
+            id: "send-workbench-chat",
+            disabled: action.is_none()
+                || self.pending.is_some()
+                || current.is_none_or(|chat| chat.draft.trim().is_empty()),
+            action,
+        });
+        view.buttons.push(ButtonBinding {
+            id: "propose-workbench-edit",
+            disabled: proposal.is_none()
+                || self.pending.is_some()
+                || current.is_none_or(|chat| chat.draft.trim().is_empty()),
+            action: proposal,
+        });
+        view.buttons.push(ButtonBinding {
+            id: "discard-workbench-edit",
+            disabled: !reviewing,
+            action: None,
+        });
     }
 }

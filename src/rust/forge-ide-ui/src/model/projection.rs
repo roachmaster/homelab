@@ -723,7 +723,10 @@ impl UiModel {
                 target_span,
             });
         let source_range = self.source.as_ref().map(|s| s.range()).unwrap_or_default();
-        let source_status = if source_loading {
+        let review = self.current_edit();
+        let source_status = if review.is_some() {
+            "Proposed diff · Awaiting review".into()
+        } else if source_loading {
             "Loading source…".into()
         } else {
             self.source_message.clone()
@@ -784,8 +787,76 @@ impl UiModel {
                 visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading || source_loading),
             ],
             transcripts: vec![],
+            diffs: vec![],
         };
         self.chats.project(&mut view, connected);
+        let (workbench_chat, propose, attachment) = match (key, entry, &self.source) {
+            (Some(report), Some(entry), Some(source)) if connected && self.chats.workbench => {
+                let (byte_start, _, first, last, clipped) = source.chat_window();
+                let location = if source.document.text.is_empty() {
+                    "Empty file".into()
+                } else if first == last {
+                    format!("Line {first}")
+                } else {
+                    format!("Lines {first}–{last}")
+                };
+                (
+                    Some(RowAction::SendWorkbenchChat {
+                        report: report.clone(),
+                        entry: entry.id,
+                        byte_start,
+                        conversation: self.chats.selected(),
+                    }),
+                    (!source.document.text.is_empty()).then_some(RowAction::ProposeEdit {
+                        report: report.clone(),
+                        entry: entry.id,
+                        byte_start,
+                        conversation: self.chats.selected(),
+                    }),
+                    format!(
+                        "{location} · rev {}{}",
+                        &source.document.sha256[..8],
+                        if clipped { " · excerpt" } else { "" }
+                    ),
+                )
+            }
+            _ => (None, None, String::new()),
+        };
+        view.visibility.extend([
+            visible("workbench-edit-diff", review.is_some()),
+            visible("source-view", review.is_none()),
+            visible("source-range", review.is_none()),
+            visible("source-pagination", review.is_none()),
+        ]);
+        view.diffs.push(DiffBinding {
+            id: "workbench-edit-diff",
+            lines: review
+                .map(|review| review.preview.lines.clone())
+                .unwrap_or_default(),
+        });
+        if review.is_some() {
+            let label = if review
+                .and_then(|review| review.preview.proposal_id.as_ref())
+                .is_some()
+            {
+                "Proposed diff"
+            } else {
+                "Proposed diff · Read-only preview"
+            };
+            view.texts.push(text("workbench-edit-status", label));
+        }
+        self.chats.project_workbench(
+            &mut view,
+            workbench_chat,
+            propose,
+            attachment,
+            review.is_some(),
+            self.pending_edit.is_some(),
+        );
+        self.project_write(
+            &mut view,
+            review.and_then(|review| review.preview.proposal_id.as_deref()),
+        );
         view
     }
 }

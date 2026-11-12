@@ -1,6 +1,7 @@
 use forge_ide_ui::{protocol::*, *};
 fn catalog() -> Catalog {
     Catalog {
+        recent_write: None,
         protocol_version: 1,
         session_epoch: "session-a".into(),
         timeout_ms: 1000,

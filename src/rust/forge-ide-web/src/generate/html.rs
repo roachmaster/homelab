@@ -143,8 +143,20 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 let _=write!(out,"<button type=\"button\" id=\"{id}-close\" class=\"fg-pane-close\" data-pane-toggle=\"{id}\" aria-label=\"Collapse {title}\" aria-controls=\"{id}\">−</button>");
             }
             out.push_str("</header><div class=\"fg-pane-body\">");
-            children(items, out);
-            out.push_str("</div></section>");
+            for item in items
+                .iter()
+                .filter(|c| !matches!(c, Component::PaneFooter { .. }))
+            {
+                emit(item, out);
+            }
+            out.push_str("</div>");
+            for item in items
+                .iter()
+                .filter(|c| matches!(c, Component::PaneFooter { .. }))
+            {
+                emit(item, out);
+            }
+            out.push_str("</section>");
             if *position != PanePosition::Main {
                 let orientation = if *position == PanePosition::Bottom {
                     "horizontal"
@@ -153,6 +165,18 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 };
                 let _=write!(out,"<div id=\"{id}-separator\" class=\"fg-separator fg-separator-{position_key}\" role=\"separator\" tabindex=\"0\" aria-label=\"Resize {title}; arrows adjust, Enter collapses\" aria-controls=\"{id}\" aria-orientation=\"{orientation}\" aria-valuemin=\"{min}\" aria-valuemax=\"{max}\" aria-valuenow=\"{initial}\" data-resize-pane=\"{id}\"></div>");
             }
+        }
+        Component::PaneFooter {
+            id,
+            children: items,
+        } => {
+            let _ = write!(
+                out,
+                "<footer class=\"fg-pane-footer\" id=\"{}\" hidden>",
+                escape(id)
+            );
+            children(items, out);
+            out.push_str("</footer>");
         }
         Component::Text {
             id,
@@ -220,8 +244,17 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::Transcript { id, label } => {
             let _ = write!(out, "<div id=\"{}\" class=\"fg-transcript\" role=\"region\" aria-label=\"{}\" tabindex=\"0\" data-transcript></div>", escape(id), escape(label));
         }
-        Component::TextArea { id, label, action } => {
-            let _ = write!(out, "<label class=\"fg-field fg-textarea\" for=\"{id}\"><span>{}</span><textarea id=\"{id}\" rows=\"3\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" disabled></textarea></label>", escape(label), escape(action));
+        Component::TextArea {
+            id,
+            label,
+            action,
+            placeholder,
+        } => {
+            let placeholder = placeholder
+                .as_ref()
+                .map(|text| format!(" placeholder=\"{}\"", escape(text)))
+                .unwrap_or_default();
+            let _ = write!(out, "<label class=\"fg-field fg-textarea\" for=\"{id}\"><span>{}</span><textarea id=\"{id}\" rows=\"3\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\"{placeholder} disabled></textarea></label>", escape(label), escape(action));
         }
         Component::Filter { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field fg-filter\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"search\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" maxlength=\"256\" disabled></label>",escape(label),escape(action));
@@ -242,6 +275,9 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
         Component::Source { id, label } => {
             let _ = write!(out, "<div class=\"fg-source-frame\" data-source-frame><pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre></div>", escape(id), escape(label));
+        }
+        Component::Diff { id, label } => {
+            let _ = write!(out, "<div id=\"{}\" class=\"fg-diff\" data-diff-view role=\"region\" tabindex=\"0\" aria-label=\"{}\" hidden></div>", escape(id), escape(label));
         }
         Component::SourceWrap { id, label, target } => {
             let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-source-wrap\" data-source-wrap aria-controls=\"{}\" aria-pressed=\"false\">{}</button>", escape(id), escape(target), escape(label));

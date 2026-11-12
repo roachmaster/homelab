@@ -16,10 +16,11 @@ let assets, agent, fixtureBinary, output, browser, browserOwner, check, report;
 const active = new Set();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function startFixture(faults = false, singleProject = false) {
+async function startFixture(faults = false, singleProject = false, managedWrites = false) {
   report.ensureActive();
   report.setStage('fixture_start');
-  const child = spawn(fixtureBinary, [assets, agent, ...(faults ? ['--faults'] : singleProject ? ['--single-project'] : [])], {
+  const mode = faults ? ['--faults'] : managedWrites ? ['--managed-writes'] : singleProject ? ['--single-project'] : [];
+  const child = spawn(fixtureBinary, [assets, agent, ...mode], {
     stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
   });
   const state = { child, stopped: false, stopping: null, origin: '', code: '', page: null, name: faults ? 'injected_fixture' : 'real_fixture' };
@@ -826,7 +827,8 @@ async function noSelectedFileFromPriorReport(page) {
 // Actual mTLS source reads, including the single-project phone entry path.
 // Search is report-local; opening a result obtains its digest-checked source.
 async function sourceSearchJourney() {
-  const fixture = await startFixture(false, true);
+  const managedWrites = process.platform !== 'win32' && process.getuid?.() !== 0;
+  const fixture = await startFixture(false, true, managedWrites);
   report.setStage('scenario');
   const context = await browser.newContext({ viewport: { width: 390, height: 664 } });
   try {
@@ -854,6 +856,79 @@ async function sourceSearchJourney() {
     assert.equal(traffic.count('source'), reads + 1, 'opening a search result reads one file');
     assert.equal(traffic.count('inspect'), 1, 'opening source does not repeat inspection');
     await assertVisibleFocus(page);
+    const contextualRequests = [];
+    const gateway = '**/forge/v1/dispatch';
+    let releasePreview;
+    const deferredPreview = new Promise(resolve => { releasePreview = resolve; });
+    const contextualChat = async route => {
+      const body = route.request().postDataJSON();
+      if (body?.kind === 'propose_edit') {
+        if (body.request.messages.at(-1).content === 'Delay this preview.') await deferredPreview;
+        return route.fulfill({ json: {
+          protocol_version: 1,
+          event: { kind: 'edit_result', request_id: body.request.request_id,
+            outcome: { kind: 'preview', preview: {
+              base_sha256: body.request.file_context.sha256,
+              lines: [
+                { old_line: 6, new_line: null, text: 'pub fn inspect_me() {}' },
+                { old_line: null, new_line: 6, text: 'pub fn inspect_me() { /* <script> */ }' },
+              ],
+            } } },
+        } });
+      }
+      if (body?.kind !== 'chat' || !body.request.file_context) return route.continue();
+      contextualRequests.push(body.request);
+      await route.fulfill({ json: {
+        protocol_version: 1,
+        event: { kind: 'chat_result', request_id: body.request.request_id,
+          outcome: { kind: 'answer', content: 'The selected Rust fixture contains inspect_me.' } },
+      } });
+    };
+    await context.route(gateway, contextualChat);
+    try {
+      const dock = page.locator('#workbench-chat');
+      const prompt = dock.getByRole('textbox', { name: 'Ask Forge about this file' });
+      await check(dock.locator('#workbench-chat-context')).toHaveText(/^Lines 1–6 · rev [0-9a-f]{8}$/);
+      await prompt.fill('What is defined here?');
+      await dock.getByRole('button', { name: 'Send' }).click();
+      await check(dock.getByRole('status')).toHaveText('Reply ready in Chat.');
+      assert.equal(contextualRequests.length, 1);
+      assert.equal(contextualRequests[0].file_context.byte_start, 0);
+      assert.match(contextualRequests[0].file_context.sha256, /^[0-9a-f]{64}$/);
+      assert.deepEqual(contextualRequests[0].messages, [{ role: 'user', content: 'What is defined here?' }]);
+      await page.locator('#open-chat').click();
+      await check(page.locator('#chat-transcript')).toContainText('The selected Rust fixture contains inspect_me.');
+      await page.locator('#open-workbench').click();
+      await check(dock).toBeVisible();
+      const readsBeforePreview = traffic.count('source');
+      await prompt.fill('Add a comment to inspect_me.');
+      await dock.getByRole('button', { name: 'Propose edit' }).click();
+      const diff = page.getByRole('region', { name: 'Proposed diff' });
+      await check(diff.locator('[data-change=removed]')).toContainText('−');
+      await check(diff.locator('[data-change=added]')).toContainText('<script>');
+      await check(diff.locator('script')).toHaveCount(0);
+      await check(page.locator('#source-view')).toBeHidden();
+      await page.getByRole('button', { name: 'Wrap', exact: true }).click();
+      await check(page.locator('#source-view')).toHaveAttribute('data-wrap', 'true');
+      await page.getByRole('button', { name: 'Wrap', exact: true }).click();
+      await dock.getByRole('button', { name: 'Discard' }).click();
+      await check(diff).toBeHidden();
+      await check(page.locator('#source-view [data-line="6"] .fg-source-text')).toHaveText('pub fn inspect_me() {}');
+      assert.equal(traffic.count('source'), readsBeforePreview, 'preview and discard leave verified source intact');
+      await prompt.fill('Delay this preview.');
+      await dock.getByRole('button', { name: 'Propose edit' }).click();
+      await check(dock.locator('#workbench-chat-status')).toHaveText('Preparing proposal…');
+      await page.getByRole('button', { name: 'Back to files', exact: true }).click();
+      await page.locator('#project-query').fill('README <safe>');
+      await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'README <safe>.md' }).click();
+      await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
+      releasePreview();
+      await check(dock.locator('#workbench-chat-status')).toHaveText('Reply ready in Chat.');
+      await check(diff).toBeHidden();
+    } finally {
+      releasePreview();
+      await context.unroute(gateway, contextualChat);
+    }
     const projectControls = page.getByRole('button', { name: 'Project controls' });
     const viewOptions = page.locator('#workspace-options > summary');
     await check(projectControls).toHaveAttribute('aria-expanded', 'false');
@@ -880,14 +955,11 @@ async function sourceSearchJourney() {
     await check(viewOptions).toBeHidden();
     await check(page.locator('#source-pagination')).toBeHidden();
     assert.equal(traffic.count('inspect'), 1, 'project disclosure stays local');
-    await page.getByRole('button', { name: 'Back to files', exact: true }).click();
-    await check(page.locator('#explorer-panel')).toBeVisible();
-    await page.locator('#project-query').fill('README <safe>');
-    await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'README <safe>.md' }).click();
     await check(page.locator('#workspace-panel')).toBeVisible();
     await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
     await check(page.locator('#source-view script, #source-view img, #source-view svg')).toHaveCount(0);
     await page.getByRole('button', { name: 'Back to files', exact: true }).click();
+    await check(page.locator('#explorer-panel')).toBeVisible();
     await page.locator('#project-query').fill('paged.txt');
     await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'paged.txt' }).click();
     await check(page.locator('#source-view')).toContainText('Source line 1:');
@@ -928,6 +1000,11 @@ async function sourceSearchJourney() {
     })).toBeLessThan(3);
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     await check(page.locator('#source-view [data-line="301"]')).toBeInViewport();
+    if (managedWrites) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await managedWriteJourney(page, context);
+      await page.setViewportSize({ width: 390, height: 664 });
+    }
     const beforeReload = traffic.count('inspect');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await check(page.locator('#chat')).toBeVisible();
@@ -944,6 +1021,63 @@ async function sourceSearchJourney() {
     await context.close();
     await stopFixture(fixture);
   }
+}
+
+async function managedWriteJourney(page, context) {
+  await page.getByRole('button', { name: 'Back to files', exact: true }).click();
+  await page.locator('#project-query').fill('managed.txt');
+  await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'managed.txt' }).click();
+  const source = page.locator('#source-view');
+  const dock = page.locator('#workbench-chat');
+  await check(source).toContainText('old line');
+  await dock.getByRole('textbox', { name: 'Ask Forge about this file' }).fill('Update the second line.');
+  await dock.getByRole('button', { name: 'Propose edit' }).click();
+  const diff = page.getByRole('region', { name: 'Proposed diff' });
+  await check(diff).toContainText('extra line');
+  await screenshot(page, 'ide-workbench-managed-preview.png');
+
+  // Let the real host and mTLS agent complete the write, then drop the reply
+  // before it reaches the browser. Status must recover the same operation.
+  const gateway = '**/forge/v1/dispatch';
+  const operations = [];
+  const loseApplyReply = async route => {
+    const body = route.request().postDataJSON();
+    if (body?.kind !== 'edit_write') return route.continue();
+    operations.push([body.request.intent.kind, body.request.operation]);
+    if (body.request.intent.kind !== 'apply') return route.continue();
+    const response = await route.fetch();
+    assert.equal((await response.json()).event.outcome.kind, 'applied');
+    return route.abort('failed');
+  };
+  await context.route(gateway, loseApplyReply);
+  try {
+    await dock.getByRole('button', { name: 'Apply', exact: true }).click();
+    await check(dock.locator('#workbench-write-status')).toContainText('Write outcome unknown');
+    await dock.getByRole('button', { name: 'Check status', exact: true }).click();
+    await check(source.locator('[data-line="3"]')).toContainText('extra line');
+    assert.deepEqual(operations.map(([kind]) => kind), ['apply', 'status']);
+    assert.equal(operations[0][1], operations[1][1]);
+    await screenshot(page, 'ide-workbench-managed-applied.png');
+  } finally {
+    await context.unroute(gateway, loseApplyReply);
+  }
+
+  await page.locator('#open-chat').click();
+  await check(page.locator('#chat-transcript')).toContainText(/Applied · rev [0-9a-f]{8}/);
+  await page.locator('#chat-draft').fill('What changed in the file?');
+  await page.getByRole('button', { name: 'Send with file', exact: true }).click();
+  await check(page.locator('#chat-transcript')).toContainText('The verified excerpt contains the updated and extra lines.');
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await check(page.locator('#chat')).toBeVisible();
+  await page.locator('#open-workbench').click();
+  await page.locator('#project-query').fill('managed.txt');
+  await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'managed.txt' }).click();
+  await check(source.locator('[data-line="3"]')).toContainText('extra line');
+  await check(dock.locator('#workbench-write-status')).toContainText(/Applied · rev [0-9a-f]{8}/);
+  await dock.getByRole('button', { name: 'Undo edit', exact: true }).click();
+  await check(source.locator('[data-line="2"]')).toContainText('old line');
+  await check(source.locator('[data-line="3"]')).toContainText('omega');
+  await check(dock.locator('#workbench-write-status')).toContainText(/Reverted · rev [0-9a-f]{8}/);
 }
 
 async function chatJourney(page, context) {
@@ -1024,7 +1158,8 @@ async function realJourney() {
   assert.equal(traffic.count('pair'), 1, 'one explicit pairing request');
   await chatJourney(page, context);
   await inspect(page, 'workspace');
-  await check(page.locator('#workbench textarea, #workbench [contenteditable="true"]')).toHaveCount(0);
+  await check(page.locator('#workspace-panel .fg-pane-body textarea, #workbench [contenteditable="true"]')).toHaveCount(0);
+  await check(page.locator('#workbench-chat')).toBeHidden();
   await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
   await check(page.locator('#source-shape-panel')).toHaveJSProperty('open', false);
   await check(page.locator('#inspection-details')).toHaveJSProperty('open', false);

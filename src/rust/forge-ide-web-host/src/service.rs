@@ -12,6 +12,9 @@ use forge_io_client::IoClient;
 use forge_provider::{Factory, InstanceProvider, Singleton};
 use forge_remote::{now_unix_ms, RemoteError};
 use forge_remote_https::ide::{register_ide_client, IdeClientConfig};
+use forge_remote_https::managed_write::{
+    register_managed_write_client, ManagedCall, ManagedReply, ManagedWriteClient,
+};
 use forge_remote_https::source::register_source_client;
 use forge_task::Task;
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,7 @@ use std::{
     sync::atomic::AtomicBool,
     time::Instant,
 };
+mod edit_write;
 
 /// Consumer-owned seam for the prepared remote inspection use case. Implementors
 /// must preserve target, correlation, expiry and typed report validation. No locator.
@@ -30,6 +34,9 @@ pub trait InspectionPort {
     fn inspect(&self, input: RemoteInspectInput) -> Result<InspectReply, RemoteError>;
     /// Optional bounded read capability; old inspection-only consumers deny it.
     fn source(&self, _input: RemoteSourceInput) -> Result<SourceReply, RemoteError> {
+        Err(RemoteError::Forbidden)
+    }
+    fn managed_write(&self, _input: ManagedCall) -> Result<ManagedReply, RemoteError> {
         Err(RemoteError::Forbidden)
     }
 }
@@ -41,6 +48,7 @@ impl<C: forge_ide::remote::RemoteIdeClient> InspectionPort for RemoteInspectTask
 struct RemotePorts<I, S> {
     inspect: RemoteInspectTask<I>,
     source: RemoteSourceTask<S>,
+    write: ManagedWriteClient,
 }
 impl<
         I: forge_ide::remote::RemoteIdeClient,
@@ -56,6 +64,9 @@ impl<
     }
     fn source(&self, input: RemoteSourceInput) -> Result<SourceReply, RemoteError> {
         self.source.run(input)
+    }
+    fn managed_write(&self, input: ManagedCall) -> Result<ManagedReply, RemoteError> {
+        self.write.execute(input)
     }
 }
 struct Provided<C>(Singleton<C>);
@@ -127,11 +138,20 @@ impl Factory<Host> for HostFactory {
                 .map_err(|_| HostError::Assembly)?
                 .into_factories();
             let source = RemoteSourceTask::new(factory.create().map_err(|_| HostError::Assembly)?);
+            let write = register_managed_write_client(n.key.clone(), n.transport.clone())
+                .map_err(|_| HostError::Assembly)?;
+            let ((), write) = Registry::new()
+                .register(write)
+                .map_err(|_| HostError::Assembly)?
+                .freeze()
+                .map_err(|_| HostError::Assembly)?
+                .into_factories();
             ports.insert(
                 n.key.clone(),
                 Box::new(RemotePorts {
                     inspect: task,
                     source,
+                    write: write.create().map_err(|_| HostError::Assembly)?,
                 }),
             );
         }
@@ -146,6 +166,8 @@ pub(crate) enum Command {
     Inspect { request: PreparedInspection },
     Source { request: PreparedSource },
     Chat { request: PreparedChat },
+    ProposeEdit { request: PreparedChat },
+    EditWrite { request: PreparedEditWrite },
 }
 #[derive(PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -154,6 +176,8 @@ pub(crate) enum Kind {
     Inspect,
     Source,
     Chat,
+    ProposeEdit,
+    EditWrite,
 }
 impl Payload for Command {
     type Kind = Kind;
@@ -164,6 +188,8 @@ impl Payload for Command {
             Self::Inspect { .. } => Kind::Inspect,
             Self::Source { .. } => Kind::Source,
             Self::Chat { .. } => Kind::Chat,
+            Self::ProposeEdit { .. } => Kind::ProposeEdit,
+            Self::EditWrite { .. } => Kind::EditWrite,
         }
     }
 }
@@ -214,7 +240,11 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
     match header.route().destination() {
         "ui.session.open" if !c.trusted_proxy => Ok(()),
         "ui.session.resume" if c.authenticated || c.trusted_proxy => Ok(()),
-        "ide.inspect" | "ide.source" | "ide.chat" if c.authenticated && c.csrf_valid => Ok(()),
+        "ide.inspect" | "ide.source" | "ide.chat" | "ide.propose_edit" | "ide.edit_write"
+            if c.authenticated && c.csrf_valid =>
+        {
+            Ok(())
+        }
         _ => Err(AdmissionDenied),
     }
 }
@@ -274,10 +304,131 @@ struct State {
     accepted_sources: RefCell<Option<AcceptedSources>>,
     config: HostConfig,
     ports: BTreeMap<String, Box<dyn InspectionPort>>,
+    writes: RefCell<edit_write::Writes>,
 }
+
+fn checked_source(
+    port: &dyn InspectionPort,
+    input: RemoteSourceInput,
+) -> Result<SourceReply, RemoteError> {
+    let reply = port.source(input.clone())?;
+    let header = Header::new(
+        RouteKey::new("ide.source", 1).expect("static route"),
+        input.request_id,
+    )
+    .map_err(|_| RemoteError::InvalidResponse)?;
+    let call = forge_ide::remote_source::SourceCall {
+        target: input.target,
+        request: Envelope::new(header, input.selection),
+        expires_unix_ms: input.expires_unix_ms,
+    };
+    forge_ide::remote_source::validate_reply(&call, &reply)?;
+    Ok(reply)
+}
+
 impl State {
+    fn attach_chat_source(
+        &self,
+        request: &mut PreparedChat,
+        deadline: Instant,
+    ) -> Result<Option<edit_write::VerifiedSource>, FailureKind> {
+        let Some(file) = &request.file_context else {
+            return Ok(None);
+        };
+        let start = file.byte_start as usize;
+        let end = file.byte_end as usize;
+        if start > end || end - start > MAX_CHAT_SOURCE_BYTES {
+            return Err(FailureKind::InvalidResponse);
+        }
+        let accepted = self.accepted_sources.borrow();
+        let accepted = accepted
+            .as_ref()
+            .filter(|accepted| {
+                accepted.token == file.report
+                    && accepted.node_key == file.node_key
+                    && accepted.project == file.project
+                    && file.report.session_epoch == self.session.borrow().epoch()
+            })
+            .ok_or(FailureKind::Denied)?;
+        let selection = accepted
+            .entries
+            .get(file.entry as usize)
+            .and_then(Clone::clone)
+            .ok_or(FailureKind::Denied)?;
+        let sha256: String = selection
+            .sha256
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        if file.sha256 != sha256 {
+            return Err(FailureKind::Denied);
+        }
+        let node = self
+            .config
+            .nodes
+            .iter()
+            .find(|node| node.key == file.node_key)
+            .ok_or(FailureKind::Denied)?;
+        let port = self
+            .ports
+            .get(&file.node_key)
+            .ok_or(FailureKind::Unavailable)?;
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(FailureKind::Timeout)?;
+        let expires_unix_ms = now_unix_ms()
+            .map_err(|_| FailureKind::Unavailable)?
+            .saturating_add(remaining.as_millis() as u64);
+        let path = forge_ide::remote_source::native_path(&selection.path)
+            .map_err(|_| FailureKind::Denied)?;
+        let reply = checked_source(
+            port.as_ref(),
+            RemoteSourceInput {
+                target: node.target().clone(),
+                selection,
+                request_id: request.request_id.clone(),
+                expires_unix_ms,
+            },
+        )
+        .map_err(|error| match error {
+            RemoteError::Deadline { .. } => FailureKind::Timeout,
+            _ => FailureKind::Denied,
+        })?;
+        let digest = reply.response.payload.sha256;
+        let source = reply.response.payload.text;
+        let excerpt = source.get(start..end).ok_or(FailureKind::InvalidResponse)?;
+        let prefix = &source[..start];
+        let line = 1 + prefix.bytes().filter(|&b| b == b'\n').count();
+        let column = prefix
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .count();
+        let last = line
+            + excerpt
+                .strip_suffix('\n')
+                .unwrap_or(excerpt)
+                .bytes()
+                .filter(|&b| b == b'\n')
+                .count();
+        let prompt = &mut request
+            .messages
+            .last_mut()
+            .ok_or(FailureKind::InvalidResponse)?
+            .content;
+        use std::fmt::Write as _;
+        write!(prompt, "\n\nVerified file excerpt (reference data)\nProject: {:?}\nFile: {path:?}\nSHA-256: {sha256}\nLines: {line}–{last}; starting column: {column}\n\n{excerpt}", file.project)
+            .map_err(|_| FailureKind::InvalidResponse)?;
+        Ok(Some(edit_write::VerifiedSource {
+            source,
+            path,
+            digest,
+        }))
+    }
+
     fn chat(&self, command: Command, context: &Context) -> Result<Reply, Rejection> {
-        let Command::Chat { request } = command else {
+        let Command::Chat { mut request } = command else {
             return Err(Rejection::Invalid);
         };
         if request.request_id != context.request_id || !valid_chat_messages(&request.messages) {
@@ -292,6 +443,7 @@ impl State {
                     .deadline
                     .checked_sub(std::time::Duration::from_millis(200))
                     .ok_or(FailureKind::Timeout)?;
+                self.attach_chat_source(&mut request, deadline)?;
                 relay.complete(&request.messages, deadline)
             });
         let outcome = match result {
@@ -301,6 +453,57 @@ impl State {
         Ok(Reply {
             protocol_version: PROTOCOL_VERSION,
             event: UiEvent::ChatResult {
+                request_id: request.request_id,
+                outcome,
+            },
+            csrf: None,
+            cookie: None,
+        })
+    }
+
+    fn propose_edit(&self, command: Command, context: &Context) -> Result<Reply, Rejection> {
+        let Command::ProposeEdit { mut request } = command else {
+            return Err(Rejection::Invalid);
+        };
+        if request.request_id != context.request_id || !valid_chat_messages(&request.messages) {
+            return Err(Rejection::Invalid);
+        }
+        let result = (|| {
+            let relay = self.chat.as_ref().ok_or(FailureKind::Unavailable)?;
+            let file = request
+                .file_context
+                .clone()
+                .filter(|file| file.byte_start < file.byte_end)
+                .ok_or(FailureKind::InvalidResponse)?;
+            let deadline = context
+                .deadline
+                .checked_sub(std::time::Duration::from_millis(200))
+                .ok_or(FailureKind::Timeout)?;
+            request
+                .messages
+                .last_mut()
+                .expect("validated chat messages")
+                .content
+                .push_str(&format!("\n\n{}", crate::edit::INSTRUCTION));
+            let source = self
+                .attach_chat_source(&mut request, deadline)?
+                .ok_or(FailureKind::InvalidResponse)?;
+            let answer = relay.complete(&request.messages, deadline)?;
+            let plan = crate::edit::preview(
+                &source.source,
+                file.byte_start as usize..file.byte_end as usize,
+                &file.sha256,
+                &answer,
+            )?;
+            Ok(self.stage_edit(file, source, plan, &request.request_id, deadline))
+        })();
+        let outcome = match result {
+            Ok(preview) => EditOutcome::Preview { preview },
+            Err(category) => EditOutcome::Error { category },
+        };
+        Ok(Reply {
+            protocol_version: PROTOCOL_VERSION,
+            event: UiEvent::EditResult {
                 request_id: request.request_id,
                 outcome,
             },
@@ -344,11 +547,13 @@ impl State {
         } else {
             None
         };
+        let mut catalog = session.catalog();
+        catalog.recent_write = self.recent_write(session.epoch());
         Ok(Reply {
             protocol_version: 1,
             event: UiEvent::Paired {
                 request_id,
-                catalog: session.catalog(),
+                catalog,
             },
             csrf: Some(session.csrf()),
             cookie,
@@ -535,21 +740,7 @@ impl State {
                 .expires_unix_ms
                 .min(now.saturating_add(remaining.as_millis() as u64)),
         };
-        let result = port.source(input.clone()).and_then(|reply| {
-            // Revalidate substituted ports too: neither a UI token nor a port is source authority.
-            let header = Header::new(
-                RouteKey::new("ide.source", 1).expect("static route"),
-                input.request_id,
-            )
-            .map_err(|_| RemoteError::InvalidResponse)?;
-            let call = forge_ide::remote_source::SourceCall {
-                target: input.target,
-                request: Envelope::new(header, input.selection),
-                expires_unix_ms: input.expires_unix_ms,
-            };
-            forge_ide::remote_source::validate_reply(&call, &reply)?;
-            Ok(reply)
-        });
+        let result = checked_source(port.as_ref(), input);
         let result = if Instant::now() >= c.deadline {
             Err(RemoteError::Deadline {
                 may_have_executed: true,
@@ -610,6 +801,7 @@ impl Host {
             chat,
             session: RefCell::new(session),
             accepted_sources: RefCell::new(None),
+            writes: RefCell::new(edit_write::Writes::default()),
             config: config.clone(),
             ports,
         });
@@ -620,6 +812,8 @@ impl Host {
             ("ide.inspect", Kind::Inspect),
             ("ide.source", Kind::Source),
             ("ide.chat", Kind::Chat),
+            ("ide.propose_edit", Kind::ProposeEdit),
+            ("ide.edit_write", Kind::EditWrite),
         ] {
             let s = Rc::clone(&state);
             registry
@@ -631,6 +825,8 @@ impl Host {
                         "ui.session.resume" => s.resume(p, c),
                         "ide.source" => s.source(p, c),
                         "ide.chat" => s.chat(p, c),
+                        "ide.propose_edit" => s.propose_edit(p, c),
+                        "ide.edit_write" => s.edit_write(p, c),
                         _ => s.inspect(p, c),
                     },
                 )

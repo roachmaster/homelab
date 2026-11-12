@@ -7,6 +7,7 @@ publish.workspace = true
 [features]
 default = []
 ide = ["dep:forge-ide"]
+managed-writes = ["ide", "forge-ide/write-contract"]
 
 [dependencies]
 forge-ide = { path = "../forge-ide", default-features = false, features = ["remote"], optional = true }

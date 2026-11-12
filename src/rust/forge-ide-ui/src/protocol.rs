@@ -22,6 +22,18 @@ pub struct Catalog {
     pub session_epoch: String,
     pub timeout_ms: u64,
     pub nodes: Vec<NodeChoice>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recent_write: Option<ResumableWrite>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResumableWrite {
+    pub operation: String,
+    pub node_key: String,
+    pub project: String,
+    pub path: Vec<String>,
+    pub outcome: Option<EditWriteOutcome>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +87,7 @@ pub struct PreparedSource {
 pub const MAX_CHAT_PROMPT_BYTES: usize = 2048;
 pub const MAX_CHAT_REPLY_BYTES: usize = 4096;
 pub const MAX_CHAT_TIMEOUT_MS: u64 = 26_000;
+pub const MAX_CHAT_SOURCE_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -95,6 +108,78 @@ pub struct ChatMessage {
 pub struct PreparedChat {
     pub request_id: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_context: Option<ChatFileContext>,
+}
+
+/// A reference into an accepted source revision. The host resolves the bytes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatFileContext {
+    pub report: RequestToken,
+    pub node_key: String,
+    pub project: String,
+    pub entry: u32,
+    pub sha256: String,
+    pub byte_start: u32,
+    pub byte_end: u32,
+}
+
+pub const MAX_EDIT_PREVIEW_ROWS: usize = 24;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EditPreview {
+    pub base_sha256: String,
+    pub lines: Vec<DiffLine>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiffLine {
+    pub old_line: Option<u32>,
+    pub new_line: Option<u32>,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EditOutcome {
+    Preview { preview: EditPreview },
+    Error { category: FailureKind },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedEditWrite {
+    pub request_id: String,
+    pub operation: String,
+    pub intent: EditWriteIntent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EditWriteIntent {
+    Apply { proposal_id: String },
+    Undo { applied_operation: String },
+    Status {},
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EditWriteOutcome {
+    Applied {
+        sha256: String,
+        undo_until_unix_ms: Option<u64>,
+    },
+    Reverted {
+        sha256: String,
+    },
+    Conflict,
+    Rejected,
+    Unknown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,6 +226,8 @@ pub enum UiEffect {
     Source { request: PreparedSource },
     Abort { token: RequestToken },
     Chat { request: PreparedChat },
+    ProposeEdit { request: PreparedChat },
+    EditWrite { request: PreparedEditWrite },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,6 +249,41 @@ pub enum UiEvent {
         value: String,
     },
     SendChat {},
+    SendWorkbenchChat {
+        report: RequestToken,
+        entry: u32,
+        byte_start: u32,
+        conversation: usize,
+    },
+    SendChatWithFile {
+        report: RequestToken,
+        entry: u32,
+        byte_start: u32,
+        conversation: usize,
+    },
+    ProposeEdit {
+        report: RequestToken,
+        entry: u32,
+        byte_start: u32,
+        conversation: usize,
+    },
+    DiscardEdit {},
+    EditResult {
+        request_id: String,
+        outcome: EditOutcome,
+    },
+    ApplyEdit {
+        proposal_id: String,
+    },
+    UndoEdit {
+        applied_operation: String,
+    },
+    CheckEditWrite {},
+    EditWriteResult {
+        request_id: String,
+        operation: String,
+        outcome: EditWriteOutcome,
+    },
     ChatResult {
         request_id: String,
         outcome: ChatOutcome,

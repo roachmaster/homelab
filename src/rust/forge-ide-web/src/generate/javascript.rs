@@ -9,6 +9,7 @@ let actionByElement=new WeakMap();
 let focusKeyByElement=new WeakMap();
 let inputDrafts=new WeakMap();
 let sourceViews=new WeakMap();
+let diffViews=new WeakMap();
 let presentationSequence=0;
 let pendingActionOrigin=null;
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
@@ -48,6 +49,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('input,textarea')){n.value='';n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
   for(const n of document.querySelectorAll('.fg-tree,.fg-details,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
+  for(const n of document.querySelectorAll('[data-diff-view]')){n.replaceChildren();n.scrollTop=0;}
   for(const n of document.querySelectorAll('[data-source-wrap],[data-compact-toolbar]')){
     if(n.hasAttribute('data-source-wrap')){
       const source=element(n.getAttribute('aria-controls'));
@@ -58,7 +60,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
-  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
+  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();diffViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
 }
 function stop(){const old=worker;worker=null;if(old)old.terminate();clearProtected();}
@@ -84,6 +86,7 @@ function apply(view,acknowledgedSequence){
   const focusKey=focusKeyByElement.get(focus);
   const priorTree=focus?.closest?.('[role="tree"]');
   const priorPane=focus?.closest?.('[data-pane]');
+  const priorFooter=focus?.closest?.('.fg-pane-footer');
   const origin=pendingActionOrigin;
   // Capture provenance before clearing its acknowledgement, including early
   // focus-return paths. Older views must not consume newer pending intent.
@@ -177,6 +180,21 @@ function apply(view,acknowledgedSequence){
     const n=element(b.id);if(!n)continue;
     const parts=[];for(const row of b.rows){const property=document.createElement('div');property.className='fg-property';const t=document.createElement('dt');t.textContent=row.label;const d=document.createElement('dd');d.textContent=row.value;property.append(t,d);parts.push(property);}n.replaceChildren(...parts);
   }
+  for(const b of view.diffs||[]){
+    const n=element(b.id);
+    if(!n?.hasAttribute('data-diff-view'))continue;
+    if(!Array.isArray(b.lines)||b.lines.length>24)throw new Error('Invalid diff');
+    const signature=JSON.stringify(b.lines);
+    if(diffViews.get(n)===signature)continue;
+    const rows=b.lines.map(line=>{
+      const row=document.createElement('div');row.className='fg-diff-line';
+      row.dataset.change=line.old_line===null?'added':line.new_line===null?'removed':'context';
+      const fields=[line.old_line??'',line.new_line??'',row.dataset.change==='added'?'+':row.dataset.change==='removed'?'−':'',line.text];
+      for(const value of fields){const cell=document.createElement('span');cell.textContent=String(value);row.append(cell);}
+      return row;
+    });
+    n.replaceChildren(...rows);diffViews.set(n,signature);
+  }
   // Source windows are selected and bounded by WASM. The renderer only creates
   // numbered safe-text lines and projects the accepted declaration span.
   for(const b of view.sources||[]){
@@ -252,7 +270,8 @@ function apply(view,acknowledgedSequence){
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){
-    const target=visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):[...document.querySelectorAll('.fg-screen:not([hidden]) :is(select,input,button):not(:disabled)')].find(visible);
+    const footerControl=priorFooter&&[...priorFooter.querySelectorAll(':is(textarea,input,button):not(:disabled)')].find(visible);
+    const target=footerControl||(visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):[...document.querySelectorAll('.fg-screen:not([hidden]) :is(select,input,button):not(:disabled)')].find(visible));
     if(visible(target))target.focus({preventScroll:true});
   }
 }

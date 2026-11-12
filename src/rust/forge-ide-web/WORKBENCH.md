@@ -1,9 +1,10 @@
-# Read-only Forge IDE workbench
+# Forge IDE workbench
 
 The generated workbench lets an admitted user find a file or Rust declaration and
 read its actual source. Application structure and styles are typed Rust components
 and validated YAML; the compiled Rust/WASM model owns project, selection, source
-and request policy. It does not provide editing, compilation, a terminal or debugging.
+and request policy. Source inspection is read-only by default. Opted-in managed
+projects can also apply and undo staged inline edits.
 
 ## Use the workbench
 
@@ -40,6 +41,26 @@ case-sensitive local filters. The global Find query is case-insensitive; all que
 inputs are limited to 256 UTF-8 bytes. No regular-expression evaluation is exposed.
 
 ## Source and request ownership
+
+The Workbench dock offers **Send** for a contextual question and **Propose
+edit** for a read-only diff. Both use the active in-session Chat thread.
+Before inference, the host resolves the accepted report entry and re-reads
+the source through the agent to verify its digest. Only a bounded excerpt
+from the selected window is sent. The visible Chat transcript retains the
+question and reply. After a confirmed write, the same Chat thread can use
+**Send with file** once the Workbench has verified the resulting revision.
+
+A proposal accepts a structured replacement of up to eight complete lines
+inside the excerpt. Review shows old and new line numbers and explicit
+addition and deletion markers. **Discard** returns to verified source
+locally. A proposal with a verified native revision in an opted-in managed
+workspace also offers **Apply**. A successful write refreshes the inspection
+and reopens the file if it is still selected. **Undo edit** checks the current
+revision against the applied revision before restoring the saved bytes. An
+ambiguous result offers **Check status** for the same operation ID. Reloading
+the browser can recover the latest operation within the active host session.
+The agent journal survives an agent restart. The web host's operation index
+is in memory, so browser recovery depends on the original host session.
 
 A source request carries its own request token, the accepted report token, configured
 node/project and report-local entry ID. Browser IDs are not native paths or authority.
@@ -142,16 +163,15 @@ source component is read-only. Editing and saving require separate contracts:
   own DOM, caret, focus, composition and a bounded presentation buffer. It would
   neither fetch source nor decide when a document is saved. Programmatic updates
   must not echo back as new user edits.
-- Only WASM could prepare a future write effect. Host and agent would independently
+- WASM would prepare the editor's write effect. Host and agent would independently
   authorize it and enforce the expected source revision. A widget callback or
   optimistic label cannot prove successful publication.
 - Context loss would dispose editor content/listeners, reject late callbacks and
   restore focus appropriately. Hiding a pane alone must not discard unsaved work.
   Pagehide and fatal recovery would clear protected editor content synchronously.
 
-Writes, revision conflicts, editor widgets and edit/composition/save lifecycle
-remain unimplemented. They need explicit model/codec, admission and real-browser
-verification before being presented as working capabilities.
+An editor widget and its dirty buffer, composition and save lifecycle remain
+future work. The current workflow applies only staged inline proposals.
 
 The [inline-edit proposal](../../../docs/architecture/proposals/forge-ide-inline-edit.md)
 designs a contextual prompt, a staged diff, and guarded Apply and Undo actions.

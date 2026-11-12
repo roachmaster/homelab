@@ -11,7 +11,7 @@ use rcgen::{
 use serde_json::json;
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
@@ -85,15 +85,19 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if !(args.len() == 2
-        || (args.len() == 3 && (args[2] == "--faults" || args[2] == "--single-project")))
+        || (args.len() == 3
+            && (args[2] == "--faults"
+                || args[2] == "--single-project"
+                || args[2] == "--managed-writes")))
     {
         return Err(
-            "usage: loopback_fixture GENERATED_ASSETS_DIRECTORY FORGE_AGENT_BINARY [--faults|--single-project]"
+            "usage: loopback_fixture GENERATED_ASSETS_DIRECTORY FORGE_AGENT_BINARY [--faults|--single-project|--managed-writes]"
                 .into(),
         );
     }
     let faults = args.get(2).is_some_and(|value| value == "--faults");
-    let single_project = args.get(2).is_some_and(|value| value == "--single-project");
+    let managed = args.get(2).is_some_and(|value| value == "--managed-writes");
+    let single_project = managed || args.get(2).is_some_and(|value| value == "--single-project");
     let assets = PathBuf::from(&args[0]).canonicalize()?;
     let agent = PathBuf::from(&args[1]).canonicalize()?;
     let root = std::env::temp_dir().join(format!(
@@ -109,6 +113,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o700))?;
     }
     let (project, empty_project) = write_projects(&fixture.root)?;
+    #[cfg(unix)]
+    if managed {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&project, fs::Permissions::from_mode(0o700))?;
+        let file = project.join("managed.txt");
+        fs::write(&file, "alpha\nold line\nomega\n")?;
+        fs::set_permissions(file, fs::Permissions::from_mode(0o600))?;
+    }
     if single_project {
         let text = (1..=600)
             .map(|line| format!("Source line {line}: Unicode 界 and literal <script> text.\n"))
@@ -148,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let credentials = |name: &str| json!({"chain":[format!("{name}.der")],"key":format!("{name}.key.der"),"roots":["ca.der"]});
-    let server = json!({"mode":"server","bind":"127.0.0.1:0","node":"fixture-node","incarnation":"fixture-host","allow_non_loopback":false,"credentials":credentials("server"),"peers":[{"certificate":"client.der","subject":"reader","node_info":true,"projects":["workspace","empty"]}],"projects":[{"alias":"workspace","root":project},{"alias":"empty","root":empty_project}],"limits":{"request_bytes":4096,"response_bytes":4194304,"timeout_ms":5000,"poll_ms":50}});
+    let server = json!({"mode":"server","bind":"127.0.0.1:0","node":"fixture-node","incarnation":"fixture-host","allow_non_loopback":false,"credentials":credentials("server"),"peers":[{"certificate":"client.der","subject":"reader","node_info":true,"projects":["workspace","empty"],"write_projects":if managed {vec!["workspace"]} else {vec![]}}],"projects":[{"alias":"workspace","root":project,"managed_writes":managed},{"alias":"empty","root":empty_project}],"limits":{"request_bytes":if managed {32768} else {4096},"response_bytes":4194304,"timeout_ms":5000,"poll_ms":50}});
     let server_path = fixture.root.join("server.json");
     fs::write(&server_path, serde_json::to_vec(&server)?)?;
     let mut child = Command::new(agent)
@@ -172,7 +184,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         vec!["workspace", "empty", "denied"]
     };
-    let host_config = json!({"bind":"127.0.0.1:0","assets":assets,"credentials":credentials("client"),"nodes":[{"key":"lab","label":"Local fixture","projects":projects,"address":address,"server_name":"localhost","node":"fixture-node","incarnation":"fixture-host"}],"timeout_ms":5000});
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut host_config = json!({"bind":"127.0.0.1:0","assets":assets,"credentials":credentials("client"),"nodes":[{"key":"lab","label":"Local fixture","projects":projects,"address":address,"server_name":"localhost","node":"fixture-node","incarnation":"fixture-host"}],"timeout_ms":5000});
+    let relay = if managed {
+        let (config, relay) = start_managed_chat(&fixture.root, Arc::clone(&stop))?;
+        host_config["chat"] = config;
+        Some(relay)
+    } else {
+        None
+    };
     let config_path = fixture.root.join("host.json");
     fs::write(&config_path, serde_json::to_vec(&host_config)?)?;
     let group = register_host("web", load_config(&config_path)?)?;
@@ -191,7 +211,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         factory.create()?
     };
-    let stop = Arc::new(AtomicBool::new(false));
     let signal = Arc::clone(&stop);
     ctrlc::set_handler(move || signal.store(true, Ordering::Release))?;
     println!("READY {}", host.origin());
@@ -204,7 +223,101 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ServeOutcome::Served => {}
         }
     }
+    if let Some(relay) = relay {
+        relay.join().map_err(|_| "managed chat fixture panicked")?;
+    }
     Ok(())
+}
+
+fn start_managed_chat(
+    root: &std::path::Path,
+    stop: Arc<AtomicBool>,
+) -> std::io::Result<(serde_json::Value, std::thread::JoinHandle<()>)> {
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    let token_file = root.join("fixture-chat-token");
+    fs::write(&token_file, TOKEN)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600))?;
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
+    let endpoint = listener.local_addr()?;
+    let handle = std::thread::spawn(move || {
+        while !stop.load(Ordering::Acquire) {
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(_) => break,
+            };
+            let answer = (|| -> Option<&'static str> {
+                stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+                let mut request = BufReader::new(&mut stream);
+                let mut header = String::new();
+                let mut length = None;
+                let mut authenticated = false;
+                request.read_line(&mut header).ok()?;
+                if header != "POST /v1/chat/completions HTTP/1.1\r\n" {
+                    return None;
+                }
+                loop {
+                    header.clear();
+                    if request.read_line(&mut header).ok()? == 0 {
+                        return None;
+                    }
+                    if header == "\r\n" {
+                        break;
+                    }
+                    let (name, value) = header.trim_end().split_once(": ")?;
+                    if name.eq_ignore_ascii_case("content-length") {
+                        length = value
+                            .parse::<usize>()
+                            .ok()
+                            .filter(|length| *length <= 32_768);
+                    }
+                    if name.eq_ignore_ascii_case("authorization") {
+                        authenticated = value == format!("Bearer {TOKEN}");
+                    }
+                }
+                if !authenticated {
+                    return None;
+                }
+                let mut bytes = vec![0; length?];
+                request.read_exact(&mut bytes).ok()?;
+                let request: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+                let prompt = request["messages"].as_array()?.last()?["content"].as_str()?;
+                if prompt.contains("first_line and last_line")
+                    && prompt.ends_with("alpha\nold line\nomega\n")
+                {
+                    Some(
+                        r#"{"first_line":2,"last_line":2,"replacement":"updated line\nextra line"}"#,
+                    )
+                } else if prompt.starts_with("What changed in the file?")
+                    && prompt.ends_with("alpha\nupdated line\nextra line\nomega\n")
+                {
+                    Some("The verified excerpt contains the updated and extra lines.")
+                } else {
+                    None
+                }
+            })();
+            if let Some(answer) = answer {
+                let body = json!({"choices":[{"message":{"role":"assistant","content":answer}}]})
+                    .to_string();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+            } else {
+                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+            }
+        }
+    });
+    Ok((json!({"endpoint":endpoint,"token_file":token_file}), handle))
 }
 
 /// Explicit test-only injected fault port; never selected by normal host config.

@@ -25,13 +25,15 @@ Keep **Wrap**, the selected pane, and keyboard focus behavior. A named **Ask For
 
 Forge currently supports digest-checked source reads through `ide.source`, a bounded `PreparedChat` text transcript through `ide.chat`, and a generated source viewer with line highlights. The Chat and Workbench docks can share the same active thread within the browser session. The runner persists runs and messages in PostgreSQL, but the IDE compatibility route sends a transcript snapshot per turn and the browser lacks conversation-list and reload hydration. Durable conversation identity and reopening require their own contract. [Source behavior](../../../src/rust/forge-ide-web/WORKBENCH.md#source-and-request-ownership) · [Current wire protocol](../../../src/rust/forge-ide-ui/src/protocol.rs) · [Runner persistence](../../../deploy/mission-control/agent-runner/README.md)
 
+The implementation stages proposals in the native web host. The browser uses `ide.edit_write` for Apply, Undo, and status. The host forwards the authorized operation through `ide.managed_write@1`, and the agent owns publication and the durable journal. Browser reload recovery uses the current web host session's latest operation. [Managed workspace configuration](../../../src/rust/forge-agent/README.md#managed-inline-writes)
+
 ## Proposed data and ownership
 
 | Contract | Contents and authority |
 | --- | --- |
 | `EditContext` | Admitted node, project, report token and entry ID. Base SHA-256 and exact line-window coordinates. Display path and a bounded excerpt for inference. The display path carries no filesystem authority. |
 | `EditProposal` | Native-issued opaque proposal ID, owner/session binding, base identity, expiry, and a bounded diff projection. The native service keeps the canonical candidate bytes. A conversation message can reference the proposal ID for navigation. |
-| `ApplyPatch` | Proposal ID and client operation ID. No path or replacement bytes. The native write agent resolves the staged file through its admitted project and checks ownership, operation ID, expiry, and base revision. |
+| `ApplyPatch` | Proposal ID and client operation ID. The browser sends no path or replacement bytes. The native host resolves the staged file and replacement. The agent checks its project grant, operation ID, expiry, and base revision. |
 | `UndoPatch` | Applied operation ID and a new operation ID. Requires the current file digest to match the recorded applied digest and an available before-image. |
 | `WriteReceipt` | Operation ID, typed outcome, and resulting digest on success. Status lookup by operation ID reconciles a lost response without starting a second write. |
 
@@ -54,14 +56,15 @@ sequenceDiagram
     H->>H: Admit session, route and project
     H->>M: Request bounded structured candidate
     M-->>H: Candidate edits
-    H->>A: Validate and stage against the admitted base
-    A-->>H: Proposal ID and bounded diff
+    H->>A: Verify the digest and obtain a native revision
+    A-->>H: Native base revision
+    H->>H: Stage replacement and issue proposal ID
     H-->>W: Correlated proposal result
     W-->>UI: Preview if context still matches
     User->>UI: Apply reviewed proposal
     UI->>W: Apply intent with proposal ID
-    W->>H: ide.apply_patch with operation ID
-    H->>A: Admit then forward typed write
+    W->>H: ide.edit_write with proposal and operation IDs
+    H->>A: ide.managed_write with admitted replacement
     alt Base and authorization valid
         A->>A: Publish guarded change and record receipt
         A-->>H: Applied receipt with new digest

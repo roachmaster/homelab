@@ -1,5 +1,5 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{ChatMessage, RequestToken, SourceSpan};
+use crate::protocol::{ChatMessage, DiffLine, RequestToken, SourceSpan};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -14,6 +14,12 @@ pub struct ViewModel {
     pub panes: Vec<PaneBinding>,
     pub sources: Vec<SourceBinding>,
     pub transcripts: Vec<TranscriptBinding>,
+    pub diffs: Vec<DiffBinding>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DiffBinding {
+    pub id: &'static str,
+    pub lines: Vec<DiffLine>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TranscriptBinding {
@@ -140,6 +146,30 @@ pub struct RowView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    SendChatWithFile {
+        report: RequestToken,
+        entry: u32,
+        byte_start: u32,
+        conversation: usize,
+    },
+    ApplyEdit {
+        proposal_id: String,
+    },
+    UndoEdit {
+        applied_operation: String,
+    },
+    SendWorkbenchChat {
+        report: RequestToken,
+        entry: u32,
+        byte_start: u32,
+        conversation: usize,
+    },
+    ProposeEdit {
+        report: RequestToken,
+        entry: u32,
+        byte_start: u32,
+        conversation: usize,
+    },
     SelectSearchResult {
         report: RequestToken,
         entry: u32,

@@ -28,7 +28,10 @@ pub fn ide_document() -> Document {
                     component!(transcript "chat-transcript", "Chat messages"),
                     component!(status "chat-status", ""),
                     component!(textarea "chat-draft", "Message", "set_chat_draft"),
-                    component!(row [component!(checked_button "send-chat", "Send", "send_chat", "chat-draft")]),
+                    component!(row [
+                        component!(checked_button "send-chat", "Send", "send_chat", "chat-draft"),
+                        component!(checked_button "send-chat-with-file", "Send with file", "send_chat_with_file", "chat-draft"),
+                    ]),
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
@@ -65,6 +68,7 @@ pub fn ide_document() -> Document {
                             component!(source_wrap "source-wrap", "Wrap", "source-view"),
                             component!(status "source-status", ""),
                             component!(source "source-view", "Read-only source"),
+                            component!(diff "workbench-edit-diff", "Proposed diff"),
                             component!(caption "source-range", ""),
                             component!(region "source-pagination"; [
                                 component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
@@ -85,6 +89,25 @@ pub fn ide_document() -> Document {
                             component!(row [component!(button "shape-previous", "Previous shape page", "previous_shape"), component!(button "shape-more", "Next shape page", "more_shape")]),
                             component!(disclosure "source-shape-counts", "Observed counts"; [
                                 component!(facts "source-shape-details"),
+                            ]),
+                        ]),
+                        component!(pane_footer "workbench-chat"; [
+                            component!(caption "workbench-chat-context", ""),
+                            component!(status "workbench-chat-status", ""),
+                            component!(region "workbench-chat-compose"; [
+                                component!(textarea "workbench-chat-draft", "Ask Forge about this file", "set_chat_draft", "Ask Forge…"),
+                                component!(checked_button "send-workbench-chat", "Send", "send_workbench_chat", "workbench-chat-draft"),
+                                component!(checked_button "propose-workbench-edit", "Propose edit", "propose_edit", "workbench-chat-draft"),
+                            ]),
+                            component!(region "workbench-edit-review"; [
+                                component!(status "workbench-edit-status", ""),
+                                component!(button "discard-workbench-edit", "Discard", "discard_edit"),
+                                component!(primary "apply-workbench-edit", "Apply", "apply_edit"),
+                            ]),
+                            component!(region "workbench-write"; [
+                                component!(status "workbench-write-status", ""),
+                                component!(button "undo-workbench-edit", "Undo edit", "undo_edit"),
+                                component!(button "check-workbench-write", "Check status", "check_edit_write"),
                             ]),
                         ]),
                     ]),
@@ -129,6 +152,24 @@ pub fn ide_transport() -> Transport {
     let mut chat = common.clone();
     chat.push(HeaderBinding::literal("Forge-Destination", "ide.chat"));
     chat.push(HeaderBinding::field(
+        "Forge-Request-Id",
+        "request.request_id",
+    ));
+    let mut edit = common.clone();
+    edit.push(HeaderBinding::literal(
+        "Forge-Destination",
+        "ide.propose_edit",
+    ));
+    edit.push(HeaderBinding::field(
+        "Forge-Request-Id",
+        "request.request_id",
+    ));
+    let mut write = common.clone();
+    write.push(HeaderBinding::literal(
+        "Forge-Destination",
+        "ide.edit_write",
+    ));
+    write.push(HeaderBinding::field(
         "Forge-Request-Id",
         "request.request_id",
     ));
@@ -178,6 +219,24 @@ pub fn ide_transport() -> Transport {
                 timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
                 deadline: None,
                 accept_events: vec!["chat_result".into()],
+            },
+            RequestBinding {
+                kind: "propose_edit".into(),
+                request_id: "request.request_id".into(),
+                headers: edit,
+                csrf: true,
+                timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
+                deadline: None,
+                accept_events: vec!["edit_result".into()],
+            },
+            RequestBinding {
+                kind: "edit_write".into(),
+                request_id: "request.request_id".into(),
+                headers: write,
+                csrf: true,
+                timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
+                deadline: None,
+                accept_events: vec!["edit_write_result".into()],
             },
             RequestBinding {
                 kind: "source".into(),

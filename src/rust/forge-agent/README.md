@@ -176,7 +176,7 @@ capability calls after admission/variant/resource rejection. No private keys are
 committed. This demonstrates two processes, **not two physical machines**.
 
 A real two-host trial still needs explicitly authorized credential distribution,
-network exposure and host controls. Remote jobs, delegation, writes, process
+network exposure and host controls. Remote jobs, delegation, process
 launch, additional HTTP methods and alternate carriers remain later decisions.
 
 ## Read-only source operation
@@ -189,3 +189,19 @@ SHA-256. Source reads preserve no-follow/exclusion policy and the fixed 1 MiB te
 limit. Changed bytes fail and require inspection again. This operation uses the
 existing project read grant; it adds no write, terminal or execution capability.
 Deploy the updated agent and IDE host/codec together for the report digest schema.
+
+## Managed inline writes
+
+The Unix agent can opt a project into `ide.managed_write@1` with
+`"managed_writes": true` on the project and `"write_projects": ["project-alias"]`
+on the admitted peer. The peer must also have the existing read grant. The agent
+must run under an unprivileged dedicated UID that owns the private `0700`
+workspace. Use a workspace whose writers are all fenced through the managed
+writer. The journal and target must be on the same filesystem.
+
+The native host holds the staged replacement and authorizes the browser action
+by proposal ID. The agent verifies the file digest and physical identity before
+publishing the staged replacement and recording its receipt. Undo rechecks the
+published revision and is available for 30 minutes. The private journal has a
+32-receipt cap and reserves its last slot for Undo. Reaching the cap blocks new
+operations until the workspace is taken offline and its journal is archived.

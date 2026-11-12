@@ -114,6 +114,28 @@ impl SourceState {
             target_span,
         }
     }
+    pub fn chat_window(&self) -> (u32, u32, u32, u32, bool) {
+        let chunk = &self.chunks[self.selected];
+        let mut end = chunk.end.min(chunk.start + MAX_CHAT_SOURCE_BYTES);
+        while !self.document.text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let excerpt = &self.document.text[chunk.start..end];
+        let last_line = chunk.line
+            + excerpt
+                .strip_suffix('\n')
+                .unwrap_or(excerpt)
+                .bytes()
+                .filter(|&b| b == b'\n')
+                .count() as u32;
+        (
+            chunk.start as u32,
+            end as u32,
+            chunk.line,
+            last_line,
+            end < chunk.end,
+        )
+    }
 }
 
 impl UiModel {
@@ -122,6 +144,7 @@ impl UiModel {
             effects.push(UiEffect::Abort { token: p.token });
         }
         self.source = None;
+        self.edit_review = None;
         self.source_message.clear();
     }
     pub(super) fn navigate_entry(

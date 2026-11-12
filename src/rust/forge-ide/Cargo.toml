@@ -8,6 +8,8 @@ publish.workspace = true
 default = []
 remote = ["dep:forge-remote", "dep:forge-ingress-contract"]
 yaml = ["dep:serde", "dep:serde_yaml_ng"]
+write-contract = ["dep:serde"]
+managed-writes = ["write-contract", "dep:nix", "dep:serde_json"]
 cli = ["yaml", "dep:forge-bridge", "dep:forge-ingress-contract", "dep:forge-command"]
 
 [dependencies]
@@ -27,6 +29,10 @@ proc-macro2 = { version = "1", default-features = false, features = ["span-locat
 quote = { version = "1", default-features = false }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_yaml_ng = { version = "=0.10.0", optional = true }
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31", features = ["user"], optional = true }
 
 [[bin]]
 name = "forge-ide"

@@ -21,7 +21,11 @@ impl IdeConfig {
         Self::Native {
             root,
             limits: Limits::default(),
-            excluded_names: vec![".git".into(), "target".into()],
+            excluded_names: vec![
+                ".git".into(),
+                "target".into(),
+                crate::filesystem::WRITE_JOURNAL.into(),
+            ],
         }
     }
 }

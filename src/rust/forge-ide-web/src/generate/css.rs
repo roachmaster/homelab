@@ -46,6 +46,33 @@ pub(crate) fn emit(t: &Theme) -> String {
 #source-panel>.fg-source-frame+.fg-caption{padding:6px 0 0}
 #source-pagination>.fg-row{margin:6px 0}
 #source-pagination:not(:has(button:enabled)){display:none}
+#workbench-chat{
+  padding:3px 10px max(3px,env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--border)
+}
+#workbench-chat-compose,#workbench-edit-review,#workbench-write{
+  display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:0 8px
+}
+#workbench-chat-context,#workbench-chat-status{grid-column:1/-1;padding:0;min-height:0;border:0;font-size:11px}
+#workbench-chat-status:empty{display:none}
+#workbench-chat .fg-textarea>span{
+  position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)
+}
+#workbench-chat .fg-textarea textarea{
+  height:var(--touch);min-height:var(--touch);max-height:var(--touch);resize:none;padding:8px 9px
+}
+#workbench-chat :is(#workbench-chat-compose,#workbench-edit-review,#workbench-write)>button{min-height:var(--touch);font-size:12px}
+#workbench-chat-compose>button:disabled{background:var(--raised);border-color:var(--border)}
+#workbench-edit-status{padding:0;border:0;min-height:0}
+#workbench-write-status{padding:0;border:0;min-height:0}
+#workbench-write-status:empty{display:none}
+.fg-diff{border:1px solid var(--border);border-radius:var(--radius);max-height:60dvh;overflow:auto;font:12px/1.55 ui-monospace,monospace}
+.fg-diff-line{display:grid;grid-template-columns:7ch 7ch 2ch 1fr;width:max-content;min-width:100%;gap:4px;padding:0 6px}
+.fg-diff-line>span:nth-child(-n+2){color:var(--muted);text-align:right}
+.fg-diff-line>span:last-child{white-space:pre}
+#source-panel:has(.fg-source[data-wrap=true]) .fg-diff-line{width:100%;grid-template-columns:7ch 7ch 2ch minmax(0,1fr)}
+#source-panel:has(.fg-source[data-wrap=true]) .fg-diff-line>span:last-child{white-space:pre-wrap;overflow-wrap:anywhere}
+.fg-diff-line[data-change=added]{color:var(--text);background:color-mix(in srgb,#26a269 25%,var(--bg))}
+.fg-diff-line[data-change=removed]{color:var(--text);background:color-mix(in srgb,var(--error) 17%,var(--bg))}
 @media(max-width:800px){
   body:has(>.fg-app:not([hidden])>#workbench:not([hidden])){
     display:grid;min-height:100dvh;

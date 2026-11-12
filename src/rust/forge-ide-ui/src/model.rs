@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 const PAGE_ROWS: usize = 256;
 mod chat;
+mod edit;
 mod projection;
 mod source;
 pub use projection::name_label;
@@ -35,6 +36,9 @@ pub struct Output {
 pub struct UiModel {
     catalog: Option<Catalog>,
     chats: chat::Chats,
+    pending_edit: Option<edit::PendingEdit>,
+    edit_review: Option<edit::EditReview>,
+    write: edit::WriteState,
     node: String,
     project: String,
     phase: Phase,
@@ -68,6 +72,9 @@ impl Default for UiModel {
         Self {
             catalog: None,
             chats: chat::Chats::default(),
+            pending_edit: None,
+            edit_review: None,
+            write: edit::WriteState::default(),
             node: String::new(),
             project: String::new(),
             phase: Phase::Unpaired,
@@ -159,6 +166,7 @@ impl UiModel {
             return Err(UiError::InvalidClock);
         }
         let mut effects = Vec::new();
+        let proposing = matches!(&input.event, UiEvent::ProposeEdit { .. });
         match input.event {
             UiEvent::OpenChat {}
             | UiEvent::OpenWorkbench {}
@@ -166,6 +174,13 @@ impl UiModel {
             | UiEvent::SelectChat { .. }
             | UiEvent::SetChatDraft { .. }
             | UiEvent::SendChat {}
+            | UiEvent::SendWorkbenchChat { .. }
+            | UiEvent::SendChatWithFile { .. }
+            | UiEvent::ProposeEdit { .. }
+            | UiEvent::DiscardEdit {}
+            | UiEvent::ApplyEdit { .. }
+            | UiEvent::UndoEdit { .. }
+            | UiEvent::CheckEditWrite {}
                 if self.catalog.is_none() =>
             {
                 return Err(UiError::NotConnected)
@@ -180,20 +195,79 @@ impl UiModel {
             } => self.chats.draft(conversation, value)?,
             UiEvent::SendChat {} => {
                 let request_id = self.next_id(input.now_ms)?;
-                if let Some(request) = self.chats.send(request_id)? {
+                if let Some(request) = self.chats.send(request_id, None)? {
                     effects.push(UiEffect::Chat { request });
                 }
+            }
+            UiEvent::SendChatWithFile {
+                report,
+                entry,
+                byte_start,
+                conversation,
+            } => {
+                self.send_chat_with_file(
+                    (report, entry, byte_start, conversation),
+                    input.now_ms,
+                    &mut effects,
+                )?;
+            }
+            UiEvent::SendWorkbenchChat {
+                report,
+                entry,
+                byte_start,
+                conversation,
+            }
+            | UiEvent::ProposeEdit {
+                report,
+                entry,
+                byte_start,
+                conversation,
+            } => {
+                self.send_workbench(
+                    input.now_ms,
+                    (report, entry, byte_start, conversation),
+                    proposing,
+                    &mut effects,
+                )?;
+            }
+            UiEvent::DiscardEdit {} if self.chats.workbench && !self.write_pending() => {
+                self.edit_review = None
+            }
+            UiEvent::DiscardEdit {} => {}
+            UiEvent::EditResult {
+                request_id,
+                outcome,
+            } => self.complete_edit(&request_id, outcome),
+            UiEvent::ApplyEdit { proposal_id } => {
+                self.apply_edit(proposal_id, input.now_ms, &mut effects)?
+            }
+            UiEvent::UndoEdit { applied_operation } => {
+                self.undo_edit(applied_operation, input.now_ms, &mut effects)?
+            }
+            UiEvent::CheckEditWrite {} => self.check_edit_write(input.now_ms, &mut effects)?,
+            UiEvent::EditWriteResult {
+                request_id,
+                operation,
+                outcome,
+            } => {
+                self.complete_write(&request_id, &operation, outcome, input.now_ms, &mut effects);
             }
             UiEvent::ChatResult {
                 request_id,
                 outcome,
-            } => self.chats.complete(&request_id, outcome),
+            } if !self.is_pending_edit(&request_id) => self.chats.complete(&request_id, outcome),
+            UiEvent::ChatResult { .. } => {}
             UiEvent::NetworkFailed {
                 request_id,
                 category,
             } => {
-                self.chats
-                    .complete(&request_id, ChatOutcome::Error { category });
+                self.write_failed(&request_id);
+                if self.is_pending_edit(&request_id) {
+                    self.complete_edit(&request_id, EditOutcome::Error { category });
+                } else {
+                    self.chats
+                        .complete(&request_id, ChatOutcome::Error { category });
+                }
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
@@ -291,8 +365,13 @@ impl UiModel {
                     self.node = sole[0].0.clone();
                     self.project = sole[0].1.clone();
                 }
+                let mut catalog = catalog;
+                let recent_write = catalog.recent_write.take();
                 self.catalog = Some(catalog);
                 self.chats.open();
+                if let Some(recent) = recent_write {
+                    self.restore_write(recent);
+                }
                 self.pairing = None;
                 self.pairing_required = false;
                 self.phase = Phase::Idle;
@@ -414,6 +493,7 @@ impl UiModel {
                                 self.expanded.insert(0);
                                 self.report = Some(report);
                                 self.pending = None;
+                                self.reopen_written_file(input.now_ms, &mut effects);
                             }
                         }
                         Outcome::Error { category, message } => {
@@ -618,6 +698,7 @@ impl UiModel {
                 self.problems_window.previous();
             }
         }
+        self.expire_undo(input.now_ms);
         Ok(Output {
             protocol_version: PROTOCOL_VERSION,
             view: self.render(),

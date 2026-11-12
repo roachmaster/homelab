@@ -77,6 +77,7 @@ pub enum Component {
         id: String,
         label: String,
         action: String,
+        placeholder: Option<String>,
     },
     Row(Vec<Component>),
     Workspace(Vec<Component>),
@@ -93,6 +94,10 @@ pub enum Component {
         min: u16,
         initial: u16,
         max: u16,
+        children: Vec<Component>,
+    },
+    PaneFooter {
+        id: String,
         children: Vec<Component>,
     },
     Text {
@@ -136,6 +141,10 @@ pub enum Component {
         id: String,
         label: String,
     },
+    Diff {
+        id: String,
+        label: String,
+    },
     /// A presentation-only line-wrap control for a source viewer.
     SourceWrap {
         id: String,
@@ -165,7 +174,8 @@ macro_rules! component {
     (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
     (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
-    (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into()} };
+    (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:None} };
+    (textarea $id:expr, $label:expr, $action:expr, $placeholder:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:Some($placeholder.into())} };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
     (compact_toolbar $id:expr, $label:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::CompactToolbar{id:$id.into(),label:$label.into(),children:vec![$($child),*]} };
     (row [$($child:expr),* $(,)?]) => { $crate::generate::Component::Row(vec![$($child),*]) };
@@ -173,6 +183,7 @@ macro_rules! component {
     (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,children:vec![$($child),*]} };
     (focused_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,children:vec![$($child),*]} };
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
+    (pane_footer $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneFooter{id:$id.into(),children:vec![$($child),*]} };
     (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
     (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
     (context $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Context} };
@@ -187,6 +198,7 @@ macro_rules! component {
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
     (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
+    (diff $id:expr, $label:expr) => { $crate::generate::Component::Diff{id:$id.into(),label:$label.into()} };
     (source_wrap $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::SourceWrap{id:$id.into(),label:$label.into(),target:$target.into()} };
     (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
     (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
@@ -241,15 +253,17 @@ impl Document {
                 | Component::Toolbar(_)
                 | Component::ReadingColumn(_)
                 | Component::Workspace(_) => (None, None, None),
-                Component::PaneLayout { id, .. } | Component::Region { id, .. } => {
-                    (Some(id), None, None)
-                }
+                Component::PaneLayout { id, .. }
+                | Component::Region { id, .. }
+                | Component::PaneFooter { id, .. } => (Some(id), None, None),
                 Component::Text { id, text, .. } => (Some(id), Some(text), None),
                 Component::Select { id, label, action }
                 | Component::Button {
                     id, label, action, ..
                 }
-                | Component::TextArea { id, label, action }
+                | Component::TextArea {
+                    id, label, action, ..
+                }
                 | Component::Filter { id, label, action }
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
@@ -258,6 +272,7 @@ impl Document {
                 | Component::Tree { id, label }
                 | Component::Reload { id, label }
                 | Component::CompactToolbar { id, label, .. }
+                | Component::Diff { id, label }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
                 Component::PaneLink { id, label, target }
                 | Component::SourceWrap { id, label, target } => {
@@ -272,6 +287,12 @@ impl Document {
                 return Err("invalid component label/action");
             }
             match c {
+                Component::TextArea {
+                    placeholder: Some(placeholder),
+                    ..
+                } if !text(placeholder) => {
+                    return Err("invalid input placeholder");
+                }
                 Component::Button {
                     check_input: Some(id),
                     ..
@@ -339,6 +360,7 @@ impl Document {
                 | Component::PaneLayout { children, .. }
                 | Component::Region { children, .. }
                 | Component::Pane { children, .. }
+                | Component::PaneFooter { children, .. }
                 | Component::Row(children)
                 | Component::ReadingColumn(children)
                 | Component::Toolbar(children)

@@ -16,3 +16,6 @@ pub mod remote;
 
 #[cfg(feature = "remote")]
 pub mod remote_source;
+
+#[cfg(feature = "write-contract")]
+pub mod managed_edit;

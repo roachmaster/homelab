@@ -14,7 +14,7 @@ forge-bridge.workspace = true
 forge-ide = { path = "../forge-ide", features = ["remote"] }
 forge-ide-ui = { path = "../forge-ide-ui" }
 forge-remote = { path = "../forge-remote" }
-forge-remote-https = { path = "../forge-remote-https", features = ["ide"] }
+forge-remote-https = { path = "../forge-remote-https", features = ["ide", "managed-writes"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 httparse = "1"

@@ -15,6 +15,11 @@ use forge_ide::{
     remote::{RemoteInspectInput, RemoteInspectTask, ReportLimits, IDE_INSPECT},
     task::{InspectRequest, InspectTask},
 };
+#[cfg(unix)]
+use forge_ide::{
+    filesystem::managed_write::{ManagedWriter, WriteError},
+    managed_edit::{ManagedCommand, ManagedResponse, ManagedWriteRequest},
+};
 use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
 use forge_io_client::IoClient;
 use forge_kernel::node::{self, NodeClient, NodeCommand, NodeConfig, NodeResponse, NodeTask};
@@ -111,8 +116,33 @@ where
         target,
         gateway,
         projects,
+        managed_roots,
         grants,
     } = config::server(path)?;
+    #[cfg(unix)]
+    let write = {
+        let writers = managed_roots
+            .into_iter()
+            .map(|(alias, root)| {
+                let writer = ManagedWriter::open(&root).map_err(|_| {
+                    AppError::Configuration(
+                        "managed project needs a private workspace owned by the agent",
+                    )
+                })?;
+                Ok((alias, writer))
+            })
+            .collect::<Result<BTreeMap<_, _>, AppError>>()?;
+        move |command| managed_write(&writers, command)
+    };
+    #[cfg(not(unix))]
+    let write = {
+        if !managed_roots.is_empty() {
+            return Err(AppError::Configuration(
+                "managed project writes require Unix",
+            ));
+        }
+        |_| Err(RemoteError::Forbidden)
+    };
     let staged = Registry::new()
         .register(
             node::register(NodeConfig::Local {
@@ -138,11 +168,12 @@ where
         );
         handles.insert(alias, Singleton::new(factory.create().map_err(assembly)?));
     }
-    let service = Service::new_with_source(
+    let service = Service::new_with_write(
         target,
         observation,
         Projects(handles),
         Sources(sources),
+        write,
         grants,
     )?;
     let codec = Codec::new(ReportLimits::default())?;
@@ -174,6 +205,35 @@ where
     err.execute(b"STOPPED: admission ended; owned listener released on return\n".to_vec())
         .map_err(AppError::Output)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn managed_write(
+    writers: &BTreeMap<ProjectAlias, ManagedWriter>,
+    command: ManagedWriteRequest,
+) -> Result<ManagedResponse, RemoteError> {
+    let alias = ProjectAlias::new(command.project).map_err(|_| RemoteError::InvalidRequest)?;
+    let writer = writers.get(&alias).ok_or(RemoteError::Forbidden)?;
+    let result = match command.command {
+        ManagedCommand::BaseRevision { path, digest } => writer
+            .base_revision(&path, digest)
+            .map(|revision| ManagedResponse::BaseRevision { revision }),
+        ManagedCommand::Execute { request } => writer
+            .execute(request)
+            .map(|receipt| ManagedResponse::Receipt { receipt }),
+        ManagedCommand::Status { owner, operation } => writer
+            .status(&owner, &operation)
+            .map(|receipt| ManagedResponse::Status { receipt }),
+    };
+    result.map_err(|error| match error {
+        WriteError::Invalid => RemoteError::InvalidRequest,
+        WriteError::Unmanaged => RemoteError::Forbidden,
+        WriteError::JournalFull => RemoteError::Limit,
+        WriteError::Busy => RemoteError::Unavailable,
+        WriteError::Io(_) | WriteError::Indeterminate => RemoteError::Deadline {
+            may_have_executed: true,
+        },
+    })
 }
 struct Handle<C>(Singleton<C>);
 impl<C: IoClient> IoClient for Handle<C> {

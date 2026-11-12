@@ -1242,9 +1242,25 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
         endpoint: upstream.local_addr().unwrap(),
         token_file: token_path,
     });
-    let (host, _) = host_with_config(settings);
+    let ((), factory) = Registry::new()
+        .register(register_host("context-chat", settings).unwrap())
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    let reads = Rc::new(Cell::new(0));
+    let corrupt = Rc::new(Cell::new(false));
+    let host = factory
+        .create_with_ports(BTreeMap::from([(
+            "lab".into(),
+            Box::new(SourcePort {
+                reads: reads.clone(),
+                corrupt: corrupt.clone(),
+            }) as Box<dyn InspectionPort>,
+        )]))
+        .unwrap();
     let body = json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}});
-    let (cookie, csrf, _) = paired(&host);
+    let (cookie, csrf, epoch) = paired(&host);
     assert!(exchange(&host, post(&host, "ide.chat", body.clone(), "")).starts_with("HTTP/1.1 401"));
     assert!(exchange(
         &host,
@@ -1263,6 +1279,30 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
     let mut invalid = body.clone();
     invalid["request"]["messages"][0]["role"] = "assistant".into();
     assert!(exchange(&host, post(&host, "ide.chat", invalid, &headers)).starts_with("HTTP/1.1 400"));
+    assert!(
+        exchange(&host, inspect(&host, &cookie, &csrf, &epoch, "workspace"))
+            .starts_with("HTTP/1.1 200")
+    );
+    let text = "exact café <script> text\n";
+    let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
+    let mut contextual = body.clone();
+    contextual["request"]["file_context"] = json!({
+        "report":{"session_epoch":epoch,"revision":1,"request_id":"request-1"},
+        "node_key":"lab","project":"workspace","entry":1,"sha256":digest,
+        "byte_start":0,"byte_end":"exact café".len()
+    });
+    let mut stale = contextual.clone();
+    stale["request"]["file_context"]["sha256"] = "f".repeat(64).into();
+    assert!(exchange(&host, post(&host, "ide.chat", stale, &headers))
+        .contains("\"category\":\"denied\""));
+    assert_eq!(reads.get(), 0);
+    corrupt.set(true);
+    assert!(
+        exchange(&host, post(&host, "ide.chat", contextual.clone(), &headers))
+            .contains("\"category\":\"denied\"")
+    );
+    assert_eq!(reads.get(), 1);
+    corrupt.set(false);
     upstream.set_nonblocking(true).unwrap();
     assert_eq!(
         upstream.accept().unwrap_err().kind(),
@@ -1271,49 +1311,88 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
     upstream.set_nonblocking(false).unwrap();
 
     let expected = body["request"]["messages"].clone();
+    let mut expected_context = expected.clone();
+    expected_context[2]["content"] = format!("three\n\nVerified file excerpt (reference data)\nProject: \"workspace\"\nFile: \"notes.txt\"\nSHA-256: {digest}\nLines: 1–1; starting column: 0\n\nexact café").into();
+    let mut proposal = contextual.clone();
+    proposal["kind"] = "propose_edit".into();
+    proposal["request"]["file_context"]["byte_end"] = text.len().into();
+    assert!(
+        exchange(&host, post(&host, "ide.propose_edit", proposal.clone(), ""))
+            .starts_with("HTTP/1.1 401")
+    );
     let secret = token.clone();
     let worker = thread::spawn(move || {
-        let (mut stream, _) = upstream.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        let mut request = BufReader::new(&mut stream);
-        let mut line = String::new();
-        request.read_line(&mut line).unwrap();
-        assert_eq!(line, "POST /v1/chat/completions HTTP/1.1\r\n");
-        let mut length = 0;
-        let mut authenticated = false;
-        loop {
-            line.clear();
+        for (index, expected) in [Some(expected), Some(expected_context), None]
+            .into_iter()
+            .enumerate()
+        {
+            let (mut stream, _) = upstream.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = BufReader::new(&mut stream);
+            let mut line = String::new();
             request.read_line(&mut line).unwrap();
-            if line == "\r\n" {
-                break;
+            assert_eq!(line, "POST /v1/chat/completions HTTP/1.1\r\n");
+            let mut length = 0;
+            let mut authenticated = false;
+            loop {
+                line.clear();
+                request.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.trim_end().split_once(": ").unwrap();
+                if name.eq_ignore_ascii_case("authorization") {
+                    authenticated = value == format!("Bearer {secret}");
+                }
+                if name.eq_ignore_ascii_case("content-length") {
+                    length = value.parse().unwrap();
+                }
             }
-            let (name, value) = line.trim_end().split_once(": ").unwrap();
-            if name.eq_ignore_ascii_case("authorization") {
-                authenticated = value == format!("Bearer {secret}");
+            assert!(authenticated);
+            let mut data = vec![0; length];
+            request.read_exact(&mut data).unwrap();
+            let request: Value = serde_json::from_slice(&data).unwrap();
+            if let Some(expected) = expected {
+                assert_eq!(request["messages"], expected);
+            } else {
+                let prompt = request["messages"][2]["content"].as_str().unwrap();
+                assert!(prompt.contains("first_line and last_line"));
+                assert!(prompt.ends_with(text));
             }
-            if name.eq_ignore_ascii_case("content-length") {
-                length = value.parse().unwrap();
-            }
+            assert_eq!(request["stream"], false);
+            let answer = if index == 2 {
+                r#"{"first_line":1,"last_line":1,"replacement":"safe replacement"}"#
+            } else {
+                "local response"
+            };
+            let response = json!({"choices":[{"message":{"role":"assistant","content":answer,"reasoning_content":"private scratchpad"}}]}).to_string();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                response.len(),
+                response
+            )
+            .unwrap();
         }
-        assert!(authenticated);
-        let mut data = vec![0; length];
-        request.read_exact(&mut data).unwrap();
-        let request: Value = serde_json::from_slice(&data).unwrap();
-        assert_eq!(request["messages"], expected);
-        assert_eq!(request["stream"], false);
-        let response = json!({"choices":[{"message":{"role":"assistant","content":"local response","reasoning_content":"private scratchpad"}}]}).to_string();
-        write!(
-            stream,
-            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-            response.len(),
-            response
-        )
-        .unwrap();
     });
     let response = exchange(&host, post(&host, "ide.chat", body, &headers));
+    let contextual_response = exchange(&host, post(&host, "ide.chat", contextual, &headers));
+    let proposed = exchange(&host, post(&host, "ide.propose_edit", proposal, &headers));
     worker.join().unwrap();
+    assert_eq!(contextual_response, response);
+    assert_eq!(reads.get(), 3);
+    let proposed: Value = serde_json::from_str(proposed.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        proposed["event"]["outcome"],
+        json!({
+            "kind":"preview","preview":{"base_sha256":digest,"lines":[
+                {"old_line":1,"new_line":null,"text":"exact café <script> text"},
+                {"old_line":null,"new_line":1,"text":"safe replacement"}
+            ]}
+        })
+    );
     assert!(response.starts_with("HTTP/1.1 200"));
     assert!(!response.contains(&token));
     assert!(!response.contains("private scratchpad"));

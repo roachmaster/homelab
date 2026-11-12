@@ -2,6 +2,9 @@
 //! arbitrary subject constructor is exposed by this application.
 use crate::config::Grants;
 use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
+use forge_ide::managed_edit::{
+    ManagedCommand, ManagedResponse, ManagedWriteRequest, IDE_MANAGED_WRITE,
+};
 use forge_ide::remote_source::{SourceCall, SourceReply, SourceSelection, IDE_SOURCE};
 use forge_ide::source::SourceDocument;
 use forge_ide::{
@@ -17,6 +20,7 @@ use forge_remote::{
     now_unix_ms, NodeCall, NodeInfo, NodeInfoSource, NodeReply, ReadNodeInfo, RemoteError, Target,
     NODE_INFO,
 };
+use forge_remote_https::managed_write::{ManagedCall, ManagedCodec, ManagedReply};
 use forge_remote_https::source::SourceCodec;
 use forge_remote_https::{
     gateway::{GatewayCodec, NodeCodec, RequestMetadata, VerifiedContext},
@@ -29,11 +33,13 @@ pub(crate) enum Kind {
     Node,
     Inspect,
     Source,
+    Write,
 }
 pub(crate) enum AgentCommand {
     NodeInfo,
     Inspect(ProjectAlias),
     Source(SourceSelection),
+    Write(ManagedWriteRequest),
 }
 impl Payload for AgentCommand {
     type Kind = Kind;
@@ -42,6 +48,7 @@ impl Payload for AgentCommand {
             Self::NodeInfo => Kind::Node,
             Self::Inspect(_) => Kind::Inspect,
             Self::Source(_) => Kind::Source,
+            Self::Write(_) => Kind::Write,
         }
     }
 }
@@ -54,11 +61,13 @@ enum AgentResult {
     Node(NodeInfo),
     Report(Box<ProjectReport>),
     Source(SourceDocument),
+    Write(ManagedResponse),
 }
 pub(crate) enum AgentReply {
     Node(NodeReply),
     Inspect(Box<InspectReply>),
     Source(SourceReply),
+    Write(ManagedReply),
 }
 pub(crate) struct Codec {
     ide: IdeCodec,
@@ -115,6 +124,18 @@ impl GatewayCodec for Codec {
                     expires: expires_unix_ms,
                 })
             }
+            IDE_MANAGED_WRITE => {
+                let ManagedCall {
+                    target,
+                    request,
+                    expires_unix_ms,
+                } = ManagedCodec.decode(meta, body)?;
+                Ok(AgentRequest {
+                    target,
+                    request: Envelope::new(request.header, AgentCommand::Write(request.payload)),
+                    expires: expires_unix_ms,
+                })
+            }
             _ => Err(RemoteError::UnknownRoute),
         }
     }
@@ -127,6 +148,7 @@ impl GatewayCodec for Codec {
             Ok(AgentReply::Node(reply)) => NodeCodec.encode(Ok(reply), max),
             Ok(AgentReply::Inspect(reply)) => self.ide.encode(Ok(*reply), max),
             Ok(AgentReply::Source(reply)) => SourceCodec.encode(Ok(reply), max),
+            Ok(AgentReply::Write(reply)) => ManagedCodec.encode(Ok(reply), max),
             Err(error) => NodeCodec.encode(Err(error), max),
         }
     }
@@ -160,6 +182,7 @@ impl AdmissionPolicy<Context> for Admission {
         let permitted = match header.route().destination() {
             NODE_INFO => g.node_info,
             IDE_INSPECT | IDE_SOURCE => !g.projects.is_empty(),
+            IDE_MANAGED_WRITE => !g.write_projects.is_empty(),
             _ => false,
         };
         if !permitted {
@@ -199,6 +222,7 @@ impl Service {
         Self::new_with_source(target, node, projects, NoSources, grants)
     }
 
+    #[cfg(test)]
     pub fn new_with_source<N, P, S>(
         target: Target,
         node: N,
@@ -212,6 +236,32 @@ impl Service {
             + 'static,
         S: IoClient<Request = SourceSelection, Response = SourceDocument, Error = RemoteError>
             + 'static,
+    {
+        Self::new_with_write(
+            target,
+            node,
+            projects,
+            sources,
+            |_| Err(RemoteError::Forbidden),
+            grants,
+        )
+    }
+
+    pub fn new_with_write<N, P, S, W>(
+        target: Target,
+        node: N,
+        projects: P,
+        sources: S,
+        write: W,
+        grants: Grants,
+    ) -> Result<Self, RemoteError>
+    where
+        N: NodeInfoSource + 'static,
+        P: IoClient<Request = ProjectAlias, Response = ProjectReport, Error = RemoteError>
+            + 'static,
+        S: IoClient<Request = SourceSelection, Response = SourceDocument, Error = RemoteError>
+            + 'static,
+        W: Fn(ManagedWriteRequest) -> Result<ManagedResponse, RemoteError> + 'static,
     {
         let grants = Rc::new(grants);
         let mut routes = RegistryBuilder::new();
@@ -276,6 +326,55 @@ impl Service {
                 },
             )
             .map_err(|_| RemoteError::InvalidRequest)?;
+        let write_grants = Rc::clone(&grants);
+        routes
+            .register(
+                RouteKey::new(IDE_MANAGED_WRITE, 1).expect("static route"),
+                Kind::Write,
+                move |command: AgentCommand, c: &Context| {
+                    let AgentCommand::Write(mut command) = command else {
+                        return Err(RemoteError::InvalidRequest);
+                    };
+                    let alias = ProjectAlias::new(command.project.clone())
+                        .map_err(|_| RemoteError::InvalidRequest)?;
+                    if !write_grants.get(&c.subject).is_some_and(|grant| {
+                        grant.projects.contains(&alias) && grant.write_projects.contains(&alias)
+                    }) {
+                        return Err(RemoteError::Forbidden);
+                    }
+                    let owner = match &mut command.command {
+                        ManagedCommand::Execute { request } => {
+                            if request.expires_unix_ms > c.expires {
+                                return Err(RemoteError::InvalidRequest);
+                            }
+                            Some(&mut request.owner)
+                        }
+                        ManagedCommand::Status { owner, .. } => Some(owner),
+                        ManagedCommand::BaseRevision { .. } => None,
+                    };
+                    if let Some(owner) = owner {
+                        if owner.is_empty()
+                            || owner.len() > 96
+                            || !owner.bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')
+                            })
+                        {
+                            return Err(RemoteError::InvalidRequest);
+                        }
+                        *owner =
+                            forge_ide::source::digest(format!("{}\0{owner}", c.subject).as_bytes())
+                                .iter()
+                                .map(|byte| format!("{byte:02x}"))
+                                .collect();
+                    }
+                    c.live()?;
+                    c.invoked.set(true);
+                    let response = write(command)?;
+                    c.live()?;
+                    Ok(AgentResult::Write(response))
+                },
+            )
+            .map_err(|_| RemoteError::InvalidRequest)?;
         Ok(Self {
             target,
             bridge: Bridge::new(routes.freeze(), Admission(grants)),
@@ -327,6 +426,13 @@ impl Service {
                 }))
             }
             AgentResult::Source(value) => Ok(AgentReply::Source(SourceReply {
+                responder: self.target.clone(),
+                response: Response {
+                    header: response.header,
+                    payload: value,
+                },
+            })),
+            AgentResult::Write(value) => Ok(AgentReply::Write(ManagedReply {
                 responder: self.target.clone(),
                 response: Response {
                     header: response.header,
@@ -407,6 +513,7 @@ mod tests {
             Grant {
                 node_info: true,
                 projects: BTreeSet::from([ProjectAlias::new("good").unwrap()]),
+                write_projects: Default::default(),
             },
         );
         let service = Service::new(
@@ -481,6 +588,7 @@ mod tests {
             Grant {
                 node_info: false,
                 projects: BTreeSet::from([ProjectAlias::new("good").unwrap()]),
+                write_projects: Default::default(),
             },
         )]);
         let service = Service::new_with_source(
@@ -533,5 +641,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(reads.get(), 1);
+    }
+
+    #[test]
+    fn managed_write_requires_both_project_grants_before_invoking_writer() {
+        let good = ProjectAlias::new("good").unwrap();
+        let grants = BTreeMap::from([
+            (
+                "reader".into(),
+                Grant {
+                    node_info: false,
+                    projects: BTreeSet::from([good.clone()]),
+                    write_projects: BTreeSet::new(),
+                },
+            ),
+            (
+                "writer".into(),
+                Grant {
+                    node_info: false,
+                    projects: BTreeSet::from([good.clone()]),
+                    write_projects: BTreeSet::from([good]),
+                },
+            ),
+        ]);
+        let calls = Rc::new(Cell::new(0));
+        let writer_calls = Rc::clone(&calls);
+        let service = Service::new_with_write(
+            Target::new("node", "run").unwrap(),
+            Nodes(Rc::new(Cell::new(0))),
+            Projects(Rc::new(Cell::new(0))),
+            NoSources,
+            move |_| {
+                writer_calls.set(writer_calls.get() + 1);
+                Ok(ManagedResponse::Status { receipt: None })
+            },
+            grants,
+        )
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let request = |project: &str| {
+            call(
+                IDE_MANAGED_WRITE,
+                AgentCommand::Write(ManagedWriteRequest {
+                    project: project.into(),
+                    command: ManagedCommand::Status {
+                        owner: "session".into(),
+                        operation: "operation".into(),
+                    },
+                }),
+            )
+        };
+        for (subject, project) in [("reader", "good"), ("writer", "other"), ("unknown", "good")] {
+            assert!(matches!(
+                service.dispatch_inner(request(project), subject, deadline),
+                Err(RemoteError::Forbidden)
+            ));
+        }
+        assert_eq!(calls.get(), 0);
+        assert!(matches!(
+            service.dispatch_inner(request("good"), "writer", deadline),
+            Ok(AgentReply::Write(_))
+        ));
+        assert_eq!(calls.get(), 1);
     }
 }

@@ -23,6 +23,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+#[cfg(all(unix, feature = "managed-writes"))]
+pub mod managed_write;
+pub(crate) const WRITE_JOURNAL: &str = ".forge-write-journal";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FsRequest {
     List { path: PathBuf, max_entries: usize },

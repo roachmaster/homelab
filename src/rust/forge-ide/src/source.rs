@@ -63,7 +63,10 @@ impl<C: IoClient<Request = FsRequest, Response = FsResponse, Error = FsError>> T
     fn run(&self, input: SourceRequest) -> Result<SourceDocument, SourceError> {
         if input.path.as_os_str().is_empty()
             || input.path.components().any(|c| match c {
-                Component::Normal(name) => self.excluded.iter().any(|e| e == name),
+                Component::Normal(name) => {
+                    name == crate::filesystem::WRITE_JOURNAL
+                        || self.excluded.iter().any(|e| e == name)
+                }
                 _ => true,
             })
         {

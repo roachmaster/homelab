@@ -31,12 +31,16 @@ pub(crate) struct PeerFile {
     subject: String,
     node_info: bool,
     projects: Vec<String>,
+    #[serde(default)]
+    write_projects: Vec<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ProjectFile {
     alias: String,
     root: PathBuf,
+    #[serde(default)]
+    managed_writes: bool,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,12 +107,14 @@ pub(crate) enum ConfigFile {
 pub(crate) struct Grant {
     pub node_info: bool,
     pub projects: BTreeSet<ProjectAlias>,
+    pub write_projects: BTreeSet<ProjectAlias>,
 }
 pub(crate) type Grants = BTreeMap<String, Grant>;
 pub(crate) struct ServerPlan {
     pub target: Target,
     pub gateway: GatewayServerConfig,
     pub projects: Vec<(ProjectAlias, IdeConfig)>,
+    pub managed_roots: BTreeMap<ProjectAlias, PathBuf>,
     pub grants: Grants,
 }
 pub(crate) struct ClientPlan {
@@ -207,12 +213,17 @@ pub(crate) fn server(path: &Path) -> Result<ServerPlan, AppError> {
     }
     let mut aliases = BTreeSet::new();
     let mut configured = Vec::new();
+    let mut managed_roots = BTreeMap::new();
     for p in projects {
         let alias = ProjectAlias::new(p.alias).map_err(crate::assembly)?;
         if !aliases.insert(alias.clone()) {
             return Err(invalid("duplicate project alias"));
         }
-        configured.push((alias, IdeConfig::project(resolve(&base, &p.root))));
+        let root = resolve(&base, &p.root);
+        if p.managed_writes {
+            managed_roots.insert(alias.clone(), root.clone());
+        }
+        configured.push((alias, IdeConfig::project(root)));
     }
     let mut grants = BTreeMap::new();
     let mut identities = Vec::new();
@@ -227,12 +238,25 @@ pub(crate) fn server(path: &Path) -> Result<ServerPlan, AppError> {
                 return Err(invalid("unknown or repeated project permission"));
             }
         }
+        let mut write_projects = BTreeSet::new();
+        for alias in p.write_projects {
+            let alias = ProjectAlias::new(alias).map_err(crate::assembly)?;
+            if !permitted.contains(&alias)
+                || !managed_roots.contains_key(&alias)
+                || !write_projects.insert(alias)
+            {
+                return Err(invalid(
+                    "write permission requires a readable managed project",
+                ));
+            }
+        }
         if grants
             .insert(
                 p.subject.clone(),
                 Grant {
                     node_info: p.node_info,
                     projects: permitted,
+                    write_projects,
                 },
             )
             .is_some()
@@ -256,6 +280,7 @@ pub(crate) fn server(path: &Path) -> Result<ServerPlan, AppError> {
             limits,
         },
         projects: configured,
+        managed_roots,
         grants,
     })
 }
