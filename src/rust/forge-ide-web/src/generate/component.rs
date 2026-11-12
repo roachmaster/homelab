@@ -57,6 +57,12 @@ pub enum Component {
         children: Vec<Component>,
     },
     Toolbar(Vec<Component>),
+    /// A toolbar that can collapse behind a local control in a narrow file pane.
+    CompactToolbar {
+        id: String,
+        label: String,
+        children: Vec<Component>,
+    },
     Navigation {
         id: String,
         title: String,
@@ -130,6 +136,12 @@ pub enum Component {
         id: String,
         label: String,
     },
+    /// A presentation-only line-wrap control for a source viewer.
+    SourceWrap {
+        id: String,
+        label: String,
+        target: String,
+    },
     /// Presentation-only route to a declared pane; no application event.
     PaneLink {
         id: String,
@@ -155,6 +167,7 @@ macro_rules! component {
     (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
     (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into()} };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
+    (compact_toolbar $id:expr, $label:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::CompactToolbar{id:$id.into(),label:$label.into(),children:vec![$($child),*]} };
     (row [$($child:expr),* $(,)?]) => { $crate::generate::Component::Row(vec![$($child),*]) };
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
     (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,children:vec![$($child),*]} };
@@ -174,6 +187,7 @@ macro_rules! component {
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
     (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
+    (source_wrap $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::SourceWrap{id:$id.into(),label:$label.into(),target:$target.into()} };
     (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
     (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
     (details $id:expr) => { $crate::generate::Component::Details{id:$id.into()} };
@@ -243,8 +257,12 @@ impl Document {
                 Component::Transcript { id, label }
                 | Component::Tree { id, label }
                 | Component::Reload { id, label }
+                | Component::CompactToolbar { id, label, .. }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
-                Component::PaneLink { id, label, target } => (Some(id), Some(label), Some(target)),
+                Component::PaneLink { id, label, target }
+                | Component::SourceWrap { id, label, target } => {
+                    (Some(id), Some(label), Some(target))
+                }
                 Component::Details { id } | Component::Facts { id } => (Some(id), None, None),
             };
             if let Some(id) = id {
@@ -261,6 +279,7 @@ impl Document {
                     return Err("invalid checked input id");
                 }
                 Component::Workspace(_) => insert(ids, "workspace")?,
+                Component::CompactToolbar { id, .. } => insert(ids, &format!("{id}-toggle"))?,
                 Component::PairForm { id, .. } => {
                     for suffix in ["form", "code"] {
                         insert(ids, &format!("{id}-{suffix}"))?;
@@ -313,6 +332,7 @@ impl Document {
             }
             let children = match c {
                 Component::Navigation { children, .. }
+                | Component::CompactToolbar { children, .. }
                 | Component::Screen { children, .. }
                 | Component::Panel { children, .. }
                 | Component::Disclosure { children, .. }

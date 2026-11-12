@@ -574,7 +574,11 @@ async function deviceViewportJourney(page, traffic) {
     report.checkpoint('viewport_breakpoint');
     await check(page.locator('#workspace')).toHaveAttribute('data-narrow', String(narrow));
     if (narrow) {
+      const projectControls = page.locator('#project-controls-toggle');
+      const closed = await projectControls.isVisible() && await projectControls.getAttribute('aria-expanded') === 'false';
+      if (closed) await projectControls.click();
       assert.equal(await page.locator('#workbench .fg-toolbar select').evaluateAll(fields => fields.every(field => field.getBoundingClientRect().width >= 120)), true, 'narrow context selectors stay readable rather than shrinking around status');
+      if (closed) await projectControls.click();
     }
     async function activate(pane, checkpoint) {
       report.checkpoint(checkpoint);
@@ -850,6 +854,32 @@ async function sourceSearchJourney() {
     assert.equal(traffic.count('source'), reads + 1, 'opening a search result reads one file');
     assert.equal(traffic.count('inspect'), 1, 'opening source does not repeat inspection');
     await assertVisibleFocus(page);
+    const projectControls = page.getByRole('button', { name: 'Project controls' });
+    const viewOptions = page.locator('#workspace-options > summary');
+    await check(projectControls).toHaveAttribute('aria-expanded', 'false');
+    await check(page.locator('#project')).toBeHidden();
+    await check(viewOptions).toBeHidden();
+    assert.equal(await page.evaluate(() => {
+      const rect = selector => document.querySelector(selector).getBoundingClientRect();
+      const project = rect('#project-controls-toggle');
+      const tabs = [...document.querySelectorAll('.fg-pane-switches button')].map(tab => tab.getBoundingClientRect());
+      return Math.abs(rect('.fg-header').top - rect('#ide-navigation').top) <= 1 &&
+        tabs.every(tab => tab.width >= 44 && tab.height >= 44 &&
+          Math.abs(tab.top + tab.height / 2 - project.top - project.height / 2) <= 1) &&
+        project.width >= 44 && project.height >= 44;
+    }), true, 'mobile file chrome shares two rows above the file heading with 44px pane controls');
+    await projectControls.press('Enter');
+    await check(projectControls).toHaveAttribute('aria-expanded', 'true');
+    await check(page.locator('#project')).toBeVisible();
+    await check(viewOptions).toBeVisible();
+    await viewOptions.press('Enter');
+    await check(page.locator('#workspace-reset')).toBeVisible();
+    await viewOptions.press('Enter');
+    await projectControls.press('Enter');
+    await check(page.locator('#project')).toBeHidden();
+    await check(viewOptions).toBeHidden();
+    await check(page.locator('#source-pagination')).toBeHidden();
+    assert.equal(traffic.count('inspect'), 1, 'project disclosure stays local');
     await page.getByRole('button', { name: 'Back to files', exact: true }).click();
     await check(page.locator('#explorer-panel')).toBeVisible();
     await page.locator('#project-query').fill('README <safe>');
@@ -863,6 +893,20 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view')).toContainText('Source line 1:');
     await check(page.locator('#source-view .fg-source-line')).toHaveCount(256);
     const pageReads = traffic.count('source');
+    const sourceFrame = page.locator('[data-source-frame]');
+    const source = page.locator('#source-view');
+    const wrap = page.getByRole('button', { name: 'Wrap', exact: true });
+    await check(sourceFrame).toHaveAttribute('data-overflow-right', '');
+    await source.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+    await check(sourceFrame).not.toHaveAttribute('data-overflow-right', '');
+    await wrap.press('Space');
+    await check(wrap).toHaveAttribute('aria-pressed', 'true');
+    assert.equal(await source.evaluate(node => node.scrollWidth <= node.clientWidth + 1 && node.scrollLeft === 0), true);
+    await check(source.locator('[data-line="1"] .fg-source-number')).toHaveText('1');
+    await wrap.press('Space');
+    await check(wrap).toHaveAttribute('aria-pressed', 'false');
+    await check(sourceFrame).toHaveAttribute('data-overflow-right', '');
+    assert.equal(traffic.count('source'), pageReads, 'wrapping reuses the accepted source window');
     await page.locator('#source-more').click();
     await check(page.locator('#source-view')).toContainText('Source line 257:');
     await check(page.locator('#source-more')).toBeFocused();

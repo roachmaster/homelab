@@ -15,10 +15,15 @@ const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map
 const layouts=new Map();
 let typeahead=new WeakMap();
 function element(id){return typeof id==='string'?document.getElementById(id):null;}
+function updateSourceOverflow(source){
+  const frame=source.closest('[data-source-frame]');
+  if(!frame)return;
+  frame.toggleAttribute('data-overflow-right',source.dataset.wrap!=='true'&&source.scrollWidth-source.clientWidth-source.scrollLeft>1);
+}
 function visible(n){
   if(!n||!n.isConnected||n.closest('[hidden]'))return false;
   for(let p=n.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS'&&!p.open&&!p.querySelector(':scope > summary')?.contains(n))return false;
-  return true;
+  return n.getClientRects?.().length!==0;
 }
 function tell(event,sequence){if(worker && !fatalState)worker.postMessage(sequence===undefined?event:{event,presentation_sequence:sequence});}
 function sendAction(n,value,sequence){
@@ -43,6 +48,13 @@ function clearProtected(){
   for(const n of document.querySelectorAll('input,textarea')){n.value='';n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
   for(const n of document.querySelectorAll('.fg-tree,.fg-details,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
+  for(const n of document.querySelectorAll('[data-source-wrap],[data-compact-toolbar]')){
+    if(n.hasAttribute('data-source-wrap')){
+      const source=element(n.getAttribute('aria-controls'));
+      if(source){delete source.dataset.wrap;updateSourceOverflow(source);}
+      n.setAttribute('aria-pressed','false');
+    }else n.setAttribute('aria-expanded','false');
+  }
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
@@ -188,6 +200,7 @@ function apply(view,acknowledgedSequence){
       row.append(number,text);parts.push(row);
     }
     n.replaceChildren(...parts);n.scrollLeft=0;n.scrollTop=0;
+    updateSourceOverflow(n);
     sourceViews.set(n,{context,text:b.text,first:b.first_line,column:b.first_column,span});
     if(parts.length)sourceTargets.push(selected||parts[0]);
   }
@@ -239,7 +252,7 @@ function apply(view,acknowledgedSequence){
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){
-    const target=visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):document.querySelector('.fg-screen:not([hidden]) select:not(:disabled),.fg-screen:not([hidden]) input:not(:disabled),.fg-screen:not([hidden]) button:not(:disabled)');
+    const target=visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):[...document.querySelectorAll('.fg-screen:not([hidden]) :is(select,input,button):not(:disabled)')].find(visible);
     if(visible(target))target.focus({preventScroll:true});
   }
 }
@@ -268,6 +281,23 @@ for(const n of document.querySelectorAll('input[data-action],textarea[data-actio
 });
 for(const n of document.querySelectorAll('form[data-action]'))n.addEventListener('submit',e=>{e.preventDefault();const input=n.querySelector('input[name="value"]');if(!input||n.querySelector('button')?.disabled)return;const value=input.value;input.value='';sendAction(n,value);});
 for(const n of document.querySelectorAll('[data-reload]'))n.addEventListener('click',()=>location.reload());
+for(const n of document.querySelectorAll('[data-compact-toolbar]'))n.addEventListener('click',()=>{
+  n.setAttribute('aria-expanded',String(n.getAttribute('aria-expanded')!=='true'));
+});
+for(const n of document.querySelectorAll('[data-source-wrap]'))n.addEventListener('click',()=>{
+  const source=element(n.getAttribute('aria-controls'));
+  if(!source?.hasAttribute('data-source-view'))return;
+  const wrap=source.dataset.wrap!=='true';
+  source.dataset.wrap=String(wrap);
+  n.setAttribute('aria-pressed',String(wrap));
+  if(wrap)source.scrollLeft=0;
+  updateSourceOverflow(source);
+});
+for(const frame of document.querySelectorAll('[data-source-frame]')){
+  const source=frame.querySelector('[data-source-view]');
+  source.addEventListener('scroll',()=>updateSourceOverflow(source),{passive:true});
+  new ResizeObserver(()=>updateSourceOverflow(source)).observe(source);
+}
 for(const tree of document.querySelectorAll('[role="tree"]')){
   tree.addEventListener('focusin',e=>{
     const row=e.target.closest('.fg-row-select');if(!row)return;

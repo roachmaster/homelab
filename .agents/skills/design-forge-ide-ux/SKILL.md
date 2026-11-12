@@ -1,13 +1,13 @@
 ---
 name: design-forge-ide-ux
-description: Design or review task-oriented Forge IDE workbench UX, file navigation, information hierarchy, responsive panels and keyboard/touch flows. Apply these guardrails to wireframes, UI implementation and review; not marketing pages or a standalone report dashboard.
+description: Design or review Forge IDE Chat and Workbench UX, including responsive conversation layouts, file navigation, information hierarchy and keyboard/touch flows. Apply to Forge IDE wireframes, UI implementation and review.
 ---
 
 # Design Forge IDE UX
 
-Build a **task-oriented IDE/workbench**, not an inspection/report dashboard.
-Start with the user's work in an authorized project: find a file, select it, and
-use the dominant work area. Inspection, source-shape analysis, metrics and
+Build a **task-oriented IDE**. In Workbench, start with the user's work in an
+authorized project. Help them find a file, select it, and use the dominant work
+area. Inspection, source-shape analysis, metrics and
 explanations support that work; they do not define the product's identity.
 The current read-only capability is a delivery limit, not a permanent design goal.
 Do not compensate for missing editing with a fake editor or a report-heavy screen.
@@ -19,11 +19,36 @@ not a competing frontend architecture. Its [source notes](references/sources.md)
 and [pinned adaptation record](../../../docs/design/skill-sources.md) distinguish
 local guidance from upstream material. No upstream skill suite is installed.
 
-For a visual critique, polish or design-direction request, read
+For Workbench visual critique, polish or design direction, read
 [Workbench craft](references/workbench-craft.md): it adapts design-taste and
 Impeccable guidance to an operational IDE, not a landing page. For implementation
 acceptance, use [Test Forge UI](../test-forge-ui/SKILL.md); wireframes and aesthetic
 rules are not usability or browser-test evidence.
+
+## Shape a Chat layout
+
+Use the existing [component declarations](../../../src/rust/forge-ide-web/src/generate/application.rs)
+as the source of labels, actions and order. For visual polish, start with the
+[YAML theme](../../../src/rust/forge-ide-web/ui/theme.yaml) and the reusable
+[style generator](../../../src/rust/forge-ide-web/src/generate/css.rs). Scope
+viewport and overflow rules to active Chat so Workbench keeps its own scrolling.
+
+- **Give the transcript the remaining height.** Fit the active Chat shell to the
+  dynamic viewport. Keep navigation and conversation controls compact. Let the
+  transcript scroll within a flexible middle track and dock Message and Send
+  below it. Use a shorter composer and tighter spacing on short viewports while
+  preserving touch targets.
+- **Align the reading column.** Give Conversation the remaining toolbar width
+  beside New chat. Align that row, transcript and composer to the same edges.
+  Let Forge replies use the full readable width of the open transcript. Keep
+  user prompts in bounded right-aligned bubbles and wrap long content.
+- **Keep controls recognizable.** Place Send beside Message and give the disabled
+  state a visible fill and boundary. Check the Message border against the
+  actual adjacent colors and use a visible keyboard focus indicator. Preserve
+  accessible names and tab order when moving controls with layout rules.
+
+Use the [Chat layout checks](../test-forge-ui/SKILL.md#chat-layout-checks) to
+verify the generated screen.
 
 ## Workbench guardrails
 
@@ -47,6 +72,29 @@ rules are not usability or browser-test evidence.
 Use the [workbench acceptance checklist](../test-forge-ui/SKILL.md#workbench-acceptance-checklist)
 for design review and implementation verification. Aesthetic polish and passing
 interaction tests cannot excuse the wrong primary product shape.
+
+## Make source the main work area on phones
+
+- **Keep three compact rows above the source controls.** Share the first row
+  between the brand and the Chat/Workbench mode switch. Put pane tabs and
+  Project controls on the next row, with View options and project selectors
+  inside the disclosure while a file is active. Put Back to files beside the
+  filename. Keep actionable warnings visible and use one short source status.
+- **Give each control a recognizable role.** Use a recessed segmented track
+  with a solid raised selected segment, an underline for the active mobile
+  pane, and a quiet chevron with text for back navigation. Use the primary
+  accent fill and dark text for the pressed Wrap pill. Preserve the 44 px
+  mobile hit area with a smaller visible pill and draw a solid keyboard focus
+  ring around that pill. Selection and keyboard focus need distinct cues.
+- **Keep source readable in either mode.** Make Wrap a browser presentation
+  toggle that preserves source text, line numbers and the accepted window.
+  When unwrapped, show the right-edge cue only while more content can be
+  scrolled to the right. Show source pagination when a neighboring window
+  exists. Keep source scrolling bounded so short landscape layouts retain
+  usable focus and scroll positions.
+
+Use the [mobile source checks](../test-forge-ui/SKILL.md#mobile-source-checks)
+with a real inspected file.
 
 ## Establish what the screen can truthfully show
 

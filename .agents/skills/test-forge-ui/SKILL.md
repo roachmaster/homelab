@@ -21,7 +21,7 @@ to that existing workflow. It installs no server, extension, browser or service.
   generation checks, plus actual browser acceptance when behavior or rendering is
   affected. `make ui-check` and `make ui-qa-check` are useful but neither proves
   browser-to-agent acceptance. Do not treat a focused run as the full gate.
-- **Full workbench acceptance:** use `make ui-qa` from the repository root with the
+- **Full browser acceptance:** use `make ui-qa` from the repository root with the
   documented prerequisites already present. It rebuilds atomic assets/WASM, uses
   owned localhost fixtures and ephemeral identities, and runs the fixed ordered
   suite. Do not narrow it with package flags or replace real-agent cases with mocks.
@@ -55,6 +55,28 @@ host and remote agent authorize independently. Test-driver JavaScript is permitt
 test code, not permission to hand-author application JS. A fix belongs in the
 declaration, Rust model or reusable generator/adapter primitive responsible for it.
 
+## Chat layout checks
+
+For visual changes to Chat, pair the full `make ui-qa` run with a focused
+inspection of the generated page. Use the [Chat layout guidance](../design-forge-ide-ux/SKILL.md#shape-a-chat-layout)
+and reuse test-owned loopback fixtures. A controlled reply is sufficient for
+measuring layout and scroll behavior. Record it as controlled fixture evidence.
+
+- Compare desktop and phone screenshots with a short prompt and reply. Check
+  the toolbar edges against the transcript and composer, including the width
+  of Conversation and the position of New chat. Check a narrow portrait and
+  a short landscape viewport when the change affects width or height.
+- Exercise empty and populated drafts. Check that Send has a visible button
+  shape when disabled and that Tab moves from Message to the enabled Send.
+  Measure the idle composer border against its adjacent rendered colors and
+  verify at least 3:1 contrast.
+- Use a long reply to check that the transcript scrolls with Message and Send
+  visible and that the page has no unintended horizontal overflow. Switch
+  between Chat and Workbench to exercise each screen's layout independently.
+
+Report viewport sizes and which checks ran. Treat conversation recovery after
+reload as a separate behavior that requires its own test.
+
 ## Workbench acceptance checklist
 
 Use [Design Forge IDE UX](../design-forge-ide-ux/SKILL.md) for the product hierarchy
@@ -86,6 +108,26 @@ acceptance, inspect fresh screenshots **and** exercise the affected controls:
 
 Report which criteria passed, failed or were not exercised. Keep product hierarchy
 findings separate from functional test results; neither proves the other.
+
+## Mobile source checks
+
+Open an actual inspected file with long lines, such as the Homelab Makefile
+in an owned loopback fixture. Capture the initial view at 390 × 844 and
+compare the source's top edge and the number of fully visible lines with the
+baseline. Check narrower and short landscape viewports when changing layout.
+
+- Open Project controls with the keyboard and confirm the selectors and View
+  options are reachable. Exercise Back to files and the pane tabs. Check that
+  the main controls retain their touch hit areas and remain on screen.
+- Tab to Wrap and toggle it with Space. Inspect both pressed states and
+  verify the solid ring follows the visible pill with a gap and remains
+  distinguishable from the pressed fill. Measure the visual pill and the
+  44 px mobile hit area independently.
+- Check that a long line fits when wrapped and that line numbers stay
+  visible. With Wrap off, scroll right and confirm the edge cue disappears
+  at the end. Check the single-window footer and paging on a multi-window
+  file. Wrap and opening project controls should leave source and inspection
+  request counts unchanged.
 
 ## Keep browser evidence bounded and private
 

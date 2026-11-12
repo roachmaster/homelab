@@ -238,7 +238,14 @@ impl UiModel {
                             .into();
                     return;
                 }
-                self.source_message = "Read-only source · verified against this inspection.".into();
+                self.source_message = if self.current_entry().is_some_and(|entry| {
+                    entry.content_status == "text" && entry.declarations.is_empty()
+                }) {
+                    "Verified read-only source · No declarations"
+                } else {
+                    "Verified read-only source"
+                }
+                .into();
                 self.source = Some(SourceState::new(document));
                 self.reveal_declaration();
             }

@@ -80,6 +80,16 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 "</div>"
             });
         }
+        Component::CompactToolbar {
+            id,
+            label,
+            children: items,
+        } => {
+            let id = escape(id);
+            let _ = write!(out, "<div class=\"fg-compact-toolbar\"><button type=\"button\" id=\"{id}-toggle\" data-compact-toolbar aria-controls=\"{id}\" aria-expanded=\"false\">{}</button><div class=\"fg-toolbar\" id=\"{id}\">", escape(label));
+            children(items, out);
+            out.push_str("</div></div>");
+        }
         Component::PaneLayout {
             id,
             single_secondary,
@@ -231,7 +241,10 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let _=write!(out,"<div id=\"{}\" class=\"fg-tree\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
         }
         Component::Source { id, label } => {
-            let _ = write!(out, "<pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre>", escape(id), escape(label));
+            let _ = write!(out, "<div class=\"fg-source-frame\" data-source-frame><pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre></div>", escape(id), escape(label));
+        }
+        Component::SourceWrap { id, label, target } => {
+            let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-source-wrap\" data-source-wrap aria-controls=\"{}\" aria-pressed=\"false\">{}</button>", escape(id), escape(target), escape(label));
         }
         Component::PaneLink { id, label, target } => {
             let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-pane-link\" data-pane-reveal=\"{}\">{}</button>", escape(id), escape(target), escape(label));

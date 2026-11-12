@@ -32,7 +32,7 @@ pub fn ide_document() -> Document {
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
-                component!(toolbar [
+                component!(compact_toolbar "project-controls", "Project controls"; [
                     component!(select "node", "Node", "select_node"),
                     component!(select "project", "Project", "select_project"),
                     component!(primary "inspect", "Refresh project", "inspect"),
@@ -56,14 +56,19 @@ pub fn ide_document() -> Document {
                         ]),
                     ]),
                     component!(pane "workspace-panel", "File", Main, 240, 480, 960; [
-                        component!(pane_link "back-to-files", "Back to files", "explorer-panel"),
-                        component!(heading "selection-title", "Select a file to read its source"),
+                        component!(region "file-heading"; [
+                            component!(pane_link "back-to-files", "Back to files", "explorer-panel"),
+                            component!(heading "selection-title", "Select a file to read its source"),
+                        ]),
                         component!(caption "workspace-summary", "Find a file or symbol in Explorer."),
                         component!(panel "source-panel", "Source · Read only"; [
+                            component!(source_wrap "source-wrap", "Wrap", "source-view"),
                             component!(status "source-status", ""),
                             component!(source "source-view", "Read-only source"),
                             component!(caption "source-range", ""),
-                            component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
+                            component!(region "source-pagination"; [
+                                component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
+                            ]),
                         ]),
                         component!(panel "declaration-details-panel", "Selected declaration"; [
                             component!(details "declaration-details"),
