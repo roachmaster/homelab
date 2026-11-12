@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="844" height="946" viewBox="0 0 844 946" role="img" aria-labelledby="title desc">
+<title id="title">Forge IDE inline edit on mobile</title>
+<desc id="desc">Two proposed 390 by 844 Workbench screens. The first shows verified source and an edit prompt dock. The second shows a staged diff, including a deletion and an addition, with Discard and Apply controls.</desc>
+<rect x="0" y="0" width="844" height="946" rx="0" fill="#0d1117"/>
+<text x="22" y="32" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="23" font-weight="700" text-anchor="start" xml:space="preserve">Forge IDE inline edit</text>
+<text x="22" y="56" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400" text-anchor="start" xml:space="preserve">Proposed Workbench layout at 390 × 844</text>
+<text x="22" y="79" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700" text-anchor="start" xml:space="preserve">Prompt from verified source</text>
+<g id="prompt">
+<rect x="22" y="90" width="390" height="844" rx="10" fill="#0d1117" stroke="#5a6679"/>
+<rect x="23" y="91" width="388" height="50" rx="9" fill="#161b22"/>
+<text x="34" y="122" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="700" text-anchor="start" xml:space="preserve">Forge IDE</text>
+<rect x="228" y="96" width="172" height="38" rx="9" fill="#0d1117" stroke="#5a6679"/>
+<rect x="289" y="99" width="108" height="32" rx="7" fill="#212833"/>
+<text x="258" y="120" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" text-anchor="middle" xml:space="preserve">Chat</text>
+<text x="343" y="120" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" text-anchor="middle" xml:space="preserve">Workbench</text>
+<rect x="22" y="141" width="390" height="1" rx="0" fill="#5a6679"/>
+<text x="34" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Explorer</text>
+<text x="100" y="170" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" text-anchor="start" xml:space="preserve">File</text>
+<text x="140" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Outline</text>
+<text x="202" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Problems</text>
+<text x="276" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Project controls ▾</text>
+<rect x="90" y="188" width="41" height="2" rx="0" fill="#60a5fa"/>
+<rect x="22" y="190" width="390" height="1" rx="0" fill="#5a6679"/>
+<text x="34" y="221" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700" text-anchor="start" xml:space="preserve">‹  Back to files</text>
+<text x="155" y="223" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="700" text-anchor="start" xml:space="preserve">Makefile</text>
+<rect x="32" y="240" width="370" height="1" rx="0" fill="#5a6679"/>
+<text x="34" y="264" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Verified source · Lines 1–32</text>
+<rect x="349" y="244" width="53" height="28" rx="14" fill="#212833"/>
+<text x="375" y="263" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="11" font-weight="700" text-anchor="middle" xml:space="preserve">Wrap</text>
+<rect x="32" y="278" width="370" height="599" rx="8" fill="#0d1117" stroke="#5a6679"/>
+<text x="56" y="298" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">1</text>
+<text x="80" y="298" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve"># Project quality gates</text>
+<text x="56" y="316" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">2</text>
+<text x="56" y="334" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">3</text>
+<text x="80" y="334" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">.DEFAULT_GOAL := check</text>
+<text x="56" y="352" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">4</text>
+<text x="56" y="370" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">5</text>
+<text x="80" y="370" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">.PHONY: check test fmt lint clean</text>
+<text x="56" y="388" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">6</text>
+<text x="56" y="406" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">7</text>
+<text x="80" y="406" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">check: fmt lint test</text>
+<text x="56" y="424" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">8</text>
+<text x="56" y="442" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">9</text>
+<text x="80" y="442" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">test:</text>
+<text x="56" y="460" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">10</text>
+<text x="80" y="460" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo test</text>
+<text x="56" y="478" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">11</text>
+<text x="56" y="496" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">12</text>
+<text x="80" y="496" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">fmt:</text>
+<text x="56" y="514" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">13</text>
+<text x="80" y="514" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo fmt --check</text>
+<text x="56" y="532" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">14</text>
+<text x="56" y="550" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">15</text>
+<text x="80" y="550" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">lint:</text>
+<text x="56" y="568" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">16</text>
+<text x="80" y="568" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo clippy --all-targets</text>
+<text x="56" y="586" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">17</text>
+<text x="56" y="604" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">18</text>
+<text x="80" y="604" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">clean:</text>
+<text x="56" y="622" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">19</text>
+<text x="80" y="622" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo clean</text>
+<text x="56" y="640" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">20</text>
+<text x="56" y="658" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">21</text>
+<text x="80" y="658" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve"># Local build helpers</text>
+<text x="56" y="676" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">22</text>
+<text x="80" y="676" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">build:</text>
+<text x="56" y="694" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">23</text>
+<text x="80" y="694" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo build</text>
+<text x="56" y="712" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">24</text>
+<text x="56" y="730" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">25</text>
+<text x="80" y="730" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">docs:</text>
+<text x="56" y="748" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">26</text>
+<text x="80" y="748" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo doc --no-deps</text>
+<text x="56" y="766" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">27</text>
+<text x="56" y="784" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">28</text>
+<text x="80" y="784" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">verify:</text>
+<text x="56" y="802" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">29</text>
+<text x="80" y="802" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo check</text>
+<text x="56" y="820" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">30</text>
+<text x="56" y="838" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">31</text>
+<text x="80" y="838" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve"># Run from the workspace root</text>
+<text x="56" y="856" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">32</text>
+<text x="80" y="856" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">help:</text>
+<rect x="23" y="878" width="388" height="55" rx="9" fill="#161b22"/>
+<rect x="23" y="878" width="388" height="1" rx="0" fill="#5a6679"/>
+<rect x="34" y="884" width="294" height="44" rx="8" fill="#0d1117" stroke="#5a6679"/>
+<text x="46" y="911" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="400" text-anchor="start" xml:space="preserve">Ask Forge to edit Makefile…</text>
+<rect x="336" y="884" width="64" height="44" rx="8" fill="#212833" stroke="#5a6679"/>
+<text x="368.0" y="912" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700" text-anchor="middle" xml:space="preserve">Send</text>
+</g>
+<text x="432" y="79" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="14" font-weight="700" text-anchor="start" xml:space="preserve">Review the proposed diff</text>
+<g id="review">
+<rect x="432" y="90" width="390" height="844" rx="10" fill="#0d1117" stroke="#5a6679"/>
+<rect x="433" y="91" width="388" height="50" rx="9" fill="#161b22"/>
+<text x="444" y="122" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="700" text-anchor="start" xml:space="preserve">Forge IDE</text>
+<rect x="638" y="96" width="172" height="38" rx="9" fill="#0d1117" stroke="#5a6679"/>
+<rect x="699" y="99" width="108" height="32" rx="7" fill="#212833"/>
+<text x="668" y="120" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" text-anchor="middle" xml:space="preserve">Chat</text>
+<text x="753" y="120" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" text-anchor="middle" xml:space="preserve">Workbench</text>
+<rect x="432" y="141" width="390" height="1" rx="0" fill="#5a6679"/>
+<text x="444" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Explorer</text>
+<text x="510" y="170" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="700" text-anchor="start" xml:space="preserve">File</text>
+<text x="550" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Outline</text>
+<text x="612" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Problems</text>
+<text x="686" y="170" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Project controls ▾</text>
+<rect x="500" y="188" width="41" height="2" rx="0" fill="#60a5fa"/>
+<rect x="432" y="190" width="390" height="1" rx="0" fill="#5a6679"/>
+<text x="444" y="221" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700" text-anchor="start" xml:space="preserve">‹  Back to files</text>
+<text x="565" y="223" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="18" font-weight="700" text-anchor="start" xml:space="preserve">Makefile</text>
+<rect x="442" y="240" width="370" height="1" rx="0" fill="#5a6679"/>
+<text x="444" y="264" fill="#60a5fa" font-family="DejaVu Sans, sans-serif" font-size="12" font-weight="400" text-anchor="start" xml:space="preserve">Proposed diff · Awaiting review</text>
+<rect x="759" y="244" width="53" height="28" rx="14" fill="#212833"/>
+<text x="785" y="263" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="11" font-weight="700" text-anchor="middle" xml:space="preserve">Wrap</text>
+<rect x="442" y="278" width="370" height="599" rx="8" fill="#0d1117" stroke="#5a6679"/>
+<text x="466" y="298" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">1</text>
+<text x="490" y="298" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve"># Project quality gates</text>
+<text x="466" y="316" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">2</text>
+<text x="466" y="334" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">3</text>
+<text x="490" y="334" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">.DEFAULT_GOAL := check</text>
+<text x="466" y="352" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">4</text>
+<text x="466" y="370" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">5</text>
+<text x="490" y="370" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">.PHONY: check test fmt lint clean</text>
+<text x="466" y="388" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">6</text>
+<text x="466" y="406" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">7</text>
+<text x="490" y="406" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">check: fmt lint test</text>
+<text x="466" y="424" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">8</text>
+<text x="466" y="442" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">9</text>
+<text x="490" y="442" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">test:</text>
+<rect x="443" y="447" width="368" height="18" rx="0" fill="#3a2329"/>
+<text x="466" y="460" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">10</text>
+<text x="474" y="460" fill="#ffb0ad" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" text-anchor="start" xml:space="preserve">−</text>
+<text x="490" y="460" fill="#ffb0ad" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo test</text>
+<rect x="443" y="465" width="368" height="18" rx="0" fill="#18312c"/>
+<text x="466" y="478" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">10</text>
+<text x="474" y="478" fill="#8ee6bf" font-family="DejaVu Sans Mono, monospace" font-size="12" font-weight="700" text-anchor="start" xml:space="preserve">+</text>
+<text x="490" y="478" fill="#8ee6bf" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo test --locked</text>
+<text x="466" y="496" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">11</text>
+<text x="466" y="514" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">12</text>
+<text x="490" y="514" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">fmt:</text>
+<text x="466" y="532" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">13</text>
+<text x="490" y="532" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo fmt --check</text>
+<text x="466" y="550" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">14</text>
+<text x="466" y="568" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">15</text>
+<text x="490" y="568" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">lint:</text>
+<text x="466" y="586" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">16</text>
+<text x="490" y="586" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo clippy --all-targets</text>
+<text x="466" y="604" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">17</text>
+<text x="466" y="622" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">18</text>
+<text x="490" y="622" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">clean:</text>
+<text x="466" y="640" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">19</text>
+<text x="490" y="640" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo clean</text>
+<text x="466" y="658" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">20</text>
+<text x="466" y="676" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">21</text>
+<text x="490" y="676" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve"># Local build helpers</text>
+<text x="466" y="694" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">22</text>
+<text x="490" y="694" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">build:</text>
+<text x="466" y="712" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">23</text>
+<text x="490" y="712" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo build</text>
+<text x="466" y="730" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">24</text>
+<text x="466" y="748" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">25</text>
+<text x="490" y="748" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">docs:</text>
+<text x="466" y="766" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">26</text>
+<text x="490" y="766" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo doc --no-deps</text>
+<text x="466" y="784" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">27</text>
+<text x="466" y="802" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">28</text>
+<text x="490" y="802" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">verify:</text>
+<text x="466" y="820" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">29</text>
+<text x="490" y="820" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">    cargo check</text>
+<text x="466" y="838" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">30</text>
+<text x="466" y="856" fill="#9aa6b8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="end" xml:space="preserve">31</text>
+<text x="490" y="856" fill="#f0f4f8" font-family="DejaVu Sans Mono, monospace" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve"># Run from the workspace root</text>
+<rect x="433" y="878" width="388" height="55" rx="9" fill="#161b22"/>
+<rect x="433" y="878" width="388" height="1" rx="0" fill="#5a6679"/>
+<text x="444" y="902" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700" text-anchor="start" xml:space="preserve">1 change</text>
+<text x="444" y="921" fill="#9aa6b8" font-family="DejaVu Sans, sans-serif" font-size="11" font-weight="400" text-anchor="start" xml:space="preserve">+1 added · −1 removed</text>
+<rect x="645" y="884" width="78" height="44" rx="8" fill="#212833" stroke="#5a6679"/>
+<text x="684.0" y="912" fill="#f0f4f8" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700" text-anchor="middle" xml:space="preserve">Discard</text>
+<rect x="732" y="884" width="78" height="44" rx="8" fill="#60a5fa"/>
+<text x="771.0" y="912" fill="#0d1117" font-family="DejaVu Sans, sans-serif" font-size="13" font-weight="700" text-anchor="middle" xml:space="preserve">Apply</text>
+</g>
+</svg>

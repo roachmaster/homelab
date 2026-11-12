@@ -152,3 +152,6 @@ source component is read-only. Editing and saving require separate contracts:
 Writes, revision conflicts, editor widgets and edit/composition/save lifecycle
 remain unimplemented. They need explicit model/codec, admission and real-browser
 verification before being presented as working capabilities.
+
+The [inline-edit proposal](../../../docs/architecture/proposals/forge-ide-inline-edit.md)
+designs a contextual prompt, a staged diff, and guarded Apply and Undo actions.
