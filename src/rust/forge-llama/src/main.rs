@@ -107,7 +107,7 @@ fn dispatch_error(error: DispatchError<Error>) -> HttpResponse {
 
 async fn body<T: serde::de::DeserializeOwned>(
     request: HttpRequest<Incoming>,
-) -> Result<T, HttpResponse> {
+) -> Result<T, (StatusCode, &'static str)> {
     let is_json = request
         .headers()
         .get(CONTENT_TYPE)
@@ -115,17 +115,17 @@ async fn body<T: serde::de::DeserializeOwned>(
         .and_then(|h| h.split(';').next())
         .is_some_and(|h| h.trim().eq_ignore_ascii_case("application/json"));
     if !is_json {
-        return Err(failure(StatusCode::UNSUPPORTED_MEDIA_TYPE, "json_required"));
+        return Err((StatusCode::UNSUPPORTED_MEDIA_TYPE, "json_required"));
     }
     let collected = tokio::time::timeout(
         Duration::from_secs(5),
         Limited::new(request.into_body(), BODY_LIMIT).collect(),
     )
     .await
-    .map_err(|_| failure(StatusCode::REQUEST_TIMEOUT, "body_timeout"))?
-    .map_err(|_| failure(StatusCode::PAYLOAD_TOO_LARGE, "body_limit_or_read_error"))?;
+    .map_err(|_| (StatusCode::REQUEST_TIMEOUT, "body_timeout"))?
+    .map_err(|_| (StatusCode::PAYLOAD_TOO_LARGE, "body_limit_or_read_error"))?;
     serde_json::from_slice(&collected.to_bytes())
-        .map_err(|_| failure(StatusCode::BAD_REQUEST, "invalid_json"))
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid_json"))
 }
 
 impl Http {
@@ -149,12 +149,12 @@ impl Http {
                         model: selection.model,
                     },
                 ),
-                Err(reply) => return reply,
+                Err((status, code)) => return failure(status, code),
             },
             (&Method::DELETE, "/v1/runtime") => (Operation::Stop, Request::Stop),
             (&Method::POST, "/v1/chat/completions") => match body(request).await {
                 Ok(chat) => (Operation::Chat, Request::Chat(chat)),
-                Err(reply) => return reply,
+                Err((status, code)) => return failure(status, code),
             },
             _ => return failure(StatusCode::NOT_FOUND, "unknown_route"),
         };
