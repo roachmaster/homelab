@@ -1,0 +1,65 @@
+- id: count-lines
+  task: Print the line count and filename for notes.txt using wc.
+  files:
+    notes.txt: |
+      plan
+      forge
+      test
+      ship
+  reference: wc -l notes.txt
+  stdout: "4 notes.txt\n"
+
+- id: sort-names
+  task: Print the names in names.txt in ascending alphabetical order, keeping duplicates.
+  files:
+    names.txt: |
+      zeta
+      delta
+      beta
+      beta
+  reference: sort names.txt
+  stdout: "beta\nbeta\ndelta\nzeta\n"
+
+- id: first-two
+  task: Print exactly the first two lines of notes.txt.
+  files:
+    notes.txt: |
+      first
+      second
+      third
+      fourth
+  reference: head -n 2 notes.txt
+  stdout: "first\nsecond\n"
+
+- id: matching-lines
+  task: Print the lines in service.log that contain ERROR and include their original line numbers in grep format.
+  files:
+    service.log: |
+      INFO boot
+      ERROR missing setting
+      INFO restored
+      ERROR probe failed
+  reference: grep -n ERROR service.log
+  stdout: "2:ERROR missing setting\n4:ERROR probe failed\n"
+
+- id: csv-column
+  task: Print the second comma-separated field from every row in people.csv, including the header.
+  files:
+    people.csv: |
+      id,team,age
+      1,forge,32
+      2,lab,41
+  reference: cut -d, -f2 people.csv
+  stdout: "team\nforge\nlab\n"
+
+- id: unique-sorted
+  task: Print each distinct name in names.txt once in ascending alphabetical order.
+  files:
+    names.txt: |
+      coda
+      amber
+      coda
+      beta
+      amber
+  reference: sort names.txt | uniq
+  stdout: "amber\nbeta\ncoda\n"

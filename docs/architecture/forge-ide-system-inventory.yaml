@@ -1,0 +1,334 @@
+schema_version: 1
+system: Forge IDE and local agent
+verified_at_utc: "2026-11-11T20:18:21Z"
+purpose: Record the live chat and workbench alongside the proposed event-driven agent.
+scope:
+  - Forge IDE browser, access, and source workbench
+  - Private inference on Forge GPU
+  - Proposed agent orchestration, persistence, repository storage, and Bash execution
+status_definitions:
+  deployed: Observed in the current operating setup.
+  retained: Available as supporting material for maintenance or rebuilds.
+  proposed: Part of the target design and awaiting implementation or deployment.
+  deferred: Reserved for a later phase.
+
+mission_control_deployment:
+  service_manager: systemd
+  lifecycle_script: ../../deploy/mission-control/services.py
+  port_source: Listener fields in this inventory.
+  service_bundles: Reviewed unit files and registered drop-ins from an operator-provided directory.
+  future_provisioning:
+    status: deferred
+    authoring: A Forge GPU model drafts K3s provisioning from the verified service inventory.
+    validation: Mission Control validates the proposed changes before a trusted deployment step.
+
+hosts:
+  - id: mission-control
+    role: Serves the IDE and workbench and relays private inference requests.
+    observed_resources:
+      vcpus: 8
+      usable_ram_gib: 62
+      data_mount: /mnt/data
+      kvm_device_present: true
+    proposed_role: Native systemd host for the IDE, agent, storage, and CPU-only sandbox.
+  - id: forge-gpu
+    role: Runs the local inference adapter and its llama.cpp child.
+    observed_resources:
+      cpu: AMD Ryzen 7 7700X
+      cores: 8
+      threads: 16
+      usable_ram_gib: 30
+      gpu: Intel Arc Pro B50
+    proposed_role: Dedicated inference host.
+
+components:
+  - id: forge-ide-browser
+    status: deployed
+    placement: browser
+    responsibilities:
+      - Open Chat as the landing page and provide a separate source Workbench.
+      - Keep each conversation, transcript, and draft in the current tab's Rust WASM worker.
+    limitations:
+      - Reload clears tab-owned conversation state.
+      - Chat sends the conversation history and receives one complete reply.
+    source: ../../src/rust/forge-ide-web/README.md
+
+  - id: cloudflare-access
+    status: deployed
+    placement: cloudflare
+    public_origin: https://portal.thedevex.com
+    listener: "portal.thedevex.com:443"
+    responsibility: Authenticate public portal access and forward traffic through the tunnel.
+
+  - id: portal-proxy
+    status: deployed
+    placement: mission-control
+    listener: "127.0.0.1:8090"
+    service: bitwave-portal-cloudflare.socket
+    responsibility: Pass Cloudflare tunnel traffic to the local Forge IDE web host.
+
+  - id: forge-ide-web-host
+    status: deployed
+    placement: mission-control
+    service: homelab-web.service
+    lifecycle:
+      drop_ins: [40-chat-release.conf]
+    requires: [workbench-source-agent]
+    listener: "127.0.0.1:8788"
+    release_revision: 9dca24214460f196522b9e1f97eb3a8871a20f86
+    responsibilities:
+      - Serve the generated IDE assets and admit browser requests using the proxy session and CSRF protection.
+      - Route source inspection to the source agent and chat to the authenticated Mission Control runner.
+    source: ../../src/rust/forge-ide-web-host/README.md
+
+  - id: workbench-source-agent
+    status: deployed
+    placement: mission-control
+    service: homelab-agent.service
+    lifecycle:
+      drop_ins: []
+    listener: "127.0.0.1:9443"
+    transport: mTLS
+    allowed_project_aliases: [homelab]
+    responsibility: Provide read-only inspection and source views for the configured Homelab snapshot.
+
+  - id: forge-inference-tunnel
+    status: deployed
+    placement: mission-control
+    service: homelab-forge-chat-tunnel.service
+    lifecycle:
+      drop_ins: []
+    listener: "127.0.0.1:18082"
+    remote_target:
+      host: forge-gpu
+      listener: "127.0.0.1:18080"
+    responsibility: Carry private HTTP requests over SSH to the Forge adapter.
+
+  - id: forge-ssh
+    status: deployed
+    placement: forge-gpu
+    service: ssh.service
+    listener: "0.0.0.0:22"
+    ipv6_listener: "[::]:22"
+    responsibility: Terminate the private SSH forward from Mission Control.
+
+  - id: forge-llama-adapter
+    status: deployed
+    placement: forge-gpu
+    service: forge-llama.service
+    service_manager: systemd user manager with lingering enabled
+    starts_at_boot: true
+    listener: "127.0.0.1:18080"
+    transport: Bearer-authenticated HTTP over loopback or the private SSH forward
+    responsibilities:
+      - Load and switch allowlisted models and own the llama.cpp child process.
+      - Submit one text chat at a time and return a complete reply.
+    boot_behavior: The adapter comes up with the GPU idle until a client selects a model.
+    source: ../../src/rust/forge-llama/README.md
+
+  - id: llama-cpp-sycl
+    status: deployed
+    placement: forge-gpu
+    release: b12110-sycl
+    executable: /opt/forge/llama.cpp/releases/b12110-sycl/llama-server
+    listener: "127.0.0.1:18081"
+    device: SYCL0
+    configured_context_tokens: 32768
+    responsibility: Run model inference using Intel SYCL and Level Zero.
+
+  - id: forge-gpu-stack
+    status: deployed
+    placement: forge-gpu
+    device: Intel Arc Pro B50
+    pci_address: "0000:03:00.0"
+    kernel: 7.3.0-10-generic
+    driver: xe
+    guc_firmware: "70.54.0"
+    userspace: Intel oneAPI and Level Zero
+    responsibility: Provide hardware acceleration to llama.cpp.
+
+  - id: forge-model-storage
+    status: deployed
+    placement: forge-gpu
+    directory: /var/lib/forge/models
+    models:
+      - id: gpt-oss-20b
+        file: gpt-oss-20b-mxfp4.gguf
+        observed_state: ready
+      - id: qwen2.5-coder-7b
+        file: qwen2.5-coder-7b-instruct-q4_k_m.gguf
+        observed_state: available
+    responsibility: Store the two allowlisted GGUF weights locally.
+
+  - id: sycl-build-source
+    status: retained
+    placement: forge-gpu
+    upstream_revision: cd959bae99ff4bed22bef2604f45241c09bbb8c8
+    source_snapshot: /var/tmp/forge-sycl-comparison-20261110/llama.cpp-cd959bae99ff4bed22bef2604f45241c09bbb8c8
+    build_script: /var/tmp/forge-sycl-comparison-20261110/build-sycl.sh
+    responsibility: Preserve the source and build recipe for the deployed SYCL release.
+    maintenance_gap: The build material is still in a temporary directory.
+
+  - id: mission-control-k3s
+    status: deferred
+    placement: mission-control
+    topology: Single node
+    responsibility: Future orchestration of the validated native services.
+    provisioning_source: Reviewed artifacts drafted with Forge GPU inference.
+
+  - id: agent-runner
+    status: deployed
+    placement: mission-control
+    service: forge-agent-runner.service
+    listener: "127.0.0.1:18083"
+    uses: [postgres, inference-connector]
+    source: ../../deploy/mission-control/agent-runner/README.md
+    responsibilities:
+      - Admit a prompt, assign a durable run ID, and commit ordered job events to PostgreSQL.
+      - Pin the selected model for the run and submit model turns to Forge.
+      - Process queued work after restart and record interrupted inference attempts.
+      - Return a complete answer to the IDE relay and support event replay through the local API.
+
+  - id: inference-connector
+    status: deployed
+    placement: mission-control
+    initial_transport: Private HTTP over the existing SSH forward
+    uses: [forge-inference-tunnel]
+    responsibility: Give the agent runner scoped access to the Forge adapter at the registered loopback listener.
+
+  - id: structured-model-turns
+    status: proposed
+    placement: forge-gpu
+    owners: [forge-llama-adapter, agent-runner]
+    model_output_variants: [final_reply, tool_call, invalid_output]
+    continuation_fields: [model, messages, original_tool_call, tool_call_id, tool_result]
+    responsibilities:
+      - Translate model output into text or a complete typed tool request.
+      - Accept the original assistant call and matching tool result when continuing inference.
+    verification_gap: Verify a structured Bash request and tool-result continuation with the pinned llama.cpp build and GPT-OSS 20B.
+
+  - id: postgres
+    status: deployed
+    placement: mission-control
+    service: postgresql@16-main.service
+    provisioning_script: ../../deploy/mission-control/setup-postgres.sh
+    cluster: 16/main
+    observed_version: "16.15"
+    database: forge_agent
+    socket: /var/run/postgresql/.s.PGSQL.5432
+    responsibility: Store conversations, messages, runs, tool calls, tool results, and ordered events.
+    storage: postgres-data
+    sql_drop: ../../deploy/mission-control/sql/README.md
+    access: The forge_agent OS account connects as forge_agent through Unix socket peer authentication.
+    notifications: A wake-up signal can prompt the runner to read committed event rows.
+    observed_state: Cluster online with schema migration 0001 applied and socket access verified.
+
+  - id: postgres-data
+    status: deployed
+    placement: mission-control
+    directory: /mnt/data/forge-homelab/postgres
+    responsibility: Persist the database independently of service restarts.
+    used_by: [postgres]
+    owner: postgres
+    backup_directory: /mnt/data/forge-homelab/postgres-backups
+    backup_script: ../../deploy/mission-control/backup-postgres.sh
+    backup_verification: Initial logical archive restored and schema verified in a disposable database.
+
+  - id: repository-sync
+    status: proposed
+    placement: mission-control
+    kind: Trusted sync script or service
+    responsibility: Fetch approved Git remotes into the repository store and resolve each requested commit.
+    storage: repository-storage
+    credential_scope: Approved Git access is held by the trusted sync account.
+
+  - id: repository-storage
+    status: proposed
+    placement: mission-control
+    proposed_directory: /mnt/data/forge-homelab/repositories
+    responsibility: Store multiple Git checkouts in separate directories.
+    candidate_repositories: [homelab, study-notes]
+    access:
+      writer: repository-sync
+      sandbox_input: A pinned snapshot of each approved repo is copied into the isolated run workspace.
+    open_detail: Choose the initial repository allowlist, storage path, and snapshot layout.
+
+  - id: sandbox-driver
+    status: proposed
+    placement: mission-control
+    responsibilities:
+      - Start and manage one isolated execution environment per agent run.
+      - Scope the repository inputs and run workspace for the admitted request.
+      - Execute admitted Bash calls and collect their exit status, stdout, and stderr.
+      - Return results keyed by run ID and tool-call ID.
+
+  - id: bash-sandbox
+    status: proposed
+    placement: mission-control
+    kind: CPU-only sandbox
+    isolation: VM-backed isolation with a runtime to be verified on Mission Control.
+    workspace_source: repository-storage
+    writable_workspace: Per-run scratch storage inside the sandbox.
+    lifetime: One workspace per agent run, reused across its tool calls.
+    initial_resource_budget:
+      concurrent_tool_executions: 1
+      vcpus_per_sandbox: 2
+      memory_gib_per_sandbox: 2
+    limits_to_select: [wall_time, workspace_bytes, stdout_bytes, stderr_bytes]
+    access_policy:
+      network: disabled
+      gpu: none
+      host_mounts: none
+      git_or_database_credentials: none
+
+  - id: ide-agent-events
+    status: proposed
+    placement: browser
+    responsibility: Show queue, inference, tool, and completion updates in the originating conversation.
+    event_fields: [conversation_id, run_id, sequence, type]
+    event_types: [queued, model_started, tool_started, tool_finished, reply_chunk, completed, failed, cancelled]
+    open_detail: Choose browser delivery and reconnect behavior after the stored event contract is proven.
+
+flows:
+  - id: current-chat
+    status: deployed
+    path: [forge-ide-browser, cloudflare-access, portal-proxy, forge-ide-web-host, agent-runner, inference-connector, forge-inference-tunnel, forge-llama-adapter, llama-cpp-sycl, forge-gpu-stack]
+    persistence: The runner stores each IDE request and its status events in PostgreSQL.
+    response: One complete assistant reply returns to the originating chat.
+  - id: current-workbench
+    status: deployed
+    path: [forge-ide-browser, cloudflare-access, portal-proxy, forge-ide-web-host, workbench-source-agent]
+    response: Read-only report and source views for the admitted project.
+  - id: proposed-bash-round-trip
+    status: proposed
+    path: [forge-ide-browser, forge-ide-web-host, agent-runner, inference-connector, forge-llama-adapter, llama-cpp-sycl]
+    continuation:
+      - The adapter returns a structured Bash request to the agent runner.
+      - The runner records the pending call in postgres and dispatches it through sandbox-driver to bash-sandbox.
+      - The driver returns the matching result and the runner commits it to postgres.
+      - The runner submits a fresh model turn with the original call and tool result.
+      - The IDE displays progress and the final reply in the originating conversation.
+
+discussion_items:
+  - id: first-repository
+    question: Which repository should the first Bash run receive, and which Git actions can the trusted sync job perform?
+  - id: sandbox-runtime
+    question: Which isolation runtime works on Mission Control and enforces the required access and resource limits?
+  - id: workspace-persistence
+    question: Should unfinished edits survive a sandbox restart, or is one disposable workspace per run sufficient?
+  - id: interrupted-tool-call
+    question: Which outcomes should the IDE display after the sandbox starts a command and the result is lost?
+    invariant: An unknown tool outcome requires an explicit retry instead of automatic replay.
+  - id: native-deployment
+    question: What acceptance evidence should the new native agent and sandbox produce before receiving live IDE chat?
+
+first_acceptance_checks:
+  - A plain assistant reply completes without starting a sandbox command.
+  - A complete Bash tool call runs once and its matching result reaches the model.
+  - A repo-scoped sandbox can edit its workspace and show a diff without writing into the shared checkouts.
+  - Switching conversations while Bash runs keeps progress and the final reply attached to the originating conversation.
+  - Restarting the runner preserves the transcript and does not automatically repeat an interrupted tool call.
+  - Disconnecting Forge leaves saved conversations readable on Mission Control.
+
+references:
+  postgres_listen: https://www.postgresql.org/docs/current/sql-listen.html

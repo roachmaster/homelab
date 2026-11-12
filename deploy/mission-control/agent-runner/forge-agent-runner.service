@@ -1,0 +1,23 @@
+[Unit]
+Description=Forge agent event runner
+Requires=postgresql@16-main.service
+Wants=homelab-forge-chat-tunnel.service
+After=postgresql@16-main.service homelab-forge-chat-tunnel.service
+
+[Service]
+User=forge_agent
+Group=forge_agent
+ExecStart=/usr/bin/python3 -B /opt/homelab-forge/agent-runner/runner.py
+LoadCredential=runner.token:/etc/homelab-forge/agent-runner/token
+LoadCredential=forge.token:/etc/homelab-forge/web/llama.token
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
