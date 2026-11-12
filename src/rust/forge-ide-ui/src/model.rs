@@ -3,7 +3,9 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 
 const PAGE_ROWS: usize = 256;
+mod chat;
 mod projection;
+mod source;
 pub use projection::name_label;
 const MAX_JS_INTEGER: u64 = 9_007_199_254_740_991;
 
@@ -32,18 +34,26 @@ pub struct Output {
 #[derive(Debug)]
 pub struct UiModel {
     catalog: Option<Catalog>,
+    chats: chat::Chats,
     node: String,
     project: String,
     phase: Phase,
     message: String,
     pairing: Option<String>,
+    pairing_required: bool,
     pending: Option<PreparedInspection>,
+    pending_source: Option<PreparedSource>,
+    source: Option<source::SourceState>,
+    source_message: String,
+    navigation_revision: u64,
     revision: u64,
     sequence: u64,
     report: Option<ReportView>,
     accepted_report: Option<RequestToken>,
     file_filter: BoundedQuery,
     symbol_filter: BoundedQuery,
+    project_query: BoundedQuery,
+    search_window: RowWindow,
     selected_problem: Option<(u32, u16)>,
     selected_entry: Option<u32>,
     selected_declaration: Option<u32>,
@@ -57,18 +67,26 @@ impl Default for UiModel {
     fn default() -> Self {
         Self {
             catalog: None,
+            chats: chat::Chats::default(),
             node: String::new(),
             project: String::new(),
             phase: Phase::Unpaired,
-            message: "Connect to the local Forge host using its one-time pairing code.".into(),
+            message: "Checking the Forge session…".into(),
             pairing: None,
+            pairing_required: false,
             pending: None,
+            pending_source: None,
+            source: None,
+            source_message: String::new(),
+            navigation_revision: 0,
             revision: 0,
             sequence: 0,
             report: None,
             accepted_report: None,
             file_filter: BoundedQuery::default(),
             symbol_filter: BoundedQuery::default(),
+            project_query: BoundedQuery::default(),
+            search_window: RowWindow::default(),
             selected_problem: None,
             selected_entry: None,
             selected_declaration: None,
@@ -119,10 +137,13 @@ impl UiModel {
         if let Some(p) = self.pending.take() {
             effects.push(UiEffect::Abort { token: p.token });
         }
+        self.clear_source(effects);
         self.report = None;
         self.accepted_report = None;
         self.file_filter = BoundedQuery::default();
         self.symbol_filter = BoundedQuery::default();
+        self.project_query = BoundedQuery::default();
+        self.search_window = RowWindow::default();
         self.selected_problem = None;
         self.selected_entry = None;
         self.selected_declaration = None;
@@ -139,17 +160,52 @@ impl UiModel {
         }
         let mut effects = Vec::new();
         match input.event {
+            UiEvent::OpenChat {}
+            | UiEvent::OpenWorkbench {}
+            | UiEvent::NewChat {}
+            | UiEvent::SelectChat { .. }
+            | UiEvent::SetChatDraft { .. }
+            | UiEvent::SendChat {}
+                if self.catalog.is_none() =>
+            {
+                return Err(UiError::NotConnected)
+            }
+            UiEvent::OpenChat {} => self.chats.workbench = false,
+            UiEvent::OpenWorkbench {} => self.chats.workbench = true,
+            UiEvent::NewChat {} => self.chats.new_conversation()?,
+            UiEvent::SelectChat { value } => self.chats.select(&value)?,
+            UiEvent::SetChatDraft {
+                conversation,
+                value,
+            } => self.chats.draft(conversation, value)?,
+            UiEvent::SendChat {} => {
+                let request_id = self.next_id(input.now_ms)?;
+                if let Some(request) = self.chats.send(request_id)? {
+                    effects.push(UiEffect::Chat { request });
+                }
+            }
+            UiEvent::ChatResult {
+                request_id,
+                outcome,
+            } => self.chats.complete(&request_id, outcome),
             UiEvent::NetworkFailed {
                 request_id,
                 category,
             } => {
+                self.chats
+                    .complete(&request_id, ChatOutcome::Error { category });
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
-                    self.message = format!(
-                        "{}; enter the local host pairing code to connect.",
-                        failure_label(category)
-                    );
+                    self.pairing_required = category == FailureKind::Denied;
+                    self.message = if self.pairing_required {
+                        "Access denied. This host requires a pairing code to connect.".into()
+                    } else {
+                        format!(
+                            "{}. Refresh this page to reconnect.",
+                            failure_label(category)
+                        )
+                    };
                 } else if self
                     .pending
                     .as_ref()
@@ -159,6 +215,16 @@ impl UiModel {
                     self.phase = Phase::Failed;
                     self.message = format!(
                         "{}. Retry is a new request; remote completion may be unknown.",
+                        failure_label(category)
+                    );
+                } else if self
+                    .pending_source
+                    .as_ref()
+                    .is_some_and(|p| p.token.request_id == request_id)
+                {
+                    self.pending_source = None;
+                    self.source_message = format!(
+                        "{}. Select the file again to retry.",
                         failure_label(category)
                     );
                 }
@@ -171,6 +237,7 @@ impl UiModel {
             UiEvent::Resume {} => {
                 let request_id = self.next_id(input.now_ms)?;
                 self.pairing = Some(request_id.clone());
+                self.pairing_required = false;
                 self.phase = Phase::Pairing;
                 self.message = "Checking the local host session…".into();
                 effects.push(UiEffect::Resume { request_id });
@@ -183,6 +250,7 @@ impl UiModel {
                     return Err(UiError::InvalidAction);
                 }
                 let request_id = self.next_id(input.now_ms)?;
+                self.pairing_required = true;
                 self.pairing = Some(request_id.clone());
                 self.phase = Phase::Pairing;
                 self.message = "Pairing with the local host…".into();
@@ -210,10 +278,37 @@ impl UiModel {
                     .first()
                     .map(|p| p.alias.clone())
                     .unwrap_or_default();
+                let sole = catalog
+                    .nodes
+                    .iter()
+                    .flat_map(|n| {
+                        n.projects
+                            .iter()
+                            .map(move |p| (n.key.clone(), p.alias.clone()))
+                    })
+                    .collect::<Vec<_>>();
+                if sole.len() == 1 {
+                    self.node = sole[0].0.clone();
+                    self.project = sole[0].1.clone();
+                }
                 self.catalog = Some(catalog);
+                self.chats.open();
                 self.pairing = None;
+                self.pairing_required = false;
                 self.phase = Phase::Idle;
-                self.message = "Connected. Choose an allowed project, then Inspect.".into();
+                self.message = if self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|c| c.nodes.iter().any(|n| !n.projects.is_empty()))
+                {
+                    "Connected. Choose an allowed project, then Refresh project."
+                } else {
+                    "Connected. No projects are available for this session."
+                }
+                .into();
+                if sole.len() == 1 {
+                    self.begin_inspection(input.now_ms, &mut effects)?;
+                }
             }
             UiEvent::PairFailed {
                 request_id,
@@ -259,46 +354,19 @@ impl UiModel {
                 self.message = "Selection changed. Inspect to load this project.".into();
             }
             UiEvent::Inspect {} => {
-                if self.pending.is_some() {
-                    return Err(UiError::Busy);
-                }
-                let c = self.catalog.as_ref().ok_or(UiError::NotConnected)?;
-                let n = self.selected_node().ok_or(UiError::InvalidSelection)?;
-                if !n.projects.iter().any(|p| p.alias == self.project) {
-                    return Err(UiError::InvalidSelection);
-                }
-                let expires = input
-                    .now_ms
-                    .checked_add(c.timeout_ms)
-                    .filter(|v| *v <= MAX_JS_INTEGER)
-                    .ok_or(UiError::InvalidClock)?;
-                let epoch = c.session_epoch.clone();
-                let target_node = n.node.clone();
-                let target_incarnation = n.incarnation.clone();
-                self.invalidate(&mut effects)?;
-                let request_id = self.next_id(input.now_ms)?;
-                let request = PreparedInspection {
-                    token: RequestToken {
-                        session_epoch: epoch,
-                        revision: self.revision,
-                        request_id,
-                    },
-                    node_key: self.node.clone(),
-                    target_node,
-                    target_incarnation,
-                    project: self.project.clone(),
-                    destination: "ide.inspect".into(),
-                    contract_version: 1,
-                    expires_unix_ms: expires,
-                };
-                self.pending = Some(request.clone());
-                self.phase = Phase::Loading;
-                self.message = "Inspecting… Cancel stops waiting locally, not remote work.".into();
-                effects.push(UiEffect::Inspect { request });
+                self.begin_inspection(input.now_ms, &mut effects)?;
             }
             UiEvent::Cancel {} => {
                 if self.pending.is_none() {
-                    return Ok(self.output(None));
+                    if let Some(p) = self.pending_source.take() {
+                        effects.push(UiEffect::Abort { token: p.token });
+                        self.source_message =
+                            "Stopped waiting for source. Select the file to retry.".into();
+                    }
+                    return Ok(Output {
+                        effects,
+                        ..self.output(None)
+                    });
                 }
                 self.invalidate(&mut effects)?;
                 self.phase = Phase::Cancelled;
@@ -338,9 +406,11 @@ impl UiModel {
                                 } else {
                                     Phase::Partial
                                 };
-                                self.message = if report.complete { "Inspection ready. This is a structural outline, not a source editor." } else { "Partial inspection: some files or syntax could not be inspected. Review diagnostics." }.into();
+                                self.message = if report.complete { "Project ready. Find a file or function to read its source." } else { "Partial inspection: some files or syntax could not be inspected. Review diagnostics." }.into();
                                 self.accepted_report = Some(result.token);
                                 self.selected_entry = Some(0);
+                                self.navigation_revision =
+                                    self.navigation_revision.saturating_add(1);
                                 self.expanded.insert(0);
                                 self.report = Some(report);
                                 self.pending = None;
@@ -364,7 +434,7 @@ impl UiModel {
                 if !self.matches_report(&report) {
                     return Ok(self.output(None));
                 }
-                self.select_entry(value)?;
+                self.navigate_entry(value, input.now_ms, &mut effects)?;
             }
             UiEvent::ToggleEntry { report, value } => {
                 if !self.matches_report(&report) {
@@ -397,6 +467,8 @@ impl UiModel {
                 }
                 self.selected_declaration = Some(value);
                 self.selected_problem = None;
+                self.navigation_revision = self.navigation_revision.saturating_add(1);
+                self.reveal_declaration();
             }
             UiEvent::SelectProblem {
                 report,
@@ -414,8 +486,66 @@ impl UiModel {
                 if value as usize >= e.diagnostics.len() {
                     return Err(UiError::InvalidAction);
                 }
-                self.select_entry(entry)?;
+                self.navigate_entry(entry, input.now_ms, &mut effects)?;
                 self.selected_problem = Some((entry, value));
+            }
+            UiEvent::SourceResult { result } => self.accept_source(result, input.now_ms),
+            UiEvent::SetProjectQuery { report, value } => {
+                if !self.matches_report(&report) {
+                    return Ok(self.output(None));
+                }
+                self.project_query = BoundedQuery::new(value)?;
+                self.search_window = RowWindow::default();
+            }
+            UiEvent::SelectSearchResult {
+                report,
+                entry,
+                declaration,
+            } => {
+                if !self.matches_report(&report) {
+                    return Ok(self.output(None));
+                }
+                let selected = self
+                    .report
+                    .as_ref()
+                    .and_then(|r| r.entries.get(entry as usize))
+                    .ok_or(UiError::InvalidAction)?;
+                if declaration.is_some_and(|d| d as usize >= selected.declarations.len()) {
+                    return Err(UiError::InvalidAction);
+                }
+                self.navigate_entry(entry, input.now_ms, &mut effects)?;
+                self.selected_declaration = declaration;
+                self.reveal_declaration();
+            }
+            UiEvent::MoreSearch { report } => {
+                if !self.matches_report(&report) {
+                    return Ok(self.output(None));
+                }
+                let page = self.search_page();
+                self.search_window
+                    .more(&page, MAX_ENTRIES + MAX_DECLARATIONS);
+            }
+            UiEvent::PreviousSearch { report } => {
+                if !self.matches_report(&report) {
+                    return Ok(self.output(None));
+                }
+                self.search_window.previous();
+            }
+            UiEvent::MoreSource { report, entry } => {
+                if !self.matches_entry(&report, entry) {
+                    return Ok(self.output(None));
+                }
+                if let Some(source) = &mut self.source {
+                    source.next();
+                }
+            }
+            UiEvent::PreviousSource { report, entry } => {
+                if !self.matches_entry(&report, entry) {
+                    return Ok(self.output(None));
+                }
+                if let Some(source) = &mut self.source {
+                    source.previous();
+                }
             }
             UiEvent::SetFileFilter { report, value } => {
                 if !self.matches_report(&report) {
@@ -494,6 +624,44 @@ impl UiModel {
             effects,
             error: None,
         })
+    }
+    fn begin_inspection(&mut self, now: u64, effects: &mut Vec<UiEffect>) -> Result<(), UiError> {
+        if self.pending.is_some() {
+            return Err(UiError::Busy);
+        }
+        let c = self.catalog.as_ref().ok_or(UiError::NotConnected)?;
+        let n = self.selected_node().ok_or(UiError::InvalidSelection)?;
+        if !n.projects.iter().any(|p| p.alias == self.project) {
+            return Err(UiError::InvalidSelection);
+        }
+        let expires = now
+            .checked_add(c.timeout_ms)
+            .filter(|v| *v <= MAX_JS_INTEGER)
+            .ok_or(UiError::InvalidClock)?;
+        let epoch = c.session_epoch.clone();
+        let target_node = n.node.clone();
+        let target_incarnation = n.incarnation.clone();
+        self.invalidate(effects)?;
+        let request_id = self.next_id(now)?;
+        let request = PreparedInspection {
+            token: RequestToken {
+                session_epoch: epoch,
+                revision: self.revision,
+                request_id,
+            },
+            node_key: self.node.clone(),
+            target_node,
+            target_incarnation,
+            project: self.project.clone(),
+            destination: "ide.inspect".into(),
+            contract_version: 1,
+            expires_unix_ms: expires,
+        };
+        self.pending = Some(request.clone());
+        self.phase = Phase::Loading;
+        self.message = "Inspecting… Cancel stops waiting locally, not remote work.".into();
+        effects.push(UiEffect::Inspect { request });
+        Ok(())
     }
     fn selected_node(&self) -> Option<&NodeChoice> {
         self.catalog

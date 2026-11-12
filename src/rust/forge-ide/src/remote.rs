@@ -249,7 +249,7 @@ pub fn validate_report(
             Entry::File { content, .. } => {
                 files += 1;
                 match content {
-                    FileContent::Text { lines, rust } => {
+                    FileContent::Text { lines, rust, .. } => {
                         if *lines > limits.max_source_bytes {
                             return Err(RemoteInspectError::Limit);
                         }
@@ -263,7 +263,7 @@ pub fn validate_report(
                             validate_summary(summary, *lines, &mut budget)?;
                         }
                     }
-                    FileContent::RustUnavailable { lines, error } => {
+                    FileContent::RustUnavailable { lines, error, .. } => {
                         incomplete = true;
                         if *lines > limits.max_source_bytes {
                             return Err(RemoteInspectError::Limit);

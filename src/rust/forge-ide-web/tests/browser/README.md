@@ -77,7 +77,7 @@ cannot be established. Review images before sharing them beyond the test artifac
 
 | IDs | Evidence |
 | --- | --- |
-| `real.report.partial`, `real.navigation.keyboard`, `real.filters.safe_text`, `real.pagination.problems` | Actual report, source-shape trait/two-candidate inventory and local navigation, distinct focus for shared entry actions, full bounded-report filters, safe labels and problem cross-navigation |
+| `real.report.partial`, `real.navigation.keyboard`, `real.filters.safe_text`, `real.pagination.problems` | Single-project automatic opening; real source reads; phone file/symbol search and direct source navigation; safe source text; actual report, source-shape inventory, keyboard focus, bounded filters and problem cross-navigation |
 | `real.panes.desktop`, `real.panes.narrow` | Pointer/keyboard resize/collapse/reset and narrow pane interaction |
 | `probe.report.stale_actions`, `probe.page.lifecycle` | Real WASM stale-event acceptance; explicitly manipulated lifetime probes plus real reload/history |
 | `real.report.empty`, `real.admission.denied` | Real empty project and independently denied project |
@@ -94,7 +94,13 @@ cannot be established. Review images before sharing them beyond the test artifac
   bounded pages, Problems navigation, arrow/Home/End/typeahead focus versus Enter
   selection, keyboard pane resizing/reset/collapse/reopen, 1440px desktop and
   760px narrow layouts, and refresh/browser leave-return. Navigation/filter/pane
-  actions must not create inspection requests.
+  actions must not create inspection requests. Opening a readable file may issue
+  one separately admitted source read; search and source-page changes do not.
+  A separate single-project real-agent fixture proves automatic opening after
+  pairing and resume, case-insensitive symbol search, direct phone source display,
+  highlighted declaration lines, Back to files, and literal HTML-like source text.
+  A 600-line UTF-8 file exercises bounded forward/backward source pages without
+  additional reads, with visible keyboard focus on the paging control.
 - **Actual WASM stale-intent probe:** observes only local UI events in ephemeral
   browser memory, then replays old row/filter events after report/file changes.
   This uses the real model and transport, not a replacement worker. Report token

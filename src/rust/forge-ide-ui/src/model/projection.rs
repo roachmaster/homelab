@@ -2,12 +2,12 @@
 //! context lives here; generated DOM primitives only display these typed values.
 use super::*;
 
-// Five lists total at most 1.875 MiB. JSON-escaped catalog choices occupy < 4 MiB
+// Five lists total at most 0.9375 MiB. JSON-escaped catalog choices occupy < 4 MiB
 // at existing bounds, leaving room under the 8 MiB ABI cap for selected details,
 // text/input/button bindings and effect/error envelopes. A complete selected
 // ancestor path can itself occupy up to 65 * 4096 * 7 JSON bytes. Each row is costed with
 // a conservative fixed allowance covering every numeric field and repeated key.
-const LIST_BYTE_BUDGET: usize = 384 * 1024;
+const LIST_BYTE_BUDGET: usize = 192 * 1024;
 const ROW_FIXED_BYTES: usize = 1280;
 
 pub(super) struct RowPage {
@@ -190,6 +190,76 @@ impl UiModel {
             matches.iter().filter(|&&m| m).count(),
             &self.tree_window,
         )
+    }
+    pub(super) fn search_page(&self) -> RowPage {
+        let (Some(report), Some(key)) = (&self.report, &self.accepted_report) else {
+            return page([], 0, 0, &self.search_window);
+        };
+        let query = self.project_query.0.trim().to_lowercase();
+        if query.is_empty() {
+            return page([], 0, 0, &self.search_window);
+        }
+        let mut matches = Vec::new();
+        for e in &report.entries {
+            if e.kind == EntryKind::File && entry_path(report, e).to_lowercase().contains(&query) {
+                matches.push((e.id, None));
+            }
+            for d in &e.declarations {
+                if d.name.to_lowercase().contains(&query) {
+                    matches.push((e.id, Some(d.id)));
+                }
+            }
+        }
+        let total = matches.len();
+        let rows = matches.into_iter().map(|(entry, declaration)| {
+            let e = &report.entries[entry as usize];
+            let d = declaration.map(|id| &e.declarations[id as usize]);
+            let path = entry_path(report, e);
+            // The selected details retain the complete path. An extreme path must
+            // still fit a row and make pagination progress at every valid limit.
+            let path = if path.len() > MAX_TEXT_BYTES {
+                let mut at = path.len() - (MAX_TEXT_BYTES - 3);
+                while !path.is_char_boundary(at) {
+                    at += 1;
+                }
+                format!("…{}", &path[at..])
+            } else {
+                path
+            };
+            RowView {
+                id: format!(
+                    "search-{entry}-{}",
+                    declaration
+                        .map(|d| d.to_string())
+                        .unwrap_or_else(|| "file".into())
+                ),
+                label: d
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| self.entry_name(e)),
+                glyph: d.map(|d| declaration_glyph(d.kind)).unwrap_or("≡").into(),
+                icon: if d.is_some() {
+                    RowIcon::Symbol
+                } else {
+                    RowIcon::Document
+                },
+                kind_label: d.map(|d| declaration_label(d.kind)).unwrap_or("file"),
+                parent: None,
+                secondary: d
+                    .map(|d| format!("{path} · line {}", d.span.start.line))
+                    .unwrap_or(path),
+                depth: 0,
+                selected: self.selected_entry == Some(entry)
+                    && self.selected_declaration == declaration,
+                expanded: None,
+                action: RowAction::SelectSearchResult {
+                    report: key.clone(),
+                    entry,
+                    declaration,
+                },
+                toggle: None,
+            }
+        });
+        page(rows, total, total, &self.search_window)
     }
     pub(super) fn outline_page(&self) -> RowPage {
         let (Some(e), Some(key)) = (self.current_entry(), &self.accepted_report) else {
@@ -429,6 +499,7 @@ impl UiModel {
     pub(super) fn render(&self) -> ViewModel {
         let connected = self.catalog.is_some();
         let loading = self.pending.is_some();
+        let source_loading = self.pending_source.is_some();
         let no_project = connected && self.project.is_empty();
         let status_tone = match self.phase {
             Phase::Failed => Tone::Error,
@@ -440,6 +511,7 @@ impl UiModel {
         let key = self.accepted_report.as_ref();
         let entry = self.current_entry();
         let tree = self.tree_page();
+        let search = self.search_page();
         let outline = self.outline_page();
         let problems = self.problems_page();
         let source_shape = self.source_shape();
@@ -556,7 +628,7 @@ impl UiModel {
                 }
             }
         }
-        let summary = self.report.as_ref().map(summary).unwrap_or_else(|| "Read-only project structure and Rust declarations. No file editing or source-body access.".into());
+        let summary = self.report.as_ref().map(summary).unwrap_or_else(|| "Read-only source and Rust declarations. No project inspection has been accepted yet.".into());
         let workspace_summary = if let Some(e) = entry {
             let hidden = if hidden_entry {
                 " Selected entry is hidden by the file filter."
@@ -569,7 +641,7 @@ impl UiModel {
         } else if connected && self.project.is_empty() {
             "No allowed project is available on this node. Choose another admitted node; no arbitrary path can be inspected.".into()
         } else {
-            "Choose an allowed node and project, then Inspect. This workspace shows file metadata and structural declarations, never source bodies.".into()
+            "Choose an allowed node and project, then Refresh project. Find a file or function to read its checked source.".into()
         };
         let file_summary = if self.report.is_none() {
             "No accepted report. Filters apply only to inspected names.".into()
@@ -625,18 +697,51 @@ impl UiModel {
         let tree_more = tree.more();
         let outline_more = outline.more();
         let problems_more = problems.more();
-        ViewModel {
+        let search_more = search.more();
+        let context = SelectionContext {
+            report: self.accepted_report.clone(),
+            entry: self.selected_entry,
+            declaration: self.selected_declaration,
+        };
+        let target_span = entry
+            .and_then(|e| {
+                self.selected_declaration
+                    .and_then(|id| e.declarations.get(id as usize))
+            })
+            .map(|d| d.span);
+        let source_binding = self
+            .source
+            .as_ref()
+            .map(|s| s.binding(context.clone(), target_span))
+            .unwrap_or_else(|| SourceBinding {
+                id: "source-view",
+                context: context.clone(),
+                text: String::new(),
+                first_line: 1,
+                first_column: 0,
+                total_lines: 0,
+                target_span,
+            });
+        let source_range = self.source.as_ref().map(|s| s.range()).unwrap_or_default();
+        let source_status = if source_loading {
+            "Loading source…".into()
+        } else {
+            self.source_message.clone()
+        };
+        let search_summary = format!("{} · files and Rust symbols in the {} inspection. Name search, not source-content search.", search.range(), if self.report.as_ref().is_some_and(|r| r.complete) { "loaded" } else { "partial" });
+        let navigation =
+            (self.navigation_revision > 0 && key.is_some()).then_some(self.navigation_revision);
+
+        let mut view = ViewModel {
             panes: vec![PaneBinding {
-                id: "workspace-panel",
-                context: SelectionContext {
-                    report: self.accepted_report.clone(),
-                    entry: self.selected_entry,
-                    declaration: self.selected_declaration,
-                },
-            }],
+                id: "workspace-panel", context: context.clone(), reveal: if entry.is_some_and(|e| e.kind == EntryKind::File) { navigation } else { None },
+            }, PaneBinding { id: "explorer-panel", context, reveal: if entry.is_some_and(|e| e.kind != EntryKind::File) { navigation } else { None } }],
+            sources: vec![source_binding],
             texts: vec![
                 tone_text("status", self.message.clone(), status_tone),
                 tone_text("phase-label", if no_project { "No allowed project" } else { phase_label(self.phase) }, status_tone),
+                text("source-status", source_status), text("source-range", source_range), text("search-summary", search_summary),
+                text("inspect-label", if key.is_some() { "Refresh" } else { "Open project" }),
                 text("source-shape-summary", shape_summary),
                 text("summary", summary), text("workspace-summary",workspace_summary),
                 text("selection-title", entry.map(|e| self.entry_name(e)).unwrap_or_else(|| "Project overview".into())),
@@ -645,11 +750,16 @@ impl UiModel {
             ],
             choices: vec![SelectBinding { id:"node",value:self.node.clone(),disabled:!connected,options:nodes },SelectBinding { id:"project",value:self.project.clone(),disabled:!connected,options:projects }],
             inputs: vec![
+                InputBinding { id:"project-query",value:self.project_query.0.clone(),disabled:key.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.map(|k| FilterAction::SetProjectQuery { report:k.clone() }) },
                 InputBinding { id:"file-filter",value:self.file_filter.0.clone(),disabled:key.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.map(|k| FilterAction::SetFileFilter { report:k.clone() }) },
                 InputBinding { id:"symbol-filter",value:self.symbol_filter.0.clone(),disabled:entry.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.zip(entry).map(|(k,e)| FilterAction::SetSymbolFilter { report:k.clone(),entry:e.id }) },
             ],
             buttons: vec![
-                button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!loading,None),
+                button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!loading && !source_loading,None),
+                button("search-more",!search_more,key.map(|k| RowAction::MoreSearch { report:k.clone() })),
+                button("search-previous",self.search_window.history.is_empty(),key.map(|k| RowAction::PreviousSearch { report:k.clone() })),
+                button("source-more",!self.source.as_ref().is_some_and(|s| s.has_next()),key.zip(entry).map(|(k,e)| RowAction::MoreSource { report:k.clone(),entry:e.id })),
+                button("source-previous",!self.source.as_ref().is_some_and(|s| s.has_previous()),key.zip(entry).map(|(k,e)| RowAction::PreviousSource { report:k.clone(),entry:e.id })),
                 button("shape-more",!shape_more,key.map(|k| RowAction::MoreShape { report:k.clone() })),
                 button("shape-previous",self.shape_window.history.is_empty(),key.map(|k| RowAction::PreviousShape { report:k.clone() })),
                 button("tree-more",!tree_more,key.map(|k| RowAction::MoreTree { report:k.clone() })),
@@ -661,16 +771,21 @@ impl UiModel {
             ],
             lists: vec![
                 ListBinding { id:"files",rows:tree.rows,empty_message:if self.report.is_some() { "No entry names match this filter in the accepted report." } else { "Inspect a project to browse its structure." }.into() },
-                ListBinding { id:"outline",rows:outline.rows.clone(),empty_message:outline_empty_message.clone() },
-                ListBinding { id:"declarations",rows:outline.rows,empty_message:outline_empty_message },
+                ListBinding { id:"outline",rows:outline.rows,empty_message:outline_empty_message },
+                ListBinding { id:"declarations",rows:vec![],empty_message:"Use Outline or Find to navigate declarations in this file.".into() },
                 ListBinding { id:"problems",rows:problems.rows,empty_message:match &self.report { None => "Inspect a project to see supplied diagnostics.",Some(r) if !r.complete => "No diagnostic strings were supplied in this partial report. Uninspected content remains unknown.",Some(_) => "No diagnostic strings were supplied. This is not a compiler or type-check result." }.into() },
                 ListBinding { id:"source-shape",rows:shape.rows,empty_message:"No source shape is available in the accepted report.".into() },
+                ListBinding { id:"search-results",rows:search.rows,empty_message:"No matching file or Rust symbol names in this inspection.".into() },
             ],
             tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details },TableBinding { id:"source-shape-details",rows:shape_details }],
             visibility: vec![
-                visible("connection",!connected),visible("pair-panel",!connected),visible("workbench",connected),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading),
+                visible("search-panel",!self.project_query.0.trim().is_empty()),visible("files-panel",self.project_query.0.trim().is_empty()),visible("source-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
+                visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading || source_loading),
             ],
-        }
+            transcripts: vec![],
+        };
+        self.chats.project(&mut view, connected);
+        view
     }
 }
 fn shape_counts(c: &crate::shape::ShapeCounts) -> String {
@@ -767,10 +882,10 @@ fn content_label(e: &EntryView) -> &'static str {
 fn entry_overview(e: &EntryView) -> String {
     match e.kind {
         EntryKind::Directory => {
-            "Directory · Select a file in Explorer to inspect declarations.".into()
+            "Directory · Find a file or function in Explorer to read its source.".into()
         }
         EntryKind::File if !e.declarations.is_empty() => format!(
-            "{} · {} declarations · Select a declaration for structural details.",
+            "{} · {} declarations · Navigate with Outline or Find.",
             content_label(e),
             e.declarations.len()
         ),

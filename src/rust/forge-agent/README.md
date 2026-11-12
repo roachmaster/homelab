@@ -178,3 +178,14 @@ committed. This demonstrates two processes, **not two physical machines**.
 A real two-host trial still needs explicitly authorized credential distribution,
 network exposure and host controls. Remote jobs, delegation, writes, process
 launch, additional HTTP methods and alternate carriers remain later decisions.
+
+## Read-only source operation
+
+The same authenticated gateway now admits `ide.source@1` independently by operation
+and project grant. Project configuration creates source tasks from the registered
+inspection factories after freeze. No browser-supplied absolute root is accepted:
+the request names one configured alias, relative native components and an expected
+SHA-256. Source reads preserve no-follow/exclusion policy and the fixed 1 MiB text
+limit. Changed bytes fail and require inspection again. This operation uses the
+existing project read grant; it adds no write, terminal or execution capability.
+Deploy the updated agent and IDE host/codec together for the report digest schema.

@@ -1,8 +1,9 @@
 # Forge IDE web host
 
-A **loopback-only, single-local-operator prototype** serving the generated IDE UI
+A **loopback-bound, single-operator prototype** serving the generated IDE UI
 and adapting one browser command gateway to the existing authenticated remote
-IDE inspection task. It is not a public web service, editor or multi-user login.
+IDE inspection task. Explicit HTTPS-origin configuration supports an access-controlled
+TLS proxy; this is not an unrestricted public service, editor or multi-user login.
 
 ## Composition and public API
 
@@ -37,10 +38,17 @@ cargo run --manifest-path src/rust/Cargo.toml -p forge-ide-web-host -- \
   serve --config /absolute/path/ui-host.json
 ```
 
-Open the printed `READY http://127.0.0.1:PORT` origin. Manually enter the printed
+By default, open the printed `READY http://127.0.0.1:PORT` origin and enter the printed
 one-use `PAIRING` code in the UI. Do not put this secret in a URL or publish a
 terminal capture. Refresh resumes the existing memory-only session via its cookie.
 Restart invalidates the session. `Ctrl-C`/termination requests orderly shutdown.
+
+For a supervised service using the default pairing mode, append `--pairing-file /run/forge-web/pairing-code`.
+Its parent must be an existing owner-only directory and the absolute destination
+must not exist. The code is published complete with mode `0600`, without replacing
+files or following destination symlinks; it is then omitted from stdout. A failed
+publication aborts startup before `READY`. Use a private systemd runtime directory
+that is removed on stop. Never place this file beneath served assets or a project.
 
 Config JSON is only an external codec. Paths are config-relative:
 
@@ -88,6 +96,38 @@ journeys must be reported separately.
 
 ## Browser boundary
 
+### Optional HTTPS proxy origin
+
+Add `"public_origin": "https://ide.example.com"` to the host JSON only when a
+trusted TLS proxy already restricts access. The listener remains loopback HTTP.
+The configured origin is exact and canonical: lowercase DNS hostname, no path,
+credentials, query, fragment, trailing slash or explicit default `:443` port.
+An optional nondefault port must match the browser. The host checks the original
+`Host` and `Origin` and adds `Secure` to its existing HttpOnly/SameSite cookie.
+It never derives origin or identity from `Forwarded`, `X-Forwarded-*` or Cloudflare
+headers. Preserve original Host/Origin and Content-Length through the proxy.
+
+When the TLS proxy already authenticates access, add
+`"session_auth": "trusted_proxy"` alongside `public_origin`. The initial browser
+Resume request then opens the Forge session automatically: no pairing code is
+created or requested, and the Pair command is rejected. Cookies remain Secure,
+HttpOnly and SameSite=Strict; inspection still requires its session cookie, CSRF,
+epoch, target and project checks. Refresh resumes an active session or creates a
+fresh session after expiry, without a server restart or manual code. The default
+`"session_auth": "pairing"` retains the existing local pairing behavior.
+
+Trusted-proxy mode requires an explicit HTTPS public origin and a loopback bind.
+It trusts the local TLS proxy's access policy; it does not verify Cloudflare
+Access JWTs or infer identity from forwarded headers. Keep upstream access controls
+enabled and the backend inaccessible off-host. Local processes and SSH users are
+inside this trust boundary. This remains one shared operator session, not isolated
+multi-user identities or delegated authorization. An active session is preserved
+when another admitted browser connects; expired credentials and epochs rotate.
+The agent still checks its separate mTLS and project grants.
+See [deployment and rollback](deploy/README.md) for service configuration.
+
+### Request contract
+
 - Fixed static `GET`/`HEAD`: `/`, `/index.html`, `/style.css`, `/main.js`,
   `/worker.js`, `/app.wasm`. The manifest is **not** served. Static responses carry
   CSP, `nosniff`, `no-store` and no-referrer policy. No catalog/credentials are assets.
@@ -95,8 +135,10 @@ journeys must be reported separately.
   `Allow: POST`; no fake REST verbs or per-task URLs.
 - Exact `Host` and `Origin`, JSON Content-Type, canonical version/routing headers,
   single header values, typed body and header/payload agreement are mandatory.
-- `ui.session.open`: one-use 256-bit random code (default five-minute lifetime,
-  at most 20 attempts). `ui.session.resume`: authenticated cookie and exact Origin.
+- `ui.session.open`: one-use 256-bit random code in default pairing mode (five-minute
+  lifetime, at most 20 attempts); denied in trusted-proxy mode. `ui.session.resume`:
+  exact Origin plus a valid cookie in pairing mode, or automatic session admission
+  through the explicitly trusted proxy in trusted-proxy mode.
 - `ide.inspect`: cookie, session-bound `Forge-CSRF`, session epoch, configured
   node/target incarnation/project, expiry, and shared-bridge admission are checked
   **before** invoking the remote task.
@@ -104,7 +146,8 @@ journeys must be reported separately.
   `Path=/forge/v1/dispatch`, default 30-minute fixed lifetime. The loopback HTTP
   prototype cannot claim encrypted browser transport or a Secure cookie. Local
   malware, hostile local users, browser compromise and stolen pairing secrets are
-  outside its trust model. Do not expose it through tunnels/reverse proxies.
+  outside its trust model. The default mode must not be exposed through proxies.
+  For an access-controlled HTTPS proxy, explicitly set `public_origin` as below.
 - Browser `UiEvent` replies are bounded typed projections. Native path names retain
   tagged encodings; report diagnostics/type spellings may expose source metadata.
   This is not secret redaction or a full compiler AST.
@@ -120,6 +163,25 @@ Bodies are tagged `pair {request_id, code}`, `resume {request_id}`, or
 `{protocol_version:1,event:UiEvent,csrf?:string}`. CSRF stays in generated worker
 transport plumbing, not the Rust domain model or DOM. HTTP failures use a bounded
 `{error:...}` response; application errors can be typed events with HTTP 200.
+
+## Chat relay
+
+The optional host configuration enables chat against the private Forge llama.cpp
+adapter. The endpoint must be loopback, such as a local SSH forward to Forge GPU.
+The token file is readable only by the native host and stays outside the asset
+directory. The model must already be running on the adapter.
+
+```json
+"chat": {
+  "endpoint": "127.0.0.1:18080",
+  "token_file": "/etc/homelab-forge/web/llama.token"
+}
+```
+
+Chat uses `POST /forge/v1/dispatch` with destination `ide.chat`, the normal
+session cookie and CSRF header. The host forwards the bounded message history to
+the adapter's `POST /v1/chat/completions` and returns the assistant's text.
+When the adapter or model is unavailable, the browser keeps the prompt as a draft.
 
 ## Bounds and limitations
 
@@ -204,8 +266,27 @@ before UI assertions; changing a supported browser selection is not a passing te
 
 ### Workbench asset compatibility
 
-The host accepts asset manifest ABI 2. Rebuild and replace the complete generated
+The host accepts asset manifest ABI 4. Rebuild and replace the complete generated
 bundle for the report-keyed workbench; old ABI 1 or unknown asset versions fail
 before listening. Hashes bind the five files as a bundle, not publisher identity.
 The native session/inspection HTTP protocol remains 1. See the
 [local UI migration](../forge-ide-web/WORKBENCH.md#compatibility-and-verification).
+
+## Selected source reads
+
+The host admits `ide.source@1` through the same command bridge, exact Host/Origin,
+session cookie, CSRF, target and deadline gates as inspection. The browser submits
+only the accepted report token and entry ID. The host retains one bounded accepted
+inspection mapping to native path components and SHA-256; it never accepts a
+browser path. Starting another admitted inspection replaces that mapping. A tab
+whose report has been superseded must refresh before reading additional files.
+No source survives host restart as cached authority.
+
+The separately registered source client calls the mTLS agent, which independently
+checks operation/project permission and revision. Both the client and host verify
+returned bytes against the expected digest before exposing source to WASM.
+`InspectionPort::source` is an explicit optional substitution seam; its default
+denies reads, preserving inspection-only consumers. The native response is at most
+1 MiB. The UI displays bounded windows (256 lines / 64 KiB) and safely renders text;
+this is a read-only source viewer, with no save or execution route. Generated assets
+and WASM ABI 4 must be replaced atomically with this host.

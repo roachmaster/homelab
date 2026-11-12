@@ -171,6 +171,7 @@ fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
             )],
             csrf: false,
             deadline: None,
+            timeout_ms: None,
             accept_events: vec!["collection_loaded".into()],
         }],
     };
@@ -234,6 +235,7 @@ fn rejects_invalid_pane_geometry_positions_and_generated_id_collisions() {
     assert!(register_assets("assets", c).is_err());
     assert!(Theme::parse(&theme_with("row_px", "1")).is_err());
     assert!(Theme::parse(&theme_with("control_px", "100")).is_err());
+    assert!(Theme::parse(&theme_with("touch_px", "30")).is_err());
 }
 
 #[test]
@@ -266,9 +268,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==2"));
+    assert!(worker.contains("wasm.abi_version()!==4"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 2);
+    assert_eq!(manifest["abi_version"], 4);
 }
 
 #[test]
@@ -370,4 +372,43 @@ fn focused_layout_and_disclosure_are_declarative_reusable_primitives() {
         .children
         .push(component!(disclosure "workspace", "Collision"; []));
     assert!(register_assets("assets", c).is_err());
+}
+
+#[test]
+fn source_and_pane_navigation_are_reusable_safe_declarations() {
+    let mut c = config();
+    c.document = Document {
+        title: "Document reader".into(),
+        subtitle: "Independent read-only window".into(),
+        children: vec![component!(layout "reader"; [
+            component!(pane "reader-nav", "Items", Leading, 180, 240, 380; [
+                component!(region "reader-results"; [component!(tree "reader-list", "Items")]),
+            ]),
+            component!(pane "reader-main", "Document", Main, 240, 480, 960; [
+                component!(pane_link "reader-back", "Back <safe>", "reader-nav"),
+                component!(source "reader-text", "Source <safe>"),
+            ]),
+        ])],
+    };
+    let assets = build(c);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    assert!(html.contains("data-pane-reveal=\"reader-nav\""));
+    assert!(html.contains("Back &lt;safe&gt;"));
+    assert!(html.contains("aria-label=\"Source &lt;safe&gt;\""));
+    assert!(html.contains("data-source-view tabindex=\"0\""));
+    assert!(!html.contains("contenteditable"));
+    assert_eq!(assets.files["main.js"], build(config()).files["main.js"]);
+    let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
+    assert!(!main.contains("select_search_result"));
+    assert!(!main.contains("ide.source"));
+    assert!(!main.contains("innerHTML"));
+    let transport = ide_transport();
+    let source = transport
+        .bindings
+        .iter()
+        .find(|b| b.kind == "source")
+        .unwrap();
+    assert!(source.csrf);
+    assert_eq!(source.accept_events, ["source_result"]);
+    assert_eq!(source.deadline.as_deref(), Some("request.expires_unix_ms"));
 }

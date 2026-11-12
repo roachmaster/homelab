@@ -19,6 +19,7 @@ forge-io-client.workspace = true
 forge-bridge = { workspace = true, optional = true }
 forge-ingress-contract = { workspace = true, optional = true }
 forge-command = { workspace = true, optional = true }
+sha2 = "=0.10.9"
 cap-std = "=4.0.3"
 cap-fs-ext = "=4.0.3"
 syn = { version = "=2.0.118", default-features = false, features = ["full", "parsing", "printing", "visit", "clone-impls", "extra-traits"] }

@@ -37,9 +37,31 @@ const tree = {
 };
 const body = { isConnected: true };
 const extraElements = new Map();
+const sourceElements = [];
+function sourceNode(tag = 'span') {
+  return { tagName: tag.toUpperCase(), dataset: {}, children: [], textContent: '',
+    isConnected: true, scrollLeft: 0, scrollTop: 0, clientTop: 1, scrolled: false,
+    closest(selector) { return selector === '[data-source-view]' && this.hasAttribute(selector.slice(1, -1)) ? this : this.parentElement?.closest?.(selector) ?? null; },
+    getBoundingClientRect() {
+      if (this.tagName === 'PRE') return { top: 100 };
+      if (this.className === 'fg-source-line') {
+        const source = this.parentElement;
+        return { top: 100 + source.clientTop + 6 + source.children.indexOf(this) * 20 - source.scrollTop };
+      }
+      return { top: 0 };
+    },
+    setAttribute(name, value) { this[name] = value; },
+    hasAttribute(name) { return name === 'data-source-view' && this.tagName === 'PRE'; },
+    append(...children) { for (const child of children) child.parentElement = this; this.children.push(...children); },
+    replaceChildren(...children) { for (const child of children) child.parentElement = this; this.children = children; },
+    scrollIntoView() { this.scrolled = true; },
+    focus() { document.activeElement = this; },
+  };
+}
 const document = {
   body, activeElement: body,
-  querySelectorAll(selector) { if (selector === '[data-bind-text]') return [status]; return selector === 'input' || selector === 'input[data-action]' ? [input] : []; },
+  createElement(tag) { return sourceNode(tag); },
+  querySelectorAll(selector) { if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; return selector === 'input,textarea' || selector === 'input[data-action],textarea[data-action]' ? [input] : []; },
   querySelector() { return null; },
   getElementById(id) { return id === input.id ? input : id === status.id ? status : id === tree.id ? tree : extraElements.get(id) ?? null; },
 };
@@ -61,7 +83,7 @@ function view(value, sequence, token = 'A', disabled = false) {
 }
 function type(value) { input.value = value; handlers.get('input')(); }
 view('', null);
-// ABI2 views without optional additive tone metadata remain displayable. Unknown
+// Views without optional additive tone metadata remain displayable. Unknown
 // values cannot inject presentation selectors, and lifecycle erases old urgency.
 function textView(tone) {
   workers.at(-1).onmessage({ data: { kind: 'view', view: {
@@ -95,13 +117,13 @@ const pane = { id: 'collection-pane', dataset: { pane: 'main' }, hidden: false,
 };
 const paneState = { root: { dataset: {} }, grid: { clientWidth: 0 }, panes: [pane], main: pane,
   open: new Set([pane.id]), sizes: new Map(), active: pane.id, narrow: { matches: false },
-  focus: new Map([[pane.id, { node: inside }]]), context: new Map(), resetScroll: new Set(),
+  focus: new Map([[pane.id, { node: inside }]]), context: new Map(), reveal: new Map(), resetScroll: new Set(),
 };
 context.paneState = paneState;
 vm.runInContext("layouts.set('collection-layout', paneState)", context);
-function paneView(contextValue, sequence = null) {
+function paneView(contextValue, sequence = null, reveal = null) {
   workers.at(-1).onmessage({ data: { kind: 'view', presentation_sequence: sequence, view: {
-    panes: [{ id: pane.id, context: contextValue }],
+    panes: [{ id: pane.id, context: contextValue, reveal }],
   } } });
 }
 paneView({ selected: 1 });
@@ -218,6 +240,27 @@ assert.equal(paneState.resetScroll.size, 0);
 paneBody.scrollTop = 350;
 vm.runInContext('updateLayout(paneState)', context);
 assert.equal(paneBody.scrollTop, 350, 'consumed reset does not keep snapping scroll');
+paneState.active = 'other-pane';
+paneView({ selected: 4 }, null, 1);
+assert.equal(paneState.active, pane.id, 'model reveal opens the requested narrow pane');
+paneState.active = 'other-pane';
+paneView({ selected: 4 }, null, 1);
+assert.equal(paneState.active, 'other-pane', 'same reveal does not undo a later manual switch');
+paneView({ selected: 4 }, null, 2);
+assert.equal(paneState.active, pane.id, 'repeated selection can explicitly reveal the same content');
+document.activeElement = inside;
+paneBody.scrollTop = 300;
+const internalReveal = dispatchFrom('inside');
+paneView({ selected: 5 }, internalReveal, 3);
+assert.equal(document.activeElement, inside, 'direct narrow-pane selection retains its focused control');
+assert.equal(paneBody.scrollTop, 300, 'direct narrow-pane selection retains its scroll');
+const internalBeforeSwitch = dispatchFrom('inside');
+paneState.active = 'other-pane';
+document.activeElement = outside;
+paneView({ selected: 6 }, internalBeforeSwitch, 4);
+assert.equal(paneState.active, 'other-pane', 'late internal selection does not undo a newer manual pane switch');
+assert.equal(document.activeElement, outside);
+
 paneState.resetScroll.add(pane.id);
 dispatchFrom('inside');
 vm.runInContext('clearProtected()', context);
@@ -278,3 +321,98 @@ vm.runInContext("openPane(toolFixture, toolFixture.panes[2])", context);
 assert.deepEqual([...context.toolFixture.open], ['main', 'nav', 'related']);
 assert.deepEqual([...vm.runInContext("defaultPanes(toolFixture.panes, true)", context)], ['main', 'nav', 'related']);
 assert.deepEqual([...vm.runInContext("defaultPanes(toolFixture.panes, false)", context)], ['main', 'nav', 'related', 'errors']);
+
+// Exact model-selected source windows use safe text and bounded numbered rows.
+const sourceMount = sourceNode('pre');
+sourceMount.id = 'document-source';
+extraElements.set(sourceMount.id, sourceMount);
+sourceElements.push(sourceMount);
+const sourceBinding = { id: sourceMount.id, context: { report: 'owned', entry: 2, declaration: 4 },
+  text: '<script>unsafe()</script>\nfn checked() {}\n', first_line: 90, first_column: 0,
+  total_lines: 500, target_span: { start: { line: 91, column: 0 }, end: { line: 92, column: 0 } },
+};
+function sourceView(binding, sequence = null) {
+  workers.at(-1).onmessage({ data: { kind: 'view', presentation_sequence: sequence, view: { sources: [binding] } } });
+}
+sourceView(sourceBinding);
+assert.equal(sourceMount.children.length, 2);
+assert.equal(sourceMount.children[0].children[1].textContent, '<script>unsafe()</script>');
+assert.equal(sourceMount.children[0].dataset.line, '90');
+assert.equal(sourceMount.children[0].dataset.highlight, 'false');
+assert.equal(sourceMount.children[1].dataset.highlight, 'true');
+assert.equal(sourceMount.children[1].children[0].scrolled, true, 'accepted target becomes visible');
+assert.equal(sourceMount.scrollTop, 26, 'selected declaration starts at the source window top');
+assert.equal(sourceMount.children[1].getBoundingClientRect().top, sourceMount.getBoundingClientRect().top + sourceMount.clientTop);
+
+const stableSourceRow = sourceMount.children[0];
+sourceMount.scrollLeft = 120;
+sourceView(sourceBinding);
+assert.equal(sourceMount.children[0], stableSourceRow, 'unrelated views preserve source nodes');
+assert.equal(sourceMount.scrollLeft, 120, 'unrelated views preserve source horizontal position');
+assert.equal(sourceMount.scrollTop, 26, 'unrelated views preserve source vertical position');
+sourceView({ ...sourceBinding, text: Array.from({ length: 256 }, (_, i) => 'line ' + (257 + i)).join('\n'),
+  first_line: 257, target_span: { start: { line: 300, column: 0 }, end: { line: 310, column: 1 } } });
+assert.equal(sourceMount.children[43].dataset.line, '300');
+assert.equal(sourceMount.scrollTop, 866, 'a late declaration aligns internally before outer nearest scrolling');
+assert.equal(sourceMount.children[43].getBoundingClientRect().top, sourceMount.getBoundingClientRect().top + sourceMount.clientTop);
+
+sourceView({ ...sourceBinding, text: 'continued', first_column: 64, target_span: null });
+assert.equal(sourceMount.children[0].children[0].textContent, '90↪');
+sourceView({ ...sourceBinding, text: '', target_span: null });
+assert.equal(sourceMount.children.length, 0, 'withdrawn source clears protected pixels');
+sourceView(sourceBinding);
+lifecycle.get('pagehide')();
+assert.equal(sourceMount.children.length, 0, 'page teardown clears source nodes synchronously');
+lifecycle.get('pageshow')();
+sourceView(sourceBinding);
+assert.equal(sourceMount.children.length, 2, 'new instance does not inherit a stale render cache');
+// Background source display must not pull a still-valid focused navigation row
+// away from the viewport. The source window still updates to accepted contents.
+sourceMount.closest = selector => selector === '[data-pane]' ? pane : selector === '[data-source-view]' ? sourceMount : null;
+context.inside = inside;
+vm.runInContext("focusKeyByElement.set(inside, 'current-analysis-row')", context);
+document.activeElement = inside;
+sourceView({ ...sourceBinding, text: 'updated source' });
+assert.equal(sourceMount.children[0].children[0].scrolled, false);
+assert.equal(sourceMount.children[0].children[1].textContent, 'updated source');
+assert.equal(document.activeElement, inside);
+document.activeElement = body;
+sourceView(sourceBinding);
+assert.equal(sourceMount.children[1].children[0].scrolled, true, 'external source navigation still reveals its target');
+// External reveal must leave focus on the displayed code, not its heading above
+// a vertically scrolled short viewport. Gutter anchors do not add Tab stops.
+context.paneState = paneState;
+vm.runInContext("layouts.set('collection-layout', paneState)", context);
+paneState.narrow.matches = true;
+paneState.active = 'other-pane';
+document.activeElement = outside;
+workers.at(-1).onmessage({ data: { kind: 'view', view: {
+  sources: [{ ...sourceBinding, text: 'external replacement\nselected line' }],
+  panes: [{ id: pane.id, context: { selected: 99 }, reveal: 99 }],
+} } });
+const focusedSourceLine = sourceMount.children[1].children[0];
+assert.equal(document.activeElement, focusedSourceLine, 'external reveal focuses the visible source line');
+assert.equal(focusedSourceLine.scrolled, true);
+assert.equal(focusedSourceLine.tabIndex, -1, 'programmatic line focus adds no extra Tab stop');
+assert.equal(focusedSourceLine['aria-label'], 'Source line 91');
+// When a source response arrives after loading, a waiting pane-heading focus
+// follows the new source line, while explicit user navigation keeps ownership.
+document.activeElement = heading;
+sourceView({ ...sourceBinding, text: 'loaded replacement\nselected line' });
+assert.equal(document.activeElement, sourceMount.children[1].children[0]);
+const pagingControl = { ...inside, disabled: false };
+context.pagingControl = pagingControl;
+vm.runInContext("actionByElement.set(pagingControl, { kind: 'next_window' })", context);
+document.activeElement = pagingControl;
+sourceMount.scrollTop = 140;
+const nextWindow = dispatchFrom('pagingControl');
+sourceView({ ...sourceBinding, text: 'next window', first_line: 200, target_span: null }, nextWindow);
+assert.equal(document.activeElement, pagingControl, 'line paging retains an enabled control and viewport');
+assert.equal(sourceMount.children[0].children[0].scrolled, false, 'line paging does not scroll its control away');
+assert.equal(sourceMount.scrollTop, 0, 'new source window resets its own inner scroll');
+const lastWindow = dispatchFrom('pagingControl');
+pagingControl.disabled = true;
+sourceView({ ...sourceBinding, text: 'last window', first_line: 400, target_span: null }, lastWindow);
+assert.equal(document.activeElement, sourceMount.children[0].children[0], 'exhausted paging control moves focus to visible source');
+vm.runInContext("layouts.delete('collection-layout')", context);
+console.log('Source presentation: safe text, line spans, continuation, stable scroll, narrow reveal and teardown passed.');

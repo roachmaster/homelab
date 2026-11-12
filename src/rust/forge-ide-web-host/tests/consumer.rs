@@ -6,6 +6,7 @@ use forge_ide::{
 };
 use forge_ide_web_host::{
     register_host, Host, HostConfig, HostLimits, InspectionPort, NodeConfig, ServeOutcome,
+    SessionAuth,
 };
 use forge_ingress_contract::{Header, Response, RouteKey};
 use forge_remote::{RemoteError, Target};
@@ -50,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":2,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":4,"files":files})).unwrap(),
         )
         .unwrap();
         Self(p)
@@ -88,7 +89,10 @@ impl InspectionPort for Fake {
 }
 fn config(f: &Files) -> HostConfig {
     HostConfig {
+        chat: None,
         bind: "127.0.0.1:0".parse().unwrap(),
+        public_origin: None,
+        session_auth: SessionAuth::Pairing,
         assets: f.0.clone(),
         limits: HostLimits::default(),
         nodes: vec![NodeConfig {
@@ -110,7 +114,10 @@ fn config(f: &Files) -> HostConfig {
     }
 }
 fn host(f: &Files) -> (Host, Rc<Cell<usize>>) {
-    let group = register_host("ui", config(f)).unwrap();
+    host_with_config(config(f))
+}
+fn host_with_config(config: HostConfig) -> (Host, Rc<Cell<usize>>) {
+    let group = register_host("ui", config).unwrap();
     let ((), factory) = Registry::new()
         .register(group)
         .unwrap()
@@ -145,7 +152,7 @@ fn exchange(host: &Host, request: String) -> String {
 }
 fn post(host: &Host, destination: &str, body: Value, extra: &str) -> String {
     let body = body.to_string();
-    format!("POST /forge/v1/dispatch HTTP/1.1\r\nHost: {}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nForge-Envelope-Version: 1\r\nForge-Contract-Version: 1\r\nForge-Request-Id: request-1\r\nForge-Destination: {}\r\n{}\r\n{}",host.local_addr().unwrap(),host.origin(),body.len(),destination,extra,body)
+    format!("POST /forge/v1/dispatch HTTP/1.1\r\nHost: {}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nForge-Envelope-Version: 1\r\nForge-Contract-Version: 1\r\nForge-Request-Id: request-1\r\nForge-Destination: {}\r\n{}\r\n{}",host.origin().split_once("://").unwrap().1,host.origin(),body.len(),destination,extra,body)
 }
 fn paired(host: &Host) -> (String, String, String) {
     let r = exchange(
@@ -157,15 +164,31 @@ fn paired(host: &Host) -> (String, String, String) {
             "",
         ),
     );
+    session_values(host, &r)
+}
+fn resumed(host: &Host, cookie: Option<&str>) -> (String, String, String) {
+    let r = exchange(
+        host,
+        post(
+            host,
+            "ui.session.resume",
+            json!({"kind":"resume","request_id":"request-1"}),
+            &cookie.map_or_else(String::new, |value| format!("Cookie: {value}\r\n")),
+        ),
+    );
+    session_values(host, &r)
+}
+fn session_values(host: &Host, r: &str) -> (String, String, String) {
     assert!(r.starts_with("HTTP/1.1 200"), "{r}");
-    let cookie = r
+    let cookie_header = r
         .lines()
         .find_map(|s| s.strip_prefix("Set-Cookie: "))
-        .unwrap()
-        .split(';')
-        .next()
-        .unwrap()
-        .to_owned();
+        .unwrap();
+    assert_eq!(
+        cookie_header.split(';').any(|part| part.trim() == "Secure"),
+        host.origin().starts_with("https://")
+    );
+    let cookie = cookie_header.split(';').next().unwrap().to_owned();
     let body: Value = serde_json::from_str(r.split_once("\r\n\r\n").unwrap().1).unwrap();
     (
         cookie,
@@ -180,6 +203,155 @@ fn inspect(host: &Host, cookie: &str, csrf: &str, epoch: &str, project: &str) ->
     let expires = forge_remote::now_unix_ms().unwrap() + 4000;
     post(host,"ide.inspect",json!({"kind":"inspect","request":{"token":{"session_epoch":epoch,"revision":1,"request_id":"request-1"},"node_key":"lab","target_node":"node","target_incarnation":"host","project":project,"destination":"ide.inspect","contract_version":1,"expires_unix_ms":expires}}),&format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\nForge-Target-Node: node\r\nForge-Target-Incarnation: host\r\nForge-Expires-Unix-Ms: {expires}\r\n"))
 }
+
+struct SourcePort {
+    reads: Rc<Cell<usize>>,
+    corrupt: Rc<Cell<bool>>,
+}
+impl InspectionPort for SourcePort {
+    fn inspect(&self, r: RemoteInspectInput) -> Result<InspectReply, RemoteError> {
+        let text = "exact café <script> text\n";
+        Ok(InspectReply {
+            responder: r.target,
+            response: Response {
+                header: (&Header::new(RouteKey::new("ide.inspect", 1).unwrap(), r.request_id)
+                    .unwrap())
+                    .into(),
+                payload: ProjectReport {
+                    format_version: 1,
+                    complete: true,
+                    entries: 2,
+                    files: 1,
+                    bytes_read: text.len(),
+                    tree: TreeNode {
+                        name: Name::Utf8(".".into()),
+                        detail: Entry::Directory {
+                            children: vec![TreeNode {
+                                name: Name::Utf8("notes.txt".into()),
+                                detail: Entry::File {
+                                    size_bytes: text.len() as u64,
+                                    content: forge_ide::model::FileContent::Text {
+                                        sha256: forge_ide::source::digest(text.as_bytes()),
+                                        lines: 1,
+                                        rust: None,
+                                    },
+                                },
+                            }],
+                        },
+                    },
+                },
+            },
+        })
+    }
+    fn source(
+        &self,
+        r: forge_ide::remote_source::RemoteSourceInput,
+    ) -> Result<forge_ide::remote_source::SourceReply, RemoteError> {
+        self.reads.set(self.reads.get() + 1);
+        assert_eq!(r.selection.path, vec![Name::Utf8("notes.txt".into())]);
+        Ok(forge_ide::remote_source::SourceReply {
+            responder: r.target,
+            response: Response {
+                header: (&Header::new(RouteKey::new("ide.source", 1).unwrap(), r.request_id)
+                    .unwrap())
+                    .into(),
+                payload: forge_ide::source::SourceDocument {
+                    text: if self.corrupt.get() {
+                        "changed".into()
+                    } else {
+                        "exact café <script> text\n".into()
+                    },
+                    sha256: r.selection.sha256,
+                },
+            },
+        })
+    }
+}
+#[test]
+fn source_uses_only_current_report_entry_and_revalidates_substituted_port() {
+    let files = Files::new();
+    let group = register_host("source-host", config(&files)).unwrap();
+    let ((), factory) = Registry::new()
+        .register(group)
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    let reads = Rc::new(Cell::new(0));
+    let corrupt = Rc::new(Cell::new(false));
+    let ports: BTreeMap<String, Box<dyn InspectionPort>> = BTreeMap::from([(
+        "lab".into(),
+        Box::new(SourcePort {
+            reads: Rc::clone(&reads),
+            corrupt: Rc::clone(&corrupt),
+        }) as Box<dyn InspectionPort>,
+    )]);
+    let host = factory.create_with_ports(ports).unwrap();
+    let (cookie, csrf, epoch) = paired(&host);
+    let expires = forge_remote::now_unix_ms().unwrap() + 4000;
+    let headers=format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\nForge-Target-Node: node\r\nForge-Target-Incarnation: host\r\nForge-Expires-Unix-Ms: {expires}\r\n");
+    let body = json!({"kind":"source","request":{"token":{"session_epoch":epoch,"revision":2,"request_id":"request-1"},"report":{"session_epoch":epoch,"revision":1,"request_id":"request-1"},"node_key":"lab","target_node":"node","target_incarnation":"host","project":"workspace","destination":"ide.source","contract_version":1,"expires_unix_ms":expires,"entry":1}});
+    // No accepted report is not source authority.
+    assert!(
+        exchange(&host, post(&host, "ide.source", body.clone(), &headers))
+            .starts_with("HTTP/1.1 401")
+    );
+    assert!(
+        exchange(&host, inspect(&host, &cookie, &csrf, &epoch, "workspace"))
+            .starts_with("HTTP/1.1 200")
+    );
+    for mutation in 0..8 {
+        let mut bad = body.clone();
+        match mutation {
+            0 => bad["request"]["report"]["revision"] = 99.into(),
+            1 => bad["request"]["report"]["session_epoch"] = "old".into(),
+            2 => bad["request"]["token"]["session_epoch"] = "old".into(),
+            3 => bad["request"]["entry"] = 0.into(),
+            4 => bad["request"]["entry"] = 999.into(),
+            5 => bad["request"]["project"] = "other".into(),
+            6 => bad["request"]["node_key"] = "other".into(),
+            _ => bad["request"]["path"] = "/secret".into(),
+        }
+        let response = exchange(&host, post(&host, "ide.source", bad, &headers));
+        assert!(
+            response.starts_with("HTTP/1.1 401") || response.starts_with("HTTP/1.1 400"),
+            "mutation {mutation}: {response}"
+        );
+    }
+    let denied = exchange(
+        &host,
+        post(
+            &host,
+            "ide.source",
+            body.clone(),
+            &headers.replace(&csrf, "wrong-csrf"),
+        ),
+    );
+    assert!(denied.starts_with("HTTP/1.1 401"));
+    assert_eq!(reads.get(), 0);
+    let response = exchange(&host, post(&host, "ide.source", body.clone(), &headers));
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        value["event"]["result"]["outcome"]["document"]["text"],
+        "exact café <script> text\n"
+    );
+    assert_eq!(reads.get(), 1);
+    corrupt.set(true);
+    let response = exchange(&host, post(&host, "ide.source", body.clone(), &headers));
+    let value: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(value["event"]["result"]["outcome"]["kind"], "error");
+    assert_eq!(
+        value["event"]["result"]["outcome"]["category"],
+        "invalid_response"
+    );
+    let newer = inspect(&host, &cookie, &csrf, &epoch, "workspace")
+        .replace("\"revision\":1", "\"revision\":3");
+    assert!(exchange(&host, newer).starts_with("HTTP/1.1 200"));
+    let before = reads.get();
+    assert!(exchange(&host, post(&host, "ide.source", body, &headers)).starts_with("HTTP/1.1 401"));
+    assert_eq!(reads.get(), before);
+}
 #[test]
 fn public_registrar_is_effect_free_and_must_freeze() {
     let f = Files::new();
@@ -193,6 +365,359 @@ fn public_registrar_is_effect_free_and_must_freeze() {
         .unwrap()
         .into_factories();
     assert!(factory.create_with_ports(BTreeMap::new()).is_err());
+}
+#[test]
+fn public_origin_requires_canonical_https_and_keeps_loopback_binding() {
+    let f = Files::new();
+    for invalid in [
+        "",
+        "http://portal.example.com",
+        "https://",
+        "https://Portal.example.com",
+        "https://portal.example.com/",
+        "https://portal.example.com/path",
+        "https://portal.example.com?query",
+        "https://portal.example.com#fragment",
+        "https://user@portal.example.com",
+        "https://portal.example.com:443",
+        "https://portal.example.com:0443",
+        "https://portal.example.com:08443",
+        "https://portal.example.com:0",
+        "https://portal.example.com:65536",
+        "https://portal.example.com:+8443",
+        "https://portal.example.com:8443:80",
+        "https://portal.example.com.",
+        "https://portal..example.com",
+        "https://-portal.example.com",
+        "https://portal-.example.com",
+        "https://portal_example.com",
+        "https://127.0.0.1",
+        "https://[::1]",
+        "https://portal.example.com\r\nHost: evil.example",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(invalid.into());
+        assert!(register_host("ui", c).is_err(), "accepted {invalid:?}");
+    }
+    let mut c = config(&f);
+    c.public_origin = Some(format!("https://{}.example.com", "a".repeat(64)));
+    assert!(register_host("ui", c).is_err());
+    let mut c = config(&f);
+    c.public_origin = Some("https://portal.example.com".into());
+    c.bind = "0.0.0.0:8787".parse().unwrap();
+    assert!(register_host("ui", c).is_err());
+}
+#[test]
+fn public_origin_rejects_browser_numeric_hosts_without_rejecting_dns_digits() {
+    let f = Files::new();
+    for invalid in [
+        "https://2130706433",
+        "https://2130706433:8443",
+        "https://0x7f000001",
+        "https://0X7F000001",
+        "https://127.1",
+        "https://0177.0.0.1",
+        "https://0x7f.0.0.1",
+        "https://0",
+        "https://00",
+        "https://09",
+        "https://0x",
+        "https://4294967296",
+        "https://0xffffffffffffffffffffffffffff",
+        "https://portal.123",
+        "https://portal.09",
+        "https://portal.0x",
+        "https://portal.0xface",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(invalid.into());
+        assert!(register_host("ui", c).is_err(), "accepted {invalid:?}");
+    }
+    for valid in [
+        "https://portal.thedevex.com",
+        "https://node123.example.com",
+        "https://123.example.com",
+        "https://0x7f000001.example.com",
+        "https://portal.xn--p1ai",
+        "https://portal.example.com:8443",
+        "https://portal.0xg",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(valid.into());
+        assert!(register_host("ui", c).is_ok(), "rejected {valid:?}");
+    }
+}
+#[test]
+fn https_origin_uses_secure_cookie_and_preserves_session_csrf_project_admission() {
+    let f = Files::new();
+    for origin in [
+        "https://portal.example.com",
+        "https://portal.example.com:8443",
+    ] {
+        let mut c = config(&f);
+        c.public_origin = Some(origin.into());
+        let (h, calls) = host_with_config(c);
+        assert_eq!(h.origin(), origin);
+        assert!(h.local_addr().unwrap().ip().is_loopback());
+        assert!(exchange(
+            &h,
+            inspect(&h, "forge_ui=wrong", "wrong", "wrong", "workspace")
+        )
+        .starts_with("HTTP/1.1 401"));
+        let (cookie, csrf, epoch) = paired(&h);
+        for request in [
+            inspect(&h, "forge_ui=wrong", &csrf, &epoch, "workspace"),
+            inspect(&h, &cookie, "wrong", &epoch, "workspace"),
+            inspect(&h, &cookie, &csrf, "wrong", "workspace"),
+            inspect(&h, &cookie, &csrf, &epoch, "private"),
+        ] {
+            assert!(exchange(&h, request).starts_with("HTTP/1.1 401"));
+        }
+        assert_eq!(calls.get(), 0);
+        assert!(
+            exchange(&h, inspect(&h, &cookie, &csrf, &epoch, "workspace"))
+                .starts_with("HTTP/1.1 200")
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(exchange(
+            &h,
+            post(
+                &h,
+                "ui.session.resume",
+                json!({"kind":"resume","request_id":"request-1"}),
+                &format!("Cookie: {cookie}\r\n")
+            )
+        )
+        .starts_with("HTTP/1.1 200"));
+        assert_eq!(calls.get(), 1);
+    }
+}
+#[test]
+fn https_origin_rejects_wrong_authority_origin_and_forwarded_header_spoofing() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.public_origin = Some("https://portal.example.com".into());
+    let (h, calls) = host_with_config(c);
+    let request = post(
+        &h,
+        "ui.session.open",
+        json!({"kind":"pair","request_id":"request-1","code":h.pairing_code().unwrap()}),
+        "",
+    );
+    for invalid in [
+        request.replace(
+            "Host: portal.example.com",
+            &format!("Host: {}", h.local_addr().unwrap()),
+        ),
+        request.replace(
+            "Host: portal.example.com",
+            "Host: evil.example\r\nX-Forwarded-Host: portal.example.com",
+        ),
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: http://portal.example.com\r\nX-Forwarded-Proto: https",
+        ),
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: https://evil.example\r\nForwarded: proto=https;host=portal.example.com",
+        ),
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: https://portal.example.com:443",
+        ),
+    ] {
+        assert!(exchange(&h, invalid).starts_with("HTTP/1.1 400"));
+    }
+    assert_eq!(calls.get(), 0);
+    assert!(h.pairing_code().is_some());
+    assert!(exchange(
+        &h,
+        "GET / HTTP/1.1\r\nHost: portal.example.com\r\n\r\n".into()
+    )
+    .starts_with("HTTP/1.1 200"));
+    assert!(exchange(&h, request).starts_with("HTTP/1.1 200"));
+}
+#[test]
+fn startup_file_loads_explicit_https_origin_and_old_config_remains_local() {
+    let f = Files::new();
+    fs::write(f.0.join("client.der"), [1]).unwrap();
+    fs::write(f.0.join("client.key.der"), [1]).unwrap();
+    fs::write(f.0.join("ca.der"), [1]).unwrap();
+    let path = f.0.join("host.json");
+    let mut value = json!({
+        "bind":"127.0.0.1:0", "assets":f.0,
+        "credentials":{"chain":["client.der"],"key":"client.key.der","roots":["ca.der"]},
+        "nodes":[{"key":"lab","label":"Lab","projects":["workspace"],
+            "address":"127.0.0.1:7443","server_name":"localhost","node":"node","incarnation":"host"}]
+    });
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(forge_ide_web_host::load_config(&path)
+        .unwrap()
+        .public_origin
+        .is_none());
+    value["public_origin"] = json!("https://portal.example.com");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert_eq!(
+        forge_ide_web_host::load_config(&path)
+            .unwrap()
+            .public_origin
+            .as_deref(),
+        Some("https://portal.example.com")
+    );
+    assert_eq!(
+        forge_ide_web_host::load_config(&path).unwrap().session_auth,
+        SessionAuth::Pairing
+    );
+    value["session_auth"] = json!("trusted_proxy");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert_eq!(
+        forge_ide_web_host::load_config(&path).unwrap().session_auth,
+        SessionAuth::TrustedProxy
+    );
+    value["session_auth"] = json!("from_header");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(forge_ide_web_host::load_config(&path).is_err());
+    value["session_auth"] = json!("trusted_proxy");
+    value["public_origin"] = json!("http://portal.example.com");
+    fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    assert!(forge_ide_web_host::load_config(&path).is_err());
+}
+#[test]
+fn trusted_proxy_mode_requires_explicit_https_origin_and_loopback() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.session_auth = SessionAuth::TrustedProxy;
+    assert!(register_host("ui", c.clone()).is_err());
+    c.public_origin = Some("https://portal.example.com".into());
+    assert!(register_host("ui", c.clone()).is_ok());
+    c.bind = "0.0.0.0:8787".parse().unwrap();
+    assert!(register_host("ui", c).is_err());
+}
+#[test]
+fn trusted_proxy_resume_establishes_session_without_pairing_and_preserves_active_clients() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.session_auth = SessionAuth::TrustedProxy;
+    c.public_origin = Some("https://portal.example.com".into());
+    let (h, calls) = host_with_config(c);
+    assert!(h.pairing_code().is_none());
+    assert!(exchange(
+        &h,
+        post(
+            &h,
+            "ui.session.open",
+            json!({"kind":"pair","request_id":"request-1","code":"unused"}),
+            ""
+        )
+    )
+    .starts_with("HTTP/1.1 401"));
+    assert!(exchange(
+        &h,
+        inspect(&h, "forge_ui=wrong", "wrong", "wrong", "workspace")
+    )
+    .starts_with("HTTP/1.1 401"));
+    let (cookie, csrf, epoch) = resumed(&h, None);
+    assert_eq!(
+        resumed(&h, None),
+        (cookie.clone(), csrf.clone(), epoch.clone())
+    );
+    assert_eq!(
+        resumed(&h, Some("forge_ui=wrong")),
+        (cookie.clone(), csrf.clone(), epoch.clone())
+    );
+    assert_eq!(
+        resumed(&h, Some(&cookie)),
+        (cookie.clone(), csrf.clone(), epoch.clone())
+    );
+    for request in [
+        inspect(&h, "forge_ui=wrong", &csrf, &epoch, "workspace"),
+        inspect(&h, &cookie, "wrong", &epoch, "workspace"),
+        inspect(&h, &cookie, &csrf, "wrong", "workspace"),
+        inspect(&h, &cookie, &csrf, &epoch, "private"),
+        inspect(&h, &cookie, &csrf, &epoch, "workspace")
+            .replace("Forge-Target-Node: node", "Forge-Target-Node: other"),
+    ] {
+        assert!(!exchange(&h, request).starts_with("HTTP/1.1 200"));
+    }
+    assert_eq!(calls.get(), 0);
+    assert!(
+        exchange(&h, inspect(&h, &cookie, &csrf, &epoch, "workspace")).starts_with("HTTP/1.1 200")
+    );
+    assert_eq!(calls.get(), 1);
+    assert!(h.pairing_code().is_none());
+}
+#[test]
+fn trusted_proxy_expired_resume_rotates_credentials_without_manual_pairing() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.session_auth = SessionAuth::TrustedProxy;
+    c.public_origin = Some("https://portal.example.com".into());
+    c.limits.session_ttl = Duration::from_millis(80);
+    let (h, calls) = host_with_config(c);
+    let (old_cookie, old_csrf, old_epoch) = resumed(&h, None);
+    thread::sleep(Duration::from_millis(160));
+    assert!(exchange(
+        &h,
+        inspect(&h, &old_cookie, &old_csrf, &old_epoch, "workspace")
+    )
+    .starts_with("HTTP/1.1 401"));
+    let (cookie, csrf, epoch) = resumed(&h, Some(&old_cookie));
+    assert_ne!(cookie, old_cookie);
+    assert_ne!(csrf, old_csrf);
+    assert_ne!(epoch, old_epoch);
+    assert!(exchange(
+        &h,
+        inspect(&h, &old_cookie, &old_csrf, &old_epoch, "workspace")
+    )
+    .starts_with("HTTP/1.1 401"));
+    assert_eq!(calls.get(), 0);
+    assert!(
+        exchange(&h, inspect(&h, &cookie, &csrf, &epoch, "workspace")).starts_with("HTTP/1.1 200")
+    );
+    assert_eq!(calls.get(), 1);
+}
+#[test]
+fn trusted_proxy_resume_keeps_origin_checks_and_headers_cannot_enable_mode() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.public_origin = Some("https://portal.example.com".into());
+    let (default_host, _) = host_with_config(c.clone());
+    let forwarded = "Cf-Access-Jwt-Assertion: fake\r\nX-Forwarded-Proto: https\r\nX-Forwarded-Host: portal.example.com\r\n";
+    assert!(exchange(
+        &default_host,
+        post(
+            &default_host,
+            "ui.session.resume",
+            json!({"kind":"resume","request_id":"request-1"}),
+            forwarded
+        )
+    )
+    .starts_with("HTTP/1.1 401"));
+    assert!(default_host.pairing_code().is_some());
+    c.session_auth = SessionAuth::TrustedProxy;
+    let (h, calls) = host_with_config(c);
+    let request = post(
+        &h,
+        "ui.session.resume",
+        json!({"kind":"resume","request_id":"request-1"}),
+        forwarded,
+    );
+    for invalid in [
+        request.replace(
+            "Origin: https://portal.example.com",
+            "Origin: https://evil.example",
+        ),
+        request.replace(
+            "Host: portal.example.com\r\nOrigin",
+            "Host: evil.example\r\nOrigin",
+        ),
+    ] {
+        let response = exchange(&h, invalid);
+        assert!(response.starts_with("HTTP/1.1 400"));
+        assert!(!response.contains("Set-Cookie:"));
+    }
+    assert!(exchange(&h, request).starts_with("HTTP/1.1 200"));
+    assert_eq!(calls.get(), 0);
 }
 #[test]
 fn pair_resume_inspect_use_public_port_once_and_filtered_catalog() {
@@ -339,7 +864,7 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 3] {
+    for abi in [0, 1, 2, 3, 5] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -695,4 +1220,106 @@ fn binary_help_does_not_load_config_or_bind() {
         .output()
         .unwrap();
     assert!(!out.status.success());
+}
+
+#[cfg(unix)]
+#[test]
+fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token_dir = files.0.join("native");
+    fs::create_dir(&token_dir).unwrap();
+    let token_path = token_dir.join("token");
+    let token = "0123456789abcdef".repeat(4);
+    fs::write(&token_path, &token).unwrap();
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut settings = config(&files);
+    settings.chat = Some(forge_ide_web_host::ChatConfig {
+        endpoint: upstream.local_addr().unwrap(),
+        token_file: token_path,
+    });
+    let (host, _) = host_with_config(settings);
+    let body = json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}});
+    let (cookie, csrf, _) = paired(&host);
+    assert!(exchange(&host, post(&host, "ide.chat", body.clone(), "")).starts_with("HTTP/1.1 401"));
+    assert!(exchange(
+        &host,
+        post(
+            &host,
+            "ide.chat",
+            body.clone(),
+            &format!("Cookie: {cookie}\r\n")
+        )
+    )
+    .starts_with("HTTP/1.1 401"));
+    let headers = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    let mut invalid = body.clone();
+    invalid["request"]["request_id"] = "mismatch".into();
+    assert!(exchange(&host, post(&host, "ide.chat", invalid, &headers)).starts_with("HTTP/1.1 400"));
+    let mut invalid = body.clone();
+    invalid["request"]["messages"][0]["role"] = "assistant".into();
+    assert!(exchange(&host, post(&host, "ide.chat", invalid, &headers)).starts_with("HTTP/1.1 400"));
+    upstream.set_nonblocking(true).unwrap();
+    assert_eq!(
+        upstream.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    upstream.set_nonblocking(false).unwrap();
+
+    let expected = body["request"]["messages"].clone();
+    let secret = token.clone();
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = upstream.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = BufReader::new(&mut stream);
+        let mut line = String::new();
+        request.read_line(&mut line).unwrap();
+        assert_eq!(line, "POST /v1/chat/completions HTTP/1.1\r\n");
+        let mut length = 0;
+        let mut authenticated = false;
+        loop {
+            line.clear();
+            request.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+            let (name, value) = line.trim_end().split_once(": ").unwrap();
+            if name.eq_ignore_ascii_case("authorization") {
+                authenticated = value == format!("Bearer {secret}");
+            }
+            if name.eq_ignore_ascii_case("content-length") {
+                length = value.parse().unwrap();
+            }
+        }
+        assert!(authenticated);
+        let mut data = vec![0; length];
+        request.read_exact(&mut data).unwrap();
+        let request: Value = serde_json::from_slice(&data).unwrap();
+        assert_eq!(request["messages"], expected);
+        assert_eq!(request["stream"], false);
+        let response = json!({"choices":[{"message":{"role":"assistant","content":"local response","reasoning_content":"private scratchpad"}}]}).to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+            response.len(),
+            response
+        )
+        .unwrap();
+    });
+    let response = exchange(&host, post(&host, "ide.chat", body, &headers));
+    worker.join().unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert!(!response.contains(&token));
+    assert!(!response.contains("private scratchpad"));
+    let reply: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(
+        reply["event"],
+        json!({"kind":"chat_result","request_id":"request-1","outcome":{"kind":"answer","content":"local response"}})
+    );
 }

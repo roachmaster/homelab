@@ -52,7 +52,26 @@ pub enum Component {
         title: String,
         children: Vec<Component>,
     },
+    Region {
+        id: String,
+        children: Vec<Component>,
+    },
     Toolbar(Vec<Component>),
+    Navigation {
+        id: String,
+        title: String,
+        children: Vec<Component>,
+    },
+    ReadingColumn(Vec<Component>),
+    Transcript {
+        id: String,
+        label: String,
+    },
+    TextArea {
+        id: String,
+        label: String,
+        action: String,
+    },
     Row(Vec<Component>),
     Workspace(Vec<Component>),
     PaneLayout {
@@ -86,6 +105,7 @@ pub enum Component {
         label: String,
         action: String,
         emphasis: ButtonEmphasis,
+        check_input: Option<String>,
     },
     Filter {
         id: String,
@@ -105,6 +125,17 @@ pub enum Component {
         id: String,
         label: String,
     },
+    /// Read-only, bounded source window supplied by the accepted model view.
+    Source {
+        id: String,
+        label: String,
+    },
+    /// Presentation-only route to a declared pane; no application event.
+    PaneLink {
+        id: String,
+        label: String,
+        target: String,
+    },
     Details {
         id: String,
     },
@@ -118,6 +149,11 @@ macro_rules! component {
     (screen $id:expr, $title:expr, $protected:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Screen { id:$id.into(),title:$title.into(),protected:$protected,children:vec![$($child),*] } };
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
+    (region $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Region { id:$id.into(),children:vec![$($child),*] } };
+    (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
+    (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
+    (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
+    (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into()} };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
     (row [$($child:expr),* $(,)?]) => { $crate::generate::Component::Row(vec![$($child),*]) };
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
@@ -130,12 +166,15 @@ macro_rules! component {
     (heading $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Heading} };
     (status $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:true,style:$crate::generate::TextStyle::Body} };
     (select $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Select{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard} };
-    (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary} };
+    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None} };
+    (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:None} };
+    (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into())} };
     (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into()} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
+    (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
+    (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
     (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
     (details $id:expr) => { $crate::generate::Component::Details{id:$id.into()} };
 }
@@ -180,25 +219,32 @@ impl Document {
             }
             let (id, label, action) = match c {
                 Component::Screen { id, title, .. }
+                | Component::Navigation { id, title, .. }
                 | Component::Panel { id, title, .. }
                 | Component::Disclosure { id, title, .. }
                 | Component::Pane { id, title, .. } => (Some(id), Some(title), None),
-                Component::Row(_) | Component::Toolbar(_) | Component::Workspace(_) => {
-                    (None, None, None)
+                Component::Row(_)
+                | Component::Toolbar(_)
+                | Component::ReadingColumn(_)
+                | Component::Workspace(_) => (None, None, None),
+                Component::PaneLayout { id, .. } | Component::Region { id, .. } => {
+                    (Some(id), None, None)
                 }
-                Component::PaneLayout { id, .. } => (Some(id), None, None),
                 Component::Text { id, text, .. } => (Some(id), Some(text), None),
                 Component::Select { id, label, action }
                 | Component::Button {
                     id, label, action, ..
                 }
+                | Component::TextArea { id, label, action }
                 | Component::Filter { id, label, action }
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
                 }
-                Component::Tree { id, label } | Component::Reload { id, label } => {
-                    (Some(id), Some(label), None)
-                }
+                Component::Transcript { id, label }
+                | Component::Tree { id, label }
+                | Component::Reload { id, label }
+                | Component::Source { id, label } => (Some(id), Some(label), None),
+                Component::PaneLink { id, label, target } => (Some(id), Some(label), Some(target)),
                 Component::Details { id } | Component::Facts { id } => (Some(id), None, None),
             };
             if let Some(id) = id {
@@ -208,6 +254,12 @@ impl Document {
                 return Err("invalid component label/action");
             }
             match c {
+                Component::Button {
+                    check_input: Some(id),
+                    ..
+                } if !key(id) => {
+                    return Err("invalid checked input id");
+                }
                 Component::Workspace(_) => insert(ids, "workspace")?,
                 Component::PairForm { id, .. } => {
                     for suffix in ["form", "code"] {
@@ -260,12 +312,15 @@ impl Document {
                 _ => {}
             }
             let children = match c {
-                Component::Screen { children, .. }
+                Component::Navigation { children, .. }
+                | Component::Screen { children, .. }
                 | Component::Panel { children, .. }
                 | Component::Disclosure { children, .. }
                 | Component::PaneLayout { children, .. }
+                | Component::Region { children, .. }
                 | Component::Pane { children, .. }
                 | Component::Row(children)
+                | Component::ReadingColumn(children)
                 | Component::Toolbar(children)
                 | Component::Workspace(children) => Some(children),
                 _ => None,

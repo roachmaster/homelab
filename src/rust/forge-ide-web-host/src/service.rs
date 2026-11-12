@@ -1,15 +1,18 @@
-use crate::{assets::Assets, http, session::Session, HostConfig, HostError};
+use crate::chat::ChatRelay;
+use crate::{assets::Assets, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_ide::remote::{
     InspectCall, InspectReply, ProjectAlias, RemoteInspectInput, RemoteInspectTask, ReportLimits,
 };
+use forge_ide::remote_source::{RemoteSourceInput, RemoteSourceTask, SourceReply, SourceSelection};
 use forge_ide_ui::protocol::*;
 use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
 use forge_io_client::IoClient;
 use forge_provider::{Factory, InstanceProvider, Singleton};
 use forge_remote::{now_unix_ms, RemoteError};
 use forge_remote_https::ide::{register_ide_client, IdeClientConfig};
+use forge_remote_https::source::register_source_client;
 use forge_task::Task;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -25,10 +28,34 @@ use std::{
 /// must preserve target, correlation, expiry and typed report validation. No locator.
 pub trait InspectionPort {
     fn inspect(&self, input: RemoteInspectInput) -> Result<InspectReply, RemoteError>;
+    /// Optional bounded read capability; old inspection-only consumers deny it.
+    fn source(&self, _input: RemoteSourceInput) -> Result<SourceReply, RemoteError> {
+        Err(RemoteError::Forbidden)
+    }
 }
 impl<C: forge_ide::remote::RemoteIdeClient> InspectionPort for RemoteInspectTask<C> {
     fn inspect(&self, input: RemoteInspectInput) -> Result<InspectReply, RemoteError> {
         self.run(input)
+    }
+}
+struct RemotePorts<I, S> {
+    inspect: RemoteInspectTask<I>,
+    source: RemoteSourceTask<S>,
+}
+impl<
+        I: forge_ide::remote::RemoteIdeClient,
+        S: IoClient<
+            Request = forge_ide::remote_source::SourceCall,
+            Response = SourceReply,
+            Error = RemoteError,
+        >,
+    > InspectionPort for RemotePorts<I, S>
+{
+    fn inspect(&self, input: RemoteInspectInput) -> Result<InspectReply, RemoteError> {
+        self.inspect.run(input)
+    }
+    fn source(&self, input: RemoteSourceInput) -> Result<SourceReply, RemoteError> {
+        self.source.run(input)
     }
 }
 struct Provided<C>(Singleton<C>);
@@ -87,7 +114,26 @@ impl Factory<Host> for HostFactory {
             let task =
                 RemoteInspectTask::new(Provided(Singleton::new(client)), ReportLimits::default())
                     .map_err(|_| HostError::Assembly)?;
-            ports.insert(n.key.clone(), Box::new(task));
+            let group = register_source_client(
+                format!("{}.source", n.key),
+                n.transport.clone(),
+                self.config.limits.response_bytes,
+            )
+            .map_err(|_| HostError::Assembly)?;
+            let ((), factory) = Registry::new()
+                .register(group)
+                .map_err(|_| HostError::Assembly)?
+                .freeze()
+                .map_err(|_| HostError::Assembly)?
+                .into_factories();
+            let source = RemoteSourceTask::new(factory.create().map_err(|_| HostError::Assembly)?);
+            ports.insert(
+                n.key.clone(),
+                Box::new(RemotePorts {
+                    inspect: task,
+                    source,
+                }),
+            );
         }
         self.create_with_ports(ports)
     }
@@ -98,12 +144,16 @@ pub(crate) enum Command {
     Pair { request_id: String, code: String },
     Resume { request_id: String },
     Inspect { request: PreparedInspection },
+    Source { request: PreparedSource },
+    Chat { request: PreparedChat },
 }
 #[derive(PartialEq, Eq)]
 pub(crate) enum Kind {
     Pair,
     Resume,
     Inspect,
+    Source,
+    Chat,
 }
 impl Payload for Command {
     type Kind = Kind;
@@ -112,6 +162,8 @@ impl Payload for Command {
             Self::Pair { .. } => Kind::Pair,
             Self::Resume { .. } => Kind::Resume,
             Self::Inspect { .. } => Kind::Inspect,
+            Self::Source { .. } => Kind::Source,
+            Self::Chat { .. } => Kind::Chat,
         }
     }
 }
@@ -151,6 +203,7 @@ impl Rejection {
 }
 pub(crate) struct Context {
     pub authenticated: bool,
+    pub trusted_proxy: bool,
     pub csrf_valid: bool,
     pub request_id: String,
     pub target: Option<(String, String)>,
@@ -159,9 +212,9 @@ pub(crate) struct Context {
 }
 fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
     match header.route().destination() {
-        "ui.session.open" => Ok(()),
-        "ui.session.resume" if c.authenticated => Ok(()),
-        "ide.inspect" if c.authenticated && c.csrf_valid => Ok(()),
+        "ui.session.open" if !c.trusted_proxy => Ok(()),
+        "ui.session.resume" if c.authenticated || c.trusted_proxy => Ok(()),
+        "ide.inspect" | "ide.source" | "ide.chat" if c.authenticated && c.csrf_valid => Ok(()),
         _ => Err(AdmissionDenied),
     }
 }
@@ -173,12 +226,89 @@ type AppBridge = Bridge<
     Rejection,
     fn(&Header, &Context) -> Result<(), AdmissionDenied>,
 >;
+struct AcceptedSources {
+    token: RequestToken,
+    node_key: String,
+    project: String,
+    entries: Vec<Option<SourceSelection>>,
+}
+fn source_selections(
+    report: &forge_ide::model::ProjectReport,
+    project: &str,
+) -> Result<Vec<Option<SourceSelection>>, HostError> {
+    use forge_ide::model::{Entry, FileContent};
+    let alias = ProjectAlias::new(project).map_err(|_| HostError::InvalidReport)?;
+    let mut entries = Vec::new();
+    let mut pending = vec![(&report.tree, Vec::new())];
+    while let Some((node, path)) = pending.pop() {
+        if entries.len() >= MAX_ENTRIES {
+            return Err(HostError::Limit);
+        }
+        let selection = match &node.detail {
+            Entry::Directory { children } => {
+                for child in children.iter().rev() {
+                    let mut next = path.clone();
+                    next.push(child.name.clone());
+                    pending.push((child, next));
+                }
+                None
+            }
+            Entry::File {
+                content:
+                    FileContent::Text { sha256, .. } | FileContent::RustUnavailable { sha256, .. },
+                ..
+            } => Some(SourceSelection {
+                project: alias.clone(),
+                path,
+                sha256: *sha256,
+            }),
+            _ => None,
+        };
+        entries.push(selection);
+    }
+    Ok(entries)
+}
 struct State {
+    chat: Option<ChatRelay>,
     session: RefCell<Session>,
+    accepted_sources: RefCell<Option<AcceptedSources>>,
     config: HostConfig,
     ports: BTreeMap<String, Box<dyn InspectionPort>>,
 }
 impl State {
+    fn chat(&self, command: Command, context: &Context) -> Result<Reply, Rejection> {
+        let Command::Chat { request } = command else {
+            return Err(Rejection::Invalid);
+        };
+        if request.request_id != context.request_id || !valid_chat_messages(&request.messages) {
+            return Err(Rejection::Invalid);
+        }
+        let result = self
+            .chat
+            .as_ref()
+            .ok_or(FailureKind::Unavailable)
+            .and_then(|relay| {
+                let deadline = context
+                    .deadline
+                    .checked_sub(std::time::Duration::from_millis(200))
+                    .ok_or(FailureKind::Timeout)?;
+                relay.complete(&request.messages, deadline)
+            });
+        let outcome = match result {
+            Ok(content) => ChatOutcome::Answer { content },
+            Err(category) => ChatOutcome::Error { category },
+        };
+        Ok(Reply {
+            protocol_version: PROTOCOL_VERSION,
+            event: UiEvent::ChatResult {
+                request_id: request.request_id,
+                outcome,
+            },
+            csrf: None,
+            cookie: None,
+        })
+    }
+
     fn pair(&self, p: Command, c: &Context) -> Result<Reply, Rejection> {
         let Command::Pair { request_id, code } = p else {
             return Err(Rejection::Invalid);
@@ -207,7 +337,13 @@ impl State {
         if request_id != c.request_id {
             return Err(Rejection::Invalid);
         }
-        let session = self.session.borrow();
+        let mut session = self.session.borrow_mut();
+        let cookie = if self.config.session_auth == SessionAuth::TrustedProxy {
+            session.resume_proxy().map_err(|_| Rejection::Unavailable)?;
+            Some(session.cookie_header())
+        } else {
+            None
+        };
         Ok(Reply {
             protocol_version: 1,
             event: UiEvent::Paired {
@@ -215,7 +351,7 @@ impl State {
                 catalog: session.catalog(),
             },
             csrf: Some(session.csrf()),
-            cookie: None,
+            cookie,
         })
     }
     fn inspect(&self, p: Command, c: &Context) -> Result<Reply, Rejection> {
@@ -266,6 +402,7 @@ impl State {
             .expires_unix_ms
             .min(now.saturating_add(remaining.as_millis() as u64));
         let port = self.ports.get(&r.node_key).ok_or(Rejection::Unavailable)?;
+        self.accepted_sources.replace(None);
         let result = port.inspect(RemoteInspectInput {
             target: node.target().clone(),
             project: ProjectAlias::new(r.project.clone()).map_err(|_| Rejection::Invalid)?,
@@ -281,8 +418,20 @@ impl State {
             result
         };
         let outcome = match result {
-            Ok(reply) => match crate::project_report(reply.response.payload) {
-                Ok(report) => Outcome::Report { report },
+            Ok(reply) => match source_selections(&reply.response.payload, &r.project).and_then(
+                |selections| {
+                    crate::project_report(reply.response.payload).map(|report| (report, selections))
+                },
+            ) {
+                Ok((report, selections)) => {
+                    self.accepted_sources.replace(Some(AcceptedSources {
+                        token: r.token.clone(),
+                        node_key: r.node_key.clone(),
+                        project: r.project.clone(),
+                        entries: selections,
+                    }));
+                    Outcome::Report { report }
+                }
                 Err(e) => Outcome::Error {
                     category: if matches!(e, HostError::Limit) {
                         FailureKind::Limit
@@ -321,6 +470,114 @@ impl State {
             cookie: None,
         })
     }
+    fn source(&self, p: Command, c: &Context) -> Result<Reply, Rejection> {
+        let Command::Source { request: r } = p else {
+            return Err(Rejection::Invalid);
+        };
+        if r.destination != "ide.source"
+            || r.contract_version != 1
+            || r.token.request_id != c.request_id
+            || c.target.as_ref() != Some(&(r.target_node.clone(), r.target_incarnation.clone()))
+            || c.expiry != Some(r.expires_unix_ms)
+        {
+            return Err(Rejection::Invalid);
+        }
+        let session = self.session.borrow();
+        if r.token.session_epoch != session.epoch() || r.report.session_epoch != session.epoch() {
+            return Err(Rejection::Denied);
+        }
+        drop(session);
+        let node = self
+            .config
+            .nodes
+            .iter()
+            .find(|n| n.key == r.node_key)
+            .ok_or(Rejection::Denied)?;
+        if node.target().node() != r.target_node
+            || node.target().incarnation() != r.target_incarnation
+            || !node.projects.contains(&r.project)
+        {
+            return Err(Rejection::Denied);
+        }
+        let selection = {
+            let accepted = self.accepted_sources.borrow();
+            let accepted = accepted.as_ref().ok_or(Rejection::Denied)?;
+            if accepted.token != r.report
+                || accepted.node_key != r.node_key
+                || accepted.project != r.project
+            {
+                return Err(Rejection::Denied);
+            }
+            accepted
+                .entries
+                .get(r.entry as usize)
+                .and_then(Clone::clone)
+                .ok_or(Rejection::Denied)?
+        };
+        let now = now_unix_ms().map_err(|_| Rejection::Unavailable)?;
+        if r.expires_unix_ms <= now
+            || r.expires_unix_ms
+                > now.saturating_add(self.config.limits.request_timeout.as_millis() as u64)
+        {
+            return Err(Rejection::Invalid);
+        }
+        let remaining = c
+            .deadline
+            .checked_duration_since(Instant::now())
+            .filter(|d| d.as_millis() > 0)
+            .ok_or(Rejection::Unavailable)?;
+        let port = self.ports.get(&r.node_key).ok_or(Rejection::Unavailable)?;
+        let input = RemoteSourceInput {
+            target: node.target().clone(),
+            selection: selection.clone(),
+            request_id: r.token.request_id.clone(),
+            expires_unix_ms: r
+                .expires_unix_ms
+                .min(now.saturating_add(remaining.as_millis() as u64)),
+        };
+        let result = port.source(input.clone()).and_then(|reply| {
+            // Revalidate substituted ports too: neither a UI token nor a port is source authority.
+            let header = Header::new(
+                RouteKey::new("ide.source", 1).expect("static route"),
+                input.request_id,
+            )
+            .map_err(|_| RemoteError::InvalidResponse)?;
+            let call = forge_ide::remote_source::SourceCall {
+                target: input.target,
+                request: Envelope::new(header, input.selection),
+                expires_unix_ms: input.expires_unix_ms,
+            };
+            forge_ide::remote_source::validate_reply(&call, &reply)?;
+            Ok(reply)
+        });
+        let result = if Instant::now() >= c.deadline {
+            Err(RemoteError::Deadline {
+                may_have_executed: true,
+            })
+        } else {
+            result
+        };
+        let outcome=match result {
+            Ok(reply)=>SourceOutcome::Source{document:SourceDocument{text:reply.response.payload.text,sha256:reply.response.payload.sha256.iter().map(|b|format!("{b:02x}")).collect()}},
+            Err(e)=>SourceOutcome::Error{category:match e {RemoteError::Forbidden|RemoteError::Unauthenticated=>FailureKind::Denied,RemoteError::Deadline{..}=>FailureKind::Timeout,RemoteError::Limit=>FailureKind::Limit,RemoteError::InvalidResponse=>FailureKind::InvalidResponse,_=>FailureKind::Unavailable},message:"Source is unavailable or changed since inspection. Refresh the project and try again.".into()},
+        };
+        Ok(Reply {
+            protocol_version: PROTOCOL_VERSION,
+            event: UiEvent::SourceResult {
+                result: SourceResultEvent {
+                    protocol_version: PROTOCOL_VERSION,
+                    token: r.token,
+                    report: r.report,
+                    node_key: r.node_key,
+                    project: r.project,
+                    entry: r.entry,
+                    outcome,
+                },
+            },
+            csrf: None,
+            cookie: None,
+        })
+    }
 }
 /// Synchronous, single-owner host. Construct/use/drop outside any async runtime.
 /// Session credentials are memory-only and invalidated by shutdown/restart.
@@ -348,8 +605,11 @@ impl Host {
         }
         let assets = Assets::load(&config.assets)?;
         let session = Session::new(&config)?;
+        let chat = config.chat.as_ref().map(ChatRelay::new).transpose()?;
         let state = Rc::new(State {
+            chat,
             session: RefCell::new(session),
+            accepted_sources: RefCell::new(None),
             config: config.clone(),
             ports,
         });
@@ -358,6 +618,8 @@ impl Host {
             ("ui.session.open", Kind::Pair),
             ("ui.session.resume", Kind::Resume),
             ("ide.inspect", Kind::Inspect),
+            ("ide.source", Kind::Source),
+            ("ide.chat", Kind::Chat),
         ] {
             let s = Rc::clone(&state);
             registry
@@ -367,6 +629,8 @@ impl Host {
                     move |p, c| match name {
                         "ui.session.open" => s.pair(p, c),
                         "ui.session.resume" => s.resume(p, c),
+                        "ide.source" => s.source(p, c),
+                        "ide.chat" => s.chat(p, c),
                         _ => s.inspect(p, c),
                     },
                 )
@@ -378,8 +642,17 @@ impl Host {
         );
         let listener = TcpListener::bind(config.bind)?;
         listener.set_nonblocking(true)?;
-        let authority = listener.local_addr()?.to_string();
-        let origin = format!("http://{authority}");
+        let (authority, origin) = match &config.public_origin {
+            Some(origin) => (
+                crate::config::https_authority(origin)?.to_owned(),
+                origin.clone(),
+            ),
+            None => {
+                let authority = listener.local_addr()?.to_string();
+                let origin = format!("http://{authority}");
+                (authority, origin)
+            }
+        };
         Ok(Self {
             listener,
             assets,
@@ -420,6 +693,7 @@ impl Host {
         let s = self.state.session.borrow();
         Context {
             authenticated: s.authenticated(cookie),
+            trusted_proxy: self.config.session_auth == SessionAuth::TrustedProxy,
             csrf_valid: s.csrf_matches(csrf),
             request_id,
             target,

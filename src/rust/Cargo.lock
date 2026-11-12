@@ -367,6 +367,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_yaml_ng",
+ "sha2",
  "syn 2.0.118",
 ]
 
@@ -408,12 +409,16 @@ dependencies = [
  "forge-remote-https",
  "forge-task",
  "getrandom 0.4.3",
+ "http-body-util",
  "httparse",
+ "hyper",
+ "hyper-util",
  "rcgen",
  "serde",
  "serde_json",
  "sha2",
  "subtle",
+ "tokio",
 ]
 
 [[package]]

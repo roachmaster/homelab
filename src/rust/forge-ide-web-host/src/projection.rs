@@ -44,14 +44,14 @@ pub fn project_report(report: native::ProjectReport) -> Result<ReportView, HostE
                 e.kind = EntryKind::File;
                 e.size_bytes = Some(size_bytes);
                 match content {
-                    native::FileContent::Text { lines, rust } => {
+                    native::FileContent::Text { lines, rust, .. } => {
                         e.lines = Some(num(lines)?);
                         e.content_status = "text".into();
                         if let Some(r) = rust {
                             e.declarations = declarations(r.declarations)?;
                         }
                     }
-                    native::FileContent::RustUnavailable { lines, error } => {
+                    native::FileContent::RustUnavailable { lines, error, .. } => {
                         e.lines = Some(num(lines)?);
                         e.content_status = "rust_unavailable".into();
                         e.diagnostics.push(error.to_string());

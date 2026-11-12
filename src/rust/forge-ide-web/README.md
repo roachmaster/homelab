@@ -2,14 +2,14 @@
 
 The real browser application is built from **typed Rust components/macros and
 validated YAML style tokens**, not handwritten application HTML, CSS or JS.
-It is an inspection UI, not a source editor. The worker runs the actual compiled
+It opens to Chat after admission and includes a read-only source workbench. The worker runs the actual compiled
 [`forge-ide-ui`](../forge-ide-ui/README.md) Rust model through the bounded WASM ABI.
 The [native host](../forge-ide-web-host/README.md) supplies protected selectors and
-adapts inspection to the existing remote agent; native credentials stay there.
+adapts inspection and bounded source reads to the remote agent; native credentials stay there.
 
 The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
-Explorer/Outline filters, file/declaration workspace, Problems and reversible
-keyboard/narrow panes, plus the local ABI2 migration.
+project-wide file/symbol search, numbered source windows, Outline, Problems and
+reversible keyboard/narrow panes. Chat uses the local ABI 4 bundle.
 
 ## Authoring and build boundary
 
@@ -53,12 +53,31 @@ Open its printed loopback origin and enter the one-use console pairing code.
 Never publish that code or put it in a URL. The prototype is single-local-operator,
 not an internet service or a general relay.
 
-After pairing: choose an allowed node/project, Inspect, expand the file tree,
-select a Rust file, select a declaration and inspect its line/count/span metadata.
+After admission, use **New chat** to start a separate conversation and use
+**Conversation** to switch between histories and drafts. Follow-ups send the
+selected conversation's bounded history to the active Forge llama.cpp model.
+Conversations live in the current browser tab's worker and clear on reload.
+A failed send leaves the draft ready to retry.
+
+Use **Workbench** to open the source tools. A catalog containing one allowed
+project opens it automatically.
+With multiple projects, choose the intended node/project and use **Refresh project**.
+Use **Find files or symbols** to search names throughout the loaded report, then
+select a result to read its source. Explorer file selection and Outline declaration
+selection use the same checked source path. Narrow screens open the selected file
+pane automatically and provide **Back to files**.
+
+Source is read-only, bounded and checked against the bytes used for inspection.
+A changed, unavailable, non-text or oversized file produces an explicit status;
+it is never presented as verified source. Numbered windows and **Previous lines /
+Next lines** keep the DOM bounded. Selecting a declaration opens and highlights
+its source range. Search is over names in the loaded report, not full source text,
+resolved references or an unbounded filesystem index.
+
 Partial reports remain visibly partial. Cancel stops local waiting and invalidates
-late responses; it does not kill the agent's synchronous parser. Retry is explicit.
-Refresh resumes the memory-only authenticated session but starts a fresh worker/model.
-No file writes, source editing, process commands or remote jobs are exposed.
+late responses; it does not kill the agent's synchronous task. Retry is explicit.
+Refresh resumes the memory-only authenticated session and opens a sole allowed
+project again. No file writes, editing, process commands or remote jobs are exposed.
 
 ## Runtime ownership
 
@@ -68,7 +87,7 @@ lifecycle. No backend fetch or business reducer runs there. Worker glue executes
 Rust's prepared effects, projects headers, performs bounded HTTP I/O, retains CSRF
 transport metadata and returns typed results to WASM. Rust owns request tokens,
 selection revisions, stale-result rejection, accepted report keys, local filters,
-bounded row windows, diagnostic navigation, tree expansion and details.
+bounded row/source windows, diagnostic navigation, tree expansion and details.
 Page teardown/resume and fatal recovery clear protected DOM. A WASM ABI failure
 closes that instance and aborts its pending fetches; transport
 failures become recoverable typed model events. No automatic retry exists.
@@ -103,4 +122,4 @@ Rust/YAML. `manifest.json` records exactly five asset hashes; the host verifies
 those bytes before listening. This detects drift, not publisher authenticity.
 Host configuration/content, generated WASM and local operator are trusted. The UI
 is not a secret-redaction system: identifiers, diagnostic/type spellings and native
-filename encodings may expose project metadata. Source bodies are not an editor API.
+filename encodings may expose project metadata. Displayed source remains read-only; no editor/save API is exposed.

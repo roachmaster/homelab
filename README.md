@@ -20,19 +20,21 @@ The [first Rust core](src/rust/README.md) now implements typed contracts, a sync
 
 The [SYCL llama.cpp adapter](src/rust/forge-llama/README.md) exposes authenticated loopback REST commands to start, switch, prompt and stop a local model on Forge GPU.
 
+The [Mission Control runner](deploy/mission-control/agent-runner/README.md) records Chat requests and events in PostgreSQL and sends inference requests over the private Forge tunnel. See the [service inventory](docs/architecture/forge-ide-system-inventory.yaml) for the deployed endpoints.
+
 ## Forge IDE read-only workbench
 
 [![Proposed read-only IDE workbench](docs/design/forge-ide-wireframes/forge-ide-workbench-desktop.svg)](docs/design/forge-ide-wireframes/README.md)
 
-The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) implements the compact context toolbar, local Explorer/Outline filters, file/declaration workspace, Problems, and keyboard/narrow pane controls. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above remain design images, not screenshots. Read-only report data is not a source editor or Run/Debug capability.
+The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) opens a single allowed project automatically and provides project-wide file/symbol search, Explorer, Outline and a read-only source viewer. Opening a file reads bounded source through the admitted host and agent; its SHA-256 must match the bytes used for inspection. Selecting a symbol reveals its numbered source lines, including on phones. Problems, metadata and source-shape analysis remain supporting tools. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above are design images, not screenshots. Editing, saving and Run/Debug remain future capabilities.
 
-[Component, page and transition contracts](docs/design/forge-ide-components/README.md) map nine compositions onto the reusable generator/model, with two screens in one document and report-keyed state flows. Local WASM ABI 2 requires an atomic asset rebuild; the native inspection gateway/protocol is unchanged. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
+[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe the earlier nine-composition workbench. The current [generated IDE](src/rust/forge-ide-web/README.md) opens to Chat and uses local WASM ABI 4. Rebuild its assets as a bundle. The native gateway admits `ide.source` separately and validates inspected-content digests, so deploy the host and agent together. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
 
 ## Forge IDE generated browser boundary
 
 [![Generated UI build and runtime ownership](docs/architecture/diagrams/mermaid/images/m25-ui-implementation.svg)](src/rust/forge-ide-web/README.md)
 
-The [earlier UI report snapshot](docs/architecture/proposals/forge-ide-ui.pdf) uses Mission Control as a guide, not a source of truth: Rust-owned state, thin worker/DOM adapters, and an explicitly secured host bridge to the existing agent. The [new implementation](src/rust/forge-ide-web/README.md) adds a generated inspection UI and loopback-only host, not an internet deployment. The [current UI skill](.agents/skills/design-forge-ui/SKILL.md) and [updated proposal](docs/architecture/proposals/forge-ide-ui.md) supersede its manual-asset authoring advice: application HTML/CSS/JS must be generated from declarations.
+The [earlier UI report snapshot](docs/architecture/proposals/forge-ide-ui.pdf) uses Mission Control as a guide, not a source of truth: Rust-owned state, thin worker/DOM adapters, and an explicitly secured host bridge to the existing agent. The [new implementation](src/rust/forge-ide-web/README.md) adds a generated inspection UI and loopback-bound host. Explicit HTTPS-origin configuration supports an access-controlled proxy with Secure cookies and optional automatic sessions using the proxy's existing sign-in; see [deployment and rollback](src/rust/forge-ide-web-host/deploy/README.md). It remains a single-operator read-only workbench. The [current UI skill](.agents/skills/design-forge-ui/SKILL.md) and [updated proposal](docs/architecture/proposals/forge-ide-ui.md) supersede its manual-asset authoring advice: application HTML/CSS/JS must be generated from declarations.
 
 ## Run the local Forge system
 

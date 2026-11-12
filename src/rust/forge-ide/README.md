@@ -208,3 +208,26 @@ displays YAML. This crate never imports that host or HTTPS. Default consumers
 and the existing local CLI retain their previous behavior. Remote acceptance
 depth is an independent policy (root 0 includes file leaves); a structurally valid
 local report may still exceed its remote policy/budget.
+
+## Revision-checked source reads
+
+Text and Rust-analysis-unavailable report entries now retain the SHA-256 of the
+exact bytes inspected. `source::SourceTask<C>` consumes a typed relative
+`SourceRequest` and uses the existing rooted `FsRequest::Read` port. The task
+returns at most 1 MiB of exact UTF-8 text, rejects NUL/binary data, honors excluded
+path components and requires the supplied digest to match the current bytes.
+Same-length edits therefore require a fresh inspection; declaration spans are
+never silently applied to changed source. No source writes or guessed encodings.
+
+After `register_ide` / `register_projects` and freeze, the public
+`InspectFactory::create_source()` constructs a source task with the same configured
+root and exclusions. Root opening remains an explicit creation effect. The
+`remote` feature exports `remote_source::{SourceSelection, SourceCall, SourceReply,
+RemoteSourceInput, RemoteSourceTask}` for the independently admitted
+`ide.source@1` operation. Native names remain lossless; unsupported foreign name
+encodings are rejected at the native read boundary.
+
+The report digest field requires matching updated agent/codec consumers. Deploy
+these components together; the report remains metadata rather than an atomic
+filesystem snapshot. Revision checking proves equality to the reported file bytes,
+not that every project file existed at one simultaneous instant.

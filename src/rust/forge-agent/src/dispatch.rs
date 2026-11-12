@@ -2,6 +2,8 @@
 //! arbitrary subject constructor is exposed by this application.
 use crate::config::Grants;
 use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
+use forge_ide::remote_source::{SourceCall, SourceReply, SourceSelection, IDE_SOURCE};
+use forge_ide::source::SourceDocument;
 use forge_ide::{
     assembly::ProjectAlias,
     model::ProjectReport,
@@ -15,6 +17,7 @@ use forge_remote::{
     now_unix_ms, NodeCall, NodeInfo, NodeInfoSource, NodeReply, ReadNodeInfo, RemoteError, Target,
     NODE_INFO,
 };
+use forge_remote_https::source::SourceCodec;
 use forge_remote_https::{
     gateway::{GatewayCodec, NodeCodec, RequestMetadata, VerifiedContext},
     ide::IdeCodec,
@@ -25,10 +28,12 @@ use std::{cell::Cell, rc::Rc, time::Instant};
 pub(crate) enum Kind {
     Node,
     Inspect,
+    Source,
 }
 pub(crate) enum AgentCommand {
     NodeInfo,
     Inspect(ProjectAlias),
+    Source(SourceSelection),
 }
 impl Payload for AgentCommand {
     type Kind = Kind;
@@ -36,6 +41,7 @@ impl Payload for AgentCommand {
         match self {
             Self::NodeInfo => Kind::Node,
             Self::Inspect(_) => Kind::Inspect,
+            Self::Source(_) => Kind::Source,
         }
     }
 }
@@ -47,10 +53,12 @@ pub(crate) struct AgentRequest {
 enum AgentResult {
     Node(NodeInfo),
     Report(Box<ProjectReport>),
+    Source(SourceDocument),
 }
 pub(crate) enum AgentReply {
     Node(NodeReply),
-    Inspect(InspectReply),
+    Inspect(Box<InspectReply>),
+    Source(SourceReply),
 }
 pub(crate) struct Codec {
     ide: IdeCodec,
@@ -95,6 +103,18 @@ impl GatewayCodec for Codec {
                     expires: expires_unix_ms,
                 })
             }
+            IDE_SOURCE => {
+                let SourceCall {
+                    target,
+                    request,
+                    expires_unix_ms,
+                } = SourceCodec.decode(meta, body)?;
+                Ok(AgentRequest {
+                    target,
+                    request: Envelope::new(request.header, AgentCommand::Source(request.payload)),
+                    expires: expires_unix_ms,
+                })
+            }
             _ => Err(RemoteError::UnknownRoute),
         }
     }
@@ -105,7 +125,8 @@ impl GatewayCodec for Codec {
     ) -> Result<Vec<u8>, RemoteError> {
         match result {
             Ok(AgentReply::Node(reply)) => NodeCodec.encode(Ok(reply), max),
-            Ok(AgentReply::Inspect(reply)) => self.ide.encode(Ok(reply), max),
+            Ok(AgentReply::Inspect(reply)) => self.ide.encode(Ok(*reply), max),
+            Ok(AgentReply::Source(reply)) => SourceCodec.encode(Ok(reply), max),
             Err(error) => NodeCodec.encode(Err(error), max),
         }
     }
@@ -138,7 +159,7 @@ impl AdmissionPolicy<Context> for Admission {
         let g = self.0.get(&c.subject).ok_or(AdmissionDenied)?;
         let permitted = match header.route().destination() {
             NODE_INFO => g.node_info,
-            IDE_INSPECT => !g.projects.is_empty(),
+            IDE_INSPECT | IDE_SOURCE => !g.projects.is_empty(),
             _ => false,
         };
         if !permitted {
@@ -151,7 +172,19 @@ pub(crate) struct Service {
     target: Target,
     bridge: Bridge<'static, AgentCommand, Context, AgentResult, RemoteError, Admission>,
 }
+#[cfg(test)]
+struct NoSources;
+#[cfg(test)]
+impl IoClient for NoSources {
+    type Request = SourceSelection;
+    type Response = SourceDocument;
+    type Error = RemoteError;
+    fn execute(&self, _: SourceSelection) -> Result<SourceDocument, RemoteError> {
+        Err(RemoteError::Unavailable)
+    }
+}
 impl Service {
+    #[cfg(test)]
     pub fn new<N, P>(
         target: Target,
         node: N,
@@ -161,6 +194,23 @@ impl Service {
     where
         N: NodeInfoSource + 'static,
         P: IoClient<Request = ProjectAlias, Response = ProjectReport, Error = RemoteError>
+            + 'static,
+    {
+        Self::new_with_source(target, node, projects, NoSources, grants)
+    }
+
+    pub fn new_with_source<N, P, S>(
+        target: Target,
+        node: N,
+        projects: P,
+        sources: S,
+        grants: Grants,
+    ) -> Result<Self, RemoteError>
+    where
+        N: NodeInfoSource + 'static,
+        P: IoClient<Request = ProjectAlias, Response = ProjectReport, Error = RemoteError>
+            + 'static,
+        S: IoClient<Request = SourceSelection, Response = SourceDocument, Error = RemoteError>
             + 'static,
     {
         let grants = Rc::new(grants);
@@ -199,6 +249,30 @@ impl Service {
                     let report = projects.execute(alias)?;
                     c.live()?;
                     Ok(AgentResult::Report(Box::new(report)))
+                },
+            )
+            .map_err(|_| RemoteError::InvalidRequest)?;
+        let source_grants = Rc::clone(&grants);
+        routes
+            .register(
+                RouteKey::new(IDE_SOURCE, 1).expect("static route"),
+                Kind::Source,
+                move |command: AgentCommand, c: &Context| {
+                    let AgentCommand::Source(selection) = command else {
+                        return Err(RemoteError::InvalidRequest);
+                    };
+                    if !source_grants
+                        .get(&c.subject)
+                        .is_some_and(|g| g.projects.contains(&selection.project))
+                    {
+                        return Err(RemoteError::Forbidden);
+                    }
+                    forge_ide::remote_source::validate_selection(&selection)?;
+                    c.live()?;
+                    c.invoked.set(true);
+                    let document = sources.execute(selection)?;
+                    c.live()?;
+                    Ok(AgentResult::Source(document))
                 },
             )
             .map_err(|_| RemoteError::InvalidRequest)?;
@@ -252,13 +326,20 @@ impl Service {
                     },
                 }))
             }
-            AgentResult::Report(value) => Ok(AgentReply::Inspect(InspectReply {
+            AgentResult::Source(value) => Ok(AgentReply::Source(SourceReply {
+                responder: self.target.clone(),
+                response: Response {
+                    header: response.header,
+                    payload: value,
+                },
+            })),
+            AgentResult::Report(value) => Ok(AgentReply::Inspect(Box::new(InspectReply {
                 responder: self.target.clone(),
                 response: Response {
                     header: response.header,
                     payload: *value,
                 },
-            })),
+            }))),
         }
     }
 }
@@ -378,5 +459,79 @@ mod tests {
             )
             .unwrap();
         assert_eq!((n.get(), p.get()), (0, 1));
+    }
+    struct Sources(Rc<Cell<usize>>);
+    impl IoClient for Sources {
+        type Request = SourceSelection;
+        type Response = SourceDocument;
+        type Error = RemoteError;
+        fn execute(&self, selection: SourceSelection) -> Result<SourceDocument, RemoteError> {
+            self.0.set(self.0.get() + 1);
+            Ok(SourceDocument {
+                text: "ok".into(),
+                sha256: selection.sha256,
+            })
+        }
+    }
+    #[test]
+    fn source_admission_rejects_wrong_subject_project_variant_and_target_before_io() {
+        let reads = Rc::new(Cell::new(0));
+        let grants = BTreeMap::from([(
+            "reader".into(),
+            Grant {
+                node_info: false,
+                projects: BTreeSet::from([ProjectAlias::new("good").unwrap()]),
+            },
+        )]);
+        let service = Service::new_with_source(
+            Target::new("node", "run").unwrap(),
+            Nodes(Rc::new(Cell::new(0))),
+            Projects(Rc::new(Cell::new(0))),
+            Sources(Rc::clone(&reads)),
+            grants,
+        )
+        .unwrap();
+        let selection = |project: &str| SourceSelection {
+            project: ProjectAlias::new(project).unwrap(),
+            path: vec![Name::Utf8("file".into())],
+            sha256: forge_ide::source::digest(b"ok"),
+        };
+        let deadline = Instant::now() + Duration::from_secs(1);
+        for (subject, project) in [("forged", "good"), ("reader", "denied")] {
+            assert!(matches!(
+                service.dispatch_inner(
+                    call(IDE_SOURCE, AgentCommand::Source(selection(project))),
+                    subject,
+                    deadline
+                ),
+                Err(RemoteError::Forbidden)
+            ));
+        }
+        assert!(matches!(
+            service.dispatch_inner(
+                call(
+                    IDE_SOURCE,
+                    AgentCommand::Inspect(ProjectAlias::new("good").unwrap())
+                ),
+                "reader",
+                deadline
+            ),
+            Err(RemoteError::InvalidRequest)
+        ));
+        let mut wrong = call(IDE_SOURCE, AgentCommand::Source(selection("good")));
+        wrong.target = Target::new("wrong", "run").unwrap();
+        assert!(matches!(
+            service.dispatch_inner(wrong, "reader", deadline),
+            Err(RemoteError::WrongTarget)
+        ));
+        assert_eq!(reads.get(), 0);
+        service
+            .dispatch_inner(
+                call(IDE_SOURCE, AgentCommand::Source(selection("good"))),
+                "reader",
+                deadline,
+            )
+            .unwrap();
+        assert_eq!(reads.get(), 1);
     }
 }

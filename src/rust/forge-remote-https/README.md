@@ -229,3 +229,14 @@ original node endpoint regressions, real ephemeral-mTLS IDE round trips, policy
 rejection, response caps, expiry/uncertain results, strict codec negatives, idle
 polling and listener cleanup. Test keys exist only transiently; the normal library
 never generates credentials or modifies trust stores.
+
+## Source adapter (`ide` feature)
+
+`source::{register_source_client, SourceClientFactory, HttpsSourceClient, SourceCodec}`
+provides the typed `ide.source@1` adapter. Registration validates explicit transport
+configuration without I/O; factory creation builds the retained mTLS client. Calls
+carry an authorized project alias, bounded native-name components and the digest
+from inspection. Responses preserve target, request/correlation headers and exact
+UTF-8 bytes. The adapter verifies both the expected digest and the returned text's
+SHA-256 before publishing a result, with a 1 MiB source limit and bounded JSON.
+It does not open files, select projects or retry failed/changed reads.

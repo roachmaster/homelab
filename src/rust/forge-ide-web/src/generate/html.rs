@@ -59,6 +59,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children(items, out);
             out.push_str("</section>");
         }
+        Component::Region {
+            id,
+            children: items,
+        } => {
+            let _ = write!(out, "<div id=\"{}\" class=\"fg-region\">", escape(id));
+            children(items, out);
+            out.push_str("</div>");
+        }
         Component::Toolbar(items) | Component::Row(items) | Component::Workspace(items) => {
             out.push_str(match c {
                 Component::Toolbar(_) => "<div class=\"fg-toolbar\">",
@@ -168,18 +176,42 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             label,
             action,
             emphasis,
+            check_input,
         } => {
             let class = match emphasis {
                 ButtonEmphasis::Standard => "fg-button",
                 ButtonEmphasis::Primary => "fg-button fg-button-primary",
             };
+            let check = check_input.as_ref().map_or_else(String::new, |id| {
+                format!(" data-check-input=\"{}\"", escape(id))
+            });
             let _ = write!(
                 out,
-                "<button type=\"button\" class=\"{class}\" id=\"{}\" data-action=\"{}\" disabled>{}</button>",
+                "<button type=\"button\" class=\"{class}\" id=\"{}\" data-action=\"{}\"{check} disabled>{}</button>",
                 escape(id),
                 escape(action),
                 escape(label)
             );
+        }
+        Component::Navigation {
+            id,
+            title,
+            children: items,
+        } => {
+            let _ = write!(out, "<nav id=\"{}\" class=\"fg-toolbar fg-navigation\" aria-label=\"{}\" data-protected hidden>", escape(id), escape(title));
+            children(items, out);
+            out.push_str("</nav>");
+        }
+        Component::ReadingColumn(items) => {
+            out.push_str("<div class=\"fg-reading-column\">");
+            children(items, out);
+            out.push_str("</div>");
+        }
+        Component::Transcript { id, label } => {
+            let _ = write!(out, "<div id=\"{}\" class=\"fg-transcript\" role=\"region\" aria-label=\"{}\" tabindex=\"0\" data-transcript></div>", escape(id), escape(label));
+        }
+        Component::TextArea { id, label, action } => {
+            let _ = write!(out, "<label class=\"fg-field fg-textarea\" for=\"{id}\"><span>{}</span><textarea id=\"{id}\" rows=\"3\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" disabled></textarea></label>", escape(label), escape(action));
         }
         Component::Filter { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field fg-filter\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"search\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" maxlength=\"256\" disabled></label>",escape(label),escape(action));
@@ -197,6 +229,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
         Component::Tree { id, label } => {
             let _=write!(out,"<div id=\"{}\" class=\"fg-tree\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
+        }
+        Component::Source { id, label } => {
+            let _ = write!(out, "<pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre>", escape(id), escape(label));
+        }
+        Component::PaneLink { id, label, target } => {
+            let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-pane-link\" data-pane-reveal=\"{}\">{}</button>", escape(id), escape(target), escape(label));
         }
         Component::Details { id } | Component::Facts { id } => {
             let class = if matches!(c, Component::Facts { .. }) {

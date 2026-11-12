@@ -13,6 +13,7 @@ pub const MAX_PROJECTS: usize = 128;
 pub const MAX_DEPTH: usize = 64;
 pub const MAX_FILTER_BYTES: usize = 256;
 pub const MAX_PROBLEMS: usize = MAX_ENTRIES * 16;
+pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,13 +57,90 @@ pub struct PreparedInspection {
     pub contract_version: u16,
     pub expires_unix_ms: u64,
 }
+/// Source is addressed through an accepted report entry, never a caller path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedSource {
+    pub token: RequestToken,
+    pub report: RequestToken,
+    pub node_key: String,
+    pub target_node: String,
+    pub target_incarnation: String,
+    pub project: String,
+    pub destination: String,
+    pub contract_version: u16,
+    pub expires_unix_ms: u64,
+    pub entry: u32,
+}
+pub const MAX_CHAT_PROMPT_BYTES: usize = 2048;
+pub const MAX_CHAT_REPLY_BYTES: usize = 4096;
+pub const MAX_CHAT_TIMEOUT_MS: u64 = 26_000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatRole {
+    User,
+    Assistant,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatMessage {
+    pub role: ChatRole,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedChat {
+    pub request_id: String,
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChatOutcome {
+    Answer { content: String },
+    Error { category: FailureKind },
+}
+
+pub fn valid_chat_text(text: &str, max: usize) -> bool {
+    !text.trim().is_empty()
+        && text.len() <= max
+        && text
+            .chars()
+            .all(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t'))
+}
+
+pub fn valid_chat_messages(messages: &[ChatMessage]) -> bool {
+    !messages.is_empty()
+        && messages.len() % 2 == 1
+        && messages.len() <= 25
+        && messages
+            .iter()
+            .map(|message| message.content.len())
+            .sum::<usize>()
+            <= 7168
+        && messages.iter().enumerate().all(|(i, message)| {
+            if i % 2 == 0 {
+                message.role == ChatRole::User
+                    && valid_chat_text(&message.content, MAX_CHAT_PROMPT_BYTES)
+            } else {
+                message.role == ChatRole::Assistant
+                    && valid_chat_text(&message.content, MAX_CHAT_REPLY_BYTES)
+            }
+        })
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiEffect {
     Resume { request_id: String },
     Pair { request_id: String, code: String },
     Inspect { request: PreparedInspection },
+    Source { request: PreparedSource },
     Abort { token: RequestToken },
+    Chat { request: PreparedChat },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,6 +151,21 @@ pub struct Input {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiEvent {
+    OpenChat {},
+    OpenWorkbench {},
+    NewChat {},
+    SelectChat {
+        value: String,
+    },
+    SetChatDraft {
+        conversation: usize,
+        value: String,
+    },
+    SendChat {},
+    ChatResult {
+        request_id: String,
+        outcome: ChatOutcome,
+    },
     NetworkFailed {
         request_id: String,
         category: FailureKind,
@@ -124,6 +217,29 @@ pub enum UiEvent {
         entry: u32,
         value: String,
     },
+    SetProjectQuery {
+        report: RequestToken,
+        value: String,
+    },
+    SelectSearchResult {
+        report: RequestToken,
+        entry: u32,
+        declaration: Option<u32>,
+    },
+    MoreSource {
+        report: RequestToken,
+        entry: u32,
+    },
+    PreviousSource {
+        report: RequestToken,
+        entry: u32,
+    },
+    MoreSearch {
+        report: RequestToken,
+    },
+    PreviousSearch {
+        report: RequestToken,
+    },
     MoreTree {
         report: RequestToken,
     },
@@ -153,6 +269,37 @@ pub enum UiEvent {
     Result {
         result: ResultEvent,
     },
+    SourceResult {
+        result: SourceResultEvent,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceResultEvent {
+    pub protocol_version: u16,
+    pub token: RequestToken,
+    pub report: RequestToken,
+    pub node_key: String,
+    pub project: String,
+    pub entry: u32,
+    pub outcome: SourceOutcome,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceOutcome {
+    Source {
+        document: SourceDocument,
+    },
+    Error {
+        category: FailureKind,
+        message: String,
+    },
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceDocument {
+    pub text: String,
+    pub sha256: String,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

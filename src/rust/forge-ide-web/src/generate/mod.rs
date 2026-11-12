@@ -52,6 +52,7 @@ pub struct RequestBinding {
     pub headers: Vec<HeaderBinding>,
     pub csrf: bool,
     pub deadline: Option<String>,
+    pub timeout_ms: Option<u32>,
     pub accept_events: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize)]
@@ -79,6 +80,7 @@ impl Transport {
                 || b.accept_events.is_empty()
                 || b.accept_events.len() > 8
                 || b.accept_events.iter().any(|v| !component::key(v))
+                || b.timeout_ms.is_some_and(|ms| !(100..=30_000).contains(&ms))
                 || b.deadline.as_ref().is_some_and(|v| !path(v))
             {
                 return Err("invalid request binding");
@@ -248,7 +250,7 @@ impl Factory<AssetBundle> for AssetFactory {
         ]);
         let manifest = Manifest {
             format_version: 1,
-            abi_version: 2,
+            abi_version: 4,
             files: files
                 .iter()
                 .map(|(path, bytes)| ManifestFile {

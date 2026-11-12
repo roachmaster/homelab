@@ -249,7 +249,7 @@ fn command(
         request_id,
     )
     .map_err(|_| Rejection::Invalid)?;
-    let (target, expiry) = if destination == "ide.inspect" {
+    let (target, expiry) = if matches!(destination, "ide.inspect" | "ide.source") {
         (
             Some((
                 required(r, "forge-target-node")?.to_owned(),
