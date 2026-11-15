@@ -154,6 +154,34 @@ fn post(host: &Host, destination: &str, body: Value, extra: &str) -> String {
     let body = body.to_string();
     format!("POST /forge/v1/dispatch HTTP/1.1\r\nHost: {}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nForge-Envelope-Version: 1\r\nForge-Contract-Version: 1\r\nForge-Request-Id: request-1\r\nForge-Destination: {}\r\n{}\r\n{}",host.origin().split_once("://").unwrap().1,host.origin(),body.len(),destination,extra,body)
 }
+fn workspace_post(host: &Host, body: &Value, auth: Option<(&str, &str)>) -> String {
+    let body = body.to_string();
+    let authority = host.origin().split_once("://").unwrap().1;
+    let auth = auth.map_or_else(String::new, |(cookie, csrf)| {
+        format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n")
+    });
+    format!(
+        "POST /forge/v1/dispatch/workspace HTTP/1.1\r\nHost: {authority}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth}\r\n{body}",
+        host.origin(),
+        body.len(),
+    )
+}
+
+fn workspace_reply(host: &Host, body: Value, auth: (&str, &str)) -> Value {
+    let response = exchange(host, workspace_post(host, &body, Some(auth)));
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(headers
+        .lines()
+        .any(|line| line == "Cache-Control: no-store"));
+    serde_json::from_str(body).unwrap()
+}
+
+fn workspace_snapshot(draft: &str) -> Value {
+    json!({"chat":{"selected":0,"conversations":[{"messages":[],"draft":draft}]},
+           "workbench":null,"workbench_open":false})
+}
+
 fn paired(host: &Host) -> (String, String, String) {
     let r = exchange(
         host,
@@ -796,6 +824,150 @@ fn wrong_origin_host_duplicate_headers_and_method_fail_closed() {
     assert_eq!(calls.get(), 0);
     assert!(h.pairing_code().is_some());
 }
+
+#[test]
+fn workspace_checkpoint_requires_session_csrf_origin_and_a_bounded_body() {
+    let files = Files::new();
+    let (host, calls) = host(&files);
+    let (cookie, csrf, _) = paired(&host);
+    let restore = json!({"operation":"restore","tab":"a".repeat(32)});
+    let good = workspace_post(&host, &restore, Some((&cookie, &csrf)));
+    for (request, status) in [
+        (workspace_post(&host, &restore, None), 401),
+        (
+            workspace_post(&host, &restore, Some(("forge_ui=wrong", &csrf))),
+            401,
+        ),
+        (
+            workspace_post(&host, &restore, Some((&cookie, "wrong"))),
+            401,
+        ),
+        (good.replace(&format!("Forge-CSRF: {csrf}\r\n"), ""), 401),
+        (
+            good.replace(
+                &format!("Origin: {}", host.origin()),
+                "Origin: https://different.example",
+            ),
+            400,
+        ),
+        (
+            good.replace(&format!("Origin: {}\r\n", host.origin()), ""),
+            400,
+        ),
+        (
+            workspace_post(
+                &host,
+                &json!({"operation":"restore","tab":"A".repeat(32)}),
+                Some((&cookie, &csrf)),
+            ),
+            400,
+        ),
+    ] {
+        let reply = exchange(&host, request);
+        assert!(reply.starts_with(&format!("HTTP/1.1 {status} ")), "{reply}");
+        assert!(reply.contains("\r\nCache-Control: no-store\r\n"));
+    }
+
+    // An oversized Content-Length is rejected before the host waits for its body.
+    let (headers, _) = good.split_once("\r\n\r\n").unwrap();
+    let oversized = headers.replace(
+        &format!("Content-Length: {}", restore.to_string().len()),
+        &format!("Content-Length: {}", 2 * 1024 * 1024 + 1),
+    ) + "\r\n\r\n";
+    assert!(exchange(&host, oversized).starts_with("HTTP/1.1 413 "));
+
+    let loaded = workspace_reply(&host, restore, (&cookie, &csrf));
+    assert!(loaded["lease"]
+        .as_str()
+        .is_some_and(|lease| !lease.is_empty()));
+    assert_eq!(loaded["snapshot"], Value::Null);
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn workspace_checkpoint_isolates_tabs_and_keeps_the_newest_revision_across_resume() {
+    let files = Files::new();
+    let mut settings = config(&files);
+    settings.public_origin = Some("https://portal.example.com".into());
+    settings.session_auth = SessionAuth::TrustedProxy;
+    let (host, calls) = host_with_config(settings);
+    let (cookie, csrf, epoch) = resumed(&host, None);
+    let auth = (cookie.as_str(), csrf.as_str());
+    let first_tab = "a".repeat(32);
+    let second_tab = "b".repeat(32);
+    let restore = |tab: &str| json!({"operation":"restore","tab":tab});
+    let save = |tab: &str, lease: &str, revision: u32, snapshot: &Value| json!({"operation":"save","tab":tab,"lease":lease,"revision":revision,"snapshot":snapshot});
+
+    let first = workspace_reply(&host, restore(&first_tab), auth);
+    let first_lease = first["lease"].as_str().unwrap();
+    assert_eq!(first["snapshot"], Value::Null);
+    let mut latest = workspace_snapshot("Newest draft in first tab");
+    let long_conversation = json!({"messages":[
+        {"role":"user","content":"p".repeat(2048)},
+        {"role":"assistant","content":"a".repeat(4096)},
+        {"role":"user","content":"f".repeat(1024)},
+        {"role":"assistant","content":"b".repeat(4096)}
+    ],"draft":""});
+    latest["chat"]["conversations"]
+        .as_array_mut()
+        .unwrap()
+        .extend([long_conversation.clone(), long_conversation]);
+    assert!(latest.to_string().len() > HostLimits::default().request_bytes);
+    let older = workspace_snapshot("Out-of-order draft");
+    for (revision, snapshot) in [(2, &latest), (1, &older), (2, &older)] {
+        assert_eq!(
+            workspace_reply(
+                &host,
+                save(&first_tab, first_lease, revision, snapshot),
+                auth
+            ),
+            json!({})
+        );
+    }
+
+    let second = workspace_reply(&host, restore(&second_tab), auth);
+    let second_lease = second["lease"].as_str().unwrap();
+    assert_eq!(second["snapshot"], Value::Null);
+    assert_ne!(second_lease, first_lease);
+    let cross_tab = save(&second_tab, first_lease, 3, &older);
+    assert!(
+        exchange(&host, workspace_post(&host, &cross_tab, Some(auth))).starts_with("HTTP/1.1 401 ")
+    );
+    let other = workspace_snapshot("Second tab draft");
+    assert_eq!(
+        workspace_reply(&host, save(&second_tab, second_lease, 1, &other), auth),
+        json!({})
+    );
+
+    assert_eq!(
+        resumed(&host, Some(&cookie)),
+        (cookie.clone(), csrf.clone(), epoch)
+    );
+    let reloaded = workspace_reply(&host, restore(&first_tab), auth);
+    let new_lease = reloaded["lease"].as_str().unwrap();
+    assert_ne!(new_lease, first_lease);
+    assert_eq!(reloaded["snapshot"], latest);
+    let delayed = save(&first_tab, first_lease, u32::MAX, &older);
+    assert!(
+        exchange(&host, workspace_post(&host, &delayed, Some(auth))).starts_with("HTTP/1.1 401 ")
+    );
+    let mut invalid = latest.clone();
+    invalid["chat"]["selected"] = 7.into();
+    let invalid = save(&first_tab, new_lease, 1, &invalid);
+    assert!(
+        exchange(&host, workspace_post(&host, &invalid, Some(auth))).starts_with("HTTP/1.1 400 ")
+    );
+    assert_eq!(
+        workspace_reply(&host, restore(&first_tab), auth)["snapshot"],
+        latest
+    );
+    assert_eq!(
+        workspace_reply(&host, restore(&second_tab), auth)["snapshot"],
+        other
+    );
+    assert_eq!(calls.get(), 0);
+}
+
 #[test]
 fn pairing_is_one_use_and_attempts_bounded() {
     let f = Files::new();

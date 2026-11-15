@@ -89,12 +89,14 @@ const localActions = ['select_entry', 'toggle_entry', 'select_declaration', 'sel
 // request headers, cookies or network bodies. Nothing in this probe is an artifact.
 async function observe(context) {
   const counts = new Map();
+  const inspectionIds = new Set();
   context.on('request', request => {
     if (new URL(request.url()).pathname !== '/forge/v1/dispatch') return;
     let kind;
     try { kind = request.postDataJSON()?.kind; } catch { kind = 'invalid'; }
     if (!['resume', 'pair', 'inspect', 'source'].includes(kind)) kind = 'other';
     counts.set(kind, (counts.get(kind) || 0) + 1);
+    if (kind === 'inspect') inspectionIds.add(request.headers()['forge-request-id']);
   });
   await context.addInitScript(kinds => {
     const allowed = new Set(kinds);
@@ -145,18 +147,34 @@ async function observe(context) {
       clear() { probe.actions.clear(); probe.saved.clear(); probe.worker = null; },
     };
   }, localActions);
-  return { count: kind => counts.get(kind) || 0 };
+  return { count: kind => counts.get(kind) || 0, uniqueInspections: () => inspectionIds.size };
 }
-async function connect(context, fixture, autoLoad = false) {
+const beforeForgeUrl = 'data:text/html,<!doctype html><title>Forge QA previous page</title>';
+const retainedChatDraft = 'Draft for the other conversation';
+
+async function connect(context, fixture, autoLoad = false, beforeWorkbench) {
   report.ensureActive();
   const page = await context.newPage();
   fixture.page = page;
   const errors = [];
+  let expectsLeaveWarning = false;
   page.on('pageerror', () => { if (errors.length < 64) errors.push('page runtime error'); });
   page.on('dialog', dialog => {
+    if (expectsLeaveWarning && dialog.type() === 'beforeunload') return;
     if (errors.length < 64) errors.push('unexpected script dialog');
     void dialog.dismiss().catch(() => { if (errors.length < 64) errors.push('dialog dismissal failed'); });
   });
+  async function respondToLeaveWarning(navigate, decision) {
+    expectsLeaveWarning = true;
+    try {
+      const response = page.waitForEvent('dialog', { predicate: dialog => dialog.type() === 'beforeunload', timeout: 5000 })
+        .then(dialog => decision === 'leave' ? dialog.accept() : dialog.dismiss());
+      await Promise.all([response, navigate()]);
+    } finally {
+      expectsLeaveWarning = false;
+    }
+  }
+  if (beforeWorkbench) await page.goto(beforeForgeUrl);
   await page.goto(fixture.origin, { waitUntil: 'domcontentloaded' });
   await check(page.locator('#pair')).toBeEnabled();
   await check(page.locator('#files [role="treeitem"]')).toHaveCount(0);
@@ -167,6 +185,7 @@ async function connect(context, fixture, autoLoad = false) {
   await check(page.locator('#chat')).toBeVisible();
   await check(page.locator('#workbench')).toBeHidden();
   await check(page.locator('#workbench-context')).toBeHidden();
+  if (beforeWorkbench) await beforeWorkbench(page, respondToLeaveWarning);
   await page.locator('#open-workbench').click();
   await check(page.locator('#status')).toContainText(autoLoad ? 'Partial inspection:' : 'Connected.');
   await check(page.locator('#pair-code')).toHaveValue('');
@@ -178,7 +197,17 @@ async function connect(context, fixture, autoLoad = false) {
   await check(page.locator('#node')).toBeHidden();
   await check(page.locator('#project')).toBeHidden();
   assert.equal(page.workers().length, 1, 'one real dedicated WASM worker');
-  return { page, errors };
+  return { page, errors, respondToLeaveWarning };
+}
+function checkpointSaved(page, matches) {
+  return page.waitForResponse(response => {
+    if (!response.ok() || new URL(response.url()).pathname !== '/forge/v1/dispatch/workspace') return false;
+    const command = response.request().postDataJSON();
+    return command?.operation === 'save' && matches(command.snapshot);
+  }, { timeout: 10000 });
+}
+function checkpointHasDraft(snapshot, draft) {
+  return snapshot?.chat?.conversations?.some(conversation => conversation.draft === draft) === true;
 }
 function fileRow(page, name) {
   return page.locator('#files [role="treeitem"]').filter({ has: page.getByText(name, { exact: true }) });
@@ -815,7 +844,7 @@ async function delayedPaneContextProbe(page, traffic) {
   await page.setViewportSize({ width: 1440, height: 1000 });
 }
 
-async function reportAndPageLifecycle(page, traffic) {
+async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   report.start('probe.report.stale_actions');
   await delayedPaneContextProbe(page, traffic);
   await filterFiles(page, LONG_FILE_NAME);
@@ -830,16 +859,28 @@ async function reportAndPageLifecycle(page, traffic) {
   await noSelectedFileFromPriorReport(page);
   const rows = await page.locator('#files [role="treeitem"]').count();
   const target = fileRow(page, 'README <safe>.md');
+  const saved = checkpointSaved(page, snapshot => snapshot.workbench_open &&
+    checkpointHasDraft(snapshot, retainedChatDraft) && snapshot.workbench?.entry?.path.at(-1)?.value === 'README <safe>.md');
   for (let i = 0; i < 3; i += 1) {
     await target.click();
     await check(target).toBeFocused();
     await check(page.locator('#files [role="treeitem"]')).toHaveCount(rows);
   }
+  await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
+  await saved;
   report.pass('probe.report.stale_actions');
   report.start('probe.page.lifecycle');
 
-  let before = traffic.count('resume');
-  const inspectBefore = traffic.count('inspect');
+  const requestCounts = () => ['resume', 'inspect', 'source'].map(traffic.count);
+  async function checkRestoredWorkbench(before) {
+    await check(page.locator('#workbench')).toBeVisible();
+    await check(page.locator('#selection-title')).toContainText('README <safe>.md');
+    await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
+    assert.deepEqual(requestCounts(), before.map(count => count + 1),
+      'workspace restore authenticates, inspects, and verifies source afresh');
+    assert.equal(page.workers().length, 1);
+  }
+  let before = requestCounts();
   const cleared = await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
     return {
@@ -852,6 +893,9 @@ async function reportAndPageLifecycle(page, traffic) {
       hidden: document.getElementById('workbench').hidden,
       contextHidden: document.getElementById('workbench-context').hidden,
       contextText: document.getElementById('workbench-context').textContent,
+      source: document.getElementById('source-view').textContent,
+      transcript: document.getElementById('chat-transcript').textContent,
+      draft: document.getElementById('chat-draft').value,
     };
   });
   assert.equal(cleared.options, 0, 'teardown synchronously clears protected catalog DOM');
@@ -863,32 +907,55 @@ async function reportAndPageLifecycle(page, traffic) {
   assert.equal(cleared.hidden, true, 'teardown hides protected composition before resume');
   assert.equal(cleared.contextHidden, true, 'teardown hides project context before resume');
   assert.equal(cleared.contextText, '', 'teardown clears project context before resume');
+  assert.equal(cleared.source, '', 'teardown clears verified source before resume');
+  assert.equal(cleared.transcript, '', 'teardown clears the transcript before resume');
+  assert.equal(cleared.draft, '', 'teardown clears the draft before resume');
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
   });
-  await check(page.locator('#status')).toContainText('Connected.');
-  await noReport(page);
-  assert.equal(traffic.count('resume'), before + 1, 'repeated pageshow starts one fresh Resume');
-  assert.equal(traffic.count('inspect'), inspectBefore, 'return never replays an inspection');
-  assert.equal(page.workers().length, 1);
-  before = traffic.count('resume');
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await check(page.locator('#status')).toContainText('Connected.');
-  await noReport(page);
-  assert.equal(traffic.count('resume'), before + 1);
-  assert.equal(traffic.count('inspect'), inspectBefore);
-  assert.equal(page.workers().length, 1);
-  await page.goto('about:blank');
-  await page.goBack({ waitUntil: 'domcontentloaded' });
-  await check(page.locator('#status')).toContainText('Connected.');
-  await noReport(page);
-  assert.equal(traffic.count('inspect'), inspectBefore, 'browser leave/return never restores the old report');
-  assert.equal(page.workers().length, 1);
+  await checkRestoredWorkbench(before);
+  process.stderr.write('QA_CHECK native_back_warning\n');
+  await page.locator('#workbench-context').click();
+  before = requestCounts();
+  const forgeUrl = page.url();
+  await respondToLeaveWarning(() => page.evaluate(() => history.back()), 'stay');
+  await check(page).toHaveURL(forgeUrl);
+  await check(page.locator('#selection-title')).toContainText('README <safe>.md');
+  assert.deepEqual(requestCounts(), before, 'dismissing Back keeps the current session and report');
+  await respondToLeaveWarning(() => page.evaluate(() => history.back()), 'leave');
+  await check(page).toHaveURL(beforeForgeUrl);
+  process.stderr.write('QA_CHECK forward_restore\n');
+  await page.goForward({ waitUntil: 'domcontentloaded' });
+  await checkRestoredWorkbench(before);
+  process.stderr.write('QA_CHECK reload_restore\n');
+  await page.locator('#workbench-context').click();
+  before = requestCounts();
+  await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+  await checkRestoredWorkbench(before);
+  await page.locator('#open-chat').click();
   await check(page.locator('#chat')).toBeVisible();
+  const conversations = page.locator('#chat-conversation');
+  await check(conversations).toHaveValue('1');
+  await check(page.locator('#chat-draft')).toHaveValue(retainedChatDraft);
+  await conversations.selectOption('0');
+  await check(page.locator('#chat-transcript')).toContainText('Original conversation');
+  await check(page.locator('#chat-transcript [data-role="assistant"]')).toHaveCount(2);
   await page.locator('#open-workbench').click();
-  assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0, 'no report/session secrets in browser storage');
+  assert.equal(await page.evaluate(() => localStorage.length === 0 && sessionStorage.length === 1 &&
+    /^[0-9a-f]{32}$/.test(sessionStorage.getItem('forge-workspace-tab') ?? '')), true,
+  'browser storage contains only the opaque same-tab checkpoint identifier');
   assert.equal(new URL(page.url()).search, '', 'no report/session state in URL');
+  const otherTab = await page.context().newPage();
+  try {
+    await otherTab.goto(page.url(), { waitUntil: 'domcontentloaded' });
+    await check(otherTab.locator('#chat')).toBeVisible();
+    await check(otherTab.locator('#chat-draft')).toHaveValue('');
+    await check(otherTab.locator('#chat-conversation option')).toHaveCount(1);
+    await noReport(otherTab);
+  } finally {
+    await otherTab.close();
+  }
   report.pass('probe.page.lifecycle');
 }
 async function noSelectedFileFromPriorReport(page) {
@@ -904,7 +971,7 @@ async function sourceSearchJourney() {
   const context = await browser.newContext({ viewport: { width: 390, height: 664 } });
   try {
     const traffic = await observe(context);
-    const { page, errors } = await connect(context, fixture, true);
+    const { page, errors, respondToLeaveWarning } = await connect(context, fixture, true);
     await projectOptionsJourney(page, traffic);
     process.stderr.write('QA_CHECK source_search_connected\n');
     assert.equal(traffic.count('inspect'), 1, 'one admitted project opens automatically');
@@ -953,6 +1020,8 @@ async function sourceSearchJourney() {
     assert.equal(traffic.count('source'), pageReads, 'source paging reuses the exact accepted file');
     await page.getByRole('button', { name: 'Back to files', exact: true }).click();
     await page.locator('#project-query').fill('late_view');
+    const saved = checkpointSaved(page, snapshot => snapshot.workbench_open &&
+      snapshot.workbench?.entry?.declaration.at(-1)?.name === 'late_view');
     await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'late_view' }).click();
     const lateLine = page.locator('#source-view [data-line="300"]');
     await check(lateLine).toHaveAttribute('data-highlight', 'true');
@@ -962,13 +1031,16 @@ async function sourceSearchJourney() {
     })).toBeLessThan(3);
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     await check(page.locator('#source-view [data-line="301"]')).toBeInViewport();
+    await saved;
     const beforeReload = traffic.count('inspect');
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await check(page.locator('#chat')).toBeVisible();
-    await page.locator('#open-workbench').click();
+    const sourceBeforeReload = traffic.count('source');
+    await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+    await check(page.locator('#workbench')).toBeVisible();
     await check(page.locator('#status')).toContainText('Partial inspection:');
-    await check(page.locator('#source-view')).toHaveText('');
+    await check(lateLine).toHaveAttribute('data-highlight', 'true');
+    await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     assert.equal(traffic.count('inspect'), beforeReload + 1, 'reload obtains a fresh single-project report');
+    assert.equal(traffic.count('source'), sourceBeforeReload + 1, 'reload re-verifies the bookmarked declaration source');
     assert.deepEqual(errors, []);
   } catch (error) {
     const location = String(error.stack).match(/journey\.mjs:(\d+):(\d+)/);
@@ -1025,7 +1097,7 @@ async function chatJourney(page, context) {
     await page.locator('#new-chat').click();
     await check(select).toHaveValue('1');
     await check(transcript).not.toContainText('Original conversation');
-    await draft.fill('Draft for the other conversation');
+    await draft.fill(retainedChatDraft);
     release();
     await check(send).toBeEnabled();
     await check(transcript).not.toContainText('Reply');
@@ -1062,7 +1134,7 @@ async function chatJourney(page, context) {
       'Original conversation', replyMarkdown, 'Follow-up',
     ]);
     await select.selectOption('1');
-    await check(draft).toHaveValue('Draft for the other conversation');
+    await check(draft).toHaveValue(retainedChatDraft);
     await screenshot(page, 'ide-chat-desktop.png');
     await page.setViewportSize({ width: 390, height: 664 });
     await check(page.locator('#new-chat')).toBeInViewport();
@@ -1085,8 +1157,25 @@ async function realJourney() {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
   report.setStage('scenario');
   const traffic = await observe(context);
-  const { page, errors } = await connect(context, fixture);
-  assert.equal(traffic.count('resume'), 1, 'startup resumes once');
+  const { page, errors, respondToLeaveWarning } = await connect(context, fixture, false, async (page, withWarning) => {
+    assert.equal(traffic.count('resume'), 1, 'startup resumes once');
+    const forgeUrl = page.url();
+    await page.goBack({ waitUntil: 'domcontentloaded' });
+    await check(page).toHaveURL(beforeForgeUrl);
+    await page.goForward({ waitUntil: 'domcontentloaded' });
+    await check(page.locator('#chat')).toBeVisible();
+    assert.equal(traffic.count('resume'), 2, 'clean Forward reconnects once');
+    const draft = page.locator('#chat-draft');
+    await draft.click();
+    await page.keyboard.type('Unsent Back draft');
+    await check(page.locator('#send-chat')).toBeEnabled();
+    await withWarning(() => page.evaluate(() => history.back()), 'stay');
+    await check(page).toHaveURL(forgeUrl);
+    await check(draft).toHaveValue('Unsent Back draft');
+    await draft.fill('');
+    await check(page.locator('#send-chat')).toBeDisabled();
+  });
+  assert.deepEqual(errors, [], 'clean Back does not prompt and native draft warning only occurs when expected');
   assert.equal(traffic.count('pair'), 1, 'one explicit pairing request');
   await projectOptionsJourney(page, traffic);
   await chatJourney(page, context);
@@ -1143,7 +1232,7 @@ async function realJourney() {
   await keyboardAndFilters(page, traffic);
   await panesAndNarrow(page, traffic);
   await deviceViewportJourney(page, traffic);
-  await reportAndPageLifecycle(page, traffic);
+  await reportAndPageLifecycle(page, traffic, respondToLeaveWarning);
   report.start('real.report.empty');
 
   const beforeSelection = traffic.count('inspect');
@@ -1245,7 +1334,7 @@ async function controlledLifecycleJourney() {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   report.setStage('scenario');
   const traffic = await observe(context);
-  const { page, errors } = await connect(context, fixture);
+  const { page, errors, respondToLeaveWarning } = await connect(context, fixture);
   await selectProject(page, 'slow');
   await disclosure(page, 'project-options', false);
   const before = traffic.count('inspect');
@@ -1289,19 +1378,22 @@ async function controlledLifecycleJourney() {
   report.pass('injected.requests.revisions');
   report.start('injected.requests.refresh_focus');
 
+  const pendingBookmark = checkpointSaved(page, snapshot => snapshot.workbench_open && snapshot.workbench?.project === 'slow');
   await selectProject(page, 'slow');
+  await pendingBookmark;
   await page.locator('#inspect').click();
   await check(page.locator('#status')).toContainText('Inspecting');
   const refreshRequests = traffic.count('inspect');
   const refreshResumes = traffic.count('resume');
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await check(page.locator('#status')).toContainText('Connected.');
-  await noReport(page);
-  assert.equal(traffic.count('inspect'), refreshRequests, 'refresh during work never replays Inspect');
+  const refreshIdentities = traffic.uniqueInspections();
+  await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+  await check(page.locator('#workbench')).toBeVisible();
+  await check(page.locator('#status')).toContainText('Project ready.');
+  await check(page.locator('#source-view')).toHaveText('');
+  assert.equal(traffic.count('inspect'), refreshRequests + 1, 'refresh performs one fresh inspection of the bookmarked project');
+  assert.equal(traffic.uniqueInspections(), refreshIdentities + 1, 'refresh does not replay the previous inspection identity');
   assert.equal(traffic.count('resume'), refreshResumes + 1);
   assert.equal(page.workers().length, 1);
-  await check(page.locator('#chat')).toBeVisible();
-  await page.locator('#open-workbench').click();
   await selectProject(page, 'slow');
   await page.locator('#inspect').click();
   await check(page.locator('#status')).toContainText('Inspecting');
@@ -1311,12 +1403,49 @@ async function controlledLifecycleJourney() {
   report.pass('injected.requests.refresh_focus');
   report.start('injected.failures.unavailable_timeout');
 
+  const recoveryDraft = 'Keep this draft through explicit reload';
+  await page.locator('#open-chat').click();
+  const reloadDraft = page.locator('#chat-draft');
+  await reloadDraft.fill(recoveryDraft);
+  await check(page.locator('#send-chat')).toBeEnabled();
+  await page.locator('#open-workbench').click();
+  const reloadBookmark = checkpointSaved(page, snapshot => snapshot.workbench_open &&
+    snapshot.workbench?.project === 'unavailable' && checkpointHasDraft(snapshot, recoveryDraft));
   await inspect(page, 'unavailable', 'node observation unavailable');
   await noReport(page);
   await check(page.locator('#inspect')).toBeEnabled();
   const failedCount = traffic.count('inspect');
   await delay(250);
   assert.equal(traffic.count('inspect'), failedCount, 'unavailable does not auto-retry');
+  await reloadBookmark;
+  process.stderr.write('QA_CHECK explicit_reload_confirmation\n');
+  const recovery = page.locator('#reload-session');
+  const leaveDialog = page.locator('#leave-confirmation');
+  const beforeRecovery = traffic.count('resume');
+  await recovery.click();
+  await check(leaveDialog).toBeVisible();
+  await check(leaveDialog.getByRole('heading', { name: 'Leave this page?' })).toBeVisible();
+  await check(leaveDialog).toContainText('Forge will reload and try to restore your workspace. Any work that hasn’t been saved may be lost.');
+  const stay = leaveDialog.getByRole('button', { name: 'Stay', exact: true });
+  await check(stay).toBeFocused();
+  await stay.click();
+  await check(leaveDialog).toBeHidden();
+  await check(page.locator('#status')).toContainText('node observation unavailable');
+  assert.equal(traffic.count('resume'), beforeRecovery, 'Stay does not reload the document');
+  await recovery.click();
+  await check(leaveDialog).toBeVisible();
+  await Promise.all([
+    page.waitForEvent('domcontentloaded'),
+    leaveDialog.getByRole('button', { name: 'Leave', exact: true }).click(),
+  ]);
+  await check(page.locator('#workbench')).toBeVisible();
+  await check(page.locator('#status')).toContainText('node observation unavailable');
+  assert.equal(traffic.count('resume'), beforeRecovery + 1, 'Leave reloads once without a native double prompt');
+  await page.locator('#open-chat').click();
+  await check(reloadDraft).toHaveValue(recoveryDraft);
+  await reloadDraft.fill('');
+  await check(page.locator('#send-chat')).toBeDisabled();
+  await page.locator('#open-workbench').click();
   await inspect(page, 'timeout', 'Deadline expired');
   await check(page.locator('#inspect')).toBeEnabled();
   await noReport(page);
@@ -1327,7 +1456,9 @@ async function controlledLifecycleJourney() {
   report.pass('injected.failures.unavailable_timeout');
   report.start('probe.worker.fatal');
 
+  const fatalBookmark = checkpointSaved(page, snapshot => snapshot.workbench_open && snapshot.workbench?.project === 'workspace');
   await inspect(page, 'workspace', 'Project ready.');
+  await fatalBookmark;
   // Controlled adapter fatal path, not a claim of spontaneous ABI failure.
   // Calls the real generated worker's fail-closed routine after real WASM data.
   const worker = page.workers()[0];
@@ -1345,9 +1476,9 @@ async function controlledLifecycleJourney() {
   await screenshot(page, 'ide-controlled-fatal.png');
   report.pass('probe.worker.fatal');
   report.start('injected.catalog.empty');
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await check(page.locator('#status')).toContainText('Connected.');
-  await noReport(page);
+  await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+  await check(page.locator('#status')).toContainText('Project ready.');
+  await check(page.locator('#source-view')).toHaveText('');
   assert.equal(page.workers().length, 1);
 
   // Production HostConfig deliberately forbids a node with zero configured
@@ -1361,9 +1492,10 @@ async function controlledLifecycleJourney() {
     for (const node of body.event.catalog.nodes) node.projects = [];
     await route.fulfill({ response, json: body });
   });
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.locator('#workbench-context').click();
+  await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
   await check(page.locator('#status')).toContainText('Connected.');
-  await page.locator('#open-workbench').click();
+  await check(page.locator('#workbench')).toBeVisible();
   await check(page.locator('#workbench')).toContainText(/No allowed project/i);
   await check(page.locator('#inspect')).toBeDisabled();
   await check(page.locator('#project option')).toHaveCount(0);
@@ -1379,7 +1511,7 @@ async function controlledLifecycleJourney() {
   report.start('probe.session.missing');
 
   await context.clearCookies();
-  await page.reload({ waitUntil: 'domcontentloaded' });
+  await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
   await check(page.locator('#pair')).toBeEnabled();
   await check(page.locator('#connection')).toBeVisible();
   await check(page.locator('#workbench')).toBeHidden();

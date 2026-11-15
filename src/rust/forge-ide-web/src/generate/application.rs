@@ -159,7 +159,8 @@ pub fn ide_transport() -> Transport {
                 request_id: "request_id".into(),
                 headers: resume,
                 csrf: false,
-                timeout_ms: None,
+                // A returning tab can be queued behind its interrupted inference.
+                timeout_ms: Some(30_000),
                 deadline: None,
                 accept_events: vec!["paired".into(), "pair_failed".into()],
             },

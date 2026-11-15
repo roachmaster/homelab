@@ -70,12 +70,11 @@ Outline, Problems and pane switches provide local navigation. This deliberately
 avoids treating report-local integer IDs as stable cross-refresh addresses.
 
 Browser Back/Forward keeps normal browser behavior and may leave the document.
-Existing `pagehide` tears down the worker; a restored page starts a fresh worker
-and resumes its host session. Refresh also obtains a fresh admitted catalog,
-selects its current default node/project and starts with no report. Neither action
-replays an inspection or restores an old report automatically. If resumable
-navigation/deep links are later requested, design stable identifiers and privacy
-rules separately rather than serializing current view state into URLs.
+Browsers can warn if the operator has an open workspace. `pagehide` tears down the
+worker. A returning page starts a fresh worker, resumes its host session and
+recovers the last saved Chat state and Workbench bookmark for that tab. The
+bookmark is resolved against a fresh admitted catalog and inspection. Source
+still goes through the usual digest verification.
 
 Generated presentation clears protected DOM during teardown and before session
 recheck, including browser-cache restoration. Fatal worker recovery clears content
@@ -86,9 +85,10 @@ entry/declaration, expansions, filters and pagination **within the same accepted
 report**. Geometry, scroll and focus can survive pane closure/reopening in memory.
 A new inspection, node/project change, session replacement or teardown invalidates
 report-scoped selection and diagnostic references. Do not carry them to a new
-report even when it happens to reuse entry `0`. First slice adds no localStorage,
-report cache or cross-tab state. Pairing codes, CSRF, session identifiers, reports
-and protected aliases must not be copied into URLs/history/storage/logs.
+report even when it happens to reuse entry `0`. The checkpoint stays in active
+host session memory. Browser session storage contains only the opaque tab
+identifier. Pairing codes, CSRF, session identifiers, reports, chat content and
+protected aliases stay out of browser URLs, history, storage and logs.
 
 ## Implemented module map
 

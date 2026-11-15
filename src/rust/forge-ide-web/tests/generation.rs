@@ -251,7 +251,6 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
         "set_file_filter",
         "session_epoch",
         "localStorage",
-        "sessionStorage",
         "history.pushState",
         "fetch(",
     ] {
@@ -260,11 +259,14 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
             "application semantics/unsafe storage in primitive: {forbidden}"
         );
     }
+    assert_eq!(main.matches("sessionStorage.").count(), 2);
+    assert!(main.contains("sessionStorage.getItem(key)"));
+    assert!(main.contains("sessionStorage.setItem(key,tab)"));
+    assert!(main.contains("const key='forge-workspace-tab'"));
     assert!(main.contains("{...action,value}"));
-    assert!(main.contains("window.addEventListener('pagehide',stop)"));
-    assert!(
-        main.contains("function start(){\n  if(worker||fatalState)return;\n  clearProtected();")
-    );
+    assert!(main.contains("window.addEventListener('pagehide',()=>{"));
+    assert!(main.contains("if(leaveDialog?.open)leaveDialog.close();\n  stop();"));
+    assert!(main.contains("leaving=false;\n  clearProtected();"));
     assert!(main.contains("if(old)old.terminate();clearProtected();"));
     assert!(main.contains("if(worker!==owned||fatalState)return"));
     assert!(main.contains("function fatal(message)"));

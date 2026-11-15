@@ -89,8 +89,11 @@ while repeating a file selection can deliberately reopen the same File pane.
 Report/entry context changes discard obsolete row focus keys. Filter inputs retain
 bounded in-flight presentation drafts until the matching worker acknowledgment;
 an old view cannot erase newer typing. A new context, disabled input or teardown
-clears the draft. No History API, deep links, localStorage, persistent report cache
-or cross-tab synchronization exists.
+clears the filter draft. After navigation, an admitted tab can recover its
+selected project, file and declaration from an in-memory host bookmark. Forge
+obtains a fresh report and verifies source again. Browser session storage holds
+only the random tab identifier. There is no History API, deep link, localStorage,
+persistent report cache or cross-tab synchronization.
 
 ## Authoring and runtime boundaries
 

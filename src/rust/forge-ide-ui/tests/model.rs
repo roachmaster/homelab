@@ -203,6 +203,162 @@ fn source_request(output: &Output) -> PreparedSource {
 }
 
 #[test]
+fn workspace_restores_source_and_declaration_only_from_fresh_report() {
+    let mut prior = connected();
+    let inspected = inspect(&mut prior);
+    let old_request_id = inspected.token.request_id.clone();
+    let mut original = report();
+    original.entries[1].name = NativeName::UnixBytes(vec![b'f', 0xff]);
+    event(&mut prior, result(&inspected, original.clone()));
+    let selected = event(
+        &mut prior,
+        UiEvent::SelectEntry {
+            report: inspected.token.clone(),
+            value: 1,
+        },
+    );
+    let opened = source_request(&selected);
+    event(
+        &mut prior,
+        UiEvent::SelectDeclaration {
+            report: inspected.token,
+            entry: 1,
+            value: 1,
+        },
+    );
+    let old_source = "Old source must stay out of the snapshot\n";
+    event(&mut prior, source_result(&opened, old_source.into()));
+    assert!(prior.view().sources[0].text.contains(old_source.trim()));
+    let saved = prior.output(None).workspace.unwrap();
+    assert!(saved.is_valid());
+    assert!(saved.workbench_open);
+    let encoded = serde_json::to_string(&saved).unwrap();
+    assert!(!encoded.contains(old_source.trim()));
+    assert!(!encoded.contains(&old_request_id));
+    assert!(!encoded.contains("session_epoch"));
+    let bookmark = saved.workbench.as_ref().unwrap().entry.as_ref().unwrap();
+    assert_eq!(bookmark.path, [NativeName::UnixBytes(vec![b'f', 0xff])]);
+    assert_eq!(bookmark.declaration[1].name, "run");
+
+    let mut reopened = connected_chat();
+    let clean = reopened.output(None);
+    assert!(!clean.has_workspace_work);
+    let mut invalid = saved.clone();
+    invalid
+        .workbench
+        .as_mut()
+        .unwrap()
+        .entry
+        .as_mut()
+        .unwrap()
+        .path
+        .clear();
+    assert!(!invalid.is_valid());
+    let rejected = event(
+        &mut reopened,
+        UiEvent::RestoreWorkspace { snapshot: invalid },
+    );
+    assert_eq!(rejected, clean);
+    let output = reopened
+        .dispatch(Input {
+            now_ms: 200,
+            event: UiEvent::RestoreWorkspace {
+                snapshot: saved.clone(),
+            },
+        })
+        .unwrap();
+    let [UiEffect::Inspect { request }] = output.effects.as_slice() else {
+        panic!("fresh inspection")
+    };
+    assert_eq!(output.workspace, Some(saved));
+    assert!(output.has_workspace_work);
+    assert!(output.view.sources[0].text.is_empty());
+    assert!(rows_named(&reopened, "files").is_empty());
+    assert_ne!(request.token.request_id, old_request_id);
+
+    let shift = &mut original.entries[1];
+    shift.id = 2;
+    shift.declarations[0].id = 1;
+    shift.declarations[1].id = 2;
+    shift.declarations[1].parent = Some(1);
+    shift.declarations[1].span.start.line = 2;
+    shift
+        .declarations
+        .insert(0, declaration(0, None, DeclarationKind::Struct, "Added"));
+    let mut extra = report().entries.pop().unwrap();
+    extra.name = NativeName::Utf8("unrelated.rs".into());
+    original.entries.insert(1, extra);
+    original.files = 2;
+    let resolved = reopened
+        .dispatch(Input {
+            now_ms: 201,
+            event: result(request, original),
+        })
+        .unwrap();
+    let fresh_source = source_request(&resolved);
+    assert_eq!(fresh_source.entry, 2);
+    assert_eq!(fresh_source.report, request.token);
+    assert!(resolved.view.sources[0].text.is_empty());
+    let loaded = reopened
+        .dispatch(Input {
+            now_ms: 202,
+            event: source_result(&fresh_source, "one\ntwo\nthree\n".into()),
+        })
+        .unwrap();
+    assert_eq!(loaded.view.sources[0].target_span.unwrap().start.line, 2);
+}
+
+#[test]
+fn workspace_recovery_reuses_autoload_and_drops_missing_selection() {
+    let mut reopened = UiModel::default();
+    let resume = event(&mut reopened, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &resume.effects[0] else {
+        panic!("resume")
+    };
+    let mut allowed = catalog();
+    allowed.nodes[0].projects.truncate(1);
+    let paired = event(
+        &mut reopened,
+        UiEvent::Paired {
+            request_id: request_id.clone(),
+            catalog: allowed,
+        },
+    );
+    let [UiEffect::Inspect { request }] = paired.effects.as_slice() else {
+        panic!("automatic inspection")
+    };
+    assert!(!paired.has_workspace_work);
+    let mut saved = paired.workspace.unwrap();
+    saved.workbench_open = true;
+    saved.workbench = Some(WorkbenchBookmark {
+        node_key: "lab".into(),
+        project: "workspace".into(),
+        entry: Some(WorkbenchEntryBookmark {
+            path: vec![NativeName::Utf8("removed.rs".into())],
+            kind: EntryKind::File,
+            declaration: vec![],
+        }),
+    });
+    let restored = event(
+        &mut reopened,
+        UiEvent::RestoreWorkspace {
+            snapshot: saved.clone(),
+        },
+    );
+    assert!(restored.effects.is_empty());
+    assert_eq!(restored.workspace, Some(saved));
+    let resolved = event(&mut reopened, result(request, report()));
+    assert!(resolved.effects.is_empty());
+    assert!(resolved
+        .workspace
+        .unwrap()
+        .workbench
+        .unwrap()
+        .entry
+        .is_none());
+}
+
+#[test]
 fn project_search_crosses_files_and_pages_with_report_guarded_selection() {
     let mut m = connected();
     let p = inspect(&mut m);

@@ -11,6 +11,7 @@ mod http;
 mod projection;
 mod service;
 mod session;
+mod workspace;
 
 pub use config::{load_config, HostConfig, HostLimits, NodeConfig, SessionAuth};
 use forge_bootstrap::PreparedGroup;

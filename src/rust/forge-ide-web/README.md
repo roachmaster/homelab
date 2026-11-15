@@ -56,8 +56,16 @@ not an internet service or a general relay.
 After admission, use **New chat** to start a separate conversation and use
 **Conversation** to switch between histories and drafts. Follow-ups send the
 selected conversation's bounded history to the active Forge llama.cpp model.
-Conversations live in the current browser tab's worker and clear on reload.
-A failed send leaves the draft ready to retry.
+While you work, Forge checkpoints the selected conversation, accepted replies and
+unsent drafts in the authenticated host's memory. When you return to the same
+browser tab after Back or reload, Forge restores the last saved checkpoint while
+the host session is active. An interrupted send restores its prompt as a draft.
+A failed send also leaves the draft ready to retry.
+
+Browsers that support the native leave warning can show it when a draft,
+conversation or Workbench context is open. The browser supplies the wording.
+Forge's own reload buttons show a **Stay** or **Leave** confirmation when there
+is work in the tab. Recovery works independently of the native dialog.
 
 Use **Workbench** to open the source tools. A catalog containing one allowed
 project opens it automatically.

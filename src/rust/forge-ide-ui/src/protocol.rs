@@ -14,6 +14,7 @@ pub const MAX_DEPTH: usize = 64;
 pub const MAX_FILTER_BYTES: usize = 256;
 pub const MAX_PROBLEMS: usize = MAX_ENTRIES * 16;
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
+const MAX_WORKBENCH_ENTRY_BOOKMARK_BYTES: usize = 4 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,6 +23,96 @@ pub struct Catalog {
     pub session_epoch: String,
     pub timeout_ms: u64,
     pub nodes: Vec<NodeChoice>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceSnapshot {
+    pub chat: ChatSnapshot,
+    pub workbench: Option<WorkbenchBookmark>,
+    pub workbench_open: bool,
+}
+
+impl WorkspaceSnapshot {
+    pub fn is_valid(&self) -> bool {
+        valid_chat_snapshot(&self.chat)
+            && self
+                .workbench
+                .as_ref()
+                .is_none_or(WorkbenchBookmark::is_valid)
+    }
+}
+
+/// Selection hints paired with a fresh admitted report. Never source authority.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkbenchBookmark {
+    pub node_key: String,
+    pub project: String,
+    pub entry: Option<WorkbenchEntryBookmark>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkbenchEntryBookmark {
+    /// Exact report names below the project root, with native encodings intact.
+    pub path: Vec<NativeName>,
+    pub kind: EntryKind,
+    pub declaration: Vec<DeclarationIdentity>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeclarationIdentity {
+    pub kind: DeclarationKind,
+    pub name: String,
+    pub module_inline: Option<bool>,
+    pub implementation: Option<Implementation>,
+}
+
+impl WorkbenchBookmark {
+    pub fn is_valid(&self) -> bool {
+        crate::validate::token(&self.node_key)
+            && (self.project.is_empty() || crate::validate::token(&self.project))
+            && self.entry.as_ref().is_none_or(|entry| {
+                !self.project.is_empty()
+                    && (1..=MAX_DEPTH).contains(&entry.path.len())
+                    && entry.declaration.len() <= MAX_DEPTH + 1
+                    && (entry.declaration.is_empty() || entry.kind == EntryKind::File)
+                    && entry.wire_cost() <= MAX_WORKBENCH_ENTRY_BOOKMARK_BYTES
+            })
+    }
+}
+
+impl WorkbenchEntryBookmark {
+    fn wire_cost(&self) -> usize {
+        // Allow for JSON punctuation, numbers and worst-case escaping without
+        // coupling the portable protocol to a particular serializer.
+        let names: usize = self
+            .path
+            .iter()
+            .map(|name| {
+                48 + match name {
+                    NativeName::Utf8(value) => 6 * value.len(),
+                    NativeName::UnixBytes(value) | NativeName::EncodedBytes(value) => {
+                        4 * value.len()
+                    }
+                    NativeName::WindowsWide(value) => 6 * value.len(),
+                }
+            })
+            .sum();
+        let declarations: usize = self
+            .declaration
+            .iter()
+            .map(|item| {
+                let implementation = item.implementation.as_ref().map_or(0, |imp| {
+                    imp.target.len() + imp.trait_path.as_ref().map_or(0, String::len)
+                });
+                180 + 6 * (item.name.len() + implementation)
+            })
+            .sum();
+        80 + names + declarations
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +166,7 @@ pub struct PreparedSource {
 pub const MAX_CHAT_PROMPT_BYTES: usize = 2048;
 pub const MAX_CHAT_REPLY_BYTES: usize = 4096;
 pub const MAX_CHAT_TIMEOUT_MS: u64 = 26_000;
+pub(crate) const MAX_CONVERSATIONS: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,6 +180,38 @@ pub enum ChatRole {
 pub struct ChatMessage {
     pub role: ChatRole,
     pub content: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatSnapshot {
+    pub selected: usize,
+    pub conversations: Vec<ChatConversationSnapshot>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatConversationSnapshot {
+    pub messages: Vec<ChatMessage>,
+    pub draft: String,
+}
+
+pub fn valid_chat_snapshot(snapshot: &ChatSnapshot) -> bool {
+    let conversations = &snapshot.conversations;
+    conversations.len() <= MAX_CONVERSATIONS
+        && snapshot.selected < conversations.len().max(1)
+        && conversations.iter().all(|conversation| {
+            conversation.draft.len() <= MAX_CHAT_PROMPT_BYTES
+                && conversation
+                    .messages
+                    .split_last()
+                    .is_none_or(|(reply, history)| {
+                        // The last reply can grow the accepted request beyond its send budget.
+                        valid_chat_messages(history)
+                            && reply.role == ChatRole::Assistant
+                            && valid_chat_text(&reply.content, MAX_CHAT_REPLY_BYTES)
+                    })
+        })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +301,9 @@ pub enum UiEvent {
     Paired {
         request_id: String,
         catalog: Catalog,
+    },
+    RestoreWorkspace {
+        snapshot: WorkspaceSnapshot,
     },
     PairFailed {
         request_id: String,

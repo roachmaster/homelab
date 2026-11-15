@@ -1,4 +1,5 @@
 use crate::chat::ChatRelay;
+use crate::workspace::{WorkspaceReply, WorkspaceRequest};
 use crate::{assets::Assets, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
@@ -680,6 +681,13 @@ impl Host {
     }
     pub fn serve_next(&self, stop: &AtomicBool) -> Result<http::ServeOutcome, HostError> {
         http::serve_next(self, stop)
+    }
+    pub(crate) fn workspace_authorized(&self, cookie: Option<&str>, csrf: Option<&str>) -> bool {
+        let session = self.state.session.borrow();
+        session.authenticated(cookie) && session.csrf_matches(csrf)
+    }
+    pub(crate) fn workspace(&self, request: WorkspaceRequest) -> Result<WorkspaceReply, Rejection> {
+        self.state.session.borrow_mut().workspaces.handle(request)
     }
     pub(crate) fn context(
         &self,

@@ -1,4 +1,4 @@
-use crate::{HostConfig, HostError, SessionAuth};
+use crate::{workspace::Workspaces, HostConfig, HostError, SessionAuth};
 use forge_ide_ui::protocol::*;
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
@@ -21,6 +21,7 @@ pub(crate) struct Session {
     csrf: String,
     until: Option<Instant>,
     catalog: Catalog,
+    pub workspaces: Workspaces,
 }
 impl Session {
     pub fn new(config: &HostConfig) -> Result<Self, HostError> {
@@ -62,6 +63,7 @@ impl Session {
             csrf: random_token()?,
             until: None,
             catalog,
+            workspaces: Workspaces::default(),
         })
     }
     pub fn pairing_code(&self) -> Option<&str> {
@@ -101,6 +103,7 @@ impl Session {
             self.cookie = cookie;
             self.csrf = csrf;
             self.catalog.session_epoch = epoch;
+            self.workspaces = Workspaces::default();
         }
         self.until = Some(Instant::now() + self.ttl);
         Ok(())

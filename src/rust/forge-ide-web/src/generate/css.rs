@@ -50,6 +50,10 @@ pub(crate) fn emit(t: &Theme) -> String {
 .fg-button-icon.fg-button-primary:enabled{background:var(--raised);border-color:var(--border);color:var(--text)}
 .fg-button-icon.fg-button-primary:hover:enabled{border-color:var(--accent);filter:none}
 @media(max-width:800px){.fg-button-icon{width:var(--touch);height:var(--touch)}}
+.fg-leave-dialog{width:min(400px,calc(100% - 32px));padding:20px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text)}
+.fg-leave-dialog::backdrop{background:rgb(0 0 0 / .65)}
+.fg-leave-dialog>h2{font-size:17px;margin-bottom:8px}
+.fg-leave-dialog>.fg-row{justify-content:flex-end;margin:16px 0 0}
 "#);
     for n in 0..=64 {
         let _ = writeln!(s, ".fg-depth-{n}{{margin-inline-start:{}px}}", n * 12);

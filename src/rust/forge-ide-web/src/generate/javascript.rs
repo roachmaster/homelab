@@ -12,10 +12,44 @@ let sourceViews=new WeakMap();
 let transcriptViews=new WeakMap();
 let presentationSequence=0;
 let pendingActionOrigin=null;
+let workspaceWork=false;
+let leaveWarning=false;
+let leaving=false;
+let finishReload=null;
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
+const draftFields=[...document.querySelectorAll('textarea[data-action]')];
+const leaveDialog=document.getElementById('leave-confirmation');
 const layouts=new Map();
 let typeahead=new WeakMap();
 function element(id){return typeof id==='string'?document.getElementById(id):null;}
+function tabKey(){
+  try{
+    const key='forge-workspace-tab';
+    const saved=sessionStorage.getItem(key);
+    if(saved&&/^[0-9a-f]{32}$/.test(saved))return saved;
+    const tab=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
+    sessionStorage.setItem(key,tab);
+    return tab;
+  }catch(_){return '';}
+}
+function warnBeforeUnload(event){event.preventDefault();event.returnValue=true;}
+function hasWork(){return workspaceWork||draftFields.some(n=>n.value.trim().length>0);}
+function syncLeaveWarning(){
+  const enabled=!leaving&&hasWork();
+  if(enabled===leaveWarning)return;
+  leaveWarning=enabled;
+  if(enabled)window.addEventListener('beforeunload',warnBeforeUnload);
+  else window.removeEventListener('beforeunload',warnBeforeUnload);
+}
+function reloadPage(){
+  if(leaving)return;
+  leaving=true;
+  syncLeaveWarning();
+  if(!worker){location.reload();return;}
+  const timer=setTimeout(()=>finishReload?.(),1250);
+  finishReload=()=>{clearTimeout(timer);finishReload=null;location.reload();};
+  worker.postMessage({flush_workspace:'reload'});
+}
 function visible(n){
   if(!n||!n.isConnected||n.closest('[hidden]'))return false;
   for(let p=n.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS'&&!p.open&&!p.querySelector(':scope > summary')?.contains(n))return false;
@@ -49,10 +83,15 @@ function clearProtected(){
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
+  workspaceWork=false;
+  syncLeaveWarning();
 }
 function stop(){const old=worker;worker=null;if(old)old.terminate();clearProtected();}
 function fatal(message){
-  if(fatalState)return;fatalState=true;stop();
+  if(fatalState)return;
+  const priorWork=hasWork();
+  fatalState=true;stop();
+  workspaceWork=priorWork;syncLeaveWarning();
   document.querySelector('.fg-app').hidden=true;
   element('runtime-message').textContent=typeof message==='string'?message.slice(0,512):'Application stopped. Reload to retry.';
   element('runtime-recovery').hidden=false;
@@ -67,7 +106,7 @@ function focusRow(row){
   if(pendingActionOrigin)pendingActionOrigin={sequence:pendingActionOrigin.sequence,pane:row.closest('[data-pane]')};
   row.focus();row.scrollIntoView({block:'nearest'});
 }
-function apply(view,acknowledgedSequence){
+function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(!view||typeof view!=='object')throw new Error('Invalid view');
   const focus=document.activeElement;
   const focusKey=focusKeyByElement.get(focus);
@@ -92,6 +131,8 @@ function apply(view,acknowledgedSequence){
     if(!pending){if(n.value!==b.value)n.value=b.value;inputDrafts.delete(n);n.setCustomValidity('');n.removeAttribute('aria-invalid');}
     n.disabled=b.disabled;actionByElement.set(n,b.action);n.dataset.maxBytes=String(b.max_bytes);
   }
+  workspaceWork=hasWorkspaceWork===true;
+  syncLeaveWarning();
   for(const b of view.choices||[]){
     const n=element(b.id);if(!n)continue;
     const signature=JSON.stringify(b.options);
@@ -265,10 +306,18 @@ function apply(view,acknowledgedSequence){
 }
 function start(){
   if(worker||fatalState)return;
+  leaving=false;
   clearProtected();
   try{
-    const owned=new Worker('/worker.js');worker=owned;
-    owned.onmessage=({data})=>{if(worker!==owned||fatalState)return;try{if(data.kind==='view')apply(data.view,data.presentation_sequence);else if(data.kind==='fatal')fatal(data.message);}catch(_){fatal('Could not display the checked view. Reload to retry.');}};
+    const owned=new Worker('/worker.js',{name:tabKey()});worker=owned;
+    owned.onmessage=({data})=>{
+      if(worker!==owned||fatalState)return;
+      try{
+        if(data.kind==='view')apply(data.view,data.presentation_sequence,data.has_workspace_work);
+        else if(data.kind==='fatal')fatal(data.message);
+        else if(data.kind==='workspace_flushed')finishReload?.();
+      }catch(_){fatal('Could not display the checked view. Reload to retry.');}
+    };
     owned.onerror=()=>{if(worker===owned)fatal('The Rust worker could not start. Reload to retry.');};
   }catch(_){fatal('This browser cannot start the required worker. Reload to retry.');}
 }
@@ -280,6 +329,7 @@ for(const n of document.querySelectorAll('button[data-action]'))n.addEventListen
 for(const n of document.querySelectorAll('input[data-action],textarea[data-action]'))n.addEventListener('input',()=>{
   // The declared byte cap is a codec bound, not a second query/filter implementation.
   if(!visible(n)||n.disabled||!actionByElement.get(n))return;
+  if(draftFields.includes(n))syncLeaveWarning();
   const context=JSON.stringify(actionByElement.get(n));const max=Number(n.dataset.maxBytes)||256;
   if(new TextEncoder().encode(n.value).length>max){inputDrafts.set(n,{context,invalid:true});n.setCustomValidity('Use at most '+max+' UTF-8 bytes. This draft has not been applied.');n.setAttribute('aria-invalid','true');n.reportValidity();return;}
   if(presentationSequence>=2147483647){fatal('The presentation message limit was reached. Reload to retry.');return;}
@@ -287,7 +337,12 @@ for(const n of document.querySelectorAll('input[data-action],textarea[data-actio
   n.setCustomValidity('');n.removeAttribute('aria-invalid');sendAction(n,n.value,sequence);
 });
 for(const n of document.querySelectorAll('form[data-action]'))n.addEventListener('submit',e=>{e.preventDefault();const input=n.querySelector('input[name="value"]');if(!input||n.querySelector('button')?.disabled)return;const value=input.value;input.value='';sendAction(n,value);});
-for(const n of document.querySelectorAll('[data-reload]'))n.addEventListener('click',()=>location.reload());
+for(const n of document.querySelectorAll('[data-reload]'))n.addEventListener('click',()=>{
+  if(hasWork()&&leaveDialog)leaveDialog.showModal();
+  else reloadPage();
+});
+element('leave-stay')?.addEventListener('click',()=>leaveDialog.close());
+element('leave-confirm')?.addEventListener('click',()=>{leaveDialog.close();reloadPage();});
 for(const tree of document.querySelectorAll('[role="tree"]')){
   tree.addEventListener('focusin',e=>{
     const row=e.target.closest('.fg-row-select');if(!row)return;
@@ -393,20 +448,93 @@ for(const root of document.querySelectorAll('[data-layout]')){
   new ResizeObserver(()=>updateLayout(state)).observe(state.grid);
   updateLayout(state);
 }
-window.addEventListener('pagehide',stop);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'&&!leaving)worker?.postMessage({flush_workspace:'background'});
+});
+window.addEventListener('pagehide',()=>{
+  finishReload=null;
+  if(leaveDialog?.open)leaveDialog.close();
+  stop();
+});
 window.addEventListener('pageshow',start);start();
 "#;
 
 pub(crate) const WORKER: &str = r#"'use strict';
 // GENERATED reusable WASM/HTTP adapter. CONFIG is validated Rust declaration data.
 const MAX=8*1024*1024;
+const WORKSPACE_MAX=2*1024*1024;
 const encoder=new TextEncoder();const decoder=new TextDecoder('utf-8',{fatal:true});
 let wasm=null;let csrf=null;let closed=false;
+const workspaceTab=typeof name==='string'&&/^[0-9a-f]{32}$/.test(name)?name:null;
+let workspaceLease=null;
+let workspaceRevision=0;
+let workspaceJSON=null;
+let latestCheckpoint=null;
 const pending=new Map();
 function field(value,path){for(const part of path.split('.')){if(value===null || typeof value!=='object' || !Object.hasOwn(value,part))throw new Error('Missing declared field');value=value[part];}if(typeof value!=='string' && typeof value!=='number')throw new Error('Invalid declared field');return value;}
 function safeJson(text){let depth=0,quoted=false,escape=false;for(const c of text){if(quoted){if(escape)escape=false;else if(c==='\\')escape=true;else if(c==='"')quoted=false;}else if(c==='"')quoted=true;else if(c==='{'||c==='['){if(++depth>64)throw new Error('Nesting limit');}else if(c==='}'||c===']')depth--;}return JSON.parse(text);}
 async function bounded(response,limit){const reader=response.body?.getReader();if(!reader)throw new Error('Missing response body');const chunks=[];let total=0;try{for(;;){const {value,done}=await reader.read();if(done)break;total+=value.length;if(total>limit){await reader.cancel();throw new Error('Byte limit');}chunks.push(value);}}finally{reader.releaseLock();}const bytes=new Uint8Array(total);let at=0;for(const c of chunks){bytes.set(c,at);at+=c.length;}return bytes;}
-function dispatch(event,presentation_sequence=null){
+async function workspaceRequest(body,keepalive,signal){
+  return fetch('/forge/v1/dispatch/workspace',{
+    method:'POST',headers:{'Content-Type':'application/json','Forge-CSRF':csrf},
+    body,keepalive,signal,credentials:'same-origin',redirect:'error',cache:'no-store'
+  });
+}
+async function restoreWorkspace(){
+  if(!workspaceTab||!csrf)return null;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),2500);
+  try{
+    const request=JSON.stringify({operation:'restore',tab:workspaceTab});
+    const response=await workspaceRequest(request,false,controller.signal);
+    if(!response.ok){await response.body?.cancel();return null;}
+    const saved=safeJson(decoder.decode(await bounded(response,WORKSPACE_MAX)));
+    if(!/^[0-9a-f]{64}$/.test(saved.lease))return null;
+    workspaceLease=saved.lease;
+    workspaceJSON=saved.snapshot?JSON.stringify(saved.snapshot):null;
+    return saved.snapshot??null;
+  }catch(_){return null;}finally{clearTimeout(timer);}
+}
+async function saveCheckpoint(checkpoint){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),5000);
+  try{
+    const {body,bytes}=checkpoint;
+    let response;
+    try{
+      response=await workspaceRequest(body,bytes<=60*1024,controller.signal);
+    }catch(error){
+      if(bytes>60*1024||controller.signal.aborted)throw error;
+      response=await workspaceRequest(body,false,controller.signal);
+    }
+    checkpoint.saved=response.ok;
+    await response.body?.cancel();
+  }catch(_){}finally{clearTimeout(timer);}
+}
+function checkpointWorkspace(snapshot){
+  if(!workspaceLease||!csrf||!snapshot)return;
+  const json=JSON.stringify(snapshot);
+  if(json===workspaceJSON)return;
+  const body=JSON.stringify({operation:'save',tab:workspaceTab,lease:workspaceLease,revision:++workspaceRevision,snapshot});
+  const bytes=encoder.encode(body).length;
+  if(bytes>WORKSPACE_MAX)return;
+  workspaceJSON=json;
+  const checkpoint={body,bytes,saved:false,pending:null};
+  checkpoint.pending=saveCheckpoint(checkpoint);
+  latestCheckpoint=checkpoint;
+}
+async function flushWorkspace(notify){
+  const checkpoint=latestCheckpoint;
+  if(checkpoint){
+    await checkpoint.pending;
+    if(!checkpoint.saved&&checkpoint===latestCheckpoint){
+      checkpoint.pending=saveCheckpoint(checkpoint);
+      await checkpoint.pending;
+    }
+  }
+  if(notify)postMessage({kind:'workspace_flushed'});
+}
+function dispatch(event,presentation_sequence=null,suppressView=false){
   if(closed||!wasm)return;
   const input=encoder.encode(JSON.stringify({now_ms:Date.now(),event}));if(input.length>MAX)throw new Error('Input limit');
   const ptr=wasm.reserve_input(input.length);if(!ptr)throw new Error('Input allocation refused');
@@ -415,7 +543,10 @@ function dispatch(event,presentation_sequence=null){
   if(!status || !len || len>MAX || out+len>wasm.memory.buffer.byteLength)throw new Error('Invalid WASM result');
   let result;try{result=safeJson(decoder.decode(new Uint8Array(wasm.memory.buffer,out,len).slice()));}finally{wasm.release_output();}
   if(result.protocol_version!==1)throw new Error('Protocol mismatch');
-  postMessage({kind:'view',view:result.view,presentation_sequence});
+  if(!suppressView){
+    postMessage({kind:'view',view:result.view,presentation_sequence,has_workspace_work:result.has_workspace_work});
+    checkpointWorkspace(result.workspace);
+  }
   for(const effect of result.effects)run(effect).catch(()=>fatal('Invalid application effect. Reload to retry.'));
 }
 function fatal(message){if(closed)return;closed=true;for(const c of pending.values())c.abort();pending.clear();csrf=null;wasm=null;postMessage({kind:'fatal',message});}
@@ -438,8 +569,16 @@ async function run(effect){
     const bytes=await bounded(response,MAX);const decoded=safeJson(decoder.decode(bytes));
     if(binding.deadline && Date.now()>Number(field(effect,binding.deadline))){failed(id,'timeout');return;}
     if(decoded.protocol_version!==1 || !decoded.event || !binding.accept_events.includes(decoded.event.kind))throw new Error('Unexpected response envelope');
-    if(decoded.csrf!==undefined && decoded.csrf!==null){if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');csrf=decoded.csrf;}
-    try{dispatch(decoded.event);}catch(_){fatal('Invalid application ABI result. Reload to retry.');}
+    let saved=null;
+    if(decoded.csrf!==undefined && decoded.csrf!==null){
+      if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');
+      csrf=decoded.csrf;
+      saved=await restoreWorkspace();
+    }
+    try{
+      dispatch(decoded.event,null,saved!==null);
+      if(saved!==null)dispatch({kind:'restore_workspace',snapshot:saved});
+    }catch(_){fatal('Invalid application ABI result. Reload to retry.');}
   }catch(e){failed(id,timedOut?'timeout':controller.signal.aborted?'cancelled':e instanceof TypeError?'unavailable':'invalid_response');}
   finally{clearTimeout(timer);pending.delete(id);}
 }
@@ -453,7 +592,8 @@ const ready=(async()=>{
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));
 onmessage=async({data})=>{if(closed)return;try{
   await ready;
-  if(data&&typeof data==='object'&&Object.hasOwn(data,'presentation_sequence')){
+  if(data?.flush_workspace==='reload'||data?.flush_workspace==='background')await flushWorkspace(data.flush_workspace==='reload');
+  else if(data&&typeof data==='object'&&Object.hasOwn(data,'presentation_sequence')){
     if(Object.keys(data).length!==2||!Object.hasOwn(data,'event')||!Number.isSafeInteger(data.presentation_sequence)||data.presentation_sequence<1||data.presentation_sequence>2147483647)throw new Error('Invalid presentation envelope');
     dispatch(data.event,data.presentation_sequence);
   }else dispatch(data);

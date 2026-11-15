@@ -400,6 +400,11 @@ impl Document {
             "runtime-recovery".into(),
             "runtime-message".into(),
             "runtime-reload".into(),
+            "leave-confirmation".into(),
+            "leave-heading".into(),
+            "leave-description".into(),
+            "leave-stay".into(),
+            "leave-confirm".into(),
         ]);
         let mut count = 0;
         let mut has_brand_context = false;

@@ -1,8 +1,6 @@
 use super::*;
 use crate::markdown::render_markdown;
 
-const MAX_CONVERSATIONS: usize = 16;
-
 #[derive(Debug, Default)]
 pub(super) struct Chats {
     pub workbench: bool,
@@ -26,6 +24,46 @@ struct Pending {
 }
 
 impl Chats {
+    pub fn has_work(&self) -> bool {
+        self.pending.is_some()
+            || self.conversations.iter().any(|conversation| {
+                !conversation.draft.is_empty() || !conversation.messages.is_empty()
+            })
+    }
+
+    pub fn snapshot(&self) -> ChatSnapshot {
+        ChatSnapshot {
+            selected: self.selected,
+            conversations: self
+                .conversations
+                .iter()
+                .map(|conversation| ChatConversationSnapshot {
+                    messages: conversation.messages.clone(),
+                    draft: conversation.draft.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn restore_snapshot(&mut self, snapshot: ChatSnapshot) -> Result<(), UiError> {
+        if !valid_chat_snapshot(&snapshot) {
+            return Err(UiError::InvalidAction);
+        }
+        self.selected = snapshot.selected;
+        self.conversations = snapshot
+            .conversations
+            .into_iter()
+            .map(|conversation| Conversation {
+                messages: conversation.messages,
+                draft: conversation.draft,
+                status: String::new(),
+            })
+            .collect();
+        self.pending = None;
+        self.open();
+        Ok(())
+    }
+
     pub fn open(&mut self) {
         if self.conversations.is_empty() {
             self.conversations.push(Conversation::default());
@@ -250,5 +288,128 @@ impl Chats {
                 action: None,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_restores_every_draft_and_completed_transcript_without_replaying_a_pending_chat() {
+        let mut chats = Chats::default();
+        chats.open();
+        chats.draft(0, "Explain the result".into()).unwrap();
+        chats.send("completed".into()).unwrap();
+        chats.complete(
+            "completed",
+            ChatOutcome::Answer {
+                content: "**Result**".into(),
+            },
+        );
+        chats
+            .draft(0, " Draft in the first chat \n".into())
+            .unwrap();
+        chats.new_conversation().unwrap();
+        chats.draft(1, "  Unsent on return  \n".into()).unwrap();
+        chats.send("pending".into()).unwrap();
+
+        let snapshot = chats.snapshot();
+        assert_eq!(snapshot.selected, 1);
+        assert_eq!(snapshot.conversations[0].messages[1].content, "**Result**");
+        assert!(snapshot.conversations[1].messages.is_empty());
+        assert_eq!(snapshot.conversations[1].draft, "  Unsent on return  \n");
+        let mut restored = Chats {
+            workbench: true,
+            ..Chats::default()
+        };
+        restored.restore_snapshot(snapshot.clone()).unwrap();
+        assert!(restored.workbench);
+        restored.complete(
+            "pending",
+            ChatOutcome::Answer {
+                content: "Late answer".into(),
+            },
+        );
+        assert_eq!(restored.snapshot(), snapshot);
+        let request = restored.send("new".into()).unwrap().unwrap();
+        assert_eq!(request.messages[0].content, "Unsent on return");
+        assert_eq!(
+            restored.conversations[0].draft,
+            " Draft in the first chat \n"
+        );
+    }
+
+    #[test]
+    fn invalid_snapshot_leaves_current_chat_untouched() {
+        let mut chats = Chats::default();
+        chats.open();
+        chats.draft(0, "Original".into()).unwrap();
+        let original = chats.snapshot();
+
+        let mut bad_selection = original.clone();
+        bad_selection.selected = 1;
+        let mut oversized_draft = original.clone();
+        oversized_draft.conversations[0].draft = "x".repeat(MAX_CHAT_PROMPT_BYTES + 1);
+        let mut incomplete_history = original.clone();
+        incomplete_history.conversations[0]
+            .messages
+            .push(ChatMessage {
+                role: ChatRole::User,
+                content: "User without reply".into(),
+            });
+        let mut too_many_chats = original.clone();
+        too_many_chats.conversations =
+            vec![original.conversations[0].clone(); MAX_CONVERSATIONS + 1];
+        for invalid in [
+            bad_selection,
+            oversized_draft,
+            incomplete_history,
+            too_many_chats,
+        ] {
+            assert_eq!(
+                chats.restore_snapshot(invalid).unwrap_err(),
+                UiError::InvalidAction
+            );
+            assert_eq!(chats.snapshot(), original);
+        }
+    }
+
+    #[test]
+    fn opening_empty_chats_does_not_count_as_recoverable_work() {
+        let mut chats = Chats::default();
+        chats.open();
+        chats.new_conversation().unwrap();
+        assert!(!chats.has_work());
+        chats.draft(1, "   ".into()).unwrap();
+        assert!(chats.has_work());
+    }
+
+    #[test]
+    fn snapshot_keeps_a_final_reply_that_fills_the_remaining_history() {
+        let mut chats = Chats::default();
+        chats.open();
+        chats.draft(0, "x".repeat(MAX_CHAT_PROMPT_BYTES)).unwrap();
+        chats.send("first".into()).unwrap().unwrap();
+        chats.complete(
+            "first",
+            ChatOutcome::Answer {
+                content: "y".repeat(MAX_CHAT_REPLY_BYTES),
+            },
+        );
+        chats.draft(0, "z".repeat(1024)).unwrap();
+        chats.send("second".into()).unwrap().unwrap();
+        chats.complete(
+            "second",
+            ChatOutcome::Answer {
+                content: "q".repeat(MAX_CHAT_REPLY_BYTES),
+            },
+        );
+
+        let snapshot = chats.snapshot();
+        assert!(valid_chat_snapshot(&snapshot));
+        let mut restored = Chats::default();
+        restored.restore_snapshot(snapshot.clone()).unwrap();
+        assert_eq!(restored.snapshot(), snapshot);
     }
 }

@@ -183,6 +183,14 @@ session cookie and CSRF header. The host forwards the bounded message history to
 the adapter's `POST /v1/chat/completions` and returns the assistant's text.
 When the adapter or model is unavailable, the browser keeps the prompt as a draft.
 
+The same-origin workspace endpoint at `/forge/v1/dispatch/workspace` requires the
+active session cookie and CSRF token. It keeps bounded checkpoints in host
+memory for up to 12 tabs in that session. They contain Chat work and a
+Workbench bookmark. Recovery revalidates the bookmark against the current
+catalog and a fresh inspection. A new page instance claims a new lease, and
+out-of-order saves cannot replace a newer revision. Session rotation and host
+restart discard the checkpoints.
+
 ## Bounds and limitations
 
 Headers: 16 KiB/48 fields; request: default16 KiB (maximum64 KiB); response:

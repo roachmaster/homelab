@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 
 const PAGE_ROWS: usize = 256;
+mod bookmark;
 mod chat;
 mod projection;
 mod source;
@@ -27,6 +28,8 @@ pub struct Output {
     pub view: ViewModel,
     pub effects: Vec<UiEffect>,
     pub error: Option<String>,
+    pub workspace: Option<WorkspaceSnapshot>,
+    pub has_workspace_work: bool,
 }
 
 /// Instance-local UI semantics. This is not an authentication authority or an
@@ -35,6 +38,9 @@ pub struct Output {
 pub struct UiModel {
     catalog: Option<Catalog>,
     chats: chat::Chats,
+    workbench_seen: bool,
+    workspace_restored: bool,
+    workbench_recovery: Option<WorkbenchBookmark>,
     node: String,
     project: String,
     phase: Phase,
@@ -68,6 +74,9 @@ impl Default for UiModel {
         Self {
             catalog: None,
             chats: chat::Chats::default(),
+            workbench_seen: false,
+            workspace_restored: false,
+            workbench_recovery: None,
             node: String::new(),
             project: String::new(),
             phase: Phase::Unpaired,
@@ -125,6 +134,8 @@ impl UiModel {
             view,
             effects: vec![],
             error,
+            workspace: self.workspace_snapshot(),
+            has_workspace_work: self.has_workspace_work(),
         }
     }
     fn next_id(&mut self, now: u64) -> Result<String, UiError> {
@@ -138,6 +149,7 @@ impl UiModel {
             effects.push(UiEffect::Abort { token: p.token });
         }
         self.clear_source(effects);
+        self.workbench_recovery = None;
         self.report = None;
         self.accepted_report = None;
         self.file_filter = BoundedQuery::default();
@@ -171,7 +183,10 @@ impl UiModel {
                 return Err(UiError::NotConnected)
             }
             UiEvent::OpenChat {} => self.chats.workbench = false,
-            UiEvent::OpenWorkbench {} => self.chats.workbench = true,
+            UiEvent::OpenWorkbench {} => {
+                self.chats.workbench = true;
+                self.workbench_seen = true;
+            }
             UiEvent::NewChat {} => self.chats.new_conversation()?,
             UiEvent::SelectChat { value } => self.chats.select(&value)?,
             UiEvent::SetChatDraft {
@@ -272,6 +287,16 @@ impl UiModel {
                     self.message = format!("Rejected host catalog: {e}");
                     return Ok(self.output(None));
                 }
+                if self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|previous| previous.session_epoch != catalog.session_epoch)
+                {
+                    self.invalidate(&mut effects)?;
+                    self.chats = chat::Chats::default();
+                    self.workbench_seen = false;
+                    self.workspace_restored = false;
+                }
                 self.node = catalog.nodes[0].key.clone();
                 self.project = catalog.nodes[0]
                     .projects
@@ -309,6 +334,19 @@ impl UiModel {
                 if sole.len() == 1 {
                     self.begin_inspection(input.now_ms, &mut effects)?;
                 }
+            }
+            UiEvent::RestoreWorkspace { snapshot } => {
+                if self.catalog.is_none() || self.workspace_restored || !snapshot.is_valid() {
+                    return Ok(self.output(None));
+                }
+                self.chats.restore_snapshot(snapshot.chat)?;
+                self.workspace_restored = true;
+                self.restore_workbench(
+                    snapshot.workbench,
+                    snapshot.workbench_open,
+                    input.now_ms,
+                    &mut effects,
+                );
             }
             UiEvent::PairFailed {
                 request_id,
@@ -414,6 +452,7 @@ impl UiModel {
                                 self.expanded.insert(0);
                                 self.report = Some(report);
                                 self.pending = None;
+                                self.resolve_workbench_recovery(input.now_ms, &mut effects);
                             }
                         }
                         Outcome::Error { category, message } => {
@@ -623,6 +662,8 @@ impl UiModel {
             view: self.render(),
             effects,
             error: None,
+            workspace: self.workspace_snapshot(),
+            has_workspace_work: self.has_workspace_work(),
         })
     }
     fn begin_inspection(&mut self, now: u64, effects: &mut Vec<UiEffect>) -> Result<(), UiError> {
@@ -641,7 +682,9 @@ impl UiModel {
         let epoch = c.session_epoch.clone();
         let target_node = n.node.clone();
         let target_incarnation = n.incarnation.clone();
+        let recovery = self.workbench_recovery.take();
         self.invalidate(effects)?;
+        self.workbench_recovery = recovery;
         let request_id = self.next_id(now)?;
         let request = PreparedInspection {
             token: RequestToken {

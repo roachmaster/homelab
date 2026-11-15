@@ -1,7 +1,7 @@
 //! Deliberately narrow HTTP/1.1 adapter. No chunking, upgrades, keepalive or CORS.
 use crate::{
     service::{Command, Rejection},
-    Host, HostError,
+    workspace, Host, HostError,
 };
 use forge_ingress_contract::{Header, RouteKey};
 use std::{
@@ -85,7 +85,7 @@ fn read_chunk(
 }
 fn read_request(
     s: &mut TcpStream,
-    max_body: usize,
+    host: &Host,
     deadline: Instant,
     stop: &AtomicBool,
 ) -> Result<Request, Rejection> {
@@ -149,6 +149,18 @@ fn read_request(
             v.parse::<usize>().map_err(|_| Rejection::Limit)?
         }
     };
+    let mut request = Request {
+        method,
+        path,
+        headers,
+        body: Vec::new(),
+    };
+    let max_body = if request.path == workspace::PATH && request.method == "POST" {
+        authorize_workspace(host, &request)?;
+        workspace::MAX_BYTES
+    } else {
+        host.config.limits.request_bytes
+    };
     if length > max_body {
         return Err(Rejection::Limit);
     }
@@ -163,12 +175,8 @@ fn read_request(
         }
         raw.extend_from_slice(&chunk[..n]);
     }
-    Ok(Request {
-        method,
-        path,
-        headers,
-        body: raw[end..].to_vec(),
-    })
+    request.body = raw.split_off(end);
+    Ok(request)
 }
 fn required<'a>(r: &'a Request, key: &str) -> Result<&'a str, Rejection> {
     r.headers
@@ -189,6 +197,18 @@ fn cookie(r: &Request) -> Result<Option<&str>, Rejection> {
         }
     }
     Ok(found)
+}
+fn authorize_workspace(host: &Host, r: &Request) -> Result<(), Rejection> {
+    if required(r, "host")? != host.authority
+        || required(r, "origin")? != host.origin
+        || required(r, "content-type")? != "application/json"
+    {
+        return Err(Rejection::Invalid);
+    }
+    if !host.workspace_authorized(cookie(r)?, r.headers.get("forge-csrf").map(String::as_str)) {
+        return Err(Rejection::Denied);
+    }
+    Ok(())
 }
 fn canonical_number(r: &Request, key: &str) -> Result<u64, Rejection> {
     let v = required(r, key)?;
@@ -309,6 +329,14 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
         }
         return command(host, &r, stop, deadline).unwrap_or_else(Response::rejected);
     }
+    if r.path == workspace::PATH {
+        if r.method != "POST" {
+            let mut response = Response::error(405, "method_not_allowed");
+            response.allow = Some("POST");
+            return response;
+        }
+        return workspace_command(host, &r, stop, deadline).unwrap_or_else(Response::rejected);
+    }
     if !r.body.is_empty() {
         return Response::error(400, "unexpected_body");
     }
@@ -329,6 +357,32 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
     } else {
         Response::error(404, "not_found")
     }
+}
+fn workspace_command(
+    host: &Host,
+    r: &Request,
+    stop: &AtomicBool,
+    deadline: Instant,
+) -> Result<Response, Rejection> {
+    authorize_workspace(host, r)?;
+    let request = serde_json::from_slice(&r.body).map_err(|_| Rejection::Invalid)?;
+    if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
+        return Err(Rejection::Unavailable);
+    }
+    let reply = host.workspace(request)?;
+    let mut output = LimitedBytes {
+        bytes: Vec::new(),
+        max: workspace::MAX_BYTES,
+    };
+    serde_json::to_writer(&mut output, &reply).map_err(|_| Rejection::Limit)?;
+    Ok(Response {
+        status: 200,
+        mime: "application/json",
+        body: output.bytes,
+        cookie: None,
+        allow: None,
+        head: false,
+    })
 }
 fn write_response(s: &mut TcpStream, r: Response, deadline: Instant) -> Result<(), HostError> {
     s.set_write_timeout(Some(remaining(deadline)?))?;
@@ -380,12 +434,7 @@ pub(crate) fn serve_next(host: &Host, stop: &AtomicBool) -> Result<ServeOutcome,
     }
     stream.set_nonblocking(false)?;
     let deadline = Instant::now() + host.config.limits.request_timeout;
-    let response = match read_request(
-        &mut stream,
-        host.config.limits.request_bytes,
-        deadline,
-        stop,
-    ) {
+    let response = match read_request(&mut stream, host, deadline, stop) {
         Ok(r) => route(host, r, stop, deadline),
         Err(e) => Response::rejected(e),
     };
