@@ -1235,7 +1235,6 @@ async function controlledLifecycleJourney() {
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
   await assertTone(page, 'status', 'warning');
   await check(cancel).toBeHidden();
-  report.checkpoint('cancel_focus_restored');
   await check(page.locator('#inspect')).toBeFocused();
   await delay(1000); // injected native port completes after local cancellation
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
