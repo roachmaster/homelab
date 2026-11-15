@@ -366,6 +366,7 @@ async function keyboardAndFilters(page, traffic) {
   await check(fileRow(page, 'broken.rs')).toHaveAttribute('aria-selected', 'true');
   await check(page.locator('#details')).toContainText(/diagnostic/i);
   await check(page.locator('#details')).toContainText('Rust syntax analysis unavailable');
+  await check(page.locator('#source-view')).toContainText('pub fn broken(');
   report.pass('real.navigation.keyboard');
   report.start('real.filters.safe_text');
 
