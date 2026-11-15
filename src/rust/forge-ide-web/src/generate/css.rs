@@ -45,8 +45,8 @@ pub(crate) fn emit(t: &Theme) -> String {
 .fg-pane-actions>.fg-button{flex:none;white-space:nowrap}
 [data-narrow=true] .fg-pane-actions{align-items:flex-end}
 [data-narrow=true] .fg-pane-actions>.fg-pane-switches{gap:2px}
-[data-narrow=true] .fg-pane-actions>.fg-pane-switches>button{min-width:var(--touch);padding-inline:5px}
-[data-narrow=true] .fg-pane-actions>.fg-button{min-height:var(--touch);padding-inline:7px;font-size:12px}
+[data-narrow=true] .fg-pane-actions>.fg-pane-switches>button{min-width:var(--touch);padding-inline:3px}
+[data-narrow=true] .fg-pane-actions>.fg-button{min-height:var(--touch);padding-inline:6px;font-size:12px}
 "#);
     for n in 0..=64 {
         let _ = writeln!(s, ".fg-depth-{n}{{margin-inline-start:{}px}}", n * 12);
