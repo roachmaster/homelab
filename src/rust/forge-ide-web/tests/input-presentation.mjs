@@ -9,6 +9,7 @@ if (process.argv.length !== 3) throw new Error('usage: node input-presentation.m
 const source = await readFile(process.argv[2], 'utf8');
 const handlers = new Map();
 const lifecycle = new Map();
+const documentLifecycle = new Map();
 const workers = [];
 const attrs = new Map([['data-action', 'filter_collection'], ['data-dynamic-action', '']]);
 const input = {
@@ -59,7 +60,8 @@ function sourceNode(tag = 'span') {
   };
 }
 const document = {
-  body, activeElement: body,
+  body, activeElement: body, visibilityState: 'visible',
+  addEventListener(name, fn) { documentLifecycle.set(name, fn); },
   createElement(tag) { return sourceNode(tag); },
   querySelectorAll(selector) { if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; return selector === 'input,textarea' || selector === 'input[data-action],textarea[data-action]' ? [input] : []; },
   querySelector() { return null; },
@@ -67,7 +69,10 @@ const document = {
 };
 const context = vm.createContext({
   document, TextEncoder,
-  window: { addEventListener(name, fn) { lifecycle.set(name, fn); } },
+  window: {
+    addEventListener(name, fn) { lifecycle.set(name, fn); },
+    removeEventListener(name) { lifecycle.delete(name); },
+  },
   Worker: class {
     constructor() { this.sent = []; this.stopped = false; workers.push(this); }
     postMessage(event) { this.sent.push(event); }
@@ -75,6 +80,10 @@ const context = vm.createContext({
   },
 });
 vm.runInContext(source, context, { filename: process.argv[2] });
+document.visibilityState = 'hidden';
+documentLifecycle.get('visibilitychange')();
+assert.equal(workers.at(-1).sent.at(-1).flush_workspace, 'background');
+document.visibilityState = 'visible';
 const action = token => ({ kind: 'filter_collection', report: { token } });
 function view(value, sequence, token = 'A', disabled = false) {
   workers.at(-1).onmessage({ data: { kind: 'view', presentation_sequence: sequence,
