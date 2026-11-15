@@ -104,12 +104,15 @@ fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
     assert!(register_assets("assets", c).is_err());
 }
 #[test]
-fn generated_main_has_no_backend_fetch_or_raw_html_interpretation() {
+fn generated_main_has_no_backend_fetch_or_eval_and_only_sanctioned_transcript_html() {
     let a = build(config());
     let main = std::str::from_utf8(&a.files["main.js"]).unwrap();
     assert!(!main.contains("fetch("));
-    assert!(!main.contains("innerHTML"));
     assert!(!main.contains("eval("));
+    assert_eq!(main.matches("innerHTML").count(), 1);
+    assert!(main.contains("body.innerHTML=message.rendered_html;"));
+    assert!(!main.contains("outerHTML"));
+    assert!(!main.contains("insertAdjacentHTML"));
     let html = std::str::from_utf8(&a.files["index.html"]).unwrap();
     assert!(!html.contains("<style"));
     assert!(!html.contains("style="));
@@ -251,7 +254,6 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
         "sessionStorage",
         "history.pushState",
         "fetch(",
-        "innerHTML",
     ] {
         assert!(
             !main.contains(forbidden),
@@ -401,7 +403,7 @@ fn source_and_pane_navigation_are_reusable_safe_declarations() {
     let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
     assert!(!main.contains("select_search_result"));
     assert!(!main.contains("ide.source"));
-    assert!(!main.contains("innerHTML"));
+    assert!(main.contains("text.textContent=lines[i];"));
     let transport = ide_transport();
     let source = transport
         .bindings

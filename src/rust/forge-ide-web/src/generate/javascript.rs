@@ -9,6 +9,7 @@ let actionByElement=new WeakMap();
 let focusKeyByElement=new WeakMap();
 let inputDrafts=new WeakMap();
 let sourceViews=new WeakMap();
+let transcriptViews=new WeakMap();
 let presentationSequence=0;
 let pendingActionOrigin=null;
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
@@ -46,7 +47,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
-  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
+  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
 }
 function stop(){const old=worker;worker=null;if(old)old.terminate();clearProtected();}
@@ -156,7 +157,22 @@ function apply(view,acknowledgedSequence){
       const role=message.role==='user'?'user':'assistant';
       node.dataset.role=role;
       node.children[0].textContent=role==='user'?'You':'Forge';
-      if(node.children[1].textContent!==message.content)node.children[1].textContent=message.content;
+      const previous=node.children[1];
+      const html=role==='assistant'&&typeof message.rendered_html==='string'&&message.rendered_html;
+      if(html){
+        if(transcriptViews.get(node)===html)continue;
+        const body=previous.tagName==='DIV'?previous:document.createElement('div');
+        body.className='fg-message-body';
+        // Sanitized transcript HTML only, emitted by the Rust Markdown renderer.
+        body.innerHTML=message.rendered_html;
+        if(body!==previous)previous.replaceWith(body);
+        transcriptViews.set(node,html);
+      }else{
+        transcriptViews.delete(node);
+        const body=previous.tagName==='P'?previous:document.createElement('p');
+        if(body.textContent!==message.content)body.textContent=message.content;
+        if(body!==previous)previous.replaceWith(body);
+      }
     }
     for(const stale of current.slice(b.messages.length))stale.remove();
     if(follow)n.scrollTop=n.scrollHeight;

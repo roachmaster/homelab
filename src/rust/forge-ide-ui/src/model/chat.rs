@@ -1,4 +1,5 @@
 use super::*;
+use crate::markdown::render_markdown;
 
 const MAX_CONVERSATIONS: usize = 16;
 
@@ -154,16 +155,28 @@ impl Chats {
             .pending
             .as_ref()
             .filter(|p| p.conversation == self.selected);
-        let rows = current.map(|c| c.messages.clone()).unwrap_or_default();
         let mut messages = TranscriptBinding {
             id: "chat-transcript",
             conversation: self.selected,
-            messages: rows,
+            messages: current
+                .into_iter()
+                .flat_map(|chat| &chat.messages)
+                .map(|message| TranscriptMessage {
+                    role: message.role,
+                    content: message.content.clone(),
+                    rendered_html: if message.role == ChatRole::Assistant {
+                        render_markdown(&message.content)
+                    } else {
+                        None
+                    },
+                })
+                .collect(),
         };
         if let Some(waiting) = waiting {
-            messages.messages.push(ChatMessage {
+            messages.messages.push(TranscriptMessage {
                 role: ChatRole::User,
                 content: waiting.prompt.clone(),
+                rendered_html: None,
             });
         }
         view.texts.extend([TextBinding {

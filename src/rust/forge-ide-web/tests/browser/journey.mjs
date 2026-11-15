@@ -908,6 +908,14 @@ async function chatJourney(page, context) {
   const draft = page.locator('#chat-draft');
   const select = page.locator('#chat-conversation');
   const send = page.locator('#send-chat');
+  const replyMarkdown = '## Reply\n\nReply `<img src=x onerror=alert(1)>` with [the guide](https://example.com/guide).\n\n| Topic | Key |\n|---|---|\n| **What** | Virus |';
+  async function assertChatShell() {
+    await check(transcript).toHaveCSS('background-color', 'rgb(28, 32, 38)');
+    await check(transcript).toHaveCSS('border-top-width', '1px');
+    const [draftBox, sendBox] = await Promise.all([draft.boundingBox(), send.boundingBox()]);
+    assert(draftBox && sendBox && sendBox.y >= draftBox.y + draftBox.height,
+      'the Send button is below the composer');
+  }
   const sent = [];
   let release;
   const hold = new Promise(resolve => { release = resolve; });
@@ -920,7 +928,7 @@ async function chatJourney(page, context) {
       protocol_version: 1,
       event: {
         kind: 'chat_result', request_id: body.request.request_id,
-        outcome: { kind: 'answer', content: 'Reply <img src=x onerror=alert(1)>' },
+        outcome: { kind: 'answer', content: replyMarkdown },
       },
     } });
   };
@@ -945,11 +953,34 @@ async function chatJourney(page, context) {
     await select.selectOption('0');
     await check(transcript).toContainText('Reply <img src=x onerror=alert(1)>');
     await check(transcript.locator('img,script')).toHaveCount(0);
+    const heading = transcript.getByRole('heading', { name: 'Reply', exact: true });
+    const table = transcript.getByRole('table');
+    await check(heading).toHaveText('Reply');
+    await check(table.getByRole('columnheader')).toHaveText(['Topic', 'Key']);
+    await check(table.getByRole('cell')).toHaveText(['What', 'Virus']);
+    await check(table.locator('strong')).toHaveText('What');
+    await check(transcript.locator('code')).toHaveText('<img src=x onerror=alert(1)>');
+    const guide = transcript.getByRole('link', { name: 'the guide', exact: true });
+    await check(guide).toHaveAttribute('href', 'https://example.com/guide');
+    await check(guide).toHaveAttribute('target', '_blank');
+    await check(guide).toHaveAttribute('rel', 'noopener noreferrer');
+    await check(transcript).not.toContainText('## Reply');
+    await check(transcript).not.toContainText('| Topic |');
+    await assertChatShell();
+    await screenshot(page, 'ide-chat-rendered.png');
+    await page.setViewportSize({ width: 390, height: 664 });
+    await check(select).toHaveValue('0');
+    await check(heading).toBeInViewport();
+    await check(table).toBeInViewport();
+    await check(table.getByRole('cell')).toHaveText(['What', 'Virus']);
+    await assertChatShell();
+    await screenshot(page, 'ide-chat-rendered-phone.png');
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await draft.fill('Follow-up');
     await send.click();
     await check(transcript.locator('[data-role=assistant]')).toHaveCount(2);
     assert.deepEqual(sent[1].map(message => message.content), [
-      'Original conversation', 'Reply <img src=x onerror=alert(1)>', 'Follow-up',
+      'Original conversation', replyMarkdown, 'Follow-up',
     ]);
     await select.selectOption('1');
     await check(draft).toHaveValue('Draft for the other conversation');

@@ -1,5 +1,5 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{ChatMessage, RequestToken, SourceSpan};
+use crate::protocol::{ChatRole, RequestToken, SourceSpan};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -19,7 +19,16 @@ pub struct ViewModel {
 pub struct TranscriptBinding {
     pub id: &'static str,
     pub conversation: usize,
-    pub messages: Vec<ChatMessage>,
+    pub messages: Vec<TranscriptMessage>,
+}
+
+/// Plain transcript content with an optional sanitized assistant presentation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TranscriptMessage {
+    pub role: ChatRole,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendered_html: Option<String>,
 }
 
 /// Exact, bounded UTF-8 window of the accepted read-only source document.
