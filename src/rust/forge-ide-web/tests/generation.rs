@@ -409,8 +409,26 @@ fn workbench_refresh_follows_pane_navigation_as_an_action() {
     assert!(refresh.starts_with("<button"));
     assert!(refresh.contains("id=\"inspect\""));
     assert!(refresh.contains("data-action=\"inspect\""));
-    assert!(refresh.ends_with(">Refresh project"));
+    assert!(refresh.contains("aria-label=\"Refresh project\""));
+    assert!(refresh.contains("title=\"Refresh project\""));
+    let (_, glyph) = refresh.split_once('>').unwrap();
+    assert!(glyph.starts_with("<span"));
+    assert!(glyph.contains("aria-hidden=\"true\""));
+    assert!(glyph.contains("data-glyph=\"↻\""));
+    assert!(glyph.ends_with("></span>"));
     assert!(!refresh.contains("data-pane-switch"));
+}
+
+#[test]
+fn workbench_places_report_phase_in_inspection_details() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let (_, details) = html
+        .split_once("<details id=\"inspection-details\"")
+        .unwrap();
+    let (details, _) = details.split_once("</details>").unwrap();
+    assert!(details.contains("id=\"phase-label\""));
+    assert!(html.contains("id=\"inspection-actions\""));
 }
 
 #[test]

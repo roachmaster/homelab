@@ -226,6 +226,27 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(label)
             );
         }
+        Component::IconButton {
+            id,
+            label,
+            action,
+            emphasis,
+            glyph,
+        } => {
+            let primary = if *emphasis == ButtonEmphasis::Primary {
+                " fg-button-primary"
+            } else {
+                ""
+            };
+            let label = escape(label);
+            let _ = write!(
+                out,
+                "<button type=\"button\" class=\"fg-button{primary} fg-button-icon\" id=\"{}\" data-action=\"{}\" aria-label=\"{label}\" title=\"{label}\" disabled><span aria-hidden=\"true\" data-glyph=\"{}\"></span></button>",
+                escape(id),
+                escape(action),
+                escape(&glyph.to_string())
+            );
+        }
         Component::Navigation {
             id,
             title,

@@ -13,10 +13,10 @@ host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
 
 1. A catalog with exactly one allowed project opens it automatically after admission.
    Otherwise open **Project options** beside **View options**, choose **Node** and
-   **Project**, then select **Refresh project** beside **Problems**. The header
+   **Project**, then use the **Refresh project** symbol beside **Problems**. The header
    beside **Forge IDE** shows the current selection. Changing context clears
    previous report and source ownership. Refresh replaces the loaded report with
-   a new inspection.
+   a new inspection. **Inspection details** shows the report status and summary.
 2. **Find files or symbols** searches file paths and declaration names in the loaded
    report, case-insensitively. Results show their file context. Selecting a symbol
    opens its file and declaration directly. Clear the query to return to Explorer.

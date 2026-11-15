@@ -115,6 +115,14 @@ pub enum Component {
         emphasis: ButtonEmphasis,
         check_input: Option<String>,
     },
+    /// A button whose visual glyph is decorative and whose label names the action.
+    IconButton {
+        id: String,
+        label: String,
+        action: String,
+        emphasis: ButtonEmphasis,
+        glyph: char,
+    },
     Filter {
         id: String,
         label: String,
@@ -179,6 +187,7 @@ macro_rules! component {
     (select $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Select{id:$id.into(),label:$label.into(),action:$action.into()} };
     (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None} };
     (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:None} };
+    (primary_icon $id:expr, $label:expr, $action:expr, $glyph:expr) => { $crate::generate::Component::IconButton{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,glyph:$glyph} };
     (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into())} };
     (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into()} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
@@ -248,6 +257,9 @@ impl Document {
                 | Component::Button {
                     id, label, action, ..
                 }
+                | Component::IconButton {
+                    id, label, action, ..
+                }
                 | Component::TextArea { id, label, action }
                 | Component::Filter { id, label, action }
                 | Component::PairForm { id, label, action } => {
@@ -275,6 +287,11 @@ impl Document {
                 } if !key(id) => {
                     return Err("invalid checked input id");
                 }
+                Component::IconButton { label, glyph, .. }
+                    if label.trim().is_empty() || glyph.is_control() || glyph.is_whitespace() =>
+                {
+                    return Err("icon button needs a nonempty label and visible glyph");
+                }
                 Component::BrandContext { .. } if depth != 0 => {
                     return Err("brand context must be a document child");
                 }
@@ -282,7 +299,11 @@ impl Document {
                     return Err("layout controls must be a direct child of a pane layout");
                 }
                 Component::PaneAction(button)
-                    if !in_layout || !matches!(button.as_ref(), Component::Button { .. }) =>
+                    if !in_layout
+                        || !matches!(
+                            button.as_ref(),
+                            Component::Button { .. } | Component::IconButton { .. }
+                        ) =>
                 {
                     return Err("pane action requires a button directly in a pane layout");
                 }

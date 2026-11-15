@@ -44,9 +44,12 @@ pub(crate) fn emit(t: &Theme) -> String {
 .fg-pane-actions>.fg-pane-switches{min-width:0}
 .fg-pane-actions>.fg-button{flex:none;white-space:nowrap}
 [data-narrow=true] .fg-pane-actions{align-items:flex-end}
-[data-narrow=true] .fg-pane-actions>.fg-pane-switches{gap:2px}
-[data-narrow=true] .fg-pane-actions>.fg-pane-switches>button{min-width:var(--touch);padding-inline:3px}
-[data-narrow=true] .fg-pane-actions>.fg-button{min-height:var(--touch);padding-inline:6px;font-size:12px}
+[data-narrow=true] .fg-pane-actions>.fg-pane-switches>button{min-width:var(--touch)}
+.fg-button-icon{display:grid;place-items:center;width:var(--control);height:var(--control);padding:0;font-size:18px;line-height:1}
+.fg-button-icon>[data-glyph]::before{content:attr(data-glyph)}
+.fg-button-icon.fg-button-primary:enabled{background:var(--raised);border-color:var(--border);color:var(--text)}
+.fg-button-icon.fg-button-primary:hover:enabled{border-color:var(--accent);filter:none}
+@media(max-width:800px){.fg-button-icon{width:var(--touch);height:var(--touch)}}
 "#);
     for n in 0..=64 {
         let _ = writeln!(s, ".fg-depth-{n}{{margin-inline-start:{}px}}", n * 12);

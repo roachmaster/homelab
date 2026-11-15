@@ -33,10 +33,11 @@ pub fn ide_document() -> Document {
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
-                component!(toolbar [
-                    component!(button "cancel", "Cancel local wait", "cancel"),
-                    component!(reload "reload-session", "Reload to check session"),
-                    component!(caption "phase-label", "Checking session"),
+                component!(region "inspection-actions"; [
+                    component!(toolbar [
+                        component!(button "cancel", "Cancel local wait", "cancel"),
+                        component!(reload "reload-session", "Reload to check session"),
+                    ]),
                 ]),
                 component!(focused_layout "workspace"; [
                     component!(layout_controls [
@@ -45,7 +46,7 @@ pub fn ide_document() -> Document {
                             component!(select "project", "Project", "select_project"),
                         ]),
                     ]),
-                    component!(pane_action component!(primary "inspect", "Refresh project", "inspect")),
+                    component!(pane_action component!(primary_icon "inspect", "Refresh project", "inspect", '↻')),
                     component!(pane "explorer-panel", "Explorer", Leading, 180, 250, 400; [
                         component!(filter "project-query", "Find files or symbols", "set_project_query"),
                         component!(region "search-panel"; [
@@ -101,6 +102,7 @@ pub fn ide_document() -> Document {
                     ]),
                 ]),
                 component!(disclosure "inspection-details", "Inspection details"; [
+                    component!(caption "phase-label", "Checking session"),
                     component!(context "selection-context", ""),
                     component!(caption "summary", "No report yet"),
                     component!(caption "inspection-limits", "Read-only source and declarations. Find searches names in this loaded report, not source contents. Source is checked against the inspected version. Cancel stops only this browser wait."),

@@ -719,6 +719,58 @@ fn wrong_target_or_expired_success_fails_without_retaining_report() {
     assert!(status(&m).contains("Deadline"));
 }
 #[test]
+fn inspection_action_row_follows_cancel_and_reload_visibility() {
+    let assert_visibility = |model: &UiModel, cancel: bool, reload: bool| {
+        let view = model.view();
+        for (id, expected) in [
+            ("inspection-actions", cancel || reload),
+            ("cancel", cancel),
+            ("reload-session", reload),
+        ] {
+            let binding = view.visibility.iter().find(|binding| binding.id == id);
+            assert_eq!(
+                binding.map(|binding| binding.visible),
+                Some(expected),
+                "{id}"
+            );
+        }
+    };
+    let mut model = connected();
+    assert_visibility(&model, false, false);
+
+    let request = inspect(&mut model);
+    assert_visibility(&model, true, false);
+    event(&mut model, result(&request, report()));
+    assert_visibility(&model, false, false);
+
+    let request = inspect(&mut model);
+    let mut partial = report();
+    partial.complete = false;
+    event(&mut model, result(&request, partial));
+    assert_visibility(&model, false, false);
+    event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: request.token,
+            value: 1,
+        },
+    );
+    assert_visibility(&model, true, false);
+    event(&mut model, UiEvent::Cancel {});
+    assert_visibility(&model, false, false);
+
+    let request = inspect(&mut model);
+    event(
+        &mut model,
+        UiEvent::NetworkFailed {
+            request_id: request.token.request_id,
+            category: FailureKind::Unavailable,
+        },
+    );
+    assert_visibility(&model, false, true);
+}
+
+#[test]
 fn failed_network_request_has_no_hidden_retry_and_stale_failures_are_ignored() {
     let mut m = connected();
     let p = inspect(&mut m);

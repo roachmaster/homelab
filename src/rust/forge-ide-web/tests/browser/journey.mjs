@@ -279,12 +279,28 @@ async function checkRefreshPlacement(page) {
   const refresh = page.getByRole('button', { name: 'Refresh project', exact: true });
   await check(refresh).toHaveAttribute('id', 'inspect');
   await check(refresh).toHaveAttribute('data-action', 'inspect');
+  await check(refresh).toHaveAttribute('aria-label', 'Refresh project');
+  await check(refresh).toHaveAttribute('title', 'Refresh project');
+  await check(refresh).toHaveText('');
+  await check(refresh.locator('[aria-hidden="true"][data-glyph="↻"]')).toBeVisible();
   await check(refresh).toBeEnabled();
   await check(problems).toBeInViewport();
   await check(refresh).toBeInViewport();
+  assert.ok(await refresh.evaluate(button => {
+    const reference = document.createElement('span');
+    reference.style.backgroundColor = 'var(--raised)';
+    document.body.append(reference);
+    const neutral = getComputedStyle(button).backgroundColor === getComputedStyle(reference).backgroundColor;
+    reference.remove();
+    return neutral;
+  }), 'refresh uses the neutral raised surface');
   const [problemsBounds, refreshBounds] = await Promise.all([problems.boundingBox(), refresh.boundingBox()]);
   assert(problemsBounds && refreshBounds && problemsBounds.y < refreshBounds.y + refreshBounds.height &&
     refreshBounds.y < problemsBounds.y + problemsBounds.height, 'Problems and Refresh project share a row');
+  if (page.viewportSize().width <= 390) {
+    assert(Math.abs(refreshBounds.width - 44) < 1 && Math.abs(refreshBounds.height - 44) < 1,
+      'phone refresh target is 44 by 44 CSS pixels');
+  }
   const gap = refreshBounds.x - (problemsBounds.x + problemsBounds.width);
   assert(gap >= -1 && gap <= 12, 'Refresh project immediately follows Problems');
   await problems.focus();
@@ -483,8 +499,9 @@ async function panesAndNarrow(page, traffic) {
   const outline = await page.locator('#outline-panel').boundingBox();
   assert.ok(center.width > explorer.width && center.width > outline.width, 'file workspace is the dominant desktop surface');
   await assertTone(page, 'status', 'warning');
+  await check(page.locator('#inspection-actions')).toBeHidden();
   await check(page.locator('#cancel')).toBeHidden();
-  await assertTone(page, 'phase-label', 'warning');
+  await check(page.locator('#phase-label')).toBeHidden();
   await page.locator('#problems-panel-switch').focus();
   await page.keyboard.press('Tab');
   await check(page.locator('#inspect')).toBeFocused();
@@ -1078,12 +1095,18 @@ async function realJourney() {
   await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
   await check(page.locator('#source-shape-panel')).toHaveJSProperty('open', false);
   await check(page.locator('#inspection-details')).toHaveJSProperty('open', false);
+  await check(page.locator('#phase-label')).toBeHidden();
+  await check(page.locator('#inspection-actions')).toBeHidden();
   await check(page.locator('#problems-panel')).toBeHidden();
   await disclosure(page, 'inspection-details', true);
+  await check(page.locator('#phase-label')).toBeVisible();
+  await check(page.locator('#phase-label')).toHaveText('Partial report');
+  await assertTone(page, 'phase-label', 'warning');
   await check(page.locator('#summary')).toContainText('1 traits');
   await check(page.locator('#summary')).toContainText('2 trait impls');
   await check(page.locator('#summary')).toContainText('1 free functions');
   await disclosure(page, 'inspection-details', false);
+  await check(page.locator('#phase-label')).toBeHidden();
   const shapeCalls = traffic.count('inspect');
   await disclosure(page, 'source-shape-panel', true);
   await disclosure(page, 'source-shape-caveats', true);
@@ -1141,6 +1164,9 @@ async function realJourney() {
   await assertTone(page, 'status', 'error');
   await noReport(page);
   await check(page.locator('#inspect')).toBeEnabled();
+  await check(page.locator('#inspection-actions')).toBeVisible();
+  await check(page.locator('#reload-session')).toBeVisible();
+  await check(page.locator('#cancel')).toBeHidden();
   await check(page.locator('#pair-panel')).toBeHidden();
   await page.setViewportSize({ width: 760, height: 1000 });
   await screenshot(page, 'ide-workbench-narrow-denied.png');
@@ -1224,8 +1250,11 @@ async function controlledLifecycleJourney() {
   await disclosure(page, 'project-options', false);
   const before = traffic.count('inspect');
   await page.locator('#inspect').evaluate(button => { button.click(); button.click(); button.click(); });
-  await check(page.locator('#phase-label')).toContainText('Inspecting');
+  await check(page.locator('#status')).toContainText('Inspecting');
   await check(page.locator('#inspect')).toBeDisabled();
+  const actions = page.locator('#inspection-actions');
+  await check(actions).toBeVisible();
+  await check(page.locator('#reload-session')).toBeHidden();
   const cancel = page.locator('#cancel');
   await check(cancel).toBeEnabled();
   await check(cancel).toBeVisible();
@@ -1235,6 +1264,7 @@ async function controlledLifecycleJourney() {
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
   await assertTone(page, 'status', 'warning');
   await check(cancel).toBeHidden();
+  await check(actions).toBeHidden();
   await check(page.locator('#inspect')).toBeFocused();
   await delay(1000); // injected native port completes after local cancellation
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
@@ -1242,6 +1272,7 @@ async function controlledLifecycleJourney() {
   assert.equal(traffic.count('inspect'), before + 1, 'rapid repeated Inspect creates one request');
   await inspect(page, 'workspace', 'Project ready.');
   await check(page.locator('#files')).toContainText('fault-fixture.txt');
+  await check(actions).toBeHidden();
   report.pass('injected.requests.cancel_retry');
   await controlledInputDraftJourney(page);
   report.start('injected.requests.revisions');
@@ -1260,7 +1291,7 @@ async function controlledLifecycleJourney() {
 
   await selectProject(page, 'slow');
   await page.locator('#inspect').click();
-  await check(page.locator('#phase-label')).toContainText('Inspecting');
+  await check(page.locator('#status')).toContainText('Inspecting');
   const refreshRequests = traffic.count('inspect');
   const refreshResumes = traffic.count('resume');
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -1273,7 +1304,7 @@ async function controlledLifecycleJourney() {
   await page.locator('#open-workbench').click();
   await selectProject(page, 'slow');
   await page.locator('#inspect').click();
-  await check(page.locator('#phase-label')).toContainText('Inspecting');
+  await check(page.locator('#status')).toContainText('Inspecting');
   await page.locator('#project').focus();
   await check(page.locator('#status')).toContainText('Project ready.');
   await check(page.locator('#project')).toBeFocused();
@@ -1336,8 +1367,11 @@ async function controlledLifecycleJourney() {
   await check(page.locator('#workbench')).toContainText(/No allowed project/i);
   await check(page.locator('#inspect')).toBeDisabled();
   await check(page.locator('#project option')).toHaveCount(0);
+  await check(page.locator('#phase-label')).toBeHidden();
+  await disclosure(page, 'inspection-details', true);
   await check(page.locator('#phase-label')).toHaveText('No allowed project');
   await assertTone(page, 'phase-label', 'warning');
+  await disclosure(page, 'inspection-details', false);
   await noReport(page);
   await screenshot(page, 'ide-controlled-no-allowed-project.png');
   await context.unroute('**/forge/v1/dispatch');

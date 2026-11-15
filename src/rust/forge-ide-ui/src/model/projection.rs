@@ -500,6 +500,8 @@ impl UiModel {
         let connected = self.catalog.is_some();
         let loading = self.pending.is_some();
         let source_loading = self.pending_source.is_some();
+        let can_cancel = loading || source_loading;
+        let can_reload = self.phase == Phase::Failed;
         let no_project = connected && self.project.is_empty();
         let status_tone = match self.phase {
             Phase::Failed => Tone::Error,
@@ -768,7 +770,7 @@ impl UiModel {
                 InputBinding { id:"symbol-filter",value:self.symbol_filter.0.clone(),disabled:entry.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.zip(entry).map(|(k,e)| FilterAction::SetSymbolFilter { report:k.clone(),entry:e.id }) },
             ],
             buttons: vec![
-                button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!loading && !source_loading,None),
+                button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!can_cancel,None),
                 button("search-more",!search_more,key.map(|k| RowAction::MoreSearch { report:k.clone() })),
                 button("search-previous",self.search_window.history.is_empty(),key.map(|k| RowAction::PreviousSearch { report:k.clone() })),
                 button("source-more",!self.source.as_ref().is_some_and(|s| s.has_next()),key.zip(entry).map(|(k,e)| RowAction::MoreSource { report:k.clone(),entry:e.id })),
@@ -793,8 +795,11 @@ impl UiModel {
             tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details },TableBinding { id:"source-shape-details",rows:shape_details }],
             visibility: vec![
                 visible("workbench-context", workbench_node.is_some()),
+                visible("inspection-actions", can_cancel || can_reload),
+                visible("cancel", can_cancel),
+                visible("reload-session", can_reload),
                 visible("search-panel",!self.project_query.0.trim().is_empty()),visible("files-panel",self.project_query.0.trim().is_empty()),visible("source-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
-                visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading || source_loading),
+                visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
             ],
             transcripts: vec![],
         };
