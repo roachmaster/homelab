@@ -1035,6 +1035,63 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
 }
 
 #[test]
+fn stale_browser_documents_redirect_to_the_portal() {
+    let f = Files::new();
+    let (h, _) = host(&f);
+    let get = |target, headers| {
+        exchange(
+            &h,
+            format!(
+                "GET {target} HTTP/1.1\r\nHost: {}\r\n{headers}\r\n",
+                h.local_addr().unwrap()
+            ),
+        )
+    };
+    let html = "Accept: text/html,application/xhtml+xml,*/*;q=0.8\r\n";
+    let navigation = format!("{html}Sec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: document\r\n");
+    for target in [
+        "/?old=1",
+        "/index.html?old=1",
+        "/obsolete-workbench",
+        "/cards_seed.md",
+    ] {
+        let response = get(target, navigation.as_str());
+        assert!(response.starts_with("HTTP/1.1 302 Found"));
+        assert!(response.contains("\r\nLocation: /\r\n"));
+        assert!(response.contains("\r\nCache-Control: no-store\r\n"));
+        assert!(!response.contains("Set-Cookie:"));
+    }
+    assert!(get("/obsolete-workbench", html).starts_with("HTTP/1.1 302 Found"));
+
+    for target in ["/", "/index.html", "/worker.js"] {
+        assert!(get(target, navigation.as_str()).starts_with("HTTP/1.1 200 OK"));
+    }
+    for target in ["/forge/v1/dispatch", "/forge/v1/dispatch/workspace"] {
+        let response = get(target, navigation.as_str());
+        assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed"));
+        assert!(response.contains("\r\nAllow: POST\r\n"));
+    }
+    for target in [
+        "/api/unknown",
+        "/forge/v1/dispatch?old=1",
+        "/cdn-cgi/access/unknown",
+        "//external.invalid",
+    ] {
+        assert!(get(target, navigation.as_str()).starts_with("HTTP/1.1 404 Not Found"));
+    }
+    for headers in [
+        "Accept: application/json\r\n",
+        "Accept: text/html;q=0,application/json\r\n",
+        "Accept: text/html\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Dest: empty\r\n",
+        "Accept: text/html\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: iframe\r\n",
+    ] {
+        let response = get("/missing.js", headers);
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"));
+        assert!(response.ends_with("{\"error\":\"not_found\"}"));
+    }
+}
+
+#[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
     for abi in [0, 1, 2, 3, 5] {
         let f = Files::new();

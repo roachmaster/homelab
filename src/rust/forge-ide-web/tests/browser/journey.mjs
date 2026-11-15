@@ -948,11 +948,46 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   assert.equal(new URL(page.url()).search, '', 'no report/session state in URL');
   const otherTab = await page.context().newPage();
   try {
-    await otherTab.goto(page.url(), { waitUntil: 'domcontentloaded' });
+    const portalUrl = page.url();
+    const staleUrl = new URL('/obsolete-workbench', portalUrl).href;
+    // Seed one genuine history entry for a page that used to exist. Only this
+    // visit is simulated. Back below reaches the native host document route.
+    await otherTab.route(staleUrl, route => route.fulfill({
+      status: 200,
+      contentType: 'text/html',
+      headers: { 'Cache-Control': 'no-store' },
+      body: '<!doctype html><title>Prior Forge page</title>',
+    }), { times: 1 });
+    await otherTab.goto(staleUrl, { waitUntil: 'domcontentloaded' });
+    await otherTab.goto(portalUrl, { waitUntil: 'domcontentloaded' });
     await check(otherTab.locator('#chat')).toBeVisible();
-    await check(otherTab.locator('#chat-draft')).toHaveValue('');
+    const draft = otherTab.locator('#chat-draft');
+    await check(draft).toHaveValue('');
     await check(otherTab.locator('#chat-conversation option')).toHaveCount(1);
     await noReport(otherTab);
+
+    const staleHistoryDraft = 'Keep this draft when Back reaches an old Forge page';
+    const saved = checkpointSaved(otherTab, snapshot => checkpointHasDraft(snapshot, staleHistoryDraft));
+    await draft.click();
+    await draft.fill(staleHistoryDraft);
+    await saved;
+    process.stderr.write('QA_CHECK stale_portal_back\n');
+    const documentResponse = otherTab.waitForResponse(response =>
+      response.url() === staleUrl && response.request().isNavigationRequest());
+    const leave = otherTab.waitForEvent('dialog', { predicate: dialog => dialog.type() === 'beforeunload', timeout: 5000 })
+      .then(dialog => dialog.accept());
+    const [redirect] = await Promise.all([
+      documentResponse,
+      leave,
+      otherTab.waitForEvent('domcontentloaded'),
+      otherTab.evaluate(() => history.back()),
+    ]);
+    assert.match(await redirect.request().headerValue('accept') ?? '', /\btext\/html\b/);
+    assert.equal(redirect.status(), 302);
+    assert.equal(redirect.headers().location, '/');
+    await check(otherTab).toHaveURL(portalUrl);
+    await check(otherTab.locator('#chat')).toBeVisible();
+    await check(draft).toHaveValue(staleHistoryDraft);
   } finally {
     await otherTab.close();
   }

@@ -31,6 +31,7 @@ struct Response {
     body: Vec<u8>,
     cookie: Option<String>,
     allow: Option<&'static str>,
+    location: Option<&'static str>,
     head: bool,
 }
 impl Response {
@@ -41,11 +42,23 @@ impl Response {
             body: format!("{{\"error\":\"{label}\"}}").into_bytes(),
             cookie: None,
             allow: None,
+            location: None,
             head: false,
         }
     }
     fn rejected(e: Rejection) -> Self {
         Self::error(e.status(), e.label())
+    }
+    fn return_to_portal(head: bool) -> Self {
+        Self {
+            status: 302,
+            mime: "text/html; charset=utf-8",
+            body: Vec::new(),
+            cookie: None,
+            allow: None,
+            location: Some("/"),
+            head,
+        }
     }
 }
 fn remaining(deadline: Instant) -> std::io::Result<Duration> {
@@ -314,9 +327,51 @@ fn command(
         body: bytes.bytes,
         cookie: reply.cookie,
         allow: None,
+        location: None,
         head: false,
     })
 }
+fn is_stale_document_navigation(r: &Request) -> bool {
+    fn accepts_html(accept: &str) -> bool {
+        accept.split(',').any(|range| {
+            let mut parts = range.split(';');
+            parts
+                .next()
+                .is_some_and(|media| media.trim().eq_ignore_ascii_case("text/html"))
+                && parts
+                    .filter_map(|part| part.split_once('='))
+                    .find(|(name, _)| name.trim().eq_ignore_ascii_case("q"))
+                    .is_none_or(|(_, quality)| {
+                        quality
+                            .trim()
+                            .parse::<f32>()
+                            .is_ok_and(|quality| quality > 0.0 && quality <= 1.0)
+                    })
+        })
+    }
+
+    let path = r
+        .path
+        .split_once('?')
+        .map_or(r.path.as_str(), |(path, _)| path);
+    let reserved = ["/forge/v1", "/api", "/cdn-cgi"].iter().any(|prefix| {
+        path == *prefix
+            || path
+                .strip_prefix(prefix)
+                .is_some_and(|tail| tail.starts_with('/'))
+    });
+    let header = |name| r.headers.get(name).map(String::as_str);
+    // Accept covers browsers that omit Fetch Metadata. When present, metadata
+    // excludes frames, asset requests and fetches even if they request HTML.
+    matches!(r.method.as_str(), "GET" | "HEAD")
+        && path.starts_with('/')
+        && !path.starts_with("//")
+        && !reserved
+        && header("sec-fetch-mode").is_none_or(|value| value == "navigate")
+        && header("sec-fetch-dest").is_none_or(|value| value == "document")
+        && header("accept").is_some_and(accepts_html)
+}
+
 fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Response {
     if r.headers.get("host").map(String::as_str) != Some(host.authority.as_str()) {
         return Response::error(400, "invalid_host");
@@ -352,8 +407,11 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
             body: body.to_vec(),
             cookie: None,
             allow: None,
+            location: None,
             head: r.method == "HEAD",
         }
+    } else if is_stale_document_navigation(&r) {
+        Response::return_to_portal(r.method == "HEAD")
     } else {
         Response::error(404, "not_found")
     }
@@ -381,6 +439,7 @@ fn workspace_command(
         body: output.bytes,
         cookie: None,
         allow: None,
+        location: None,
         head: false,
     })
 }
@@ -388,6 +447,7 @@ fn write_response(s: &mut TcpStream, r: Response, deadline: Instant) -> Result<(
     s.set_write_timeout(Some(remaining(deadline)?))?;
     let reason = match r.status {
         200 => "OK",
+        302 => "Found",
         400 => "Bad Request",
         401 => "Unauthorized",
         404 => "Not Found",
@@ -401,6 +461,9 @@ fn write_response(s: &mut TcpStream, r: Response, deadline: Instant) -> Result<(
     }
     if let Some(a) = r.allow {
         head.push_str(&format!("Allow: {a}\r\n"));
+    }
+    if let Some(location) = r.location {
+        head.push_str(&format!("Location: {location}\r\n"));
     }
     head.push_str("\r\n");
     write_bounded(s, head.as_bytes(), deadline)?;
