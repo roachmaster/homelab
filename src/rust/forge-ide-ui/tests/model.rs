@@ -203,6 +203,70 @@ fn source_request(output: &Output) -> PreparedSource {
 }
 
 #[test]
+fn verified_markdown_preview_uses_whole_file_without_changing_raw_windows() {
+    let mut model = connected();
+    let inspection = inspect(&mut model);
+    let mut inspected = report();
+    let mut plain = inspected.entries[1].clone();
+    plain.id = 2;
+    inspected.entries[1].name = NativeName::Utf8("README.Markdown".into());
+    inspected.entries[1].declarations.clear();
+    inspected.entries.push(plain);
+    inspected.files = 2;
+    event(&mut model, result(&inspection, inspected));
+    let opening = event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: inspection.token.clone(),
+            value: 1,
+        },
+    );
+    assert!(opening.view.sources[0].markdown.is_none());
+    let text = format!(
+        "# Title\n\n**Bold** <script>alert(1)</script> [unsafe](javascript:alert(1)) ![diagram](https://example.com/p.png)\n\n{}\n## Tail\n",
+        "A raw line\n".repeat(260),
+    );
+    let opened = event(
+        &mut model,
+        source_result(&source_request(&opening), text.clone()),
+    );
+    let source = &opened.view.sources[0];
+    let markdown = source.markdown.as_ref().unwrap();
+    let html = markdown.rendered_html.as_deref().unwrap();
+    assert!(html.contains("<h1>Title</h1>") && html.contains("<strong>Bold</strong>"));
+    assert!(
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;") && html.contains("unsafe diagram")
+    );
+    assert!(html.contains("<h2>Tail</h2>"));
+    assert!(!html.contains("<script") && !html.contains("<img") && !html.contains("href="));
+    assert!(text.starts_with(&source.text) && !source.text.contains("## Tail"));
+
+    let next = event(
+        &mut model,
+        UiEvent::MoreSource {
+            report: inspection.token.clone(),
+            entry: 1,
+        },
+    );
+    assert_eq!(next.view.sources[0].markdown.as_ref(), Some(markdown));
+    assert!(next.view.sources[0].text.contains("## Tail"));
+    let opening = event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: inspection.token,
+            value: 2,
+        },
+    );
+    assert!(opening.view.sources[0].markdown.is_none());
+    let opened = event(
+        &mut model,
+        source_result(&source_request(&opening), "# Raw only".into()),
+    );
+    assert!(opened.view.sources[0].markdown.is_none());
+    assert_eq!(opened.view.sources[0].text, "# Raw only");
+}
+
+#[test]
 fn workspace_restores_source_and_declaration_only_from_fresh_report() {
     let mut prior = connected();
     let inspected = inspect(&mut prior);

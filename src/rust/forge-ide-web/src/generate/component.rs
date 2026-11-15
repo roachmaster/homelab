@@ -146,11 +146,23 @@ pub enum Component {
         id: String,
         label: String,
     },
+    /// Optional raw and Markdown presentations around one read-only source view.
+    SourceFormats {
+        prefix: String,
+        children: Vec<Component>,
+    },
     /// Presentation-only route to a declared pane; no application event.
     PaneLink {
         id: String,
         label: String,
         target: String,
+    },
+    /// A narrow-layout pane link rendered before the pane heading.
+    PaneHeaderLink {
+        id: String,
+        label: String,
+        target: String,
+        glyph: char,
     },
     Details {
         id: String,
@@ -194,7 +206,9 @@ macro_rules! component {
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
     (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
+    (source_formats $prefix:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::SourceFormats{prefix:$prefix.into(),children:vec![$($child),*]} };
     (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
+    (pane_header_link $id:expr, $label:expr, $target:expr, $glyph:expr) => { $crate::generate::Component::PaneHeaderLink{id:$id.into(),label:$label.into(),target:$target.into(),glyph:$glyph} };
     (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
     (details $id:expr) => { $crate::generate::Component::Details{id:$id.into()} };
 }
@@ -231,8 +245,9 @@ impl Document {
             depth: usize,
             count: &mut usize,
             ids: &mut BTreeSet<String>,
-            in_layout: bool,
+            parent: Option<&Component>,
         ) -> Result<(), &'static str> {
+            let in_layout = matches!(parent, Some(Component::PaneLayout { .. }));
             *count += 1;
             if depth > 12 || *count > 256 {
                 return Err("component declaration limit");
@@ -248,6 +263,7 @@ impl Document {
                 | Component::ReadingColumn(_)
                 | Component::LayoutControls(_)
                 | Component::PaneAction(_)
+                | Component::SourceFormats { .. }
                 | Component::Workspace(_) => (None, None, None),
                 Component::PaneLayout { id, .. } | Component::Region { id, .. } => {
                     (Some(id), None, None)
@@ -269,7 +285,10 @@ impl Document {
                 | Component::Tree { id, label }
                 | Component::Reload { id, label }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
-                Component::PaneLink { id, label, target } => (Some(id), Some(label), Some(target)),
+                Component::PaneLink { id, label, target }
+                | Component::PaneHeaderLink {
+                    id, label, target, ..
+                } => (Some(id), Some(label), Some(target)),
                 Component::Details { id }
                 | Component::Facts { id }
                 | Component::BrandContext { id } => (Some(id), None, None),
@@ -288,12 +307,32 @@ impl Document {
                     return Err("invalid checked input id");
                 }
                 Component::IconButton { label, glyph, .. }
+                | Component::PaneHeaderLink { label, glyph, .. }
                     if label.trim().is_empty() || glyph.is_control() || glyph.is_whitespace() =>
                 {
                     return Err("icon button needs a nonempty label and visible glyph");
                 }
                 Component::BrandContext { .. } if depth != 0 => {
                     return Err("brand context must be a document child");
+                }
+                Component::PaneHeaderLink { .. }
+                    if !matches!(parent, Some(Component::Pane { .. })) =>
+                {
+                    return Err("pane header link must be a direct child of a pane");
+                }
+                Component::SourceFormats { prefix, children } => {
+                    if !key(prefix)
+                        || children
+                            .iter()
+                            .filter(|child| matches!(child, Component::Source { .. }))
+                            .count()
+                            != 1
+                    {
+                        return Err("source formats require one direct source view");
+                    }
+                    for suffix in ["format", "raw", "raw-pane", "display", "preview"] {
+                        insert(ids, &format!("{prefix}-{suffix}"))?;
+                    }
                 }
                 Component::LayoutControls(_) if !in_layout => {
                     return Err("layout controls must be a direct child of a pane layout");
@@ -307,7 +346,7 @@ impl Document {
                 {
                     return Err("pane action requires a button directly in a pane layout");
                 }
-                Component::PaneAction(button) => visit(button, depth + 1, count, ids, false)?,
+                Component::PaneAction(button) => visit(button, depth + 1, count, ids, Some(c))?,
                 Component::Workspace(_) => insert(ids, "workspace")?,
                 Component::PairForm { id, .. } => {
                     for suffix in ["form", "code"] {
@@ -321,6 +360,7 @@ impl Document {
                     min,
                     initial,
                     max,
+                    children,
                     ..
                 } => {
                     if !in_layout
@@ -330,6 +370,14 @@ impl Document {
                         || *max > 960
                     {
                         return Err("invalid pane placement/geometry");
+                    }
+                    if children
+                        .iter()
+                        .filter(|child| matches!(child, Component::PaneHeaderLink { .. }))
+                        .count()
+                        > 1
+                    {
+                        return Err("pane allows one header link");
                     }
                     insert(ids, &format!("{id}-heading"))?;
                     insert(ids, &format!("{id}-switch"))?;
@@ -376,6 +424,7 @@ impl Document {
                 | Component::PaneLayout { children, .. }
                 | Component::Region { children, .. }
                 | Component::Pane { children, .. }
+                | Component::SourceFormats { children, .. }
                 | Component::Row(children)
                 | Component::LayoutControls(children)
                 | Component::ReadingColumn(children)
@@ -385,13 +434,7 @@ impl Document {
             };
             if let Some(children) = children {
                 for child in children {
-                    visit(
-                        child,
-                        depth + 1,
-                        count,
-                        ids,
-                        matches!(c, Component::PaneLayout { .. }),
-                    )?;
+                    visit(child, depth + 1, count, ids, Some(c))?;
                 }
             }
             Ok(())
@@ -415,7 +458,7 @@ impl Document {
                 }
                 has_brand_context = true;
             }
-            visit(c, 0, &mut count, &mut ids, false)?;
+            visit(c, 0, &mut count, &mut ids, None)?;
         }
         Ok(())
     }

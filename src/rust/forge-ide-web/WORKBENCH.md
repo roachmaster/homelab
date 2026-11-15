@@ -30,9 +30,11 @@ host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
    provides declaration navigation. Selecting a declaration highlights its lines
    and opens the corresponding source window. Previous/Next lines traverses the
    accepted document locally; no additional file read occurs for line paging.
-5. On phones, selecting a file or declaration reveals the File pane. **Back to files**
-   returns to Explorer. Pane switches still expose Outline and Problems. Selection
-   remains in the same model and survives presentation-only pane changes.
+   Verified Markdown files open in **Raw**. Choose **Display** for a formatted
+   preview. Files that exceed the preview limits remain readable in **Raw**.
+5. On phones, selecting a file or declaration reveals the File pane. The
+   **Back to files** arrow beside **File** returns to Explorer. Pane switches
+   still expose Outline and Problems. Selection survives pane changes.
 6. Metadata, source-shape inventory and inspection details remain supporting
    disclosures. Problems shows supplied inspection strings, without invented
    compiler severity, test success or source locations.

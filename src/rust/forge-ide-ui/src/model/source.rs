@@ -1,5 +1,6 @@
 //! Read-only document acceptance and exact, bounded source windows.
 use super::*;
+use crate::markdown::render_markdown_file;
 
 const WINDOW_BYTES: usize = 64 * 1024;
 const WINDOW_LINES: u32 = 256;
@@ -18,10 +19,11 @@ pub(super) struct SourceState {
     chunks: Vec<Chunk>,
     selected: usize,
     total_lines: u32,
+    markdown: Option<MarkdownPreview>,
 }
 
 impl SourceState {
-    fn new(document: SourceDocument) -> Self {
+    fn new(document: SourceDocument, markdown: bool) -> Self {
         let mut chunks = Vec::new();
         let (mut start, mut line, mut column, mut first_line, mut first_column) = (0, 1, 0, 1, 0);
         for (at, ch) in document.text.char_indices() {
@@ -53,11 +55,15 @@ impl SourceState {
             column: first_column,
         });
         let total_lines = document.text.lines().count() as u32;
+        let markdown = markdown.then(|| MarkdownPreview {
+            rendered_html: render_markdown_file(&document.text),
+        });
         Self {
             document,
             chunks,
             selected: 0,
             total_lines,
+            markdown,
         }
     }
     pub fn next(&mut self) {
@@ -112,6 +118,7 @@ impl SourceState {
             first_column: chunk.column,
             total_lines: self.total_lines,
             target_span,
+            markdown: self.markdown.clone(),
         }
     }
 }
@@ -239,7 +246,10 @@ impl UiModel {
                     return;
                 }
                 self.source_message = "Read-only source · verified against this inspection.".into();
-                self.source = Some(SourceState::new(document));
+                let markdown = self
+                    .current_entry()
+                    .is_some_and(|entry| is_markdown(&entry.name));
+                self.source = Some(SourceState::new(document, markdown));
                 self.reveal_declaration();
             }
             SourceOutcome::Error { category, message } => {
@@ -253,16 +263,35 @@ impl UiModel {
     }
 }
 
+fn is_markdown(name: &NativeName) -> bool {
+    let suffix = |bytes: &[u8]| {
+        [b".md".as_slice(), b".markdown"].iter().any(|suffix| {
+            bytes
+                .len()
+                .checked_sub(suffix.len())
+                .is_some_and(|start| bytes[start..].eq_ignore_ascii_case(suffix))
+        })
+    };
+    match name {
+        NativeName::Utf8(name) => suffix(name.as_bytes()),
+        NativeName::UnixBytes(name) | NativeName::EncodedBytes(name) => suffix(name),
+        NativeName::WindowsWide(name) => suffix(String::from_utf16_lossy(name).as_bytes()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
     fn exact_windows_cover_unicode_long_lines_empty_lines_and_highlights() {
         let text = format!("{}\n{}tail", "界".repeat(WINDOW_BYTES), "\n".repeat(600));
-        let mut state = SourceState::new(SourceDocument {
-            text: text.clone(),
-            sha256: "a".repeat(64),
-        });
+        let mut state = SourceState::new(
+            SourceDocument {
+                text: text.clone(),
+                sha256: "a".repeat(64),
+            },
+            false,
+        );
         let rebuilt = state
             .chunks
             .iter()
@@ -282,10 +311,13 @@ mod tests {
             state.selected + 1 == state.chunks.len() || state.chunks[state.selected + 1].line > 600
         );
         for text in ["", "a", "a\n", "\n", "\r\n", "a\r"] {
-            let state = SourceState::new(SourceDocument {
-                text: text.into(),
-                sha256: "a".repeat(64),
-            });
+            let state = SourceState::new(
+                SourceDocument {
+                    text: text.into(),
+                    sha256: "a".repeat(64),
+                },
+                false,
+            );
             assert_eq!(state.total_lines as usize, text.lines().count());
         }
     }

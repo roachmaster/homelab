@@ -42,6 +42,15 @@ pub struct SourceBinding {
     pub first_column: u32,
     pub total_lines: u32,
     pub target_span: Option<SourceSpan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<MarkdownPreview>,
+}
+
+/// Sanitized HTML from the entire verified file. `None` means Raw remains
+/// available but the Markdown rendering exceeds its limits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MarkdownPreview {
+    pub rendered_html: Option<String>,
 }
 /// Opaque, model-owned presentation identity. The renderer compares it but does
 /// not infer selection semantics from rows or retain it as domain state.

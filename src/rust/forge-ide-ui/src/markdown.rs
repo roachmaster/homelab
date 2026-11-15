@@ -1,8 +1,8 @@
-//! Sanitized Markdown rendering for Forge chat transcripts.
+//! Sanitized Markdown rendering for Forge chat and verified source previews.
 //!
 //! Model replies arrive as plain Markdown text. This module renders a bounded
-//! subset of Markdown to an HTML string that the generated transcript renderer
-//! may assign to its single sanctioned `innerHTML` site. The renderer is the
+//! subset of Markdown to an HTML string for the generated presentation adapter.
+//! The renderer is the
 //! safety boundary for that site, so it follows three rules:
 //!
 //! - Only a fixed whitelist of tags is ever emitted: headings, paragraphs,
@@ -12,8 +12,8 @@
 //! - All source text is HTML-escaped. Raw HTML in the source is escaped, never
 //!   passed through, so model output cannot create elements, event handlers
 //!   or scripts. Image syntax renders as its alt text, never an `img` element.
-//! - Output is bounded. A rendering that would exceed [`MAX_RENDERED_HTML_BYTES`]
-//!   returns [`None`], and the transcript falls back to plain text.
+//! - Output is bounded. A rendering that would exceed its output budget returns
+//!   [`None`], leaving the original text available.
 //!
 //! Supported subset: ATX headings, paragraphs, hard breaks (two trailing
 //! spaces), fenced code blocks, unordered and ordered lists, blockquotes,
@@ -25,6 +25,9 @@
 /// Maximum rendered HTML bytes for one message. Replies are already bounded
 /// to 4 KiB of source text; this cap bounds the expansion of escaping and tags.
 pub const MAX_RENDERED_HTML_BYTES: usize = 32_768;
+const MAX_MARKDOWN_FILE_BYTES: usize = 64 * 1024;
+const MAX_MARKDOWN_FILE_HTML_BYTES: usize = 128 * 1024;
+const MAX_INLINE_FILE_WORK: u64 = 4 * 1024 * 1024;
 
 /// Maximum nesting depth for inline emphasis and blockquotes.
 const MAX_DEPTH: usize = 8;
@@ -37,9 +40,31 @@ pub fn render_markdown(text: &str) -> Option<String> {
     if text.trim().is_empty() {
         return None;
     }
+    render_with_limit(text, MAX_RENDERED_HTML_BYTES)
+}
+
+pub(crate) fn render_markdown_file(text: &str) -> Option<String> {
+    if text.len() > MAX_MARKDOWN_FILE_BYTES {
+        return None;
+    }
+    // Inline delimiters may scan to the end of the current line. Bound the
+    // combined lookahead work before processing a larger source document.
+    let work: u64 = text
+        .lines()
+        .map(|line| {
+            line.len() as u64 * line.bytes().filter(|b| b"[<*_`".contains(b)).count() as u64
+        })
+        .sum();
+    if work > MAX_INLINE_FILE_WORK {
+        return None;
+    }
+    render_with_limit(text, MAX_MARKDOWN_FILE_HTML_BYTES)
+}
+
+fn render_with_limit(text: &str, limit: usize) -> Option<String> {
     let lines: Vec<&str> = text.lines().collect();
     let mut out = String::new();
-    if render_blocks(&lines, &mut out, 0) {
+    if render_blocks(&lines, &mut out, 0, limit) {
         Some(out)
     } else {
         None
@@ -61,11 +86,6 @@ fn escape_str(text: &str, out: &mut String) {
     for c in text.chars() {
         escape_char(c, out);
     }
-}
-
-/// Returns `false` once the output budget is exceeded.
-fn within_budget(out: &str) -> bool {
-    out.len() <= MAX_RENDERED_HTML_BYTES
 }
 
 fn is_blank(line: &str) -> bool {
@@ -220,7 +240,7 @@ fn split_row(line: &str) -> Vec<&str> {
 }
 
 /// Render a slice of lines as blocks. Returns `false` on budget overflow.
-fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
+fn render_blocks(lines: &[&str], out: &mut String, depth: usize, limit: usize) -> bool {
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
@@ -244,7 +264,7 @@ fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
             i = if j < lines.len() { j + 1 } else { j };
         } else if let Some((level, content)) = heading(line) {
             out.push_str(&format!("<h{level}>"));
-            if !parse_inline(content, out, 0) {
+            if !parse_inline(content, out, limit) {
                 return false;
             }
             out.push_str(&format!("</h{level}>"));
@@ -263,10 +283,10 @@ fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
             out.push_str("<blockquote>");
             // Deeper nesting degrades to plain paragraphs instead of recursing.
             if depth < MAX_DEPTH {
-                if !render_blocks(&inner, out, depth + 1) {
+                if !render_blocks(&inner, out, depth + 1, limit) {
                     return false;
                 }
-            } else if !render_paragraph(&inner, out) {
+            } else if !render_paragraph(&inner, out, limit) {
                 return false;
             }
             out.push_str("</blockquote>");
@@ -280,7 +300,7 @@ fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
                 match list_item(lines[i]) {
                     Some((item_kind, content)) if item_kind == kind => {
                         out.push_str("<li>");
-                        if !parse_inline(content, out, 0) {
+                        if !parse_inline(content, out, limit) {
                             return false;
                         }
                         out.push_str("</li>");
@@ -301,7 +321,7 @@ fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
             out.push_str("<table><thead><tr>");
             for header in &headers {
                 out.push_str("<th>");
-                if !parse_inline(header, out, 0) {
+                if !parse_inline(header, out, limit) {
                     return false;
                 }
                 out.push_str("</th>");
@@ -314,7 +334,7 @@ fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
                     for c in 0..headers.len() {
                         out.push_str("<td>");
                         let cell = row.get(c).copied().unwrap_or("");
-                        if !parse_inline(cell, out, 0) {
+                        if !parse_inline(cell, out, limit) {
                             return false;
                         }
                         out.push_str("</td>");
@@ -334,11 +354,11 @@ fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
                 paragraph.push(lines[i]);
                 i += 1;
             }
-            if !render_paragraph(&paragraph, out) {
+            if !render_paragraph(&paragraph, out, limit) {
                 return false;
             }
         }
-        if !within_budget(out) {
+        if out.len() > limit {
             return false;
         }
     }
@@ -346,7 +366,7 @@ fn render_blocks(lines: &[&str], out: &mut String, depth: usize) -> bool {
 }
 
 /// Render paragraph lines, joining them with a space or `<br>` on a hard break.
-fn render_paragraph(lines: &[&str], out: &mut String) -> bool {
+fn render_paragraph(lines: &[&str], out: &mut String, limit: usize) -> bool {
     out.push_str("<p>");
     for (index, line) in lines.iter().enumerate() {
         if index > 0 {
@@ -358,7 +378,7 @@ fn render_paragraph(lines: &[&str], out: &mut String) -> bool {
             }
         }
         let line = line.trim_end();
-        if !parse_inline(line, out, 0) {
+        if !parse_inline(line, out, limit) {
             return false;
         }
     }
@@ -367,15 +387,18 @@ fn render_paragraph(lines: &[&str], out: &mut String) -> bool {
 }
 
 /// Parse inline Markdown into `out`. Returns `false` on budget overflow.
-fn parse_inline(text: &str, out: &mut String, depth: usize) -> bool {
+fn parse_inline(text: &str, out: &mut String, limit: usize) -> bool {
+    if out.len() > limit {
+        return false;
+    }
     let chars: Vec<char> = text.chars().collect();
-    parse_chars(&chars, out, depth)
+    parse_chars(&chars, out, 0, limit)
 }
 
-fn parse_chars(chars: &[char], out: &mut String, depth: usize) -> bool {
+fn parse_chars(chars: &[char], out: &mut String, depth: usize, limit: usize) -> bool {
     let mut i = 0;
     while i < chars.len() {
-        if !within_budget(out) {
+        if out.len() > limit {
             return false;
         }
         match chars[i] {
@@ -403,12 +426,12 @@ fn parse_chars(chars: &[char], out: &mut String, depth: usize) -> bool {
                 }
             }
             '*' | '_' => {
-                let Some(consumed) = parse_emphasis(chars, i, out, depth) else {
+                let Some(consumed) = parse_emphasis(chars, i, out, depth, limit) else {
                     return false;
                 };
                 i += consumed;
             }
-            '[' => match parse_link(chars, i, out, depth) {
+            '[' => match parse_link(chars, i, out, depth, limit) {
                 Some(consumed) => i += consumed,
                 None => {
                     out.push('[');
@@ -417,7 +440,7 @@ fn parse_chars(chars: &[char], out: &mut String, depth: usize) -> bool {
             },
             '!' if i + 1 < chars.len() && chars[i + 1] == '[' => {
                 // Images never become elements; render the alt text only.
-                match parse_image_alt(chars, i, out, depth) {
+                match parse_image_alt(chars, i, out, depth, limit) {
                     Some(consumed) => i += consumed,
                     None => {
                         out.push('!');
@@ -493,7 +516,13 @@ fn find_closer(chars: &[char], from: usize, delim: char, min: usize) -> Option<u
 
 /// Parse emphasis at `i`, returning the characters consumed, or `None` on
 /// budget overflow. Unmatched delimiters render literally.
-fn parse_emphasis(chars: &[char], i: usize, out: &mut String, depth: usize) -> Option<usize> {
+fn parse_emphasis(
+    chars: &[char],
+    i: usize,
+    out: &mut String,
+    depth: usize,
+    limit: usize,
+) -> Option<usize> {
     let delim = chars[i];
     let run = count_run(chars, i, delim);
     if depth >= MAX_DEPTH || !can_open(chars, i, run, delim) {
@@ -515,7 +544,7 @@ fn parse_emphasis(chars: &[char], i: usize, out: &mut String, depth: usize) -> O
         }
         if let Some(end) = find_closer(chars, i + run, delim, width) {
             out.push_str(open);
-            if !parse_chars(&chars[i + width..end], out, depth + 1) {
+            if !parse_chars(&chars[i + width..end], out, depth + 1, limit) {
                 return None;
             }
             out.push_str(close);
@@ -531,7 +560,13 @@ fn parse_emphasis(chars: &[char], i: usize, out: &mut String, depth: usize) -> O
 /// Parse `[text](url)` at `i`, returning the characters consumed, or `None`
 /// when the text is not link syntax. Links with a disallowed scheme render
 /// as their text only.
-fn parse_link(chars: &[char], i: usize, out: &mut String, depth: usize) -> Option<usize> {
+fn parse_link(
+    chars: &[char],
+    i: usize,
+    out: &mut String,
+    depth: usize,
+    limit: usize,
+) -> Option<usize> {
     let close = chars[i + 1..].iter().position(|c| *c == ']')? + i + 1;
     if close + 1 >= chars.len() || chars[close + 1] != '(' {
         return None;
@@ -540,11 +575,11 @@ fn parse_link(chars: &[char], i: usize, out: &mut String, depth: usize) -> Optio
     let url: String = chars[close + 2..end].iter().collect();
     if is_safe_url(&url) {
         open_link(&url, out);
-        if !parse_chars(&chars[i + 1..close], out, depth + 1) {
+        if !parse_chars(&chars[i + 1..close], out, depth + 1, limit) {
             return None;
         }
         out.push_str("</a>");
-    } else if !parse_chars(&chars[i + 1..close], out, depth + 1) {
+    } else if !parse_chars(&chars[i + 1..close], out, depth + 1, limit) {
         return None;
     }
     Some(end + 1 - i)
@@ -552,13 +587,19 @@ fn parse_link(chars: &[char], i: usize, out: &mut String, depth: usize) -> Optio
 
 /// Parse `![alt](url)` at `i`, rendering only the alt text. Returns the
 /// characters consumed, or `None` when the text is not image syntax.
-fn parse_image_alt(chars: &[char], i: usize, out: &mut String, depth: usize) -> Option<usize> {
+fn parse_image_alt(
+    chars: &[char],
+    i: usize,
+    out: &mut String,
+    depth: usize,
+    limit: usize,
+) -> Option<usize> {
     let close = chars[i + 2..].iter().position(|c| *c == ']')? + i + 2;
     if close + 1 >= chars.len() || chars[close + 1] != '(' {
         return None;
     }
     let end = find_url_end(chars, close + 2)?;
-    if !parse_chars(&chars[i + 2..close], out, depth + 1) {
+    if !parse_chars(&chars[i + 2..close], out, depth + 1, limit) {
         return None;
     }
     Some(end + 1 - i)
@@ -631,6 +672,20 @@ mod tests {
     fn blank_input_renders_nothing() {
         assert_eq!(render_markdown(""), None);
         assert_eq!(render_markdown("  \n\t\n"), None);
+        assert_eq!(render_markdown_file("  \n\t\n"), Some(String::new()));
+    }
+
+    #[test]
+    fn file_preview_uses_separate_input_output_and_work_limits() {
+        let text = "x".repeat(36 * 1024);
+        assert!(render_markdown(&text).is_none());
+        assert_eq!(
+            render_markdown_file(&text).unwrap(),
+            format!("<p>{text}</p>")
+        );
+        assert!(render_markdown_file(&"x".repeat(MAX_MARKDOWN_FILE_BYTES + 1)).is_none());
+        assert!(render_markdown_file(&"&".repeat(MAX_MARKDOWN_FILE_BYTES)).is_none());
+        assert!(render_markdown_file(&"[".repeat(MAX_MARKDOWN_FILE_BYTES)).is_none());
     }
 
     #[test]

@@ -104,13 +104,15 @@ fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
     assert!(register_assets("assets", c).is_err());
 }
 #[test]
-fn generated_main_has_no_backend_fetch_or_eval_and_only_sanctioned_transcript_html() {
+fn generated_main_has_no_backend_fetch_or_eval_and_one_sanitized_markdown_sink() {
     let a = build(config());
     let main = std::str::from_utf8(&a.files["main.js"]).unwrap();
     assert!(!main.contains("fetch("));
     assert!(!main.contains("eval("));
     assert_eq!(main.matches("innerHTML").count(), 1);
-    assert!(main.contains("body.innerHTML=message.rendered_html;"));
+    assert!(main.contains("node.innerHTML=html;"));
+    assert!(main.contains("setMarkdown(body,message.rendered_html)"));
+    assert!(main.contains("setMarkdown(format.preview,format.html)"));
     assert!(!main.contains("outerHTML"));
     assert!(!main.contains("insertAdjacentHTML"));
     let html = std::str::from_utf8(&a.files["index.html"]).unwrap();

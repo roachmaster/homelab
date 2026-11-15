@@ -73,7 +73,8 @@ With multiple projects, choose the intended node/project and use **Refresh proje
 Use **Find files or symbols** to search names throughout the loaded report, then
 select a result to read its source. Explorer file selection and Outline declaration
 selection use the same checked source path. Narrow screens open the selected file
-pane automatically and provide **Back to files**.
+pane automatically and show a **Back to files** arrow beside **File**. Markdown
+files offer **Raw** source and a formatted **Display** preview.
 
 Source is read-only, bounded and checked against the bytes used for inspection.
 A changed, unavailable, non-text or oversized file produces an explicit status;

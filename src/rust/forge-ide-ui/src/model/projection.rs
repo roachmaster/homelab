@@ -735,6 +735,7 @@ impl UiModel {
                 first_column: 0,
                 total_lines: 0,
                 target_span,
+                markdown: None,
             });
         let source_range = self.source.as_ref().map(|s| s.range()).unwrap_or_default();
         let source_status = if source_loading {

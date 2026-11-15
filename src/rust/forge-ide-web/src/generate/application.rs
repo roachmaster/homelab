@@ -62,14 +62,16 @@ pub fn ide_document() -> Document {
                         ]),
                     ]),
                     component!(pane "workspace-panel", "File", Main, 240, 480, 960; [
-                        component!(pane_link "back-to-files", "Back to files", "explorer-panel"),
+                        component!(pane_header_link "back-to-files", "Back to files", "explorer-panel", '←'),
                         component!(heading "selection-title", "Select a file to read its source"),
                         component!(caption "workspace-summary", "Find a file or symbol in Explorer."),
                         component!(panel "source-panel", "Source · Read only"; [
                             component!(status "source-status", ""),
-                            component!(source "source-view", "Read-only source"),
-                            component!(caption "source-range", ""),
-                            component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
+                            component!(source_formats "source"; [
+                                component!(source "source-view", "Read-only source"),
+                                component!(caption "source-range", ""),
+                                component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
+                            ]),
                         ]),
                         component!(panel "declaration-details-panel", "Selected declaration"; [
                             component!(details "declaration-details"),

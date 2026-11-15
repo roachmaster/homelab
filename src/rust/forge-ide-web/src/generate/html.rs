@@ -161,12 +161,24 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let id = escape(id);
             let title = escape(title);
             let position_key = position.key();
-            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane fg-pane-{position_key}\" data-pane=\"{position_key}\" data-min=\"{min}\" data-default=\"{initial}\" data-max=\"{max}\" aria-labelledby=\"{id}-heading\"><header class=\"fg-pane-header\"><h2 id=\"{id}-heading\" tabindex=\"-1\">{title}</h2>");
+            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane fg-pane-{position_key}\" data-pane=\"{position_key}\" data-min=\"{min}\" data-default=\"{initial}\" data-max=\"{max}\" aria-labelledby=\"{id}-heading\"><header class=\"fg-pane-header\">");
+            if let Some(link) = items
+                .iter()
+                .find(|item| matches!(item, Component::PaneHeaderLink { .. }))
+            {
+                emit(link, out);
+            }
+            let _ = write!(out, "<h2 id=\"{id}-heading\" tabindex=\"-1\">{title}</h2>");
             if *position != PanePosition::Main {
                 let _=write!(out,"<button type=\"button\" id=\"{id}-close\" class=\"fg-pane-close\" data-pane-toggle=\"{id}\" aria-label=\"Collapse {title}\" aria-controls=\"{id}\">−</button>");
             }
             out.push_str("</header><div class=\"fg-pane-body\">");
-            children(items, out);
+            for item in items
+                .iter()
+                .filter(|item| !matches!(item, Component::PaneHeaderLink { .. }))
+            {
+                emit(item, out);
+            }
             out.push_str("</div></section>");
             if *position != PanePosition::Main {
                 let orientation = if *position == PanePosition::Bottom {
@@ -287,8 +299,29 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::Source { id, label } => {
             let _ = write!(out, "<pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre>", escape(id), escape(label));
         }
+        Component::SourceFormats {
+            prefix,
+            children: items,
+        } => {
+            let prefix = escape(prefix);
+            let raw_pane = format!("{prefix}-raw-pane");
+            let preview = format!("{prefix}-preview");
+            let _ = write!(out, "<div data-source-formats><div id=\"{prefix}-format\" class=\"fg-source-format\" data-source-format role=\"group\" aria-label=\"Markdown view\" hidden><button type=\"button\" id=\"{prefix}-raw\" data-source-mode=\"raw\" aria-controls=\"{raw_pane}\" aria-pressed=\"true\">Raw</button><button type=\"button\" id=\"{prefix}-display\" data-source-mode=\"display\" aria-controls=\"{preview}\" aria-pressed=\"false\">Display</button></div><p data-source-preview-unavailable class=\"fg-caption\" hidden>Markdown display is unavailable for this file size.</p><div id=\"{raw_pane}\" data-source-raw>");
+            children(items, out);
+            let _ = write!(out, "</div><div id=\"{preview}\" class=\"fg-source-preview\" data-source-preview role=\"region\" aria-label=\"Markdown display\" tabindex=\"0\" hidden></div></div>");
+        }
         Component::PaneLink { id, label, target } => {
             let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-pane-link\" data-pane-reveal=\"{}\">{}</button>", escape(id), escape(target), escape(label));
+        }
+        Component::PaneHeaderLink {
+            id,
+            label,
+            target,
+            glyph,
+        } => {
+            let label = escape(label);
+            let target = escape(target);
+            let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-button-icon fg-pane-header-link\" data-pane-reveal=\"{target}\" aria-controls=\"{target}\" aria-label=\"{label}\" title=\"{label}\"><span aria-hidden=\"true\" data-glyph=\"{}\"></span></button>", escape(id), escape(&glyph.to_string()));
         }
         Component::Details { id } | Component::Facts { id } => {
             let class = if matches!(c, Component::Facts { .. }) {

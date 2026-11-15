@@ -871,11 +871,15 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   report.pass('probe.report.stale_actions');
   report.start('probe.page.lifecycle');
 
+  await page.locator('#source-display').click();
+  await check(page.locator('#source-preview')).toContainText('Fixture overview');
   const requestCounts = () => ['resume', 'inspect', 'source'].map(traffic.count);
   async function checkRestoredWorkbench(before) {
     await check(page.locator('#workbench')).toBeVisible();
     await check(page.locator('#selection-title')).toContainText('README <safe>.md');
+    await check(page.locator('#source-view')).toBeVisible();
     await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
+    await check(page.locator('#source-raw')).toHaveAttribute('aria-pressed', 'true');
     assert.deepEqual(requestCounts(), before.map(count => count + 1),
       'workspace restore authenticates, inspects, and verifies source afresh');
     assert.equal(page.workers().length, 1);
@@ -894,6 +898,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
       contextHidden: document.getElementById('workbench-context').hidden,
       contextText: document.getElementById('workbench-context').textContent,
       source: document.getElementById('source-view').textContent,
+      markdown: document.getElementById('source-preview').textContent,
       transcript: document.getElementById('chat-transcript').textContent,
       draft: document.getElementById('chat-draft').value,
     };
@@ -908,6 +913,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   assert.equal(cleared.contextHidden, true, 'teardown hides project context before resume');
   assert.equal(cleared.contextText, '', 'teardown clears project context before resume');
   assert.equal(cleared.source, '', 'teardown clears verified source before resume');
+  assert.equal(cleared.markdown, '', 'teardown clears displayed Markdown before resume');
   assert.equal(cleared.transcript, '', 'teardown clears the transcript before resume');
   assert.equal(cleared.draft, '', 'teardown clears the draft before resume');
   await page.evaluate(() => {
@@ -998,6 +1004,65 @@ async function noSelectedFileFromPriorReport(page) {
   await check(page.locator('#details')).not.toContainText(LONG_FILE_NAME);
 }
 
+async function checkPhoneFileBack(page) {
+  const header = page.locator('#workspace-panel > .fg-pane-header');
+  const heading = header.getByRole('heading', { name: 'File', exact: true });
+  const back = header.getByRole('button', { name: 'Back to files', exact: true });
+  await check(back).toHaveAttribute('id', 'back-to-files');
+  await check(back).toHaveAttribute('aria-label', 'Back to files');
+  await check(back).toHaveAttribute('title', 'Back to files');
+  await check(back).not.toContainText('Back to files');
+  await check(back).toBeInViewport();
+  const [icon, title] = await Promise.all([back.boundingBox(), heading.boundingBox()]);
+  assert(icon && title && Math.abs(icon.width - 44) < 1 && Math.abs(icon.height - 44) < 1,
+    'the phone Back icon has a 44 by 44 CSS pixel target');
+  assert(icon.x + icon.width <= title.x + 1 && icon.y < title.y + title.height && title.y < icon.y + icon.height,
+    'the Back icon and File heading share the same header row');
+  await back.focus();
+  await page.keyboard.press('Enter');
+  await check(page.locator('#explorer-panel')).toBeVisible();
+  await check(page.locator('#workspace-panel')).toBeHidden();
+  await assertVisibleFocus(page);
+}
+
+async function checkMarkdownSource(page, traffic) {
+  const modes = page.getByRole('group', { name: 'Markdown view', exact: true });
+  const raw = modes.getByRole('button', { name: 'Raw', exact: true });
+  const display = modes.getByRole('button', { name: 'Display', exact: true });
+  const rawView = page.locator('#source-view');
+  const rawLines = rawView.locator('.fg-source-text');
+  const preview = page.getByRole('region', { name: 'Markdown display', exact: true });
+  const lines = [
+    '## Fixture overview', '', '**Readable detail**', '', 'Fixture <script> text is never HTML.', '',
+    '![Fixture image alternative](/fixture-diagram.png)',
+  ];
+  async function checkRaw() {
+    await check(raw).toHaveAttribute('aria-pressed', 'true');
+    await check(display).toHaveAttribute('aria-pressed', 'false');
+    await check(rawView).toBeVisible();
+    await check(preview).toBeHidden();
+    await check(rawLines).toHaveCount(lines.length);
+    assert.deepEqual(await rawLines.allTextContents(), lines, 'Raw shows each accepted source line verbatim');
+  }
+  await check(modes).toBeVisible();
+  await checkRaw();
+  const counts = ['source', 'inspect'].map(traffic.count);
+  await display.click();
+  await check(display).toHaveAttribute('aria-pressed', 'true');
+  await check(raw).toHaveAttribute('aria-pressed', 'false');
+  await check(rawView).toBeHidden();
+  await check(preview.getByRole('heading', { name: 'Fixture overview', exact: true })).toBeVisible();
+  await check(preview.locator('strong')).toHaveText('Readable detail');
+  await check(preview).toContainText('Fixture <script> text is never HTML.');
+  await check(preview).toContainText('Fixture image alternative');
+  await check(preview.locator('script,img,svg')).toHaveCount(0);
+  await check(preview).not.toContainText('## Fixture overview');
+  await check(preview).not.toContainText('**Readable detail**');
+  await raw.press('Enter');
+  await checkRaw();
+  assert.deepEqual(['source', 'inspect'].map(traffic.count), counts, 'changing Markdown view reuses verified source');
+}
+
 // Actual mTLS source reads, including the single-project phone entry path.
 // Search is report-local; opening a result obtains its digest-checked source.
 async function sourceSearchJourney() {
@@ -1029,18 +1094,20 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view')).not.toHaveAttribute('contenteditable', 'true');
     assert.equal(traffic.count('source'), reads + 1, 'opening a search result reads one file');
     assert.equal(traffic.count('inspect'), 1, 'opening source does not repeat inspection');
+    await check(page.locator('#source-format')).toBeHidden();
     await assertVisibleFocus(page);
-    await page.getByRole('button', { name: 'Back to files', exact: true }).click();
-    await check(page.locator('#explorer-panel')).toBeVisible();
+    await checkPhoneFileBack(page);
     await page.locator('#project-query').fill('README <safe>');
     await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'README <safe>.md' }).click();
     await check(page.locator('#workspace-panel')).toBeVisible();
     await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
     await check(page.locator('#source-view script, #source-view img, #source-view svg')).toHaveCount(0);
+    await checkMarkdownSource(page, traffic);
     await page.getByRole('button', { name: 'Back to files', exact: true }).click();
     await page.locator('#project-query').fill('paged.txt');
     await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'paged.txt' }).click();
     await check(page.locator('#source-view')).toContainText('Source line 1:');
+    await check(page.locator('#source-format')).toBeHidden();
     await check(page.locator('#source-view .fg-source-line')).toHaveCount(256);
     const pageReads = traffic.count('source');
     await page.locator('#source-more').click();

@@ -49,7 +49,7 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
     fs::write(project.join("src/lib.rs"),b"pub struct Widget { pub value: u32 }\npub struct Gadget;\npub trait View { fn show(&self); }\nimpl View for Widget { fn show(&self) {} }\nimpl View for Gadget { fn show(&self) {} }\npub fn inspect_me() {}\n")?;
     fs::write(
         project.join("README <safe>.md"),
-        b"Fixture <script> text is never HTML.\n",
+        b"## Fixture overview\n\n**Readable detail**\n\nFixture <script> text is never HTML.\n\n![Fixture image alternative](/fixture-diagram.png)\n",
     )?;
     fs::write(project.join("broken.rs"), b"pub fn broken(\n")?;
     fs::write(project.join("blank.rs"), b"")?;

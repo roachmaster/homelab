@@ -20,6 +20,7 @@ const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map
 const draftFields=[...document.querySelectorAll('textarea[data-action]')];
 const leaveDialog=document.getElementById('leave-confirmation');
 const layouts=new Map();
+const sourceFormats=new Map();
 let typeahead=new WeakMap();
 function element(id){return typeof id==='string'?document.getElementById(id):null;}
 function tabKey(){
@@ -69,6 +70,38 @@ function sendAction(n,value,sequence){
   tell(value===undefined?action:{...action,value},sequence);
   pendingActionOrigin={sequence,pane};
 }
+function setMarkdown(node,html){
+  // Only sanitized HTML produced by the Rust Markdown renderer may pass here.
+  node.innerHTML=html;
+}
+function showSourceFormat(format){
+  const display=format.showDisplay&&format.html!==null;
+  format.raw.hidden=display;
+  format.preview.hidden=!display;
+  format.rawButton.setAttribute('aria-pressed',String(!display));
+  format.displayButton.setAttribute('aria-pressed',String(display));
+  if(display&&format.rendered!==format.html){
+    if(format.html==='')format.preview.textContent='Empty Markdown file.';
+    else setMarkdown(format.preview,format.html);
+    format.rendered=format.html;
+    format.preview.scrollTop=0;
+  }
+}
+function updateSourceFormat(format,context,markdown){
+  const html=typeof markdown?.rendered_html==='string'&&markdown.rendered_html.length<=131072
+    ?markdown.rendered_html:null;
+  if(context!==format.context||(format.html!==null&&html===null)){
+    format.context=context;
+    format.showDisplay=false;
+    format.rendered=null;
+    format.preview.replaceChildren();
+  }
+  format.html=html;
+  format.controls.hidden=!markdown;
+  format.displayButton.disabled=html===null;
+  format.unavailable.hidden=!markdown||html!==null;
+  showSourceFormat(format);
+}
 function clearProtected(){
   // Synchronous: never leave catalog/report pixels behind on pagehide or bfcache restore.
   for(const n of document.querySelectorAll('[data-protected]'))n.hidden=true;
@@ -78,6 +111,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('input,textarea')){n.value='';n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
   for(const n of document.querySelectorAll('.fg-tree,.fg-details,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
+  for(const format of sourceFormats.values())updateSourceFormat(format,null,null);
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
@@ -204,8 +238,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
         if(transcriptViews.get(node)===html)continue;
         const body=previous.tagName==='DIV'?previous:document.createElement('div');
         body.className='fg-message-body';
-        // Sanitized transcript HTML only, emitted by the Rust Markdown renderer.
-        body.innerHTML=message.rendered_html;
+        setMarkdown(body,message.rendered_html);
         if(body!==previous)previous.replaceWith(body);
         transcriptViews.set(node,html);
       }else{
@@ -227,6 +260,11 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   for(const b of view.sources||[]){
     const n=element(b.id);if(!n||!n.hasAttribute('data-source-view'))continue;
     const context=JSON.stringify(b.context);const span=JSON.stringify(b.target_span);
+    const format=sourceFormats.get(n);
+    if(format){
+      const fileContext=JSON.stringify([b.context?.report,b.context?.entry]);
+      updateSourceFormat(format,fileContext,b.markdown);
+    }
     const prior=sourceViews.get(n);
     if(prior&&prior.context===context&&prior.text===b.text&&prior.first===b.first_line&&prior.column===b.first_column&&prior.span===span)continue;
     if(typeof b.text!=='string'||b.text.length>65536||!Number.isSafeInteger(b.first_line)||b.first_line<1||!Number.isSafeInteger(b.first_column)||b.first_column<0)throw new Error('Invalid source window');
@@ -320,6 +358,20 @@ function start(){
     };
     owned.onerror=()=>{if(worker===owned)fatal('The Rust worker could not start. Reload to retry.');};
   }catch(_){fatal('This browser cannot start the required worker. Reload to retry.');}
+}
+for(const group of document.querySelectorAll('[data-source-formats]')){
+  const format={
+    controls:group.querySelector('[data-source-format]'),
+    raw:group.querySelector('[data-source-raw]'),
+    preview:group.querySelector('[data-source-preview]'),
+    unavailable:group.querySelector('[data-source-preview-unavailable]'),
+    rawButton:group.querySelector('[data-source-mode="raw"]'),
+    displayButton:group.querySelector('[data-source-mode="display"]'),
+    context:null,html:null,rendered:null,showDisplay:false,
+  };
+  sourceFormats.set(format.raw.querySelector('[data-source-view]'),format);
+  format.rawButton.addEventListener('click',()=>{format.showDisplay=false;showSourceFormat(format);});
+  format.displayButton.addEventListener('click',()=>{format.showDisplay=true;showSourceFormat(format);});
 }
 for(const n of document.querySelectorAll('select[data-action]'))n.addEventListener('change',()=>sendAction(n,n.value));
 for(const n of document.querySelectorAll('button[data-action]'))n.addEventListener('click',()=>{
