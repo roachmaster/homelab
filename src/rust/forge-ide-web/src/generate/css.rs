@@ -40,6 +40,13 @@ pub(crate) fn emit(t: &Theme) -> String {
 .fg-layout-options>.fg-disclosure>.fg-disclosure-body{position:absolute;z-index:5;top:100%;inset-inline-start:10px;width:min(18rem,calc(100% - 20px));display:grid;gap:8px;padding:10px;background:var(--raised);border:1px solid var(--border);box-shadow:0 8px 18px #0005}
 .fg-layout-options>.fg-disclosure select{width:100%}
 [data-narrow=true] .fg-layout-options>.fg-disclosure>summary{min-height:var(--touch);display:flex;align-items:center}
+.fg-pane-actions{display:flex;align-items:center;gap:4px;max-width:100%;min-width:0}
+.fg-pane-actions>.fg-pane-switches{min-width:0}
+.fg-pane-actions>.fg-button{flex:none;white-space:nowrap}
+[data-narrow=true] .fg-pane-actions{align-items:flex-end}
+[data-narrow=true] .fg-pane-actions>.fg-pane-switches{gap:2px}
+[data-narrow=true] .fg-pane-actions>.fg-pane-switches>button{min-width:var(--touch);padding-inline:5px}
+[data-narrow=true] .fg-pane-actions>.fg-button{min-height:var(--touch);padding-inline:7px;font-size:12px}
 "#);
     for n in 0..=64 {
         let _ = writeln!(s, ".fg-depth-{n}{{margin-inline-start:{}px}}", n * 12);

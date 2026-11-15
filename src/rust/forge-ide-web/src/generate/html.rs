@@ -92,6 +92,9 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let controls = items
                 .iter()
                 .find(|item| matches!(item, Component::LayoutControls(_)));
+            let action = items
+                .iter()
+                .find(|item| matches!(item, Component::PaneAction(_)));
             let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout data-single-secondary=\"{single_secondary}\"><div class=\"fg-layout-controls\">");
             if controls.is_some() {
                 out.push_str("<div class=\"fg-layout-options\">");
@@ -115,6 +118,9 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 emit(slot, out);
                 out.push_str("</div>");
             }
+            if action.is_some() {
+                out.push_str("<div class=\"fg-pane-actions\">");
+            }
             out.push_str("<nav class=\"fg-pane-switches\" aria-label=\"Visible pane\">");
             for pane in items {
                 if let Component::Pane {
@@ -127,7 +133,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                     let _=write!(out,"<button type=\"button\" id=\"{}-switch\" data-pane-position=\"{}\" data-pane-switch=\"{}\" aria-controls=\"{}\" aria-pressed=\"false\">{}</button>",escape(id),position.key(),escape(id),escape(id),escape(title));
                 }
             }
-            out.push_str("</nav></div><div class=\"fg-panes\">");
+            out.push_str("</nav>");
+            if let Some(action) = action {
+                emit(action, out);
+                out.push_str("</div>");
+            }
+            out.push_str("</div><div class=\"fg-panes\">");
             for pane in items
                 .iter()
                 .filter(|item| matches!(item, Component::Pane { .. }))
@@ -137,6 +148,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             out.push_str("</div></section>");
         }
         Component::LayoutControls(items) => children(items, out),
+        Component::PaneAction(button) => emit(button, out),
         Component::Pane {
             id,
             title,

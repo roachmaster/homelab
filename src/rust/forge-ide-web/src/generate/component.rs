@@ -86,6 +86,8 @@ pub enum Component {
     },
     /// Optional declarations placed next to a pane layout's built-in view options.
     LayoutControls(Vec<Component>),
+    /// An optional button adjacent to the pane navigation, outside its landmark.
+    PaneAction(Box<Component>),
     Pane {
         id: String,
         title: String,
@@ -167,6 +169,7 @@ macro_rules! component {
     (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,children:vec![$($child),*]} };
     (focused_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,children:vec![$($child),*]} };
     (layout_controls [$($child:expr),* $(,)?]) => { $crate::generate::Component::LayoutControls(vec![$($child),*]) };
+    (pane_action $button:expr) => { $crate::generate::Component::PaneAction(Box::new($button)) };
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
     (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
     (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
@@ -235,6 +238,7 @@ impl Document {
                 | Component::Toolbar(_)
                 | Component::ReadingColumn(_)
                 | Component::LayoutControls(_)
+                | Component::PaneAction(_)
                 | Component::Workspace(_) => (None, None, None),
                 Component::PaneLayout { id, .. } | Component::Region { id, .. } => {
                     (Some(id), None, None)
@@ -277,6 +281,12 @@ impl Document {
                 Component::LayoutControls(_) if !in_layout => {
                     return Err("layout controls must be a direct child of a pane layout");
                 }
+                Component::PaneAction(button)
+                    if !in_layout || !matches!(button.as_ref(), Component::Button { .. }) =>
+                {
+                    return Err("pane action requires a button directly in a pane layout");
+                }
+                Component::PaneAction(button) => visit(button, depth + 1, count, ids, false)?,
                 Component::Workspace(_) => insert(ids, "workspace")?,
                 Component::PairForm { id, .. } => {
                     for suffix in ["form", "code"] {
@@ -314,6 +324,7 @@ impl Document {
                     }
                     let mut positions = BTreeSet::new();
                     let mut has_controls = false;
+                    let mut has_action = false;
                     for child in children {
                         match child {
                             Component::Pane { position, .. } => {
@@ -322,9 +333,10 @@ impl Document {
                                 }
                             }
                             Component::LayoutControls(_) if !has_controls => has_controls = true,
+                            Component::PaneAction(_) if !has_action => has_action = true,
                             _ => {
                                 return Err(
-                                    "pane layout requires panes and at most one controls group",
+                                    "pane layout requires panes and at most one controls group and action",
                                 )
                             }
                         }

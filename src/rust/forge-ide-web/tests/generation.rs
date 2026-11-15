@@ -396,6 +396,24 @@ fn workbench_keeps_project_selects_in_a_closed_native_disclosure() {
 }
 
 #[test]
+fn workbench_refresh_follows_pane_navigation_as_an_action() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let (_, controls) = html.split_once("<div class=\"fg-pane-actions\">").unwrap();
+    let (navigation, actions) = controls.split_once("</nav>").unwrap();
+    let (_, last_switch) = navigation.rsplit_once("<button").unwrap();
+    assert!(last_switch.contains("id=\"problems-panel-switch\""));
+    assert!(!navigation.contains("id=\"inspect\""));
+
+    let (refresh, _) = actions.split_once("</button>").unwrap();
+    assert!(refresh.starts_with("<button"));
+    assert!(refresh.contains("id=\"inspect\""));
+    assert!(refresh.contains("data-action=\"inspect\""));
+    assert!(refresh.ends_with(">Refresh project"));
+    assert!(!refresh.contains("data-pane-switch"));
+}
+
+#[test]
 fn source_and_pane_navigation_are_reusable_safe_declarations() {
     let mut c = config();
     c.document = Document {

@@ -34,7 +34,6 @@ pub fn ide_document() -> Document {
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
                 component!(toolbar [
-                    component!(primary "inspect", "Refresh project", "inspect"),
                     component!(button "cancel", "Cancel local wait", "cancel"),
                     component!(reload "reload-session", "Reload to check session"),
                     component!(caption "phase-label", "Checking session"),
@@ -46,6 +45,7 @@ pub fn ide_document() -> Document {
                             component!(select "project", "Project", "select_project"),
                         ]),
                     ]),
+                    component!(pane_action component!(primary "inspect", "Refresh project", "inspect")),
                     component!(pane "explorer-panel", "Explorer", Leading, 180, 250, 400; [
                         component!(filter "project-query", "Find files or symbols", "set_project_query"),
                         component!(region "search-panel"; [

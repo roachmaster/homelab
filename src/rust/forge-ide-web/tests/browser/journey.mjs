@@ -274,7 +274,26 @@ async function disclosure(page, id, open) {
   }
   await check(details).toHaveJSProperty('open', open);
 }
+async function checkRefreshPlacement(page) {
+  const problems = page.locator('#problems-panel-switch');
+  const refresh = page.getByRole('button', { name: 'Refresh project', exact: true });
+  await check(refresh).toHaveAttribute('id', 'inspect');
+  await check(refresh).toHaveAttribute('data-action', 'inspect');
+  await check(refresh).toBeEnabled();
+  await check(problems).toBeInViewport();
+  await check(refresh).toBeInViewport();
+  const [problemsBounds, refreshBounds] = await Promise.all([problems.boundingBox(), refresh.boundingBox()]);
+  assert(problemsBounds && refreshBounds && problemsBounds.y < refreshBounds.y + refreshBounds.height &&
+    refreshBounds.y < problemsBounds.y + problemsBounds.height, 'Problems and Refresh project share a row');
+  const gap = refreshBounds.x - (problemsBounds.x + problemsBounds.width);
+  assert(gap >= -1 && gap <= 12, 'Refresh project immediately follows Problems');
+  await problems.focus();
+  await page.keyboard.press('Tab');
+  await check(refresh).toBeFocused();
+  await refresh.click({ trial: true });
+}
 async function projectOptionsJourney(page, traffic) {
+  await checkRefreshPlacement(page);
   const projectOptions = page.locator('#project-options > summary');
   const viewOptions = page.locator('#workspace-options > summary');
   await check(projectOptions).toHaveText('Project options');
@@ -291,6 +310,9 @@ async function projectOptionsJourney(page, traffic) {
   await check(page.locator('#node')).toBeFocused();
   await page.keyboard.press('Tab');
   await check(page.locator('#project')).toBeFocused();
+  assert.ok(await page.locator('#project-options select').evaluateAll(fields =>
+    fields.length === 2 && fields.every(field => field.getBoundingClientRect().width >= 120)),
+  'open context selectors keep readable widths');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
     'open project options do not overflow the viewport');
   await disclosure(page, 'project-options', false);
@@ -462,8 +484,7 @@ async function panesAndNarrow(page, traffic) {
   await assertTone(page, 'status', 'warning');
   await check(page.locator('#cancel')).toBeHidden();
   await assertTone(page, 'phase-label', 'warning');
-  await page.locator('#inspect').focus();
-  await page.keyboard.press('Shift+Tab');
+  await page.locator('#problems-panel-switch').focus();
   await page.keyboard.press('Tab');
   await check(page.locator('#inspect')).toBeFocused();
   assert.equal(await page.locator('#inspect').evaluate(button => {
@@ -609,9 +630,7 @@ async function deviceViewportJourney(page, traffic) {
     const narrow = viewport.width <= 800;
     report.checkpoint('viewport_breakpoint');
     await check(page.locator('#workspace')).toHaveAttribute('data-narrow', String(narrow));
-    if (narrow) {
-      assert.equal(await page.locator('#workbench .fg-toolbar select').evaluateAll(fields => fields.every(field => field.getBoundingClientRect().width >= 120)), true, 'narrow context selectors stay readable rather than shrinking around status');
-    }
+    if (viewport.width === 375) await projectOptionsJourney(page, traffic);
     async function activate(pane, checkpoint) {
       report.checkpoint(checkpoint);
       if (narrow) {
