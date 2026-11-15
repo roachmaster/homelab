@@ -8,6 +8,7 @@ pub fn ide_document() -> Document {
         title: "Forge IDE".into(),
         subtitle: "Chat and source workbench".into(),
         children: vec![
+            component!(brand_context "workbench-context"),
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [
                 component!(panel "pair-panel", "Connect to your Forge host"; [
@@ -33,14 +34,18 @@ pub fn ide_document() -> Document {
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
                 component!(toolbar [
-                    component!(select "node", "Node", "select_node"),
-                    component!(select "project", "Project", "select_project"),
                     component!(primary "inspect", "Refresh project", "inspect"),
                     component!(button "cancel", "Cancel local wait", "cancel"),
                     component!(reload "reload-session", "Reload to check session"),
                     component!(caption "phase-label", "Checking session"),
                 ]),
                 component!(focused_layout "workspace"; [
+                    component!(layout_controls [
+                        component!(disclosure "project-options", "Project options"; [
+                            component!(select "node", "Node", "select_node"),
+                            component!(select "project", "Project", "select_project"),
+                        ]),
+                    ]),
                     component!(pane "explorer-panel", "Explorer", Leading, 180, 250, 400; [
                         component!(filter "project-query", "Find files or symbols", "set_project_query"),
                         component!(region "search-panel"; [

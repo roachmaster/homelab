@@ -166,11 +166,17 @@ async function connect(context, fixture, autoLoad = false) {
   fixture.code = '';
   await check(page.locator('#chat')).toBeVisible();
   await check(page.locator('#workbench')).toBeHidden();
+  await check(page.locator('#workbench-context')).toBeHidden();
   await page.locator('#open-workbench').click();
   await check(page.locator('#status')).toContainText(autoLoad ? 'Partial inspection:' : 'Connected.');
   await check(page.locator('#pair-code')).toHaveValue('');
   await check(page.locator('#pair-panel')).toBeHidden();
   await check(page.locator('#node')).toHaveValue('lab');
+  await check(page.locator('#workbench-context')).toHaveText('Local fixture / workspace');
+  await check(page.locator('#workbench-context')).toBeVisible();
+  await check(page.locator('#project-options')).toHaveJSProperty('open', false);
+  await check(page.locator('#node')).toBeHidden();
+  await check(page.locator('#project')).toBeHidden();
   assert.equal(page.workers().length, 1, 'one real dedicated WASM worker');
   return { page, errors };
 }
@@ -241,8 +247,13 @@ async function assertTone(page, id, tone) {
     return matches;
   }, tone), true, 'typed status tone survives the stylesheet cascade');
 }
-async function inspect(page, project, expected = 'Partial inspection:') {
+async function selectProject(page, project) {
+  await disclosure(page, 'project-options', true);
   await page.locator('#project').selectOption(project);
+}
+async function inspect(page, project, expected = 'Partial inspection:') {
+  await selectProject(page, project);
+  await disclosure(page, 'project-options', false);
   await page.locator('#inspect').click();
   await check(page.locator('#status')).toContainText(expected);
 }
@@ -262,6 +273,30 @@ async function disclosure(page, id, open) {
     await check(summary).toBeFocused();
   }
   await check(details).toHaveJSProperty('open', open);
+}
+async function projectOptionsJourney(page, traffic) {
+  const projectOptions = page.locator('#project-options > summary');
+  const viewOptions = page.locator('#workspace-options > summary');
+  await check(projectOptions).toHaveText('Project options');
+  await check(projectOptions).toBeInViewport();
+  await check(viewOptions).toBeInViewport();
+  const projectBounds = await projectOptions.boundingBox();
+  const viewBounds = await viewOptions.boundingBox();
+  assert(projectBounds && viewBounds && projectBounds.y < viewBounds.y + viewBounds.height &&
+    viewBounds.y < projectBounds.y + projectBounds.height, 'project and view options share a row');
+  const requests = ['resume', 'pair', 'inspect', 'source', 'other'];
+  const before = requests.map(traffic.count);
+  await disclosure(page, 'project-options', true);
+  await page.keyboard.press('Tab');
+  await check(page.locator('#node')).toBeFocused();
+  await page.keyboard.press('Tab');
+  await check(page.locator('#project')).toBeFocused();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+    'open project options do not overflow the viewport');
+  await disclosure(page, 'project-options', false);
+  await check(page.locator('#node')).toBeHidden();
+  await check(page.locator('#project')).toBeHidden();
+  assert.deepEqual(requests.map(traffic.count), before, 'project options open and close locally');
 }
 async function ensurePane(page, id) {
   if (!await page.locator(`#${id}`).isVisible()) await page.locator(`#${id}-switch`).click();
@@ -427,7 +462,8 @@ async function panesAndNarrow(page, traffic) {
   await assertTone(page, 'status', 'warning');
   await check(page.locator('#cancel')).toBeHidden();
   await assertTone(page, 'phase-label', 'warning');
-  await page.locator('#project').focus();
+  await page.locator('#inspect').focus();
+  await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Tab');
   await check(page.locator('#inspect')).toBeFocused();
   assert.equal(await page.locator('#inspect').evaluate(button => {
@@ -777,6 +813,8 @@ async function reportAndPageLifecycle(page, traffic) {
       declarations: document.getElementById('declaration-details').textContent,
       disclosuresClosed: [...document.querySelectorAll('.fg-disclosure')].every(node => !node.open),
       hidden: document.getElementById('workbench').hidden,
+      contextHidden: document.getElementById('workbench-context').hidden,
+      contextText: document.getElementById('workbench-context').textContent,
     };
   });
   assert.equal(cleared.options, 0, 'teardown synchronously clears protected catalog DOM');
@@ -786,6 +824,8 @@ async function reportAndPageLifecycle(page, traffic) {
   assert.equal(cleared.declarations, '', 'teardown synchronously clears declaration metadata');
   assert.equal(cleared.disclosuresClosed, true, 'teardown closes disclosures as well as clearing their protected contents');
   assert.equal(cleared.hidden, true, 'teardown hides protected composition before resume');
+  assert.equal(cleared.contextHidden, true, 'teardown hides project context before resume');
+  assert.equal(cleared.contextText, '', 'teardown clears project context before resume');
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
@@ -828,6 +868,7 @@ async function sourceSearchJourney() {
   try {
     const traffic = await observe(context);
     const { page, errors } = await connect(context, fixture, true);
+    await projectOptionsJourney(page, traffic);
     process.stderr.write('QA_CHECK source_search_connected\n');
     assert.equal(traffic.count('inspect'), 1, 'one admitted project opens automatically');
     await check(page.locator('#explorer-panel')).toBeVisible();
@@ -934,6 +975,7 @@ async function chatJourney(page, context) {
   };
   await page.locator('#open-chat').click();
   await check(page.locator('#chat')).toBeVisible();
+  await check(page.locator('#workbench-context')).toBeHidden();
   await draft.fill('Retry this draft');
   await send.click();
   await check(page.locator('#chat-status')).toContainText('inference is unavailable');
@@ -1009,6 +1051,7 @@ async function realJourney() {
   const { page, errors } = await connect(context, fixture);
   assert.equal(traffic.count('resume'), 1, 'startup resumes once');
   assert.equal(traffic.count('pair'), 1, 'one explicit pairing request');
+  await projectOptionsJourney(page, traffic);
   await chatJourney(page, context);
   await inspect(page, 'workspace');
   await check(page.locator('#workbench textarea, #workbench [contenteditable="true"]')).toHaveCount(0);
@@ -1060,7 +1103,13 @@ async function realJourney() {
   await reportAndPageLifecycle(page, traffic);
   report.start('real.report.empty');
 
-  await inspect(page, 'empty', 'Project ready.');
+  const beforeSelection = traffic.count('inspect');
+  await selectProject(page, 'empty');
+  await check(page.locator('#workbench-context')).toHaveText('Local fixture / empty');
+  assert.equal(traffic.count('inspect'), beforeSelection, 'selection changes the context before inspection');
+  await disclosure(page, 'project-options', false);
+  await page.locator('#inspect').click();
+  await check(page.locator('#status')).toContainText('Project ready.');
   await check(page.locator('#summary')).toContainText('0 files');
   await check(page.locator('#files [role="treeitem"]')).toHaveCount(1);
   await check(page.locator('#problems [role="treeitem"]')).toHaveCount(0);
@@ -1151,7 +1200,7 @@ async function controlledLifecycleJourney() {
   report.setStage('scenario');
   const traffic = await observe(context);
   const { page, errors } = await connect(context, fixture);
-  await page.locator('#project').selectOption('slow');
+  await selectProject(page, 'slow');
   const before = traffic.count('inspect');
   await page.locator('#inspect').evaluate(button => { button.click(); button.click(); button.click(); });
   await check(page.locator('#phase-label')).toContainText('Inspecting');
@@ -1173,19 +1222,19 @@ async function controlledLifecycleJourney() {
   await controlledInputDraftJourney(page);
   report.start('injected.requests.revisions');
 
-  await page.locator('#project').selectOption('slow');
+  await selectProject(page, 'slow');
   await page.locator('#inspect').click();
   await check(page.locator('#status')).toContainText('Inspecting');
-  await page.locator('#project').selectOption('workspace');
-  await page.locator('#project').selectOption('slow');
-  await page.locator('#project').selectOption('workspace');
+  await selectProject(page, 'workspace');
+  await selectProject(page, 'slow');
+  await selectProject(page, 'workspace');
   await delay(1000);
   await check(page.locator('#status')).toContainText('Selection changed.');
   await noReport(page);
   report.pass('injected.requests.revisions');
   report.start('injected.requests.refresh_focus');
 
-  await page.locator('#project').selectOption('slow');
+  await selectProject(page, 'slow');
   await page.locator('#inspect').click();
   await check(page.locator('#phase-label')).toContainText('Inspecting');
   const refreshRequests = traffic.count('inspect');
@@ -1198,7 +1247,7 @@ async function controlledLifecycleJourney() {
   assert.equal(page.workers().length, 1);
   await check(page.locator('#chat')).toBeVisible();
   await page.locator('#open-workbench').click();
-  await page.locator('#project').selectOption('slow');
+  await selectProject(page, 'slow');
   await page.locator('#inspect').click();
   await check(page.locator('#phase-label')).toContainText('Inspecting');
   await page.locator('#project').focus();

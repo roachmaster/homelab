@@ -35,6 +35,10 @@ pub enum ButtonEmphasis {
 }
 #[derive(Clone, Debug)]
 pub enum Component {
+    /// Protected text projected next to the document title.
+    BrandContext {
+        id: String,
+    },
     /// Native keyboard-accessible progressive disclosure; presentation only.
     Disclosure {
         id: String,
@@ -80,6 +84,8 @@ pub enum Component {
         single_secondary: bool,
         children: Vec<Component>,
     },
+    /// Optional declarations placed next to a pane layout's built-in view options.
+    LayoutControls(Vec<Component>),
     Pane {
         id: String,
         title: String,
@@ -146,6 +152,7 @@ pub enum Component {
 /// Component structure, not a string-template macro. Every text value is escaped.
 #[macro_export]
 macro_rules! component {
+    (brand_context $id:expr) => { $crate::generate::Component::BrandContext { id:$id.into() } };
     (screen $id:expr, $title:expr, $protected:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Screen { id:$id.into(),title:$title.into(),protected:$protected,children:vec![$($child),*] } };
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
@@ -159,6 +166,7 @@ macro_rules! component {
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
     (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,children:vec![$($child),*]} };
     (focused_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,children:vec![$($child),*]} };
+    (layout_controls [$($child:expr),* $(,)?]) => { $crate::generate::Component::LayoutControls(vec![$($child),*]) };
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
     (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
     (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
@@ -226,6 +234,7 @@ impl Document {
                 Component::Row(_)
                 | Component::Toolbar(_)
                 | Component::ReadingColumn(_)
+                | Component::LayoutControls(_)
                 | Component::Workspace(_) => (None, None, None),
                 Component::PaneLayout { id, .. } | Component::Region { id, .. } => {
                     (Some(id), None, None)
@@ -245,7 +254,9 @@ impl Document {
                 | Component::Reload { id, label }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
                 Component::PaneLink { id, label, target } => (Some(id), Some(label), Some(target)),
-                Component::Details { id } | Component::Facts { id } => (Some(id), None, None),
+                Component::Details { id }
+                | Component::Facts { id }
+                | Component::BrandContext { id } => (Some(id), None, None),
             };
             if let Some(id) = id {
                 insert(ids, id)?;
@@ -259,6 +270,12 @@ impl Document {
                     ..
                 } if !key(id) => {
                     return Err("invalid checked input id");
+                }
+                Component::BrandContext { .. } if depth != 0 => {
+                    return Err("brand context must be a document child");
+                }
+                Component::LayoutControls(_) if !in_layout => {
+                    return Err("layout controls must be a direct child of a pane layout");
                 }
                 Component::Workspace(_) => insert(ids, "workspace")?,
                 Component::PairForm { id, .. } => {
@@ -296,16 +313,23 @@ impl Document {
                         insert(ids, &format!("{id}-{suffix}"))?;
                     }
                     let mut positions = BTreeSet::new();
+                    let mut has_controls = false;
                     for child in children {
-                        if let Component::Pane { position, .. } = child {
-                            if !positions.insert(position.key()) {
-                                return Err("duplicate pane position");
+                        match child {
+                            Component::Pane { position, .. } => {
+                                if !positions.insert(position.key()) {
+                                    return Err("duplicate pane position");
+                                }
                             }
-                        } else {
-                            return Err("pane layout requires panes");
+                            Component::LayoutControls(_) if !has_controls => has_controls = true,
+                            _ => {
+                                return Err(
+                                    "pane layout requires panes and at most one controls group",
+                                )
+                            }
                         }
                     }
-                    if !positions.contains("main") || children.len() > 4 {
+                    if !positions.contains("main") {
                         return Err("pane layout requires one main pane");
                     }
                 }
@@ -320,6 +344,7 @@ impl Document {
                 | Component::Region { children, .. }
                 | Component::Pane { children, .. }
                 | Component::Row(children)
+                | Component::LayoutControls(children)
                 | Component::ReadingColumn(children)
                 | Component::Toolbar(children)
                 | Component::Workspace(children) => Some(children),
@@ -344,7 +369,14 @@ impl Document {
             "runtime-reload".into(),
         ]);
         let mut count = 0;
+        let mut has_brand_context = false;
         for c in &self.children {
+            if matches!(c, Component::BrandContext { .. }) {
+                if has_brand_context {
+                    return Err("document allows one brand context");
+                }
+                has_brand_context = true;
+            }
             visit(c, 0, &mut count, &mut ids, false)?;
         }
         Ok(())

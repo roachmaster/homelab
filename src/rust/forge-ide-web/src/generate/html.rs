@@ -16,6 +16,9 @@ fn children(items: &[Component], out: &mut String) {
 }
 pub(crate) fn emit(c: &Component, out: &mut String) {
     match c {
+        Component::BrandContext { id } => {
+            let _ = write!(out, "<span id=\"{}\" class=\"fg-brand-context\" data-bind-text data-protected hidden></span>", escape(id));
+        }
         Component::Screen {
             id,
             title,
@@ -86,7 +89,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children: items,
         } => {
             let id = escape(id);
-            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout data-single-secondary=\"{single_secondary}\"><div class=\"fg-layout-controls\"><details id=\"{id}-options\" class=\"fg-view-options\"><summary>View options</summary><div class=\"fg-option-list\">");
+            let controls = items
+                .iter()
+                .find(|item| matches!(item, Component::LayoutControls(_)));
+            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout data-single-secondary=\"{single_secondary}\"><div class=\"fg-layout-controls\">");
+            if controls.is_some() {
+                out.push_str("<div class=\"fg-layout-options\">");
+            }
+            let _=write!(out,"<details id=\"{id}-options\" class=\"fg-view-options\"><summary>View options</summary><div class=\"fg-option-list\">");
             for pane in items {
                 if let Component::Pane {
                     id,
@@ -100,7 +110,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                     }
                 }
             }
-            let _=write!(out,"<button type=\"button\" id=\"{id}-reset\" data-layout-reset>Reset panes</button></div></details><nav class=\"fg-pane-switches\" aria-label=\"Visible pane\">");
+            let _=write!(out,"<button type=\"button\" id=\"{id}-reset\" data-layout-reset>Reset panes</button></div></details>");
+            if let Some(slot) = controls {
+                emit(slot, out);
+                out.push_str("</div>");
+            }
+            out.push_str("<nav class=\"fg-pane-switches\" aria-label=\"Visible pane\">");
             for pane in items {
                 if let Component::Pane {
                     id,
@@ -113,9 +128,15 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 }
             }
             out.push_str("</nav></div><div class=\"fg-panes\">");
-            children(items, out);
+            for pane in items
+                .iter()
+                .filter(|item| matches!(item, Component::Pane { .. }))
+            {
+                emit(pane, out);
+            }
             out.push_str("</div></section>");
         }
+        Component::LayoutControls(items) => children(items, out),
         Component::Pane {
             id,
             title,
@@ -251,4 +272,4 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
     }
 }
 // A reusable shell/recovery primitive; content is exclusively typed emitter output.
-pub(crate) const SHELL: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/main.js\" defer></script></head><body><header class=\"fg-header\"><div class=\"fg-brand\"><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{{title}}</h1></div><p>{{subtitle}}</p></header><section id=\"runtime-recovery\" class=\"fg-recovery\" hidden><p id=\"runtime-message\" role=\"alert\"></p><button id=\"runtime-reload\" type=\"button\" data-reload>Reload application</button></section><div class=\"fg-app\">{{{content}}}</div><noscript>This application requires JavaScript and WebAssembly.</noscript></body></html>";
+pub(crate) const SHELL: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/main.js\" defer></script></head><body><header class=\"fg-header\"><div class=\"fg-brand\"><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{{title}}</h1>{{{brand_context}}}</div><p>{{subtitle}}</p></header><section id=\"runtime-recovery\" class=\"fg-recovery\" hidden><p id=\"runtime-message\" role=\"alert\"></p><button id=\"runtime-reload\" type=\"button\" data-reload>Reload application</button></section><div class=\"fg-app\">{{{content}}}</div><noscript>This application requires JavaScript and WebAssembly.</noscript></body></html>";

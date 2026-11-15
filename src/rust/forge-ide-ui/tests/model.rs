@@ -2282,6 +2282,68 @@ fn synthetic_root_uses_admitted_project_label_consistently() {
 }
 
 #[test]
+fn workbench_header_context_tracks_admitted_selection() {
+    let assert_context = |model: &UiModel, expected: &str| {
+        let view = model.view();
+        assert_eq!(
+            view.texts
+                .iter()
+                .find(|binding| binding.id == "workbench-context")
+                .unwrap()
+                .text,
+            expected
+        );
+        assert_eq!(
+            view.visibility
+                .iter()
+                .find(|binding| binding.id == "workbench-context")
+                .unwrap()
+                .visible,
+            !expected.is_empty()
+        );
+    };
+    let mut model = UiModel::default();
+    assert_context(&model, "");
+    let resume = event(&mut model, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &resume.effects[0] else {
+        panic!("resume")
+    };
+    let mut catalog = catalog();
+    let mut empty = catalog.nodes[0].clone();
+    empty.key = "empty".into();
+    empty.label = "Empty Lab".into();
+    empty.projects.clear();
+    catalog.nodes.push(empty);
+    event(
+        &mut model,
+        UiEvent::Paired {
+            request_id: request_id.clone(),
+            catalog,
+        },
+    );
+    assert_context(&model, "");
+    event(&mut model, UiEvent::OpenWorkbench {});
+    assert_context(&model, "Lab / Workspace");
+    let selected = event(
+        &mut model,
+        UiEvent::SelectProject {
+            value: "other".into(),
+        },
+    );
+    assert!(selected.effects.is_empty());
+    assert_context(&model, "Lab / Other");
+    event(
+        &mut model,
+        UiEvent::SelectNode {
+            value: "empty".into(),
+        },
+    );
+    assert_context(&model, "Empty Lab");
+    event(&mut model, UiEvent::OpenChat {});
+    assert_context(&model, "");
+}
+
+#[test]
 fn chat_is_the_landing_view_and_in_flight_replies_follow_their_conversation() {
     let mut model = connected_chat();
     let visible = |view: &forge_ide_ui::view::ViewModel, id: &str| {

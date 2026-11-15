@@ -32,6 +32,14 @@ pub(crate) fn emit(t: &Theme) -> String {
 .fg-message-body a{color:var(--accent)}
 .fg-textarea{display:grid;gap:4px}.fg-textarea textarea{font:inherit;font-size:max(16px,1em);width:100%;min-width:0;min-height:4.5rem;max-height:35dvh;resize:vertical;padding:10px 12px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius)}.fg-textarea textarea:focus-visible,.fg-transcript:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:600px){.fg-reading-column .fg-toolbar{gap:8px}.fg-reading-column .fg-toolbar .fg-field{flex:1 1 8rem}.fg-message{max-width:100%}.fg-transcript{max-height:46dvh}}
+.fg-brand:has(>.fg-brand-context:not([hidden])){min-width:0;flex-wrap:wrap}
+.fg-brand-context{min-width:0;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.fg-layout-options{display:flex;align-items:center;gap:inherit}
+.fg-layout-options>.fg-disclosure{border:0}
+.fg-layout-options>.fg-disclosure>summary{cursor:pointer;list-style-position:inside;padding:3px 7px;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;font-weight:400;color:var(--text)}
+.fg-layout-options>.fg-disclosure>.fg-disclosure-body{position:absolute;z-index:5;top:100%;inset-inline-start:10px;width:min(18rem,calc(100% - 20px));display:grid;gap:8px;padding:10px;background:var(--raised);border:1px solid var(--border);box-shadow:0 8px 18px #0005}
+.fg-layout-options>.fg-disclosure select{width:100%}
+[data-narrow=true] .fg-layout-options>.fg-disclosure>summary{min-height:var(--touch);display:flex;align-items:center}
 "#);
     for n in 0..=64 {
         let _ = writeln!(s, ".fg-depth-{n}{{margin-inline-start:{}px}}", n * 12);

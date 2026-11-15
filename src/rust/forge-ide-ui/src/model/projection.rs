@@ -538,8 +538,8 @@ impl UiModel {
                     .collect()
             })
             .unwrap_or_default();
-        let projects = self
-            .selected_node()
+        let selected_node = self.selected_node();
+        let projects = selected_node
             .map(|n| {
                 n.projects
                     .iter()
@@ -548,6 +548,18 @@ impl UiModel {
                         label: p.label.clone(),
                     })
                     .collect()
+            })
+            .unwrap_or_default();
+        let workbench_node = selected_node.filter(|_| self.chats.workbench);
+        let workbench_context = workbench_node
+            .map(|node| {
+                node.projects
+                    .iter()
+                    .find(|project| project.alias == self.project)
+                    .map_or_else(
+                        || node.label.clone(),
+                        |project| format!("{} / {}", node.label, project.label),
+                    )
             })
             .unwrap_or_default();
         let mut details = Vec::new();
@@ -740,6 +752,7 @@ impl UiModel {
             texts: vec![
                 tone_text("status", self.message.clone(), status_tone),
                 tone_text("phase-label", if no_project { "No allowed project" } else { phase_label(self.phase) }, status_tone),
+                text("workbench-context", workbench_context),
                 text("source-status", source_status), text("source-range", source_range), text("search-summary", search_summary),
                 text("inspect-label", if key.is_some() { "Refresh" } else { "Open project" }),
                 text("source-shape-summary", shape_summary),
@@ -779,6 +792,7 @@ impl UiModel {
             ],
             tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details },TableBinding { id:"source-shape-details",rows:shape_details }],
             visibility: vec![
+                visible("workbench-context", workbench_node.is_some()),
                 visible("search-panel",!self.project_query.0.trim().is_empty()),visible("files-panel",self.project_query.0.trim().is_empty()),visible("source-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
                 visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading || source_loading),
             ],

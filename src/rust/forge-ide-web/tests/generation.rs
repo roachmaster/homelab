@@ -377,6 +377,25 @@ fn focused_layout_and_disclosure_are_declarative_reusable_primitives() {
 }
 
 #[test]
+fn workbench_keeps_project_selects_in_a_closed_native_disclosure() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let (_, header) = html.split_once("<header").unwrap();
+    let (header, _) = header.split_once("</header>").unwrap();
+    assert!(header.contains("id=\"workbench-context\""));
+
+    let (before_options, options) = html.split_once("<details id=\"project-options\"").unwrap();
+    let (attributes, options) = options.split_once('>').unwrap();
+    assert!(!attributes.split_whitespace().any(|part| part == "open"));
+    assert!(before_options.contains("id=\"workspace-options\""));
+    let (options, _) = options.split_once("</details>").unwrap();
+    assert!(options.starts_with("<summary>Project options</summary>"));
+    assert!(options.contains("id=\"node\""));
+    assert!(options.contains("id=\"project\""));
+    assert!(!options.contains("id=\"inspect\""));
+}
+
+#[test]
 fn source_and_pane_navigation_are_reusable_safe_declarations() {
     let mut c = config();
     c.document = Document {

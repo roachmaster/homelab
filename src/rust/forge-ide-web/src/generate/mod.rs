@@ -190,7 +190,7 @@ impl Factory<AssetBundle> for AssetFactory {
     type Error = AssetError;
     fn create(&self) -> Result<AssetBundle, AssetError> {
         let schema = Schema::Object {
-            fields: ["title", "subtitle", "content"]
+            fields: ["title", "subtitle", "brand_context", "content"]
                 .into_iter()
                 .map(|k| {
                     (
@@ -222,9 +222,15 @@ impl Factory<AssetBundle> for AssetFactory {
         let ((), factory) = frozen.into_factories();
         let provider = Singleton::new(factory.create().map_err(AssetError::Template)?);
         let renderer = provider.acquire().unwrap_or_else(|never| match never {});
+        let mut brand_context = String::new();
         let mut content = String::new();
         for c in &self.config.document.children {
-            html::emit(c, &mut content);
+            let target = if matches!(c, Component::BrandContext { .. }) {
+                &mut brand_context
+            } else {
+                &mut content
+            };
+            html::emit(c, target);
         }
         let context = Value::Object(BTreeMap::from([
             (
@@ -235,6 +241,7 @@ impl Factory<AssetBundle> for AssetFactory {
                 "subtitle".into(),
                 Value::Text(self.config.document.subtitle.clone()),
             ),
+            ("brand_context".into(), Value::Text(brand_context)),
             ("content".into(), Value::Text(content)),
         ]));
         let html = renderer.render(&context).map_err(AssetError::Template)?;

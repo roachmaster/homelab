@@ -12,9 +12,10 @@ entry method. A local host can require its one-use pairing code; a trusted proxy
 host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
 
 1. A catalog with exactly one allowed project opens it automatically after admission.
-   Otherwise choose **Node** and **Project**, then **Refresh project**. Changing
-   context clears previous report and source ownership. Refresh replaces the loaded
-   report; it does not claim the filesystem remained unchanged since the last read.
+   Otherwise open **Project options** beside **View options**, choose **Node** and
+   **Project**, then select **Refresh project**. The header beside **Forge IDE**
+   shows the current selection. Changing context clears previous report and source
+   ownership. Refresh replaces the loaded report with a new inspection.
 2. **Find files or symbols** searches file paths and declaration names in the loaded
    report, case-insensitively. Results show their file context. Selecting a symbol
    opens its file and declaration directly. Clear the query to return to Explorer.
