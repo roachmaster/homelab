@@ -1220,17 +1220,22 @@ async function controlledLifecycleJourney() {
   const traffic = await observe(context);
   const { page, errors } = await connect(context, fixture);
   await selectProject(page, 'slow');
+  await disclosure(page, 'project-options', false);
   const before = traffic.count('inspect');
   await page.locator('#inspect').evaluate(button => { button.click(); button.click(); button.click(); });
   await check(page.locator('#phase-label')).toContainText('Inspecting');
   await check(page.locator('#inspect')).toBeDisabled();
-  await check(page.locator('#cancel')).toBeEnabled();
-  await check(page.locator('#cancel')).toBeVisible();
-  await page.locator('#cancel').click();
+  const cancel = page.locator('#cancel');
+  await check(cancel).toBeEnabled();
+  await check(cancel).toBeVisible();
+  await cancel.focus();
+  await check(cancel).toBeFocused();
+  await page.keyboard.press('Enter');
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
   await assertTone(page, 'status', 'warning');
-  await check(page.locator('#cancel')).toBeHidden();
-  await assertVisibleFocus(page);
+  await check(cancel).toBeHidden();
+  report.checkpoint('cancel_focus_restored');
+  await check(page.locator('#inspect')).toBeFocused();
   await delay(1000); // injected native port completes after local cancellation
   await check(page.locator('#status')).toContainText('Stopped waiting locally.');
   await noReport(page);

@@ -255,7 +255,11 @@ function apply(view,acknowledgedSequence){
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){
-    const target=visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):document.querySelector('.fg-screen:not([hidden]) select:not(:disabled),.fg-screen:not([hidden]) input:not(:disabled),.fg-screen:not([hidden]) button:not(:disabled)');
+    let target=visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):null;
+    if(!target){
+      const controls=[...document.querySelectorAll('.fg-screen:not([hidden]) :is(select,input,button):not(:disabled)')].filter(visible);
+      target=controls.find(n=>n.classList.contains('fg-button-primary'))||controls[0];
+    }
     if(visible(target))target.focus({preventScroll:true});
   }
 }
