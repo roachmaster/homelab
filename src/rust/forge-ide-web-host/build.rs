@@ -12,6 +12,7 @@ fn main() -> io::Result<()> {
         ("design.html", DesignPage::Overview),
         ("chat-history.html", DesignPage::ChatHistory),
         ("chat-dispatch.html", DesignPage::ChatDispatch),
+        ("mail.html", DesignPage::Mail),
     ] {
         fs::write(output.join(name), page.render())?;
     }

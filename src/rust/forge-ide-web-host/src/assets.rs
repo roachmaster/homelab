@@ -18,7 +18,10 @@ const CHAT_HISTORY_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chat-
 const CHAT_HISTORY_CSS: &[u8] = include_bytes!("../design/chat-history.css");
 const CHAT_DISPATCH_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chat-dispatch.html"));
 const CHAT_DISPATCH_SEQUENCE: &[u8] = include_bytes!("../design/chat-dispatch-sequence.svg");
-const DESIGN_IMAGES: [(&str, &[u8]); 9] = [
+const MAIL_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/mail.html"));
+const MAIL_WIREFRAME: &[u8] = include_bytes!("../design/forge-ide-mail-wireframe.svg");
+const MAIL_SEQUENCE: &[u8] = include_bytes!("../design/mail-dispatch-sequence.svg");
+const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
     (
         "forge-ide-chat-desktop.png",
         include_bytes!("../design/forge-ide-chat-desktop.png"),
@@ -55,6 +58,10 @@ const DESIGN_IMAGES: [(&str, &[u8]); 9] = [
         "chat-history-expiry.png",
         include_bytes!("../design/chat-history-expiry.png"),
     ),
+    (
+        "forge-ide-mail-wireframe.png",
+        include_bytes!("../design/forge-ide-mail-wireframe.png"),
+    ),
 ];
 
 fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
@@ -70,6 +77,9 @@ fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
             Some(("text/html; charset=utf-8", CHAT_DISPATCH_HTML))
         }
         "/design/chat-dispatch-sequence.svg" => Some(("image/svg+xml", CHAT_DISPATCH_SEQUENCE)),
+        "/design/mail" | "/design/mail/" => Some(("text/html; charset=utf-8", MAIL_HTML)),
+        "/design/forge-ide-mail-wireframe.svg" => Some(("image/svg+xml", MAIL_WIREFRAME)),
+        "/design/mail-dispatch-sequence.svg" => Some(("image/svg+xml", MAIL_SEQUENCE)),
         _ => {
             let name = path.strip_prefix("/design/")?;
             DESIGN_IMAGES

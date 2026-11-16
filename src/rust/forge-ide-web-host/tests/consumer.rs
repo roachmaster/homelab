@@ -1054,6 +1054,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Content-Security-Policy:"));
         assert!(response.contains("Forge IDE design"));
         assert!(response.contains("href=\"/design/chat-dispatch\""));
+        assert!(response.contains("href=\"/design/mail\""));
     }
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
     assert!(request("GET", "/design/previous-chats.js")
@@ -1069,10 +1070,23 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Content-Type: text/html; charset=utf-8"));
         assert!(response.contains("href=\"/design/chat-dispatch-sequence.svg\""));
     }
-    let diagram = request("HEAD", "/design/chat-dispatch-sequence.svg");
-    assert!(diagram.starts_with("HTTP/1.1 200 OK"));
-    assert!(diagram.contains("Content-Type: image/svg+xml"));
-    assert!(diagram.ends_with("\r\n\r\n"));
+    for path in ["/design/mail", "/design/mail/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("href=\"/design/forge-ide-mail-wireframe.svg\""));
+        assert!(response.contains("href=\"/design/mail-dispatch-sequence.svg\""));
+    }
+    for path in [
+        "/design/chat-dispatch-sequence.svg",
+        "/design/forge-ide-mail-wireframe.svg",
+        "/design/mail-dispatch-sequence.svg",
+    ] {
+        let diagram = request("HEAD", path);
+        assert!(diagram.starts_with("HTTP/1.1 200 OK"));
+        assert!(diagram.contains("Content-Type: image/svg+xml"));
+        assert!(diagram.ends_with("\r\n\r\n"));
+    }
     assert!(request("GET", "/design/chat-dispatch-sequence.mmd").starts_with("HTTP/1.1 404"));
     for path in [
         "/design/forge-ide-chat-desktop.png",
@@ -1084,6 +1098,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         "/design/chat-history-retention.png",
         "/design/chat-history-delete.png",
         "/design/chat-history-expiry.png",
+        "/design/forge-ide-mail-wireframe.png",
     ] {
         let response = request("HEAD", path);
         assert!(response.starts_with("HTTP/1.1 200 OK"));

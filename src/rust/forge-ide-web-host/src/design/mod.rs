@@ -56,6 +56,7 @@ macro_rules! element {
 mod dispatch;
 mod history;
 mod landing;
+mod mail;
 
 fn render(nodes: &[Node], output: &mut String) {
     for node in nodes {
@@ -81,6 +82,7 @@ pub enum DesignPage {
     Overview,
     ChatHistory,
     ChatDispatch,
+    Mail,
 }
 
 impl DesignPage {
@@ -99,6 +101,12 @@ impl DesignPage {
                 "/design",
                 "Back to Design",
                 dispatch::BODY,
+            ),
+            Self::Mail => (
+                "Mail design · Forge IDE",
+                "/design",
+                "Back to Design",
+                mail::BODY,
             ),
         };
         let overview = matches!(self, Self::Overview);
