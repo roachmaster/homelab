@@ -1,6 +1,6 @@
 use crate::chat::ChatRelay;
 use crate::workspace::{WorkspaceReply, WorkspaceRequest};
-use crate::{assets::Assets, http, session::Session, HostConfig, HostError, SessionAuth};
+use crate::{assets::Assets, history, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_ide::remote::{
@@ -216,6 +216,9 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
         "ui.session.open" if !c.trusted_proxy => Ok(()),
         "ui.session.resume" if c.authenticated || c.trusted_proxy => Ok(()),
         "ide.inspect" | "ide.source" | "ide.chat" if c.authenticated && c.csrf_valid => Ok(()),
+        destination if history::is_destination(destination) && c.authenticated && c.csrf_valid => {
+            Ok(())
+        }
         _ => Err(AdmissionDenied),
     }
 }
@@ -281,7 +284,16 @@ impl State {
         let Command::Chat { request } = command else {
             return Err(Rejection::Invalid);
         };
-        if request.request_id != context.request_id || !valid_chat_messages(&request.messages) {
+        if request.request_id != context.request_id
+            || !valid_chat_messages(&request.messages)
+            || request
+                .chat_id
+                .as_deref()
+                .is_some_and(|id| !valid_chat_id(id))
+            || request.expected_revision.is_some_and(|revision| {
+                request.chat_id.is_none() || !(1..9_007_199_254_740_991).contains(&revision)
+            })
+        {
             return Err(Rejection::Invalid);
         }
         let result = self
@@ -293,12 +305,9 @@ impl State {
                     .deadline
                     .checked_sub(std::time::Duration::from_millis(200))
                     .ok_or(FailureKind::Timeout)?;
-                relay.complete(&request.messages, deadline)
+                relay.complete(&request, deadline)
             });
-        let outcome = match result {
-            Ok(content) => ChatOutcome::Answer { content },
-            Err(category) => ChatOutcome::Error { category },
-        };
+        let outcome = result.unwrap_or_else(|category| ChatOutcome::Error { category });
         Ok(Reply {
             protocol_version: PROTOCOL_VERSION,
             event: UiEvent::ChatResult {
@@ -735,5 +744,21 @@ impl Host {
                 forge_bridge::DispatchError::Handler(e) => e,
                 _ => Rejection::Invalid,
             })
+    }
+
+    pub(crate) fn chat_history(
+        &self,
+        header: &Header,
+        body: &[u8],
+        context: &Context,
+    ) -> Result<(u16, hyper::body::Bytes), Rejection> {
+        admit(header, context).map_err(|_| Rejection::Denied)?;
+        let relay = self
+            .state
+            .chat
+            .as_ref()
+            .filter(|relay| relay.workspace_persistence)
+            .ok_or(Rejection::Unavailable)?;
+        history::dispatch(relay, header, body, context.deadline)
     }
 }

@@ -192,6 +192,14 @@ drafts and Workbench bookmark. The host revalidates that bookmark against an
 admitted catalog and a fresh inspection. An older page lease cannot replace a
 newer checkpoint.
 
+With PostgreSQL enabled, **Previous chats** lists and opens committed chats
+across browser tabs. Its **Manage** menu uses the same authenticated
+`POST /forge/v1/dispatch` endpoint with the `ide.chat.history.*` destinations.
+The host forwards those requests to the existing runner's private
+`POST /v1/dispatch`. The runner commits each linked chat turn and checks the
+current revision when setting an expiration date, keeping a chat indefinitely,
+or deleting it. Expiration runs in the runner process.
+
 Without the runner setting, the host keeps up to 12 bounded tab checkpoints in
 session memory. Session rotation and host restart clear those checkpoints.
 
@@ -209,7 +217,7 @@ adapter is intentionally not a general-purpose HTTP server. Asset manifest count
 is exactly five; each asset is capped at16 MiB, hash verified and loaded via the
 existing rooted native file client (no symlink traversal or shell wrappers).
 The host embeds the Design reference at `/design`, its sample Previous chats
-prototype, and the proposed chat history contracts and sequence diagrams at
+prototype, and the chat history contracts and sequence diagrams at
 `/design/chat-history`. The design pages use fixed asset paths.
 The configured startup directory and generated content remain trusted; hashing
 provides consistency, not a publisher signature or a filesystem snapshot.

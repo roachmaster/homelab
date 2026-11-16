@@ -29,6 +29,10 @@ impl Session {
             protocol_version: 1,
             session_epoch: random_token()?,
             timeout_ms: config.limits.request_timeout.as_millis() as u64,
+            chat_history: config
+                .chat
+                .as_ref()
+                .is_some_and(|chat| chat.workspace_persistence),
             nodes: config
                 .nodes
                 .iter()

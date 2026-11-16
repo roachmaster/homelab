@@ -1,5 +1,6 @@
 //! Deliberately narrow HTTP/1.1 adapter. No chunking, upgrades, keepalive or CORS.
 use crate::{
+    history,
     service::{Command, Rejection},
     workspace, Host, HostError,
 };
@@ -311,10 +312,25 @@ fn command(
         expiry,
         deadline,
     );
-    let payload: Command = serde_json::from_slice(&r.body).map_err(|_| Rejection::Invalid)?;
     if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
         return Err(Rejection::Unavailable);
     }
+    if history::is_destination(destination) {
+        let (status, body) = host.chat_history(&header, &r.body, &context)?;
+        if body.len() > host.config.limits.response_bytes {
+            return Err(Rejection::Limit);
+        }
+        return Ok(Response {
+            status,
+            mime: "application/json",
+            body: body.to_vec(),
+            cookie: None,
+            allow: None,
+            location: None,
+            head: false,
+        });
+    }
+    let payload: Command = serde_json::from_slice(&r.body).map_err(|_| Rejection::Invalid)?;
     let reply = host.dispatch(header, payload, &context)?;
     let mut bytes = LimitedBytes {
         bytes: Vec::new(),
@@ -452,6 +468,7 @@ fn write_response(s: &mut TcpStream, r: Response, deadline: Instant) -> Result<(
         401 => "Unauthorized",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
         413 => "Content Too Large",
         _ => "Service Unavailable",
     };

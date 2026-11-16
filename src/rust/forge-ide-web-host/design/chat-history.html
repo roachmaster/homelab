@@ -19,7 +19,7 @@
   <main id="main" class="page-width history-contract">
     <div class="intro">
       <h1>Previous chats technical design</h1>
-      <p>Proposed contracts for opening, retaining, deleting, and expiring saved chats through Forge dispatch.</p>
+      <p>Contracts for opening, retaining, deleting, and expiring saved chats through Forge dispatch.</p>
       <nav class="section-nav" aria-label="Technical design sections">
         <a href="#dispatch">Dispatch</a>
         <a href="#dto">DTOs</a>
@@ -37,14 +37,14 @@
         </li>
         <li>
           <h3>Forge web host → Forge runner</h3>
-          <p>After admission, the host sends the validated request to the existing runner’s proposed private <code>POST /v1/dispatch</code>. It uses the same destination, versions and request ID with the runner’s bearer credential. The host keeps browser cookies and CSRF values at the browser boundary. The runner derives the operator from its admitted credential and selects the registered handler.</p>
+          <p>After admission, the host sends the validated request to the existing runner’s private <code>POST /v1/dispatch</code>. It uses the same destination, versions and request ID with the runner’s bearer credential. The host keeps browser cookies and CSRF values at the browser boundary. The runner derives the operator from its admitted credential and selects the registered handler.</p>
         </li>
         <li>
           <h3>Forge runner → PostgreSQL</h3>
           <p>The runner invokes an operator-scoped DAO operation and returns a bounded, typed result. The browser uses the echoed <code>request_id</code> to match the result to the action that initiated it.</p>
         </li>
       </ol>
-      <p class="contract-note">Deployed workspace recovery currently uses <code>POST /forge/v1/dispatch/workspace</code>, which relays to <code>POST /v1/workspace</code> when durable recovery is enabled. The chat history destinations and the private runner dispatch route are proposed here.</p>
+      <p class="contract-note">Workspace recovery uses <code>POST /forge/v1/dispatch/workspace</code>, which relays to <code>POST /v1/workspace</code> when durable recovery is enabled. The tab checkpoint stores draft and selection state by chat ID. A linked inference commits the saved transcript in the runner.</p>
     </section>
 
     <section id="dto" class="design-section" aria-labelledby="dto-title">
@@ -57,7 +57,7 @@
         </div>
         <div>
           <dt><code>RetentionPolicyDto</code></dt>
-          <dd><code>{"kind":"long_term"}</code> has no scheduled expiry. <code>expires</code> carries an inclusive <code>expires_on</code> calendar date. The runner accepts an IANA <code>time_zone</code> or uses the configured zone, which defaults to UTC. It persists the resolved zone and returns the derived <code>expires_at</code> UTC instant when the next local calendar day begins.</dd>
+          <dd><code>{"kind":"long_term"}</code> is the default and has no scheduled expiry. <code>expires</code> carries an inclusive <code>expires_on</code> calendar date. The runner accepts an IANA <code>time_zone</code> and uses UTC when omitted. It persists the resolved zone and returns the derived <code>expires_at</code> UTC instant when the next local calendar day begins.</dd>
         </div>
         <div>
           <dt><code>ChatMessageDto</code></dt>
@@ -202,7 +202,7 @@
         </div>
       </dl>
       <p class="contract-note">The removal transaction covers the committed transcript, chat-owned linked run content, and recoverable checkpoint copies. Use explicit chat ownership links to determine which records belong to the chat. Check the tombstone at checkpoint save, restore, and late run completion so an open tab or a finishing request cannot revive the chat.</p>
-      <p class="contract-note">Older IDE runs store full submitted transcript snapshots, sometimes from successive turns of the same chat. Keep those entries identifiable as read-only archives. Continuing an archive starts a new chat with a new ID. Retention applies to records explicitly linked to the saved chat. Unlinked archives, independent runner records, and existing backups follow their own retention scope.</p>
+      <p class="contract-note">The runner imports shared workspace transcripts as saved chats. Separate copies in older tabs, unlinked runner snapshots, and existing backups follow their existing retention scope.</p>
     </section>
 
     <section id="sequences" class="design-section" aria-labelledby="sequence-title">

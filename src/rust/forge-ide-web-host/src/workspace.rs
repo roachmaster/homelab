@@ -12,6 +12,8 @@ const MAX_TABS: usize = 12;
 pub(crate) enum WorkspaceRequest {
     Restore {
         tab: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        history: bool,
     },
     Save {
         tab: String,
@@ -55,10 +57,14 @@ fn valid_lease(lease: &str) -> bool {
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl WorkspaceRequest {
     pub(crate) fn is_valid(&self) -> bool {
         match self {
-            Self::Restore { tab } => valid_tab(tab),
+            Self::Restore { tab, .. } => valid_tab(tab),
             Self::Save {
                 tab,
                 lease,
@@ -88,7 +94,7 @@ impl Workspaces {
             return Err(Rejection::Invalid);
         }
         match request {
-            WorkspaceRequest::Restore { tab } => {
+            WorkspaceRequest::Restore { tab, .. } => {
                 let lease = random_token().map_err(|_| Rejection::Unavailable)?;
                 if !self.0.contains_key(&tab) && self.0.len() == MAX_TABS {
                     if let Some((oldest, _)) = self.0.iter().min_by_key(|(_, entry)| entry.touched)

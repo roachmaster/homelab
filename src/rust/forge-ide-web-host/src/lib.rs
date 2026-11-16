@@ -7,6 +7,7 @@ mod assets;
 mod chat;
 mod config;
 pub use chat::ChatConfig;
+mod history;
 mod http;
 mod projection;
 mod service;

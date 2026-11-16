@@ -1601,3 +1601,122 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
         json!({"kind":"chat_result","request_id":"request-1","outcome":{"kind":"answer","content":"local response"}})
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token = "0123456789abcdef".repeat(4);
+    let token_path = files.0.join("runner.token");
+    fs::write(&token_path, &token).unwrap();
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut settings = config(&files);
+    settings.chat = Some(forge_ide_web_host::ChatConfig {
+        endpoint: upstream.local_addr().unwrap(),
+        token_file: token_path,
+        workspace_persistence: true,
+    });
+    let (host, _) = host_with_config(settings);
+    let (cookie, csrf, _) = paired(&host);
+    let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    let chat_id = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
+    let destination = "ide.chat.history.delete";
+    let delete = json!({"kind":"chat_history_delete","request_id":"request-1",
+                        "chat_id":chat_id,"expected_revision":7});
+    let request = post(&host, destination, delete.clone(), &auth);
+    for (request, expected) in [
+        (post(&host, destination, delete.clone(), ""), 401),
+        (
+            post(&host, "ide.chat.history.list", delete.clone(), &auth),
+            400,
+        ),
+        (request.replace("\"request-1\"", "\"mismatch!\""), 400),
+        (
+            request.replace("Content-Type:", "Forge-Target-Node: lab\r\nContent-Type:"),
+            400,
+        ),
+        (
+            request.replace(host.origin(), "https://example.invalid"),
+            400,
+        ),
+    ] {
+        assert!(exchange(&host, request).starts_with(&format!("HTTP/1.1 {expected} ")));
+    }
+    upstream.set_nonblocking(true).unwrap();
+    assert_eq!(
+        upstream.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    upstream.set_nonblocking(false).unwrap();
+
+    let conflict = json!({"protocol_version":1,"event":{"kind":"chat_history_failed",
+                         "request_id":"request-1","code":"revision_conflict"}});
+    let wrong_chat = json!({"protocol_version":1,"event":{"kind":"chat_history_deleted",
+                           "request_id":"request-1","chat_id":"0".repeat(36),"revision":8}});
+    let success = json!({"protocol_version":1,"event":{"kind":"chat_history_deleted",
+                        "request_id":"request-1","chat_id":chat_id,"revision":8}});
+    let answers = [
+        ("409 Conflict", conflict.clone()),
+        ("200 OK", wrong_chat),
+        ("200 OK", success.clone()),
+    ];
+    let worker = thread::spawn(move || {
+        for (status, reply) in answers {
+            let (mut stream, _) = upstream.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = BufReader::new(&mut stream);
+            let mut line = String::new();
+            request.read_line(&mut line).unwrap();
+            assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
+            let mut headers = BTreeMap::new();
+            loop {
+                line.clear();
+                assert_ne!(request.read_line(&mut line).unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.trim_end().split_once(": ").unwrap();
+                headers.insert(name.to_ascii_lowercase(), value.to_owned());
+            }
+            assert_eq!(headers["authorization"], format!("Bearer {token}"));
+            assert_eq!(headers["forge-destination"], destination);
+            assert_eq!(headers["forge-request-id"], "request-1");
+            assert_eq!(headers["forge-envelope-version"], "1");
+            assert_eq!(headers["forge-contract-version"], "1");
+            for browser_only in ["cookie", "origin", "forge-csrf"] {
+                assert!(!headers.contains_key(browser_only));
+            }
+            let mut bytes = vec![0; headers["content-length"].parse().unwrap()];
+            request.read_exact(&mut bytes).unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), delete);
+            let reply = reply.to_string();
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
+        }
+    });
+    for (status, expected) in [
+        (409, conflict),
+        (503, json!({"error":"unavailable"})),
+        (200, success),
+    ] {
+        let result = exchange(&host, request.clone());
+        assert!(
+            result.starts_with(&format!("HTTP/1.1 {status} ")),
+            "{result}"
+        );
+        let (_, body) = result.split_once("\r\n\r\n").unwrap();
+        assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
+    }
+    worker.join().unwrap();
+}
