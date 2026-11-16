@@ -32,10 +32,12 @@ export async function startDurableRelay(prompt, reply) {
   let submitted = 0;
   let completions = 0;
   let dropFirstAcknowledgement = true;
+  let loadedModel = 'gpt-oss-20b';
   function finish() {
     const run = [...runs.values()].find(run => run.status === 'queued' && run.content === prompt);
     if (!run) throw new Error('Fixture chat is not queued');
     run.status = 'completed';
+    loadedModel = run.model_id;
     run.events.push({ sequence: 2, kind: 'completed' });
     completions++;
     history.set(run.chat_id, {
@@ -70,20 +72,29 @@ export async function startDurableRelay(prompt, reply) {
           fail(400, 'invalid_request');
           return;
         }
+        if (destination === 'ide.chat.run.models' && body.kind === 'chat_run_models') {
+          replyTo(200, { kind: 'chat_run_models_listed', default_model_id: 'gpt-oss-20b',
+            models: [
+              { model_id: 'gpt-oss-20b', label: 'GPT-OSS 20B (MXFP4)', ready: loadedModel === 'gpt-oss-20b' },
+              { model_id: 'qwen2.5-coder-7b', label: 'Qwen2.5-Coder 7B Instruct (Q4_K_M)', ready: loadedModel === 'qwen2.5-coder-7b' },
+            ] });
+          return;
+        }
         if (destination === 'ide.chat.run.submit' && body.kind === 'chat_run_submit') {
           const checkpoint = [...tabs.values()].find(tab =>
             tab.snapshot?.chat.pending_run?.idempotency_key === body.idempotency_key &&
             tab.snapshot.chat.pending_run.chat_id === body.chat_id &&
+            tab.snapshot.chat.pending_run.model_id === body.model_id &&
             tab.snapshot.chat.conversations.some(chat => chat.chat_id === body.chat_id && chat.draft === body.content));
           if (!checkpoint) { fail(400, 'invalid_request'); return; }
           let run = submissions.get(body.idempotency_key);
           if (!run) {
-            run = { run_id: randomUUID(), chat_id: body.chat_id, content: body.content,
+            run = { run_id: randomUUID(), chat_id: body.chat_id, content: body.content, model_id: body.model_id,
               status: 'queued', events: [{ sequence: 1, kind: 'queued' }] };
             runs.set(run.run_id, run);
             submissions.set(body.idempotency_key, run);
             submitted++;
-          } else if (run.chat_id !== body.chat_id || run.content !== body.content) {
+          } else if (run.chat_id !== body.chat_id || run.content !== body.content || run.model_id !== body.model_id) {
             fail(409, 'idempotency_conflict');
             return;
           }
@@ -167,7 +178,12 @@ export async function startDurableRelay(prompt, reply) {
           if (old.pending_run && removed.has(old.pending_run.chat_id)) delete old.pending_run;
         }
         tabs.set(body.tab, { lease, revision: 0, snapshot: restored });
-        send(200, { lease, snapshot: restored });
+        const visible = structuredClone(restored);
+        if (visible && body.models !== true) {
+          delete visible.chat.model_id;
+          if (visible.chat.pending_run) delete visible.chat.pending_run.model_id;
+        }
+        send(200, { lease, snapshot: visible });
       } else if (body.operation === 'save' && previous?.lease === body.lease) {
         if (body.revision > previous.revision) {
           previous.revision = body.revision;

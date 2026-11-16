@@ -1,8 +1,10 @@
 use super::*;
 use crate::markdown::render_markdown;
 mod history;
+mod models;
 mod run;
 use history::History;
+use models::ModelSelection;
 use run::AsyncRun;
 
 #[derive(Debug, Default)]
@@ -13,6 +15,7 @@ pub(super) struct Chats {
     pending: Option<Pending>,
     pub(super) history: History,
     pub(super) async_chat: bool,
+    models: ModelSelection,
 }
 
 #[derive(Debug, Default)]
@@ -45,6 +48,7 @@ impl Chats {
     pub fn snapshot(&self) -> ChatSnapshot {
         ChatSnapshot {
             selected: self.selected,
+            model_id: self.models.selected.clone(),
             conversations: self
                 .conversations
                 .iter()
@@ -68,6 +72,7 @@ impl Chats {
             return Err(UiError::InvalidAction);
         }
         self.selected = snapshot.selected;
+        self.models.selected = snapshot.model_id;
         self.conversations = snapshot
             .conversations
             .into_iter()
@@ -433,6 +438,7 @@ impl Chats {
         });
         self.project_history(view, connected);
         self.project_run(view, waiting, connected);
+        self.project_models(view, connected);
         view.inputs.push(InputBinding {
             id: "chat-draft",
             value: current.map(|c| c.draft.clone()).unwrap_or_default(),
@@ -455,6 +461,7 @@ impl Chats {
                 "send-chat",
                 !connected
                     || self.pending.is_some()
+                    || self.models.selection_unavailable()
                     || self.history.waiting()
                     || self.history.dialog_open()
                     || current.is_none_or(|c| c.draft.trim().is_empty()),

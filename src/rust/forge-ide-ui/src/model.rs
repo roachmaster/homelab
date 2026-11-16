@@ -176,6 +176,7 @@ impl UiModel {
             | UiEvent::OpenWorkbench {}
             | UiEvent::NewChat {}
             | UiEvent::SelectChat { .. }
+            | UiEvent::SelectChatModel { .. }
             | UiEvent::SetChatDraft { .. }
             | UiEvent::SendChat {}
             | UiEvent::SendPersistentChat { .. }
@@ -197,7 +198,15 @@ impl UiModel {
             {
                 return Err(UiError::NotConnected)
             }
-            UiEvent::OpenChat {} => self.chats.workbench = false,
+            UiEvent::OpenChat {} => {
+                self.chats.workbench = false;
+                if self.chats.async_chat {
+                    let request_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.request_models(request_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
+            }
             UiEvent::OpenWorkbench {} => {
                 self.chats.workbench = true;
                 self.workbench_seen = true;
@@ -215,6 +224,7 @@ impl UiModel {
                     effects.push(UiEffect::ChatHistory(request));
                 }
             }
+            UiEvent::SelectChatModel { value } => self.chats.select_model(value)?,
             UiEvent::SetChatDraft {
                 conversation,
                 value,
@@ -281,10 +291,24 @@ impl UiModel {
             UiEvent::CloseChatDialog {} => self.chats.close_history_dialog(),
             UiEvent::ChatHistory(response) => self.chats.accept_history(response),
             UiEvent::ChatRun(response) => {
-                if self.chats.expects_run_request(response.request_id()) {
+                if !self.chats.accept_models(&response)
+                    && self.chats.expects_run_request(response.request_id())
+                {
+                    let completed = matches!(
+                        &response,
+                        ChatRunResponse::ChatRunEvents {
+                            status: ChatRunStatus::Completed,
+                            ..
+                        }
+                    );
                     let next_id = self.next_id(input.now_ms)?;
                     if let Some(request) = self.chats.accept_run(response, next_id) {
                         effects.push(UiEffect::ChatRun(request));
+                    } else if completed {
+                        let request_id = self.next_id(input.now_ms)?;
+                        if let Some(request) = self.chats.request_models(request_id) {
+                            effects.push(UiEffect::ChatRun(request));
+                        }
                     }
                 }
             }
@@ -305,6 +329,7 @@ impl UiModel {
                     }
                 }
                 self.chats.history_network_failed(&request_id, category);
+                self.chats.models_network_failed(&request_id);
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
@@ -431,6 +456,12 @@ impl UiModel {
                 .into();
                 if sole.len() == 1 {
                     self.begin_inspection(input.now_ms, &mut effects)?;
+                }
+                if self.chats.async_chat {
+                    let request_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.request_models(request_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
                 }
             }
             UiEvent::RestoreWorkspace { snapshot } => {

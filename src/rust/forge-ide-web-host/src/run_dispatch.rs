@@ -50,9 +50,9 @@ pub(crate) fn dispatch(
 fn status_matches(status: StatusCode, event: &ChatRunResponse) -> bool {
     match event {
         ChatRunResponse::ChatRunAccepted { .. } => status == StatusCode::ACCEPTED,
-        ChatRunResponse::ChatRunEvents { .. } | ChatRunResponse::ChatRunCancelled { .. } => {
-            status == StatusCode::OK
-        }
+        ChatRunResponse::ChatRunEvents { .. }
+        | ChatRunResponse::ChatRunCancelled { .. }
+        | ChatRunResponse::ChatRunModelsListed { .. } => status == StatusCode::OK,
         ChatRunResponse::ChatRunFailed { code, .. } => match code {
             ChatRunFailure::InvalidRequest => status == StatusCode::BAD_REQUEST,
             ChatRunFailure::Denied => {

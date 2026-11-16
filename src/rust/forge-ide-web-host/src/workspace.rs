@@ -14,6 +14,8 @@ pub(crate) enum WorkspaceRequest {
         tab: String,
         #[serde(default, skip_serializing_if = "is_false")]
         history: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        models: bool,
     },
     Save {
         tab: String,
@@ -64,7 +66,11 @@ fn is_false(value: &bool) -> bool {
 impl WorkspaceRequest {
     pub(crate) fn is_valid(&self) -> bool {
         match self {
-            Self::Restore { tab, .. } => valid_tab(tab),
+            Self::Restore {
+                tab,
+                history,
+                models,
+            } => valid_tab(tab) && (!*models || *history),
             Self::Save {
                 tab,
                 lease,

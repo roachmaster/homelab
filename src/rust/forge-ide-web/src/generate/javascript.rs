@@ -561,13 +561,18 @@ async function workspaceRequest(body,keepalive,signal){
     body,keepalive,signal,credentials:'same-origin',redirect:'error',cache:'no-store'
   });
 }
-async function restoreWorkspace(chatHistory){
+async function restoreWorkspace(chatHistory,chatModels){
   if(!workspaceTab||!csrf)return null;
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),2500);
   try{
-    const request=JSON.stringify({operation:'restore',tab:workspaceTab,...(chatHistory?{history:true}:{})});
-    const response=await workspaceRequest(request,false,controller.signal);
+    const request={operation:'restore',tab:workspaceTab,...(chatHistory?{history:true}:{}),...(chatModels?{models:true}:{})};
+    let response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
+    if(chatModels&&response.status===400){
+      await response.body?.cancel();
+      delete request.models;
+      response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
+    }
     if(!response.ok){await response.body?.cancel();return null;}
     const saved=safeJson(decoder.decode(await bounded(response,WORKSPACE_MAX)));
     if(!/^[0-9a-f]{64}$/.test(saved.lease))return null;
@@ -618,7 +623,7 @@ async function flushWorkspace(notify){
 async function checkpointedRun(effect){
   if(!workspaceLease||!workspaceJSON)return false;
   const intent=safeJson(workspaceJSON).chat?.pending_run;
-  if(intent?.chat_id!==effect.chat_id||intent.idempotency_key!==effect.idempotency_key)return false;
+  if(intent?.chat_id!==effect.chat_id||intent.idempotency_key!==effect.idempotency_key||intent.model_id!==effect.model_id)return false;
   const checkpoint=latestCheckpoint;
   if(!checkpoint)return true; // Restored from a durable checkpoint.
   await checkpoint.pending;
@@ -681,9 +686,11 @@ async function run(effect){
     if(decoded.csrf!==undefined && decoded.csrf!==null){
       if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');
       csrf=decoded.csrf;
-      saved=await restoreWorkspace(decoded.event.catalog?.chat_history===true);
+      saved=await restoreWorkspace(decoded.event.catalog?.chat_history===true,decoded.event.catalog?.async_chat===true);
     }
     try{
+      // The completed request should not occupy a slot used by its effects.
+      pending.delete(id);
       dispatch(decoded.event,null,saved!==null);
       if(saved!==null)dispatch({kind:'restore_workspace',snapshot:saved});
     }catch(_){fatal('Invalid application ABI result. Reload to retry.');}

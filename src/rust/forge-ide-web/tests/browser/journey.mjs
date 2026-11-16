@@ -1072,6 +1072,10 @@ async function durableHostRestartJourney() {
     const { page, traffic } = await startPage();
     await pair(page);
     await check(page.locator('#chat')).toBeVisible();
+    const model = page.getByRole('combobox', { name: 'Model', exact: true });
+    await check(model).toHaveValue('gpt-oss-20b');
+    await check(model.locator('option[value="qwen2.5-coder-7b"]')).toHaveText(/Qwen2.5-Coder 7B.*loads on request$/);
+    await model.selectOption('qwen2.5-coder-7b');
     const tab = await tabIdentifier(page);
     assert.ok(/^[0-9a-f]{32}$/.test(tab ?? ''), 'first document uses an opaque tab key');
     const draft = page.locator('#chat-draft');
@@ -1079,14 +1083,19 @@ async function durableHostRestartJourney() {
     await page.locator('#send-chat').click();
     await check(page.locator('#chat-run-retry')).toBeVisible();
     assert.equal(relay.submitted(), 1, 'the queue committed the job before the acknowledgement was lost');
-    const accepted = checkpointSaved(page, snapshot => !!snapshot.chat.pending_run?.run_id);
+    const accepted = checkpointSaved(page, snapshot => !!snapshot.chat.pending_run?.run_id &&
+      snapshot.chat.pending_run.model_id === 'qwen2.5-coder-7b');
     await reloadQueuedChat(page);
     await accepted;
+    await check(model).toHaveValue('qwen2.5-coder-7b');
+    await check(model).toBeDisabled();
     assert.equal(relay.submitted(), 1, 'reloading with no run ID reuses the submitted intent');
     await reloadQueuedChat(page);
     assert.equal(traffic.count('chat_run_submit'), 2, 'reloading with a run ID polls without submitting');
     relay.finish();
     await checkTranscript(page);
+    await check(model).toBeEnabled();
+    await check(model.locator('option[value="qwen2.5-coder-7b"]')).toHaveText(/ · loaded$/);
     await page.locator('#new-chat').click();
     await draft.fill(privateDraft);
     const persisted = checkpointSaved(page, snapshot => snapshot.workbench_open &&

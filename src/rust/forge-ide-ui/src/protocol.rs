@@ -198,6 +198,8 @@ pub struct ChatSnapshot {
     pub selected: usize,
     pub conversations: Vec<ChatConversationSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_run: Option<PendingChatRunSnapshot>,
 }
 
@@ -216,6 +218,7 @@ pub fn valid_chat_snapshot(snapshot: &ChatSnapshot) -> bool {
     let conversations = &snapshot.conversations;
     conversations.len() <= MAX_CONVERSATIONS
         && snapshot.selected < conversations.len().max(1)
+        && snapshot.model_id.as_deref().is_none_or(valid_model_id)
         && conversations.iter().all(|conversation| {
             conversation.draft.len() <= MAX_CHAT_PROMPT_BYTES
                 && conversation.chat_id.as_deref().is_none_or(valid_chat_id)
@@ -497,6 +500,9 @@ pub enum UiEvent {
     OpenWorkbench {},
     NewChat {},
     SelectChat {
+        value: String,
+    },
+    SelectChatModel {
         value: String,
     },
     SetChatDraft {

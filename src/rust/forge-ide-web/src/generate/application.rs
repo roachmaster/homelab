@@ -68,6 +68,9 @@ pub fn ide_document() -> Document {
                     component!(status "chat-status", ""),
                     component!(textarea "chat-draft", "Message", "set_chat_draft"),
                     component!(row [
+                        component!(region "chat-model-choice"; [
+                            component!(select "chat-model", "Model", "select_chat_model"),
+                        ]),
                         component!(uuid_button "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id"),
                         component!(button "chat-run-cancel", "Cancel run", "cancel_chat_run"),
                         component!(button "chat-run-retry", "Retry send", "retry_chat_submit"),
@@ -280,6 +283,12 @@ pub fn ide_transport() -> Transport {
             "chat_run_cancel",
             "ide.chat.run.cancel",
             "chat_run_cancelled",
+            "chat_run_failed",
+        ),
+        (
+            "chat_run_models",
+            "ide.chat.run.models",
+            "chat_run_models_listed",
             "chat_run_failed",
         ),
     ] {

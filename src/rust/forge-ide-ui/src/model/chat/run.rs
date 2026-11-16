@@ -37,6 +37,7 @@ impl Pending {
                 expected_revision: run.checkpoint.expected_revision,
                 content: self.prompt.clone(),
                 idempotency_key: run.checkpoint.idempotency_key.clone(),
+                model_id: run.checkpoint.model_id.clone(),
             },
             Some(run_id) if run.cancelling => ChatRunRequest::ChatRunCancel { request_id, run_id },
             Some(run_id) => ChatRunRequest::ChatRunEvents {
@@ -57,6 +58,10 @@ impl Chats {
         if !valid_chat_id(&generated_id) {
             return Err(UiError::InvalidAction);
         }
+        if self.models.selection_unavailable() {
+            return Err(UiError::InvalidAction);
+        }
+        let model_id = self.models.requested_model().map(str::to_owned);
         let Some(prepared) = self.send_with_id(request_id, Some(generated_id.clone()))? else {
             return Ok(None);
         };
@@ -67,6 +72,7 @@ impl Chats {
             idempotency_key: generated_id,
             run_id: None,
             expected_revision: prepared.expected_revision,
+            model_id,
         }));
         Ok(pending.run_request())
     }
@@ -329,6 +335,26 @@ mod tests {
     #[test]
     fn pending_work_restores_with_the_same_submission_key_before_acceptance() {
         let mut original = async_chats();
+        assert!(original.request_models("models".into()).is_some());
+        assert!(
+            original.accept_models(&ChatRunResponse::ChatRunModelsListed {
+                request_id: "models".into(),
+                default_model_id: "gpt-oss-20b".into(),
+                models: vec![
+                    ChatRunModel {
+                        model_id: "gpt-oss-20b".into(),
+                        label: "GPT-OSS 20B".into(),
+                        ready: true,
+                    },
+                    ChatRunModel {
+                        model_id: "qwen2.5-coder-7b".into(),
+                        label: "Qwen2.5-Coder 7B".into(),
+                        ready: false,
+                    },
+                ],
+            })
+        );
+        original.select_model("qwen2.5-coder-7b".into()).unwrap();
         original.draft(0, PROMPT.into()).unwrap();
         original.submit_run("initial".into(), CHAT.into()).unwrap();
         original.run_network_failed("initial", "unused".into());
@@ -336,13 +362,19 @@ mod tests {
         let pending = snapshot.pending_run.as_ref().unwrap();
         assert_eq!(pending.idempotency_key, CHAT);
         assert_eq!(pending.run_id, None);
+        assert_eq!(snapshot.model_id.as_deref(), Some("qwen2.5-coder-7b"));
+        assert_eq!(pending.model_id.as_deref(), Some("qwen2.5-coder-7b"));
+
+        let mut snapshot = snapshot;
+        // The pending intent wins even if the default or tab preference changed.
+        snapshot.model_id = Some("gpt-oss-20b".into());
 
         let mut restored = async_chats();
         restored.restore_snapshot(snapshot).unwrap();
         assert!(matches!(
             restored.resume_run("retry".into()),
-            Some(ChatRunRequest::ChatRunSubmit { idempotency_key, content, .. })
-                if idempotency_key == CHAT && content == PROMPT
+            Some(ChatRunRequest::ChatRunSubmit { idempotency_key, content, model_id, .. })
+                if idempotency_key == CHAT && content == PROMPT && model_id.as_deref() == Some("qwen2.5-coder-7b")
         ));
         assert!(matches!(
             restored.accept_run(accept("retry"), "page".into()),

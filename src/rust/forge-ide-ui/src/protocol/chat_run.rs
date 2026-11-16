@@ -1,8 +1,25 @@
 use super::{valid_chat_id, valid_chat_text, MAX_CHAT_PROMPT_BYTES, MAX_CHAT_REPLY_BYTES};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const MAX_EVENT_PAGE: usize = 100;
+const MAX_MODELS: usize = 16;
+
+pub fn valid_model_id(value: &str) -> bool {
+    fn letter_or_digit(byte: u8) -> bool {
+        byte.is_ascii_lowercase() || byte.is_ascii_digit()
+    }
+    value.len() <= 80
+        && value
+            .as_bytes()
+            .first()
+            .copied()
+            .is_some_and(letter_or_digit)
+        && value
+            .bytes()
+            .all(|byte| letter_or_digit(byte) || b"._-".contains(&byte))
+}
 
 pub fn valid_run_revision(revision: u64) -> bool {
     (1..=MAX_SAFE_INTEGER).contains(&revision)
@@ -17,6 +34,9 @@ pub struct PendingChatRunSnapshot {
     pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<u64>,
+    /// The model selected for the submitted intent survives retries and reloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 impl PendingChatRunSnapshot {
@@ -25,6 +45,7 @@ impl PendingChatRunSnapshot {
             && valid_chat_id(&self.idempotency_key)
             && self.run_id.as_deref().is_none_or(valid_chat_id)
             && self.expected_revision.is_none_or(valid_run_revision)
+            && self.model_id.as_deref().is_none_or(valid_model_id)
     }
 }
 
@@ -49,6 +70,14 @@ pub struct ChatRunEvent {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatRunModel {
+    pub model_id: String,
+    pub label: String,
+    pub ready: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatRunRequest {
     ChatRunSubmit {
@@ -58,6 +87,8 @@ pub enum ChatRunRequest {
         expected_revision: Option<u64>,
         content: String,
         idempotency_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_id: Option<String>,
     },
     ChatRunEvents {
         request_id: String,
@@ -68,6 +99,9 @@ pub enum ChatRunRequest {
         request_id: String,
         run_id: String,
     },
+    ChatRunModels {
+        request_id: String,
+    },
 }
 
 impl ChatRunRequest {
@@ -75,14 +109,18 @@ impl ChatRunRequest {
         match self {
             Self::ChatRunSubmit { request_id, .. }
             | Self::ChatRunEvents { request_id, .. }
-            | Self::ChatRunCancel { request_id, .. } => request_id,
+            | Self::ChatRunCancel { request_id, .. }
+            | Self::ChatRunModels { request_id } => request_id,
         }
     }
 
     pub fn is_destination(value: &str) -> bool {
         matches!(
             value,
-            "ide.chat.run.submit" | "ide.chat.run.events" | "ide.chat.run.cancel"
+            "ide.chat.run.submit"
+                | "ide.chat.run.events"
+                | "ide.chat.run.cancel"
+                | "ide.chat.run.models"
         )
     }
 
@@ -91,6 +129,7 @@ impl ChatRunRequest {
             Self::ChatRunSubmit { .. } => "ide.chat.run.submit",
             Self::ChatRunEvents { .. } => "ide.chat.run.events",
             Self::ChatRunCancel { .. } => "ide.chat.run.cancel",
+            Self::ChatRunModels { .. } => "ide.chat.run.models",
         }
     }
 
@@ -101,11 +140,13 @@ impl ChatRunRequest {
                 expected_revision,
                 content,
                 idempotency_key,
+                model_id,
                 ..
             } => {
                 valid_chat_id(chat_id)
                     && expected_revision.is_none_or(valid_run_revision)
                     && valid_chat_text(content, MAX_CHAT_PROMPT_BYTES)
+                    && model_id.as_deref().is_none_or(valid_model_id)
                     && !idempotency_key.is_empty()
                     && idempotency_key.len() <= 128
                     && idempotency_key
@@ -118,6 +159,7 @@ impl ChatRunRequest {
                 ..
             } => valid_chat_id(run_id) && *after_sequence <= MAX_SAFE_INTEGER,
             Self::ChatRunCancel { run_id, .. } => valid_chat_id(run_id),
+            Self::ChatRunModels { .. } => true,
         }
     }
 }
@@ -164,6 +206,11 @@ pub enum ChatRunResponse {
         chat_id: String,
         status: ChatRunStatus,
     },
+    ChatRunModelsListed {
+        request_id: String,
+        default_model_id: String,
+        models: Vec<ChatRunModel>,
+    },
     ChatRunFailed {
         request_id: String,
         code: ChatRunFailure,
@@ -176,6 +223,7 @@ impl ChatRunResponse {
             Self::ChatRunAccepted { request_id, .. }
             | Self::ChatRunEvents { request_id, .. }
             | Self::ChatRunCancelled { request_id, .. }
+            | Self::ChatRunModelsListed { request_id, .. }
             | Self::ChatRunFailed { request_id, .. } => request_id,
         }
     }
@@ -186,6 +234,25 @@ impl ChatRunResponse {
         }
         match (self, request) {
             (Self::ChatRunFailed { .. }, _) => true,
+            (
+                Self::ChatRunModelsListed {
+                    default_model_id,
+                    models,
+                    ..
+                },
+                ChatRunRequest::ChatRunModels { .. },
+            ) => {
+                let mut distinct = BTreeSet::new();
+                models.len() <= MAX_MODELS
+                    && models
+                        .iter()
+                        .any(|model| model.model_id == *default_model_id)
+                    && models.iter().all(|model| {
+                        valid_model_id(&model.model_id)
+                            && valid_chat_text(&model.label, 100)
+                            && distinct.insert(&model.model_id)
+                    })
+            }
             (
                 Self::ChatRunAccepted {
                     chat_id, run_id, ..
