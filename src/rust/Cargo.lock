@@ -402,7 +402,6 @@ dependencies = [
  "forge-bridge",
  "forge-ide",
  "forge-ide-ui",
- "forge-ide-web",
  "forge-ingress-contract",
  "forge-io-client",
  "forge-provider",

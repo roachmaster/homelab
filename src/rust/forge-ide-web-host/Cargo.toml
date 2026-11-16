@@ -27,9 +27,6 @@ subtle = "2"
 sha2 = "0.10"
 ctrlc = { version = "=3.5.2", features = ["termination"] }
 
-[build-dependencies]
-forge-ide-web = { path = "../forge-ide-web", default-features = false, features = ["design-pages"] }
-
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
 

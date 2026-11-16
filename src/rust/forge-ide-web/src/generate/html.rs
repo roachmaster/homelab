@@ -1,8 +1,14 @@
 //! Audited semantic HTML emitter shared by component documents. Application
 //! labels escape here; only this generator owns markup syntax.
 use super::{ButtonEmphasis, Component, PanePosition, TextStyle};
-use crate::markup::escape;
 use std::fmt::Write;
+pub(crate) fn escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
 fn children(items: &[Component], out: &mut String) {
     for child in items {
         emit(child, out);

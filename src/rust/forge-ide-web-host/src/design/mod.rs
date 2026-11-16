@@ -1,5 +1,6 @@
 //! Rust declarations for the portal's reference and prototype pages.
-use crate::markup::escape;
+mod markup;
+use markup::escape;
 use std::fmt::Write;
 
 macro_rules! html_names {

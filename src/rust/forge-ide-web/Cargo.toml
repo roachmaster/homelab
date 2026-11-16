@@ -10,7 +10,6 @@ crate-type = ["rlib", "cdylib"]
 [features]
 default = []
 build-assets = ["dep:forge-bootstrap", "dep:forge-provider", "dep:forge-template", "dep:serde_yaml_ng", "dep:sha2"]
-design-pages = []
 
 [dependencies]
 forge-ide-ui = { path = "../forge-ide-ui" }
