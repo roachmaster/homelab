@@ -1055,6 +1055,8 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Forge IDE design"));
     }
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
+    assert!(request("GET", "/design/previous-chats.js")
+        .contains("Content-Type: text/javascript; charset=utf-8"));
     for path in [
         "/design/forge-ide-chat-desktop.png",
         "/design/forge-ide-chat-phone.png",

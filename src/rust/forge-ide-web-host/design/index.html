@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Forge IDE design</title>
   <link rel="stylesheet" href="/design/style.css">
+  <script src="/design/previous-chats.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -20,11 +21,72 @@
       <h1>Forge IDE design</h1>
       <p>Chat and read-only Workbench wireframes, with the data flow behind workspace recovery.</p>
       <nav class="section-nav" aria-label="Design sections">
+        <a href="#previous-chats">Previous chats</a>
         <a href="#phone">Phone</a>
         <a href="#desktop">Desktop</a>
         <a href="#data">Data flow</a>
       </nav>
     </div>
+
+    <section id="previous-chats" class="design-section" aria-labelledby="previous-chats-title">
+      <h2 id="previous-chats-title">Previous chats</h2>
+      <p class="previous-chat-intro">Try the proposed Chat menu with sample conversations. Drafts and changes stay inside this preview.</p>
+      <div class="previous-chat-layout">
+        <div class="previous-chat-demo" role="group" aria-label="Previous chats interactive sample">
+          <div class="previous-chat-toolbar">
+            <details id="previous-chat-menu" open>
+              <summary>Previous chats</summary>
+              <div class="previous-chat-list">
+                <section aria-labelledby="previous-chat-saved-title">
+                  <h3 id="previous-chat-saved-title">Saved chats</h3>
+                  <button type="button" data-preview-chat="workbench" aria-current="true">Summarize Workbench</button>
+                  <button type="button" data-preview-chat="source">Explain source verification</button>
+                  <button type="button" data-preview-chat="backup">Plan a backup</button>
+                </section>
+                <section id="previous-chat-local" aria-labelledby="previous-chat-local-title" hidden>
+                  <h3 id="previous-chat-local-title">This tab</h3>
+                  <div id="previous-chat-local-rows"></div>
+                </section>
+                <section aria-labelledby="previous-chat-archive-title">
+                  <h3 id="previous-chat-archive-title">Archived runs</h3>
+                  <button type="button" data-preview-chat="archive">
+                    <span>Inspect a Rust project</span><small aria-hidden="true">Snapshot</small>
+                  </button>
+                </section>
+              </div>
+            </details>
+            <button type="button" id="previous-chat-new">New chat</button>
+          </div>
+          <h3 id="previous-chat-title">Summarize Workbench</h3>
+          <div id="previous-chat-transcript" role="region" aria-label="Sample transcript" tabindex="0">
+            <p data-role="user"><strong>You</strong><span>Summarize Workbench.</span></p>
+            <p data-role="assistant"><strong>Forge</strong><span>Explorer finds files. The File pane shows verified source, and Outline lists declarations.</span></p>
+          </div>
+          <div id="previous-chat-compose">
+            <label for="previous-chat-draft">Message draft</label>
+            <textarea id="previous-chat-draft" rows="3">Add a note about Explorer.</textarea>
+          </div>
+          <div id="previous-chat-archive" hidden>
+            <p>Archived run snapshot</p>
+            <button type="button" id="previous-chat-continue">Continue as new chat</button>
+          </div>
+          <p id="previous-chat-status" role="status" aria-live="polite" aria-atomic="true"></p>
+        </div>
+
+        <aside class="previous-chat-brief" aria-labelledby="previous-chat-brief-title">
+          <h3 id="previous-chat-brief-title">Menu states</h3>
+          <dl>
+            <div><dt>Empty</dt><dd>Show “No previous chats yet.” Keep New chat beside the menu.</dd></div>
+            <div><dt>Loading</dt><dd>Announce “Loading previous chats…” and keep the open transcript and draft available.</dd></div>
+            <div><dt>Retry</dt><dd>Show “Couldn’t load previous chats.” Offer Retry in place and preserve the draft.</dd></div>
+            <div><dt>Close</dt><dd>Choose a chat, press Escape, or close the disclosure. Return keyboard focus to Previous chats.</dd></div>
+          </dl>
+          <h3>Saved chats and archived runs</h3>
+          <p>A saved chat opens its transcript and this tab’s draft. The current workspace identifies chats by slot. Stable chat IDs would let the list reorder without moving drafts between conversations.</p>
+          <p>An archived run is one submitted exchange snapshot. It opens read-only. Continue as new chat starts a separate conversation, preserving the archived snapshot.</p>
+        </aside>
+      </div>
+    </section>
 
     <section id="phone" class="design-section" aria-labelledby="phone-title">
       <h2 id="phone-title">Phone wireframes</h2>

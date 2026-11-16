@@ -13,6 +13,7 @@ const NAMES: [(&str, &str); 5] = [
 ];
 const DESIGN_HTML: &[u8] = include_bytes!("../design/index.html");
 const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
+const PREVIOUS_CHATS_JS: &[u8] = include_bytes!("../design/previous-chats.js");
 const DESIGN_IMAGES: [(&str, &[u8]); 5] = [
     (
         "forge-ide-chat-desktop.png",
@@ -40,6 +41,7 @@ fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     match path {
         "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
         "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
+        "/design/previous-chats.js" => Some(("text/javascript; charset=utf-8", PREVIOUS_CHATS_JS)),
         _ => {
             let name = path.strip_prefix("/design/")?;
             DESIGN_IMAGES

@@ -1287,7 +1287,7 @@ async function designJourney(page, traffic) {
   const context = page.context();
   const designUrl = new URL('/design', originalUrl).href;
   const styleUrl = new URL('/design/style.css', originalUrl).href;
-  const counts = () => ['resume', 'pair', 'inspect', 'source'].map(traffic.count);
+  const counts = () => ['resume', 'pair', 'inspect', 'source', 'other'].map(traffic.count);
   const before = counts();
   await check(link).toBeVisible();
   await check(link).toHaveAttribute('href', '/design');
@@ -1351,13 +1351,102 @@ async function designJourney(page, traffic) {
       const right = second.getBoundingClientRect();
       return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
     }), true, 'desktop wireframe cards display side by side');
+    await previousChatsDesignJourney(design, designUrl);
   } finally {
     await design.close();
   }
   await check(page).toHaveURL(originalUrl);
   await check(page.locator('#workspace-panel')).toBeVisible();
   assert.equal(page.workers().length, 1, 'opening Design preserves the original workbench worker');
-  assert.deepEqual(counts(), before, 'opening Design does not reconnect or reread the original Workbench');
+  assert.deepEqual(counts(), before, 'Design does not send requests through the Forge gateway');
+}
+
+async function previousChatsDesignJourney(design, designUrl) {
+  process.stderr.write('QA_CHECK design_previous_chats\n');
+  await design.getByRole('navigation', { name: 'Design sections' }).getByRole('link', { name: 'Previous chats', exact: true }).click();
+  await check(design).toHaveURL(`${designUrl}#previous-chats`);
+  const proposal = design.locator('#previous-chats');
+  const menu = proposal.locator('#previous-chat-menu');
+  const summary = menu.locator('summary');
+  const title = proposal.locator('#previous-chat-title');
+  const transcript = proposal.locator('#previous-chat-transcript');
+  const draft = proposal.locator('#previous-chat-draft');
+  const archive = proposal.locator('#previous-chat-archive');
+  const newChat = proposal.locator('#previous-chat-new');
+  const selected = menu.locator('[data-preview-chat][aria-current="true"]');
+  const row = name => menu.locator(`button[data-preview-chat="${name}"]`);
+  async function choose(name, heading) {
+    if (!await menu.evaluate(details => details.open)) await summary.click();
+    await row(name).click();
+    await check(menu).toHaveJSProperty('open', false);
+    await check(selected).toHaveCount(1);
+    await check(row(name)).toHaveAttribute('aria-current', 'true');
+    await check(title).toHaveText(heading);
+    await check(transcript).toContainText(/\S/);
+  }
+
+  await check(proposal.getByRole('heading', { name: 'Previous chats', exact: true })).toBeVisible();
+  await check(menu).toHaveJSProperty('open', true);
+  await check(summary).toHaveText('Previous chats');
+  await check(row('workbench')).toHaveAttribute('aria-current', 'true');
+  await check(title).toHaveText('Summarize Workbench');
+  await check(archive).toBeHidden();
+  await check(draft).toHaveValue('Add a note about Explorer.');
+  const initialTranscript = await transcript.innerText();
+  await choose('source', 'Explain source verification');
+  await check(transcript).not.toHaveText(initialTranscript);
+  const sourceTranscript = await transcript.innerText();
+  const savedDraft = 'Keep this draft while viewing another sample';
+  await draft.fill(savedDraft);
+  await choose('backup', 'Plan a backup');
+  await check(transcript).not.toHaveText(sourceTranscript);
+  await check(draft).not.toHaveValue(savedDraft);
+  await choose('source', 'Explain source verification');
+  await check(transcript).toHaveText(sourceTranscript);
+  await check(draft).toHaveValue(savedDraft);
+
+  await summary.click();
+  await row('backup').focus();
+  await check(row('backup')).toBeFocused();
+  await design.keyboard.press('Escape');
+  await check(menu).toHaveJSProperty('open', false);
+  await check(summary).toBeFocused();
+
+  process.stderr.write('QA_CHECK design_previous_chats_archive\n');
+  await choose('archive', 'Inspect a Rust project');
+  await check(archive).toBeVisible();
+  await check(draft).toBeHidden();
+  const archivedTranscript = await transcript.innerText();
+  await archive.getByRole('button', { name: 'Continue as new chat', exact: true }).click();
+  await check(archive).toBeHidden();
+  await check(transcript).toHaveText(archivedTranscript);
+  await check(draft).toBeEditable();
+  await check(draft).toHaveValue('');
+  const continuationDraft = 'Edit only this new chat copy';
+  await draft.fill(continuationDraft);
+  await check(draft).toHaveValue(continuationDraft);
+  await choose('archive', 'Inspect a Rust project');
+  await check(archive).toBeVisible();
+  await check(draft).toBeHidden();
+  await check(transcript).toHaveText(archivedTranscript);
+  await newChat.click();
+  await check(draft).toBeEditable();
+  await check(draft).toHaveValue('');
+  await check(transcript.locator('[data-role]')).toHaveCount(0);
+
+  process.stderr.write('QA_CHECK design_previous_chats_phone\n');
+  if (!await menu.evaluate(details => details.open)) await summary.click();
+  await check(menu).toHaveJSProperty('open', true);
+  for (const viewport of [{ width: 390, height: 664 }, { width: 375, height: 667 }]) {
+    await design.setViewportSize(viewport);
+    assert.equal(await proposal.evaluate(section => {
+      const controls = section.querySelectorAll('#previous-chat-menu button, #previous-chat-draft');
+      return document.documentElement.scrollWidth <= innerWidth + 1 && [...controls].every(node => {
+        const bounds = node.getBoundingClientRect();
+        return bounds.width === 0 || (bounds.left >= -1 && bounds.right <= innerWidth + 1);
+      });
+    }), true, 'the open Previous chats menu and editable composer fit the phone');
+  }
 }
 
 async function chatJourney(page, context) {
