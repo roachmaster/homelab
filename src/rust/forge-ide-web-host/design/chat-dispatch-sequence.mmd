@@ -1,0 +1,29 @@
+%% `mmdr -t dark -i chat-dispatch-sequence.mmd -o chat-dispatch-sequence.svg`
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","actorTextColor":"#f1f4f8","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"}}}%%
+sequenceDiagram
+    participant IDE as Forge IDE
+    participant MC as Mission Control API
+    participant DB as PostgreSQL
+    participant Forge as Forge GPU worker
+    participant Model as Local model adapter
+
+    IDE->>MC: Submit chat turn
+    MC->>DB: Save job and queued event
+    DB-->>MC: Commit confirmed
+    MC-->>IDE: 202 Accepted with run ID
+
+    Note over DB,Forge: Jobs stay queued while Forge is offline
+    Forge->>DB: Subscribe and claim work
+    DB-->>Forge: Job and attempt token
+    Forge->>Model: Run inference locally
+    Forge->>DB: Renew lease during inference
+    Model-->>Forge: Reply or failure
+
+    Forge->>DB: Publish result for this attempt
+    DB-->>MC: Wake completion consumer
+    MC->>DB: Save reply and terminal event
+
+    IDE->>MC: Request next event page
+    MC->>DB: Read authorized run and events
+    DB-->>MC: Status, events and saved reply
+    MC-->>IDE: Return events and saved reply

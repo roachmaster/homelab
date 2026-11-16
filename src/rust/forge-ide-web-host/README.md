@@ -220,7 +220,9 @@ is exactly five; each asset is capped at16 MiB, hash verified and loaded via the
 existing rooted native file client (no symlink traversal or shell wrappers).
 The host embeds the Design reference at `/design`, its sample Previous chats
 prototype, and the chat history contracts and sequence diagrams at
-`/design/chat-history`. The design pages use fixed asset paths.
+`/design/chat-history`. The proposed PostgreSQL inference dispatch design and
+sequence diagram are at `/design/chat-dispatch`. The design pages use fixed
+asset paths.
 The configured startup directory and generated content remain trusted; hashing
 provides consistency, not a publisher signature or a filesystem snapshot.
 

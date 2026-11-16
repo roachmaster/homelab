@@ -1543,6 +1543,28 @@ async function previousChatsDesignJourney(design, designUrl) {
   }
   assert.equal(await design.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
     true, 'contract and diagrams scroll inside the phone page');
+
+  process.stderr.write('QA_CHECK design_postgres_dispatch\n');
+  await design.getByRole('link', { name: 'PostgreSQL dispatch', exact: true }).click();
+  await check(design).toHaveURL(`${new URL(designUrl).origin}/design/chat-dispatch`);
+  await check(design.getByRole('heading', { level: 1 })).toHaveText(/PostgreSQL.*dispatch/i);
+  await check(design.locator('.intro')).toContainText(/proposed/i);
+  for (const section of ['sequence', 'data-access', 'contracts', 'rollout']) {
+    await check(design.locator(`#${section} h2`)).toBeVisible();
+  }
+  const inferenceDiagram = design.locator('img[src="/design/chat-dispatch-sequence.svg"]');
+  await inferenceDiagram.scrollIntoViewIfNeeded();
+  await check.poll(() => inferenceDiagram.evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+  await check(design.locator('a:has(img[src="/design/chat-dispatch-sequence.svg"])'))
+    .toHaveAttribute('href', '/design/chat-dispatch-sequence.svg');
+  for (const width of [375, 390, 1440]) {
+    await design.setViewportSize({ width, height: 844 });
+    assert.equal(await design.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+      true, 'dispatch design fits the viewport with a separately scrollable diagram');
+  }
+  await design.getByRole('link', { name: /back to design/i }).click();
+  const landingLink = design.getByRole('link', { name: 'PostgreSQL dispatch', exact: true });
+  await check(landingLink).toHaveAttribute('href', '/design/chat-dispatch');
 }
 
 async function chatJourney(page, context) {

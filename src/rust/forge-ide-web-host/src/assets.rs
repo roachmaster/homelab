@@ -16,6 +16,8 @@ const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
 const PREVIOUS_CHATS_JS: &[u8] = include_bytes!("../design/previous-chats.js");
 const CHAT_HISTORY_HTML: &[u8] = include_bytes!("../design/chat-history.html");
 const CHAT_HISTORY_CSS: &[u8] = include_bytes!("../design/chat-history.css");
+const CHAT_DISPATCH_HTML: &[u8] = include_bytes!("../design/chat-dispatch.html");
+const CHAT_DISPATCH_SEQUENCE: &[u8] = include_bytes!("../design/chat-dispatch-sequence.svg");
 const DESIGN_IMAGES: [(&str, &[u8]); 9] = [
     (
         "forge-ide-chat-desktop.png",
@@ -64,6 +66,10 @@ fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
             Some(("text/html; charset=utf-8", CHAT_HISTORY_HTML))
         }
         "/design/chat-history.css" => Some(("text/css; charset=utf-8", CHAT_HISTORY_CSS)),
+        "/design/chat-dispatch" | "/design/chat-dispatch/" => {
+            Some(("text/html; charset=utf-8", CHAT_DISPATCH_HTML))
+        }
+        "/design/chat-dispatch-sequence.svg" => Some(("image/svg+xml", CHAT_DISPATCH_SEQUENCE)),
         _ => {
             let name = path.strip_prefix("/design/")?;
             DESIGN_IMAGES
