@@ -222,7 +222,7 @@ The host build renders the Design reference from typed Rust declarations in
 `forge-ide-web-host/src/design`. It embeds the generated documents with the design
 styles and diagrams. The Design overview includes its sample Previous chats
 prototype and links to the chat history contracts and sequence diagrams at
-`/design/chat-history`. The proposed PostgreSQL inference dispatch design and
+`/design/chat-history`. The PostgreSQL inference dispatch design and
 sequence diagram are at `/design/chat-dispatch`. The design pages use fixed
 asset paths.
 The configured startup directory and generated content remain trusted; hashing

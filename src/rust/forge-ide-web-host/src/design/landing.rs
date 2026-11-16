@@ -3,7 +3,7 @@ use super::{text, Attribute, Node, Tag};
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Forge IDE design")),
-        element!(P; text("Chat and read-only Workbench wireframes, workspace recovery, and the proposed inference dispatch flow.")),
+        element!(P; text("Chat and read-only Workbench wireframes, workspace recovery, and the inference dispatch flow.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Design sections"];
             element!(A [Href = "#previous-chats"]; text("Previous chats")),
             element!(A [Href = "#phone"]; text("Phone")),

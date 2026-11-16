@@ -4,8 +4,8 @@ pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("PostgreSQL event dispatch for Forge GPU inference")),
         element!(P;
-            element!(Strong; text("Proposed design.")),
-            text(" Mission Control accepts chat turns while Forge GPU is offline. A worker on Forge claims pending jobs from PostgreSQL and calls the model locally."),
+            element!(Strong; text("Dispatch design.")),
+            text(" In PostgreSQL dispatch mode, Mission Control accepts chat turns while Forge GPU is offline. A worker on Forge claims pending jobs and calls the model locally."),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Event dispatch design sections"];
             element!(A [Href = "#overview"]; text("Overview")),
@@ -20,11 +20,11 @@ pub(super) const BODY: &[Node] = &[
         element!(H2 [Id = "overview-title"]; text("Inference responsibilities")),
         element!(Div [Class = "contract-examples"];
             element!(Section [Class = "contract-example", AriaLabelledby = "deployed-title"];
-                element!(H3 [Id = "deployed-title"]; text("Deployed today")),
-                element!(P; text("The Mission Control runner writes runs, input messages and replayable events to PostgreSQL. Its worker calls Forge GPU over the existing inference tunnel. The chat compatibility route can query the active model before queueing and wait up to 13 seconds for a reply. PostgreSQL accepts local Unix socket connections.")),
+                element!(H3 [Id = "deployed-title"]; text("Direct inference mode")),
+                element!(P; text("The Mission Control runner writes runs, input messages and replayable events to PostgreSQL. Its worker calls Forge GPU over an inference tunnel. The chat compatibility route can query the active model before queueing and wait up to 13 seconds for a reply.")),
             ),
             element!(Section [Class = "contract-example", AriaLabelledby = "proposed-title"];
-                element!(H3 [Id = "proposed-title"]; text("Proposed deployment")),
+                element!(H3 [Id = "proposed-title"]; text("PostgreSQL dispatch mode")),
                 element!(P; text("Mission Control commits the chat turn and returns a run ID. Forge GPU claims the job and publishes a result through PostgreSQL. Mission Control commits the transcript and serves ordered events to the browser.")),
             ),
         ),
