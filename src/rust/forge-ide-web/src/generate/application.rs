@@ -19,6 +19,7 @@ pub fn ide_document() -> Document {
             component!(navigation "ide-navigation", "Forge IDE views"; [
                 component!(button "open-chat", "Chat", "open_chat"),
                 component!(button "open-workbench", "Workbench", "open_workbench"),
+                component!(navigation_link "open-design", "Design", Design),
             ]),
             component!(screen "chat", "Chat", true; [
                 component!(reading_column [

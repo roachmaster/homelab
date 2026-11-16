@@ -11,6 +11,44 @@ const NAMES: [(&str, &str); 5] = [
     ("worker.js", "text/javascript; charset=utf-8"),
     ("app.wasm", "application/wasm"),
 ];
+const DESIGN_HTML: &[u8] = include_bytes!("../design/index.html");
+const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
+const DESIGN_IMAGES: [(&str, &[u8]); 5] = [
+    (
+        "forge-ide-chat-desktop.png",
+        include_bytes!("../design/forge-ide-chat-desktop.png"),
+    ),
+    (
+        "forge-ide-chat-phone.png",
+        include_bytes!("../design/forge-ide-chat-phone.png"),
+    ),
+    (
+        "forge-ide-workbench-desktop.png",
+        include_bytes!("../design/forge-ide-workbench-desktop.png"),
+    ),
+    (
+        "forge-ide-workbench-phone.png",
+        include_bytes!("../design/forge-ide-workbench-phone.png"),
+    ),
+    (
+        "forge-ide-workbench-project-options.png",
+        include_bytes!("../design/forge-ide-workbench-project-options.png"),
+    ),
+];
+
+fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
+    match path {
+        "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
+        "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
+        _ => {
+            let name = path.strip_prefix("/design/")?;
+            DESIGN_IMAGES
+                .iter()
+                .find(|(filename, _)| *filename == name)
+                .map(|(_, data)| ("image/png", *data))
+        }
+    }
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
@@ -64,6 +102,9 @@ impl Assets {
         } else {
             path.strip_prefix('/')?
         };
-        self.0.get(name).map(|(mime, b)| (*mime, b.as_slice()))
+        self.0
+            .get(name)
+            .map(|(mime, b)| (*mime, b.as_slice()))
+            .or_else(|| design_asset(path))
     }
 }

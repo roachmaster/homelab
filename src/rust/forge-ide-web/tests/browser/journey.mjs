@@ -1267,6 +1267,8 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     assert.equal(traffic.count('inspect'), beforeReload + 1, 'reload obtains a fresh single-project report');
     assert.equal(traffic.count('source'), sourceBeforeReload + 1, 'reload re-verifies the bookmarked declaration source');
+    await designJourney(page, traffic);
+    await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     assert.deepEqual(errors, []);
   } catch (error) {
     const location = String(error.stack).match(/journey\.mjs:(\d+):(\d+)/);
@@ -1276,6 +1278,86 @@ async function sourceSearchJourney() {
     await context.close();
     await stopFixture(fixture);
   }
+}
+
+async function designJourney(page, traffic) {
+  process.stderr.write('QA_CHECK design_open\n');
+  const link = page.locator('#ide-navigation').getByRole('link', { name: 'Design', exact: true });
+  const originalUrl = page.url();
+  const context = page.context();
+  const designUrl = new URL('/design', originalUrl).href;
+  const styleUrl = new URL('/design/style.css', originalUrl).href;
+  const counts = () => ['resume', 'pair', 'inspect', 'source'].map(traffic.count);
+  const before = counts();
+  await check(link).toBeVisible();
+  await check(link).toHaveAttribute('href', '/design');
+  await check(link).toHaveAttribute('target', '_blank');
+  await check(link).toHaveAttribute('rel', /\bnoopener\b/);
+  const bounds = await link.boundingBox();
+  assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, 'Design has a phone-sized touch target');
+  await link.focus();
+  await check(link).toBeFocused();
+  const [design, documentResponse, stylesheet] = await Promise.all([
+    context.waitForEvent('page', { timeout: 5_000 }),
+    context.waitForEvent('response', { predicate: response => response.url() === designUrl && response.request().isNavigationRequest(), timeout: 5_000 }),
+    context.waitForEvent('response', { predicate: response => response.url() === styleUrl, timeout: 5_000 }),
+    page.keyboard.press('Enter'),
+  ]);
+  try {
+    assert.equal(documentResponse.status(), 200);
+    assert.match(documentResponse.headers()['content-type'] ?? '', /^text\/html\b/);
+    assert.equal(stylesheet.status(), 200);
+    assert.match(stylesheet.headers()['content-type'] ?? '', /^text\/css\b/);
+    await check(design).toHaveURL(designUrl);
+    assert.equal(await design.evaluate(() => window.opener === null), true);
+    await check(design.getByRole('heading', { level: 1, name: 'Forge IDE design', exact: true })).toBeVisible();
+    await check(design.getByRole('heading', { name: 'Workspace recovery', exact: true })).toBeVisible();
+    await check(design.getByRole('link', { name: 'Back to Forge', exact: true })).toHaveAttribute('href', '/');
+    await check(design.locator('#phone figure.wireframe')).toHaveCount(3);
+    await check(design.locator('#desktop figure.wireframe')).toHaveCount(2);
+
+    process.stderr.write('QA_CHECK design_wireframes\n');
+    const names = ['chat-phone', 'workbench-phone', 'workbench-project-options', 'chat-desktop', 'workbench-desktop'];
+    const images = design.locator('figure.wireframe img');
+    await check(images).toHaveCount(names.length);
+    for (const name of names) {
+      const path = `/design/forge-ide-${name}.png`;
+      const image = design.locator(`figure.wireframe img[src="${path}"]`);
+      await check(image).toHaveAttribute('alt', /\S/);
+      await check(design.locator(`figure.wireframe a[href="${path}"]`).filter({ has: design.locator('img') }))
+        .toHaveAttribute('target', '_blank');
+      await image.scrollIntoViewIfNeeded();
+      await check.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0)).toBe(true);
+    }
+
+    process.stderr.write('QA_CHECK design_phone_layout\n');
+    for (const viewport of [{ width: 390, height: 664 }, { width: 375, height: 667 }]) {
+      await design.setViewportSize(viewport);
+      assert.equal(await design.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+        'Design fits the phone viewport');
+      assert.equal(await images.evaluateAll(nodes => nodes.every(node => {
+        const image = node.getBoundingClientRect();
+        return image.width > 0 && image.height > 0 && image.left >= -1 && image.right <= innerWidth + 1;
+      })), true, 'each wireframe fits horizontally');
+      assert.equal(await design.locator('#phone figure.wireframe').evaluateAll(figures => {
+        const boxes = figures.map(figure => figure.getBoundingClientRect());
+        return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
+      }), true, 'phone wireframe cards stack vertically');
+    }
+    process.stderr.write('QA_CHECK design_desktop_layout\n');
+    await design.setViewportSize({ width: 1440, height: 1000 });
+    assert.equal(await design.locator('#desktop figure.wireframe').evaluateAll(([first, second]) => {
+      const left = first.getBoundingClientRect();
+      const right = second.getBoundingClientRect();
+      return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
+    }), true, 'desktop wireframe cards display side by side');
+  } finally {
+    await design.close();
+  }
+  await check(page).toHaveURL(originalUrl);
+  await check(page.locator('#workspace-panel')).toBeVisible();
+  assert.equal(page.workers().length, 1, 'opening Design preserves the original workbench worker');
+  assert.deepEqual(counts(), before, 'opening Design does not reconnect or reread the original Workbench');
 }
 
 async function chatJourney(page, context) {
@@ -1310,6 +1392,7 @@ async function chatJourney(page, context) {
   };
   await page.locator('#open-chat').click();
   await check(page.locator('#chat')).toBeVisible();
+  await check(page.locator('#ide-navigation').getByRole('link', { name: 'Design', exact: true })).toBeVisible();
   await check(page.locator('#workbench-context')).toBeHidden();
   await draft.fill('Retry this draft');
   await send.click();

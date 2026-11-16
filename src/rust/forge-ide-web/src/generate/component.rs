@@ -33,6 +33,18 @@ pub enum ButtonEmphasis {
     Standard,
     Primary,
 }
+/// A document served by the same portal origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortalDocument {
+    Design,
+}
+impl PortalDocument {
+    pub(crate) fn href(self) -> &'static str {
+        match self {
+            Self::Design => "/design",
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub enum Component {
     /// Protected text projected next to the document title.
@@ -65,6 +77,12 @@ pub enum Component {
         id: String,
         title: String,
         children: Vec<Component>,
+    },
+    /// Open a portal document in a separate tab without an opener.
+    NavigationLink {
+        id: String,
+        label: String,
+        document: PortalDocument,
     },
     ReadingColumn(Vec<Component>),
     Transcript {
@@ -180,6 +198,7 @@ macro_rules! component {
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (region $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Region { id:$id.into(),children:vec![$($child),*] } };
     (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
+    (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
     (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
     (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into()} };
@@ -284,6 +303,7 @@ impl Document {
                 Component::Transcript { id, label }
                 | Component::Tree { id, label }
                 | Component::Reload { id, label }
+                | Component::NavigationLink { id, label, .. }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
                 Component::PaneLink { id, label, target }
                 | Component::PaneHeaderLink {
@@ -300,6 +320,12 @@ impl Document {
                 return Err("invalid component label/action");
             }
             match c {
+                Component::NavigationLink { label, .. }
+                    if !matches!(parent, Some(Component::Navigation { .. }))
+                        || label.trim().is_empty() =>
+                {
+                    return Err("navigation link requires a navigation parent and nonempty label");
+                }
                 Component::Button {
                     check_input: Some(id),
                     ..

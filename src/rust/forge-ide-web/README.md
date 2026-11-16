@@ -89,6 +89,9 @@ late responses; it does not kill the agent's synchronous task. Retry is explicit
 Refresh resumes the memory-only authenticated session and opens a sole allowed
 project again. No file writes, editing, process commands or remote jobs are exposed.
 
+Open **Design** beside **Workbench** for the phone and desktop wireframes
+and the workspace recovery diagram. The link opens a separate tab at `/design`.
+
 ## Runtime ownership
 
 The main thread only applies typed view bindings using `textContent`, semantic

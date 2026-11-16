@@ -268,6 +268,19 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children(items, out);
             out.push_str("</nav>");
         }
+        Component::NavigationLink {
+            id,
+            label,
+            document,
+        } => {
+            let _ = write!(
+                out,
+                "<a id=\"{}\" class=\"fg-navigation-link\" href=\"{}\" target=\"_blank\" rel=\"noopener noreferrer\">{}</a>",
+                escape(id),
+                document.href(),
+                escape(label),
+            );
+        }
         Component::ReadingColumn(items) => {
             out.push_str("<div class=\"fg-reading-column\">");
             children(items, out);
@@ -337,5 +350,28 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generate::application::ide_document;
+
+    #[test]
+    fn design_opens_in_an_isolated_tab_from_the_protected_navigation() {
+        let document = ide_document();
+        document.validate().unwrap();
+        let navigation = document.children.iter().find(|component| {
+            matches!(component, Component::Navigation { id, .. } if id == "ide-navigation")
+        }).unwrap();
+        let mut output = String::new();
+        emit(navigation, &mut output);
+        assert!(output.starts_with("<nav id=\"ide-navigation\" class=\"fg-toolbar fg-navigation\" aria-label=\"Forge IDE views\" data-protected hidden>"));
+        let (_, after_chat) = output.split_once("id=\"open-chat\"").unwrap();
+        let (_, after_workbench) = after_chat.split_once("id=\"open-workbench\"").unwrap();
+        let (_, after_button) = after_workbench.split_once("</button>").unwrap();
+        assert_eq!(after_button, "<a id=\"open-design\" class=\"fg-navigation-link\" href=\"/design\" target=\"_blank\" rel=\"noopener noreferrer\">Design</a></nav>");
+    }
+}
+
 // A reusable shell/recovery primitive; content is exclusively typed emitter output.
 pub(crate) const SHELL: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/main.js\" defer></script></head><body><header class=\"fg-header\"><div class=\"fg-brand\"><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{{title}}</h1>{{{brand_context}}}</div><p>{{subtitle}}</p></header><section id=\"runtime-recovery\" class=\"fg-recovery\" hidden><p id=\"runtime-message\" role=\"alert\"></p><button id=\"runtime-reload\" type=\"button\" data-reload>Reload application</button></section><div class=\"fg-app\">{{{content}}}</div><dialog id=\"leave-confirmation\" class=\"fg-leave-dialog\" aria-labelledby=\"leave-heading\" aria-describedby=\"leave-description\"><h2 id=\"leave-heading\">Leave this page?</h2><p id=\"leave-description\">Forge will reload and try to restore your workspace. Any work that hasn’t been saved may be lost.</p><div class=\"fg-row\"><button id=\"leave-stay\" class=\"fg-button-primary\" type=\"button\" autofocus>Stay</button><button id=\"leave-confirm\" type=\"button\">Leave</button></div></dialog><noscript>This application requires JavaScript and WebAssembly.</noscript></body></html>";

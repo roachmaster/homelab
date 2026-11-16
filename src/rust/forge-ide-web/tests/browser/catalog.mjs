@@ -2,7 +2,7 @@ import { VIEWPORTS } from './viewports.mjs';
 // Ordered acceptance groups, not independently selectable test cases. Later groups
 // reuse accepted reports, browser state and fixtures established by earlier groups.
 const definitions = [
-  ['real.report.partial', 'real', 'real_mtls', 'Automatic single-project opening, source/search phone journey and partial report through WASM, host and mTLS agent'],
+  ['real.report.partial', 'real', 'real_mtls', 'Automatic single-project opening, phone source/search and Design, and partial report through WASM, host and mTLS agent'],
   ['real.navigation.keyboard', 'real', 'real_mtls', 'Tree keyboard focus is independent of selection'],
   ['real.filters.safe_text', 'real', 'real_mtls', 'Local full-report filters, bounded input and safe complete names'],
   ['real.pagination.problems', 'real', 'real_mtls', 'Bounded reversible pagination and truthful file/problem states without repeating inspection'],

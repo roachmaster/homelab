@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forge IDE design</title>
+  <link rel="stylesheet" href="/design/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="page-width header-inner">
+      <span class="wordmark"><span class="mark" aria-hidden="true">F</span> Forge IDE</span>
+      <a class="return-link" href="/"><span aria-hidden="true">←</span> Back to Forge</a>
+    </div>
+  </header>
+
+  <main id="main" class="page-width">
+    <div class="intro">
+      <h1>Forge IDE design</h1>
+      <p>Chat and read-only Workbench wireframes, with the data flow behind workspace recovery.</p>
+      <nav class="section-nav" aria-label="Design sections">
+        <a href="#phone">Phone</a>
+        <a href="#desktop">Desktop</a>
+        <a href="#data">Data flow</a>
+      </nav>
+    </div>
+
+    <section id="phone" class="design-section" aria-labelledby="phone-title">
+      <h2 id="phone-title">Phone wireframes</h2>
+      <div class="gallery phone-gallery">
+        <figure class="wireframe">
+          <figcaption>
+            <h3>Chat</h3>
+            <p>Switch conversations above the transcript. Replies render Markdown, and the composer stays below.</p>
+          </figcaption>
+          <a class="drawing" href="/design/forge-ide-chat-phone.png" target="_blank" rel="noopener noreferrer" aria-label="Open the Chat phone wireframe at full size in a new tab">
+            <img src="/design/forge-ide-chat-phone.png" width="390" height="664" alt="Chat conversation picker, Markdown reply, and message composer">
+            <span class="open-label">Open full size <span aria-hidden="true">↗</span></span>
+          </a>
+        </figure>
+        <figure class="wireframe">
+          <figcaption>
+            <h3>Workbench</h3>
+            <p>One pane at a time. The File header arrow returns to Explorer, and Markdown files offer Raw and Display.</p>
+          </figcaption>
+          <a class="drawing" href="/design/forge-ide-workbench-phone.png" target="_blank" rel="noopener noreferrer" aria-label="Open the Workbench phone wireframe at full size in a new tab">
+            <img src="/design/forge-ide-workbench-phone.png" width="390" height="780" alt="Workbench File pane with Back to files arrow, Markdown controls, and numbered source">
+            <span class="open-label">Open full size <span aria-hidden="true">↗</span></span>
+          </a>
+        </figure>
+        <figure class="wireframe">
+          <figcaption>
+            <h3>Project options</h3>
+            <p>Open the disclosure beside View options to choose the node and project. Refresh sits beside Problems.</p>
+          </figcaption>
+          <a class="drawing" href="/design/forge-ide-workbench-project-options.png" target="_blank" rel="noopener noreferrer" aria-label="Open the Project options phone wireframe at full size in a new tab">
+            <img src="/design/forge-ide-workbench-project-options.png" width="390" height="780" alt="Open Project options disclosure with Node and Project selectors">
+            <span class="open-label">Open full size <span aria-hidden="true">↗</span></span>
+          </a>
+        </figure>
+      </div>
+    </section>
+
+    <section id="desktop" class="design-section" aria-labelledby="desktop-title">
+      <h2 id="desktop-title">Desktop wireframes</h2>
+      <div class="gallery desktop-gallery">
+        <figure class="wireframe">
+          <figcaption>
+            <h3>Chat</h3>
+            <p>A centered reading column keeps the conversation picker, transcript, and composer together.</p>
+          </figcaption>
+          <a class="drawing" href="/design/forge-ide-chat-desktop.png" target="_blank" rel="noopener noreferrer" aria-label="Open the Chat desktop wireframe at full size in a new tab">
+            <img src="/design/forge-ide-chat-desktop.png" width="1440" height="1000" loading="lazy" alt="Desktop Chat with a centered transcript and composer">
+            <span class="open-label">Open full size <span aria-hidden="true">↗</span></span>
+          </a>
+        </figure>
+        <figure class="wireframe">
+          <figcaption>
+            <h3>Workbench</h3>
+            <p>Explorer and Outline flank the read-only File pane. The active node and project appear in the header.</p>
+          </figcaption>
+          <a class="drawing" href="/design/forge-ide-workbench-desktop.png" target="_blank" rel="noopener noreferrer" aria-label="Open the Workbench desktop wireframe at full size in a new tab">
+            <img src="/design/forge-ide-workbench-desktop.png" width="1440" height="1000" loading="lazy" alt="Desktop Workbench with Explorer, numbered source in the File pane, and Outline">
+            <span class="open-label">Open full size <span aria-hidden="true">↗</span></span>
+          </a>
+        </figure>
+      </div>
+    </section>
+
+    <section id="data" class="design-section" aria-labelledby="data-title">
+      <h2 id="data-title">Workspace data flow</h2>
+      <ol class="flow" aria-label="Workspace save and restore path">
+        <li><strong>Browser</strong><p>Keeps a random tab identifier in session storage and requests a saved workspace.</p></li>
+        <li><strong>Forge web host</strong><p>Checks the active session, request origin, and CSRF token before forwarding.</p></li>
+        <li><strong>Agent Runner</strong><p>Validates the checkpoint, tab lease, and save revision.</p></li>
+        <li><strong>PostgreSQL</strong><p>Stores the operator’s Chat history and separate tab checkpoints.</p></li>
+      </ol>
+      <div class="recovery">
+        <h3>Workspace recovery</h3>
+        <dl class="storage">
+          <div>
+            <dt>Shared Chat history</dt>
+            <dd><code>forge_agent.ide_workspace_history</code></dd>
+            <dd>Completed Chat messages are available when the operator opens Forge in a new tab or browser.</dd>
+          </div>
+          <div>
+            <dt>Tab checkpoint</dt>
+            <dd><code>forge_agent.ide_workspace_tabs</code></dd>
+            <dd>The original tab recovers its drafts, selected conversation, and Workbench bookmark. A fresh inspection verifies source again.</dd>
+          </div>
+        </dl>
+        <p>Older saves cannot replace newer shared history. A competing transcript stays recoverable in the tab that saved it.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
