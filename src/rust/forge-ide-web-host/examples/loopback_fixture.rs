@@ -177,6 +177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "endpoint": relay.to_str().ok_or("invalid relay address")?,
             "token_file": PathBuf::from(token_file),
             "workspace_persistence": true,
+            "async_dispatch": true,
         });
     }
     let config_path = fixture.root.join("host.json");

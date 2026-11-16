@@ -615,6 +615,19 @@ async function flushWorkspace(notify){
   }
   if(notify)postMessage({kind:'workspace_flushed'});
 }
+async function checkpointedRun(effect){
+  if(!workspaceLease||!workspaceJSON)return false;
+  const intent=safeJson(workspaceJSON).chat?.pending_run;
+  if(intent?.chat_id!==effect.chat_id||intent.idempotency_key!==effect.idempotency_key)return false;
+  const checkpoint=latestCheckpoint;
+  if(!checkpoint)return true; // Restored from a durable checkpoint.
+  await checkpoint.pending;
+  if(!checkpoint.saved&&checkpoint===latestCheckpoint){
+    checkpoint.pending=saveCheckpoint(checkpoint);
+    await checkpoint.pending;
+  }
+  return checkpoint.saved;
+}
 function dispatch(event,presentation_sequence=null,suppressView=false){
   if(closed||!wasm)return;
   const input=encoder.encode(JSON.stringify({now_ms:Date.now(),event}));if(input.length>MAX)throw new Error('Input limit');
@@ -635,7 +648,12 @@ function failed(id,category){try{dispatch({kind:'network_failed',request_id:id,c
 async function run(effect){
   if(effect.kind==='abort'){const active=pending.get(effect.token.request_id);if(active)active.abort();return;}
   const binding=CONFIG.bindings.find(b=>b.kind===effect.kind);if(!binding)throw new Error('Undeclared transport effect');
-  const id=String(field(effect,binding.request_id));if(pending.has(id)||pending.size>=2){failed(id,'limit');return;}
+  const id=String(field(effect,binding.request_id));
+  // Run pages are short requests so they can share the host with inspection and history.
+  if(binding.kind==='chat_run_events')await new Promise(resolve=>setTimeout(resolve,1200));
+  if(binding.kind==='chat_run_submit'&&!await checkpointedRun(effect)){failed(id,'unavailable');return;}
+  if(closed)return;
+  if(pending.has(id)||pending.size>=2){failed(id,'limit');return;}
   let duration=binding.timeout_ms??5000;
   if(binding.deadline){duration=Math.min(duration,Number(field(effect,binding.deadline))-Date.now());if(duration<=0){failed(id,'timeout');return;}}
   const controller=new AbortController();pending.set(id,controller);let timedOut=false;

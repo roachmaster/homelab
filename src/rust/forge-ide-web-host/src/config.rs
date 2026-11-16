@@ -104,6 +104,15 @@ impl HostConfig {
         {
             return Err(HostError::Configuration("invalid limits"));
         }
+        if self
+            .chat
+            .as_ref()
+            .is_some_and(|chat| chat.async_dispatch && !chat.workspace_persistence)
+        {
+            return Err(HostError::Configuration(
+                "async chat requires durable workspace checkpoints",
+            ));
+        }
         let mut keys = BTreeSet::new();
         for n in &self.nodes {
             if !valid_token(&n.key)

@@ -179,6 +179,8 @@ impl UiModel {
             | UiEvent::SetChatDraft { .. }
             | UiEvent::SendChat {}
             | UiEvent::SendPersistentChat { .. }
+            | UiEvent::CancelChatRun {}
+            | UiEvent::RetryChatSubmit {}
             | UiEvent::ShowChatHistory {}
             | UiEvent::MoreChatHistory {}
             | UiEvent::NewerChatHistory {}
@@ -218,6 +220,9 @@ impl UiModel {
                 value,
             } => self.chats.draft(conversation, value)?,
             UiEvent::SendChat {} => {
+                if self.chats.async_chat {
+                    return Err(UiError::InvalidAction);
+                }
                 let request_id = self.next_id(input.now_ms)?;
                 if let Some(request) = self.chats.send(request_id)? {
                     effects.push(UiEffect::Chat { request });
@@ -225,8 +230,23 @@ impl UiModel {
             }
             UiEvent::SendPersistentChat { chat_id } => {
                 let request_id = self.next_id(input.now_ms)?;
-                if let Some(request) = self.chats.send_with_id(request_id, Some(chat_id))? {
+                if self.chats.async_chat {
+                    if let Some(request) = self.chats.submit_run(request_id, chat_id)? {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                } else if let Some(request) = self.chats.send_with_id(request_id, Some(chat_id))? {
                     effects.push(UiEffect::Chat { request });
+                }
+            }
+            UiEvent::CancelChatRun {} | UiEvent::RetryChatSubmit {} => {
+                let request_id = self.next_id(input.now_ms)?;
+                let request = if matches!(input.event, UiEvent::CancelChatRun {}) {
+                    self.chats.cancel_run(request_id)
+                } else {
+                    self.chats.retry_run(request_id)
+                };
+                if let Some(request) = request {
+                    effects.push(UiEffect::ChatRun(request));
                 }
             }
             UiEvent::ShowChatHistory {}
@@ -260,6 +280,14 @@ impl UiModel {
             UiEvent::SetChatExpiry { value } => self.chats.set_expiry_date(value)?,
             UiEvent::CloseChatDialog {} => self.chats.close_history_dialog(),
             UiEvent::ChatHistory(response) => self.chats.accept_history(response),
+            UiEvent::ChatRun(response) => {
+                if self.chats.expects_run_request(response.request_id()) {
+                    let next_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.accept_run(response, next_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
+            }
             UiEvent::ChatResult {
                 request_id,
                 outcome,
@@ -270,6 +298,12 @@ impl UiModel {
             } => {
                 self.chats
                     .complete(&request_id, ChatOutcome::Error { category });
+                if self.chats.expects_run_request(&request_id) {
+                    let next_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.run_network_failed(&request_id, next_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
                 self.chats.history_network_failed(&request_id, category);
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
@@ -379,6 +413,7 @@ impl UiModel {
                     self.project = sole[0].1.clone();
                 }
                 self.chats.history.enabled = catalog.chat_history;
+                self.chats.async_chat = catalog.async_chat;
                 self.catalog = Some(catalog);
                 self.chats.open();
                 self.pairing = None;
@@ -403,6 +438,12 @@ impl UiModel {
                     return Ok(self.output(None));
                 }
                 self.chats.restore_snapshot(snapshot.chat)?;
+                if self.chats.async_chat {
+                    let request_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.resume_run(request_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
                 self.workspace_restored = true;
                 self.restore_workbench(
                     snapshot.workbench,

@@ -67,7 +67,11 @@ pub fn ide_document() -> Document {
                     component!(transcript "chat-transcript", "Chat messages"),
                     component!(status "chat-status", ""),
                     component!(textarea "chat-draft", "Message", "set_chat_draft"),
-                    component!(row [component!(uuid_button "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id")]),
+                    component!(row [
+                        component!(uuid_button "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id"),
+                        component!(button "chat-run-cancel", "Cancel run", "cancel_chat_run"),
+                        component!(button "chat-run-retry", "Retry send", "retry_chat_submit"),
+                    ]),
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
@@ -235,19 +239,22 @@ pub fn ide_transport() -> Transport {
             accept_events: vec!["source_result".into()],
         },
     ];
-    for (kind, destination, success_event) in [
+    for (kind, destination, success_event, error_event) in [
         (
             "chat_history_list",
             "ide.chat.history.list",
             "chat_history_listed",
+            "chat_history_failed",
         ),
         (
             "chat_history_open",
             "ide.chat.history.open",
             "chat_history_opened",
+            "chat_history_failed",
         ),
         (
             "chat_history_retention_set",
+            "chat_history_failed",
             "ide.chat.history.retention.set",
             "chat_history_retention_set",
         ),
@@ -255,6 +262,25 @@ pub fn ide_transport() -> Transport {
             "chat_history_delete",
             "ide.chat.history.delete",
             "chat_history_deleted",
+            "chat_history_failed",
+        ),
+        (
+            "chat_run_submit",
+            "ide.chat.run.submit",
+            "chat_run_accepted",
+            "chat_run_failed",
+        ),
+        (
+            "chat_run_events",
+            "ide.chat.run.events",
+            "chat_run_events",
+            "chat_run_failed",
+        ),
+        (
+            "chat_run_cancel",
+            "ide.chat.run.cancel",
+            "chat_run_cancelled",
+            "chat_run_failed",
         ),
     ] {
         let mut headers = common.clone();
@@ -268,7 +294,7 @@ pub fn ide_transport() -> Transport {
             timeout_ms: None,
             deadline: None,
             accept_events: vec![success_event.into()],
-            error_events: vec!["chat_history_failed".into()],
+            error_events: vec![error_event.into()],
         });
     }
     Transport {

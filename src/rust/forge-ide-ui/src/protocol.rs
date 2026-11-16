@@ -1,6 +1,8 @@
 //! Portable browser conversation. Serialization belongs to the WASM/host codecs.
 //! IDs address a bounded view, never a native path or executable name.
 use serde::{Deserialize, Serialize};
+mod chat_run;
+pub use chat_run::*;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -29,6 +31,8 @@ pub struct Catalog {
     pub nodes: Vec<NodeChoice>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub chat_history: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub async_chat: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,6 +197,8 @@ pub struct ChatMessage {
 pub struct ChatSnapshot {
     pub selected: usize,
     pub conversations: Vec<ChatConversationSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_run: Option<PendingChatRunSnapshot>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +225,17 @@ pub fn valid_chat_snapshot(snapshot: &ChatSnapshot) -> bool {
                         && revision <= 9_007_199_254_740_991
                 })
                 && valid_committed_chat_messages(&conversation.messages)
+        })
+        && snapshot.pending_run.as_ref().is_none_or(|pending| {
+            pending.is_valid()
+                && conversations
+                    .iter()
+                    .filter(|chat| {
+                        chat.chat_id.as_ref() == Some(&pending.chat_id)
+                            && valid_chat_text(chat.draft.trim(), MAX_CHAT_PROMPT_BYTES)
+                    })
+                    .count()
+                    == 1
         })
 }
 
@@ -464,6 +481,8 @@ pub enum UiEffect {
     },
     #[serde(untagged)]
     ChatHistory(ChatHistoryRequest),
+    #[serde(untagged)]
+    ChatRun(ChatRunRequest),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -488,6 +507,8 @@ pub enum UiEvent {
     SendPersistentChat {
         chat_id: String,
     },
+    CancelChatRun {},
+    RetryChatSubmit {},
     ShowChatHistory {},
     MoreChatHistory {},
     NewerChatHistory {},
@@ -619,6 +640,8 @@ pub enum UiEvent {
     },
     #[serde(untagged)]
     ChatHistory(ChatHistoryResponse),
+    #[serde(untagged)]
+    ChatRun(ChatRunResponse),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -1,6 +1,6 @@
 // Controlled localhost relay. Browser requests still use the generated Worker,
 // real WASM and native host. The in-process store stands in for the runner here.
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -27,7 +27,28 @@ export async function startDurableRelay(prompt, reply) {
   const tabs = new Map();
   const history = new Map();
   const removed = new Set();
+  const runs = new Map();
+  const submissions = new Map();
+  let submitted = 0;
   let completions = 0;
+  let dropFirstAcknowledgement = true;
+  function finish() {
+    const run = [...runs.values()].find(run => run.status === 'queued' && run.content === prompt);
+    if (!run) throw new Error('Fixture chat is not queued');
+    run.status = 'completed';
+    run.events.push({ sequence: 2, kind: 'completed' });
+    completions++;
+    history.set(run.chat_id, {
+      summary: {
+        chat_id: run.chat_id, title: prompt, updated_at: '2026-11-16T12:00:00Z', revision: 1,
+        retention: { kind: 'expires', expires_on: '2026-12-16', time_zone: 'UTC', expires_at: '2026-12-17T00:00:00Z' },
+      },
+      messages: [
+        { role: 'user', content: prompt, position: 1 },
+        { role: 'assistant', content: reply, position: 2 },
+      ],
+    });
+  }
   const server = createServer({ requestTimeout: 5000 }, async (request, response) => {
     const send = (status, body) => {
       response.writeHead(status, { 'Content-Type': 'application/json', Connection: 'close' });
@@ -39,36 +60,59 @@ export async function startDurableRelay(prompt, reply) {
     }
     try {
       const body = await readJson(request);
-      if (request.url === '/v1/chat/completions') {
-        if (body.stream !== false || body.messages?.length !== 1 ||
-            body.messages[0].role !== 'user' || body.messages[0].content !== prompt ||
-            !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(body.chat_id)) {
-          send(400, {});
-          return;
-        }
-        completions += 1;
-        const message = { role: 'assistant', content: reply };
-        const revision = 1;
-        history.set(body.chat_id, {
-          summary: {
-            chat_id: body.chat_id, title: prompt, updated_at: '2026-11-16T12:00:00Z', revision,
-            retention: { kind: 'expires', expires_on: '2026-12-16', time_zone: 'UTC', expires_at: '2026-12-17T00:00:00Z' },
-          },
-          messages: [...body.messages, message].map((entry, index) => ({ ...entry, position: index + 1 })),
-        });
-        send(200, { chat_id: body.chat_id, revision, choices: [{ message }] });
-        return;
-      }
       if (request.url === '/v1/dispatch') {
         const id = body.request_id;
         const replyTo = (status, event) => send(status, { protocol_version: 1, event: { request_id: id, ...event } });
-        const fail = (status, code) => replyTo(status, { kind: 'chat_history_failed', code });
+        const destination = request.headers['forge-destination'];
+        const fail = (status, code) => replyTo(status, { kind: destination.startsWith('ide.chat.run.') ? 'chat_run_failed' : 'chat_history_failed', code });
         if (request.headers['forge-request-id'] !== id || request.headers['forge-envelope-version'] !== '1' ||
             request.headers['forge-contract-version'] !== '1') {
           fail(400, 'invalid_request');
           return;
         }
-        const destination = request.headers['forge-destination'];
+        if (destination === 'ide.chat.run.submit' && body.kind === 'chat_run_submit') {
+          const checkpoint = [...tabs.values()].find(tab =>
+            tab.snapshot?.chat.pending_run?.idempotency_key === body.idempotency_key &&
+            tab.snapshot.chat.pending_run.chat_id === body.chat_id &&
+            tab.snapshot.chat.conversations.some(chat => chat.chat_id === body.chat_id && chat.draft === body.content));
+          if (!checkpoint) { fail(400, 'invalid_request'); return; }
+          let run = submissions.get(body.idempotency_key);
+          if (!run) {
+            run = { run_id: randomUUID(), chat_id: body.chat_id, content: body.content,
+              status: 'queued', events: [{ sequence: 1, kind: 'queued' }] };
+            runs.set(run.run_id, run);
+            submissions.set(body.idempotency_key, run);
+            submitted++;
+          } else if (run.chat_id !== body.chat_id || run.content !== body.content) {
+            fail(409, 'idempotency_conflict');
+            return;
+          }
+          if (dropFirstAcknowledgement) {
+            dropFirstAcknowledgement = false;
+            fail(503, 'unavailable');
+            return;
+          }
+          replyTo(202, { kind: 'chat_run_accepted', run_id: run.run_id, chat_id: run.chat_id, status: run.status });
+          return;
+        }
+        if (destination === 'ide.chat.run.events' || destination === 'ide.chat.run.cancel') {
+          const run = runs.get(body.run_id);
+          if (!run || removed.has(run.chat_id)) { fail(404, 'not_found'); return; }
+          const { run_id, chat_id } = run;
+          if (destination === 'ide.chat.run.cancel' && body.kind === 'chat_run_cancel') {
+            if (run.status === 'queued') {
+              run.status = 'cancelled';
+              run.events.push({ sequence: 2, kind: 'cancelled' });
+            }
+            replyTo(200, { kind: 'chat_run_cancelled', run_id, chat_id, status: run.status });
+          } else if (body.kind === 'chat_run_events') {
+            const events = run.events.filter(event => event.sequence > body.after_sequence);
+            replyTo(200, { kind: 'chat_run_events', run_id, chat_id, status: run.status,
+              worker_ready: false, events, next_sequence: events.at(-1)?.sequence ?? body.after_sequence,
+              ...(run.status === 'completed' ? { answer: reply, revision: 1 } : {}) });
+          } else fail(400, 'invalid_request');
+          return;
+        }
         if (destination === 'ide.chat.history.list' && body.kind === 'chat_history_list') {
           replyTo(200, { kind: 'chat_history_listed', items: [...history.values()].map(chat => chat.summary), next_cursor: null });
           return;
@@ -120,6 +164,7 @@ export async function startDurableRelay(prompt, reply) {
           old.conversations = old.conversations.filter(item => !removed.has(item.chat_id)).map(item =>
             history.has(item.chat_id) ? savedConversation(history.get(item.chat_id), item.draft) : item);
           old.selected = Math.min(kept, Math.max(0, old.conversations.length - 1));
+          if (old.pending_run && removed.has(old.pending_run.chat_id)) delete old.pending_run;
         }
         tabs.set(body.tab, { lease, revision: 0, snapshot: restored });
         send(200, { lease, snapshot: restored });
@@ -154,7 +199,8 @@ export async function startDurableRelay(prompt, reply) {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     server.unref();
-    return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, completions: () => completions, close };
+    return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile,
+      submitted: () => submitted, completions: () => completions, finish, close };
   } catch (error) {
     await close();
     throw error;

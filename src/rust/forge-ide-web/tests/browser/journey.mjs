@@ -1008,6 +1008,7 @@ async function durableHostRestartJourney() {
   const prompt = 'Keep this submitted conversation';
   const reply = '## Durable fixture reply\n\n**Ready after restart.**';
   const privateDraft = 'Keep this unsent text in its original tab';
+  const cancelledDraft = 'Keep this message when the queued run is cancelled';
   const file = 'README <safe>.md';
   const source = 'Fixture <script> text is never HTML.';
   const viewport = { width: 1440, height: 1000 };
@@ -1049,6 +1050,14 @@ async function durableHostRestartJourney() {
     function tabIdentifier(page) {
       return page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
     }
+    async function reloadQueuedChat(page) {
+      await page.locator('#chat-status').click();
+      const leave = page.waitForEvent('dialog', { predicate: dialog => dialog.type() === 'beforeunload', timeout: 5000 })
+        .then(dialog => dialog.accept());
+      await Promise.all([leave, page.reload({ waitUntil: 'domcontentloaded' })]);
+      await check(page.locator('#chat-run-cancel')).toBeVisible();
+      await check(page.locator('#chat-status')).toHaveText('Waiting for Forge…');
+    }
     async function checkTranscript(page) {
       const transcript = page.locator('#chat-transcript');
       await check(transcript.locator('[data-role="user"]')).toHaveCount(1);
@@ -1068,6 +1077,15 @@ async function durableHostRestartJourney() {
     const draft = page.locator('#chat-draft');
     await draft.fill(prompt);
     await page.locator('#send-chat').click();
+    await check(page.locator('#chat-run-retry')).toBeVisible();
+    assert.equal(relay.submitted(), 1, 'the queue committed the job before the acknowledgement was lost');
+    const accepted = checkpointSaved(page, snapshot => !!snapshot.chat.pending_run?.run_id);
+    await reloadQueuedChat(page);
+    await accepted;
+    assert.equal(relay.submitted(), 1, 'reloading with no run ID reuses the submitted intent');
+    await reloadQueuedChat(page);
+    assert.equal(traffic.count('chat_run_submit'), 2, 'reloading with a run ID polls without submitting');
+    relay.finish();
     await checkTranscript(page);
     await page.locator('#new-chat').click();
     await draft.fill(privateDraft);
@@ -1158,6 +1176,15 @@ async function durableHostRestartJourney() {
     await check(freshPage.locator('#chat-transcript [data-role]')).toHaveCount(0);
     assert.equal(await freshPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.equal(relay.completions(), 1, 'retention and deletion do not call inference');
+    await freshPage.locator('#new-chat').click();
+    const cancelled = freshPage.locator('#chat-draft');
+    await cancelled.fill(cancelledDraft);
+    await freshPage.locator('#send-chat').click();
+    await check(freshPage.locator('#chat-run-cancel')).toBeVisible();
+    await freshPage.locator('#chat-run-cancel').click();
+    await check(freshPage.locator('#chat-status')).toContainText('Run cancelled');
+    await check(cancelled).toHaveValue(cancelledDraft);
+    await check(freshPage.locator('#chat-transcript [data-role]')).toHaveCount(0);
 
   } finally {
     try { await Promise.all(contexts.map(context => context.close())); }
@@ -1548,7 +1575,7 @@ async function previousChatsDesignJourney(design, designUrl) {
   await design.getByRole('link', { name: 'PostgreSQL dispatch', exact: true }).click();
   await check(design).toHaveURL(`${new URL(designUrl).origin}/design/chat-dispatch`);
   await check(design.getByRole('heading', { level: 1 })).toHaveText(/PostgreSQL.*dispatch/i);
-  await check(design.locator('.intro')).toContainText(/proposed/i);
+  await check(design.locator('.intro')).toContainText('Dispatch design.');
   for (const section of ['sequence', 'data-access', 'contracts', 'rollout']) {
     await check(design.locator(`#${section} h2`)).toBeVisible();
   }

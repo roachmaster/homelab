@@ -1,7 +1,9 @@
 use super::*;
 use crate::markdown::render_markdown;
 mod history;
+mod run;
 use history::History;
+use run::AsyncRun;
 
 #[derive(Debug, Default)]
 pub(super) struct Chats {
@@ -10,6 +12,7 @@ pub(super) struct Chats {
     conversations: Vec<Conversation>,
     pending: Option<Pending>,
     pub(super) history: History,
+    pub(super) async_chat: bool,
 }
 
 #[derive(Debug, Default)]
@@ -28,6 +31,7 @@ struct Pending {
     request_id: String,
     prompt: String,
     chat_id: Option<String>,
+    async_run: Option<AsyncRun>,
 }
 
 impl Chats {
@@ -51,6 +55,11 @@ impl Chats {
                     revision: conversation.revision,
                 })
                 .collect(),
+            pending_run: self
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.async_run.as_ref())
+                .map(|run| run.checkpoint.clone()),
         }
     }
 
@@ -71,6 +80,22 @@ impl Chats {
             })
             .collect();
         self.pending = None;
+        if self.async_chat {
+            if let Some(pending) = snapshot.pending_run {
+                let conversation = self
+                    .conversations
+                    .iter()
+                    .position(|chat| chat.chat_id.as_ref() == Some(&pending.chat_id))
+                    .expect("validated pending conversation");
+                self.pending = Some(Pending {
+                    conversation,
+                    request_id: String::new(),
+                    prompt: self.conversations[conversation].draft.trim().to_owned(),
+                    chat_id: Some(pending.chat_id.clone()),
+                    async_run: Some(AsyncRun::new(pending)),
+                });
+            }
+        }
         self.open();
         Ok(())
     }
@@ -225,6 +250,7 @@ impl Chats {
             request_id: request_id.clone(),
             prompt,
             chat_id: chat_id.clone(),
+            async_run: None,
         });
         Ok(Some(PreparedChat {
             request_id,
@@ -238,10 +264,14 @@ impl Chats {
         if !self
             .pending
             .as_ref()
-            .is_some_and(|p| p.request_id == request_id)
+            .is_some_and(|p| p.request_id == request_id && p.async_run.is_none())
         {
             return;
         }
+        self.finish(outcome);
+    }
+
+    fn finish(&mut self, outcome: ChatOutcome) {
         let pending = self.pending.take().expect("matching chat request");
         let chat = &mut self.conversations[pending.conversation];
         let answer = match outcome {
@@ -260,6 +290,19 @@ impl Chats {
                     summary.revision = revision;
                 }
                 Ok(content)
+            }
+            ChatOutcome::SavedAnswer {
+                chat_id, revision, ..
+            } if pending.async_run.is_some()
+                && pending.chat_id.as_ref() == Some(&chat_id)
+                && chat.revision.is_some_and(|restored| restored >= revision) =>
+            {
+                // Workspace restoration may have already loaded this committed transcript.
+                if chat.draft.trim() == pending.prompt {
+                    chat.draft.clear();
+                }
+                chat.status.clear();
+                return;
             }
             _ => Err(outcome),
         };
@@ -330,16 +373,26 @@ impl Chats {
                 .collect(),
         };
         if let Some(waiting) = waiting {
-            messages.messages.push(TranscriptMessage {
-                role: ChatRole::User,
-                content: waiting.prompt.clone(),
-                rendered_html: None,
+            let committed = waiting.async_run.as_ref().is_some_and(|run| {
+                current.and_then(|chat| chat.revision).unwrap_or(0)
+                    > run.checkpoint.expected_revision.unwrap_or(0)
             });
+            if !committed {
+                messages.messages.push(TranscriptMessage {
+                    role: ChatRole::User,
+                    content: waiting.prompt.clone(),
+                    rendered_html: None,
+                });
+            }
         }
         view.texts.extend([TextBinding {
             id: "chat-status",
-            text: if waiting.is_some() {
-                "Waiting for Forge…".into()
+            text: if let Some(waiting) = waiting {
+                waiting
+                    .async_run
+                    .as_ref()
+                    .map_or("Waiting for Forge…", |run| run.label)
+                    .into()
             } else if self.pending.is_some() {
                 "Forge is answering in another conversation.".into()
             } else {
@@ -379,6 +432,7 @@ impl Chats {
                 .collect(),
         });
         self.project_history(view, connected);
+        self.project_run(view, waiting, connected);
         view.inputs.push(InputBinding {
             id: "chat-draft",
             value: current.map(|c| c.draft.clone()).unwrap_or_default(),

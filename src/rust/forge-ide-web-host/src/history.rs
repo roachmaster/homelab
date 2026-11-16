@@ -41,7 +41,7 @@ pub(crate) fn dispatch(
     {
         return Err(Rejection::Invalid);
     }
-    let (status, body) = relay.history(
+    let (status, body) = relay.dispatch(
         request.destination(),
         request.request_id(),
         body.to_vec(),

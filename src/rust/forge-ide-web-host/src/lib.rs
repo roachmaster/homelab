@@ -10,6 +10,7 @@ pub use chat::ChatConfig;
 mod history;
 mod http;
 mod projection;
+mod run_dispatch;
 mod service;
 mod session;
 mod workspace;

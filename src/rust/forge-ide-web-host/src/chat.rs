@@ -18,12 +18,16 @@ pub struct ChatConfig {
     /// The local runner supports authenticated PostgreSQL workspace checkpoints.
     #[serde(default)]
     pub workspace_persistence: bool,
+    /// The local runner accepts chat turns through its durable job queue.
+    #[serde(default)]
+    pub async_dispatch: bool,
 }
 
 pub(crate) struct ChatRelay {
     endpoint: SocketAddr,
     token: String,
     pub workspace_persistence: bool,
+    pub async_dispatch: bool,
 }
 
 #[derive(Serialize)]
@@ -88,6 +92,7 @@ impl ChatRelay {
             endpoint: config.endpoint,
             token: token.into(),
             workspace_persistence: config.workspace_persistence,
+            async_dispatch: config.async_dispatch,
         })
     }
 
@@ -187,7 +192,7 @@ impl ChatRelay {
         }
     }
 
-    pub(crate) fn history(
+    pub(crate) fn dispatch(
         &self,
         destination: &str,
         request_id: &str,

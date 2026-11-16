@@ -4,6 +4,7 @@ use crate::{
     service::{Command, Rejection},
     workspace, Host, HostError,
 };
+use forge_ide_ui::protocol::ChatRunRequest;
 use forge_ingress_contract::{Header, RouteKey};
 use std::{
     collections::BTreeMap,
@@ -315,8 +316,8 @@ fn command(
     if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
         return Err(Rejection::Unavailable);
     }
-    if history::is_destination(destination) {
-        let (status, body) = host.chat_history(&header, &r.body, &context)?;
+    if history::is_destination(destination) || ChatRunRequest::is_destination(destination) {
+        let (status, body) = host.postgres_dispatch(&header, &r.body, &context)?;
         if body.len() > host.config.limits.response_bytes {
             return Err(Rejection::Limit);
         }
@@ -463,13 +464,17 @@ fn write_response(s: &mut TcpStream, r: Response, deadline: Instant) -> Result<(
     s.set_write_timeout(Some(remaining(deadline)?))?;
     let reason = match r.status {
         200 => "OK",
+        202 => "Accepted",
         302 => "Found",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
         413 => "Content Too Large",
+        422 => "Unprocessable Content",
+        429 => "Too Many Requests",
         _ => "Service Unavailable",
     };
     let mut head=format!("HTTP/1.1 {} {}\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: {}\r\n",r.status,reason,r.body.len(),r.mime,CSP);

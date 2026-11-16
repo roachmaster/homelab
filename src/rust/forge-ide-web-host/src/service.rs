@@ -216,7 +216,12 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
         "ui.session.open" if !c.trusted_proxy => Ok(()),
         "ui.session.resume" if c.authenticated || c.trusted_proxy => Ok(()),
         "ide.inspect" | "ide.source" | "ide.chat" if c.authenticated && c.csrf_valid => Ok(()),
-        destination if history::is_destination(destination) && c.authenticated && c.csrf_valid => {
+        destination
+            if (history::is_destination(destination)
+                || ChatRunRequest::is_destination(destination))
+                && c.authenticated
+                && c.csrf_valid =>
+        {
             Ok(())
         }
         _ => Err(AdmissionDenied),
@@ -746,7 +751,7 @@ impl Host {
             })
     }
 
-    pub(crate) fn chat_history(
+    pub(crate) fn postgres_dispatch(
         &self,
         header: &Header,
         body: &[u8],
@@ -759,6 +764,12 @@ impl Host {
             .as_ref()
             .filter(|relay| relay.workspace_persistence)
             .ok_or(Rejection::Unavailable)?;
+        if ChatRunRequest::is_destination(header.route().destination()) {
+            if !relay.async_dispatch {
+                return Err(Rejection::Unavailable);
+            }
+            return crate::run_dispatch::dispatch(relay, header, body, context.deadline);
+        }
         history::dispatch(relay, header, body, context.deadline)
     }
 }

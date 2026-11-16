@@ -33,6 +33,7 @@ impl Session {
                 .chat
                 .as_ref()
                 .is_some_and(|chat| chat.workspace_persistence),
+            async_chat: config.chat.as_ref().is_some_and(|chat| chat.async_dispatch),
             nodes: config
                 .nodes
                 .iter()

@@ -1531,6 +1531,7 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
         endpoint: upstream.local_addr().unwrap(),
         token_file: token_path,
         workspace_persistence: false,
+        async_dispatch: false,
     });
     let (host, _) = host_with_config(settings);
     let body = json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}});
@@ -1632,6 +1633,7 @@ fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
         endpoint: upstream.local_addr().unwrap(),
         token_file: token_path,
         workspace_persistence: true,
+        async_dispatch: false,
     });
     let (host, _) = host_with_config(settings);
     let (cookie, csrf, _) = paired(&host);

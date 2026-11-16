@@ -14,6 +14,7 @@ pub fn validate_catalog(c: &Catalog) -> Result<(), UiError> {
         || !(100..=60_000).contains(&c.timeout_ms)
         || c.nodes.is_empty()
         || c.nodes.len() > MAX_NODES
+        || (c.async_chat && !c.chat_history)
     {
         return Err(UiError::InvalidCatalog);
     }
