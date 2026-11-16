@@ -1394,15 +1394,15 @@ async function previousChatsDesignJourney(design, designUrl) {
   await check(draft).toHaveValue('Add a note about Explorer.');
   const initialTranscript = await transcript.innerText();
   await choose('source', 'Explain source verification');
-  await check(transcript).not.toHaveText(initialTranscript);
+  await check(transcript).not.toHaveText(initialTranscript, { useInnerText: true });
   const sourceTranscript = await transcript.innerText();
   const savedDraft = 'Keep this draft while viewing another sample';
   await draft.fill(savedDraft);
   await choose('backup', 'Plan a backup');
-  await check(transcript).not.toHaveText(sourceTranscript);
+  await check(transcript).not.toHaveText(sourceTranscript, { useInnerText: true });
   await check(draft).not.toHaveValue(savedDraft);
   await choose('source', 'Explain source verification');
-  await check(transcript).toHaveText(sourceTranscript);
+  await check(transcript).toHaveText(sourceTranscript, { useInnerText: true });
   await check(draft).toHaveValue(savedDraft);
 
   await summary.click();
@@ -1419,7 +1419,7 @@ async function previousChatsDesignJourney(design, designUrl) {
   const archivedTranscript = await transcript.innerText();
   await archive.getByRole('button', { name: 'Continue as new chat', exact: true }).click();
   await check(archive).toBeHidden();
-  await check(transcript).toHaveText(archivedTranscript);
+  await check(transcript).toHaveText(archivedTranscript, { useInnerText: true });
   await check(draft).toBeEditable();
   await check(draft).toHaveValue('');
   const continuationDraft = 'Edit only this new chat copy';
@@ -1428,7 +1428,7 @@ async function previousChatsDesignJourney(design, designUrl) {
   await choose('archive', 'Inspect a Rust project');
   await check(archive).toBeVisible();
   await check(draft).toBeHidden();
-  await check(transcript).toHaveText(archivedTranscript);
+  await check(transcript).toHaveText(archivedTranscript, { useInnerText: true });
   await newChat.click();
   await check(draft).toBeEditable();
   await check(draft).toHaveValue('');
