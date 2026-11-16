@@ -91,8 +91,12 @@ late responses; it does not kill the agent's synchronous task. Retry is explicit
 Refresh resumes the memory-only authenticated session and opens a sole allowed
 project again. No file writes, editing, process commands or remote jobs are exposed.
 
-Open **Design** beside **Workbench** for the phone and desktop wireframes
-and the workspace recovery diagram. The link opens a separate tab at `/design`.
+Open **Design** beside **Workbench** for the wireframes and workspace recovery
+diagram. Forge saves the current workspace before opening `/design` in the same
+tab. Use **Back to Forge** or the browser’s Back button to restore the workspace.
+The tab keeps a temporary JSON copy of its drafts and Workbench bookmark as a
+fallback for an unavailable checkpoint service. The server supplies saved chat
+replies and queued runs, and Forge verifies Workbench source again when you return.
 
 ## Runtime ownership
 

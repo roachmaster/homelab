@@ -16,6 +16,9 @@ let workspaceWork=false;
 let leaveWarning=false;
 let leaving=false;
 let finishReload=null;
+let navigation=null;
+let navigationId=0;
+const NAVIGATION_CACHE_KEY='forge-workspace-navigation';
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
 const draftFields=[...document.querySelectorAll('textarea[data-action]')];
 const leaveDialog=document.getElementById('leave-confirmation');
@@ -53,6 +56,48 @@ function reloadPage(){
   finishReload=()=>{clearTimeout(timer);finishReload=null;location.reload();};
   worker.postMessage({flush_workspace:'reload'});
 }
+function readNavigationCache(){
+  try{return sessionStorage.getItem(NAVIGATION_CACHE_KEY);}catch(_){return null;}
+}
+function writeNavigationCache(cache){
+  try{
+    if(typeof cache==='string')sessionStorage.setItem(NAVIGATION_CACHE_KEY,cache);
+    else sessionStorage.removeItem(NAVIGATION_CACHE_KEY);
+  }catch(_){}
+}
+function navigationStatus(message){
+  const status=document.querySelector('[data-workspace-navigation-status]');
+  if(status){status.textContent=message;status.hidden=!message;}
+}
+function finishNavigation(result){
+  if(!navigation||result.id!==navigation.id)return;
+  const {url,sequence,timer}=navigation;
+  clearTimeout(timer);navigation=null;
+  if(!result.saved||sequence!==presentationSequence||draftFields.some(n=>inputDrafts.get(n)?.invalid)){
+    navigationStatus('Your latest workspace changes are still open here. Try Design again.');
+    return;
+  }
+  writeNavigationCache(result.cache);
+  leaving=true;syncLeaveWarning();location.assign(url);
+}
+for(const link of document.querySelectorAll('a[data-workspace-navigation]'))link.addEventListener('click',event=>{
+  if(event.defaultPrevented||event.button!==0||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;
+  const url=new URL(link.href);
+  if(url.origin!==location.origin)return;
+  event.preventDefault();
+  if(leaving||navigation)return;
+  if(draftFields.some(n=>inputDrafts.get(n)?.invalid)){
+    navigationStatus('Shorten the draft to the message limit before opening Design.');return;
+  }
+  if(!hasWork()){
+    leaving=true;syncLeaveWarning();location.assign(url.href);return;
+  }
+  if(!worker){navigationStatus('Your workspace is unavailable. Reload and try Design again.');return;}
+  const id=++navigationId;
+  navigation={id,url:url.href,sequence:presentationSequence,timer:setTimeout(()=>finishNavigation({id,saved:false}),11000)};
+  navigationStatus('Saving workspace…');
+  worker.postMessage({flush_workspace:'navigation',id});
+});
 function visible(n){
   if(!n||!n.isConnected||n.closest('[hidden]'))return false;
   for(let p=n.parentElement;p;p=p.parentElement){
@@ -382,9 +427,13 @@ function start(){
         if(data.kind==='view')apply(data.view,data.presentation_sequence,data.has_workspace_work);
         else if(data.kind==='fatal')fatal(data.message);
         else if(data.kind==='workspace_flushed')finishReload?.();
+        else if(data.kind==='workspace_navigation_flushed')finishNavigation(data);
+        else if(data.kind==='clear_navigation_cache')writeNavigationCache(null);
       }catch(_){fatal('Could not display the checked view. Reload to retry.');}
     };
     owned.onerror=()=>{if(worker===owned)fatal('The Rust worker could not start. Reload to retry.');};
+    const cache=readNavigationCache();
+    if(cache)owned.postMessage({workspace_navigation_cache:cache});
   }catch(_){fatal('This browser cannot start the required worker. Reload to retry.');}
 }
 for(const group of document.querySelectorAll('[data-source-formats]')){
@@ -534,6 +583,8 @@ document.addEventListener('visibilitychange',()=>{
 });
 window.addEventListener('pagehide',()=>{
   finishReload=null;
+  if(navigation){clearTimeout(navigation.timer);navigation=null;}
+  navigationStatus('');
   if(leaveDialog?.open)leaveDialog.close();
   stop();
 });
@@ -544,6 +595,7 @@ pub(crate) const WORKER: &str = r#"'use strict';
 // GENERATED reusable WASM/HTTP adapter. CONFIG is validated Rust declaration data.
 const MAX=8*1024*1024;
 const WORKSPACE_MAX=2*1024*1024;
+const NAVIGATION_CACHE_MAX=256*1024;
 const encoder=new TextEncoder();const decoder=new TextDecoder('utf-8',{fatal:true});
 let wasm=null;let csrf=null;let closed=false;
 const workspaceTab=typeof name==='string'&&/^[0-9a-f]{32}$/.test(name)?name:null;
@@ -551,6 +603,9 @@ let workspaceLease=null;
 let workspaceRevision=0;
 let workspaceJSON=null;
 let latestCheckpoint=null;
+let latestWorkspace=null;
+let workspaceEpoch=null;
+let navigationCache=null;
 const pending=new Map();
 function field(value,path){for(const part of path.split('.')){if(value===null || typeof value!=='object' || !Object.hasOwn(value,part))throw new Error('Missing declared field');value=value[part];}if(typeof value!=='string' && typeof value!=='number')throw new Error('Invalid declared field');return value;}
 function safeJson(text){let depth=0,quoted=false,escape=false;for(const c of text){if(quoted){if(escape)escape=false;else if(c==='\\')escape=true;else if(c==='"')quoted=false;}else if(c==='"')quoted=true;else if(c==='{'||c==='['){if(++depth>64)throw new Error('Nesting limit');}else if(c==='}'||c===']')depth--;}return JSON.parse(text);}
@@ -562,7 +617,7 @@ async function workspaceRequest(body,keepalive,signal){
   });
 }
 async function restoreWorkspace(chatHistory,chatModels){
-  if(!workspaceTab||!csrf)return null;
+  if(!workspaceTab||!csrf)return {snapshot:null,unavailable:false};
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),2500);
   try{
@@ -573,13 +628,13 @@ async function restoreWorkspace(chatHistory,chatModels){
       delete request.models;
       response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
     }
-    if(!response.ok){await response.body?.cancel();return null;}
+    if(!response.ok){await response.body?.cancel();return {snapshot:null,unavailable:response.status>=500};}
     const saved=safeJson(decoder.decode(await bounded(response,WORKSPACE_MAX)));
-    if(!/^[0-9a-f]{64}$/.test(saved.lease))return null;
+    if(!/^[0-9a-f]{64}$/.test(saved.lease))return {snapshot:null,unavailable:false};
     workspaceLease=saved.lease;
     workspaceJSON=saved.snapshot?JSON.stringify(saved.snapshot):null;
-    return saved.snapshot??null;
-  }catch(_){return null;}finally{clearTimeout(timer);}
+    return {snapshot:saved.snapshot??null,unavailable:false};
+  }catch(_){return {snapshot:null,unavailable:true};}finally{clearTimeout(timer);}
 }
 async function saveCheckpoint(checkpoint){
   const controller=new AbortController();
@@ -598,6 +653,7 @@ async function saveCheckpoint(checkpoint){
   }catch(_){}finally{clearTimeout(timer);}
 }
 function checkpointWorkspace(snapshot){
+  latestWorkspace=snapshot;
   if(!workspaceLease||!csrf||!snapshot)return;
   const json=JSON.stringify(snapshot);
   if(json===workspaceJSON)return;
@@ -619,6 +675,29 @@ async function flushWorkspace(notify){
     }
   }
   if(notify)postMessage({kind:'workspace_flushed'});
+}
+async function flushNavigation(id){
+  const snapshot=latestWorkspace;
+  const json=JSON.stringify(snapshot);
+  const checkpoint=latestCheckpoint;
+  await flushWorkspace(false);
+  // Only leave once the canonical checkpoint exactly matches this handoff.
+  const saved=Boolean(workspaceLease&&snapshot&&workspaceJSON===json&&
+    JSON.stringify(latestWorkspace)===json&&(!checkpoint||checkpoint.saved));
+  let cache=null;
+  if(saved&&workspaceEpoch){
+    const local=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot)});
+    if(encoder.encode(local).length<=NAVIGATION_CACHE_MAX)cache=local;
+  }
+  postMessage({kind:'workspace_navigation_flushed',id,saved,cache});
+}
+function navigationSnapshot(snapshot){
+  // Keep draft text and selection hints. Rust validates the restored snapshot.
+  const chat=snapshot?.chat;
+  if(!Array.isArray(chat?.conversations)||chat.conversations.length>16)return null;
+  const conversations=chat.conversations.map(item=>({draft:typeof item?.draft==='string'?item.draft:'',messages:[]}));
+  return {chat:{selected:chat.selected,model_id:chat.model_id,conversations},
+    workbench:snapshot.workbench,workbench_open:snapshot.workbench_open};
 }
 async function checkpointedRun(effect){
   if(!workspaceLease||!workspaceJSON)return false;
@@ -686,7 +765,16 @@ async function run(effect){
     if(decoded.csrf!==undefined && decoded.csrf!==null){
       if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');
       csrf=decoded.csrf;
-      saved=await restoreWorkspace(decoded.event.catalog?.chat_history===true,decoded.event.catalog?.async_chat===true);
+      workspaceEpoch=decoded.event.catalog?.session_epoch??null;
+      const restore=await restoreWorkspace(decoded.event.catalog?.chat_history===true,decoded.event.catalog?.async_chat===true);
+      const cache=navigationCache;
+      navigationCache=null;
+      if(restore.unavailable&&cache?.version===1&&cache.tab===workspaceTab&&workspaceEpoch&&cache.epoch===workspaceEpoch){
+        saved=navigationSnapshot(cache.snapshot);
+      }else{
+        saved=restore.snapshot;
+        postMessage({kind:'clear_navigation_cache'});
+      }
     }
     try{
       // The completed request should not occupy a slot used by its effects.
@@ -706,8 +794,16 @@ const ready=(async()=>{
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));
 onmessage=async({data})=>{if(closed)return;try{
+  if(typeof data?.workspace_navigation_cache==='string'){
+    const text=data.workspace_navigation_cache;
+    if(text.length<=NAVIGATION_CACHE_MAX&&encoder.encode(text).length<=NAVIGATION_CACHE_MAX){
+      try{navigationCache=safeJson(text);}catch(_){}
+    }
+    return;
+  }
   await ready;
   if(data?.flush_workspace==='reload'||data?.flush_workspace==='background')await flushWorkspace(data.flush_workspace==='reload');
+  else if(data?.flush_workspace==='navigation'&&Number.isSafeInteger(data.id))await flushNavigation(data.id);
   else if(data&&typeof data==='object'&&Object.hasOwn(data,'presentation_sequence')){
     if(Object.keys(data).length!==2||!Object.hasOwn(data,'event')||!Number.isSafeInteger(data.presentation_sequence)||data.presentation_sequence<1||data.presentation_sequence>2147483647)throw new Error('Invalid presentation envelope');
     dispatch(data.event,data.presentation_sequence);
