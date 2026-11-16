@@ -167,7 +167,7 @@ menu.addEventListener('keydown', event => {
   menu.open = false;
   trigger.focus();
 });
-previousChats.addEventListener('pointerdown', event => {
+previousChats.addEventListener('click', event => {
   if (menu.open && !menu.contains(event.target)) menu.open = false;
 });
 draft.addEventListener('input', () => drafts.set(selected, draft.value));

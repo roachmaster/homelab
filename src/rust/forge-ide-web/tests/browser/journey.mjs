@@ -1452,9 +1452,14 @@ async function previousChatsDesignJourney(design, designUrl) {
   process.stderr.write('QA_CHECK design_chat_retention\n');
   await choose('workbench', 'Summarize Workbench');
   const retention = proposal.locator('#previous-chat-retention');
-  const manage = proposal.locator('#previous-chat-manage summary');
+  const management = proposal.locator('#previous-chat-manage');
+  const manage = management.locator('summary');
   await check(retention).toContainText('Nov 30, 2026');
+  await summary.click();
+  await check(menu).toHaveJSProperty('open', true);
   await manage.click();
+  await check(menu).toHaveJSProperty('open', false);
+  await check(management).toHaveJSProperty('open', true);
   await proposal.locator('#previous-chat-expire').click();
   const expiration = design.locator('#previous-chat-expiration-dialog');
   await check(expiration).toBeVisible();
