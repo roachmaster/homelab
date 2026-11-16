@@ -11,12 +11,12 @@ const NAMES: [(&str, &str); 5] = [
     ("worker.js", "text/javascript; charset=utf-8"),
     ("app.wasm", "application/wasm"),
 ];
-const DESIGN_HTML: &[u8] = include_bytes!("../design/index.html");
+const DESIGN_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design.html"));
 const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
 const PREVIOUS_CHATS_JS: &[u8] = include_bytes!("../design/previous-chats.js");
-const CHAT_HISTORY_HTML: &[u8] = include_bytes!("../design/chat-history.html");
+const CHAT_HISTORY_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chat-history.html"));
 const CHAT_HISTORY_CSS: &[u8] = include_bytes!("../design/chat-history.css");
-const CHAT_DISPATCH_HTML: &[u8] = include_bytes!("../design/chat-dispatch.html");
+const CHAT_DISPATCH_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chat-dispatch.html"));
 const CHAT_DISPATCH_SEQUENCE: &[u8] = include_bytes!("../design/chat-dispatch-sequence.svg");
 const DESIGN_IMAGES: [(&str, &[u8]); 9] = [
     (
