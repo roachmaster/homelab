@@ -97,7 +97,7 @@ async function observe(context) {
     if (new URL(request.url()).pathname !== '/forge/v1/dispatch') return;
     let kind;
     try { kind = request.postDataJSON()?.kind; } catch { kind = 'invalid'; }
-    if (!['resume', 'pair', 'inspect', 'source', 'chat_history_retention_set'].includes(kind)) kind = 'other';
+    if (!['resume', 'pair', 'inspect', 'source', 'chat_history_retention_set', 'chat_run_submit'].includes(kind)) kind = 'other';
     counts.set(kind, (counts.get(kind) || 0) + 1);
     if (kind === 'inspect') inspectionIds.add(request.headers()['forge-request-id']);
   });
