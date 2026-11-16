@@ -11,6 +11,17 @@ pub(crate) fn emit(t: &Theme) -> String {
 .fg-navigation-link:hover{border-color:var(--accent)}
 @media(max-width:800px){.fg-navigation-link{min-width:var(--touch);min-height:var(--touch)}}
 .fg-reading-column{width:min(100%,56rem);margin-inline:auto;padding:clamp(12px,3vw,28px);display:grid;gap:12px;min-width:0}
+/* The reader takes over on phones. Wide readers keep their index beside the content. */
+.fg-reader-layout>.fg-region{min-width:0}
+.fg-reader-layout>.fg-region:nth-child(2){display:grid;gap:12px;align-content:start}
+.fg-reader-layout .fg-transcript{max-height:none}
+.fg-message-notice{margin-top:8px;font-size:12px;color:var(--warning)!important}
+@media(min-width:901px){
+  .fg-reading-column:has(>.fg-reader-layout){width:min(100%,76rem)}
+  .fg-reader-layout:has(>:first-child:not([hidden])+ :nth-child(2):not([hidden])){display:grid;grid-template-columns:minmax(240px,30%) minmax(0,1fr);gap:20px;align-items:start}
+  .fg-reader-layout .fg-tree{max-height:65dvh}
+}
+@media(max-width:900px){.fg-reader-layout:has(>:nth-child(2):not([hidden]))>:first-child{display:none}}
 .fg-reading-column .fg-toolbar{padding:0;border:0;background:transparent}.fg-reading-column .fg-field{min-width:0}.fg-reading-column select{max-width:min(100%,22rem);text-overflow:ellipsis}
 .fg-reading-column .fg-panel{padding:12px}.fg-reading-column .fg-panel>.fg-row:has(>button:not([hidden])){margin:8px 0 0}.fg-reading-column .fg-panel>.fg-row:has(>button):not(:has(>button:not([hidden]))){display:none}
 .fg-reading-column .fg-tree{max-height:min(18rem,36dvh);padding:0}.fg-reading-column .fg-tree-row .fg-toggle[hidden]{display:none!important}.fg-reading-column .fg-tree-row button{min-height:var(--touch)}.fg-reading-column .fg-empty:empty{display:none}.fg-reading-column .fg-focus-name{display:none}.fg-reading-column button[aria-expanded=true]{border-color:var(--accent);color:var(--accent)}

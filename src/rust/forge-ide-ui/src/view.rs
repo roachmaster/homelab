@@ -31,6 +31,8 @@ pub struct TranscriptMessage {
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rendered_html: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<&'static str>,
 }
 
 /// Exact, bounded UTF-8 window of the accepted read-only source document.

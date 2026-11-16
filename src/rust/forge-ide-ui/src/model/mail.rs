@@ -69,6 +69,7 @@ pub(super) struct Mail {
     list_page: Page<String>,
     reader: Reader,
     follow_up: bool,
+    seek_latest: bool,
     subject: String,
     draft: String,
     pending: Option<Pending>,
@@ -227,6 +228,7 @@ impl Mail {
             ..Reader::default()
         };
         self.follow_up = false;
+        self.seek_latest = false;
         self.pending = None;
         self.refresh(id, Direction::Current, effects);
     }
@@ -265,8 +267,12 @@ impl Mail {
                     || matches!(event, UiEvent::MailBack {}) && self.archived;
                 self.show_list(archived, id, effects);
             }
+            UiEvent::MailOpenThread { .. } if self.has_draft() || self.busy() => {
+                self.status = "Finish or discard your draft before opening another thread.";
+                self.warning = true;
+            }
             UiEvent::MailOpenThread { thread_id }
-                if self.pane == Pane::List
+                if self.list_visible()
                     && self
                         .summaries
                         .iter()
@@ -417,11 +423,23 @@ impl Mail {
                 if self.reader.page.cursor != after_sequence {
                     self.reader.transcript_revision += 1;
                 }
+                if let Some(summary) = self
+                    .summaries
+                    .iter_mut()
+                    .find(|summary| summary.thread_id == thread.summary.thread_id)
+                {
+                    *summary = thread.summary.clone();
+                }
                 self.reader.thread = Some(thread);
                 self.reader.messages = messages;
                 self.reader
                     .page
                     .accept(direction, after_sequence, next_sequence);
+                if self.seek_latest && self.active && next_sequence.is_some() {
+                    self.refresh(id, Direction::Next, effects);
+                    return;
+                }
+                self.seek_latest = false;
             }
             (MailResponse::MailSent { thread_id, .. }, request) => {
                 self.retry_intent = None;
@@ -433,6 +451,7 @@ impl Mail {
                 }
                 self.archived = false;
                 self.show_thread(thread_id, id, effects);
+                self.seek_latest = true;
                 return;
             }
             (MailResponse::MailFailed { code, .. }, _) => {
@@ -492,6 +511,10 @@ impl Mail {
             .is_some_and(|pending| pending.request.request_id() == request_id)
     }
 
+    fn list_visible(&self) -> bool {
+        self.pane == Pane::List || !self.summaries.is_empty()
+    }
+
     fn composer_visible(&self) -> bool {
         self.pane == Pane::Compose || self.pane == Pane::Reader && self.follow_up
     }
@@ -504,6 +527,11 @@ impl Mail {
         let locked = self.locked();
         let thread = self.thread();
         let loading = self.pending.is_some();
+        let failure = self
+            .reader
+            .thread
+            .as_ref()
+            .and_then(|thread| thread.failure_reason);
         let archived_thread = thread.is_some_and(|thread| thread.status == MailStatus::Archived);
         if active {
             for visibility in &mut view.visibility {
@@ -521,7 +549,9 @@ impl Mail {
             [
                 ("open-mail", connected && enabled),
                 ("mail", active),
-                ("mail-list-panel", active && self.pane == Pane::List),
+                ("mail-list-panel", active && self.list_visible()),
+                ("mail-detail-panel", active && self.pane != Pane::List),
+                ("mail-run-failure", active && reading && failure.is_some()),
                 ("mail-reader", active && reading),
                 ("mail-back", active && self.pane != Pane::List),
                 ("mail-composer", active && composer),
@@ -643,6 +673,11 @@ impl Mail {
                 ),
                 ("mail-title", subject.to_owned(), Tone::Neutral),
                 (
+                    "mail-run-failure",
+                    failure.map(failure_text).unwrap_or_default().into(),
+                    Tone::Warning,
+                ),
+                (
                     "mail-thread-status",
                     thread
                         .map(|thread| status_text(thread.status))
@@ -680,7 +715,7 @@ impl Mail {
                 action: Some(FilterAction::SetMailDraft {}),
             },
         ]);
-        if active && self.pane == Pane::List {
+        if active && self.list_visible() {
             view.lists.push(ListBinding {
                 id: "mail-threads",
                 empty_message: if loading {
@@ -707,7 +742,7 @@ impl Mail {
                             status_text(summary.status),
                             summary.updated_at
                         ),
-                        selected: false,
+                        selected: reading && summary.thread_id == self.reader.thread_id,
                         expanded: None,
                         action: RowAction::MailOpenThread {
                             thread_id: summary.thread_id.clone(),
@@ -728,6 +763,9 @@ impl Mail {
                     .map(|message| TranscriptMessage {
                         role: message.role,
                         content: message.content.clone(),
+                        notice: message
+                            .finish_reason
+                            .map(|MailFinishReason::Length| "The reply reached its output limit."),
                         rendered_html: if message.role == ChatRole::Assistant {
                             render_markdown(&message.content)
                         } else {
@@ -750,5 +788,19 @@ fn status_text(status: MailStatus) -> &'static str {
         MailStatus::Ready => "Reply ready",
         MailStatus::Failed => "Failed",
         MailStatus::Archived => "Archived · Read only",
+    }
+}
+
+fn failure_text(failure: MailRunFailure) -> &'static str {
+    match failure {
+        MailRunFailure::OutputBudgetExhausted => {
+            "The model ran out of room before it produced a visible reply."
+        }
+        MailRunFailure::RunDeadlineExceeded => "The job took longer than the allowed time.",
+        MailRunFailure::ForgeUnavailable => "Forge became unavailable before the reply was saved.",
+        MailRunFailure::MailProfileMismatch => {
+            "Forge could not load the model configured for this thread."
+        }
+        MailRunFailure::GenerationFailed => "The model could not complete this reply.",
     }
 }

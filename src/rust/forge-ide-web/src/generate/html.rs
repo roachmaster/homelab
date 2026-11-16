@@ -307,6 +307,11 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(label),
             );
         }
+        Component::ReaderLayout(items) => {
+            out.push_str("<div class=\"fg-reader-layout\" data-reader-layout>");
+            children(items, out);
+            out.push_str("</div>");
+        }
         Component::ReadingColumn(items) => {
             out.push_str("<div class=\"fg-reading-column\">");
             children(items, out);

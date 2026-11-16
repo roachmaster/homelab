@@ -262,7 +262,11 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
             "application semantics/unsafe storage in primitive: {forbidden}"
         );
     }
-    assert_eq!(main.matches("sessionStorage.").count(), 2);
+    assert_eq!(main.matches("sessionStorage.").count(), 5);
+    assert!(main.contains("const NAVIGATION_CACHE_KEY='forge-workspace-navigation'"));
+    assert!(main.contains("sessionStorage.getItem(NAVIGATION_CACHE_KEY)"));
+    assert!(main.contains("sessionStorage.setItem(NAVIGATION_CACHE_KEY,cache)"));
+    assert!(main.contains("sessionStorage.removeItem(NAVIGATION_CACHE_KEY)"));
     assert!(main.contains("sessionStorage.getItem(key)"));
     assert!(main.contains("sessionStorage.setItem(key,tab)"));
     assert!(main.contains("const key='forge-workspace-tab'"));

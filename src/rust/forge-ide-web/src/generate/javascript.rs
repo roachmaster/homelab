@@ -100,6 +100,7 @@ for(const link of document.querySelectorAll('a[data-workspace-navigation]'))link
 });
 function visible(n){
   if(!n||!n.isConnected||n.closest('[hidden]'))return false;
+  if(n.closest('[data-reader-layout]')&&!n.getClientRects().length)return false;
   for(let p=n.parentElement;p;p=p.parentElement){
     if(p.tagName==='DIALOG'&&!p.open)return false;
     if(p.tagName==='DETAILS'&&!p.open&&!p.querySelector(':scope > summary')?.contains(n))return false;
@@ -298,6 +299,13 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       node.dataset.role=role;
       node.children[0].textContent=role==='user'?'You':b.assistant_label??'Forge';
       const previous=node.children[1];
+      const existingNotice=node.children[2];
+      if(typeof message.notice==='string'){
+        const notice=existingNotice||document.createElement('p');
+        notice.className='fg-message-notice';
+        if(notice.textContent!==message.notice)notice.textContent=message.notice;
+        if(!existingNotice)node.append(notice);
+      }else existingNotice?.remove();
       const html=role==='assistant'&&typeof message.rendered_html==='string'&&message.rendered_html;
       if(html){
         if(transcriptViews.get(node)===html)continue;

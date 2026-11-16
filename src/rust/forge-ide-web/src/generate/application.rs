@@ -88,36 +88,41 @@ pub fn ide_document() -> Document {
                         component!(primary "mail-new", "New message", "mail_new_message"),
                     ]),
                     component!(status "mail-status", ""),
-                    component!(region "mail-list-panel"; [
-                        component!(tree "mail-threads", "Mail threads"),
-                    ]),
-                    component!(region "mail-reader"; [
-                        component!(heading "mail-title", "Thread"),
-                        component!(status "mail-thread-status", ""),
-                        component!(text "mail-archive-reason", "Recall limit reached. There is too little room for another exchange in this thread."),
-                        component!(transcript "mail-transcript", "Mail messages"),
-                        component!(caption "mail-context", ""),
-                        component!(row [
-                            component!(primary "mail-follow-up", "Follow up", "mail_follow_up"),
-                            component!(uuid_button "mail-retry", "Retry saved message", "retry_mail", "mail-draft", "idempotency_key"),
+                    component!(reader_layout [
+                        component!(region "mail-list-panel"; [
+                            component!(tree "mail-threads", "Mail threads"),
+                        ]),
+                        component!(region "mail-detail-panel"; [
+                            component!(region "mail-reader"; [
+                                component!(heading "mail-title", "Thread"),
+                                component!(status "mail-thread-status", ""),
+                                component!(caption "mail-run-failure", ""),
+                                component!(text "mail-archive-reason", "Recall limit reached. There is too little room for another exchange in this thread."),
+                                component!(transcript "mail-transcript", "Mail messages"),
+                                component!(caption "mail-context", ""),
+                                component!(row [
+                                    component!(primary "mail-follow-up", "Follow up", "mail_follow_up"),
+                                    component!(uuid_button "mail-retry", "Retry saved message", "retry_mail", "mail-draft", "idempotency_key"),
+                                ]),
+                            ]),
+                            component!(region "mail-composer"; [
+                                component!(region "mail-subject-panel"; [
+                                    component!(heading "mail-compose-title", "New message"),
+                                    component!(caption "mail-recipient", "To · GPT-OSS 120B"),
+                                    component!(text_field "mail-subject", "Subject", "set_mail_subject"),
+                                ]),
+                                component!(textarea "mail-draft", "Message", "set_mail_draft"),
+                                component!(row [
+                                    component!(uuid_button "mail-send", "Send", "send_mail", "mail-draft", "idempotency_key"),
+                                    component!(button "mail-discard", "Discard draft", "mail_discard_draft"),
+                                ]),
+                            ]),
                         ]),
                     ]),
                     component!(region "mail-page-actions"; [
                         component!(row [
                             component!(button "mail-previous", "Previous page", "mail_previous"),
                             component!(button "mail-next", "Next page", "mail_next"),
-                        ]),
-                    ]),
-                    component!(region "mail-composer"; [
-                        component!(region "mail-subject-panel"; [
-                            component!(heading "mail-compose-title", "New message"),
-                            component!(caption "mail-recipient", "To · GPT-OSS 120B"),
-                            component!(text_field "mail-subject", "Subject", "set_mail_subject"),
-                        ]),
-                        component!(textarea "mail-draft", "Message", "set_mail_draft"),
-                        component!(row [
-                            component!(uuid_button "mail-send", "Send", "send_mail", "mail-draft", "idempotency_key"),
-                            component!(button "mail-discard", "Discard draft", "mail_discard_draft"),
                         ]),
                     ]),
                 ]),

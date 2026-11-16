@@ -181,6 +181,8 @@ pub struct MailThread {
     #[serde(flatten)]
     pub summary: MailThreadSummary,
     pub context_remaining_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<MailRunFailure>,
 }
 
 impl MailThread {
@@ -189,7 +191,24 @@ impl MailThread {
             && self
                 .context_remaining_tokens
                 .is_none_or(|tokens| tokens <= MAX_MAIL_SEQUENCE)
+            && (self.failure_reason.is_none() || self.summary.status == MailStatus::Failed)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailRunFailure {
+    OutputBudgetExhausted,
+    RunDeadlineExceeded,
+    ForgeUnavailable,
+    MailProfileMismatch,
+    GenerationFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailFinishReason {
+    Length,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,6 +217,8 @@ pub struct MailMessage {
     pub sequence: u64,
     pub role: ChatRole,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<MailFinishReason>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,13 +317,14 @@ impl MailResponse {
                             return false;
                         }
                         previous = message.sequence;
-                        valid_chat_text(
-                            &message.content,
-                            match message.role {
-                                ChatRole::User => MAX_MAIL_DRAFT_BYTES,
-                                ChatRole::Assistant => MAX_MAIL_REPLY_BYTES,
-                            },
-                        )
+                        (message.finish_reason.is_none() || message.role == ChatRole::Assistant)
+                            && valid_chat_text(
+                                &message.content,
+                                match message.role {
+                                    ChatRole::User => MAX_MAIL_DRAFT_BYTES,
+                                    ChatRole::Assistant => MAX_MAIL_REPLY_BYTES,
+                                },
+                            )
                     })
                     && next_sequence.is_none_or(|next| {
                         messages

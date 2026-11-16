@@ -370,6 +370,7 @@ impl Chats {
                 .map(|message| TranscriptMessage {
                     role: message.role,
                     content: message.content.clone(),
+                    notice: None,
                     rendered_html: if message.role == ChatRole::Assistant {
                         render_markdown(&message.content)
                     } else {
@@ -387,6 +388,7 @@ impl Chats {
                 messages.messages.push(TranscriptMessage {
                     role: ChatRole::User,
                     content: waiting.prompt.clone(),
+                    notice: None,
                     rendered_html: None,
                 });
             }

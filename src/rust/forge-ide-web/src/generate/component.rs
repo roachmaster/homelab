@@ -92,6 +92,7 @@ pub enum Component {
         document: PortalDocument,
     },
     ReadingColumn(Vec<Component>),
+    ReaderLayout(Vec<Component>),
     Transcript {
         id: String,
         label: String,
@@ -219,6 +220,7 @@ macro_rules! component {
     (dialog $id:expr, $title:expr, $close:expr, $focus:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Dialog{id:$id.into(),title:$title.into(),close_action:$close.into(),initial_focus:$focus.into(),children:vec![$($child),*]} };
     (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
+    (reader_layout [$sidebar:expr, $body:expr $(,)?]) => { $crate::generate::Component::ReaderLayout(vec![$sidebar,$body]) };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
     (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
     (text_field $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextField{id:$id.into(),label:$label.into(),action:$action.into()} };
@@ -305,6 +307,7 @@ impl Document {
                 Component::Row(_)
                 | Component::Toolbar(_)
                 | Component::ReadingColumn(_)
+                | Component::ReaderLayout(_)
                 | Component::LayoutControls(_)
                 | Component::PaneAction(_)
                 | Component::SourceFormats { .. }
@@ -347,6 +350,14 @@ impl Document {
                 return Err("invalid component label/action");
             }
             match c {
+                Component::ReaderLayout(children)
+                    if children.len() != 2
+                        || children
+                            .iter()
+                            .any(|child| !matches!(child, Component::Region { .. })) =>
+                {
+                    return Err("reader layout requires two regions");
+                }
                 Component::NavigationLink { label, .. }
                     if !matches!(parent, Some(Component::Navigation { .. }))
                         || label.trim().is_empty() =>
@@ -499,6 +510,7 @@ impl Document {
                 | Component::Row(children)
                 | Component::LayoutControls(children)
                 | Component::ReadingColumn(children)
+                | Component::ReaderLayout(children)
                 | Component::Toolbar(children)
                 | Component::Workspace(children) => Some(children),
                 _ => None,
