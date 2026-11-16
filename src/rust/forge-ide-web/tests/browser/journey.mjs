@@ -1347,8 +1347,18 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     assert.equal(traffic.count('inspect'), beforeReload + 1, 'reload obtains a fresh single-project report');
     assert.equal(traffic.count('source'), sourceBeforeReload + 1, 'reload re-verifies the bookmarked declaration source');
+    const designDraft = 'Keep this draft while I read the Forge design';
+    await page.locator('#open-chat').click();
+    await page.locator('#chat-draft').fill(designDraft);
+    await page.locator('#open-workbench').click();
+    const beforeDesign = ['resume', 'inspect', 'source'].map(traffic.count);
     await designJourney(page, traffic);
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
+    assert.deepEqual(['resume', 'inspect', 'source'].map(traffic.count), beforeDesign.map(count => count + 1),
+      'returning from Design authenticates and re-verifies the bookmarked source');
+    await page.locator('#open-chat').click();
+    await check(page.locator('#chat-draft')).toHaveValue(designDraft);
+    await designLocalRestoreJourney(page);
     assert.deepEqual(errors, []);
   } catch (error) {
     const location = String(error.stack).match(/journey\.mjs:(\d+):(\d+)/);
@@ -1364,81 +1374,152 @@ async function designJourney(page, traffic) {
   process.stderr.write('QA_CHECK design_open\n');
   const link = page.locator('#ide-navigation').getByRole('link', { name: 'Design', exact: true });
   const originalUrl = page.url();
+  const originalViewport = page.viewportSize();
   const context = page.context();
+  const pages = context.pages();
+  const tabKey = () => page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
+  const originalTab = await tabKey();
+  assert.match(originalTab, /^[a-f0-9]{32}$/);
   const designUrl = new URL('/design', originalUrl).href;
   const styleUrl = new URL('/design/style.css', originalUrl).href;
   const counts = () => ['resume', 'pair', 'inspect', 'source', 'other'].map(traffic.count);
   const before = counts();
   await check(link).toBeVisible();
   await check(link).toHaveAttribute('href', '/design');
-  await check(link).toHaveAttribute('target', '_blank');
-  await check(link).toHaveAttribute('rel', /\bnoopener\b/);
+  await check(link).not.toHaveAttribute('target', /.+/);
+  await check(link).toHaveAttribute('data-workspace-navigation', '');
   const bounds = await link.boundingBox();
   assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, 'Design has a phone-sized touch target');
   await link.focus();
   await check(link).toBeFocused();
-  const [design, documentResponse, stylesheet] = await Promise.all([
-    context.waitForEvent('page', { timeout: 5_000 }),
-    context.waitForEvent('response', { predicate: response => response.url() === designUrl && response.request().isNavigationRequest(), timeout: 5_000 }),
-    context.waitForEvent('response', { predicate: response => response.url() === styleUrl, timeout: 5_000 }),
+  const [documentResponse, stylesheet] = await Promise.all([
+    page.waitForEvent('response', { predicate: response => response.url() === designUrl && response.request().isNavigationRequest(), timeout: 5_000 }),
+    page.waitForEvent('response', { predicate: response => response.url() === styleUrl, timeout: 5_000 }),
     page.keyboard.press('Enter'),
   ]);
-  try {
-    assert.equal(documentResponse.status(), 200);
-    assert.match(documentResponse.headers()['content-type'] ?? '', /^text\/html\b/);
-    assert.equal(stylesheet.status(), 200);
-    assert.match(stylesheet.headers()['content-type'] ?? '', /^text\/css\b/);
-    await check(design).toHaveURL(designUrl);
-    assert.equal(await design.evaluate(() => window.opener === null), true);
-    await check(design.getByRole('heading', { level: 1, name: 'Forge IDE design', exact: true })).toBeVisible();
-    await check(design.getByRole('heading', { name: 'Workspace recovery', exact: true })).toBeVisible();
-    await check(design.getByRole('link', { name: 'Back to Forge', exact: true })).toHaveAttribute('href', '/');
-    await check(design.locator('#phone figure.wireframe')).toHaveCount(3);
-    await check(design.locator('#desktop figure.wireframe')).toHaveCount(2);
+  assert.equal(documentResponse.status(), 200);
+  assert.match(documentResponse.headers()['content-type'] ?? '', /^text\/html\b/);
+  assert.equal(stylesheet.status(), 200);
+  assert.match(stylesheet.headers()['content-type'] ?? '', /^text\/css\b/);
+  await check(page).toHaveURL(designUrl);
+  assert.deepEqual(context.pages(), pages, 'Design opens without creating a second page');
+  assert.equal(await tabKey(), originalTab, 'Design uses the same per-tab workspace key');
+  await check(page.getByRole('heading', { level: 1, name: 'Forge IDE design', exact: true })).toBeVisible();
+  await check(page.getByRole('heading', { name: 'Workspace recovery', exact: true })).toBeVisible();
+  await check(page.getByRole('link', { name: 'Back to Forge', exact: true })).toHaveAttribute('href', '/');
+  await check(page.locator('#phone figure.wireframe')).toHaveCount(3);
+  await check(page.locator('#desktop figure.wireframe')).toHaveCount(2);
 
-    process.stderr.write('QA_CHECK design_wireframes\n');
-    const names = ['chat-phone', 'workbench-phone', 'workbench-project-options', 'chat-desktop', 'workbench-desktop'];
-    const images = design.locator('figure.wireframe img');
-    await check(images).toHaveCount(names.length);
-    for (const name of names) {
-      const path = `/design/forge-ide-${name}.png`;
-      const image = design.locator(`figure.wireframe img[src="${path}"]`);
-      await check(image).toHaveAttribute('alt', /\S/);
-      await check(design.locator(`figure.wireframe a[href="${path}"]`).filter({ has: design.locator('img') }))
-        .toHaveAttribute('target', '_blank');
-      await image.scrollIntoViewIfNeeded();
-      await check.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0)).toBe(true);
-    }
-
-    process.stderr.write('QA_CHECK design_phone_layout\n');
-    for (const viewport of [{ width: 390, height: 664 }, { width: 375, height: 667 }]) {
-      await design.setViewportSize(viewport);
-      assert.equal(await design.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
-        'Design fits the phone viewport');
-      assert.equal(await images.evaluateAll(nodes => nodes.every(node => {
-        const image = node.getBoundingClientRect();
-        return image.width > 0 && image.height > 0 && image.left >= -1 && image.right <= innerWidth + 1;
-      })), true, 'each wireframe fits horizontally');
-      assert.equal(await design.locator('#phone figure.wireframe').evaluateAll(figures => {
-        const boxes = figures.map(figure => figure.getBoundingClientRect());
-        return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
-      }), true, 'phone wireframe cards stack vertically');
-    }
-    process.stderr.write('QA_CHECK design_desktop_layout\n');
-    await design.setViewportSize({ width: 1440, height: 1000 });
-    assert.equal(await design.locator('#desktop figure.wireframe').evaluateAll(([first, second]) => {
-      const left = first.getBoundingClientRect();
-      const right = second.getBoundingClientRect();
-      return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
-    }), true, 'desktop wireframe cards display side by side');
-    await previousChatsDesignJourney(design, designUrl);
-  } finally {
-    await design.close();
+  process.stderr.write('QA_CHECK design_wireframes\n');
+  const names = ['chat-phone', 'workbench-phone', 'workbench-project-options', 'chat-desktop', 'workbench-desktop'];
+  const images = page.locator('figure.wireframe img');
+  await check(images).toHaveCount(names.length);
+  for (const name of names) {
+    const path = `/design/forge-ide-${name}.png`;
+    const image = page.locator(`figure.wireframe img[src="${path}"]`);
+    await check(image).toHaveAttribute('alt', /\S/);
+    await check(page.locator(`figure.wireframe a[href="${path}"]`).filter({ has: page.locator('img') }))
+      .toHaveAttribute('target', '_blank');
+    await image.scrollIntoViewIfNeeded();
+    await check.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0)).toBe(true);
   }
-  await check(page).toHaveURL(originalUrl);
-  await check(page.locator('#workspace-panel')).toBeVisible();
-  assert.equal(page.workers().length, 1, 'opening Design preserves the original workbench worker');
+
+  process.stderr.write('QA_CHECK design_phone_layout\n');
+  for (const viewport of [{ width: 390, height: 664 }, { width: 375, height: 667 }]) {
+    await page.setViewportSize(viewport);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      'Design fits the phone viewport');
+    assert.equal(await images.evaluateAll(nodes => nodes.every(node => {
+      const image = node.getBoundingClientRect();
+      return image.width > 0 && image.height > 0 && image.left >= -1 && image.right <= innerWidth + 1;
+    })), true, 'each wireframe fits horizontally');
+    assert.equal(await page.locator('#phone figure.wireframe').evaluateAll(figures => {
+      const boxes = figures.map(figure => figure.getBoundingClientRect());
+      return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
+    }), true, 'phone wireframe cards stack vertically');
+  }
+  process.stderr.write('QA_CHECK design_desktop_layout\n');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  assert.equal(await page.locator('#desktop figure.wireframe').evaluateAll(([first, second]) => {
+    const left = first.getBoundingClientRect();
+    const right = second.getBoundingClientRect();
+    return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
+  }), true, 'desktop wireframe cards display side by side');
+  await previousChatsDesignJourney(page, designUrl);
   assert.deepEqual(counts(), before, 'Design does not send requests through the Forge gateway');
+  if (originalViewport) await page.setViewportSize(originalViewport);
+  await page.getByRole('link', { name: 'Back to Forge', exact: true }).click();
+  await check(page).toHaveURL(originalUrl);
+  assert.equal(await tabKey(), originalTab, 'the IDE returns to the same tab workspace');
+  assert.deepEqual(context.pages(), pages, 'returning from Design uses the existing page');
+  await check(page.locator('#workspace-panel')).toBeVisible();
+  assert.equal(page.workers().length, 1, 'returning from Design starts one Forge worker');
+}
+
+async function designLocalRestoreJourney(page) {
+  process.stderr.write('QA_CHECK design_local_workspace_restore\n');
+  const originalUrl = page.url();
+  const designUrl = new URL('/design', originalUrl).href;
+  const draft = page.locator('#chat-draft');
+  const transcript = page.locator('#chat-transcript');
+  const prompt = 'This sent prompt belongs in the remote workspace';
+  const reply = 'This completed reply belongs in the remote workspace';
+  const context = page.context();
+  const gateway = '**/forge/v1/dispatch';
+  const replyToChat = async route => {
+    const body = route.request().postDataJSON();
+    if (body?.kind !== 'chat') return route.continue();
+    await route.fulfill({ json: {
+      protocol_version: 1,
+      event: {
+        kind: 'chat_result', request_id: body.request.request_id,
+        outcome: { kind: 'answer', content: reply },
+      },
+    } });
+  };
+  await context.route(gateway, replyToChat);
+  try {
+    await draft.fill(prompt);
+    await page.locator('#send-chat').click();
+    await check(transcript).toContainText(prompt);
+    await check(transcript).toContainText(reply);
+  } finally {
+    await context.unroute(gateway, replyToChat);
+  }
+
+  const text = 'Restore this updated draft when the remote checkpoint is unavailable';
+  await draft.fill(text);
+  await page.getByRole('link', { name: 'Design', exact: true }).click();
+  await check(page).toHaveURL(designUrl);
+  const handoff = await page.evaluate(() => JSON.parse(sessionStorage.getItem('forge-workspace-navigation')));
+  assert.equal(handoff?.version, 1);
+  assert.equal(handoff.tab, await page.evaluate(() => sessionStorage.getItem('forge-workspace-tab')));
+  assert.equal(checkpointHasDraft(handoff.snapshot, text), true);
+  assert.ok(handoff.snapshot.chat.conversations.every(conversation => conversation.messages.length === 0),
+    'the local checkpoint excludes completed transcript bodies');
+  assert.equal(handoff.snapshot.chat.pending_run ?? null, null);
+
+  const workspaceRoute = '**/forge/v1/dispatch/workspace';
+  let rejectedRestore = false;
+  const rejectRestore = async route => {
+    if (route.request().postDataJSON()?.operation === 'restore') {
+      rejectedRestore = true;
+      await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
+    } else {
+      await route.continue();
+    }
+  };
+  await context.route(workspaceRoute, rejectRestore);
+  try {
+    await page.goBack({ waitUntil: 'domcontentloaded' });
+    await check(page).toHaveURL(originalUrl);
+    await check(draft).toBeVisible();
+    await check(draft).toHaveValue(text);
+    await check(transcript).not.toContainText(reply);
+    assert.equal(rejectedRestore, true, 'browser Back restores the local draft despite a failed workspace request');
+  } finally {
+    await context.unroute(workspaceRoute, rejectRestore);
+  }
 }
 
 async function previousChatsDesignJourney(design, designUrl) {

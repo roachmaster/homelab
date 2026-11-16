@@ -287,6 +287,12 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let _ = write!(out, "<nav id=\"{}\" class=\"fg-toolbar fg-navigation\" aria-label=\"{}\" data-protected hidden>", escape(id), escape(title));
             children(items, out);
             out.push_str("</nav>");
+            if items
+                .iter()
+                .any(|item| matches!(item, Component::NavigationLink { .. }))
+            {
+                out.push_str("<p data-workspace-navigation-status role=\"status\" hidden></p>");
+            }
         }
         Component::NavigationLink {
             id,
@@ -295,7 +301,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         } => {
             let _ = write!(
                 out,
-                "<a id=\"{}\" class=\"fg-navigation-link\" href=\"{}\" target=\"_blank\" rel=\"noopener noreferrer\">{}</a>",
+                "<a id=\"{}\" class=\"fg-navigation-link\" href=\"{}\" data-workspace-navigation>{}</a>",
                 escape(id),
                 document.href(),
                 escape(label),
@@ -381,7 +387,7 @@ mod tests {
     use crate::generate::application::ide_document;
 
     #[test]
-    fn design_opens_in_an_isolated_tab_from_the_protected_navigation() {
+    fn design_opens_in_the_forge_tab_from_the_protected_navigation() {
         let document = ide_document();
         document.validate().unwrap();
         let navigation = document.children.iter().find(|component| {
@@ -393,7 +399,7 @@ mod tests {
         let (_, after_chat) = output.split_once("id=\"open-chat\"").unwrap();
         let (_, after_workbench) = after_chat.split_once("id=\"open-workbench\"").unwrap();
         let (_, after_button) = after_workbench.split_once("</button>").unwrap();
-        assert_eq!(after_button, "<a id=\"open-design\" class=\"fg-navigation-link\" href=\"/design\" target=\"_blank\" rel=\"noopener noreferrer\">Design</a></nav>");
+        assert_eq!(after_button, "<a id=\"open-design\" class=\"fg-navigation-link\" href=\"/design\" data-workspace-navigation>Design</a></nav><p data-workspace-navigation-status role=\"status\" hidden></p>");
     }
 }
 
