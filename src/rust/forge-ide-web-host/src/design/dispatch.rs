@@ -129,10 +129,18 @@ pub(super) const BODY: &[Node] = &[
         element!(Dl [Class = "storage"];
             element!(Div;
                 element!(Dt;
+                    element!(Code; text("ide.chat.run.models")),
+                ),
+                element!(Dd; text("List the model IDs the runner accepts, the default model and which model is currently ready on Forge.")),
+            ),
+            element!(Div;
+                element!(Dt;
                     element!(Code; text("ide.chat.run.submit")),
                 ),
                 element!(Dd;
-                    text("Send a stable chat ID, the new turn and an idempotency key. Include the expected revision for a continuation. Receive "),
+                    text("Send a stable chat ID, the new turn, the selected "),
+                    element!(Code; text("model_id")),
+                    text(" and an idempotency key. Include the expected revision for a continuation. Receive "),
                     element!(Code; text("202 Accepted")),
                     text(" with the run ID, chat ID and queued status after commit. Retrying with the same key returns the existing run."),
                 ),
@@ -154,7 +162,7 @@ pub(super) const BODY: &[Node] = &[
                 element!(Dd; text("Send the run ID. Receive the current cancellation or terminal status.")),
             ),
         ),
-        element!(P; text("The IDE keeps the pending run ID in its tab checkpoint. A reload resumes authorized event reads even for a first turn that is still waiting to appear in Previous chats. The browser uses short event-page requests because the current web host serves one request at a time. Chat history actions keep their existing destinations.")),
+        element!(P; text("The runner pins the chosen model for each run. Forge loads it locally if needed and then claims the job. The IDE keeps the pending run ID and its model in the tab checkpoint. A reload resumes authorized event reads even for a first turn that is still waiting to appear in Previous chats. The browser uses short event-page requests because the current web host serves one request at a time. Chat history actions keep their existing destinations.")),
         element!(Div [Class = "contract-examples"];
             element!(Section [Class = "contract-example", AriaLabelledby = "claim-dto-title"];
                 element!(H3 [Id = "claim-dto-title"]; text("Worker claim DTO")),

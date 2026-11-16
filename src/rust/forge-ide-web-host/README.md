@@ -202,6 +202,10 @@ that date across follow-ups. It checks the current revision when changing
 expiration, keeping a chat indefinitely, or deleting it. The runner expires
 chats at midnight after their keep-through date.
 
+With `chat.async_dispatch` enabled, **Model** in Chat lists the versions
+configured by the runner. The selected `model_id` is pinned to each queued
+run. Forge loads the selected model when its job is ready.
+
 Without the runner setting, the host keeps up to 12 bounded tab checkpoints in
 session memory. Session rotation and host restart clear those checkpoints.
 
