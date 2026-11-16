@@ -254,9 +254,9 @@ pub fn ide_transport() -> Transport {
         ),
         (
             "chat_history_retention_set",
-            "chat_history_failed",
             "ide.chat.history.retention.set",
             "chat_history_retention_set",
+            "chat_history_failed",
         ),
         (
             "chat_history_delete",
