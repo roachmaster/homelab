@@ -54,6 +54,7 @@ pub struct RequestBinding {
     pub deadline: Option<String>,
     pub timeout_ms: Option<u32>,
     pub accept_events: Vec<String>,
+    pub error_events: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Transport {
@@ -79,7 +80,11 @@ impl Transport {
                 || b.headers.len() > 12
                 || b.accept_events.is_empty()
                 || b.accept_events.len() > 8
-                || b.accept_events.iter().any(|v| !component::key(v))
+                || b.error_events.len() > 8
+                || b.accept_events
+                    .iter()
+                    .chain(&b.error_events)
+                    .any(|v| !component::key(v))
                 || b.timeout_ms.is_some_and(|ms| !(100..=30_000).contains(&ms))
                 || b.deadline.as_ref().is_some_and(|v| !path(v))
             {

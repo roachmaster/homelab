@@ -72,6 +72,13 @@ pub enum Component {
         id: String,
         children: Vec<Component>,
     },
+    Dialog {
+        id: String,
+        title: String,
+        close_action: String,
+        initial_focus: String,
+        children: Vec<Component>,
+    },
     Toolbar(Vec<Component>),
     Navigation {
         id: String,
@@ -132,6 +139,8 @@ pub enum Component {
         action: String,
         emphasis: ButtonEmphasis,
         check_input: Option<String>,
+        controls: Option<String>,
+        uuid_field: Option<String>,
     },
     /// A button whose visual glyph is decorative and whose label names the action.
     IconButton {
@@ -140,6 +149,11 @@ pub enum Component {
         action: String,
         emphasis: ButtonEmphasis,
         glyph: char,
+    },
+    DateInput {
+        id: String,
+        label: String,
+        action: String,
     },
     Filter {
         id: String,
@@ -197,6 +211,7 @@ macro_rules! component {
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (region $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Region { id:$id.into(),children:vec![$($child),*] } };
+    (dialog $id:expr, $title:expr, $close:expr, $focus:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Dialog{id:$id.into(),title:$title.into(),close_action:$close.into(),initial_focus:$focus.into(),children:vec![$($child),*]} };
     (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
@@ -216,10 +231,13 @@ macro_rules! component {
     (heading $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Heading} };
     (status $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:true,style:$crate::generate::TextStyle::Body} };
     (select $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Select{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None} };
-    (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:None} };
+    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:None,uuid_field:None} };
+    (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:None,controls:None,uuid_field:None} };
     (primary_icon $id:expr, $label:expr, $action:expr, $glyph:expr) => { $crate::generate::Component::IconButton{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,glyph:$glyph} };
-    (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into())} };
+    (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:None} };
+    (uuid_button $id:expr, $label:expr, $action:expr, $input:expr, $uuid_field:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:Some($uuid_field.into())} };
+    (toggle_panel $id:expr, $label:expr, $action:expr, $controls:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:Some($controls.into()),uuid_field:None} };
+    (date_input $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::DateInput{id:$id.into(),label:$label.into(),action:$action.into()} };
     (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into()} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
@@ -275,6 +293,7 @@ impl Document {
                 Component::Screen { id, title, .. }
                 | Component::Navigation { id, title, .. }
                 | Component::Panel { id, title, .. }
+                | Component::Dialog { id, title, .. }
                 | Component::Disclosure { id, title, .. }
                 | Component::Pane { id, title, .. } => (Some(id), Some(title), None),
                 Component::Row(_)
@@ -296,6 +315,7 @@ impl Document {
                     id, label, action, ..
                 }
                 | Component::TextArea { id, label, action }
+                | Component::DateInput { id, label, action }
                 | Component::Filter { id, label, action }
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
@@ -327,10 +347,27 @@ impl Document {
                     return Err("navigation link requires a navigation parent and nonempty label");
                 }
                 Component::Button {
-                    check_input: Some(id),
+                    check_input,
+                    controls,
+                    uuid_field,
                     ..
-                } if !key(id) => {
-                    return Err("invalid checked input id");
+                } if [check_input, controls, uuid_field]
+                    .into_iter()
+                    .flatten()
+                    .any(|id| !key(id)) =>
+                {
+                    return Err("invalid button reference or UUID field");
+                }
+                Component::Dialog {
+                    id,
+                    close_action,
+                    initial_focus,
+                    ..
+                } => {
+                    if !key(close_action) || !key(initial_focus) {
+                        return Err("invalid dialog action or focus reference");
+                    }
+                    insert(ids, &format!("{id}-title"))?;
                 }
                 Component::IconButton { label, glyph, .. }
                 | Component::PaneHeaderLink { label, glyph, .. }
@@ -446,6 +483,7 @@ impl Document {
                 Component::Navigation { children, .. }
                 | Component::Screen { children, .. }
                 | Component::Panel { children, .. }
+                | Component::Dialog { children, .. }
                 | Component::Disclosure { children, .. }
                 | Component::PaneLayout { children, .. }
                 | Component::Region { children, .. }

@@ -178,6 +178,19 @@ impl UiModel {
             | UiEvent::SelectChat { .. }
             | UiEvent::SetChatDraft { .. }
             | UiEvent::SendChat {}
+            | UiEvent::SendPersistentChat { .. }
+            | UiEvent::ShowChatHistory {}
+            | UiEvent::MoreChatHistory {}
+            | UiEvent::NewerChatHistory {}
+            | UiEvent::OpenSavedChat { .. }
+            | UiEvent::ManageSavedChat {}
+            | UiEvent::ShowChatExpiry {}
+            | UiEvent::SetChatExpiry { .. }
+            | UiEvent::ConfirmChatExpiry {}
+            | UiEvent::KeepChatLongTerm {}
+            | UiEvent::ShowChatDelete {}
+            | UiEvent::ConfirmChatDelete {}
+            | UiEvent::CloseChatDialog {}
                 if self.catalog.is_none() =>
             {
                 return Err(UiError::NotConnected)
@@ -186,9 +199,20 @@ impl UiModel {
             UiEvent::OpenWorkbench {} => {
                 self.chats.workbench = true;
                 self.workbench_seen = true;
+                self.chats.close_history();
             }
             UiEvent::NewChat {} => self.chats.new_conversation()?,
-            UiEvent::SelectChat { value } => self.chats.select(&value)?,
+            UiEvent::SelectChat { value } => {
+                let request_id = self
+                    .chats
+                    .history
+                    .enabled
+                    .then(|| self.next_id(input.now_ms))
+                    .transpose()?;
+                if let Some(request) = self.chats.select(&value, request_id)? {
+                    effects.push(UiEffect::ChatHistory(request));
+                }
+            }
             UiEvent::SetChatDraft {
                 conversation,
                 value,
@@ -199,6 +223,43 @@ impl UiModel {
                     effects.push(UiEffect::Chat { request });
                 }
             }
+            UiEvent::SendPersistentChat { chat_id } => {
+                let request_id = self.next_id(input.now_ms)?;
+                if let Some(request) = self.chats.send_with_id(request_id, Some(chat_id))? {
+                    effects.push(UiEffect::Chat { request });
+                }
+            }
+            UiEvent::ShowChatHistory {}
+            | UiEvent::MoreChatHistory {}
+            | UiEvent::NewerChatHistory {}
+            | UiEvent::OpenSavedChat { .. }
+            | UiEvent::ManageSavedChat {}
+            | UiEvent::ConfirmChatExpiry {}
+            | UiEvent::KeepChatLongTerm {}
+            | UiEvent::ConfirmChatDelete {} => {
+                let request_id = self.next_id(input.now_ms)?;
+                let request = match input.event {
+                    UiEvent::ShowChatHistory {} => self.chats.toggle_history(request_id),
+                    UiEvent::MoreChatHistory {} => self.chats.page_history(request_id, false),
+                    UiEvent::NewerChatHistory {} => self.chats.page_history(request_id, true),
+                    UiEvent::OpenSavedChat { chat_id } => {
+                        self.chats.open_saved(request_id, chat_id)
+                    }
+                    UiEvent::ManageSavedChat {} => self.chats.manage_saved(request_id),
+                    UiEvent::ConfirmChatExpiry {} => self.chats.set_retention(request_id, false),
+                    UiEvent::KeepChatLongTerm {} => self.chats.set_retention(request_id, true),
+                    UiEvent::ConfirmChatDelete {} => self.chats.delete_saved(request_id),
+                    _ => unreachable!("matched chat history request"),
+                }?;
+                if let Some(request) = request {
+                    effects.push(UiEffect::ChatHistory(request));
+                }
+            }
+            UiEvent::ShowChatExpiry {} => self.chats.show_history_dialog(false)?,
+            UiEvent::ShowChatDelete {} => self.chats.show_history_dialog(true)?,
+            UiEvent::SetChatExpiry { value } => self.chats.set_expiry_date(value)?,
+            UiEvent::CloseChatDialog {} => self.chats.close_history_dialog(),
+            UiEvent::ChatHistory(response) => self.chats.accept_history(response),
             UiEvent::ChatResult {
                 request_id,
                 outcome,
@@ -209,6 +270,7 @@ impl UiModel {
             } => {
                 self.chats
                     .complete(&request_id, ChatOutcome::Error { category });
+                self.chats.history_network_failed(&request_id, category);
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
@@ -316,6 +378,7 @@ impl UiModel {
                     self.node = sole[0].0.clone();
                     self.project = sole[0].1.clone();
                 }
+                self.chats.history.enabled = catalog.chat_history;
                 self.catalog = Some(catalog);
                 self.chats.open();
                 self.pairing = None;

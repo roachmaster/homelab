@@ -115,6 +115,7 @@ pub struct InputBinding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FilterAction {
     SetChatDraft { conversation: usize },
+    SetChatExpiry {},
     SetFileFilter { report: RequestToken },
     SetProjectQuery { report: RequestToken },
     SetSymbolFilter { report: RequestToken, entry: u32 },
@@ -158,6 +159,9 @@ pub struct RowView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    OpenSavedChat {
+        chat_id: String,
+    },
     SelectSearchResult {
         report: RequestToken,
         entry: u32,

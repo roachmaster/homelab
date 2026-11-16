@@ -19,6 +19,8 @@ let finishReload=null;
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
 const draftFields=[...document.querySelectorAll('textarea[data-action]')];
 const leaveDialog=document.getElementById('leave-confirmation');
+const dialogs=new Map([...document.querySelectorAll('[data-modal]')].map(n=>[n.id,n]));
+const panelToggles=new Map([...document.querySelectorAll('button[data-action][aria-expanded][aria-controls]')].map(n=>[n.getAttribute('aria-controls'),n]));
 const layouts=new Map();
 const sourceFormats=new Map();
 let typeahead=new WeakMap();
@@ -53,20 +55,30 @@ function reloadPage(){
 }
 function visible(n){
   if(!n||!n.isConnected||n.closest('[hidden]'))return false;
-  for(let p=n.parentElement;p;p=p.parentElement)if(p.tagName==='DETAILS'&&!p.open&&!p.querySelector(':scope > summary')?.contains(n))return false;
+  for(let p=n.parentElement;p;p=p.parentElement){
+    if(p.tagName==='DIALOG'&&!p.open)return false;
+    if(p.tagName==='DETAILS'&&!p.open&&!p.querySelector(':scope > summary')?.contains(n))return false;
+  }
   return true;
 }
 function tell(event,sequence){if(worker && !fatalState)worker.postMessage(sequence===undefined?event:{event,presentation_sequence:sequence});}
 function sendAction(n,value,sequence){
   if(!visible(n)||n.disabled)return;
   const bound=actionByElement.get(n);
-  const action=bound || (n.hasAttribute('data-dynamic-action')?null:{kind:n.dataset.action});
+  let action=bound || (n.hasAttribute('data-dynamic-action')?null:{kind:n.dataset.action});
   if(!action?.kind||!worker||fatalState)return;
   if(sequence===undefined){
     if(presentationSequence>=2147483647){fatal('The presentation message limit was reached. Reload to retry.');return;}
     sequence=++presentationSequence;
   }
   const pane=n.closest('[data-pane]');
+  const uuidField=n.dataset.uuidField;
+  if(uuidField){
+    const bytes=crypto.getRandomValues(new Uint8Array(16));
+    bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+    action={...action,[uuidField]:[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-')};
+  }
   tell(value===undefined?action:{...action,value},sequence);
   pendingActionOrigin={sequence,pane};
 }
@@ -115,6 +127,8 @@ function clearProtected(){
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
+  for(const n of dialogs.values())if(n.open)n.close();
+  for(const n of panelToggles.values())n.setAttribute('aria-expanded','false');
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
   workspaceWork=false;
@@ -152,7 +166,13 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(origin?.sequence===acknowledgedSequence)pendingActionOrigin=null;
   let invalidatedFocus=null;
   const sourceTargets=[];
-  for(const b of view.visibility||[]){const n=element(b.id);if(n)n.hidden=!b.visible;}
+  const dialogBindings=[];
+  for(const b of view.visibility||[]){
+    const n=element(b.id);if(!n)continue;
+    if(dialogs.has(b.id)){dialogBindings.push([n,b.visible]);continue;}
+    n.hidden=!b.visible;
+    panelToggles.get(b.id)?.setAttribute('aria-expanded',String(b.visible));
+  }
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
   for(const b of view.inputs||[]){
@@ -329,6 +349,14 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     const heading=pane?element(pane.id+'-heading'):null;
     if((heading&&(invalidatedFocus===heading||focus===heading))||(direct&&focus.disabled))sourceFocus=anchor;
   }
+  const focusedDialog=focus?.closest?.('[data-modal]');
+  for(const [n,show] of dialogBindings)if(!show&&n.open)n.close();
+  for(const [n,show] of dialogBindings)if(show&&!n.open){
+    n.showModal();
+    element(n.dataset.initialFocus)?.focus();
+    return;
+  }
+  if(focusedDialog&&!focusedDialog.open&&document.activeElement!==document.body&&visible(document.activeElement))return;
   if(visible(sourceFocus)){sourceFocus.focus({preventScroll:true});return;}
   if(visible(invalidatedFocus)){invalidatedFocus.focus();return;}
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
@@ -388,6 +416,7 @@ for(const n of document.querySelectorAll('input[data-action],textarea[data-actio
   const sequence=++presentationSequence;inputDrafts.set(n,{context,sequence,invalid:false});
   n.setCustomValidity('');n.removeAttribute('aria-invalid');sendAction(n,n.value,sequence);
 });
+for(const n of dialogs.values())n.addEventListener('cancel',event=>{event.preventDefault();tell({kind:n.dataset.modal});});
 for(const n of document.querySelectorAll('form[data-action]'))n.addEventListener('submit',e=>{e.preventDefault();const input=n.querySelector('input[name="value"]');if(!input||n.querySelector('button')?.disabled)return;const value=input.value;input.value='';sendAction(n,value);});
 for(const n of document.querySelectorAll('[data-reload]'))n.addEventListener('click',()=>{
   if(hasWork()&&leaveDialog)leaveDialog.showModal();
@@ -532,12 +561,12 @@ async function workspaceRequest(body,keepalive,signal){
     body,keepalive,signal,credentials:'same-origin',redirect:'error',cache:'no-store'
   });
 }
-async function restoreWorkspace(){
+async function restoreWorkspace(chatHistory){
   if(!workspaceTab||!csrf)return null;
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),2500);
   try{
-    const request=JSON.stringify({operation:'restore',tab:workspaceTab});
+    const request=JSON.stringify({operation:'restore',tab:workspaceTab,...(chatHistory?{history:true}:{})});
     const response=await workspaceRequest(request,false,controller.signal);
     if(!response.ok){await response.body?.cancel();return null;}
     const saved=safeJson(decoder.decode(await bounded(response,WORKSPACE_MAX)));
@@ -617,15 +646,24 @@ async function run(effect){
     if(binding.csrf){if(!csrf){failed(id,'denied');return;}headers['Forge-CSRF']=csrf;}
     const body=JSON.stringify(effect);if(encoder.encode(body).length>16384)throw new Error('Request limit');
     const response=await fetch('/forge/v1/dispatch',{method:'POST',headers,body,credentials:'same-origin',redirect:'error',signal:controller.signal,cache:'no-store'});
-    if(!response.ok){if(response.body)await response.body.cancel();if(binding.kind==='chat'&&(response.status===401||response.status===403)){fatal('Your Forge session expired. Reload to reconnect.');return;}failed(id,response.status===401||response.status===403?'denied':response.status===413?'limit':response.status===408||response.status===504?'timeout':response.status>=500?'unavailable':'invalid_response');return;}
-    const bytes=await bounded(response,MAX);const decoded=safeJson(decoder.decode(bytes));
+    const typedErrors=binding.error_events??[];
+    if((binding.kind==='chat'||typedErrors.length)&&(response.status===401||response.status===403)){
+      if(response.body)await response.body.cancel();
+      fatal('Your Forge session expired. Reload to reconnect.');return;
+    }
+    if(!response.ok&&(!typedErrors.length||!(response.status>=400&&response.status<500||response.status===503))){
+      if(response.body)await response.body.cancel();
+      failed(id,response.status===401||response.status===403?'denied':response.status===413?'limit':response.status===408||response.status===504?'timeout':response.status>=500?'unavailable':'invalid_response');return;
+    }
+    const bytes=await bounded(response,response.ok?MAX:16384);const decoded=safeJson(decoder.decode(bytes));
     if(binding.deadline && Date.now()>Number(field(effect,binding.deadline))){failed(id,'timeout');return;}
-    if(decoded.protocol_version!==1 || !decoded.event || !binding.accept_events.includes(decoded.event.kind))throw new Error('Unexpected response envelope');
+    const events=response.ok?binding.accept_events:typedErrors;
+    if(decoded.protocol_version!==1||!decoded.event||!events.includes(decoded.event.kind)||(!response.ok&&decoded.event.request_id!==id))throw new Error('Unexpected response envelope');
     let saved=null;
     if(decoded.csrf!==undefined && decoded.csrf!==null){
       if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');
       csrf=decoded.csrf;
-      saved=await restoreWorkspace();
+      saved=await restoreWorkspace(decoded.event.catalog?.chat_history===true);
     }
     try{
       dispatch(decoded.event,null,saved!==null);

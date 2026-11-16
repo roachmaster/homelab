@@ -177,6 +177,7 @@ fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
             csrf: false,
             deadline: None,
             timeout_ms: None,
+            error_events: vec![],
             accept_events: vec!["collection_loaded".into()],
         }],
     };

@@ -1,5 +1,7 @@
 use super::*;
 use crate::markdown::render_markdown;
+mod history;
+use history::History;
 
 #[derive(Debug, Default)]
 pub(super) struct Chats {
@@ -7,10 +9,14 @@ pub(super) struct Chats {
     selected: usize,
     conversations: Vec<Conversation>,
     pending: Option<Pending>,
+    pub(super) history: History,
 }
 
 #[derive(Debug, Default)]
 struct Conversation {
+    chat_id: Option<String>,
+    revision: Option<u64>,
+    summary: Option<ChatSummaryDto>,
     messages: Vec<ChatMessage>,
     draft: String,
     status: String,
@@ -21,6 +27,7 @@ struct Pending {
     conversation: usize,
     request_id: String,
     prompt: String,
+    chat_id: Option<String>,
 }
 
 impl Chats {
@@ -40,6 +47,8 @@ impl Chats {
                 .map(|conversation| ChatConversationSnapshot {
                     messages: conversation.messages.clone(),
                     draft: conversation.draft.clone(),
+                    chat_id: conversation.chat_id.clone(),
+                    revision: conversation.revision,
                 })
                 .collect(),
         }
@@ -56,7 +65,9 @@ impl Chats {
             .map(|conversation| Conversation {
                 messages: conversation.messages,
                 draft: conversation.draft,
-                status: String::new(),
+                chat_id: conversation.chat_id,
+                revision: conversation.revision,
+                ..Conversation::default()
             })
             .collect();
         self.pending = None;
@@ -71,21 +82,79 @@ impl Chats {
     }
 
     pub fn new_conversation(&mut self) -> Result<(), UiError> {
-        if self.conversations.len() == MAX_CONVERSATIONS {
-            return Err(UiError::Limit);
+        if self.history.mutation_pending() || self.history.dialog_open() {
+            return Err(UiError::Busy);
         }
+        self.make_room()?;
+        self.close_history();
         self.selected = self.conversations.len();
         self.conversations.push(Conversation::default());
         Ok(())
     }
 
-    pub fn select(&mut self, value: &str) -> Result<(), UiError> {
-        let index = value.parse::<usize>().map_err(|_| UiError::InvalidAction)?;
-        if index >= self.conversations.len() {
-            return Err(UiError::InvalidAction);
+    pub fn select(
+        &mut self,
+        value: &str,
+        request_id: Option<String>,
+    ) -> Result<Option<ChatHistoryRequest>, UiError> {
+        if self.history.mutation_pending() || self.history.dialog_open() {
+            return Err(UiError::Busy);
         }
+        let index = value.parse::<usize>().map_err(|_| UiError::InvalidAction)?;
+        let target = self
+            .conversations
+            .get(index)
+            .ok_or(UiError::InvalidAction)?;
+        if index != self.selected && target.revision.is_some() {
+            if let (Some(request_id), Some(chat_id)) = (request_id, target.chat_id.clone()) {
+                return self.open_saved(request_id, chat_id);
+            }
+        }
+        self.close_history();
         self.selected = index;
+        Ok(None)
+    }
+
+    fn make_room(&mut self) -> Result<(), UiError> {
+        if self.conversations.len() < MAX_CONVERSATIONS {
+            return Ok(());
+        }
+        let reusable = self
+            .history
+            .enabled
+            .then(|| {
+                self.conversations
+                    .iter()
+                    .enumerate()
+                    .position(|(index, chat)| {
+                        index != self.selected
+                            && self
+                                .pending
+                                .as_ref()
+                                .is_none_or(|pending| pending.conversation != index)
+                            && chat.draft.is_empty()
+                            && (chat.revision.is_some() || chat.messages.is_empty())
+                    })
+            })
+            .flatten();
+        self.remove_conversation(reusable.ok_or(UiError::Limit)?);
         Ok(())
+    }
+
+    fn remove_conversation(&mut self, index: usize) {
+        self.conversations.remove(index);
+        self.selected = if self.selected > index {
+            self.selected - 1
+        } else {
+            self.selected
+                .min(self.conversations.len().saturating_sub(1))
+        };
+        if let Some(pending) = &mut self.pending {
+            if pending.conversation > index {
+                pending.conversation -= 1;
+            }
+        }
+        self.open();
     }
 
     pub fn draft(&mut self, conversation: usize, value: String) -> Result<(), UiError> {
@@ -109,7 +178,15 @@ impl Chats {
     }
 
     pub fn send(&mut self, request_id: String) -> Result<Option<PreparedChat>, UiError> {
-        if self.pending.is_some() {
+        self.send_with_id(request_id, None)
+    }
+
+    pub fn send_with_id(
+        &mut self,
+        request_id: String,
+        supplied_id: Option<String>,
+    ) -> Result<Option<PreparedChat>, UiError> {
+        if self.pending.is_some() || self.history.waiting() || self.history.dialog_open() {
             return Err(UiError::Busy);
         }
         let chat = self
@@ -130,15 +207,30 @@ impl Chats {
                 "This conversation reached its context limit. Start a new chat to continue.".into();
             return Ok(None);
         }
+        let chat_id = if self.history.enabled {
+            if chat.chat_id.is_none() {
+                chat.chat_id = Some(
+                    supplied_id
+                        .filter(|id| valid_chat_id(id))
+                        .ok_or(UiError::InvalidAction)?,
+                );
+            }
+            chat.chat_id.clone()
+        } else {
+            None
+        };
         chat.status.clear();
         self.pending = Some(Pending {
             conversation: self.selected,
             request_id: request_id.clone(),
             prompt,
+            chat_id: chat_id.clone(),
         });
         Ok(Some(PreparedChat {
             request_id,
             messages,
+            chat_id,
+            expected_revision: self.history.enabled.then_some(chat.revision).flatten(),
         }))
     }
 
@@ -152,8 +244,27 @@ impl Chats {
         }
         let pending = self.pending.take().expect("matching chat request");
         let chat = &mut self.conversations[pending.conversation];
-        chat.status = match outcome {
-            ChatOutcome::Answer { content } if valid_chat_text(&content, MAX_CHAT_REPLY_BYTES) => {
+        let answer = match outcome {
+            ChatOutcome::Answer { content } if pending.chat_id.is_none() => Ok(content),
+            ChatOutcome::SavedAnswer {
+                content,
+                chat_id,
+                revision,
+            } if pending.chat_id.as_ref() == Some(&chat_id)
+                && revision > chat.revision.unwrap_or(0)
+                && revision <= MAX_JS_INTEGER
+                && valid_chat_text(&content, MAX_CHAT_REPLY_BYTES) =>
+            {
+                chat.revision = Some(revision);
+                if let Some(summary) = &mut chat.summary {
+                    summary.revision = revision;
+                }
+                Ok(content)
+            }
+            _ => Err(outcome),
+        };
+        chat.status = match answer {
+            Ok(content) if valid_chat_text(&content, MAX_CHAT_REPLY_BYTES) => {
                 chat.messages.extend([
                     ChatMessage {
                         role: ChatRole::User,
@@ -167,12 +278,20 @@ impl Chats {
                 chat.draft.clear();
                 String::new()
             }
-            ChatOutcome::Error {
+            Err(ChatOutcome::SavedChatUnavailable) => {
+                chat.messages.clear();
+                chat.chat_id = None;
+                chat.revision = None;
+                chat.summary = None;
+                "This saved chat is unavailable. Send again to start a new chat with this draft.".into()
+            }
+            Err(ChatOutcome::SavedChatConflict) => "This chat changed in another tab. Reopen it from Previous chats to update the transcript. Your draft is still in the composer.".into(),
+            Err(ChatOutcome::Error {
                 category: FailureKind::Unavailable,
-            } => "Forge inference is unavailable. Your message is still in the composer.".into(),
-            ChatOutcome::Error {
+            }) => "Forge inference is unavailable. Your message is still in the composer.".into(),
+            Err(ChatOutcome::Error {
                 category: FailureKind::Timeout,
-            } => "Forge took too long to respond. Your message is still in the composer.".into(),
+            }) => "Forge took too long to respond. Your message is still in the composer.".into(),
             _ => "Forge could not return an answer. Your message is still in the composer.".into(),
         };
     }
@@ -232,7 +351,7 @@ impl Chats {
         view.choices.push(SelectBinding {
             id: "chat-conversation",
             value: self.selected.to_string(),
-            disabled: !connected,
+            disabled: !connected || self.history.mutation_pending() || self.history.dialog_open(),
             options: self
                 .conversations
                 .iter()
@@ -259,6 +378,7 @@ impl Chats {
                 })
                 .collect(),
         });
+        self.project_history(view, connected);
         view.inputs.push(InputBinding {
             id: "chat-draft",
             value: current.map(|c| c.draft.clone()).unwrap_or_default(),
@@ -273,12 +393,16 @@ impl Chats {
             ("open-workbench", !connected || self.workbench),
             (
                 "new-chat",
-                !connected || self.conversations.len() == MAX_CONVERSATIONS,
+                !connected
+                    || self.history.mutation_pending()
+                    || (!self.history.enabled && self.conversations.len() == MAX_CONVERSATIONS),
             ),
             (
                 "send-chat",
                 !connected
                     || self.pending.is_some()
+                    || self.history.waiting()
+                    || self.history.dialog_open()
                     || current.is_none_or(|c| c.draft.trim().is_empty()),
             ),
         ] {

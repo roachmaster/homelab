@@ -54,14 +54,15 @@ Never publish that code or put it in a URL. The prototype is single-local-operat
 not an internet service or a general relay.
 
 After admission, use **New chat** to start a separate conversation and use
-**Conversation** to switch between histories and drafts. Follow-ups send the
-selected conversation's bounded history to the active Forge llama.cpp model.
-While you work, Forge checkpoints the selected conversation, accepted replies and
-unsent drafts. Mission Control stores them in PostgreSQL through the local runner,
-so you can return to a saved conversation after a deploy. A new browser tab loads
-committed Chat history. Reopening the original tab after Back or reload also
-restores its unsent drafts and Workbench location. An interrupted send restores
-its prompt as a draft. A failed send also leaves the draft ready to retry.
+**Conversation** to switch between open conversations and drafts in this tab.
+When the host is configured with a PostgreSQL-backed runner, **Previous chats**
+lists saved conversations across tabs. Open one to read its committed transcript
+or send a follow-up. With a saved conversation open, **Manage** lets you keep it
+long term, set the last UTC date to keep it, or confirm deletion. The runner
+commits accepted replies, chat history and retention to PostgreSQL. A new browser
+tab opens the most recent saved chat. Reopening the original tab after Back or
+reload also restores its unsent drafts and Workbench location. An interrupted or
+failed send leaves a draft ready to retry.
 
 Browsers that support the native leave warning can show it when a draft,
 conversation or Workbench context is open. The browser supplies the wording.

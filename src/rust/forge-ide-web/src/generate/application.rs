@@ -25,12 +25,49 @@ pub fn ide_document() -> Document {
                 component!(reading_column [
                     component!(toolbar [
                         component!(select "chat-conversation", "Conversation", "select_chat"),
+                        component!(toggle_panel "chat-history-toggle", "Previous chats", "show_chat_history", "chat-history-panel"),
+                        component!(toggle_panel "chat-manage-toggle", "Manage", "manage_saved_chat", "chat-manage-panel"),
                         component!(button "new-chat", "New chat", "new_chat"),
+                    ]),
+                    component!(panel "chat-history-panel", "Saved chats"; [
+                        component!(tree "chat-history-list", "Saved chats"),
+                        component!(row [
+                            component!(button "chat-history-newer", "Newer chats", "newer_chat_history"),
+                            component!(button "chat-history-older", "Older chats", "more_chat_history"),
+                        ]),
+                    ]),
+                    component!(panel "chat-manage-panel", "Chat retention"; [
+                        component!(caption "chat-retention-label", ""),
+                        component!(region "chat-retention-actions"; [
+                            component!(row [
+                                component!(button "chat-show-expiry", "Set expiration", "show_chat_expiry"),
+                                component!(button "chat-long-term", "Keep long term", "keep_chat_long_term"),
+                                component!(button "chat-show-delete", "Delete chat", "show_chat_delete"),
+                            ]),
+                        ]),
+                    ]),
+                    component!(status "chat-history-status", ""),
+                    component!(dialog "chat-expiry-dialog", "Set expiration", "close_chat_dialog", "chat-expiry-date"; [
+                        component!(text "chat-expiry-help", "The chat will be kept through the selected date in UTC."),
+                        component!(date_input "chat-expiry-date", "Keep through", "set_chat_expiry"),
+                        component!(status "chat-expiry-status", ""),
+                        component!(row [
+                            component!(button "chat-expiry-cancel", "Cancel", "close_chat_dialog"),
+                            component!(checked_button "chat-expiry-save", "Save expiration", "confirm_chat_expiry", "chat-expiry-date"),
+                        ]),
+                    ]),
+                    component!(dialog "chat-delete-dialog", "Delete chat", "close_chat_dialog", "chat-delete-cancel"; [
+                        component!(text "chat-delete-description", ""),
+                        component!(status "chat-delete-status", ""),
+                        component!(row [
+                            component!(button "chat-delete-cancel", "Cancel", "close_chat_dialog"),
+                            component!(button "chat-delete-confirm", "Delete chat", "confirm_chat_delete"),
+                        ]),
                     ]),
                     component!(transcript "chat-transcript", "Chat messages"),
                     component!(status "chat-status", ""),
                     component!(textarea "chat-draft", "Message", "set_chat_draft"),
-                    component!(row [component!(checked_button "send-chat", "Send", "send_chat", "chat-draft")]),
+                    component!(row [component!(uuid_button "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id")]),
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
@@ -137,7 +174,7 @@ pub fn ide_transport() -> Transport {
         "Forge-Request-Id",
         "request.request_id",
     ));
-    let mut inspect = common;
+    let mut inspect = common.clone();
     inspect.extend([
         HeaderBinding::field("Forge-Destination", "request.destination"),
         HeaderBinding::field("Forge-Request-Id", "request.token.request_id"),
@@ -145,56 +182,98 @@ pub fn ide_transport() -> Transport {
         HeaderBinding::field("Forge-Target-Incarnation", "request.target_incarnation"),
         HeaderBinding::field("Forge-Expires-Unix-Ms", "request.expires_unix_ms"),
     ]);
+    let mut bindings = vec![
+        RequestBinding {
+            kind: "pair".into(),
+            request_id: "request_id".into(),
+            headers: pair,
+            csrf: false,
+            timeout_ms: None,
+            deadline: None,
+            error_events: vec![],
+            accept_events: vec!["paired".into(), "pair_failed".into()],
+        },
+        RequestBinding {
+            kind: "resume".into(),
+            request_id: "request_id".into(),
+            headers: resume,
+            csrf: false,
+            // A returning tab can be queued behind its interrupted inference.
+            timeout_ms: Some(30_000),
+            deadline: None,
+            error_events: vec![],
+            accept_events: vec!["paired".into(), "pair_failed".into()],
+        },
+        RequestBinding {
+            kind: "inspect".into(),
+            request_id: "request.token.request_id".into(),
+            headers: inspect.clone(),
+            csrf: true,
+            timeout_ms: None,
+            deadline: Some("request.expires_unix_ms".into()),
+            error_events: vec![],
+            accept_events: vec!["result".into()],
+        },
+        RequestBinding {
+            kind: "chat".into(),
+            request_id: "request.request_id".into(),
+            headers: chat,
+            csrf: true,
+            timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
+            deadline: None,
+            error_events: vec![],
+            accept_events: vec!["chat_result".into()],
+        },
+        RequestBinding {
+            kind: "source".into(),
+            request_id: "request.token.request_id".into(),
+            headers: inspect,
+            csrf: true,
+            timeout_ms: None,
+            deadline: Some("request.expires_unix_ms".into()),
+            error_events: vec![],
+            accept_events: vec!["source_result".into()],
+        },
+    ];
+    for (kind, destination, success_event) in [
+        (
+            "chat_history_list",
+            "ide.chat.history.list",
+            "chat_history_listed",
+        ),
+        (
+            "chat_history_open",
+            "ide.chat.history.open",
+            "chat_history_opened",
+        ),
+        (
+            "chat_history_retention_set",
+            "ide.chat.history.retention.set",
+            "chat_history_retention_set",
+        ),
+        (
+            "chat_history_delete",
+            "ide.chat.history.delete",
+            "chat_history_deleted",
+        ),
+    ] {
+        let mut headers = common.clone();
+        headers.push(HeaderBinding::literal("Forge-Destination", destination));
+        headers.push(HeaderBinding::field("Forge-Request-Id", "request_id"));
+        bindings.push(RequestBinding {
+            kind: kind.into(),
+            request_id: "request_id".into(),
+            headers,
+            csrf: true,
+            timeout_ms: None,
+            deadline: None,
+            accept_events: vec![success_event.into()],
+            error_events: vec!["chat_history_failed".into()],
+        });
+    }
     Transport {
         initial_event: "resume".into(),
-        bindings: vec![
-            RequestBinding {
-                kind: "pair".into(),
-                request_id: "request_id".into(),
-                headers: pair,
-                csrf: false,
-                timeout_ms: None,
-                deadline: None,
-                accept_events: vec!["paired".into(), "pair_failed".into()],
-            },
-            RequestBinding {
-                kind: "resume".into(),
-                request_id: "request_id".into(),
-                headers: resume,
-                csrf: false,
-                // A returning tab can be queued behind its interrupted inference.
-                timeout_ms: Some(30_000),
-                deadline: None,
-                accept_events: vec!["paired".into(), "pair_failed".into()],
-            },
-            RequestBinding {
-                kind: "inspect".into(),
-                request_id: "request.token.request_id".into(),
-                headers: inspect.clone(),
-                csrf: true,
-                timeout_ms: None,
-                deadline: Some("request.expires_unix_ms".into()),
-                accept_events: vec!["result".into()],
-            },
-            RequestBinding {
-                kind: "chat".into(),
-                request_id: "request.request_id".into(),
-                headers: chat,
-                csrf: true,
-                timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
-                deadline: None,
-                accept_events: vec!["chat_result".into()],
-            },
-            RequestBinding {
-                kind: "source".into(),
-                request_id: "request.token.request_id".into(),
-                headers: inspect,
-                csrf: true,
-                timeout_ms: None,
-                deadline: Some("request.expires_unix_ms".into()),
-                accept_events: vec!["source_result".into()],
-            },
-        ],
+        bindings,
     }
 }
 pub const IDE_THEME: &str = include_str!("../../ui/theme.yaml");

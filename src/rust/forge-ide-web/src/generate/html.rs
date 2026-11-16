@@ -62,6 +62,18 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children(items, out);
             out.push_str("</section>");
         }
+        Component::Dialog {
+            id,
+            title,
+            close_action,
+            initial_focus,
+            children: items,
+        } => {
+            let id = escape(id);
+            let _ = write!(out, "<dialog id=\"{id}\" class=\"fg-modal\" data-modal=\"{}\" data-initial-focus=\"{}\" aria-labelledby=\"{id}-title\"><h2 id=\"{id}-title\">{}</h2>", escape(close_action), escape(initial_focus), escape(title));
+            children(items, out);
+            out.push_str("</dialog>");
+        }
         Component::Region {
             id,
             children: items,
@@ -222,6 +234,8 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             action,
             emphasis,
             check_input,
+            controls,
+            uuid_field,
         } => {
             let class = match emphasis {
                 ButtonEmphasis::Standard => "fg-button",
@@ -230,9 +244,15 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let check = check_input.as_ref().map_or_else(String::new, |id| {
                 format!(" data-check-input=\"{}\"", escape(id))
             });
+            let controls = controls.as_ref().map_or_else(String::new, |id| {
+                format!(" aria-controls=\"{}\" aria-expanded=\"false\"", escape(id))
+            });
+            let uuid = uuid_field.as_ref().map_or_else(String::new, |field| {
+                format!(" data-uuid-field=\"{}\"", escape(field))
+            });
             let _ = write!(
                 out,
-                "<button type=\"button\" class=\"{class}\" id=\"{}\" data-action=\"{}\"{check} disabled>{}</button>",
+                "<button type=\"button\" class=\"{class}\" id=\"{}\" data-action=\"{}\"{check}{controls}{uuid} disabled>{}</button>",
                 escape(id),
                 escape(action),
                 escape(label)
@@ -291,6 +311,10 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
         Component::TextArea { id, label, action } => {
             let _ = write!(out, "<label class=\"fg-field fg-textarea\" for=\"{id}\"><span>{}</span><textarea id=\"{id}\" rows=\"3\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" disabled></textarea></label>", escape(label), escape(action));
+        }
+        Component::DateInput { id, label, action } => {
+            let id = escape(id);
+            let _ = write!(out, "<label class=\"fg-field\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"date\" data-action=\"{}\" max=\"9999-12-31\" required disabled></label>", escape(label), escape(action));
         }
         Component::Filter { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field fg-filter\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"search\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" maxlength=\"256\" disabled></label>",escape(label),escape(action));

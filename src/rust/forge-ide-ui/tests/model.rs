@@ -4,6 +4,7 @@ fn catalog() -> Catalog {
         protocol_version: 1,
         session_epoch: "session-a".into(),
         timeout_ms: 1000,
+        chat_history: false,
         nodes: vec![NodeChoice {
             key: "lab".into(),
             label: "Lab".into(),

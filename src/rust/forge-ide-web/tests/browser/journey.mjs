@@ -1115,6 +1115,47 @@ async function durableHostRestartJourney() {
     assert.equal(fresh.traffic.count('inspect'), 0, 'the previous tab Workbench bookmark does not transfer');
     assert.equal(fresh.traffic.count('source'), 0);
     assert.equal(relay.completions(), 1, 'reopening the transcript does not replay inference');
+
+    process.stderr.write('QA_CHECK durable_chat_history_retention_and_delete\n');
+    const freshPage = fresh.page;
+    await freshPage.setViewportSize({ width: 390, height: 664 });
+    const previousChats = freshPage.getByRole('button', { name: 'Previous chats' });
+    const manage = freshPage.getByRole('button', { name: 'Manage', exact: true });
+    const savedChats = freshPage.getByRole('tree', { name: 'Saved chats' });
+    await previousChats.click();
+    const savedChat = savedChats.getByRole('treeitem', { name: prompt });
+    await check(savedChat).toBeVisible();
+    await savedChat.click();
+    await check(previousChats).toHaveAttribute('aria-expanded', 'false');
+    await checkTranscript(freshPage);
+    await manage.click();
+    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept long term');
+    await freshPage.getByRole('button', { name: 'Set expiration', exact: true }).click();
+    const expiration = freshPage.getByRole('dialog', { name: 'Set expiration' });
+    await expiration.getByLabel('Keep through').fill('2099-05-12');
+    await expiration.getByRole('button', { name: 'Save expiration' }).click();
+    await check(expiration).toBeHidden();
+    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept through 2099-05-12 (UTC)');
+    await freshPage.getByRole('button', { name: 'Keep long term', exact: true }).click();
+    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept long term');
+    const deleteButton = freshPage.locator('#chat-show-delete');
+    const deletion = freshPage.getByRole('dialog', { name: 'Delete chat' });
+    await deleteButton.click();
+    await check(deletion).toContainText(prompt);
+    await check(deletion.getByRole('button', { name: 'Cancel' })).toBeFocused();
+    await deletion.getByRole('button', { name: 'Cancel' }).click();
+    await check(deletion).toBeHidden();
+    await checkTranscript(freshPage);
+    await deleteButton.click();
+    await deletion.getByRole('button', { name: 'Delete chat', exact: true }).click();
+    await check(deletion).toBeHidden();
+    await check(freshPage.locator('#chat-history-status')).toHaveText('Chat deleted.');
+    await previousChats.click();
+    await check(savedChats).toHaveText('No saved chats yet.');
+    await check(freshPage.locator('#chat-transcript [data-role]')).toHaveCount(0);
+    assert.equal(await freshPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+    assert.equal(relay.completions(), 1, 'retention and deletion do not call inference');
+
   } finally {
     try { await Promise.all(contexts.map(context => context.close())); }
     finally {

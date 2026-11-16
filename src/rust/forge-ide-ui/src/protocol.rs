@@ -16,6 +16,10 @@ pub const MAX_PROBLEMS: usize = MAX_ENTRIES * 16;
 pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 const MAX_WORKBENCH_ENTRY_BOOKMARK_BYTES: usize = 4 * 1024;
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Catalog {
@@ -23,6 +27,8 @@ pub struct Catalog {
     pub session_epoch: String,
     pub timeout_ms: u64,
     pub nodes: Vec<NodeChoice>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub chat_history: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -194,6 +200,10 @@ pub struct ChatSnapshot {
 pub struct ChatConversationSnapshot {
     pub messages: Vec<ChatMessage>,
     pub draft: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
 }
 
 pub fn valid_chat_snapshot(snapshot: &ChatSnapshot) -> bool {
@@ -202,15 +212,13 @@ pub fn valid_chat_snapshot(snapshot: &ChatSnapshot) -> bool {
         && snapshot.selected < conversations.len().max(1)
         && conversations.iter().all(|conversation| {
             conversation.draft.len() <= MAX_CHAT_PROMPT_BYTES
-                && conversation
-                    .messages
-                    .split_last()
-                    .is_none_or(|(reply, history)| {
-                        // The last reply can grow the accepted request beyond its send budget.
-                        valid_chat_messages(history)
-                            && reply.role == ChatRole::Assistant
-                            && valid_chat_text(&reply.content, MAX_CHAT_REPLY_BYTES)
-                    })
+                && conversation.chat_id.as_deref().is_none_or(valid_chat_id)
+                && conversation.revision.is_none_or(|revision| {
+                    conversation.chat_id.is_some()
+                        && revision > 0
+                        && revision <= 9_007_199_254_740_991
+                })
+                && valid_committed_chat_messages(&conversation.messages)
         })
 }
 
@@ -219,13 +227,180 @@ pub fn valid_chat_snapshot(snapshot: &ChatSnapshot) -> bool {
 pub struct PreparedChat {
     pub request_id: String,
     pub messages: Vec<ChatMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChatOutcome {
-    Answer { content: String },
-    Error { category: FailureKind },
+    Answer {
+        content: String,
+    },
+    SavedAnswer {
+        content: String,
+        chat_id: String,
+        revision: u64,
+    },
+    SavedChatUnavailable,
+    SavedChatConflict,
+    Error {
+        category: FailureKind,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RetentionPolicyInput {
+    LongTerm,
+    Expires {
+        expires_on: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_zone: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RetentionPolicyDto {
+    LongTerm,
+    Expires {
+        expires_on: String,
+        time_zone: String,
+        expires_at: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatSummaryDto {
+    pub chat_id: String,
+    pub title: String,
+    pub updated_at: String,
+    pub revision: u64,
+    pub retention: RetentionPolicyDto,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatMessageDto {
+    pub position: usize,
+    pub role: ChatRole,
+    pub content: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatHistoryDto {
+    pub summary: ChatSummaryDto,
+    pub messages: Vec<ChatMessageDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChatHistoryRequest {
+    ChatHistoryList {
+        request_id: String,
+        limit: usize,
+        cursor: Option<String>,
+    },
+    ChatHistoryOpen {
+        request_id: String,
+        chat_id: String,
+    },
+    ChatHistoryRetentionSet {
+        request_id: String,
+        chat_id: String,
+        expected_revision: u64,
+        policy: RetentionPolicyInput,
+    },
+    ChatHistoryDelete {
+        request_id: String,
+        chat_id: String,
+        expected_revision: u64,
+    },
+}
+
+impl ChatHistoryRequest {
+    pub fn request_id(&self) -> &str {
+        match self {
+            Self::ChatHistoryList { request_id, .. }
+            | Self::ChatHistoryOpen { request_id, .. }
+            | Self::ChatHistoryRetentionSet { request_id, .. }
+            | Self::ChatHistoryDelete { request_id, .. } => request_id,
+        }
+    }
+
+    pub fn destination(&self) -> &'static str {
+        match self {
+            Self::ChatHistoryList { .. } => "ide.chat.history.list",
+            Self::ChatHistoryOpen { .. } => "ide.chat.history.open",
+            Self::ChatHistoryRetentionSet { .. } => "ide.chat.history.retention.set",
+            Self::ChatHistoryDelete { .. } => "ide.chat.history.delete",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatHistoryFailureCode {
+    RevisionConflict,
+    NotFound,
+    InvalidRequest,
+    InvalidPolicy,
+    Denied,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChatHistoryResponse {
+    ChatHistoryListed {
+        request_id: String,
+        items: Vec<ChatSummaryDto>,
+        next_cursor: Option<String>,
+    },
+    ChatHistoryOpened {
+        request_id: String,
+        chat: ChatHistoryDto,
+    },
+    ChatHistoryRetentionSet {
+        request_id: String,
+        chat_id: String,
+        revision: u64,
+        retention: RetentionPolicyDto,
+    },
+    ChatHistoryDeleted {
+        request_id: String,
+        chat_id: String,
+        revision: u64,
+    },
+    ChatHistoryFailed {
+        request_id: String,
+        code: ChatHistoryFailureCode,
+    },
+}
+
+impl ChatHistoryResponse {
+    pub fn request_id(&self) -> &str {
+        match self {
+            Self::ChatHistoryListed { request_id, .. }
+            | Self::ChatHistoryOpened { request_id, .. }
+            | Self::ChatHistoryRetentionSet { request_id, .. }
+            | Self::ChatHistoryDeleted { request_id, .. }
+            | Self::ChatHistoryFailed { request_id, .. } => request_id,
+        }
+    }
+}
+
+pub fn valid_chat_id(id: &str) -> bool {
+    id.len() == 36
+        && id.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_digit() || (b'a'..=b'f').contains(&b),
+        })
 }
 
 pub fn valid_chat_text(text: &str, max: usize) -> bool {
@@ -234,6 +409,15 @@ pub fn valid_chat_text(text: &str, max: usize) -> bool {
         && text
             .chars()
             .all(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t'))
+}
+
+pub fn valid_committed_chat_messages(messages: &[ChatMessage]) -> bool {
+    messages.split_last().is_none_or(|(reply, history)| {
+        // The last reply can grow the accepted request beyond its send budget.
+        valid_chat_messages(history)
+            && reply.role == ChatRole::Assistant
+            && valid_chat_text(&reply.content, MAX_CHAT_REPLY_BYTES)
+    })
 }
 
 pub fn valid_chat_messages(messages: &[ChatMessage]) -> bool {
@@ -259,12 +443,27 @@ pub fn valid_chat_messages(messages: &[ChatMessage]) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiEffect {
-    Resume { request_id: String },
-    Pair { request_id: String, code: String },
-    Inspect { request: PreparedInspection },
-    Source { request: PreparedSource },
-    Abort { token: RequestToken },
-    Chat { request: PreparedChat },
+    Resume {
+        request_id: String,
+    },
+    Pair {
+        request_id: String,
+        code: String,
+    },
+    Inspect {
+        request: PreparedInspection,
+    },
+    Source {
+        request: PreparedSource,
+    },
+    Abort {
+        token: RequestToken,
+    },
+    Chat {
+        request: PreparedChat,
+    },
+    #[serde(untagged)]
+    ChatHistory(ChatHistoryRequest),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -286,6 +485,25 @@ pub enum UiEvent {
         value: String,
     },
     SendChat {},
+    SendPersistentChat {
+        chat_id: String,
+    },
+    ShowChatHistory {},
+    MoreChatHistory {},
+    NewerChatHistory {},
+    OpenSavedChat {
+        chat_id: String,
+    },
+    ManageSavedChat {},
+    ShowChatExpiry {},
+    SetChatExpiry {
+        value: String,
+    },
+    ConfirmChatExpiry {},
+    KeepChatLongTerm {},
+    ShowChatDelete {},
+    ConfirmChatDelete {},
+    CloseChatDialog {},
     ChatResult {
         request_id: String,
         outcome: ChatOutcome,
@@ -399,6 +617,8 @@ pub enum UiEvent {
     SourceResult {
         result: SourceResultEvent,
     },
+    #[serde(untagged)]
+    ChatHistory(ChatHistoryResponse),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
