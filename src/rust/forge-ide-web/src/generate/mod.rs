@@ -68,7 +68,7 @@ impl Transport {
         }
         if !component::key(&self.initial_event)
             || self.bindings.is_empty()
-            || self.bindings.len() > 16
+            || self.bindings.len() > 24
         {
             return Err("invalid transport declarations");
         }

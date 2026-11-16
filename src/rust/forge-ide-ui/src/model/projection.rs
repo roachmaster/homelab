@@ -805,6 +805,13 @@ impl UiModel {
             transcripts: vec![],
         };
         self.chats.project(&mut view, connected);
+        self.mail.project(
+            &mut view,
+            connected,
+            self.catalog
+                .as_ref()
+                .is_some_and(|catalog| catalog.mail_enabled),
+        );
         view
     }
 }

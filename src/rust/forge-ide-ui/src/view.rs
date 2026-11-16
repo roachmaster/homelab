@@ -19,6 +19,8 @@ pub struct ViewModel {
 pub struct TranscriptBinding {
     pub id: &'static str,
     pub conversation: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assistant_label: Option<&'static str>,
     pub messages: Vec<TranscriptMessage>,
 }
 
@@ -116,6 +118,8 @@ pub struct InputBinding {
 pub enum FilterAction {
     SetChatDraft { conversation: usize },
     SetChatExpiry {},
+    SetMailSubject {},
+    SetMailDraft {},
     SetFileFilter { report: RequestToken },
     SetProjectQuery { report: RequestToken },
     SetSymbolFilter { report: RequestToken, entry: u32 },
@@ -159,6 +163,9 @@ pub struct RowView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    MailOpenThread {
+        thread_id: String,
+    },
     OpenSavedChat {
         chat_id: String,
     },

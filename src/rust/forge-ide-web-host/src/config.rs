@@ -113,6 +113,15 @@ impl HostConfig {
                 "async chat requires durable workspace checkpoints",
             ));
         }
+        if self
+            .chat
+            .as_ref()
+            .is_some_and(|chat| chat.mail_enabled && !chat.async_dispatch)
+        {
+            return Err(HostError::Configuration(
+                "Mail requires durable asynchronous dispatch",
+            ));
+        }
         let mut keys = BTreeSet::new();
         for n in &self.nodes {
             if !valid_token(&n.key)

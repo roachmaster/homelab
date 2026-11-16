@@ -21,6 +21,8 @@ pub struct ChatConfig {
     /// The local runner accepts chat turns through its durable job queue.
     #[serde(default)]
     pub async_dispatch: bool,
+    #[serde(default)]
+    pub mail_enabled: bool,
 }
 
 pub(crate) struct ChatRelay {
@@ -28,6 +30,7 @@ pub(crate) struct ChatRelay {
     token: String,
     pub workspace_persistence: bool,
     pub async_dispatch: bool,
+    pub mail_enabled: bool,
 }
 
 #[derive(Serialize)]
@@ -93,6 +96,7 @@ impl ChatRelay {
             token: token.into(),
             workspace_persistence: config.workspace_persistence,
             async_dispatch: config.async_dispatch,
+            mail_enabled: config.mail_enabled,
         })
     }
 

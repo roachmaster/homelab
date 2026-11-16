@@ -20,7 +20,7 @@ let navigation=null;
 let navigationId=0;
 const NAVIGATION_CACHE_KEY='forge-workspace-navigation';
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
-const draftFields=[...document.querySelectorAll('textarea[data-action]')];
+const draftFields=[...document.querySelectorAll('textarea[data-action],[data-workspace-draft]')];
 const leaveDialog=document.getElementById('leave-confirmation');
 const dialogs=new Map([...document.querySelectorAll('[data-modal]')].map(n=>[n.id,n]));
 const panelToggles=new Map([...document.querySelectorAll('button[data-action][aria-expanded][aria-controls]')].map(n=>[n.getAttribute('aria-controls'),n]));
@@ -296,7 +296,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       }
       const role=message.role==='user'?'user':'assistant';
       node.dataset.role=role;
-      node.children[0].textContent=role==='user'?'You':'Forge';
+      node.children[0].textContent=role==='user'?'You':b.assistant_label??'Forge';
       const previous=node.children[1];
       const html=role==='assistant'&&typeof message.rendered_html==='string'&&message.rendered_html;
       if(html){
@@ -604,6 +604,9 @@ let workspaceRevision=0;
 let workspaceJSON=null;
 let latestCheckpoint=null;
 let latestWorkspace=null;
+let mailNavigation=null;
+let mailNavigationLocked=false;
+let mailWatchTimer=null;
 let workspaceEpoch=null;
 let navigationCache=null;
 const pending=new Map();
@@ -685,11 +688,11 @@ async function flushNavigation(id){
   const saved=Boolean(workspaceLease&&snapshot&&workspaceJSON===json&&
     JSON.stringify(latestWorkspace)===json&&(!checkpoint||checkpoint.saved));
   let cache=null;
-  if(saved&&workspaceEpoch){
+  if(saved&&workspaceEpoch&&!mailNavigationLocked){
     const local=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot)});
     if(encoder.encode(local).length<=NAVIGATION_CACHE_MAX)cache=local;
   }
-  postMessage({kind:'workspace_navigation_flushed',id,saved,cache});
+  postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!mailNavigation||cache!==null),cache});
 }
 function navigationSnapshot(snapshot){
   // Keep draft text and selection hints. Rust validates the restored snapshot.
@@ -722,6 +725,8 @@ function dispatch(event,presentation_sequence=null,suppressView=false){
   let result;try{result=safeJson(decoder.decode(new Uint8Array(wasm.memory.buffer,out,len).slice()));}finally{wasm.release_output();}
   if(result.protocol_version!==1)throw new Error('Protocol mismatch');
   if(!suppressView){
+    mailNavigation=result.mail_navigation??null;
+    mailNavigationLocked=result.mail_navigation_locked===true;
     postMessage({kind:'view',view:result.view,presentation_sequence,has_workspace_work:result.has_workspace_work});
     checkpointWorkspace(result.workspace);
   }
@@ -731,6 +736,11 @@ function fatal(message){if(closed)return;closed=true;for(const c of pending.valu
 function failed(id,category){try{dispatch({kind:'network_failed',request_id:id,category});}catch(_){fatal('The worker could not accept a transport result. Reload to retry.');}}
 async function run(effect){
   if(effect.kind==='abort'){const active=pending.get(effect.token.request_id);if(active)active.abort();return;}
+  if(effect.kind==='mail_watch'){
+    clearTimeout(mailWatchTimer);
+    mailWatchTimer=setTimeout(()=>{if(!closed)dispatch({kind:'poll_mail',watch:effect.watch});},5000);
+    return;
+  }
   const binding=CONFIG.bindings.find(b=>b.kind===effect.kind);if(!binding)throw new Error('Undeclared transport effect');
   const id=String(field(effect,binding.request_id));
   // Run pages are short requests so they can share the host with inspection and history.
@@ -762,6 +772,7 @@ async function run(effect){
     const events=response.ok?binding.accept_events:typedErrors;
     if(decoded.protocol_version!==1||!decoded.event||!events.includes(decoded.event.kind)||(!response.ok&&decoded.event.request_id!==id))throw new Error('Unexpected response envelope');
     let saved=null;
+    let savedMail=null;
     if(decoded.csrf!==undefined && decoded.csrf!==null){
       if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');
       csrf=decoded.csrf;
@@ -781,6 +792,7 @@ async function run(effect){
       pending.delete(id);
       dispatch(decoded.event,null,saved!==null);
       if(saved!==null)dispatch({kind:'restore_workspace',snapshot:saved});
+      if(savedMail!==null)dispatch({kind:'restore_mail_navigation',snapshot:savedMail});
     }catch(_){fatal('Invalid application ABI result. Reload to retry.');}
   }catch(e){failed(id,timedOut?'timeout':controller.signal.aborted?'cancelled':e instanceof TypeError?'unavailable':'invalid_response');}
   finally{clearTimeout(timer);pending.delete(id);}

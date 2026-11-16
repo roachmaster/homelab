@@ -1547,6 +1547,7 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
         token_file: token_path,
         workspace_persistence: false,
         async_dispatch: false,
+        mail_enabled: false,
     });
     let (host, _) = host_with_config(settings);
     let body = json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}});
@@ -1649,6 +1650,7 @@ fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
         token_file: token_path,
         workspace_persistence: true,
         async_dispatch: false,
+        mail_enabled: false,
     });
     let (host, _) = host_with_config(settings);
     let (cookie, csrf, _) = paired(&host);
@@ -1748,4 +1750,89 @@ fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
         assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
     }
     worker.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn mail_relays_only_admitted_and_correlated_dispatch_requests() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token_path = files.0.join("mail-runner.token");
+    fs::write(&token_path, "0123456789abcdef".repeat(4)).unwrap();
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut settings = config(&files);
+    settings.chat = Some(forge_ide_web_host::ChatConfig {
+        endpoint: upstream.local_addr().unwrap(),
+        token_file: token_path,
+        workspace_persistence: true,
+        async_dispatch: true,
+        mail_enabled: true,
+    });
+    let (host, _) = host_with_config(settings);
+    let (cookie, csrf, _) = paired(&host);
+    let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    let thread_id = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
+    let run_id = "9769c742-9e27-418a-8a08-a9f01b018c86";
+    let send = json!({
+        "kind":"mail_send","request_id":"request-1","thread_id":thread_id,
+        "subject":"Maintenance","content":"Draft a maintenance note","idempotency_key":thread_id
+    });
+    for (destination, auth, status) in [
+        ("ide.mail.send", "", 401),
+        ("ide.mail.send", &format!("Cookie: {cookie}\r\n"), 401),
+        ("ide.mail.list", &auth, 400),
+    ] {
+        assert!(
+            exchange(&host, post(&host, destination, send.clone(), auth))
+                .starts_with(&format!("HTTP/1.1 {status}"))
+        );
+    }
+
+    let expected = send.clone();
+    let runner = thread::spawn(move || {
+        for returned_thread in [thread_id, run_id] {
+            let (mut stream, _) = upstream.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = BufReader::new(&mut stream);
+            let mut line = String::new();
+            request.read_line(&mut line).unwrap();
+            assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
+            let mut headers = BTreeMap::new();
+            loop {
+                line.clear();
+                request.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.trim_end().split_once(": ").unwrap();
+                headers.insert(name.to_ascii_lowercase(), value.to_owned());
+            }
+            assert_eq!(headers["forge-destination"], "ide.mail.send");
+            let mut body = vec![0; headers["content-length"].parse().unwrap()];
+            request.read_exact(&mut body).unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
+            let response = json!({"protocol_version":1,"event":{
+                "kind":"mail_sent","request_id":"request-1","thread_id":returned_thread,
+                "run_id":run_id,"status":"queued"
+            }})
+            .to_string();
+            write!(
+                stream,
+                "HTTP/1.1 202 Accepted\r\nContent-Length: {}\r\n\r\n{response}",
+                response.len()
+            )
+            .unwrap();
+        }
+    });
+    let accepted = exchange(&host, post(&host, "ide.mail.send", send.clone(), &auth));
+    assert!(accepted.starts_with("HTTP/1.1 202"));
+    let uncorrelated = exchange(&host, post(&host, "ide.mail.send", send, &auth));
+    assert!(uncorrelated.starts_with("HTTP/1.1 503"));
+    runner.join().unwrap();
 }

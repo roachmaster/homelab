@@ -362,6 +362,7 @@ impl Chats {
             .filter(|p| p.conversation == self.selected);
         let mut messages = TranscriptBinding {
             id: "chat-transcript",
+            assistant_label: None,
             conversation: self.selected,
             messages: current
                 .into_iter()

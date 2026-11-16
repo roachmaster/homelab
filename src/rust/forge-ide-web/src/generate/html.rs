@@ -315,6 +315,10 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::Transcript { id, label } => {
             let _ = write!(out, "<div id=\"{}\" class=\"fg-transcript\" role=\"region\" aria-label=\"{}\" tabindex=\"0\" data-transcript></div>", escape(id), escape(label));
         }
+        Component::TextField { id, label, action } => {
+            let id = escape(id);
+            let _ = write!(out, "<label class=\"fg-field\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"text\" data-workspace-draft data-action=\"{}\" data-dynamic-action autocomplete=\"off\" disabled></label>", escape(label), escape(action));
+        }
         Component::TextArea { id, label, action } => {
             let _ = write!(out, "<label class=\"fg-field fg-textarea\" for=\"{id}\"><span>{}</span><textarea id=\"{id}\" rows=\"3\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" disabled></textarea></label>", escape(label), escape(action));
         }

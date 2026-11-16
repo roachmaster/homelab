@@ -4,7 +4,7 @@ use crate::{
     service::{Command, Rejection},
     workspace, Host, HostError,
 };
-use forge_ide_ui::protocol::ChatRunRequest;
+use forge_ide_ui::protocol::{ChatRunRequest, MailRequest};
 use forge_ingress_contract::{Header, RouteKey};
 use std::{
     collections::BTreeMap,
@@ -316,7 +316,10 @@ fn command(
     if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
         return Err(Rejection::Unavailable);
     }
-    if history::is_destination(destination) || ChatRunRequest::is_destination(destination) {
+    if history::is_destination(destination)
+        || ChatRunRequest::is_destination(destination)
+        || MailRequest::is_destination(destination)
+    {
         let (status, body) = host.postgres_dispatch(&header, &r.body, &context)?;
         if body.len() > host.config.limits.response_bytes {
             return Err(Rejection::Limit);
@@ -473,6 +476,7 @@ fn write_response(s: &mut TcpStream, r: Response, deadline: Instant) -> Result<(
         405 => "Method Not Allowed",
         409 => "Conflict",
         413 => "Content Too Large",
+        415 => "Unsupported Media Type",
         422 => "Unprocessable Content",
         429 => "Too Many Requests",
         _ => "Service Unavailable",

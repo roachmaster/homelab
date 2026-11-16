@@ -9,6 +9,7 @@ mod config;
 pub use chat::ChatConfig;
 mod history;
 mod http;
+mod mail_dispatch;
 mod projection;
 mod run_dispatch;
 mod service;

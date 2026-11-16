@@ -85,7 +85,7 @@ pub enum Component {
         title: String,
         children: Vec<Component>,
     },
-    /// Open a portal document in a separate tab without an opener.
+    /// Open a portal document in the current tab.
     NavigationLink {
         id: String,
         label: String,
@@ -95,6 +95,11 @@ pub enum Component {
     Transcript {
         id: String,
         label: String,
+    },
+    TextField {
+        id: String,
+        label: String,
+        action: String,
     },
     TextArea {
         id: String,
@@ -216,6 +221,7 @@ macro_rules! component {
     (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
     (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
+    (text_field $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextField{id:$id.into(),label:$label.into(),action:$action.into()} };
     (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into()} };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
     (row [$($child:expr),* $(,)?]) => { $crate::generate::Component::Row(vec![$($child),*]) };
@@ -314,6 +320,7 @@ impl Document {
                 | Component::IconButton {
                     id, label, action, ..
                 }
+                | Component::TextField { id, label, action }
                 | Component::TextArea { id, label, action }
                 | Component::DateInput { id, label, action }
                 | Component::Filter { id, label, action }

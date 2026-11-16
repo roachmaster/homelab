@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 mod chat_run;
 pub use chat_run::*;
+mod mail;
+pub use mail::*;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -33,6 +35,8 @@ pub struct Catalog {
     pub chat_history: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub async_chat: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mail_enabled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -482,10 +486,15 @@ pub enum UiEffect {
     Chat {
         request: PreparedChat,
     },
+    MailWatch {
+        watch: String,
+    },
     #[serde(untagged)]
     ChatHistory(ChatHistoryRequest),
     #[serde(untagged)]
     ChatRun(ChatRunRequest),
+    #[serde(untagged)]
+    Mail(MailRequest),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -498,6 +507,37 @@ pub struct Input {
 pub enum UiEvent {
     OpenChat {},
     OpenWorkbench {},
+    OpenMail {},
+    MailInbox {},
+    MailArchive {},
+    MailNewMessage {},
+    MailFollowUp {},
+    MailDiscardDraft {},
+    MailBack {},
+    MailRefresh {},
+    MailPrevious {},
+    MailNext {},
+    MailOpenThread {
+        thread_id: String,
+    },
+    RestoreMailNavigation {
+        snapshot: MailNavigationSnapshot,
+    },
+    SetMailSubject {
+        value: String,
+    },
+    SetMailDraft {
+        value: String,
+    },
+    SendMail {
+        idempotency_key: String,
+    },
+    RetryMail {
+        idempotency_key: String,
+    },
+    PollMail {
+        watch: String,
+    },
     NewChat {},
     SelectChat {
         value: String,
@@ -648,6 +688,8 @@ pub enum UiEvent {
     ChatHistory(ChatHistoryResponse),
     #[serde(untagged)]
     ChatRun(ChatRunResponse),
+    #[serde(untagged)]
+    Mail(MailResponse),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -218,7 +218,8 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
         "ide.inspect" | "ide.source" | "ide.chat" if c.authenticated && c.csrf_valid => Ok(()),
         destination
             if (history::is_destination(destination)
-                || ChatRunRequest::is_destination(destination))
+                || ChatRunRequest::is_destination(destination)
+                || MailRequest::is_destination(destination))
                 && c.authenticated
                 && c.csrf_valid =>
         {
@@ -769,6 +770,12 @@ impl Host {
                 return Err(Rejection::Unavailable);
             }
             return crate::run_dispatch::dispatch(relay, header, body, context.deadline);
+        }
+        if MailRequest::is_destination(header.route().destination()) {
+            if !relay.mail_enabled {
+                return Err(Rejection::Unavailable);
+            }
+            return crate::mail_dispatch::dispatch(relay, header, body, context.deadline);
         }
         history::dispatch(relay, header, body, context.deadline)
     }

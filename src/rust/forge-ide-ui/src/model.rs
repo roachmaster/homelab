@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 const PAGE_ROWS: usize = 256;
 mod bookmark;
 mod chat;
+mod mail;
 mod projection;
 mod source;
 pub use projection::name_label;
@@ -30,6 +31,10 @@ pub struct Output {
     pub error: Option<String>,
     pub workspace: Option<WorkspaceSnapshot>,
     pub has_workspace_work: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail_navigation: Option<MailNavigationSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail_navigation_locked: Option<bool>,
 }
 
 /// Instance-local UI semantics. This is not an authentication authority or an
@@ -38,6 +43,7 @@ pub struct Output {
 pub struct UiModel {
     catalog: Option<Catalog>,
     chats: chat::Chats,
+    mail: mail::Mail,
     workbench_seen: bool,
     workspace_restored: bool,
     workbench_recovery: Option<WorkbenchBookmark>,
@@ -74,6 +80,7 @@ impl Default for UiModel {
         Self {
             catalog: None,
             chats: chat::Chats::default(),
+            mail: mail::Mail::default(),
             workbench_seen: false,
             workspace_restored: false,
             workbench_recovery: None,
@@ -136,6 +143,8 @@ impl UiModel {
             error,
             workspace: self.workspace_snapshot(),
             has_workspace_work: self.has_workspace_work(),
+            mail_navigation: self.mail.navigation_snapshot(),
+            mail_navigation_locked: self.mail.navigation_locked(),
         }
     }
     fn next_id(&mut self, now: u64) -> Result<String, UiError> {
@@ -199,6 +208,7 @@ impl UiModel {
                 return Err(UiError::NotConnected)
             }
             UiEvent::OpenChat {} => {
+                self.mail.close();
                 self.chats.workbench = false;
                 if self.chats.async_chat {
                     let request_id = self.next_id(input.now_ms)?;
@@ -208,9 +218,60 @@ impl UiModel {
                 }
             }
             UiEvent::OpenWorkbench {} => {
+                self.mail.close();
                 self.chats.workbench = true;
                 self.workbench_seen = true;
                 self.chats.close_history();
+            }
+            UiEvent::RestoreMailNavigation { snapshot } => {
+                if !self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|catalog| catalog.mail_enabled)
+                    || !snapshot.is_valid()
+                    || self.mail.active
+                    || self.mail.has_draft()
+                {
+                    return Ok(self.output(None));
+                }
+                let request_id = self.next_id(input.now_ms)?;
+                if snapshot.active {
+                    self.chats.workbench = false;
+                    self.chats.close_history();
+                }
+                self.mail
+                    .restore_navigation(snapshot, request_id, &mut effects);
+            }
+            event @ (UiEvent::OpenMail {}
+            | UiEvent::MailInbox {}
+            | UiEvent::MailArchive {}
+            | UiEvent::MailNewMessage {}
+            | UiEvent::MailFollowUp {}
+            | UiEvent::MailDiscardDraft {}
+            | UiEvent::MailBack {}
+            | UiEvent::MailRefresh {}
+            | UiEvent::MailPrevious {}
+            | UiEvent::MailNext {}
+            | UiEvent::MailOpenThread { .. }
+            | UiEvent::SetMailSubject { .. }
+            | UiEvent::SetMailDraft { .. }
+            | UiEvent::SendMail { .. }
+            | UiEvent::RetryMail { .. }
+            | UiEvent::PollMail { .. }
+            | UiEvent::Mail(_)) => {
+                if !self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|catalog| catalog.mail_enabled)
+                {
+                    return Err(UiError::InvalidAction);
+                }
+                if matches!(event, UiEvent::OpenMail {}) {
+                    self.chats.workbench = false;
+                    self.chats.close_history();
+                }
+                let request_id = self.next_id(input.now_ms)?;
+                self.mail.dispatch(event, request_id, &mut effects)?;
             }
             UiEvent::NewChat {} => self.chats.new_conversation()?,
             UiEvent::SelectChat { value } => {
@@ -330,6 +391,10 @@ impl UiModel {
                 }
                 self.chats.history_network_failed(&request_id, category);
                 self.chats.models_network_failed(&request_id);
+                if self.mail.has_request(&request_id) {
+                    let watch = self.next_id(input.now_ms)?;
+                    self.mail.network_failed(&request_id, watch, &mut effects);
+                }
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
@@ -799,6 +864,8 @@ impl UiModel {
             error: None,
             workspace: self.workspace_snapshot(),
             has_workspace_work: self.has_workspace_work(),
+            mail_navigation: self.mail.navigation_snapshot(),
+            mail_navigation_locked: self.mail.navigation_locked(),
         })
     }
     fn begin_inspection(&mut self, now: u64, effects: &mut Vec<UiEffect>) -> Result<(), UiError> {

@@ -12,7 +12,11 @@ impl UiModel {
     }
 
     pub(super) fn has_workspace_work(&self) -> bool {
-        self.catalog.is_some() && (self.workbench_seen || self.chats.has_work())
+        self.catalog.is_some()
+            && (self.workbench_seen
+                || self.chats.has_work()
+                || self.mail.active
+                || self.mail.has_draft())
     }
 
     fn workbench_bookmark(&self) -> Option<WorkbenchBookmark> {

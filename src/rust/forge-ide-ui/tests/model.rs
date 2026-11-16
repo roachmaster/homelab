@@ -6,6 +6,7 @@ fn catalog() -> Catalog {
         timeout_ms: 1000,
         chat_history: false,
         async_chat: false,
+        mail_enabled: false,
         nodes: vec![NodeChoice {
             key: "lab".into(),
             label: "Lab".into(),
@@ -2717,4 +2718,144 @@ fn chat_is_the_landing_view_and_in_flight_replies_follow_their_conversation() {
         },
     );
     assert_eq!(late.view.transcripts[0].messages.len(), 2);
+}
+
+#[test]
+fn mail_keeps_the_submission_key_and_opens_a_read_only_archive() {
+    let mut model = UiModel::default();
+    let UiEffect::Resume { request_id } = event(&mut model, UiEvent::Resume {}).effects.remove(0)
+    else {
+        panic!("expected pairing");
+    };
+    event(
+        &mut model,
+        UiEvent::Paired {
+            request_id,
+            catalog: Catalog {
+                mail_enabled: true,
+                ..catalog()
+            },
+        },
+    );
+    let output = event(&mut model, UiEvent::OpenMail {});
+    assert!(matches!(
+        output.effects.as_slice(),
+        [UiEffect::Mail(MailRequest::MailList {
+            archived: false,
+            ..
+        })]
+    ));
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "mail" && binding.visible));
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "chat" && !binding.visible));
+    event(&mut model, UiEvent::MailNewMessage {});
+    event(
+        &mut model,
+        UiEvent::SetMailSubject {
+            value: "Maintenance".into(),
+        },
+    );
+    event(
+        &mut model,
+        UiEvent::SetMailDraft {
+            value: "Draft a maintenance note".into(),
+        },
+    );
+    const THREAD: &str = "1b516c5f-c722-462e-a66c-d3f1cac3f880";
+    const RUN: &str = "f75b081b-9ca9-4994-86bc-24c644ccf094";
+    let UiEffect::Mail(MailRequest::MailSend { request_id, .. }) = event(
+        &mut model,
+        UiEvent::SendMail {
+            idempotency_key: THREAD.into(),
+        },
+    )
+    .effects
+    .remove(0) else {
+        panic!("expected Mail send");
+    };
+    event(
+        &mut model,
+        UiEvent::NetworkFailed {
+            request_id,
+            category: FailureKind::Timeout,
+        },
+    );
+    let UiEffect::Mail(MailRequest::MailSend {
+        request_id,
+        idempotency_key,
+        thread_id,
+        subject,
+        content,
+        ..
+    }) = event(
+        &mut model,
+        UiEvent::SendMail {
+            idempotency_key: RUN.into(),
+        },
+    )
+    .effects
+    .remove(0)
+    else {
+        panic!("expected a retry");
+    };
+    assert_eq!(idempotency_key, THREAD);
+    assert_eq!(thread_id, THREAD);
+    assert_eq!(subject.as_deref(), Some("Maintenance"));
+    assert_eq!(content, "Draft a maintenance note");
+    let UiEffect::Mail(MailRequest::MailOpen { request_id, .. }) = event(
+        &mut model,
+        UiEvent::Mail(MailResponse::MailSent {
+            request_id,
+            thread_id: THREAD.into(),
+            run_id: RUN.into(),
+            status: MailStatus::Queued,
+        }),
+    )
+    .effects
+    .remove(0) else {
+        panic!("expected a reader fetch");
+    };
+    let fixture = serde_json::json!({
+        "kind": "mail_opened", "request_id": request_id,
+        "thread": {
+            "thread_id": THREAD, "subject": "Maintenance", "status": "archived",
+            "updated_at": "2026-11-16T21:24:00Z", "turn_count": 1, "revision": 2,
+            "latest_run_id": RUN, "archive_reason": "context_limit", "context_remaining_tokens": null
+        },
+        "messages": [
+            { "sequence": 1, "role": "user", "content": "Draft a maintenance note" },
+            { "sequence": 2, "role": "assistant", "content": "## Maintenance" }
+        ],
+        "next_sequence": null
+    });
+    let output = event(&mut model, serde_json::from_value(fixture).unwrap());
+    assert!(output.effects.is_empty());
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "mail-archive-reason" && binding.visible));
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "mail-follow-up" && !binding.visible));
+    let transcript = output
+        .view
+        .transcripts
+        .iter()
+        .find(|binding| binding.id == "mail-transcript")
+        .unwrap();
+    assert_eq!(
+        transcript.messages[1].rendered_html.as_deref(),
+        Some("<h2>Maintenance</h2>")
+    );
+    assert_eq!(output.mail_navigation.unwrap().draft, "");
 }
