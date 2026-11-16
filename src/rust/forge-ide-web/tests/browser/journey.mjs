@@ -97,7 +97,7 @@ async function observe(context) {
     if (new URL(request.url()).pathname !== '/forge/v1/dispatch') return;
     let kind;
     try { kind = request.postDataJSON()?.kind; } catch { kind = 'invalid'; }
-    if (!['resume', 'pair', 'inspect', 'source'].includes(kind)) kind = 'other';
+    if (!['resume', 'pair', 'inspect', 'source', 'chat_history_retention_set'].includes(kind)) kind = 'other';
     counts.set(kind, (counts.get(kind) || 0) + 1);
     if (kind === 'inspect') inspectionIds.add(request.headers()['forge-request-id']);
   });
@@ -1125,11 +1125,13 @@ async function durableHostRestartJourney() {
     await previousChats.click();
     const savedChat = savedChats.getByRole('treeitem', { name: prompt });
     await check(savedChat).toBeVisible();
+    await check(savedChat).toContainText('Kept through 2026-12-16 (UTC)');
     await savedChat.click();
     await check(previousChats).toHaveAttribute('aria-expanded', 'false');
     await checkTranscript(freshPage);
     await manage.click();
-    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept long term');
+    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept through 2026-12-16 (UTC)');
+    assert.equal(fresh.traffic.count('chat_history_retention_set'), 0, 'the default date needs no browser mutation');
     await freshPage.getByRole('button', { name: 'Set expiration', exact: true }).click();
     const expiration = freshPage.getByRole('dialog', { name: 'Set expiration' });
     await expiration.getByLabel('Keep through').fill('2099-05-12');
@@ -1138,6 +1140,7 @@ async function durableHostRestartJourney() {
     await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept through 2099-05-12 (UTC)');
     await freshPage.getByRole('button', { name: 'Keep long term', exact: true }).click();
     await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept long term');
+    assert.equal(fresh.traffic.count('chat_history_retention_set'), 2, 'only explicit changes update retention');
     const deleteButton = freshPage.locator('#chat-show-delete');
     const deletion = freshPage.getByRole('dialog', { name: 'Delete chat' });
     await deleteButton.click();

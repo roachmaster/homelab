@@ -50,7 +50,10 @@ export async function startDurableRelay(prompt, reply) {
         const message = { role: 'assistant', content: reply };
         const revision = 1;
         history.set(body.chat_id, {
-          summary: { chat_id: body.chat_id, title: prompt, updated_at: '2026-11-16T12:00:00Z', revision, retention: { kind: 'long_term' } },
+          summary: {
+            chat_id: body.chat_id, title: prompt, updated_at: '2026-11-16T12:00:00Z', revision,
+            retention: { kind: 'expires', expires_on: '2026-12-16', time_zone: 'UTC', expires_at: '2026-12-17T00:00:00Z' },
+          },
           messages: [...body.messages, message].map((entry, index) => ({ ...entry, position: index + 1 })),
         });
         send(200, { chat_id: body.chat_id, revision, choices: [{ message }] });

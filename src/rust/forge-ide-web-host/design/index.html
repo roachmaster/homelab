@@ -94,10 +94,10 @@
             <div><dt>Close</dt><dd>Choose a chat, press Escape, or close the disclosure. Return keyboard focus to Previous chats.</dd></div>
           </dl>
           <h3>Saved chats and archived runs</h3>
-          <p>A saved chat opens its transcript and this tab’s draft. The current workspace identifies chats by slot. Stable chat IDs would let the list reorder without moving drafts between conversations.</p>
+          <p>A saved chat opens its transcript and this tab’s draft. The draft follows the chat ID when the list order changes.</p>
           <p>An archived run is one submitted exchange snapshot. It opens read-only. Continue as new chat starts a separate conversation, preserving the archived snapshot.</p>
           <h3 class="previous-chat-retention-heading">Retention and deletion</h3>
-          <p>The preview uses UTC. Keep through includes the selected date. Expiration begins at midnight UTC the next day. Keeping a chat long term removes its scheduled expiration.</p>
+          <p>Forge automatically keeps a chat through the UTC date 30 days after its first saved turn. You can change that date or choose Keep long term to clear it. Expiration begins at midnight UTC after the keep-through date.</p>
           <p>Delete asks you to confirm the named saved chat. Archived runs remain read-only.</p>
           <p><a class="previous-chat-design-link" href="/design/chat-history">Chat history data design</a></p>
         </aside>

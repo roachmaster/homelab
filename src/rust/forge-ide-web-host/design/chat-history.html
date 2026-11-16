@@ -57,7 +57,7 @@
         </div>
         <div>
           <dt><code>RetentionPolicyDto</code></dt>
-          <dd><code>{"kind":"long_term"}</code> is the default and has no scheduled expiry. <code>expires</code> carries an inclusive <code>expires_on</code> calendar date. The runner accepts an IANA <code>time_zone</code> and uses UTC when omitted. It persists the resolved zone and returns the derived <code>expires_at</code> UTC instant when the next local calendar day begins.</dd>
+          <dd>The default is <code>expires</code>, with an inclusive <code>expires_on</code> date 30 days after the first saved turn in UTC. <code>{"kind":"long_term"}</code> is an explicit choice that clears the date. For custom dates, the runner accepts an IANA <code>time_zone</code> and uses UTC when omitted. It returns the derived <code>expires_at</code> UTC instant when the next local calendar day begins.</dd>
         </div>
         <div>
           <dt><code>ChatMessageDto</code></dt>
@@ -85,7 +85,12 @@
     "title": "Explain source verification",
     "updated_at": "2026-11-16T10:00:00Z",
     "revision": 7,
-    "retention": {"kind": "long_term"}
+    "retention": {
+      "kind": "expires",
+      "expires_on": "2026-12-16",
+      "time_zone": "UTC",
+      "expires_at": "2026-12-17T00:00:00Z"
+    }
   }],
   "next_cursor": null
 }</code></pre>
@@ -111,7 +116,12 @@
       "title": "Explain source verification",
       "updated_at": "2026-11-16T10:00:00Z",
       "revision": 7,
-      "retention": {"kind": "long_term"}
+      "retention": {
+        "kind": "expires",
+        "expires_on": "2026-12-16",
+        "time_zone": "UTC",
+        "expires_at": "2026-12-17T00:00:00Z"
+      }
     },
     "messages": [
       {"position": 1, "role": "user", "content": "How is source verified?"},
@@ -180,6 +190,10 @@
       <h2 id="dao-title">PostgreSQL data access</h2>
       <p><code>ChatHistoryDao</code> belongs to the Forge runner. Every operation takes the operator scope established at admission. Stable chat IDs connect committed messages, retention, and authorized run links. Tab selections and drafts refer to those IDs.</p>
       <dl class="storage">
+        <div>
+          <dt><code>commit_transcript(owner, chat_id, messages)</code></dt>
+          <dd>Save the transcript with the default expiration on its first committed turn. Subsequent turns retain the existing policy.</dd>
+        </div>
         <div>
           <dt><code>list(owner, limit, cursor)</code></dt>
           <dd>Read available summaries in descending last-committed-turn time, with the stable ID as the cursor tie-breaker. Omit transcripts, drafts, tombstones, and already-due chats.</dd>

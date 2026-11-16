@@ -22,11 +22,17 @@ const deleteDialog = document.getElementById('previous-chat-delete-dialog');
 const deleteTitle = document.getElementById('previous-chat-delete-title');
 const dateFormat = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' });
 
+function defaultRetention(firstSavedOn) {
+  const keepThrough = new Date(firstSavedOn + 'T00:00:00Z');
+  keepThrough.setUTCDate(keepThrough.getUTCDate() + 30);
+  return { mode: 'expires', expiresOn: keepThrough.toISOString().slice(0, 10) };
+}
+
 // The preview uses fictional messages and keeps all edits in this document.
 const chats = new Map([
   ['workbench', {
     title: 'Summarize Workbench',
-    policy: { mode: 'expires', expiresOn: '2026-11-30' },
+    policy: defaultRetention('2026-10-31'),
     messages: [
       ['user', 'Summarize Workbench.'],
       ['assistant', 'Use Explorer to find a file, File to read its source, and Outline to jump to a declaration.'],

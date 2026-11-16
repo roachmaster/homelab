@@ -57,8 +57,9 @@ After admission, use **New chat** to start a separate conversation and use
 **Conversation** to switch between open conversations and drafts in this tab.
 When the host is configured with a PostgreSQL-backed runner, **Previous chats**
 lists saved conversations across tabs. Open one to read its committed transcript
-or send a follow-up. With a saved conversation open, **Manage** lets you keep it
-long term, set the last UTC date to keep it, or confirm deletion. The runner
+or send a follow-up. Forge automatically keeps a chat through the UTC date
+30 days after its first saved turn. **Manage** lets you change that date,
+choose **Keep long term** to clear it, or confirm deletion. The runner
 commits accepted replies, chat history and retention to PostgreSQL. A new browser
 tab opens the most recent saved chat. Reopening the original tab after Back or
 reload also restores its unsent drafts and Workbench location. An interrupted or

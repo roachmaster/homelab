@@ -196,9 +196,11 @@ With PostgreSQL enabled, **Previous chats** lists and opens committed chats
 across browser tabs. Its **Manage** menu uses the same authenticated
 `POST /forge/v1/dispatch` endpoint with the `ide.chat.history.*` destinations.
 The host forwards those requests to the existing runner's private
-`POST /v1/dispatch`. The runner commits each linked chat turn and checks the
-current revision when setting an expiration date, keeping a chat indefinitely,
-or deleting it. Expiration runs in the runner process.
+`POST /v1/dispatch`. The runner commits each linked chat turn. It assigns
+a keep-through date 30 days after the first saved turn in UTC and keeps
+that date across follow-ups. It checks the current revision when changing
+expiration, keeping a chat indefinitely, or deleting it. The runner expires
+chats at midnight after their keep-through date.
 
 Without the runner setting, the host keeps up to 12 bounded tab checkpoints in
 session memory. Session rotation and host restart clear those checkpoints.
