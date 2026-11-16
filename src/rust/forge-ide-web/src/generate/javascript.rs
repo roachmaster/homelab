@@ -754,8 +754,8 @@ async function run(effect){
   // Run pages are short requests so they can share the host with inspection and history.
   if(binding.kind==='chat_run_events')await new Promise(resolve=>setTimeout(resolve,1200));
   if(binding.kind==='chat_run_submit'&&!await checkpointedRun(effect)){failed(id,'unavailable');return;}
-  if(binding.kind==='mail_list'||binding.kind==='mail_open'){
-    // A Mail handoff can restore while inspection and model discovery start.
+  if(binding.kind.startsWith('mail_')){
+    // Wait for an initial slot rather than sending early or retrying a mutation.
     const slotDeadline=Date.now()+5000;
     while(!closed&&pending.size>=2&&Date.now()<slotDeadline)await new Promise(resolve=>setTimeout(resolve,100));
   }
