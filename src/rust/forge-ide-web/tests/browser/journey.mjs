@@ -11,15 +11,18 @@ import { acquireOwned, bounded, cleanupResources, runHarness } from './report.mj
 import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from './diagnostics.mjs';
 import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
+import { startDurableRelay } from './durable-relay.mjs';
 
-let assets, agent, fixtureBinary, output, browser, browserOwner, check, report;
+let assets, agent, fixtureBinary, output, browser, browserOwner, durableRelayOwner, check, report;
 const active = new Set();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function startFixture(faults = false, singleProject = false) {
+async function startFixture(faults = false, singleProject = false, durable) {
   report.ensureActive();
   report.setStage('fixture_start');
-  const child = spawn(fixtureBinary, [assets, agent, ...(faults ? ['--faults'] : singleProject ? ['--single-project'] : [])], {
+  const mode = durable ? ['--durable', durable.bind, durable.endpoint, durable.tokenFile]
+    : faults ? ['--faults'] : singleProject ? ['--single-project'] : [];
+  const child = spawn(fixtureBinary, [assets, agent, ...mode], {
     stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
   });
   const state = { child, stopped: false, stopping: null, origin: '', code: '', page: null, name: faults ? 'injected_fixture' : 'real_fixture' };
@@ -997,7 +1000,128 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   } finally {
     await otherTab.close();
   }
+  await durableHostRestartJourney();
   report.pass('probe.page.lifecycle');
+}
+
+async function durableHostRestartJourney() {
+  const prompt = 'Keep this submitted conversation';
+  const reply = '## Durable fixture reply\n\n**Ready after restart.**';
+  const privateDraft = 'Keep this unsent text in its original tab';
+  const file = 'README <safe>.md';
+  const source = 'Fixture <script> text is never HTML.';
+  const viewport = { width: 1440, height: 1000 };
+  const contexts = [];
+  let fixture;
+  durableRelayOwner = acquireOwned(() => startDurableRelay(prompt, reply), relay => relay.close());
+  try {
+    const relay = await durableRelayOwner.ready;
+    async function restart() {
+      const previous = fixture;
+      if (previous) await stopFixture(previous);
+      fixture = await startFixture(false, false, {
+        bind: previous ? new URL(previous.origin).host : '127.0.0.1:0',
+        endpoint: relay.endpoint, tokenFile: relay.tokenFile,
+      });
+      report.setStage('scenario');
+      if (previous) assert.equal(fixture.origin, previous.origin, 'new host owns the same browser origin');
+    }
+    async function startPage() {
+      const context = await browser.newContext({ viewport });
+      contexts.push(context);
+      const traffic = await observe(context);
+      const page = await context.newPage();
+      fixture.page = page;
+      await page.goto(fixture.origin, { waitUntil: 'domcontentloaded' });
+      return { page, traffic };
+    }
+    async function pair(page) {
+      await check(page.locator('#pair')).toBeEnabled();
+      await check(page.locator('#chat')).toBeHidden();
+      await check(page.locator('#chat-transcript [data-role]')).toHaveCount(0);
+      await check(page.locator('#chat-draft')).toHaveValue('');
+      await check(page.locator('#workbench')).toBeHidden();
+      await page.locator('#pair-code').fill(fixture.code);
+      await page.locator('#pair').click();
+      fixture.code = '';
+      await check(page.locator('#pair-panel')).toBeHidden();
+    }
+    function tabIdentifier(page) {
+      return page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
+    }
+    async function checkTranscript(page) {
+      const transcript = page.locator('#chat-transcript');
+      await check(transcript.locator('[data-role="user"]')).toHaveCount(1);
+      await check(transcript.locator('[data-role="user"]')).toContainText(prompt);
+      await check(transcript.locator('[data-role="assistant"]')).toHaveCount(1);
+      await check(transcript.getByRole('heading', { name: 'Durable fixture reply' })).toBeVisible();
+      await check(transcript.locator('strong').filter({ hasText: /^Ready after restart\.$/ })).toBeVisible();
+    }
+
+    process.stderr.write('QA_CHECK durable_chat_save\n');
+    await restart();
+    const { page, traffic } = await startPage();
+    await pair(page);
+    await check(page.locator('#chat')).toBeVisible();
+    const tab = await tabIdentifier(page);
+    assert.ok(/^[0-9a-f]{32}$/.test(tab ?? ''), 'first document uses an opaque tab key');
+    const draft = page.locator('#chat-draft');
+    await draft.fill(prompt);
+    await page.locator('#send-chat').click();
+    await checkTranscript(page);
+    await page.locator('#new-chat').click();
+    await draft.fill(privateDraft);
+    const persisted = checkpointSaved(page, snapshot => snapshot.workbench_open &&
+      snapshot.workbench?.entry?.path.at(-1)?.value === file && checkpointHasDraft(snapshot, privateDraft) &&
+      snapshot.chat.conversations[0]?.messages.some(message => message.role === 'assistant' && message.content === reply));
+    await page.locator('#open-workbench').click();
+    await inspect(page, 'workspace');
+    await fileRow(page, file).click();
+    await check(page.locator('#source-view')).toContainText(source);
+    await persisted;
+
+    process.stderr.write('QA_CHECK durable_chat_same_tab_restart\n');
+    const inspectCalls = traffic.count('inspect');
+    const sourceCalls = traffic.count('source');
+    await restart();
+    fixture.page = page;
+    const leave = page.waitForEvent('dialog', { predicate: dialog => dialog.type() === 'beforeunload', timeout: 5000 })
+      .then(dialog => dialog.accept());
+    await Promise.all([leave, page.reload({ waitUntil: 'domcontentloaded' })]);
+    await pair(page);
+    await check(page.locator('#workbench')).toBeVisible();
+    await check(page.locator('#selection-title')).toContainText(file);
+    await check(page.locator('#source-view')).toContainText(source);
+    assert.equal(traffic.count('inspect'), inspectCalls + 1, 'new host performs a fresh authenticated inspection');
+    assert.equal(traffic.count('source'), sourceCalls + 1, 'new host authorizes the source from the fresh report');
+    assert.ok(await tabIdentifier(page) === tab, 'reload retains the opaque tab key');
+    await page.locator('#open-chat').click();
+    await check(page.locator('#chat-conversation')).toHaveValue('1');
+    await check(draft).toHaveValue(privateDraft);
+    await page.locator('#chat-conversation').selectOption('0');
+    await checkTranscript(page);
+
+    process.stderr.write('QA_CHECK durable_chat_new_context\n');
+    await restart();
+    const fresh = await startPage();
+    await pair(fresh.page);
+    await check(fresh.page.locator('#chat')).toBeVisible();
+    await checkTranscript(fresh.page);
+    await check(fresh.page.locator('#chat-draft')).toHaveValue('');
+    await check(fresh.page.locator('#chat-conversation option')).toHaveCount(1);
+    await check(fresh.page.locator('#workbench')).toBeHidden();
+    await noReport(fresh.page);
+    assert.ok(await tabIdentifier(fresh.page) !== tab, 'independent browser context gets a new tab key');
+    assert.equal(fresh.traffic.count('inspect'), 0, 'the previous tab Workbench bookmark does not transfer');
+    assert.equal(fresh.traffic.count('source'), 0);
+    assert.equal(relay.completions(), 1, 'reopening the transcript does not replay inference');
+  } finally {
+    try { await Promise.all(contexts.map(context => context.close())); }
+    finally {
+      try { if (fixture) await stopFixture(fixture); }
+      finally { await durableRelayOwner.close(); }
+    }
+  }
 }
 async function noSelectedFileFromPriorReport(page) {
   await check(page.locator('#selection-title')).not.toContainText(LONG_FILE_NAME);
@@ -1656,7 +1780,7 @@ const passed = await runHarness({
     if (report.frozen) throw new Error('Journey stopped before launch');
     report.setStage('browser_launch');
     // Sandbox remains mandatory. No security overrides, fake WASM, deployment or
-    // user profile. Only the labeled empty-catalog case intercepts HTTP.
+    // user profile. Native durable Chat uses the test relay on loopback.
     browserOwner = acquireOwned(
       () => chromium.launch({ headless: true, chromiumSandbox: true, channel }),
       ownedBrowser => ownedBrowser.close(),
@@ -1674,6 +1798,7 @@ const passed = await runHarness({
     await cleanupResources([
       ...(browserOwner ? [{ name: 'browser', close: () => browserOwner.close() }] : []),
       ...[...active].map(fixture => ({ name: fixture.name, close: () => stopFixture(fixture) })),
+      ...(durableRelayOwner ? [{ name: 'real_fixture', close: () => durableRelayOwner.close() }] : []),
     ], currentReport);
   },
 });

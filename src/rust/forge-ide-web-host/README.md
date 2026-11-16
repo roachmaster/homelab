@@ -184,12 +184,16 @@ the adapter's `POST /v1/chat/completions` and returns the assistant's text.
 When the adapter or model is unavailable, the browser keeps the prompt as a draft.
 
 The same-origin workspace endpoint at `/forge/v1/dispatch/workspace` requires the
-active session cookie and CSRF token. It keeps bounded checkpoints in host
-memory for up to 12 tabs in that session. They contain Chat work and a
-Workbench bookmark. Recovery revalidates the bookmark against the current
-catalog and a fresh inspection. A new page instance claims a new lease, and
-out-of-order saves cannot replace a newer revision. Session rotation and host
-restart discard the checkpoints.
+active session cookie and CSRF token. With `chat.workspace_persistence` enabled,
+the host forwards checkpoint requests to the configured local runner's
+`/v1/workspace` endpoint. The runner stores them in PostgreSQL. A new tab can
+restore the operator's saved Chat history, while the original tab keeps its
+drafts and Workbench bookmark. The host revalidates that bookmark against an
+admitted catalog and a fresh inspection. An older page lease cannot replace a
+newer checkpoint.
+
+Without the runner setting, the host keeps up to 12 bounded tab checkpoints in
+session memory. Session rotation and host restart clear those checkpoints.
 
 ## Bounds and limitations
 

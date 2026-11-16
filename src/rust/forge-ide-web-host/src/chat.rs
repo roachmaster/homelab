@@ -1,4 +1,4 @@
-use crate::HostError;
+use crate::{service::Rejection, workspace, HostError};
 use forge_ide_ui::protocol::{
     valid_chat_text, ChatMessage, ChatRole, FailureKind, MAX_CHAT_REPLY_BYTES,
 };
@@ -14,11 +14,15 @@ pub struct ChatConfig {
     /// Private local transport, such as an SSH forward to Forge GPU.
     pub endpoint: SocketAddr,
     pub token_file: PathBuf,
+    /// The local runner supports authenticated PostgreSQL workspace checkpoints.
+    #[serde(default)]
+    pub workspace_persistence: bool,
 }
 
 pub(crate) struct ChatRelay {
     endpoint: SocketAddr,
     token: String,
+    pub workspace_persistence: bool,
 }
 
 #[derive(Serialize)]
@@ -76,6 +80,7 @@ impl ChatRelay {
         Ok(Self {
             endpoint: config.endpoint,
             token: token.into(),
+            workspace_persistence: config.workspace_persistence,
         })
     }
 
@@ -90,6 +95,63 @@ impl ChatRelay {
             stream: false,
         })
         .map_err(|_| FailureKind::InvalidResponse)?;
+        let (status, body) = self.post("/v1/chat/completions", body, 128 * 1024, deadline)?;
+        match status {
+            StatusCode::OK => {}
+            StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => {
+                return Err(FailureKind::Timeout);
+            }
+            _ => return Err(FailureKind::Unavailable),
+        }
+        let completion: Completion =
+            serde_json::from_slice(&body).map_err(|_| FailureKind::InvalidResponse)?;
+        completion
+            .choices
+            .into_iter()
+            .next()
+            .filter(|choice| choice.message.role == ChatRole::Assistant)
+            .and_then(|choice| choice.message.content)
+            .filter(|content| valid_chat_text(content, MAX_CHAT_REPLY_BYTES))
+            .ok_or(FailureKind::InvalidResponse)
+    }
+
+    pub(crate) fn workspace(
+        &self,
+        request: workspace::WorkspaceRequest,
+        deadline: Instant,
+    ) -> Result<workspace::WorkspaceReply, Rejection> {
+        if !request.is_valid() {
+            return Err(Rejection::Invalid);
+        }
+        let body = serde_json::to_vec(&request).map_err(|_| Rejection::Invalid)?;
+        if body.len() > workspace::MAX_BYTES {
+            return Err(Rejection::Limit);
+        }
+        let (status, body) = self
+            .post("/v1/workspace", body, workspace::MAX_BYTES, deadline)
+            .map_err(|_| Rejection::Unavailable)?;
+        match status {
+            StatusCode::OK => {
+                let reply = serde_json::from_slice(&body).map_err(|_| Rejection::Unavailable)?;
+                if !request.accepts(&reply) {
+                    return Err(Rejection::Unavailable);
+                }
+                Ok(reply)
+            }
+            StatusCode::BAD_REQUEST => Err(Rejection::Invalid),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(Rejection::Denied),
+            StatusCode::PAYLOAD_TOO_LARGE => Err(Rejection::Limit),
+            _ => Err(Rejection::Unavailable),
+        }
+    }
+
+    fn post(
+        &self,
+        path: &'static str,
+        body: Vec<u8>,
+        limit: usize,
+        deadline: Instant,
+    ) -> Result<(StatusCode, Bytes), FailureKind> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -103,7 +165,7 @@ impl ChatRelay {
                     .await
                     .map_err(|_| FailureKind::Unavailable)?;
                 let driver = tokio::spawn(connection);
-                let result = self.exchange(&mut client, body).await;
+                let result = self.exchange(&mut client, path, body, limit).await;
                 driver.abort();
                 result
             })
@@ -115,9 +177,11 @@ impl ChatRelay {
     async fn exchange(
         &self,
         client: &mut http1::SendRequest<Full<Bytes>>,
+        path: &'static str,
         body: Vec<u8>,
-    ) -> Result<String, FailureKind> {
-        let request = Request::post("/v1/chat/completions")
+        limit: usize,
+    ) -> Result<(StatusCode, Bytes), FailureKind> {
+        let request = Request::post(path)
             .header("Host", self.endpoint.to_string())
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Content-Type", "application/json")
@@ -127,27 +191,15 @@ impl ChatRelay {
             .send_request(request)
             .await
             .map_err(|_| FailureKind::Unavailable)?;
-        match response.status() {
-            StatusCode::OK => {}
-            StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => {
-                return Err(FailureKind::Timeout)
-            }
-            _ => return Err(FailureKind::Unavailable),
+        let status = response.status();
+        if status != StatusCode::OK {
+            return Ok((status, Bytes::new()));
         }
-        let body = Limited::new(response.into_body(), 128 * 1024)
+        let body = Limited::new(response.into_body(), limit)
             .collect()
             .await
             .map_err(|_| FailureKind::InvalidResponse)?
             .to_bytes();
-        let completion: Completion =
-            serde_json::from_slice(&body).map_err(|_| FailureKind::InvalidResponse)?;
-        completion
-            .choices
-            .into_iter()
-            .next()
-            .filter(|choice| choice.message.role == ChatRole::Assistant)
-            .and_then(|choice| choice.message.content)
-            .filter(|content| valid_chat_text(content, MAX_CHAT_REPLY_BYTES))
-            .ok_or(FailureKind::InvalidResponse)
+        Ok((status, body))
     }
 }

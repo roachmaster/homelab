@@ -124,6 +124,11 @@ cannot be established. Review images before sharing them beyond the test artifac
 - **Page lifetime:** real reload and leave/return are combined with a deterministic
   `pagehide/pageshow` persisted-event probe to assert synchronous DOM clearing.
   The synthetic persisted flag does not claim the browser actually used bfcache.
+  A controlled loopback Chat relay stays up while separate native hosts serve
+  the same browser origin. The original tab recovers its draft and reauthorizes
+  the selected source. A new, independently paired browser context sees the
+  submitted transcript with no draft or Workbench selection. The relay uses
+  test-owned memory and a deterministic inference response.
 
 The driver bounds the browser journey to 180seconds, then independently attempts
 bounded cleanup. The root wrapper allows 300seconds for the driver, followed by

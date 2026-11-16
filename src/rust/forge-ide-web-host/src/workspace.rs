@@ -7,7 +7,7 @@ pub(crate) const PATH: &str = "/forge/v1/dispatch/workspace";
 pub(crate) const MAX_BYTES: usize = 2 * 1024 * 1024;
 const MAX_TABS: usize = 12;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum WorkspaceRequest {
     Restore {
@@ -21,8 +21,8 @@ pub(crate) enum WorkspaceRequest {
     },
 }
 
-#[derive(Serialize)]
-#[serde(untagged)]
+#[derive(Deserialize, Serialize)]
+#[serde(untagged, deny_unknown_fields)]
 pub(crate) enum WorkspaceReply {
     Restored {
         lease: String,
@@ -48,16 +48,47 @@ fn valid_tab(tab: &str) -> bool {
             .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
+fn valid_lease(lease: &str) -> bool {
+    lease.len() == 64
+        && lease
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+}
+
+impl WorkspaceRequest {
+    pub(crate) fn is_valid(&self) -> bool {
+        match self {
+            Self::Restore { tab } => valid_tab(tab),
+            Self::Save {
+                tab,
+                lease,
+                revision,
+                snapshot,
+            } => valid_tab(tab) && valid_lease(lease) && *revision > 0 && snapshot.is_valid(),
+        }
+    }
+
+    pub(crate) fn accepts(&self, reply: &WorkspaceReply) -> bool {
+        match (self, reply) {
+            (Self::Restore { .. }, WorkspaceReply::Restored { lease, snapshot }) => {
+                valid_lease(lease) && snapshot.as_ref().is_none_or(WorkspaceSnapshot::is_valid)
+            }
+            (Self::Save { .. }, WorkspaceReply::Saved {}) => true,
+            _ => false,
+        }
+    }
+}
+
 impl Workspaces {
     pub(crate) fn handle(
         &mut self,
         request: WorkspaceRequest,
     ) -> Result<WorkspaceReply, Rejection> {
+        if !request.is_valid() {
+            return Err(Rejection::Invalid);
+        }
         match request {
             WorkspaceRequest::Restore { tab } => {
-                if !valid_tab(&tab) {
-                    return Err(Rejection::Invalid);
-                }
                 let lease = random_token().map_err(|_| Rejection::Unavailable)?;
                 if !self.0.contains_key(&tab) && self.0.len() == MAX_TABS {
                     if let Some((oldest, _)) = self.0.iter().min_by_key(|(_, entry)| entry.touched)
@@ -87,9 +118,6 @@ impl Workspaces {
                 let entry = self.0.get_mut(&tab).ok_or(Rejection::Denied)?;
                 if entry.lease != lease {
                     return Err(Rejection::Denied);
-                }
-                if revision == 0 || !snapshot.is_valid() {
-                    return Err(Rejection::Invalid);
                 }
                 // Concurrent saves can arrive in either order. An earlier worker
                 // cannot write after a restored document has claimed the lease.

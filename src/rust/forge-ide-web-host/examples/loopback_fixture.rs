@@ -84,14 +84,12 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if !(args.len() == 2
-        || (args.len() == 3 && (args[2] == "--faults" || args[2] == "--single-project")))
-    {
-        return Err(
-            "usage: loopback_fixture GENERATED_ASSETS_DIRECTORY FORGE_AGENT_BINARY [--faults|--single-project]"
-                .into(),
-        );
-    }
+    let durable = match args.as_slice() {
+        [_, _] => None,
+        [_, _, mode] if mode == "--faults" || mode == "--single-project" => None,
+        [_, _, mode, bind, relay, token] if mode == "--durable" => Some((bind, relay, token)),
+        _ => return Err("usage: loopback_fixture ASSETS AGENT [--faults|--single-project|--durable BIND RELAY TOKEN_FILE]".into()),
+    };
     let faults = args.get(2).is_some_and(|value| value == "--faults");
     let single_project = args.get(2).is_some_and(|value| value == "--single-project");
     let assets = PathBuf::from(&args[0]).canonicalize()?;
@@ -172,7 +170,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         vec!["workspace", "empty", "denied"]
     };
-    let host_config = json!({"bind":"127.0.0.1:0","assets":assets,"credentials":credentials("client"),"nodes":[{"key":"lab","label":"Local fixture","projects":projects,"address":address,"server_name":"localhost","node":"fixture-node","incarnation":"fixture-host"}],"timeout_ms":5000});
+    let mut host_config = json!({"bind":"127.0.0.1:0","assets":assets,"credentials":credentials("client"),"nodes":[{"key":"lab","label":"Local fixture","projects":projects,"address":address,"server_name":"localhost","node":"fixture-node","incarnation":"fixture-host"}],"timeout_ms":5000});
+    if let Some((bind, relay, token_file)) = durable {
+        host_config["bind"] = json!(bind.to_str().ok_or("invalid host bind address")?);
+        host_config["chat"] = json!({
+            "endpoint": relay.to_str().ok_or("invalid relay address")?,
+            "token_file": PathBuf::from(token_file),
+            "workspace_persistence": true,
+        });
+    }
     let config_path = fixture.root.join("host.json");
     fs::write(&config_path, serde_json::to_vec(&host_config)?)?;
     let group = register_host("web", load_config(&config_path)?)?;

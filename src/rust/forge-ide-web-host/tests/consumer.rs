@@ -1470,6 +1470,7 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
     settings.chat = Some(forge_ide_web_host::ChatConfig {
         endpoint: upstream.local_addr().unwrap(),
         token_file: token_path,
+        workspace_persistence: false,
     });
     let (host, _) = host_with_config(settings);
     let body = json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}});

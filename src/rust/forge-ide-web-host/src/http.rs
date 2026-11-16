@@ -427,7 +427,7 @@ fn workspace_command(
     if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
         return Err(Rejection::Unavailable);
     }
-    let reply = host.workspace(request)?;
+    let reply = host.workspace(request, deadline)?;
     let mut output = LimitedBytes {
         bytes: Vec::new(),
         max: workspace::MAX_BYTES,

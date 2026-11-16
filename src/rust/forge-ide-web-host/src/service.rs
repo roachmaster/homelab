@@ -686,7 +686,19 @@ impl Host {
         let session = self.state.session.borrow();
         session.authenticated(cookie) && session.csrf_matches(csrf)
     }
-    pub(crate) fn workspace(&self, request: WorkspaceRequest) -> Result<WorkspaceReply, Rejection> {
+    pub(crate) fn workspace(
+        &self,
+        request: WorkspaceRequest,
+        deadline: Instant,
+    ) -> Result<WorkspaceReply, Rejection> {
+        if let Some(relay) = self
+            .state
+            .chat
+            .as_ref()
+            .filter(|relay| relay.workspace_persistence)
+        {
+            return relay.workspace(request, deadline);
+        }
         self.state.session.borrow_mut().workspaces.handle(request)
     }
     pub(crate) fn context(

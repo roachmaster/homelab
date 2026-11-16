@@ -57,10 +57,11 @@ After admission, use **New chat** to start a separate conversation and use
 **Conversation** to switch between histories and drafts. Follow-ups send the
 selected conversation's bounded history to the active Forge llama.cpp model.
 While you work, Forge checkpoints the selected conversation, accepted replies and
-unsent drafts in the authenticated host's memory. When you return to the same
-browser tab after Back or reload, Forge restores the last saved checkpoint while
-the host session is active. An interrupted send restores its prompt as a draft.
-A failed send also leaves the draft ready to retry.
+unsent drafts. Mission Control stores them in PostgreSQL through the local runner,
+so you can return to a saved conversation after a deploy. A new browser tab loads
+committed Chat history. Reopening the original tab after Back or reload also
+restores its unsent drafts and Workbench location. An interrupted send restores
+its prompt as a draft. A failed send also leaves the draft ready to retry.
 
 Browsers that support the native leave warning can show it when a draft,
 conversation or Workbench context is open. The browser supplies the wording.
