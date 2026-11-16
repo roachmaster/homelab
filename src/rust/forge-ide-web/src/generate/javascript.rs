@@ -697,7 +697,8 @@ async function flushNavigation(id){
     JSON.stringify(latestWorkspace)===json&&(!checkpoint||checkpoint.saved));
   let cache=null;
   if(saved&&workspaceEpoch&&!mailNavigationLocked){
-    const local=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot)});
+    const local=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,
+      snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{})});
     if(encoder.encode(local).length<=NAVIGATION_CACHE_MAX)cache=local;
   }
   postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!mailNavigation||cache!==null),cache});
@@ -793,7 +794,9 @@ async function run(effect){
       const restore=await restoreWorkspace(decoded.event.catalog?.chat_history===true,decoded.event.catalog?.async_chat===true);
       const cache=navigationCache;
       navigationCache=null;
-      if(restore.unavailable&&cache?.version===1&&cache.tab===workspaceTab&&workspaceEpoch&&cache.epoch===workspaceEpoch){
+      const matchesCache=cache?.version===1&&cache.tab===workspaceTab&&workspaceEpoch&&cache.epoch===workspaceEpoch;
+      if(matchesCache&&decoded.event.catalog?.mail_enabled===true)savedMail=cache.mail??null;
+      if(restore.unavailable&&matchesCache){
         saved=navigationSnapshot(cache.snapshot);
       }else{
         saved=restore.snapshot;
@@ -803,7 +806,7 @@ async function run(effect){
     try{
       // The completed request should not occupy a slot used by its effects.
       pending.delete(id);
-      dispatch(decoded.event,null,saved!==null);
+      dispatch(decoded.event,null,saved!==null||savedMail!==null);
       if(saved!==null)dispatch({kind:'restore_workspace',snapshot:saved});
       if(savedMail!==null)dispatch({kind:'restore_mail_navigation',snapshot:savedMail});
     }catch(_){fatal('Invalid application ABI result. Reload to retry.');}
