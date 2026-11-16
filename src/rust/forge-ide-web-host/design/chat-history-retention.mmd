@@ -1,0 +1,28 @@
+---
+title: Set a chat's retention policy
+---
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":25,"diagramMarginX":30,"diagramMarginY":25,"width":140,"wrap":false}}}%%
+sequenceDiagram
+    participant B as Browser
+    participant H as Web host
+    participant R as Agent Runner
+    participant P as PostgreSQL
+
+    Note over B,H: Choose an inclusive date, e.g. 15 Dec 2026,<br/>or keep the chat long-term
+    B->>H: POST /forge/v1/dispatch<br/>Forge-Destination: ide.chat.history.retention.set<br/>Chat ID, expected revision and policy
+    H->>H: Check session, origin and CSRF
+    H->>R: POST /v1/dispatch<br/>Bearer + same destination<br/>RetentionSetRequest
+    alt Inclusive calendar date
+        R->>R: Expire at start of the next day<br/>UTC unless a time zone is selected
+    else long_term
+        R->>R: Store no expiry time
+    end
+    R->>P: ChatHistoryDao write transaction<br/>Lock chat, check revision, update policy
+    P-->>R: Committed policy and revision, or rejected write
+    alt Commit succeeds
+        R-->>H: chat_history_retention_set
+        H-->>B: 200 · show saved policy
+    else Missing chat or revision changed
+        R-->>H: 404 · unavailable / 409 · conflict
+        H-->>B: Refresh history before another edit
+    end

@@ -11,11 +11,22 @@ const archive = document.getElementById('previous-chat-archive');
 const status = document.getElementById('previous-chat-status');
 const local = document.getElementById('previous-chat-local');
 const localRows = document.getElementById('previous-chat-local-rows');
+const savedEmpty = document.getElementById('previous-chat-saved-empty');
+const retention = document.getElementById('previous-chat-retention');
+const manage = document.getElementById('previous-chat-manage');
+const manageTrigger = manage.querySelector('summary');
+const expirationDialog = document.getElementById('previous-chat-expiration-dialog');
+const expirationForm = document.getElementById('previous-chat-expiration-form');
+const expirationDate = document.getElementById('previous-chat-expiration-date');
+const deleteDialog = document.getElementById('previous-chat-delete-dialog');
+const deleteTitle = document.getElementById('previous-chat-delete-title');
+const dateFormat = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeZone: 'UTC' });
 
 // The preview uses fictional messages and keeps all edits in this document.
 const chats = new Map([
   ['workbench', {
     title: 'Summarize Workbench',
+    policy: { mode: 'expires', expiresOn: '2026-11-30' },
     messages: [
       ['user', 'Summarize Workbench.'],
       ['assistant', 'Use Explorer to find a file, File to read its source, and Outline to jump to a declaration.'],
@@ -23,6 +34,7 @@ const chats = new Map([
   }],
   ['source', {
     title: 'Explain source verification',
+    policy: { mode: 'long_term' },
     messages: [
       ['user', 'How do I know the file matches the inspection?'],
       ['assistant', 'Forge compares the bytes it reads with the digest from the inspection. If the file changed, refresh the project.'],
@@ -30,6 +42,7 @@ const chats = new Map([
   }],
   ['backup', {
     title: 'Plan a backup',
+    policy: { mode: 'expires', expiresOn: '2026-12-15' },
     messages: [
       ['user', 'What should I check when backing up PostgreSQL?'],
       ['assistant', 'Restore the backup into a disposable database and verify that the expected schema and migration are present.'],
@@ -71,6 +84,16 @@ function presentChat(id) {
   compose.hidden = Boolean(chat.archived);
   archive.hidden = !chat.archived;
   draft.value = drafts.get(id) ?? '';
+  const policy = chat.policy;
+  manage.open = false;
+  manage.hidden = !policy;
+  retention.hidden = !policy;
+  if (policy?.mode === 'expires') {
+    const date = dateFormat.format(new Date(policy.expiresOn + 'T00:00:00Z'));
+    retention.textContent = 'Expires after ' + date + ' (UTC)';
+  } else {
+    retention.textContent = policy ? 'Long-term storage · No expiration scheduled' : '';
+  }
   for (const button of menu.querySelectorAll('[data-preview-chat]')) {
     if (button.dataset.previewChat === id) button.setAttribute('aria-current', 'true');
     else button.removeAttribute('aria-current');
@@ -104,6 +127,35 @@ function newChat(from) {
   draft.focus();
 }
 
+function changePolicy(policy, message) {
+  const chat = chats.get(selected);
+  if (!chat.policy) return;
+  chat.policy = policy;
+  presentChat(selected);
+  status.textContent = message;
+  manageTrigger.focus();
+}
+
+function deleteSelectedChat() {
+  const chat = chats.get(selected);
+  if (!chat.policy) return;
+  for (const row of menu.querySelectorAll('[data-preview-chat]')) {
+    if (row.dataset.previewChat === selected) row.remove();
+  }
+  chats.delete(selected);
+  drafts.delete(selected);
+  const nextSaved = [...chats].find(([, item]) => item.policy);
+  savedEmpty.hidden = Boolean(nextSaved);
+  const nextLocalChat = [...chats].find(([, item]) => !item.archived);
+  const next = nextSaved ?? nextLocalChat;
+  if (next) openChat(next[0]);
+  else {
+    newChat();
+    trigger.focus();
+  }
+  status.textContent = 'Deleted ' + chat.title + ' in this preview.';
+}
+
 menu.addEventListener('click', event => {
   const button = event.target.closest('[data-preview-chat]');
   const id = button?.dataset.previewChat;
@@ -123,5 +175,29 @@ previousChats.querySelector('#previous-chat-new').addEventListener('click', () =
 previousChats.querySelector('#previous-chat-continue').addEventListener('click', () => {
   const chat = chats.get(selected);
   if (chat.archived) newChat(chat);
+});
+document.getElementById('previous-chat-expire').addEventListener('click', () => {
+  expirationDate.value = chats.get(selected).policy?.expiresOn ?? '';
+  expirationDialog.showModal();
+});
+document.getElementById('previous-chat-keep').addEventListener('click', () => {
+  changePolicy({ mode: 'long_term' }, 'Kept for long-term storage.');
+});
+document.getElementById('previous-chat-delete').addEventListener('click', () => {
+  deleteTitle.textContent = chats.get(selected).title;
+  deleteDialog.showModal();
+});
+for (const button of document.querySelectorAll('[data-history-dismiss]')) {
+  button.addEventListener('click', () => button.closest('dialog').close());
+}
+expirationForm.addEventListener('submit', event => {
+  event.preventDefault();
+  if (!expirationDate.reportValidity()) return;
+  expirationDialog.close();
+  changePolicy({ mode: 'expires', expiresOn: expirationDate.value }, 'Expiration saved.');
+});
+document.getElementById('previous-chat-confirm-delete').addEventListener('click', () => {
+  deleteDialog.close();
+  deleteSelectedChat();
 });
 presentChat(selected);

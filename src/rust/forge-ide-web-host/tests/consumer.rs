@@ -1057,12 +1057,21 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
     assert!(request("GET", "/design/previous-chats.js")
         .contains("Content-Type: text/javascript; charset=utf-8"));
+    assert!(
+        request("GET", "/design/chat-history").contains("Content-Type: text/html; charset=utf-8")
+    );
+    assert!(request("GET", "/design/chat-history.css")
+        .contains("Content-Type: text/css; charset=utf-8"));
     for path in [
         "/design/forge-ide-chat-desktop.png",
         "/design/forge-ide-chat-phone.png",
         "/design/forge-ide-workbench-desktop.png",
         "/design/forge-ide-workbench-phone.png",
         "/design/forge-ide-workbench-project-options.png",
+        "/design/chat-history-open.png",
+        "/design/chat-history-retention.png",
+        "/design/chat-history-delete.png",
+        "/design/chat-history-expiry.png",
     ] {
         let response = request("HEAD", path);
         assert!(response.starts_with("HTTP/1.1 200 OK"));

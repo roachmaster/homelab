@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Previous chats technical design · Forge IDE</title>
+  <link rel="stylesheet" href="/design/style.css">
+  <link rel="stylesheet" href="/design/chat-history.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="page-width header-inner">
+      <span class="wordmark"><span class="mark" aria-hidden="true">F</span> Forge IDE</span>
+      <a class="return-link" href="/design#previous-chats"><span aria-hidden="true">←</span> Back to Previous chats</a>
+    </div>
+  </header>
+
+  <main id="main" class="page-width history-contract">
+    <div class="intro">
+      <h1>Previous chats technical design</h1>
+      <p>Proposed contracts for opening, retaining, deleting, and expiring saved chats through Forge dispatch.</p>
+      <nav class="section-nav" aria-label="Technical design sections">
+        <a href="#dispatch">Dispatch</a>
+        <a href="#dto">DTOs</a>
+        <a href="#dao">DAO</a>
+        <a href="#sequences">Sequence diagrams</a>
+      </nav>
+    </div>
+
+    <section id="dispatch" class="design-section" aria-labelledby="dispatch-title">
+      <h2 id="dispatch-title">Dispatch and admission</h2>
+      <ol class="flow">
+        <li>
+          <h3>Browser → Forge web host</h3>
+          <p>Send <code>application/json</code> to <code>POST /forge/v1/dispatch</code> through the existing access-controlled origin. <code>Forge-Destination</code> identifies the operation. The host checks the configured <code>Host</code> and <code>Origin</code>, the <code>forge_ui</code> session cookie, <code>Forge-CSRF</code>, and <code>Forge-Request-Id</code>. Both <code>Forge-Envelope-Version</code> and <code>Forge-Contract-Version</code> are <code>1</code>. The typed body must match its destination and request ID.</p>
+        </li>
+        <li>
+          <h3>Forge web host → Forge runner</h3>
+          <p>After admission, the host sends the validated request to the existing runner’s proposed private <code>POST /v1/dispatch</code>. It uses the same destination, versions and request ID with the runner’s bearer credential. The host keeps browser cookies and CSRF values at the browser boundary. The runner derives the operator from its admitted credential and selects the registered handler.</p>
+        </li>
+        <li>
+          <h3>Forge runner → PostgreSQL</h3>
+          <p>The runner invokes an operator-scoped DAO operation and returns a bounded, typed result. The browser uses the echoed <code>request_id</code> to match the result to the action that initiated it.</p>
+        </li>
+      </ol>
+      <p class="contract-note">Deployed workspace recovery currently uses <code>POST /forge/v1/dispatch/workspace</code>, which relays to <code>POST /v1/workspace</code> when durable recovery is enabled. The chat history destinations and the private runner dispatch route are proposed here.</p>
+    </section>
+
+    <section id="dto" class="design-section" aria-labelledby="dto-title">
+      <h2 id="dto-title">Data transfer objects</h2>
+      <p>The examples use sample chat data. Each response event is wrapped in the Forge envelope <code>{"protocol_version": 1, "event": …}</code>.</p>
+      <dl class="storage">
+        <div>
+          <dt><code>ChatSummaryDto</code></dt>
+          <dd><code>chat_id</code> is a stable opaque UUID. <code>title</code> is the display label. <code>updated_at</code> is the UTC time of the most recent committed turn. <code>revision</code> changes with each committed chat mutation, including a retention change. <code>retention</code> is a <code>RetentionPolicyDto</code>.</dd>
+        </div>
+        <div>
+          <dt><code>RetentionPolicyDto</code></dt>
+          <dd><code>{"kind":"long_term"}</code> has no scheduled expiry. <code>expires</code> carries an inclusive <code>expires_on</code> calendar date. The runner accepts an IANA <code>time_zone</code> or uses the configured zone, which defaults to UTC. It persists the resolved zone and returns the derived <code>expires_at</code> UTC instant when the next local calendar day begins.</dd>
+        </div>
+        <div>
+          <dt><code>ChatMessageDto</code></dt>
+          <dd><code>position</code>, <code>role</code>, and <code>content</code> represent a committed message in transcript order. This tab’s draft is restored separately by stable chat ID.</dd>
+        </div>
+      </dl>
+
+      <div class="contract-examples">
+        <section class="contract-example" aria-labelledby="list-dto-title">
+          <h3 id="list-dto-title">List saved chats</h3>
+          <p><code>Forge-Destination: ide.chat.history.list</code></p>
+          <h4><code>ChatHistoryListRequest</code></h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_list",
+  "request_id": "list-1",
+  "limit": 20,
+  "cursor": null
+}</code></pre>
+          <h4>Response event</h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_listed",
+  "request_id": "list-1",
+  "items": [{
+    "chat_id": "4fb285b2-5a53-4caa-90b6-d0aff012c0a4",
+    "title": "Explain source verification",
+    "updated_at": "2026-11-16T10:00:00Z",
+    "revision": 7,
+    "retention": {"kind": "long_term"}
+  }],
+  "next_cursor": null
+}</code></pre>
+          <p>The runner limits the page size. An opaque cursor continues the ordered list. <code>items: []</code> is a successful empty result. Draft-only chats stay in this tab until the first committed turn.</p>
+        </section>
+
+        <section class="contract-example" aria-labelledby="open-dto-title">
+          <h3 id="open-dto-title">Open a saved chat</h3>
+          <p><code>Forge-Destination: ide.chat.history.open</code></p>
+          <h4><code>ChatHistoryOpenRequest</code></h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_open",
+  "request_id": "open-1",
+  "chat_id": "4fb285b2-5a53-4caa-90b6-d0aff012c0a4"
+}</code></pre>
+          <h4>Response event</h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_opened",
+  "request_id": "open-1",
+  "chat": {
+    "summary": {
+      "chat_id": "4fb285b2-5a53-4caa-90b6-d0aff012c0a4",
+      "title": "Explain source verification",
+      "updated_at": "2026-11-16T10:00:00Z",
+      "revision": 7,
+      "retention": {"kind": "long_term"}
+    },
+    "messages": [
+      {"position": 1, "role": "user", "content": "How is source verified?"},
+      {"position": 2, "role": "assistant", "content": "The host checks the source against the accepted inspection."}
+    ]
+  }
+}</code></pre>
+          <p>Opening reads the saved transcript. An explicit Send starts the next turn.</p>
+        </section>
+
+        <section class="contract-example" aria-labelledby="retention-dto-title">
+          <h3 id="retention-dto-title">Set retention</h3>
+          <p><code>Forge-Destination: ide.chat.history.retention.set</code></p>
+          <h4><code>RetentionSetRequest</code></h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_retention_set",
+  "request_id": "retention-1",
+  "chat_id": "4fb285b2-5a53-4caa-90b6-d0aff012c0a4",
+  "expected_revision": 7,
+  "policy": {
+    "kind": "expires",
+    "expires_on": "2026-11-30",
+    "time_zone": "UTC"
+  }
+}</code></pre>
+          <h4>Response event</h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_retention_set",
+  "request_id": "retention-1",
+  "chat_id": "4fb285b2-5a53-4caa-90b6-d0aff012c0a4",
+  "revision": 8,
+  "retention": {
+    "kind": "expires",
+    "expires_on": "2026-11-30",
+    "time_zone": "UTC",
+    "expires_at": "2026-12-01T00:00:00Z"
+  }
+}</code></pre>
+          <p>The request supplies the calendar date. The runner derives <code>expires_at</code> using the next calendar day in the resolved zone. Setting <code>long_term</code> removes a previously scheduled expiry.</p>
+        </section>
+
+        <section class="contract-example" aria-labelledby="delete-dto-title">
+          <h3 id="delete-dto-title">Delete a saved chat</h3>
+          <p><code>Forge-Destination: ide.chat.history.delete</code></p>
+          <h4><code>DeleteChatRequest</code></h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_delete",
+  "request_id": "delete-1",
+  "chat_id": "4fb285b2-5a53-4caa-90b6-d0aff012c0a4",
+  "expected_revision": 8
+}</code></pre>
+          <h4>Response event</h4>
+          <pre class="contract-code"><code>{
+  "kind": "chat_history_deleted",
+  "request_id": "delete-1",
+  "chat_id": "4fb285b2-5a53-4caa-90b6-d0aff012c0a4",
+  "revision": 9
+}</code></pre>
+          <p>The interface confirms deletion before sending. On success, it removes the chat and the draft keyed to that chat.</p>
+        </section>
+      </div>
+      <p class="contract-note"><code>409</code> means the expected revision is stale. Refresh the saved version before attempting another change. <code>404</code> covers missing, expired, deleted, and out-of-scope chat IDs. An admitted operation’s error result echoes <code>request_id</code> with a typed code such as <code>{"kind":"chat_history_failed","request_id":"delete-1","code":"revision_conflict"}</code>. A failed open preserves the active transcript and draft.</p>
+    </section>
+
+    <section id="dao" class="design-section" aria-labelledby="dao-title">
+      <h2 id="dao-title">PostgreSQL data access</h2>
+      <p><code>ChatHistoryDao</code> belongs to the Forge runner. Every operation takes the operator scope established at admission. Stable chat IDs connect committed messages, retention, and authorized run links. Tab selections and drafts refer to those IDs.</p>
+      <dl class="storage">
+        <div>
+          <dt><code>list(owner, limit, cursor)</code></dt>
+          <dd>Read available summaries in descending last-committed-turn time, with the stable ID as the cursor tie-breaker. Omit transcripts, drafts, tombstones, and already-due chats.</dd>
+        </div>
+        <div>
+          <dt><code>get(owner, chat_id)</code></dt>
+          <dd>Read the summary and ordered committed messages from a consistent snapshot. Apply the same ownership and expiry predicates as the list.</dd>
+        </div>
+        <div>
+          <dt><code>set_retention(owner, chat_id, expected_revision, policy)</code></dt>
+          <dd>Lock the chat row, verify its revision and availability, and persist the resolved policy with the next revision in one transaction.</dd>
+        </div>
+        <div>
+          <dt><code>delete(owner, chat_id, expected_revision)</code></dt>
+          <dd>Lock the chat row, compare the revision, and commit the tombstone and content removal together. Preserve the ID, revision, and removal reason so stale writers cannot recreate it.</dd>
+        </div>
+        <div>
+          <dt><code>expire_due(now, batch_limit)</code></dt>
+          <dd>Run bounded batches in the existing runner scheduler. Recheck the policy, due instant, and candidate revision under the row lock, then use the same removal transaction as manual deletion. A policy change committed before that check takes effect.</dd>
+        </div>
+      </dl>
+      <p class="contract-note">The removal transaction covers the committed transcript, chat-owned linked run content, and recoverable checkpoint copies. Use explicit chat ownership links to determine which records belong to the chat. Check the tombstone at checkpoint save, restore, and late run completion so an open tab or a finishing request cannot revive the chat.</p>
+      <p class="contract-note">Older IDE runs store full submitted transcript snapshots, sometimes from successive turns of the same chat. Keep those entries identifiable as read-only archives. Continuing an archive starts a new chat with a new ID. Retention applies to records explicitly linked to the saved chat. Unlinked archives, independent runner records, and existing backups follow their own retention scope.</p>
+    </section>
+
+    <section id="sequences" class="design-section" aria-labelledby="sequence-title">
+      <h2 id="sequence-title">Sequence diagrams</h2>
+      <div class="gallery contract-sequences">
+        <figure class="wireframe">
+          <figcaption><h3>Open a saved chat</h3></figcaption>
+          <a class="drawing" href="/design/chat-history-open.png">
+            <img src="/design/chat-history-open.png" width="1449" height="1608" loading="lazy" alt="Saved chat list and open requests pass through Forge dispatch to the runner’s PostgreSQL reads.">
+            <span class="open-label">Open full-size diagram <span aria-hidden="true">↗</span></span>
+          </a>
+          <ol class="contract-steps">
+            <li>The browser requests summaries and selects a chat ID.</li>
+            <li>The web host admits the open request and forwards it to the Forge runner.</li>
+            <li>The runner reads the available transcript and sends the typed result. The browser opens it and restores this tab’s draft.</li>
+          </ol>
+        </figure>
+
+        <figure class="wireframe">
+          <figcaption><h3>Set retention</h3></figcaption>
+          <a class="drawing" href="/design/chat-history-retention.png">
+            <img src="/design/chat-history-retention.png" width="1590" height="1544" loading="lazy" alt="A retention choice flows through Forge dispatch to a revision-checked PostgreSQL update.">
+            <span class="open-label">Open full-size diagram <span aria-hidden="true">↗</span></span>
+          </a>
+          <ol class="contract-steps">
+            <li>The browser submits the selected policy with the displayed revision.</li>
+            <li>The web host admits and forwards the typed request.</li>
+            <li>The runner checks the revision, derives an expiry for a dated policy, and commits. The browser displays the returned policy.</li>
+          </ol>
+        </figure>
+
+        <figure class="wireframe">
+          <figcaption><h3>Delete a saved chat</h3></figcaption>
+          <a class="drawing" href="/design/chat-history-delete.png">
+            <img src="/design/chat-history-delete.png" width="1564" height="1501" loading="lazy" alt="Confirmed deletion goes through Forge dispatch to a PostgreSQL transaction that removes chat content and records its tombstone.">
+            <span class="open-label">Open full-size diagram <span aria-hidden="true">↗</span></span>
+          </a>
+          <ol class="contract-steps">
+            <li>The browser confirms the chat ID and sends the delete request with the displayed revision.</li>
+            <li>The web host admits the request. The runner checks ownership and revision under lock.</li>
+            <li>PostgreSQL commits the removal and tombstone. The success event lets the browser remove the chat.</li>
+          </ol>
+        </figure>
+
+        <figure class="wireframe">
+          <figcaption><h3>Expire due chats</h3></figcaption>
+          <a class="drawing" href="/design/chat-history-expiry.png">
+            <img src="/design/chat-history-expiry.png" width="1202" height="1120" loading="lazy" alt="The Forge runner scheduler checks due chat policies and applies the removal transaction in PostgreSQL.">
+            <span class="open-label">Open full-size diagram <span aria-hidden="true">↗</span></span>
+          </a>
+          <ol class="contract-steps">
+            <li>The runner scheduler starts a bounded batch and finds due chats.</li>
+            <li>The DAO locks each eligible chat and rechecks its persisted expiry before removing linked content and writing a tombstone.</li>
+            <li>Subsequent browser lists omit those chats. An open request for an expired chat returns <code>404</code>.</li>
+          </ol>
+        </figure>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

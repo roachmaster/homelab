@@ -14,7 +14,9 @@ const NAMES: [(&str, &str); 5] = [
 const DESIGN_HTML: &[u8] = include_bytes!("../design/index.html");
 const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
 const PREVIOUS_CHATS_JS: &[u8] = include_bytes!("../design/previous-chats.js");
-const DESIGN_IMAGES: [(&str, &[u8]); 5] = [
+const CHAT_HISTORY_HTML: &[u8] = include_bytes!("../design/chat-history.html");
+const CHAT_HISTORY_CSS: &[u8] = include_bytes!("../design/chat-history.css");
+const DESIGN_IMAGES: [(&str, &[u8]); 9] = [
     (
         "forge-ide-chat-desktop.png",
         include_bytes!("../design/forge-ide-chat-desktop.png"),
@@ -35,6 +37,22 @@ const DESIGN_IMAGES: [(&str, &[u8]); 5] = [
         "forge-ide-workbench-project-options.png",
         include_bytes!("../design/forge-ide-workbench-project-options.png"),
     ),
+    (
+        "chat-history-open.png",
+        include_bytes!("../design/chat-history-open.png"),
+    ),
+    (
+        "chat-history-retention.png",
+        include_bytes!("../design/chat-history-retention.png"),
+    ),
+    (
+        "chat-history-delete.png",
+        include_bytes!("../design/chat-history-delete.png"),
+    ),
+    (
+        "chat-history-expiry.png",
+        include_bytes!("../design/chat-history-expiry.png"),
+    ),
 ];
 
 fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
@@ -42,6 +60,10 @@ fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
         "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
         "/design/previous-chats.js" => Some(("text/javascript; charset=utf-8", PREVIOUS_CHATS_JS)),
+        "/design/chat-history" | "/design/chat-history/" => {
+            Some(("text/html; charset=utf-8", CHAT_HISTORY_HTML))
+        }
+        "/design/chat-history.css" => Some(("text/css; charset=utf-8", CHAT_HISTORY_CSS)),
         _ => {
             let name = path.strip_prefix("/design/")?;
             DESIGN_IMAGES

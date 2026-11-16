@@ -1416,6 +1416,7 @@ async function previousChatsDesignJourney(design, designUrl) {
   await choose('archive', 'Inspect a Rust project');
   await check(archive).toBeVisible();
   await check(draft).toBeHidden();
+  await check(proposal.locator('#previous-chat-manage')).toBeHidden();
   const archivedTranscript = await transcript.innerText();
   await archive.getByRole('button', { name: 'Continue as new chat', exact: true }).click();
   await check(archive).toBeHidden();
@@ -1447,6 +1448,52 @@ async function previousChatsDesignJourney(design, designUrl) {
       });
     }), true, 'the open Previous chats menu and editable composer fit the phone');
   }
+
+  process.stderr.write('QA_CHECK design_chat_retention\n');
+  await choose('workbench', 'Summarize Workbench');
+  const retention = proposal.locator('#previous-chat-retention');
+  const manage = proposal.locator('#previous-chat-manage summary');
+  await check(retention).toContainText('Nov 30, 2026');
+  await manage.click();
+  await proposal.locator('#previous-chat-expire').click();
+  const expiration = design.locator('#previous-chat-expiration-dialog');
+  await check(expiration).toBeVisible();
+  await expiration.locator('#previous-chat-expiration-date').fill('2027-01-10');
+  await expiration.getByRole('button', { name: 'Save expiration', exact: true }).click();
+  await check(expiration).toBeHidden();
+  await check(retention).toContainText('Jan 10, 2027');
+  await manage.click();
+  await proposal.locator('#previous-chat-keep').click();
+  await check(retention).toContainText('No expiration scheduled');
+
+  await manage.click();
+  await proposal.locator('#previous-chat-delete').click();
+  const deletion = design.locator('#previous-chat-delete-dialog');
+  const cancelDelete = deletion.getByRole('button', { name: 'Cancel', exact: true });
+  await check(deletion).toContainText('Summarize Workbench');
+  await check(cancelDelete).toBeFocused();
+  await cancelDelete.click();
+  await check(deletion).toBeHidden();
+  await check(title).toHaveText('Summarize Workbench');
+  await proposal.locator('#previous-chat-delete').click();
+  await deletion.locator('#previous-chat-confirm-delete').click();
+  await check(row('workbench')).toHaveCount(0);
+  await check(title).toHaveText('Explain source verification');
+  await check(draft).toHaveValue(savedDraft);
+  await check(summary).toBeFocused();
+
+  process.stderr.write('QA_CHECK design_chat_history_contract\n');
+  await proposal.locator('a[href="/design/chat-history"]').click();
+  await check(design).toHaveURL(`${new URL(designUrl).origin}/design/chat-history`);
+  await check(design.getByRole('heading', { level: 1 })).toHaveText('Previous chats technical design');
+  const diagrams = design.locator('.contract-sequences img');
+  await check(diagrams).toHaveCount(4);
+  for (const diagram of await diagrams.all()) {
+    await diagram.scrollIntoViewIfNeeded();
+    await check.poll(() => diagram.evaluate(img => img.naturalWidth)).toBeGreaterThan(0);
+  }
+  assert.equal(await design.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+    true, 'contract and diagrams scroll inside the phone page');
 }
 
 async function chatJourney(page, context) {

@@ -208,8 +208,9 @@ chunking, upgrades, `Expect`, duplicate headers and buffered pipelining. This na
 adapter is intentionally not a general-purpose HTTP server. Asset manifest count
 is exactly five; each asset is capped at16 MiB, hash verified and loaded via the
 existing rooted native file client (no symlink traversal or shell wrappers).
-The host embeds the Design reference at `/design` and serves its stylesheet,
-five wireframe previews, and sample Previous chats prototype from fixed paths.
+The host embeds the Design reference at `/design`, its sample Previous chats
+prototype, and the proposed chat history contracts and sequence diagrams at
+`/design/chat-history`. The design pages use fixed asset paths.
 The configured startup directory and generated content remain trusted; hashing
 provides consistency, not a publisher signature or a filesystem snapshot.
 
