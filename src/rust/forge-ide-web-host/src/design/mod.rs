@@ -59,6 +59,7 @@ macro_rules! element {
 
 mod dispatch;
 pub mod game_engine;
+mod game_physics;
 mod history;
 mod landing;
 mod mail;
@@ -101,6 +102,7 @@ pub enum DesignPage {
     ChatDispatch,
     Mail,
     GameStudio,
+    GamePhysics,
     Playtest,
 }
 
@@ -132,6 +134,12 @@ impl DesignPage {
                 "/design",
                 "Back to Design",
                 game_engine::BODY,
+            ),
+            Self::GamePhysics => (
+                "Physics for the Forge Game Runtime · Forge IDE",
+                "/design",
+                "Back to Design",
+                game_physics::BODY,
             ),
             Self::Playtest => (
                 "Room One · Forge Playtest",

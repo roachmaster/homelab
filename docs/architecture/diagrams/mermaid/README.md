@@ -405,3 +405,17 @@ rejected while busy; retries are explicit. The accepted-report key guard now cov
 and pagination actions; outline actions also check the selected entry. This is a
 local public event/ABI 2 change, not a native HTTP schema change. Read the table for invalid,
 stale, network failure and focus/lifecycle cases omitted from simplified arrows.
+
+## Forge game physics proposal
+
+These views describe the [physics proposal](../../proposals/forge-game-physics.md).
+The sequences expand its fixed tick and landing path. The type sketch shows a
+body owning its collider and the renderer matching the published root and
+local pose by tick. The proposed pose payload is separate from the existing
+position snapshot. Its transport remains open.
+
+| Proposed view | Source | Image |
+| --- | --- | --- |
+| Fixed tick, collision, and publication | [Mermaid](game-physics-tick.mmd) | [SVG](images/game-physics-tick.svg) |
+| Landing contact and animation bridge | [Mermaid](game-physics-animation.mmd) | [SVG](images/game-physics-animation.svg) |
+| Transform authority and publication | [Mermaid](game-physics-authority.mmd) | [SVG](images/game-physics-authority.svg) |

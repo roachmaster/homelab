@@ -1,0 +1,40 @@
+---
+title: Proposed transform authority and publication
+---
+classDiagram
+    direction TB
+    class Body {
+        <<proposed>>
+        +Motion motion
+        +Q16 resolvedRoot
+    }
+    class Collider {
+        <<proposed>>
+        +AABB shape
+        +Q8 pivotOffset
+    }
+    class AnimationPose {
+        <<proposed>>
+        +Frame selectedFrame
+        +LocalPose joints
+    }
+    class Snapshot {
+        +Tick tick
+        +Q8 previousRoot
+        +Q8 currentRoot
+    }
+    class PosePayload {
+        <<proposed>>
+        +Tick tick
+        +Frame selectedFrame
+    }
+    class Renderer {
+        +matchTick()
+        +interpolateRoot()
+        +drawSelectedFrame()
+    }
+    Body *-- Collider
+    Body --> Snapshot
+    AnimationPose --> PosePayload
+    Snapshot --> Renderer
+    PosePayload --> Renderer

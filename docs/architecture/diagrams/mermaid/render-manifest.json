@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "917d6509d8f24d5f4f0ecd151c4653c53cb6cc3b08a59235f2c6d4890d250d30",
-    "validate.mjs": "d70caa6ca8f36e6b20f956b5354645d16e0ef9822c6f71df5e25e95286f1f7ae"
+    "render.py": "0eaf7462a6959017a8fbce706e942ca27885c87e93f0b098b827ad553bd5b3f2",
+    "validate.mjs": "8f6e41890afde4949a87bbeb5e7b5796692354f3adafb4b588aa2a2a7f736ffe"
   },
   "diagrams": [
     {
@@ -181,6 +181,24 @@
       "source_sha256": "dc9c8b6617619af16e63b7548fb612626e45b55a5fcc7eeb2139ac158f9339bb",
       "svg": "images/m28-ui-transitions.svg",
       "svg_sha256": "278dfddd083dd439240210ecf47fae2f0553025a1fc195f6572316ec47276977"
+    },
+    {
+      "source": "game-physics-tick.mmd",
+      "source_sha256": "6541e2aed215195f659685216e936175501b35959e08bb0be98bd071080cbaee",
+      "svg": "images/game-physics-tick.svg",
+      "svg_sha256": "f501f066261d02c866215e25eeac26d1f715a420500c2e1d997ca35e984c0d4a"
+    },
+    {
+      "source": "game-physics-animation.mmd",
+      "source_sha256": "a2d948eabe7ccb5ba8a737f854f7107297a412dd8311ebf96561602a3e7ad0e8",
+      "svg": "images/game-physics-animation.svg",
+      "svg_sha256": "86ea184b741a92ebe9179ba004e80dbe9c85dc8d941a86043c2f06c635a06ea5"
+    },
+    {
+      "source": "game-physics-authority.mmd",
+      "source_sha256": "3674cae0fa8b93678cca316d7856527c837b93c5b37e74da1f5bd1f6a1d1b379",
+      "svg": "images/game-physics-authority.svg",
+      "svg_sha256": "ae743169687e74282cb4ab5563d477f1adf325ccee935a9681d78f5236c84b8c"
     }
   ]
 }

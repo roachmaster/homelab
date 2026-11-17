@@ -3,7 +3,7 @@
 Give the game gravity, velocity, and collision response — so the
 Scout can jump and fall under simulated motion instead of tile hops
 and baked root offsets — while keeping the fixed tick,
-determinism, and the snapshot interface exactly as they are.
+determinism, and the existing v1 snapshot layout.
 
 **Planning baseline** — GitHub `main` at `7ba1235` on 2026-11-17.
 This design applies Gregory chapter 12 (§§12.1–12.6), chapter 11
@@ -11,8 +11,15 @@ This design applies Gregory chapter 12 (§§12.1–12.6), chapter 11
 for the fixed step, and chapter 15 (§15.6) for the phase order,
 and it follows the Forge package-boundary conventions (see "How this
 integrates with the Forge philosophy" below).
-It implements the proposal's staging: "Use simple tile collision
-first. Add Rapier for a moving-platform or rigid-body milestone."
+The first implementation would use tile collision. Consider Rapier
+for a later moving-platform or rigid-body milestone.
+
+## UML views
+
+These [editable diagrams](../diagrams/mermaid/README.md#forge-game-physics-proposal)
+show the proposed [fixed tick](../diagrams/mermaid/images/game-physics-tick.svg),
+[landing and animation bridge](../diagrams/mermaid/images/game-physics-animation.svg),
+and [transform authority](../diagrams/mermaid/images/game-physics-authority.svg).
 
 ## The problem
 
@@ -87,22 +94,26 @@ Gregory §4 requires every vector to name its source space, destination space, a
 
 | Quantity            | Representation          | Space / meaning                                      |
 | ------------------- | ----------------------- | ---------------------------------------------------- |
-| Entity position     | Q16 (1/65 536 tile)     | Tile space; origin at the top-left of the board      |
-| Snapshot position   | Q8 (1/256 tile)         | Truncation of Q16; the runtime keeps the Q16 remainder so truncation never accumulates |
+| Entity position     | Q16 (1/65 536 tile)     | Tile space with origin at the top-left, +X right, +Y down |
+| Snapshot position   | Q8 (1/256 tile)         | Existing y-up wire space; convert the origin and Y axis before truncation |
 | Velocity            | Q16 per tick            | Same tile space                                      |
 | Collider offset     | Q8 relative to pivot    | Recipe body-hitbox `at` point                        |
 | Recipe pivot        | Pixel cell origin       | Authoring space; converted once at load              |
 | Contact normal      | Axis-aligned unit       | +X, −X, +Y, or −Y only for v1                        |
 
-No other spaces are admitted into the simulation step. Screen-space conversion lives only in the presentation layer. A future change that introduces a new space must update this table first.
+Board rows remain y-down. The publication adapter converts current and previous
+entity positions and event tiles to the existing y-up wire coordinates. At
+integer tile anchors the mapping is `y_up = (board_height - 1) - y_down`.
+Apply it in Q16 for transforms before converting to Q8. Screen-space
+conversion belongs to presentation.
 
 ## The step: one physics step per tick
 
-The tick IS the physics step. There is no substepping for v1:
-at 60 Hz, the fastest character moves 0.2 tiles per tick (see
-§6), so one step per tick cannot miss a tile. The physics runs
-inside `Simulate`, in the Move and Collide phases the entity
-design already defines:
+The tick is the physics step. The proposed v1 runs at 60 Hz
+with a maximum fall displacement of 0.2 tiles per tick and
+uses the swept checks below where displacement could skip
+a contact. Physics runs inside `Simulate`, in the Move and
+Collide phases the entity design already defines:
 
 | Phase | Physics work |
 | --- | --- |
@@ -113,8 +124,8 @@ design already defines:
 Integration is semi-implicit Euler (velocity first, then
 position) in fixed point. All state is integer: positions in
 Q16 (1/65,536 tile) internally, published as Q8 (1/256 tile) in
-the snapshot by truncation — the runtime keeps the Q16 remainder,
-so truncation never accumulates error. Velocities are Q16 per
+the snapshot after the coordinate conversion. The runtime keeps the
+Q16 remainder, so truncation never accumulates error. Velocities are Q16 per
 tick. There are no floats anywhere in the runtime, so the replay
 guarantee (same inputs, same state, across frame partitions)
 extends to physics unchanged. The proposal's warning applies to
@@ -124,17 +135,16 @@ build and platform before relying on it."
 Tuning constants, with the discrete behavior pinned by test
 rather than by the continuous formula:
 
-| Constant | Value | Discrete result (verified) |
+| Constant | Value | Discrete reference result |
 | --- | --- | --- |
 | Gravity | 32 tiles/s² (583 Q16/tick²) | — |
-| Jump velocity | 8 tiles/s (8,738 Q16/tick) | Apex 0.93 tiles at tick 14, lands tick 29 |
+| Jump velocity | −8 tiles/s (−8,738 Q16/tick) | Apex 0.93 tiles at tick 14, lands tick 29 |
 | Run speed cap | 4 tiles/s | 0.067 tiles/tick |
 | Fall speed cap | 12 tiles/s | 0.20 tiles/tick |
 
 The continuous formula says apex 1 tile, airtime 30 ticks;
-semi-implicit Euler gives 0.93 tiles and 29 ticks. The test
-asserts the discrete numbers — the simulation's answer, not the
-textbook's.
+semi-implicit Euler gives 0.93 tiles and 29 ticks. The runtime
+acceptance test should pin the discrete values.
 
 ## Phase ordering with the entity model
 
@@ -151,8 +161,10 @@ Physics runs inside the phases already defined by the
 
 A consumer that needs a peer's position reads the current tick's
 generation tag (the snapshot tick index). No attachment may trail
-by a tick. The physics design does not introduce new phase names;
-it only fills the work that belongs inside the existing ones.
+by a tick. For this proposal, `Animate` must precede `Effects`.
+It reads the resolved contact state directly; effects consumers
+receive the queued events afterward. Update the entity scheduler's
+reserved `Animate` position when implementing this order.
 
 ## Collision: tile grid, axis-separated resolution
 
@@ -239,25 +251,26 @@ phase." The authority table for Forge:
 | Object | Who writes its transform | When | Who reads it |
 | --- | --- | --- | --- |
 | Dynamic body | Physics (Move/Collide) | During the tick | Snapshot, animation (Animate), trace |
-| Kinematic body | Gameplay/script (before the step) | Before Move | Physics (as an obstacle), snapshot |
+| Character controller | Gameplay supplies velocity targets; physics resolves the root | InputApply through Collide | Snapshot, animation, trace |
+| Scripted kinematic obstacle | Gameplay or script supplies the target | Before Move | Physics (as an obstacle), snapshot |
 | Static terrain | Nobody (level data) | Load time | Physics (broad phase) |
-| Animated pose | Animation (Animate) | After Collide | Snapshot (pose fields), renderer |
+| Animated pose | Animation (Animate) | After Collide | Proposed same-tick pose payload, renderer |
 
 The entity, its rendered sprite, and its collider have
 different local origins, and §12.5 warns that this is "a common
 class of bugs in which the correct body motion appears in the
 wrong place." The offsets are explicit and typed: the entity
-anchor is the recipe pivot; the collider is the body hitbox's
-`at` offset from the pivot; the sprite is drawn from the pivot
-minus the cell offset (per the pixel-art README). No implicit
-"center" anywhere.
+anchor is the recipe pivot. Subtract that pivot from the exported
+body box origin to obtain the collider's local offset before converting
+authoring pixels to tile units. Draw the sprite by subtracting the pivot
+from the projected world anchor.
 
-The snapshot is the only publication path: physics writes
-entity positions, the snapshot publishes them, the renderer
-reads the snapshot. The renderer never sees a mid-step state,
-and a gameplay query always sees the last published tick — the
-"which snapshot" question §12.5 raises is answered by the
-existing generation tag (the snapshot tick index).
+The snapshot publishes the resolved root at the end of the tick. The v1
+entity record has no pose field. Pair a proposed companion pose payload
+with the completed snapshot by run epoch, tick, and stable entity ID.
+Until that payload is specified, the sequence and authority views describe
+the logical publication boundary. Physics queries inside the tick use
+phase-authoritative state, and the renderer reads only completed ticks.
 
 ## Events: physics speaks through the ring
 
@@ -310,8 +323,8 @@ a clip:
 | --- | --- |
 | Grounded, speed ≈ 0 | idle |
 | Grounded, speed > 0 | walk / run by speed band |
-| Airborne, vy > 0 (rising) | jump (rise frames) |
-| Airborne, vy < 0 (falling) | jump (fall frames) or fall |
+| Airborne, vy < 0 (rising) | jump (rise frames) |
+| Airborne, vy ≥ 0 (apex or falling) | jump (fall frames) or fall |
 | Landing event this tick | land / crouch, then idle |
 
 Selection runs in the Animate phase, after Collide, so the
@@ -474,6 +487,10 @@ and confines Rapier types to the adapter module.
   published; the bridge skill owns the rejection criteria.
 
 ## Open decisions
+
+- **Browser pose transport.** Define the companion pose payload and its bounded
+  entity/frame identifiers. Keep the v1 entity record intact. Choose explicit
+  encodings for any new contact data the browser needs, including impact speed.
 
 - **Slopes — deferred.** The tile grid has no slope tile. If a
   level needs one, the tile type and the controller's slope

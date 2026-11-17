@@ -1,0 +1,20 @@
+---
+title: Proposed Forge physics - one fixed tick
+---
+sequenceDiagram
+    participant T as Tick scheduler
+    participant P as Tile physics
+    participant A as Animation
+    participant S as Snapshot
+    Note over T,S: Proposed fixed-tick sequence
+    T->>T: InputApply - velocity targets and jump edge
+    T->>P: Move - apply targets
+    Note over P,A: Q16 integration advances velocity, then position.
+    T->>P: Collide - resolve X then Y
+    Note over P,A: Fast bodies sweep to first impact.
+    P-->>T: Resolved root and contact facts
+    T->>A: Animate from this tick
+    A-->>T: Frame and local pose
+    T->>T: Effects - deliver events
+    T->>S: Publish completed tick
+    Note over A,S: Publish Q8 y-up wire positions.<br/>Keep Q16 runtime state.

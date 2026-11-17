@@ -1,0 +1,21 @@
+---
+title: Proposed animation bridge - landing and publication
+---
+sequenceDiagram
+    participant P as Collide
+    participant Q as Event ring
+    participant A as Animate
+    participant S as Published tick
+    participant R as Renderer
+    Note over P,R: Proposed landing and animation bridge
+    P->>Q: Queue new Landed event
+    Note over P,Q: Continuing contact still updates grounded.<br/>First sight queues the impact speed and stable ID.
+    P-->>A: Grounded, velocity and landing facts
+    Note over A,S: Select land or crouch. Advance clip by tick dt.<br/>Action boxes are overlap queries.
+    Q->>Q: Effects - deliver once
+    A-->>S: Provide local pose for completed tick
+    Note over A,S: Use a separate proposed pose payload.
+    R->>S: Read completed tick
+    S-->>R: Q8 root pair in current wire
+    S-->>R: Proposed same-tick pose payload
+    Note over S,R: Renderer interpolates the root only.

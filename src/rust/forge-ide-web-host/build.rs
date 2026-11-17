@@ -18,6 +18,7 @@ fn main() -> io::Result<()> {
         ("chat-dispatch.html", DesignPage::ChatDispatch),
         ("mail.html", DesignPage::Mail),
         ("game-studio.html", DesignPage::GameStudio),
+        ("game-physics.html", DesignPage::GamePhysics),
         ("playtest.html", DesignPage::Playtest),
     ] {
         fs::write(output.join(name), page.render())?;
