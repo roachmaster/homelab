@@ -81,6 +81,21 @@ phantom queries, never contacts (§12.3). A projectile never
 contacts its owner — the filter, not a special case in the
 narrow phase.
 
+## Units and spaces (authoritative)
+
+Gregory §4 requires every vector to name its source space, destination space, and units. The following table is the only admitted contract inside the simulation:
+
+| Quantity            | Representation          | Space / meaning                                      |
+| ------------------- | ----------------------- | ---------------------------------------------------- |
+| Entity position     | Q16 (1/65 536 tile)     | Tile space; origin at the top-left of the board      |
+| Snapshot position   | Q8 (1/256 tile)         | Truncation of Q16; the runtime keeps the Q16 remainder so truncation never accumulates |
+| Velocity            | Q16 per tick            | Same tile space                                      |
+| Collider offset     | Q8 relative to pivot    | Recipe body-hitbox `at` point                        |
+| Recipe pivot        | Pixel cell origin       | Authoring space; converted once at load              |
+| Contact normal      | Axis-aligned unit       | +X, −X, +Y, or −Y only for v1                        |
+
+No other spaces are admitted into the simulation step. Screen-space conversion lives only in the presentation layer. A future change that introduces a new space must update this table first.
+
 ## The step: one physics step per tick
 
 The tick IS the physics step. There is no substepping for v1:
@@ -120,6 +135,24 @@ The continuous formula says apex 1 tile, airtime 30 ticks;
 semi-implicit Euler gives 0.93 tiles and 29 ticks. The test
 asserts the discrete numbers — the simulation's answer, not the
 textbook's.
+
+## Phase ordering with the entity model
+
+Physics runs inside the phases already defined by the
+[entity model](forge-game-entity-model.md). The mapping is fixed:
+
+| Entity-model phase | Physics work |
+| --- | --- |
+| InputApply | Intended moves become velocity targets (walk/run speed, jump impulse on the jump edge) |
+| Move | Integrate velocity and position; apply kinematic targets |
+| Collide | Broad/narrow phase, resolution, grounded flags, contact events |
+| Animate | Clip selection from the *same tick's* physics results (see the animation bridge) |
+| Effects | Queued physics events (`Landed`, `HeadBump`, `WallContact`) are delivered |
+
+A consumer that needs a peer's position reads the current tick's
+generation tag (the snapshot tick index). No attachment may trail
+by a tick. The physics design does not introduce new phase names;
+it only fills the work that belongs inside the existing ones.
 
 ## Collision: tile grid, axis-separated resolution
 
@@ -189,6 +222,15 @@ The bound is a typed constant, and spawning a body above it
 without the swept flag is a validation error, not a runtime
 surprise.
 
+**Swept acceptance (Forge units).** A body at 90 tiles/s that
+starts just before a 1-tile wall must report contact at the
+correct sub-tick time-of-impact and must never appear on the
+far side of the wall in any published snapshot. A body at the
+60 tiles/s threshold itself must also never cross a wall
+undetected. The time-of-impact is recorded as a fraction of the
+current tick (Q16) so the resolution can place the body at the
+exact contact plane before the remaining velocity is applied.
+
 ## Transform authority (§12.5)
 
 §12.5: "Assign transform authority per object and per update
@@ -228,8 +270,16 @@ carries the stable target ID and the tile, as the existing
 events do. Delivery is queued and exactly-once, at the Effects
 phase, as the entity design requires. No event fires twice for
 one contact: a contact that persists across ticks emits on its
-first tick only (the contact's first-seen tick is part of its
-identity).
+first tick only.
+
+A contact is identified by `(body-A, body-B-or-tile, axis,
+first-seen-tick)`. The first-seen tick emits the event once;
+subsequent ticks keep the contact for resolution and for the
+grounded-flag calculation but do not re-emit. The grounded flag
+is set when the Y-resolution pushes the body upward this tick,
+or when the body was already resting and its vertical velocity
+remains near zero. This is the resting-contact answer for a
+character in the absence of an iterative solver.
 
 ## The animation bridge
 
@@ -311,6 +361,24 @@ is selected per tick and does not blend sub-tick for v1. A
 frame change is a discrete event at a tick boundary, and the
 renderer's interpolation applies to the root only.
 
+## Migrating an existing Scout recipe
+
+Before a recipe can be driven by this physics design:
+
+1. Zero every airborne root offset (`[0, 0]`) in the authoring
+   tool and re-export. Keep limb rotations; discard only the
+   root translation that previously simulated the jump arc.
+2. Confirm greybox, final, and illustrated manifests agree on
+   frame counts, durations, pivots, and body hitboxes.
+3. Re-validate the body hitbox at load: non-zero size, entirely
+   inside the cell, pivot offset consistent with the recipe.
+4. Run the bridge acceptance tests (same-tick selection, no
+   double motion, no trailing attachment, replay identity of
+   clip selection).
+
+A recipe that still carries airborne root offsets will produce
+visible double-motion and is rejected by the bridge skill.
+
 ## Determinism and replay
 
 Fixed point only; no floats; no wall-clock input to the step;
@@ -382,71 +450,28 @@ and confines Rapier types to the adapter module.
   Forge bridge: per the proposal it uses ordinary Rust
   construction, and the bridge pattern applies at the Forge
   dispatch boundary, not inside the simulation.
-- **Determinism.** The step is a pure function of (state,
-  inputs) in fixed point. The cross-partition replay test
-  extends to physics: the same inputs, chunked differently,
-  reach the same positions and landing tick.
-- **Verification is the deliverable.** Unit tests per acceptance
-  criterion below; the wire test asserts the snapshot's
-  sub-tile positions; journey assertions on the visible jump
-  (the Scout leaves the ground and lands); the rendered
-  playtest is the evidence, not the Rust source alone.
+- **Determinism.** The step is a pure function of (state, inputs)
+  for a given tick; no wall-clock, no floats, fixed iteration
+  order. Replay identity extends to physics events and clip
+  selection.
 
-## Handoffs
+## Caveats and things to consider
 
-| Handoff | Producer → consumer | Phase | Data and owner | On failure |
-| --- | --- | --- | --- | --- |
-| Velocity target | Input → physics | InputApply → Move | Intended velocity; input owns it | No input → friction/deceleration, not a stale target |
-| Kinematic target | Script/patrol → physics | Before Move | Target transform; gameplay owns it | A target inside terrain is clamped to the last valid position |
-| Resolved position | Physics → snapshot | Collide → Publish | Entity positions; physics owns them | A body that cannot resolve (crushed) is pushed to the nearest free tile and an error event fires |
-| Physics state | Physics → animation | Collide → Animate | Grounded, velocity, landing; physics owns it | Animation reads the previous tick's state only if the current tick produced none (paused) |
-| Contact event | Physics → event ring | Collide → Effects | Queued events; the ring owns them | A stale target is dropped and counted, as the entity design requires |
-| Collider | Recipe → physics | Load time | Body hitbox; the recipe owns it | An invalid hitbox (zero size, outside the cell) is rejected at load, with the part and frame named |
-
-## Migration, in behavior-preserving slices
-
-1. Sub-tile positions and velocity in the entity model;
-   gravity and tile collision for the player; jump input. The
-   game stays tile-discrete for the guard and the key/exit.
-   No behavior change for existing journeys.
-2. The character controller: grounded flag, step-up, fall cap,
-   swept tests for fast bodies. The jump acceptance checks land.
-3. The animation bridge: clip selection from physics state in
-   the Animate phase, root-motion policy enforced (airborne
-   root offsets zeroed), body hitbox as collider, action boxes
-   as phantom queries. The atlas loader (a separate
-   integration) reads the manifest the bridge selects from.
-4. Dynamic props: crates with gravity, impulse response, and
-   sleep. The Rapier trigger is evaluated against the first
-   game that needs joints or stacking.
-
-Each slice keeps the game playable and the journey green; no
-slice changes the simulation rules for entities it does not
-touch.
-
-## Acceptance checks
-
-- **Jump:** from rest, the jump reaches 0.93 tiles at tick 14
-  and lands on tick 29, every time, from the same input.
-- **Fall and land:** dropping from a ledge sets the grounded
-  flag and fires exactly one `Landed` event on the landing
-  tick, with the impact speed.
-- **Wall slide:** moving diagonally into a wall slides along it
-  without sticking or jittering, and the horizontal velocity
-  survives.
-- **Step-up:** walking into a 1-tile rise climbs it; walking
-  into a 2-tile rise stops.
-- **Tunneling:** a body at 90 tiles/s crossing a 1-tile wall
-  reports the contact at the correct sub-tick time; a body at
-  the 60 tiles/s threshold never crosses a wall undetected.
-- **Replay:** the same inputs, chunked differently, reach the
-  same positions, landing tick, and events.
-- **Bridge:** the clip matches the physics state within the
-  same tick (rising → jump rise frames on the tick the jump
-  starts); the landing event selects the land clip on the
-  landing tick; no attachment trails by a tick.
-- **Boundary:** spawning a body above the speed bound without
-  the swept flag is rejected with a counted error, not a panic.
+- **Units are a contract.** Introducing a new space or representation
+  without updating the "Units and spaces" table is a design error.
+- **No sub-stepping in v1.** One physics step per tick is intentional.
+  If a future body needs finer resolution, add sub-stepping behind
+  the same `step` seam so the snapshot interface stays unchanged.
+- **Restitution is zero for characters.** Landings are not bounces.
+  Prop restitution is tuned only when the first dynamic prop lands.
+- **Sleep is deterministic.** A tick count, never a wall-clock timer.
+  Characters never sleep.
+- **Rapier is a later adapter, not a rewrite.** The seam is the
+  physics `step` function. The repeatability check on the target
+  build gates any middleware swap.
+- **Animation bridge is mandatory for any airborne motion.** A
+  recipe that still carries airborne root offsets must not be
+  published; the bridge skill owns the rejection criteria.
 
 ## Open decisions
 
