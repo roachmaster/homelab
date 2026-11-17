@@ -36,17 +36,25 @@ impl InputBuffer {
         self.repeat_ticks = 0;
     }
 
-    pub(super) fn enqueue(&mut self, action: Action, pressed: bool) {
+    pub(super) fn len(&self) -> u32 {
+        self.edges.len() as u32
+    }
+
+    pub(super) fn enqueue(&mut self, action: Action, pressed: bool) -> u32 {
         if self.observed[action as usize] == pressed {
-            return;
+            return 0;
         }
-        if self.edges.len() == MAX_EDGES {
+        let dropped = if self.edges.len() == MAX_EDGES {
             // Reset held state along with lost edges so an omitted release
             // cannot leave a direction active.
             self.clear();
-        }
+            MAX_EDGES as u32
+        } else {
+            0
+        };
         self.observed[action as usize] = pressed;
         self.edges.push_back(Edge { action, pressed });
+        dropped
     }
 
     pub(super) fn next_step(&mut self) -> Option<Action> {

@@ -1152,6 +1152,8 @@ fn browser_playtest_serves_generated_assets_on_fixed_paths() {
         assert!(response.contains("Content-Type: text/html; charset=utf-8"));
         assert!(response.contains("Content-Security-Policy:"));
         assert!(response.contains("<canvas id=\"playtest-board\""));
+        assert!(response.contains("<details id=\"playtest-debug\"><summary>Debug tools</summary>"));
+        assert!(response.contains("id=\"playtest-step\""));
         assert!(response.contains("href=\"/design/game-studio\""));
         assert!(response.contains("src=\"/playtest/main.js\""));
         assert!(request("HEAD", path).ends_with("\r\n\r\n"));

@@ -245,9 +245,12 @@ Open **Design → Game engine design → Open browser playtest** to play Room On
 The host embeds its Rust-generated HTML, CSS and browser adapter at `/playtest`.
 The player loads the verified `app.wasm` from the current UI bundle and runs its
 own Rust game state and fixed simulation ticks in the tab. The browser draws the
-board with Canvas 2D and maps keyboard and on-screen direction controls to game
-actions. The playtest has no command requests or storage. Rebuild the host and
-regenerate the UI bundle together.
+board with Canvas 2D from one versioned WASM memory snapshot and maps keyboard
+and on-screen direction controls to game actions. Room One includes a patrolling
+guard. **Debug tools** adds pause, exact single-step, an inspector, frame timings,
+and a bounded trace download. The export labels captures with missing movement
+records or ring loss as incomplete for replay. The playtest has no command
+requests or storage. Rebuild the host and regenerate the UI bundle together.
 
 ## Reproducible real-browser acceptance
 

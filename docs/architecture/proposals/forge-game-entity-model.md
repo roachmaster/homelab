@@ -44,17 +44,13 @@ insist these are not the same fact:
 | Concept | Form | Lifetime | Purpose |
 | --- | --- | --- | --- |
 | Stable ID | `u16`, authored | Persists through load and save | Ties representations together: the same ID names the entity in a descriptor, the snapshot, the trace, and a save file (§14.2) |
-| Runtime handle | Slot `u8` + generation `u16` | One loaded session | Detects deletion and slot reuse; resolved at the point of use, never cached as a pointer (§15.5) |
+| Runtime handle | Slot `u8`, generation `u32`, run epoch `u32` | One loaded run | Detects deletion, slot reuse, and restart. Resolved at the point of use (§15.5). |
 | Readiness | Spawn completes at a tick boundary | Per spawn | A resolved handle is not the same as a ready entity; nothing observes a half-spawned entity |
 
-The snapshot's entity `id` field is the stable ID. Handles never
-leave the runtime except in truncated form in event payloads (slot
-`u8` + generation low byte) for the adapter's display. Generation 0
-is reserved for "never allocated"; a slot's generation bumps on every
-despawn. Generation `u16` wraps at 65,536 reuses of one slot — not
-reachable in a session, and the bound is recorded here rather than
-assumed. A stale handle resolves to nothing: delivery is dropped and
-counted, exactly as the streaming-door example requires.
+The snapshot's entity `id` field is the stable ID. Runtime handles stay
+inside Rust. Despawn increments the slot generation. If it exhausts the
+counter, the slot is retired for the rest of the run. Restart creates
+a new epoch, invalidating handles from the previous run.
 
 ## Lifecycle: descriptors versus instances
 
@@ -72,10 +68,8 @@ a guarantee about change, and late reclassification is expensive.
 The board is static terrain (floor, wall). The key and the exit are
 dynamic — they participate in gameplay, change state, and trigger
 events — so they become entities (kinds `Key`, `Exit`), not map
-data. The runtime composites entities onto the board at publication,
-so the snapshot's board bytes keep the same cell codes and the
-adapter does not change: the model gets cleaner while the interface
-stays put.
+data. The runtime composites them onto the board at publication.
+Cell code 6 represents the guard on the snapshot path.
 
 ## Data layout
 
@@ -133,13 +127,11 @@ and counted; a valid target receives the event exactly once. Events
 are deterministic functions of (tick, inputs), and the trace records
 them, so replay reproduces them.
 
-The snapshot's event ring is the *publication* of delivered events
-for the adapter; the runtime's internal queue is separate and carries
-full handles. **Amendment to the snapshot design:** a published event
-payload encodes its target as slot `u8` + generation `u8` + data
-`u16`, so the adapter can show which entity an event concerned. The
-snapshot document should be updated with this encoding when this
-design merges.
+The internal queue carries full handles. Delivered events in the
+snapshot carry a stable target ID and the tile where the event
+occurred. The run epoch and event sequence identify the record
+across repeated reads. This makes the pickup trace useful after
+the key despawns.
 
 ## Game flow
 
@@ -179,11 +171,9 @@ and gains none here.
 
 ## How this integrates with the Forge philosophy
 
-- **Typed contracts.** Kinds, handles, and event kinds are enums and
-  newtypes, never strings; descriptors are serde structs with
-  `deny_unknown_fields`. No `serde_json::Value`, untyped map, or
-  catch-all payload anywhere in the runtime — the package-boundary
-  rule applies inside the sim, not just at the Forge bridge.
+- **Typed contracts.** Kinds, handles, and events use Rust enums and
+  newtypes. Room One descriptors are validated Rust structs. File
+  decoding belongs to the future level-loading boundary.
 - **Bounded everything.** `MAX_ENTITIES` is 256, matching the
   snapshot array; storage is fixed arrays; the tick path allocates
   nothing; iteration is by index, never by hash map, so update order
@@ -254,9 +244,8 @@ changes the simulation rules.
 - **Facing — resolved here.** The snapshot design left open whether
   the entity record needs a facing field. It does, for the first
   moving entity — and no layout change is needed: the state byte's
-  upper bits carry facing (north/east/south/west) for moving kinds,
-  documented per kind. The snapshot document should record this
-  encoding when this design merges.
+  upper two bits carry facing clockwise from north (north, east,
+  south, west).
 - **Descriptor file format — deferred** to the asset-pipeline design.
   Descriptors are Rust types for now; the file format arrives with
   level loading.

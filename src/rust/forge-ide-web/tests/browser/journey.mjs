@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
@@ -2022,6 +2022,45 @@ async function gameEngineDesignJourney(page, designUrl) {
   await check(status).toHaveText('You won!');
   await restart.click();
   await check(status).toHaveText('Find the key.');
+
+  const debug = page.locator('#playtest-debug');
+  await debug.locator('summary').click();
+  const pause = debug.locator('#playtest-pause');
+  const step = debug.getByRole('button', { name: 'Step', exact: true });
+  const inspector = debug.locator('#playtest-inspector');
+  await check(inspector).toContainText('Entities: 4');
+  await check(pause).toHaveText('Pause');
+  await check(step).toBeDisabled();
+  await pause.click();
+  await check(pause).toHaveAttribute('aria-pressed', 'true');
+  const pausedTick = Number((await inspector.textContent()).match(/\bTick: (\d+)/)[1]);
+  await waitForTicks();
+  await check(inspector).toHaveText(new RegExp(`\\bTick: ${pausedTick}\\b`));
+
+  await page.getByRole('button', { name: 'Move right', exact: true }).click();
+  await step.click();
+  await check(inspector).toHaveText(new RegExp(`\\bTick: ${pausedTick + 1}\\b`));
+  await waitForTicks();
+  await check(inspector).toHaveText(new RegExp(`\\bTick: ${pausedTick + 1}\\b`));
+  await debug.getByRole('checkbox', { name: 'Show board overlay', exact: true }).check();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+    true, 'the open debug drawer fits the 320px viewport');
+  await debug.getByRole('checkbox', { name: 'Input', exact: true }).uncheck();
+  await page.getByRole('button', { name: 'Move right', exact: true }).click();
+  const command = debug.getByRole('textbox', { name: 'Command', exact: true });
+  await command.fill('step');
+  await command.press('Enter');
+  await check(inspector).toHaveText(new RegExp(`\\bTick: ${pausedTick + 2}\\b`));
+  await check(debug.locator('#playtest-trace')).toContainText('Replay: incomplete');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    debug.getByRole('button', { name: 'Export trace', exact: true }).click(),
+  ]);
+  assert.equal(download.suggestedFilename(), 'room-one-trace.json');
+  const trace = JSON.parse(await readFile(await download.path(), 'utf8'));
+  assert.equal(trace.replayComplete, false, 'masked movement makes the replay export incomplete');
+  await download.delete();
 
   await page.getByRole('link', { name: 'Back to game engine design', exact: true }).click();
   await check(page).toHaveURL(gameDesignUrl);

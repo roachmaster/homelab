@@ -47,6 +47,7 @@ def main():
         for name in ("main.js", "worker.js"):
             run(["node", "--check", str(assets / name)])
         run(["node", str(ROOT / "forge-ide-ui/tests/wasm_abi.mjs"), str(wasm)])
+        run(["node", str(ROOT / "forge-ide-web/tests/playtest-wire.mjs"), str(wasm)])
         run(["node", str(ROOT / "forge-ide-ui/tests/worker_glue.mjs"), str(assets)])
         run(["node", str(ROOT / "forge-ide-web/tests/input-presentation.mjs"), str(assets / "main.js")])
         print("PASS: deterministic generated assets, JavaScript grammar, real WASM ABI, isolated worker faults and input-presentation checks")

@@ -29,6 +29,52 @@ pub(super) const BODY: &[Node] = &[element!(Article [Class = "playtest"];
             element!(Button [Id = "playtest-restart", Type = "button", Disabled = ""]; text("Restart")),
         ),
     ),
+    element!(Details [Id = "playtest-debug"];
+        element!(Summary; text("Debug tools")),
+        element!(Div [Class = "playtest-debug-actions"];
+            element!(Button [Id = "playtest-pause", Type = "button", Disabled = "", AriaPressed = "false"]; text("Pause")),
+            element!(Button [Id = "playtest-step", Type = "button", Disabled = ""]; text("Step")),
+            element!(Button [Id = "playtest-export", Type = "button", Disabled = ""]; text("Export trace")),
+            element!(Label;
+                element!(Input [Id = "playtest-overlay", Type = "checkbox", Disabled = ""]),
+                text("Show board overlay"),
+            ),
+        ),
+        element!(P [Id = "playtest-debug-status", Role = "status"]),
+        element!(Div [Class = "playtest-debug-grid"];
+            element!(Section [AriaLabelledby = "playtest-inspector-title"];
+                element!(H2 [Id = "playtest-inspector-title"]; text("State")),
+                element!(Pre [Id = "playtest-inspector"]),
+            ),
+            element!(Section [AriaLabelledby = "playtest-timing-title"];
+                element!(H2 [Id = "playtest-timing-title"]; text("Frame timing")),
+                element!(Canvas [Id = "playtest-timing-graph", Width = "360", Height = "92",
+                    AriaHidden = "true"]),
+                element!(Pre [Id = "playtest-timing"]),
+            ),
+        ),
+        element!(Section [AriaLabelledby = "playtest-trace-title"];
+            element!(H2 [Id = "playtest-trace-title"]; text("Trace")),
+            element!(Div [Class = "playtest-debug-actions", Role = "group", AriaLabel = "Trace channels"];
+                element!(Label; element!(Input [Type = "checkbox", DataPlaytestTraceChannel = "0", Disabled = ""]), text("Input")),
+                element!(Label; element!(Input [Type = "checkbox", DataPlaytestTraceChannel = "1", Disabled = ""]), text("Simulation")),
+                element!(Label; element!(Input [Type = "checkbox", DataPlaytestTraceChannel = "2", Disabled = ""]), text("Events")),
+                element!(Label; element!(Input [Type = "checkbox", DataPlaytestTraceChannel = "3", Disabled = ""]), text("Level")),
+                element!(Label; element!(Input [Type = "checkbox", DataPlaytestTraceChannel = "4", Disabled = ""]), text("Hitches")),
+                element!(Label; element!(Input [Type = "checkbox", DataPlaytestTraceChannel = "5", Disabled = ""]), text("Errors")),
+            ),
+            element!(Pre [Id = "playtest-trace", Tabindex = "0", AriaLabel = "Recent trace records"]),
+        ),
+        element!(Form [Id = "playtest-command", Class = "playtest-debug-actions"];
+            element!(Label [For = "playtest-command-input"]; text("Command")),
+            element!(Input [Id = "playtest-command-input", Type = "text", Disabled = "",
+                Autocomplete = "off", Maxlength = "64", AriaDescribedby = "playtest-command-help"]),
+            element!(Button [Id = "playtest-command-run", Type = "submit", Disabled = ""]; text("Run")),
+        ),
+        element!(P [Id = "playtest-command-help"];
+            element!(Code; text("pause · resume · step · restart · trace · channels <mask> · timing")),
+        ),
+    ),
 )];
 
 const STYLES: markup::Styles = &[
@@ -63,7 +109,7 @@ const STYLES: markup::Styles = &[
         ],
     ),
     (
-        ".playtest-stage, .playtest-controls",
+        ".playtest-stage, .playtest-controls, #playtest-debug",
         &[
             ("min-inline-size", "0"),
             ("padding", "10px"),
@@ -116,7 +162,7 @@ const STYLES: markup::Styles = &[
         ],
     ),
     (
-        ".playtest-controls button",
+        ".playtest-controls button, #playtest-debug button",
         &[
             ("min-block-size", "44px"),
             ("border", "1px solid var(--border)"),
@@ -129,11 +175,11 @@ const STYLES: markup::Styles = &[
         ],
     ),
     (
-        ".playtest-controls button:disabled",
+        ".playtest-controls button:disabled, #playtest-debug button:disabled",
         &[("opacity", ".55"), ("cursor", "default")],
     ),
     (
-        ".playtest-controls button:not(:disabled):hover",
+        ".playtest-controls button:not(:disabled):hover, #playtest-debug button:not(:disabled):hover",
         &[("border-color", "var(--accent)")],
     ),
     (
@@ -154,6 +200,62 @@ const STYLES: markup::Styles = &[
     ("[data-playtest-action='0']", &[("grid-column", "2")]),
     ("[data-playtest-action='2']", &[("grid-column", "1")]),
     ("#playtest-restart", &[("padding-inline", "13px")]),
+    ("#playtest-debug", &[("margin-block-start", "14px"), ("padding", "14px")]),
+    (
+        "#playtest-debug > summary",
+        &[
+            ("min-block-size", "44px"), ("padding-block", "8px"),
+            ("cursor", "pointer"), ("font-weight", "650"),
+        ],
+    ),
+    (
+        ".playtest-debug-actions",
+        &[
+            ("display", "flex"), ("align-items", "center"), ("flex-wrap", "wrap"),
+            ("gap", "8px 12px"), ("margin-block", "8px"),
+        ],
+    ),
+    ("#playtest-debug button", &[("padding-inline", "10px")]),
+    (
+        ".playtest-debug-actions label",
+        &[("display", "inline-flex"), ("align-items", "center"), ("min-block-size", "44px"), ("gap", "6px")],
+    ),
+    (
+        ".playtest-debug-actions input[type='checkbox']",
+        &[("inline-size", "18px"), ("block-size", "18px"), ("accent-color", "var(--accent)")],
+    ),
+    (
+        ".playtest-debug-grid",
+        &[
+            ("display", "grid"),
+            ("grid-template-columns", "repeat(auto-fit, minmax(min(100%, 260px), 1fr))"),
+            ("gap", "12px"),
+        ],
+    ),
+    ("#playtest-debug h2", &[("margin", "10px 0 4px"), ("font-size", "1rem")]),
+    (
+        "#playtest-debug pre",
+        &[
+            ("margin", "0"), ("padding", "8px"),
+            ("background", "var(--background)"), ("border-radius", "4px"),
+            ("white-space", "pre-wrap"), ("overflow-wrap", "anywhere"),
+            ("font", ".875rem/1.45 ui-monospace, monospace"),
+        ],
+    ),
+    ("#playtest-trace", &[("max-block-size", "13rem"), ("overflow", "auto")]),
+    ("#playtest-timing-graph", &[("display", "block"), ("max-inline-size", "100%"), ("block-size", "auto")]),
+    (
+        "#playtest-command-input",
+        &[
+            ("max-inline-size", "100%"), ("min-block-size", "44px"), ("padding-inline", "8px"),
+            ("border", "1px solid var(--border)"), ("border-radius", "5px"),
+            ("background", "var(--background)"), ("color", "var(--text)"), ("font", "inherit"),
+        ],
+    ),
+    (
+        "#playtest-command-help, #playtest-debug-status",
+        &[("color", "var(--muted)"), ("overflow-wrap", "anywhere")],
+    ),
 ];
 
 pub fn stylesheet() -> String {

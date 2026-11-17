@@ -4,6 +4,8 @@
 #[cfg(target_arch = "wasm32")]
 mod playtest;
 #[cfg(target_arch = "wasm32")]
+mod playtest_wire;
+#[cfg(target_arch = "wasm32")]
 mod wasm;
 
 #[cfg(feature = "build-assets")]

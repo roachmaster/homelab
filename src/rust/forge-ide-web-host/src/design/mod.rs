@@ -29,12 +29,14 @@ html_names!(Tag {
 html_names!(Attribute {
     Alt => "alt", AriaAtomic => "aria-atomic", AriaCurrent => "aria-current",
     AriaDescribedby => "aria-describedby", AriaHidden => "aria-hidden", AriaLabel => "aria-label",
-    AriaLabelledby => "aria-labelledby", AriaLive => "aria-live", Autofocus => "autofocus",
+    AriaLabelledby => "aria-labelledby", AriaLive => "aria-live", AriaPressed => "aria-pressed",
+    Autocomplete => "autocomplete", Autofocus => "autofocus",
     Class => "class", DataHistoryDismiss => "data-history-dismiss",
     DataPreviewChat => "data-preview-chat", DataRole => "data-role",
-    DataPlaytestAction => "data-playtest-action", Disabled => "disabled",
+    DataPlaytestAction => "data-playtest-action",
+    DataPlaytestTraceChannel => "data-playtest-trace-channel", Disabled => "disabled",
     For => "for", Height => "height", Hidden => "hidden", Href => "href",
-    Id => "id", Loading => "loading", Method => "method", Open => "open",
+    Id => "id", Loading => "loading", Maxlength => "maxlength", Method => "method", Open => "open",
     Rel => "rel", Required => "required", Role => "role", Rows => "rows",
     Src => "src", Tabindex => "tabindex", Target => "target", Type => "type", Width => "width",
 });
