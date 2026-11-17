@@ -49,6 +49,16 @@ profile depends only on the portable model and serialization. Template/bootstrap
 provider/YAML/hash dependencies belong to the native build feature; the native
 host is a different package. No native filesystem/parser/TLS/runtime enters WASM.
 
+Chat transcripts and Markdown file previews render assistant Markdown
+visually. The Rust Markdown renderer in [`forge-ide-ui`](../forge-ide-ui/README.md)
+converts each reply to sanitized HTML at view time (whitelisted tags only, all
+source text escaped, images render as alt text only, `http`/`https` links only,
+links open in a new tab with `target="_blank" rel="noopener noreferrer"`), and
+the generated code assigns that HTML through the shared `setMarkdown` adapter
+at its single sanctioned `innerHTML` site. The generation gate enforces the
+single site, and the generated assets are never hand-edited; every change goes
+through the Rust generators.
+
 ## Run from repository root
 
 Prerequisites: stable Rust, `wasm32-unknown-unknown`, Python3 and Node (for checks).

@@ -22,7 +22,11 @@ codec, not internal state. The same model runs in native unit tests and real
   of cryptographic memory erasure in Rust or JavaScript.
 - Generated main-thread primitives apply the generic `ViewModel` bindings as text
   and semantic controls, preserving focus/browser lifecycle. No domain reducer,
-  source-derived HTML, backend fetch or application-specific JavaScript is needed.
+  source-derived HTML, backend fetch or application-specific JavaScript is needed. The one exception is chat
+  transcripts and Markdown file previews: replies and previews render through
+  the sanitizing Markdown module (`src/markdown.rs`), which produces the only
+  HTML the renderer ever interprets, at its single sanctioned `innerHTML`
+  site (via the shared `setMarkdown` adapter).
 - Host and agent independently authorize every request. Catalog choices, view IDs,
   browser request IDs and this model are **not authentication or authority**.
 

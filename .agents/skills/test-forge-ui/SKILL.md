@@ -33,6 +33,24 @@ If a prerequisite or sandbox blocks a run, report the exact failed stage and wha
 remains unrun. Do not auto-install packages, run an upstream launcher, add MCP
 configuration, start an exposed server or change host security as a fallback.
 
+## Assert the rendered deliverable
+
+The generated artifact is the deliverable, not the Rust source. Native unit
+tests prove the model or renderer is correct; only browser assertions on the
+rendered DOM prove the shipped artifact shows it. When a change affects
+rendered output, assert the DOM contents, not just element existence:
+
+- Assert text and structure: heading text, table headers and cells, bold or
+  link elements, in the order they render. Element counts alone cannot catch
+  wrong content.
+- Assert the transformation happened: the raw source markers must not remain
+  visible (for example, no literal `##` heading markers or `|` table pipes
+  after Markdown rendering).
+- Capture screenshots while the content under test is on screen, at the point
+  of assertion. A screenshot taken after navigating away (for example, after
+  switching conversations) shows the wrong state and verifies nothing.
+  Inspect the captured screenshots; an assertion count is not visual evidence.
+
 ## Explore without changing the architecture
 
 Use fresh page/accessibility snapshots to identify current controls, and target
