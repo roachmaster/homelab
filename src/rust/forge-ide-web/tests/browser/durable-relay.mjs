@@ -15,7 +15,7 @@ function mailThread(archived) {
     thread_id: archived ? '56ad75f0-8cae-4766-b271-57620606c92d' : '8452b258-df30-4985-bfa1-cd98245b2a06',
     subject: archived ? 'Archived fixture thread' : mailSubject,
     status: archived ? 'archived' : 'ready',
-    updated_at: '2026-11-16T22:11:59.293456Z',
+    updated_at: archived ? '2026-11-17T01:23:54.993456+00:00' : '2026-11-16T22:11:59.293456Z',
     turn_count: 1,
     revision: 2,
     latest_run_id: 'b9b570aa-775d-4c25-b4ac-c122e292e2c3',

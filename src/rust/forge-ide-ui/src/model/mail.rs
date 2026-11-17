@@ -739,7 +739,9 @@ impl Mail {
                         secondary: format!(
                             "{} · {}",
                             status_text(summary.status),
-                            display_updated_at(&summary.updated_at)
+                            format_updated_at(&summary.updated_at)
+                                .as_deref()
+                                .unwrap_or(&summary.updated_at)
                         ),
                         selected: reading && summary.thread_id == self.reader.thread_id,
                         expanded: None,
@@ -804,15 +806,18 @@ fn failure_text(failure: MailRunFailure) -> &'static str {
     }
 }
 
-fn display_updated_at(timestamp: &str) -> String {
-    let Some((date, time)) = timestamp
+fn format_updated_at(timestamp: &str) -> Option<String> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let utc = timestamp
         .strip_suffix('Z')
-        .and_then(|stamp| stamp.split_once('T'))
-    else {
-        return timestamp.into();
-    };
-    let Some(clock) = time.get(..5) else {
-        return timestamp.into();
-    };
-    format!("{date} {clock} UTC")
+        .or_else(|| timestamp.strip_suffix("+00:00"))?;
+    let (date, time) = utc.split_once('T')?;
+    let (year, month_day) = date.split_once('-')?;
+    let (month, day) = month_day.split_once('-')?;
+    let month = MONTHS.get(month.parse::<usize>().ok()?.checked_sub(1)?)?;
+    let day = day.parse::<u8>().ok()?.to_string();
+    let clock = time.get(..5)?;
+    Some(format!("{month} {day}, {year} · {clock} UTC"))
 }

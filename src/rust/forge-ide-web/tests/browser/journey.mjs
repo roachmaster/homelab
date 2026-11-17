@@ -1016,7 +1016,7 @@ async function mailLayoutJourney(page, desktop) {
   await check(inbox).toHaveCSS('border-top-color', 'rgb(142, 188, 255)');
   await check(archive).not.toHaveAttribute('aria-current', 'page');
   await check(row.locator('.fg-row-label')).toHaveText(mailSubject);
-  await check(row.locator('.fg-row-secondary')).toHaveText('Reply ready · 2026-11-16 22:11 UTC');
+  await check(row.locator('.fg-row-secondary')).toHaveText('Reply ready · Nov 16, 2026 · 22:11 UTC');
   await check(row.locator('.fg-glyph')).toBeHidden();
 
   for (const width of [320, 375, 390]) {
@@ -1042,7 +1042,8 @@ async function mailLayoutJourney(page, desktop) {
   await archive.click();
   await check(archive).toHaveAttribute('aria-current', 'page');
   await check(inbox).not.toHaveAttribute('aria-current', 'page');
-  await check(page.locator('#mail-threads [role="treeitem"]')).toContainText('Archived fixture thread');
+  const archivedRow = page.locator('#mail-threads [role="treeitem"]').filter({ hasText: 'Archived fixture thread' });
+  await check(archivedRow.locator('.fg-row-secondary')).toHaveText('Archived · Read only · Nov 17, 2026 · 01:23 UTC');
   await inbox.click();
   await check(row).toBeVisible();
 
