@@ -81,6 +81,26 @@ phantom queries, never contacts (§12.3). A projectile never
 contacts its owner — the filter, not a special case in the
 narrow phase.
 
+**Shared shapes.** §12.3: "Local shapes can be shared by
+multiple collidables whose world transforms and collision
+filters differ." For v1 each body derives its own collider
+from its recipe hitbox, which is correct at Room One's scale.
+When many instances share one shape — twenty crates, a row of
+identical platforms — the shape moves to a shared table: a
+shape ID names one definition, and each collidable references
+it with its own transform and filter. Changing the shape then
+changes every body that uses it, in one edit. The table is
+bounded at 64 shapes when it arrives; the seam is the
+collider's shape reference, which is a shape ID from the
+start, not an inline box.
+
+**Compound shapes — deferred.** A compound is several convex
+pieces acting as one body (§12.3): a character with separate
+head and torso boxes, or an L-shaped platform. V1 is one AABB
+per body. Compounds arrive with the Rapier trigger (see
+"Middleware"), because a compound's pieces need the same
+general convex-shape machinery as ramps and circles.
+
 ## Units and spaces (authoritative)
 
 Gregory §4 requires every vector to name its source space, destination space, and units. The following table is the only admitted contract inside the simulation:
@@ -93,6 +113,7 @@ Gregory §4 requires every vector to name its source space, destination space, a
 | Collider offset     | Q8 relative to pivot    | Recipe body-hitbox `at` point                        |
 | Recipe pivot        | Pixel cell origin       | Authoring space; converted once at load              |
 | Contact normal      | Axis-aligned unit       | +X, −X, +Y, or −Y only for v1                        |
+| Time-of-impact      | Q16 fraction of a tick  | Swept tests and ray queries; 0 = tick start, 65,536 = tick end |
 
 No other spaces are admitted into the simulation step. Screen-space conversion lives only in the presentation layer. A future change that introduces a new space must update this table first.
 
@@ -156,6 +177,23 @@ it only fills the work that belongs inside the existing ones.
 
 ## Collision: tile grid, axis-separated resolution
 
+**The collision world.** §12.3: "A collision world tracks
+collidables with shape data and placements." The world is a
+named structure, not an implied loop: it holds the collidable
+set (one entry per body, with its shape reference, transform,
+motion kind, and filter), the static tile grid, and the
+persistent contact set from the previous tick. It offers
+three operations — add a collidable, remove one, and update
+one's transform — and the step runs its phases against the
+world's contents. For v1 the world is rebuilt from the entity
+table each tick, so a body spawned mid-tick is visible to
+queries only from the next tick; the structure is the seam,
+so a later incremental world (dirty flags, a spatial hash)
+replaces the rebuild without changing the step's interface.
+The persistent contact set is what makes contact identity
+work: a contact's first-seen tick is recorded when it enters
+the set, and it leaves the set when the pair separates.
+
 **Broad phase.** The tile grid is the broad phase for terrain:
 a body's AABB overlaps a bounded set of tiles (a 1-tile body
 touches at most 4 tiles; the bound is max body size + 1 per
@@ -169,7 +207,16 @@ feared one.
 **Narrow phase.** AABB vs tile AABB, and AABB vs AABB, both
 exact in fixed point. Contact information is the minimum
 penetration axis and depth, plus the contact normal (axis-aligned
-by construction).
+by construction). AABB-vs-AABB is the separating-axis test
+with two axes — SAT, in its simplest form. GJK enters only
+with general convex shapes, which is the Rapier trigger's
+territory, not v1's. And §12.3's warning about narrow-phase
+robustness — "floating-point error and tolerances can change
+the apparent answer" near touching features — does not apply
+here: fixed-point arithmetic makes touching exact. Two bodies
+whose faces share a tile boundary are touching, deterministically,
+on every platform; there is no epsilon to tune and no
+near-touching ambiguity.
 
 **Resolution.** Axis-separated, in a fixed order: resolve X,
 then Y. Each axis pushes the body out along the minimum
@@ -197,7 +244,11 @@ near-zero velocity for N consecutive ticks sleeps: it is
 excluded from integration until a contact or impulse wakes it.
 Sleep is deterministic (a tick count, not a timer) and visible
 in the trace. Characters never sleep — input can arrive on any
-tick.
+tick. Islands — groups of bodies connected by contacts or
+joints, solved and slept together (§12.4) — are the scaling
+step after sleep: they matter when many dynamic bodies
+interact, and they arrive when the first game has a pile or a
+chain, not before.
 
 ## Tunneling: bound the speed, sweep what exceeds it
 
@@ -230,6 +281,50 @@ far side of the wall in any published snapshot. A body at the
 undetected. The time-of-impact is recorded as a fraction of the
 current tick (Q16) so the resolution can place the body at the
 exact contact plane before the remaining velocity is applied.
+
+## Queries: rays, sweeps, and phantoms
+
+§12.3: "Queries address different gameplay needs." The world
+offers three, and each has one job:
+
+| Query | Question it answers | Returns | Used by |
+| --- | --- | --- | --- |
+| Ray | What does this line hit first? | `Option<Hit>` — hit point (Q16 tile space), surface normal (axis-aligned), distance (Q16), target (tile coords or stable entity ID) | Ground probe, aiming, foot planting (later) |
+| Swept shape | What will this moving body hit this tick? | First time-of-impact (Q16 fraction of the tick) + the contact, as in "Tunneling" | Fast bodies above the speed bound |
+| Phantom / overlap | What is near this volume, without pushing anything? | The set of overlapping collidables (stable IDs), up to the query's bound | Action boxes, triggers, pickups, proximity checks |
+
+**Ray.** `raycast(origin, direction, max_distance)` walks the
+tiles along the ray (a grid traversal in tile space) and tests
+bodies whose AABBs the ray crosses, returning the nearest hit.
+A ray that hits nothing returns `None` — an empty result is a
+normal answer, not an error. The hit point is the exact tile
+boundary or body face, in Q16; the normal is the face's axis
+(the ray's entry face, not the body's facing). The ground probe
+is a short downward ray from the feet: it answers "grounded?"
+without participating in dynamics, and it is the query the
+animation bridge's future foot planting reads. A ray never
+moves a body and never creates a contact — it observes the
+world as of the last completed Collide phase.
+
+**Swept shape.** Covered by "Tunneling": the swept test finds
+the first impact within the tick and resolves there. A swept
+query is a simulation input, not a gameplay question — only
+the step issues one, and only for bodies above the speed bound.
+
+**Phantom.** An overlap query against a volume, with the same
+filters as contacts but no response. The query's result is a
+bounded set (at most 8 collidables; overflow drops the
+farthest and counts it). Action boxes and triggers are phantom
+queries: they detect, they never push. A phantom query that
+needs to move something is a design error — the query reports
+the hit, and gameplay applies the impulse through a physics
+event.
+
+All three queries read the world as of the last completed
+Collide phase. A query issued mid-step sees the previous
+tick's world; a query issued in the Animate phase sees the
+current tick's. The phase a query runs in is part of its
+contract, and the skill records it per use.
 
 ## Transform authority (§12.5)
 
@@ -399,6 +494,8 @@ from the log.
 | Body size | ≤ 4×4 tiles | Bounds the broad-phase tile set (≤ 25 tiles) |
 | Speed | ≤ 60 tiles/s, swept above | The tunneling threshold (§6) |
 | Contacts per body per tick | ≤ 8 | Tile contacts (≤ 4) + entity contacts (≤ 4); overflow drops the deepest and counts it |
+| Ray queries per tick | ≤ 16 | Ground probes + aiming; each query walks at most the tiles along its path |
+| Phantom results per query | ≤ 8 | Overflow drops the farthest and counts it |
 | Sleep | After 30 ticks at rest | Deterministic, visible in the trace |
 
 The tick path allocates nothing; all physics state lives in
@@ -472,6 +569,17 @@ and confines Rapier types to the adapter module.
 - **Animation bridge is mandatory for any airborne motion.** A
   recipe that still carries airborne root offsets must not be
   published; the bridge skill owns the rejection criteria.
+- **The collision world is rebuilt per tick in v1.** A body
+  spawned mid-tick is visible to queries only from the next
+  tick. Do not work around this with a mid-tick query against
+  the entity table — wait for the next Collide phase.
+- **A query never moves a body.** Rays and phantom queries
+  observe; only the step resolves contacts. A query result
+  that needs to change motion goes through a physics event.
+- **Shared shapes are one definition, many bodies.** Changing
+  a shared shape changes every collidable that references it.
+  A per-body tweak is a new shape, not an edit to the shared
+  one.
 
 ## Open decisions
 
@@ -482,7 +590,13 @@ and confines Rapier types to the adapter module.
   Kinematic targets are the mechanism; the first platform
   arrives with the first level that needs one.
 - **Prop restitution and friction — tuned when props land.**
-  The constants are named in slice 4, not guessed now.
+  The constants are named when the first dynamic prop lands,
+  not guessed now.
+- **Compound shapes — deferred with the Rapier trigger.**
+  One AABB per body until a game needs a multi-piece collider.
+- **Islands — the scaling step after sleep.** They arrive
+  with the first game that has a pile or a chain of
+  interacting dynamic bodies.
 
 ## References
 
