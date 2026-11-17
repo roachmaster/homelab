@@ -9,10 +9,9 @@ explained, not just reproduced.
 design applies Gregory chapter 9 (tools for debugging and
 development) and the synthesis's runtime-to-debugger boundary to the
 [game engine proposal](forge-game-engine.md). It builds on the
-[snapshot design](forge-game-snapshot.md) (branch
-`design/game-snapshot-interface`, unmerged): the inspector reads the
+[snapshot design](forge-game-snapshot.md). The inspector reads the
 snapshot buffer, and the trace ring is the only new runtime interface.
-Slices 1–2 below can land before the snapshot; slice 3 needs it.
+Slices 1–2 can land before the snapshot implementation. Slice 3 requires it.
 
 ## The problem
 
@@ -201,7 +200,7 @@ input log and assert the same completion tick.
    playtest page. No drawer yet — the timing is visible in the
    console and the controls are buttons.
 3. Debug drawer UI: inspector, timing graph, trace view, console,
-   debug drawing toggle. Needs the snapshot design merged.
+   debug drawing toggle. Requires the snapshot implementation.
 4. Trace export (JSON) plus the journey's replay check.
 
 Each slice keeps the game playable and the journey green.
