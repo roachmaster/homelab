@@ -58,6 +58,7 @@ macro_rules! element {
 }
 
 mod dispatch;
+mod forge_workers;
 mod game_asset_pipeline;
 pub mod game_engine;
 mod game_physics;
@@ -105,6 +106,9 @@ pub enum DesignPage {
     GameStudio,
     GamePhysics,
     GameAssetPipeline,
+    ForgeWorkers,
+    ForgeWorkersPlaytest,
+    ForgeWorkersStudio,
     Playtest,
 }
 
@@ -148,6 +152,24 @@ impl DesignPage {
                 "/design",
                 "Back to Design",
                 game_asset_pipeline::BODY,
+            ),
+            Self::ForgeWorkers => (
+                "Forge worker and main-thread ownership · Forge IDE",
+                "/design",
+                "Back to Design",
+                forge_workers::OWNERSHIP,
+            ),
+            Self::ForgeWorkersPlaytest => (
+                "Playtest worker flow · Forge IDE",
+                "/design/forge-workers",
+                "Back to worker ownership",
+                forge_workers::PLAYTEST,
+            ),
+            Self::ForgeWorkersStudio => (
+                "Studio build worker flow · Forge IDE",
+                "/design/forge-workers",
+                "Back to worker ownership",
+                forge_workers::STUDIO,
             ),
             Self::Playtest => (
                 "Room One · Forge Playtest",

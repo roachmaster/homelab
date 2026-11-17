@@ -45,6 +45,20 @@ const GAME_ASSET_PIPELINE_LOAD: &[u8] = include_bytes!(
 const GAME_ASSET_PIPELINE_CONTRACT: &[u8] = include_bytes!(
     "../../../../docs/architecture/diagrams/mermaid/images/game-asset-pipeline-contract.svg"
 );
+const FORGE_WORKERS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/forge-workers.html"));
+const FORGE_WORKERS_PLAYTEST_HTML: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/forge-workers-playtest.html"));
+const FORGE_WORKERS_STUDIO_HTML: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/forge-workers-studio.html"));
+const FORGE_WORKERS_OWNERSHIP: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/forge-worker-ownership.svg"
+);
+const FORGE_WORKERS_PLAYTEST: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/forge-game-worker-handoff.svg"
+);
+const FORGE_WORKERS_STUDIO: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/forge-studio-worker-lease.svg"
+);
 const PLAYTEST_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.html"));
 const PLAYTEST_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.css"));
 const PLAYTEST_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.js"));
@@ -127,6 +141,18 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/game-asset-pipeline/contract.svg" => {
             Some(("image/svg+xml", GAME_ASSET_PIPELINE_CONTRACT))
         }
+        "/design/forge-workers" | "/design/forge-workers/" => {
+            Some(("text/html; charset=utf-8", FORGE_WORKERS_HTML))
+        }
+        "/design/forge-workers/playtest" | "/design/forge-workers/playtest/" => {
+            Some(("text/html; charset=utf-8", FORGE_WORKERS_PLAYTEST_HTML))
+        }
+        "/design/forge-workers/studio" | "/design/forge-workers/studio/" => {
+            Some(("text/html; charset=utf-8", FORGE_WORKERS_STUDIO_HTML))
+        }
+        "/design/forge-workers/ownership.svg" => Some(("image/svg+xml", FORGE_WORKERS_OWNERSHIP)),
+        "/design/forge-workers/playtest.svg" => Some(("image/svg+xml", FORGE_WORKERS_PLAYTEST)),
+        "/design/forge-workers/studio.svg" => Some(("image/svg+xml", FORGE_WORKERS_STUDIO)),
         "/playtest" | "/playtest/" => Some(("text/html; charset=utf-8", PLAYTEST_HTML)),
         "/playtest/style.css" => Some(("text/css; charset=utf-8", PLAYTEST_CSS)),
         "/playtest/main.js" => Some(("text/javascript; charset=utf-8", PLAYTEST_JS)),

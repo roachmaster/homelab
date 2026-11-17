@@ -14,6 +14,7 @@ pub(super) const BODY: &[Node] = &[
             element!(A [Href = "/design/game-studio"]; text("Game engine design")),
             element!(A [Href = "/design/game-physics"]; text("Game physics design")),
             element!(A [Href = "/design/game-asset-pipeline"]; text("Game asset pipeline design")),
+            element!(A [Href = "/design/forge-workers"]; text("Forge worker design")),
             element!(A [Href = "/playtest"]; text("Room One playtest")),
         ),
     ),

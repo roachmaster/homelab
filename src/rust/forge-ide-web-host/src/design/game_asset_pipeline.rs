@@ -89,6 +89,7 @@ pub(super) const BODY: &[Node] = &[
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-game-asset-pipeline.md"]; text("Full asset pipeline proposal")),
             element!(A [Href = "/design/game-studio"]; text("Game engine design")),
             element!(A [Href = "/design/game-physics"]; text("Game physics design")),
+            element!(A [Href = "/design/forge-workers/playtest"]; text("Playtest worker flow")),
             element!(A [Href = "/playtest"]; text("Open Room One playtest")),
         ),
     ),

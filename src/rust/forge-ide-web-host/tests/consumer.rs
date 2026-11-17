@@ -1038,7 +1038,7 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
 fn design_reference_serves_only_the_fixed_documents_and_images() {
     let f = Files::new();
     let (h, _) = host(&f);
-    let request = |method, target| {
+    let request = |method: &str, target: &str| {
         exchange(
             &h,
             format!(
@@ -1059,6 +1059,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/design/game-physics\">Game physics design</a>"));
         assert!(response
             .contains("href=\"/design/game-asset-pipeline\">Game asset pipeline design</a>"));
+        assert!(response.contains("href=\"/design/forge-workers\">Forge worker design</a>"));
         assert!(response.contains("href=\"/playtest\">Room One playtest</a>"));
     }
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
@@ -1096,6 +1097,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/design/game-physics\""));
         assert!(response
             .contains("href=\"/design/game-asset-pipeline\">Game asset pipeline design</a>"));
+        assert!(response.contains("href=\"/design/forge-workers\">Forge worker design</a>"));
         assert!(!response.contains("<script"));
         let head = request("HEAD", path);
         assert!(head.starts_with("HTTP/1.1 200 OK"));
@@ -1139,6 +1141,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/design/game-asset-pipeline/cook.svg\""));
         assert!(response.contains("href=\"/design/game-asset-pipeline/load.svg\""));
         assert!(response.contains("href=\"/design/game-asset-pipeline/contract.svg\""));
+        assert!(response.contains("href=\"/design/forge-workers/playtest\""));
         assert!(!response.contains("<script"));
         assert!(!response.contains("target=\"_blank\""));
         let head = request("HEAD", path);
@@ -1146,6 +1149,45 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(head.ends_with("\r\n\r\n"));
     }
     assert!(request("POST", "/design/game-asset-pipeline").starts_with("HTTP/1.1 405"));
+    for (path, heading, diagram, cross_link) in [
+        (
+            "/design/forge-workers",
+            "Forge worker and main-thread ownership",
+            "ownership.svg",
+            "/design/forge-workers/playtest",
+        ),
+        (
+            "/design/forge-workers/playtest",
+            "Playtest worker flow",
+            "playtest.svg",
+            "/design/forge-workers",
+        ),
+        (
+            "/design/forge-workers/studio",
+            "Studio build worker flow",
+            "studio.svg",
+            "/design/forge-workers",
+        ),
+    ] {
+        for target in [path.to_owned(), format!("{path}/")] {
+            let response = request("GET", &target);
+            assert!(response.starts_with("HTTP/1.1 200 OK"));
+            assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+            assert!(response.contains("Content-Security-Policy:"));
+            assert!(response.contains(&format!("<h1>{heading}</h1>")));
+            assert!(response.contains("<strong>Design proposal.</strong>"));
+            assert!(response.contains(&format!("href=\"/design/forge-workers/{diagram}\"")));
+            assert!(response.contains(&format!("href=\"{cross_link}\"")));
+            assert!(!response.contains("<script"));
+            assert!(!response.contains("target=\"_blank\""));
+            let head = request("HEAD", &target);
+            assert!(head.starts_with("HTTP/1.1 200 OK"));
+            assert!(head.ends_with("\r\n\r\n"));
+        }
+        assert!(request("POST", path).starts_with("HTTP/1.1 405"));
+    }
+    let workers = request("GET", "/design/forge-workers");
+    assert!(workers.contains("href=\"/design/forge-workers/studio\""));
     for path in [
         "/design/chat-dispatch-sequence.svg",
         "/design/forge-ide-mail-wireframe.svg",
@@ -1158,6 +1200,9 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         "/design/game-asset-pipeline/cook.svg",
         "/design/game-asset-pipeline/load.svg",
         "/design/game-asset-pipeline/contract.svg",
+        "/design/forge-workers/ownership.svg",
+        "/design/forge-workers/playtest.svg",
+        "/design/forge-workers/studio.svg",
     ] {
         let diagram = request("HEAD", path);
         assert!(diagram.starts_with("HTTP/1.1 200 OK"));
@@ -1167,6 +1212,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
     assert!(request("GET", "/design/chat-dispatch-sequence.mmd").starts_with("HTTP/1.1 404"));
     assert!(request("GET", "/design/game-physics/tick.mmd").starts_with("HTTP/1.1 404"));
     assert!(request("GET", "/design/game-asset-pipeline/cook.mmd").starts_with("HTTP/1.1 404"));
+    assert!(request("GET", "/design/forge-workers/ownership.mmd").starts_with("HTTP/1.1 404"));
     for path in [
         "/design/forge-ide-chat-desktop.png",
         "/design/forge-ide-chat-phone.png",

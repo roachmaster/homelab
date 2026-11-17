@@ -20,6 +20,12 @@ fn main() -> io::Result<()> {
         ("game-studio.html", DesignPage::GameStudio),
         ("game-physics.html", DesignPage::GamePhysics),
         ("game-asset-pipeline.html", DesignPage::GameAssetPipeline),
+        ("forge-workers.html", DesignPage::ForgeWorkers),
+        (
+            "forge-workers-playtest.html",
+            DesignPage::ForgeWorkersPlaytest,
+        ),
+        ("forge-workers-studio.html", DesignPage::ForgeWorkersStudio),
         ("playtest.html", DesignPage::Playtest),
     ] {
         fs::write(output.join(name), page.render())?;
