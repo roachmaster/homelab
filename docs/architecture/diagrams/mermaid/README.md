@@ -437,11 +437,10 @@ visible to gameplay at a tick boundary.
 ## Forge worker and main-thread ownership proposal
 
 The [worker ownership proposal](../../proposals/forge-worker-ownership.md)
-separates browser rendering, authoritative Rust execution, JavaScript
-support work, and durable Studio build execution. The IDE already uses
-a Web Worker. The current playtest instantiates its WASM runtime on the
-page thread. The diagrams propose the logical handoff and a native
-Studio build worker.
+separates browser rendering, authoritative Rust execution, and JavaScript
+I/O and message delivery. The IDE already uses a Web Worker. The current
+playtest instantiates its WASM runtime on the page thread. The Studio
+sequence shows a later milestone for durable native builds.
 
 | Proposed view | Source | Image |
 | --- | --- | --- |

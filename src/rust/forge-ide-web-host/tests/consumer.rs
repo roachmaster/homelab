@@ -1149,24 +1149,27 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(head.ends_with("\r\n\r\n"));
     }
     assert!(request("POST", "/design/game-asset-pipeline").starts_with("HTTP/1.1 405"));
-    for (path, heading, diagram, cross_link) in [
+    for (path, heading, diagram, cross_link, detail) in [
         (
             "/design/forge-workers",
             "Forge worker and main-thread ownership",
             "ownership.svg",
             "/design/forge-workers/playtest",
+            "<dt>JavaScript I/O workers</dt>",
         ),
         (
             "/design/forge-workers/playtest",
             "Playtest worker flow",
             "playtest.svg",
             "/design/forge-workers",
+            "Rust matches the result to pending work, verifies the expected digest",
         ),
         (
             "/design/forge-workers/studio",
             "Studio build worker flow",
             "studio.svg",
             "/design/forge-workers",
+            "The durable Studio build service is a separate future milestone.",
         ),
     ] {
         for target in [path.to_owned(), format!("{path}/")] {
@@ -1176,6 +1179,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
             assert!(response.contains("Content-Security-Policy:"));
             assert!(response.contains(&format!("<h1>{heading}</h1>")));
             assert!(response.contains("<strong>Design proposal.</strong>"));
+            assert!(response.contains(detail));
             assert!(response.contains(&format!("href=\"/design/forge-workers/{diagram}\"")));
             assert!(response.contains(&format!("href=\"{cross_link}\"")));
             assert!(!response.contains("<script"));

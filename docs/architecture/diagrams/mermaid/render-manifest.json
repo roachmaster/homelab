@@ -220,21 +220,21 @@
     },
     {
       "source": "forge-worker-ownership.mmd",
-      "source_sha256": "32f2f43dfc3dcc386b7532ab6629a2a4ecdeecac4cd56cb110316d3da59eb052",
+      "source_sha256": "e46eb748f4c2f480461220c7458bf386b82800fb0f4f6b1bcc4977ccff6fc44b",
       "svg": "images/forge-worker-ownership.svg",
-      "svg_sha256": "b0b1e36a2dce8485c392a2e9352942a543c87f3a6fe6c15691253ed14ac7de79"
+      "svg_sha256": "abe093f5826178fde2e86a455e69a0dd3c45e97e9cb7a9a1794acd562b760517"
     },
     {
       "source": "forge-game-worker-handoff.mmd",
-      "source_sha256": "2b57c22eb60cfab4445d6022b187ac7d4fcae94a658a056ddbe1e808ab6ed6f0",
+      "source_sha256": "aec2b13cf035ebd07becb1ec5dc35cf48e2967a9d2473957ea03c41e2a7ca9d5",
       "svg": "images/forge-game-worker-handoff.svg",
-      "svg_sha256": "d7ba12aa0052e6fb16e2dadaa8be554a85fbf7789cc0b9b97c23b1b0fd54ab86"
+      "svg_sha256": "e4cf60844d0f666ea0685869c50b959562daf11bb72b829a2d3522b9e7be209f"
     },
     {
       "source": "forge-studio-worker-lease.mmd",
-      "source_sha256": "0d61e70944549d06f37a6e674da500d1f2291bb474c2c08299d93b37132a8489",
+      "source_sha256": "84c7dbfe4b9bc97fb6c3857a761b96ff3b96c566264be1eb3c30b6987ca8f88a",
       "svg": "images/forge-studio-worker-lease.svg",
-      "svg_sha256": "13ed81ebdbadab177fcce8b26f010f27be9eac446823647372f8a835770a4061"
+      "svg_sha256": "6d6a64b0e4c1267ebfb37dc3c4b617e9ff9cab03b0e77508e417740a65254e9c"
     }
   ]
 }

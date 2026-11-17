@@ -1,5 +1,5 @@
 ---
-title: Proposed Forge Studio worker - durable build attempt
+title: Future Forge Studio milestone - durable build attempt
 ---
 sequenceDiagram
     actor M as Main JS thread
@@ -7,16 +7,17 @@ sequenceDiagram
     participant S as JS I/O worker
     participant F as Forge host
     participant D as Studio database
-    participant W as Build worker
+    participant W as Native build worker
+    Note over M,W: Future Studio milestone
     M->>R: Forward build action
     R->>S: Emit typed dispatch effect
     S->>F: Dispatch game.build.submit
     Note over F,D: Reject before storage effects if admission fails.
     F->>F: Check session, project and typed request
-    F->>D: Commit job and queued event using idempotency key
+    F->>D: Enqueue build
     D-->>F: Durable receipt
     F-->>S: Return build ID and state
-    S-->>R: Deliver correlated receipt
+    S-->>R: Relay correlated receipt
     R-->>M: Publish build view
     W->>D: Claim job with lease and attempt token
     D-->>W: Pinned revision and approved profile
@@ -29,5 +30,5 @@ sequenceDiagram
     F->>D: Read authorized job and ordered events
     D-->>F: Status and committed artifact metadata
     F-->>S: Return typed status
-    S-->>R: Deliver correlated status
+    S-->>R: Relay correlated status
     R-->>M: Publish status and authorized preview
