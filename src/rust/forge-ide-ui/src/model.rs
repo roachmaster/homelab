@@ -3,8 +3,10 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 
 const PAGE_ROWS: usize = 256;
+mod bookmark;
 mod chat;
 mod edit;
+mod mail;
 mod projection;
 mod source;
 pub use projection::name_label;
@@ -28,6 +30,12 @@ pub struct Output {
     pub view: ViewModel,
     pub effects: Vec<UiEffect>,
     pub error: Option<String>,
+    pub workspace: Option<WorkspaceSnapshot>,
+    pub has_workspace_work: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail_navigation: Option<MailNavigationSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mail_navigation_locked: Option<bool>,
 }
 
 /// Instance-local UI semantics. This is not an authentication authority or an
@@ -39,6 +47,10 @@ pub struct UiModel {
     pending_edit: Option<edit::PendingEdit>,
     edit_review: Option<edit::EditReview>,
     write: edit::WriteState,
+    mail: mail::Mail,
+    workbench_seen: bool,
+    workspace_restored: bool,
+    workbench_recovery: Option<WorkbenchBookmark>,
     node: String,
     project: String,
     phase: Phase,
@@ -75,6 +87,10 @@ impl Default for UiModel {
             pending_edit: None,
             edit_review: None,
             write: edit::WriteState::default(),
+            mail: mail::Mail::default(),
+            workbench_seen: false,
+            workspace_restored: false,
+            workbench_recovery: None,
             node: String::new(),
             project: String::new(),
             phase: Phase::Unpaired,
@@ -132,6 +148,10 @@ impl UiModel {
             view,
             effects: vec![],
             error,
+            workspace: self.workspace_snapshot(),
+            has_workspace_work: self.has_workspace_work(),
+            mail_navigation: self.mail.navigation_snapshot(),
+            mail_navigation_locked: self.mail.navigation_locked(),
         }
     }
     fn next_id(&mut self, now: u64) -> Result<String, UiError> {
@@ -145,6 +165,7 @@ impl UiModel {
             effects.push(UiEffect::Abort { token: p.token });
         }
         self.clear_source(effects);
+        self.workbench_recovery = None;
         self.report = None;
         self.accepted_report = None;
         self.file_filter = BoundedQuery::default();
@@ -172,6 +193,7 @@ impl UiModel {
             | UiEvent::OpenWorkbench {}
             | UiEvent::NewChat {}
             | UiEvent::SelectChat { .. }
+            | UiEvent::SelectChatModel { .. }
             | UiEvent::SetChatDraft { .. }
             | UiEvent::SendChat {}
             | UiEvent::SendWorkbenchChat { .. }
@@ -181,21 +203,114 @@ impl UiModel {
             | UiEvent::ApplyEdit { .. }
             | UiEvent::UndoEdit { .. }
             | UiEvent::CheckEditWrite {}
+            | UiEvent::SendPersistentChat { .. }
+            | UiEvent::CancelChatRun {}
+            | UiEvent::RetryChatSubmit {}
+            | UiEvent::ShowChatHistory {}
+            | UiEvent::MoreChatHistory {}
+            | UiEvent::NewerChatHistory {}
+            | UiEvent::OpenSavedChat { .. }
+            | UiEvent::ManageSavedChat {}
+            | UiEvent::ShowChatExpiry {}
+            | UiEvent::SetChatExpiry { .. }
+            | UiEvent::ConfirmChatExpiry {}
+            | UiEvent::KeepChatLongTerm {}
+            | UiEvent::ShowChatDelete {}
+            | UiEvent::ConfirmChatDelete {}
+            | UiEvent::CloseChatDialog {}
                 if self.catalog.is_none() =>
             {
                 return Err(UiError::NotConnected)
             }
-            UiEvent::OpenChat {} => self.chats.workbench = false,
-            UiEvent::OpenWorkbench {} => self.chats.workbench = true,
+            UiEvent::OpenChat {} => {
+                self.mail.close();
+                self.chats.workbench = false;
+                if self.chats.async_chat {
+                    let request_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.request_models(request_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
+            }
+            UiEvent::OpenWorkbench {} => {
+                self.mail.close();
+                self.chats.workbench = true;
+                self.workbench_seen = true;
+                self.chats.close_history();
+            }
+            UiEvent::RestoreMailNavigation { snapshot } => {
+                if !self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|catalog| catalog.mail_enabled)
+                    || !snapshot.is_valid()
+                    || self.mail.active
+                    || self.mail.has_draft()
+                {
+                    return Ok(self.output(None));
+                }
+                let request_id = self.next_id(input.now_ms)?;
+                if snapshot.active {
+                    self.chats.workbench = false;
+                    self.chats.close_history();
+                }
+                self.mail
+                    .restore_navigation(snapshot, request_id, &mut effects);
+            }
+            event @ (UiEvent::OpenMail {}
+            | UiEvent::MailInbox {}
+            | UiEvent::MailArchive {}
+            | UiEvent::MailNewMessage {}
+            | UiEvent::MailFollowUp {}
+            | UiEvent::MailDiscardDraft {}
+            | UiEvent::MailBack {}
+            | UiEvent::MailRefresh {}
+            | UiEvent::MailPrevious {}
+            | UiEvent::MailNext {}
+            | UiEvent::MailOpenThread { .. }
+            | UiEvent::SetMailSubject { .. }
+            | UiEvent::SetMailDraft { .. }
+            | UiEvent::SendMail { .. }
+            | UiEvent::RetryMail { .. }
+            | UiEvent::PollMail { .. }
+            | UiEvent::Mail(_)) => {
+                if !self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|catalog| catalog.mail_enabled)
+                {
+                    return Err(UiError::InvalidAction);
+                }
+                if matches!(event, UiEvent::OpenMail {}) {
+                    self.chats.workbench = false;
+                    self.chats.close_history();
+                }
+                let request_id = self.next_id(input.now_ms)?;
+                self.mail.dispatch(event, request_id, &mut effects)?;
+            }
             UiEvent::NewChat {} => self.chats.new_conversation()?,
-            UiEvent::SelectChat { value } => self.chats.select(&value)?,
+            UiEvent::SelectChat { value } => {
+                let request_id = self
+                    .chats
+                    .history
+                    .enabled
+                    .then(|| self.next_id(input.now_ms))
+                    .transpose()?;
+                if let Some(request) = self.chats.select(&value, request_id)? {
+                    effects.push(UiEffect::ChatHistory(request));
+                }
+            }
+            UiEvent::SelectChatModel { value } => self.chats.select_model(value)?,
             UiEvent::SetChatDraft {
                 conversation,
                 value,
             } => self.chats.draft(conversation, value)?,
             UiEvent::SendChat {} => {
+                if self.chats.async_chat {
+                    return Err(UiError::InvalidAction);
+                }
                 let request_id = self.next_id(input.now_ms)?;
-                if let Some(request) = self.chats.send(request_id, None)? {
+                if let Some(request) = self.chats.send(request_id)? {
                     effects.push(UiEffect::Chat { request });
                 }
             }
@@ -252,6 +367,80 @@ impl UiModel {
             } => {
                 self.complete_write(&request_id, &operation, outcome, input.now_ms, &mut effects);
             }
+            UiEvent::SendPersistentChat { chat_id } => {
+                let request_id = self.next_id(input.now_ms)?;
+                if self.chats.async_chat {
+                    if let Some(request) = self.chats.submit_run(request_id, chat_id)? {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                } else if let Some(request) = self.chats.send_with_id(request_id, Some(chat_id))? {
+                    effects.push(UiEffect::Chat { request });
+                }
+            }
+            UiEvent::CancelChatRun {} | UiEvent::RetryChatSubmit {} => {
+                let request_id = self.next_id(input.now_ms)?;
+                let request = if matches!(input.event, UiEvent::CancelChatRun {}) {
+                    self.chats.cancel_run(request_id)
+                } else {
+                    self.chats.retry_run(request_id)
+                };
+                if let Some(request) = request {
+                    effects.push(UiEffect::ChatRun(request));
+                }
+            }
+            UiEvent::ShowChatHistory {}
+            | UiEvent::MoreChatHistory {}
+            | UiEvent::NewerChatHistory {}
+            | UiEvent::OpenSavedChat { .. }
+            | UiEvent::ManageSavedChat {}
+            | UiEvent::ConfirmChatExpiry {}
+            | UiEvent::KeepChatLongTerm {}
+            | UiEvent::ConfirmChatDelete {} => {
+                let request_id = self.next_id(input.now_ms)?;
+                let request = match input.event {
+                    UiEvent::ShowChatHistory {} => self.chats.toggle_history(request_id),
+                    UiEvent::MoreChatHistory {} => self.chats.page_history(request_id, false),
+                    UiEvent::NewerChatHistory {} => self.chats.page_history(request_id, true),
+                    UiEvent::OpenSavedChat { chat_id } => {
+                        self.chats.open_saved(request_id, chat_id)
+                    }
+                    UiEvent::ManageSavedChat {} => self.chats.manage_saved(request_id),
+                    UiEvent::ConfirmChatExpiry {} => self.chats.set_retention(request_id, false),
+                    UiEvent::KeepChatLongTerm {} => self.chats.set_retention(request_id, true),
+                    UiEvent::ConfirmChatDelete {} => self.chats.delete_saved(request_id),
+                    _ => unreachable!("matched chat history request"),
+                }?;
+                if let Some(request) = request {
+                    effects.push(UiEffect::ChatHistory(request));
+                }
+            }
+            UiEvent::ShowChatExpiry {} => self.chats.show_history_dialog(false)?,
+            UiEvent::ShowChatDelete {} => self.chats.show_history_dialog(true)?,
+            UiEvent::SetChatExpiry { value } => self.chats.set_expiry_date(value)?,
+            UiEvent::CloseChatDialog {} => self.chats.close_history_dialog(),
+            UiEvent::ChatHistory(response) => self.chats.accept_history(response),
+            UiEvent::ChatRun(response) => {
+                if !self.chats.accept_models(&response)
+                    && self.chats.expects_run_request(response.request_id())
+                {
+                    let completed = matches!(
+                        &response,
+                        ChatRunResponse::ChatRunEvents {
+                            status: ChatRunStatus::Completed,
+                            ..
+                        }
+                    );
+                    let next_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.accept_run(response, next_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    } else if completed {
+                        let request_id = self.next_id(input.now_ms)?;
+                        if let Some(request) = self.chats.request_models(request_id) {
+                            effects.push(UiEffect::ChatRun(request));
+                        }
+                    }
+                }
+            }
             UiEvent::ChatResult {
                 request_id,
                 outcome,
@@ -267,6 +456,18 @@ impl UiModel {
                 } else {
                     self.chats
                         .complete(&request_id, ChatOutcome::Error { category });
+                }
+                if self.chats.expects_run_request(&request_id) {
+                    let next_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.run_network_failed(&request_id, next_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
+                self.chats.history_network_failed(&request_id, category);
+                self.chats.models_network_failed(&request_id);
+                if self.mail.has_request(&request_id) {
+                    let watch = self.next_id(input.now_ms)?;
+                    self.mail.network_failed(&request_id, watch, &mut effects);
                 }
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
@@ -346,6 +547,20 @@ impl UiModel {
                     self.message = format!("Rejected host catalog: {e}");
                     return Ok(self.output(None));
                 }
+                if self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|previous| previous.session_epoch != catalog.session_epoch)
+                {
+                    self.invalidate(&mut effects)?;
+                    self.chats = chat::Chats::default();
+                    self.pending_edit = None;
+                    self.edit_review = None;
+                    self.write = edit::WriteState::default();
+                    self.mail = mail::Mail::default();
+                    self.workbench_seen = false;
+                    self.workspace_restored = false;
+                }
                 self.node = catalog.nodes[0].key.clone();
                 self.project = catalog.nodes[0]
                     .projects
@@ -367,6 +582,8 @@ impl UiModel {
                 }
                 let mut catalog = catalog;
                 let recent_write = catalog.recent_write.take();
+                self.chats.history.enabled = catalog.chat_history;
+                self.chats.async_chat = catalog.async_chat;
                 self.catalog = Some(catalog);
                 self.chats.open();
                 if let Some(recent) = recent_write {
@@ -388,6 +605,31 @@ impl UiModel {
                 if sole.len() == 1 {
                     self.begin_inspection(input.now_ms, &mut effects)?;
                 }
+                if self.chats.async_chat {
+                    let request_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.request_models(request_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
+            }
+            UiEvent::RestoreWorkspace { snapshot } => {
+                if self.catalog.is_none() || self.workspace_restored || !snapshot.is_valid() {
+                    return Ok(self.output(None));
+                }
+                self.chats.restore_snapshot(snapshot.chat)?;
+                if self.chats.async_chat {
+                    let request_id = self.next_id(input.now_ms)?;
+                    if let Some(request) = self.chats.resume_run(request_id) {
+                        effects.push(UiEffect::ChatRun(request));
+                    }
+                }
+                self.workspace_restored = true;
+                self.restore_workbench(
+                    snapshot.workbench,
+                    snapshot.workbench_open,
+                    input.now_ms,
+                    &mut effects,
+                );
             }
             UiEvent::PairFailed {
                 request_id,
@@ -494,6 +736,11 @@ impl UiModel {
                                 self.report = Some(report);
                                 self.pending = None;
                                 self.reopen_written_file(input.now_ms, &mut effects);
+                                if self.selected_entry == Some(0) {
+                                    self.resolve_workbench_recovery(input.now_ms, &mut effects);
+                                } else {
+                                    self.workbench_recovery = None;
+                                }
                             }
                         }
                         Outcome::Error { category, message } => {
@@ -704,6 +951,10 @@ impl UiModel {
             view: self.render(),
             effects,
             error: None,
+            workspace: self.workspace_snapshot(),
+            has_workspace_work: self.has_workspace_work(),
+            mail_navigation: self.mail.navigation_snapshot(),
+            mail_navigation_locked: self.mail.navigation_locked(),
         })
     }
     fn begin_inspection(&mut self, now: u64, effects: &mut Vec<UiEffect>) -> Result<(), UiError> {
@@ -722,7 +973,9 @@ impl UiModel {
         let epoch = c.session_epoch.clone();
         let target_node = n.node.clone();
         let target_incarnation = n.incarnation.clone();
+        let recovery = self.workbench_recovery.take();
         self.invalidate(effects)?;
+        self.workbench_recovery = recovery;
         let request_id = self.next_id(now)?;
         let request = PreparedInspection {
             token: RequestToken {

@@ -154,6 +154,34 @@ fn post(host: &Host, destination: &str, body: Value, extra: &str) -> String {
     let body = body.to_string();
     format!("POST /forge/v1/dispatch HTTP/1.1\r\nHost: {}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nForge-Envelope-Version: 1\r\nForge-Contract-Version: 1\r\nForge-Request-Id: request-1\r\nForge-Destination: {}\r\n{}\r\n{}",host.origin().split_once("://").unwrap().1,host.origin(),body.len(),destination,extra,body)
 }
+fn workspace_post(host: &Host, body: &Value, auth: Option<(&str, &str)>) -> String {
+    let body = body.to_string();
+    let authority = host.origin().split_once("://").unwrap().1;
+    let auth = auth.map_or_else(String::new, |(cookie, csrf)| {
+        format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n")
+    });
+    format!(
+        "POST /forge/v1/dispatch/workspace HTTP/1.1\r\nHost: {authority}\r\nOrigin: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth}\r\n{body}",
+        host.origin(),
+        body.len(),
+    )
+}
+
+fn workspace_reply(host: &Host, body: Value, auth: (&str, &str)) -> Value {
+    let response = exchange(host, workspace_post(host, &body, Some(auth)));
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    let (headers, body) = response.split_once("\r\n\r\n").unwrap();
+    assert!(headers
+        .lines()
+        .any(|line| line == "Cache-Control: no-store"));
+    serde_json::from_str(body).unwrap()
+}
+
+fn workspace_snapshot(draft: &str) -> Value {
+    json!({"chat":{"selected":0,"conversations":[{"messages":[],"draft":draft}]},
+           "workbench":null,"workbench_open":false})
+}
+
 fn paired(host: &Host) -> (String, String, String) {
     let r = exchange(
         host,
@@ -796,6 +824,150 @@ fn wrong_origin_host_duplicate_headers_and_method_fail_closed() {
     assert_eq!(calls.get(), 0);
     assert!(h.pairing_code().is_some());
 }
+
+#[test]
+fn workspace_checkpoint_requires_session_csrf_origin_and_a_bounded_body() {
+    let files = Files::new();
+    let (host, calls) = host(&files);
+    let (cookie, csrf, _) = paired(&host);
+    let restore = json!({"operation":"restore","tab":"a".repeat(32)});
+    let good = workspace_post(&host, &restore, Some((&cookie, &csrf)));
+    for (request, status) in [
+        (workspace_post(&host, &restore, None), 401),
+        (
+            workspace_post(&host, &restore, Some(("forge_ui=wrong", &csrf))),
+            401,
+        ),
+        (
+            workspace_post(&host, &restore, Some((&cookie, "wrong"))),
+            401,
+        ),
+        (good.replace(&format!("Forge-CSRF: {csrf}\r\n"), ""), 401),
+        (
+            good.replace(
+                &format!("Origin: {}", host.origin()),
+                "Origin: https://different.example",
+            ),
+            400,
+        ),
+        (
+            good.replace(&format!("Origin: {}\r\n", host.origin()), ""),
+            400,
+        ),
+        (
+            workspace_post(
+                &host,
+                &json!({"operation":"restore","tab":"A".repeat(32)}),
+                Some((&cookie, &csrf)),
+            ),
+            400,
+        ),
+    ] {
+        let reply = exchange(&host, request);
+        assert!(reply.starts_with(&format!("HTTP/1.1 {status} ")), "{reply}");
+        assert!(reply.contains("\r\nCache-Control: no-store\r\n"));
+    }
+
+    // An oversized Content-Length is rejected before the host waits for its body.
+    let (headers, _) = good.split_once("\r\n\r\n").unwrap();
+    let oversized = headers.replace(
+        &format!("Content-Length: {}", restore.to_string().len()),
+        &format!("Content-Length: {}", 2 * 1024 * 1024 + 1),
+    ) + "\r\n\r\n";
+    assert!(exchange(&host, oversized).starts_with("HTTP/1.1 413 "));
+
+    let loaded = workspace_reply(&host, restore, (&cookie, &csrf));
+    assert!(loaded["lease"]
+        .as_str()
+        .is_some_and(|lease| !lease.is_empty()));
+    assert_eq!(loaded["snapshot"], Value::Null);
+    assert_eq!(calls.get(), 0);
+}
+
+#[test]
+fn workspace_checkpoint_isolates_tabs_and_keeps_the_newest_revision_across_resume() {
+    let files = Files::new();
+    let mut settings = config(&files);
+    settings.public_origin = Some("https://portal.example.com".into());
+    settings.session_auth = SessionAuth::TrustedProxy;
+    let (host, calls) = host_with_config(settings);
+    let (cookie, csrf, epoch) = resumed(&host, None);
+    let auth = (cookie.as_str(), csrf.as_str());
+    let first_tab = "a".repeat(32);
+    let second_tab = "b".repeat(32);
+    let restore = |tab: &str| json!({"operation":"restore","tab":tab});
+    let save = |tab: &str, lease: &str, revision: u32, snapshot: &Value| json!({"operation":"save","tab":tab,"lease":lease,"revision":revision,"snapshot":snapshot});
+
+    let first = workspace_reply(&host, restore(&first_tab), auth);
+    let first_lease = first["lease"].as_str().unwrap();
+    assert_eq!(first["snapshot"], Value::Null);
+    let mut latest = workspace_snapshot("Newest draft in first tab");
+    let long_conversation = json!({"messages":[
+        {"role":"user","content":"p".repeat(2048)},
+        {"role":"assistant","content":"a".repeat(4096)},
+        {"role":"user","content":"f".repeat(1024)},
+        {"role":"assistant","content":"b".repeat(4096)}
+    ],"draft":""});
+    latest["chat"]["conversations"]
+        .as_array_mut()
+        .unwrap()
+        .extend([long_conversation.clone(), long_conversation]);
+    assert!(latest.to_string().len() > HostLimits::default().request_bytes);
+    let older = workspace_snapshot("Out-of-order draft");
+    for (revision, snapshot) in [(2, &latest), (1, &older), (2, &older)] {
+        assert_eq!(
+            workspace_reply(
+                &host,
+                save(&first_tab, first_lease, revision, snapshot),
+                auth
+            ),
+            json!({})
+        );
+    }
+
+    let second = workspace_reply(&host, restore(&second_tab), auth);
+    let second_lease = second["lease"].as_str().unwrap();
+    assert_eq!(second["snapshot"], Value::Null);
+    assert_ne!(second_lease, first_lease);
+    let cross_tab = save(&second_tab, first_lease, 3, &older);
+    assert!(
+        exchange(&host, workspace_post(&host, &cross_tab, Some(auth))).starts_with("HTTP/1.1 401 ")
+    );
+    let other = workspace_snapshot("Second tab draft");
+    assert_eq!(
+        workspace_reply(&host, save(&second_tab, second_lease, 1, &other), auth),
+        json!({})
+    );
+
+    assert_eq!(
+        resumed(&host, Some(&cookie)),
+        (cookie.clone(), csrf.clone(), epoch)
+    );
+    let reloaded = workspace_reply(&host, restore(&first_tab), auth);
+    let new_lease = reloaded["lease"].as_str().unwrap();
+    assert_ne!(new_lease, first_lease);
+    assert_eq!(reloaded["snapshot"], latest);
+    let delayed = save(&first_tab, first_lease, u32::MAX, &older);
+    assert!(
+        exchange(&host, workspace_post(&host, &delayed, Some(auth))).starts_with("HTTP/1.1 401 ")
+    );
+    let mut invalid = latest.clone();
+    invalid["chat"]["selected"] = 7.into();
+    let invalid = save(&first_tab, new_lease, 1, &invalid);
+    assert!(
+        exchange(&host, workspace_post(&host, &invalid, Some(auth))).starts_with("HTTP/1.1 400 ")
+    );
+    assert_eq!(
+        workspace_reply(&host, restore(&first_tab), auth)["snapshot"],
+        latest
+    );
+    assert_eq!(
+        workspace_reply(&host, restore(&second_tab), auth)["snapshot"],
+        other
+    );
+    assert_eq!(calls.get(), 0);
+}
+
 #[test]
 fn pairing_is_one_use_and_attempts_bounded() {
     let f = Files::new();
@@ -860,6 +1032,138 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
         Box::new(Fake(Rc::new(Cell::new(0)))) as Box<dyn InspectionPort>,
     )]);
     assert!(factory.create_with_ports(ports).is_err());
+}
+
+#[test]
+fn design_reference_serves_only_the_fixed_documents_and_images() {
+    let f = Files::new();
+    let (h, _) = host(&f);
+    let request = |method, target| {
+        exchange(
+            &h,
+            format!(
+                "{method} {target} HTTP/1.1\r\nHost: {}\r\n\r\n",
+                h.local_addr().unwrap()
+            ),
+        )
+    };
+    for path in ["/design", "/design/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("Content-Security-Policy:"));
+        assert!(response.contains("Forge IDE design"));
+        assert!(response.contains("href=\"/design/chat-dispatch\""));
+        assert!(response.contains("href=\"/design/mail\""));
+    }
+    assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
+    assert!(request("GET", "/design/previous-chats.js")
+        .contains("Content-Type: text/javascript; charset=utf-8"));
+    assert!(
+        request("GET", "/design/chat-history").contains("Content-Type: text/html; charset=utf-8")
+    );
+    assert!(request("GET", "/design/chat-history.css")
+        .contains("Content-Type: text/css; charset=utf-8"));
+    for path in ["/design/chat-dispatch", "/design/chat-dispatch/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("href=\"/design/chat-dispatch-sequence.svg\""));
+    }
+    for path in ["/design/mail", "/design/mail/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("href=\"/design/forge-ide-mail-wireframe.svg\""));
+        assert!(response.contains("href=\"/design/mail-dispatch-sequence.svg\""));
+    }
+    for path in [
+        "/design/chat-dispatch-sequence.svg",
+        "/design/forge-ide-mail-wireframe.svg",
+        "/design/mail-dispatch-sequence.svg",
+    ] {
+        let diagram = request("HEAD", path);
+        assert!(diagram.starts_with("HTTP/1.1 200 OK"));
+        assert!(diagram.contains("Content-Type: image/svg+xml"));
+        assert!(diagram.ends_with("\r\n\r\n"));
+    }
+    assert!(request("GET", "/design/chat-dispatch-sequence.mmd").starts_with("HTTP/1.1 404"));
+    for path in [
+        "/design/forge-ide-chat-desktop.png",
+        "/design/forge-ide-chat-phone.png",
+        "/design/forge-ide-workbench-desktop.png",
+        "/design/forge-ide-workbench-phone.png",
+        "/design/forge-ide-workbench-project-options.png",
+        "/design/chat-history-open.png",
+        "/design/chat-history-retention.png",
+        "/design/chat-history-delete.png",
+        "/design/chat-history-expiry.png",
+        "/design/forge-ide-mail-wireframe.png",
+    ] {
+        let response = request("HEAD", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: image/png"));
+        assert!(response.ends_with("\r\n\r\n"));
+    }
+    assert!(request("GET", "/design/manifest.json").starts_with("HTTP/1.1 404 Not Found"));
+    assert!(request("POST", "/design").starts_with("HTTP/1.1 405 Method Not Allowed"));
+}
+
+#[test]
+fn stale_browser_documents_redirect_to_the_portal() {
+    let f = Files::new();
+    let (h, _) = host(&f);
+    let get = |target, headers| {
+        exchange(
+            &h,
+            format!(
+                "GET {target} HTTP/1.1\r\nHost: {}\r\n{headers}\r\n",
+                h.local_addr().unwrap()
+            ),
+        )
+    };
+    let html = "Accept: text/html,application/xhtml+xml,*/*;q=0.8\r\n";
+    let navigation = format!("{html}Sec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: document\r\n");
+    for target in [
+        "/?old=1",
+        "/index.html?old=1",
+        "/obsolete-workbench",
+        "/cards_seed.md",
+    ] {
+        let response = get(target, navigation.as_str());
+        assert!(response.starts_with("HTTP/1.1 302 Found"));
+        assert!(response.contains("\r\nLocation: /\r\n"));
+        assert!(response.contains("\r\nCache-Control: no-store\r\n"));
+        assert!(!response.contains("Set-Cookie:"));
+    }
+    assert!(get("/obsolete-workbench", html).starts_with("HTTP/1.1 302 Found"));
+
+    for target in ["/", "/index.html", "/worker.js"] {
+        assert!(get(target, navigation.as_str()).starts_with("HTTP/1.1 200 OK"));
+    }
+    for target in ["/forge/v1/dispatch", "/forge/v1/dispatch/workspace"] {
+        let response = get(target, navigation.as_str());
+        assert!(response.starts_with("HTTP/1.1 405 Method Not Allowed"));
+        assert!(response.contains("\r\nAllow: POST\r\n"));
+    }
+    for target in [
+        "/api/unknown",
+        "/forge/v1/dispatch?old=1",
+        "/cdn-cgi/access/unknown",
+        "//external.invalid",
+    ] {
+        assert!(get(target, navigation.as_str()).starts_with("HTTP/1.1 404 Not Found"));
+    }
+    for headers in [
+        "Accept: application/json\r\n",
+        "Accept: text/html;q=0,application/json\r\n",
+        "Accept: text/html\r\nSec-Fetch-Mode: cors\r\nSec-Fetch-Dest: empty\r\n",
+        "Accept: text/html\r\nSec-Fetch-Mode: navigate\r\nSec-Fetch-Dest: iframe\r\n",
+    ] {
+        let response = get("/missing.js", headers);
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"));
+        assert!(response.ends_with("{\"error\":\"not_found\"}"));
+    }
 }
 
 #[test]
@@ -1241,6 +1545,9 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
     settings.chat = Some(forge_ide_web_host::ChatConfig {
         endpoint: upstream.local_addr().unwrap(),
         token_file: token_path,
+        workspace_persistence: false,
+        async_dispatch: false,
+        mail_enabled: false,
     });
     let ((), factory) = Registry::new()
         .register(register_host("context-chat", settings).unwrap())
@@ -1291,6 +1598,17 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
         "node_key":"lab","project":"workspace","entry":1,"sha256":digest,
         "byte_start":0,"byte_end":"exact café".len()
     });
+    let mut linked = contextual.clone();
+    linked["request"]["chat_id"] = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4".into();
+    assert!(
+        exchange(&host, post(&host, "ide.chat", linked.clone(), &headers))
+            .starts_with("HTTP/1.1 400")
+    );
+    linked["kind"] = "propose_edit".into();
+    assert!(
+        exchange(&host, post(&host, "ide.propose_edit", linked, &headers))
+            .starts_with("HTTP/1.1 400")
+    );
     let mut stale = contextual.clone();
     stale["request"]["file_context"]["sha256"] = "f".repeat(64).into();
     assert!(exchange(&host, post(&host, "ide.chat", stale, &headers))
@@ -1401,4 +1719,210 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
         reply["event"],
         json!({"kind":"chat_result","request_id":"request-1","outcome":{"kind":"answer","content":"local response"}})
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token = "0123456789abcdef".repeat(4);
+    let token_path = files.0.join("runner.token");
+    fs::write(&token_path, &token).unwrap();
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut settings = config(&files);
+    settings.chat = Some(forge_ide_web_host::ChatConfig {
+        endpoint: upstream.local_addr().unwrap(),
+        token_file: token_path,
+        workspace_persistence: true,
+        async_dispatch: false,
+        mail_enabled: false,
+    });
+    let (host, _) = host_with_config(settings);
+    let (cookie, csrf, _) = paired(&host);
+    let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    let chat_id = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
+    let destination = "ide.chat.history.delete";
+    let delete = json!({"kind":"chat_history_delete","request_id":"request-1",
+                        "chat_id":chat_id,"expected_revision":7});
+    let request = post(&host, destination, delete.clone(), &auth);
+    for (request, expected) in [
+        (post(&host, destination, delete.clone(), ""), 401),
+        (
+            post(&host, "ide.chat.history.list", delete.clone(), &auth),
+            400,
+        ),
+        (request.replace("\"request-1\"", "\"mismatch!\""), 400),
+        (
+            request.replace("Content-Type:", "Forge-Target-Node: lab\r\nContent-Type:"),
+            400,
+        ),
+        (
+            request.replace(host.origin(), "https://example.invalid"),
+            400,
+        ),
+    ] {
+        assert!(exchange(&host, request).starts_with(&format!("HTTP/1.1 {expected} ")));
+    }
+    upstream.set_nonblocking(true).unwrap();
+    assert_eq!(
+        upstream.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    upstream.set_nonblocking(false).unwrap();
+
+    let conflict = json!({"protocol_version":1,"event":{"kind":"chat_history_failed",
+                         "request_id":"request-1","code":"revision_conflict"}});
+    let wrong_chat = json!({"protocol_version":1,"event":{"kind":"chat_history_deleted",
+                           "request_id":"request-1","chat_id":"0".repeat(36),"revision":8}});
+    let success = json!({"protocol_version":1,"event":{"kind":"chat_history_deleted",
+                        "request_id":"request-1","chat_id":chat_id,"revision":8}});
+    let answers = [
+        ("409 Conflict", conflict.clone()),
+        ("200 OK", wrong_chat),
+        ("200 OK", success.clone()),
+    ];
+    let worker = thread::spawn(move || {
+        for (status, reply) in answers {
+            let (mut stream, _) = upstream.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = BufReader::new(&mut stream);
+            let mut line = String::new();
+            request.read_line(&mut line).unwrap();
+            assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
+            let mut headers = BTreeMap::new();
+            loop {
+                line.clear();
+                assert_ne!(request.read_line(&mut line).unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.trim_end().split_once(": ").unwrap();
+                headers.insert(name.to_ascii_lowercase(), value.to_owned());
+            }
+            assert_eq!(headers["authorization"], format!("Bearer {token}"));
+            assert_eq!(headers["forge-destination"], destination);
+            assert_eq!(headers["forge-request-id"], "request-1");
+            assert_eq!(headers["forge-envelope-version"], "1");
+            assert_eq!(headers["forge-contract-version"], "1");
+            for browser_only in ["cookie", "origin", "forge-csrf"] {
+                assert!(!headers.contains_key(browser_only));
+            }
+            let mut bytes = vec![0; headers["content-length"].parse().unwrap()];
+            request.read_exact(&mut bytes).unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), delete);
+            let reply = reply.to_string();
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{reply}",
+                reply.len()
+            )
+            .unwrap();
+        }
+    });
+    for (status, expected) in [
+        (409, conflict),
+        (503, json!({"error":"unavailable"})),
+        (200, success),
+    ] {
+        let result = exchange(&host, request.clone());
+        assert!(
+            result.starts_with(&format!("HTTP/1.1 {status} ")),
+            "{result}"
+        );
+        let (_, body) = result.split_once("\r\n\r\n").unwrap();
+        assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
+    }
+    worker.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn mail_relays_only_admitted_and_correlated_dispatch_requests() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token_path = files.0.join("mail-runner.token");
+    fs::write(&token_path, "0123456789abcdef".repeat(4)).unwrap();
+    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut settings = config(&files);
+    settings.chat = Some(forge_ide_web_host::ChatConfig {
+        endpoint: upstream.local_addr().unwrap(),
+        token_file: token_path,
+        workspace_persistence: true,
+        async_dispatch: true,
+        mail_enabled: true,
+    });
+    let (host, _) = host_with_config(settings);
+    let (cookie, csrf, _) = paired(&host);
+    let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    let thread_id = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
+    let run_id = "9769c742-9e27-418a-8a08-a9f01b018c86";
+    let send = json!({
+        "kind":"mail_send","request_id":"request-1","thread_id":thread_id,
+        "subject":"Maintenance","content":"Draft a maintenance note","idempotency_key":thread_id
+    });
+    for (destination, auth, status) in [
+        ("ide.mail.send", "", 401),
+        ("ide.mail.send", &format!("Cookie: {cookie}\r\n"), 401),
+        ("ide.mail.list", &auth, 400),
+    ] {
+        assert!(
+            exchange(&host, post(&host, destination, send.clone(), auth))
+                .starts_with(&format!("HTTP/1.1 {status}"))
+        );
+    }
+
+    let expected = send.clone();
+    let runner = thread::spawn(move || {
+        for returned_thread in [thread_id, run_id] {
+            let (mut stream, _) = upstream.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut request = BufReader::new(&mut stream);
+            let mut line = String::new();
+            request.read_line(&mut line).unwrap();
+            assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
+            let mut headers = BTreeMap::new();
+            loop {
+                line.clear();
+                request.read_line(&mut line).unwrap();
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.trim_end().split_once(": ").unwrap();
+                headers.insert(name.to_ascii_lowercase(), value.to_owned());
+            }
+            assert_eq!(headers["forge-destination"], "ide.mail.send");
+            let mut body = vec![0; headers["content-length"].parse().unwrap()];
+            request.read_exact(&mut body).unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
+            let response = json!({"protocol_version":1,"event":{
+                "kind":"mail_sent","request_id":"request-1","thread_id":returned_thread,
+                "run_id":run_id,"status":"queued"
+            }})
+            .to_string();
+            write!(
+                stream,
+                "HTTP/1.1 202 Accepted\r\nContent-Length: {}\r\n\r\n{response}",
+                response.len()
+            )
+            .unwrap();
+        }
+    });
+    let accepted = exchange(&host, post(&host, "ide.mail.send", send.clone(), &auth));
+    assert!(accepted.starts_with("HTTP/1.1 202"));
+    let uncorrelated = exchange(&host, post(&host, "ide.mail.send", send, &auth));
+    assert!(uncorrelated.starts_with("HTTP/1.1 503"));
+    runner.join().unwrap();
 }

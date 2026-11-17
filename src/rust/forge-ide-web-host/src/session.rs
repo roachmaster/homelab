@@ -1,4 +1,4 @@
-use crate::{HostConfig, HostError, SessionAuth};
+use crate::{workspace::Workspaces, HostConfig, HostError, SessionAuth};
 use forge_ide_ui::protocol::*;
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
@@ -21,6 +21,7 @@ pub(crate) struct Session {
     csrf: String,
     until: Option<Instant>,
     catalog: Catalog,
+    pub workspaces: Workspaces,
 }
 impl Session {
     pub fn new(config: &HostConfig) -> Result<Self, HostError> {
@@ -29,6 +30,12 @@ impl Session {
             protocol_version: 1,
             session_epoch: random_token()?,
             timeout_ms: config.limits.request_timeout.as_millis() as u64,
+            chat_history: config
+                .chat
+                .as_ref()
+                .is_some_and(|chat| chat.workspace_persistence),
+            async_chat: config.chat.as_ref().is_some_and(|chat| chat.async_dispatch),
+            mail_enabled: config.chat.as_ref().is_some_and(|chat| chat.mail_enabled),
             nodes: config
                 .nodes
                 .iter()
@@ -63,6 +70,7 @@ impl Session {
             csrf: random_token()?,
             until: None,
             catalog,
+            workspaces: Workspaces::default(),
         })
     }
     pub fn pairing_code(&self) -> Option<&str> {
@@ -102,6 +110,7 @@ impl Session {
             self.cookie = cookie;
             self.csrf = csrf;
             self.catalog.session_epoch = epoch;
+            self.workspaces = Workspaces::default();
         }
         self.until = Some(Instant::now() + self.ttl);
         Ok(())

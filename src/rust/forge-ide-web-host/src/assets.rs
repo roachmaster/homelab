@@ -11,6 +11,84 @@ const NAMES: [(&str, &str); 5] = [
     ("worker.js", "text/javascript; charset=utf-8"),
     ("app.wasm", "application/wasm"),
 ];
+const DESIGN_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design.html"));
+const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
+const PREVIOUS_CHATS_JS: &[u8] = include_bytes!("../design/previous-chats.js");
+const CHAT_HISTORY_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chat-history.html"));
+const CHAT_HISTORY_CSS: &[u8] = include_bytes!("../design/chat-history.css");
+const CHAT_DISPATCH_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chat-dispatch.html"));
+const CHAT_DISPATCH_SEQUENCE: &[u8] = include_bytes!("../design/chat-dispatch-sequence.svg");
+const MAIL_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/mail.html"));
+const MAIL_WIREFRAME: &[u8] = include_bytes!("../design/forge-ide-mail-wireframe.svg");
+const MAIL_SEQUENCE: &[u8] = include_bytes!("../design/mail-dispatch-sequence.svg");
+const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
+    (
+        "forge-ide-chat-desktop.png",
+        include_bytes!("../design/forge-ide-chat-desktop.png"),
+    ),
+    (
+        "forge-ide-chat-phone.png",
+        include_bytes!("../design/forge-ide-chat-phone.png"),
+    ),
+    (
+        "forge-ide-workbench-desktop.png",
+        include_bytes!("../design/forge-ide-workbench-desktop.png"),
+    ),
+    (
+        "forge-ide-workbench-phone.png",
+        include_bytes!("../design/forge-ide-workbench-phone.png"),
+    ),
+    (
+        "forge-ide-workbench-project-options.png",
+        include_bytes!("../design/forge-ide-workbench-project-options.png"),
+    ),
+    (
+        "chat-history-open.png",
+        include_bytes!("../design/chat-history-open.png"),
+    ),
+    (
+        "chat-history-retention.png",
+        include_bytes!("../design/chat-history-retention.png"),
+    ),
+    (
+        "chat-history-delete.png",
+        include_bytes!("../design/chat-history-delete.png"),
+    ),
+    (
+        "chat-history-expiry.png",
+        include_bytes!("../design/chat-history-expiry.png"),
+    ),
+    (
+        "forge-ide-mail-wireframe.png",
+        include_bytes!("../design/forge-ide-mail-wireframe.png"),
+    ),
+];
+
+fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
+    match path {
+        "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
+        "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
+        "/design/previous-chats.js" => Some(("text/javascript; charset=utf-8", PREVIOUS_CHATS_JS)),
+        "/design/chat-history" | "/design/chat-history/" => {
+            Some(("text/html; charset=utf-8", CHAT_HISTORY_HTML))
+        }
+        "/design/chat-history.css" => Some(("text/css; charset=utf-8", CHAT_HISTORY_CSS)),
+        "/design/chat-dispatch" | "/design/chat-dispatch/" => {
+            Some(("text/html; charset=utf-8", CHAT_DISPATCH_HTML))
+        }
+        "/design/chat-dispatch-sequence.svg" => Some(("image/svg+xml", CHAT_DISPATCH_SEQUENCE)),
+        "/design/mail" | "/design/mail/" => Some(("text/html; charset=utf-8", MAIL_HTML)),
+        "/design/forge-ide-mail-wireframe.svg" => Some(("image/svg+xml", MAIL_WIREFRAME)),
+        "/design/mail-dispatch-sequence.svg" => Some(("image/svg+xml", MAIL_SEQUENCE)),
+        _ => {
+            let name = path.strip_prefix("/design/")?;
+            DESIGN_IMAGES
+                .iter()
+                .find(|(filename, _)| *filename == name)
+                .map(|(_, data)| ("image/png", *data))
+        }
+    }
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Manifest {
@@ -64,6 +142,9 @@ impl Assets {
         } else {
             path.strip_prefix('/')?
         };
-        self.0.get(name).map(|(mime, b)| (*mime, b.as_slice()))
+        self.0
+            .get(name)
+            .map(|(mime, b)| (*mime, b.as_slice()))
+            .or_else(|| design_asset(path))
     }
 }

@@ -183,6 +183,32 @@ session cookie and CSRF header. The host forwards the bounded message history to
 the adapter's `POST /v1/chat/completions` and returns the assistant's text.
 When the adapter or model is unavailable, the browser keeps the prompt as a draft.
 
+The same-origin workspace endpoint at `/forge/v1/dispatch/workspace` requires the
+active session cookie and CSRF token. With `chat.workspace_persistence` enabled,
+the host forwards checkpoint requests to the configured local runner's
+`/v1/workspace` endpoint. The runner stores them in PostgreSQL. A new tab can
+restore the operator's saved Chat history, while the original tab keeps its
+drafts and Workbench bookmark. The host revalidates that bookmark against an
+admitted catalog and a fresh inspection. An older page lease cannot replace a
+newer checkpoint.
+
+With PostgreSQL enabled, **Previous chats** lists and opens committed chats
+across browser tabs. Its **Manage** menu uses the same authenticated
+`POST /forge/v1/dispatch` endpoint with the `ide.chat.history.*` destinations.
+The host forwards those requests to the existing runner's private
+`POST /v1/dispatch`. The runner commits each linked chat turn. It assigns
+a keep-through date 30 days after the first saved turn in UTC and keeps
+that date across follow-ups. It checks the current revision when changing
+expiration, keeping a chat indefinitely, or deleting it. The runner expires
+chats at midnight after their keep-through date.
+
+With `chat.async_dispatch` enabled, **Model** in Chat lists the versions
+configured by the runner. The selected `model_id` is pinned to each queued
+run. Forge loads the selected model when its job is ready.
+
+Without the runner setting, the host keeps up to 12 bounded tab checkpoints in
+session memory. Session rotation and host restart clear those checkpoints.
+
 ## Bounds and limitations
 
 Headers: 16 KiB/48 fields; request: default16 KiB (maximum64 KiB); response:
@@ -196,6 +222,13 @@ chunking, upgrades, `Expect`, duplicate headers and buffered pipelining. This na
 adapter is intentionally not a general-purpose HTTP server. Asset manifest count
 is exactly five; each asset is capped at16 MiB, hash verified and loaded via the
 existing rooted native file client (no symlink traversal or shell wrappers).
+The host build renders the Design reference from typed Rust declarations in
+`forge-ide-web-host/src/design`. It embeds the generated documents with the design
+styles and diagrams. The Design overview includes its sample Previous chats
+prototype and links to the chat history contracts and sequence diagrams at
+`/design/chat-history`. The PostgreSQL inference dispatch design and
+sequence diagram are at `/design/chat-dispatch`. The design pages use fixed
+asset paths.
 The configured startup directory and generated content remain trusted; hashing
 provides consistency, not a publisher signature or a filesystem snapshot.
 

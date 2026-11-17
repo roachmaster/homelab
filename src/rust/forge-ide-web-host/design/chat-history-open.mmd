@@ -1,0 +1,30 @@
+---
+title: List and open a previous chat
+---
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":25,"diagramMarginX":30,"diagramMarginY":25,"width":140,"wrap":false}}}%%
+sequenceDiagram
+    participant B as Browser
+    participant H as Web host
+    participant R as Agent Runner
+    participant P as PostgreSQL
+
+    B->>H: POST /forge/v1/dispatch<br/>Forge-Destination: ide.chat.history.list
+    H->>H: Check session, origin and CSRF
+    H->>R: POST /v1/dispatch<br/>Bearer + same destination<br/>ChatHistoryListRequest
+    R->>P: ChatHistoryDao read transaction<br/>List admitted, available chat summaries
+    P-->>R: Summaries and page cursor
+    R-->>H: chat_history_listed
+    H-->>B: 200 · render Previous chats
+
+    B->>H: POST /forge/v1/dispatch<br/>Forge-Destination: ide.chat.history.open<br/>Chat ID in ChatHistoryOpenRequest
+    H->>H: Check session, origin and CSRF
+    H->>R: POST /v1/dispatch<br/>Bearer + same destination<br/>ChatHistoryOpenRequest
+    R->>P: ChatHistoryDao read transaction<br/>Open the admitted chat ID
+    P-->>R: Transcript, retention and revision, or missing
+    alt Chat is available
+        R-->>H: chat_history_opened
+        H-->>B: 200 · render the stored transcript
+    else Missing, expired or deleted
+        R-->>H: 404 · chat unavailable
+        H-->>B: Keep menu available and refresh the list
+    end

@@ -500,6 +500,8 @@ impl UiModel {
         let connected = self.catalog.is_some();
         let loading = self.pending.is_some();
         let source_loading = self.pending_source.is_some();
+        let can_cancel = loading || source_loading;
+        let can_reload = self.phase == Phase::Failed;
         let no_project = connected && self.project.is_empty();
         let status_tone = match self.phase {
             Phase::Failed => Tone::Error,
@@ -538,8 +540,8 @@ impl UiModel {
                     .collect()
             })
             .unwrap_or_default();
-        let projects = self
-            .selected_node()
+        let selected_node = self.selected_node();
+        let projects = selected_node
             .map(|n| {
                 n.projects
                     .iter()
@@ -548,6 +550,18 @@ impl UiModel {
                         label: p.label.clone(),
                     })
                     .collect()
+            })
+            .unwrap_or_default();
+        let workbench_node = selected_node.filter(|_| self.chats.workbench);
+        let workbench_context = workbench_node
+            .map(|node| {
+                node.projects
+                    .iter()
+                    .find(|project| project.alias == self.project)
+                    .map_or_else(
+                        || node.label.clone(),
+                        |project| format!("{} / {}", node.label, project.label),
+                    )
             })
             .unwrap_or_default();
         let mut details = Vec::new();
@@ -721,6 +735,7 @@ impl UiModel {
                 first_column: 0,
                 total_lines: 0,
                 target_span,
+                markdown: None,
             });
         let source_range = self.source.as_ref().map(|s| s.range()).unwrap_or_default();
         let review = self.current_edit();
@@ -743,6 +758,7 @@ impl UiModel {
             texts: vec![
                 tone_text("status", self.message.clone(), status_tone),
                 tone_text("phase-label", if no_project { "No allowed project" } else { phase_label(self.phase) }, status_tone),
+                text("workbench-context", workbench_context),
                 text("source-status", source_status), text("source-range", source_range), text("search-summary", search_summary),
                 text("inspect-label", if key.is_some() { "Refresh" } else { "Open project" }),
                 text("source-shape-summary", shape_summary),
@@ -759,7 +775,7 @@ impl UiModel {
                 InputBinding { id:"symbol-filter",value:self.symbol_filter.0.clone(),disabled:entry.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.zip(entry).map(|(k,e)| FilterAction::SetSymbolFilter { report:k.clone(),entry:e.id }) },
             ],
             buttons: vec![
-                button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!loading && !source_loading,None),
+                button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!can_cancel,None),
                 button("search-more",!search_more,key.map(|k| RowAction::MoreSearch { report:k.clone() })),
                 button("search-previous",self.search_window.history.is_empty(),key.map(|k| RowAction::PreviousSearch { report:k.clone() })),
                 button("source-more",!self.source.as_ref().is_some_and(|s| s.has_next()),key.zip(entry).map(|(k,e)| RowAction::MoreSource { report:k.clone(),entry:e.id })),
@@ -783,8 +799,12 @@ impl UiModel {
             ],
             tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details },TableBinding { id:"source-shape-details",rows:shape_details }],
             visibility: vec![
+                visible("workbench-context", workbench_node.is_some()),
+                visible("inspection-actions", can_cancel || can_reload),
+                visible("cancel", can_cancel),
+                visible("reload-session", can_reload),
                 visible("search-panel",!self.project_query.0.trim().is_empty()),visible("files-panel",self.project_query.0.trim().is_empty()),visible("source-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
-                visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("reload-session",self.phase == Phase::Failed),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),visible("cancel",loading || source_loading),
+                visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
             ],
             transcripts: vec![],
             diffs: vec![],
@@ -824,9 +844,7 @@ impl UiModel {
         };
         view.visibility.extend([
             visible("workbench-edit-diff", review.is_some()),
-            visible("source-view", review.is_none()),
-            visible("source-range", review.is_none()),
-            visible("source-pagination", review.is_none()),
+            visible("workbench-source-content", review.is_none()),
         ]);
         view.diffs.push(DiffBinding {
             id: "workbench-edit-diff",
@@ -856,6 +874,13 @@ impl UiModel {
         self.project_write(
             &mut view,
             review.and_then(|review| review.preview.proposal_id.as_deref()),
+        );
+        self.mail.project(
+            &mut view,
+            connected,
+            self.catalog
+                .as_ref()
+                .is_some_and(|catalog| catalog.mail_enabled),
         );
         view
     }

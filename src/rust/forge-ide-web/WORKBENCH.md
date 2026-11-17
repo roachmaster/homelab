@@ -13,9 +13,11 @@ entry method. A local host can require its one-use pairing code; a trusted proxy
 host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
 
 1. A catalog with exactly one allowed project opens it automatically after admission.
-   Otherwise choose **Node** and **Project**, then **Refresh project**. Changing
-   context clears previous report and source ownership. Refresh replaces the loaded
-   report; it does not claim the filesystem remained unchanged since the last read.
+   Otherwise open **Project options** beside **View options**, choose **Node** and
+   **Project**, then use the **Refresh project** symbol beside **Problems**. The header
+   beside **Forge IDE** shows the current selection. Changing context clears
+   previous report and source ownership. Refresh replaces the loaded report with
+   a new inspection. **Inspection details** shows the report status and summary.
 2. **Find files or symbols** searches file paths and declaration names in the loaded
    report, case-insensitively. Results show their file context. Selecting a symbol
    opens its file and declaration directly. Clear the query to return to Explorer.
@@ -29,9 +31,11 @@ host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
    provides declaration navigation. Selecting a declaration highlights its lines
    and opens the corresponding source window. Previous/Next lines traverses the
    accepted document locally; no additional file read occurs for line paging.
-5. On phones, selecting a file or declaration reveals the File pane. **Back to files**
-   returns to Explorer. Pane switches still expose Outline and Problems. Selection
-   remains in the same model and survives presentation-only pane changes.
+   Verified Markdown files open in **Raw**. Choose **Display** for a formatted
+   preview. Files that exceed the preview limits remain readable in **Raw**.
+5. On phones, selecting a file or declaration reveals the File pane. The
+   **Back to files** arrow beside **File** returns to Explorer. Pane switches
+   still expose Outline and Problems. Selection survives pane changes.
 6. Metadata, source-shape inventory and inspection details remain supporting
    disclosures. Problems shows supplied inspection strings, without invented
    compiler severity, test success or source locations.
@@ -108,8 +112,11 @@ while repeating a file selection can deliberately reopen the same File pane.
 Report/entry context changes discard obsolete row focus keys. Filter inputs retain
 bounded in-flight presentation drafts until the matching worker acknowledgment;
 an old view cannot erase newer typing. A new context, disabled input or teardown
-clears the draft. No History API, deep links, localStorage, persistent report cache
-or cross-tab synchronization exists.
+clears the filter draft. After navigation, an admitted tab can recover its
+selected project, file and declaration from an in-memory host bookmark. Forge
+obtains a fresh report and verifies source again. Browser session storage holds
+only the random tab identifier. There is no History API, deep link, localStorage,
+persistent report cache or cross-tab synchronization.
 
 ## Authoring and runtime boundaries
 

@@ -8,10 +8,14 @@ mod chat;
 mod config;
 mod edit;
 pub use chat::ChatConfig;
+mod history;
 mod http;
+mod mail_dispatch;
 mod projection;
+mod run_dispatch;
 mod service;
 mod session;
+mod workspace;
 
 pub use config::{load_config, HostConfig, HostLimits, NodeConfig, SessionAuth};
 use forge_bootstrap::PreparedGroup;

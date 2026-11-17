@@ -1,0 +1,290 @@
+<svg font-family="system-ui, &quot;DejaVu Sans&quot;, sans-serif" fill="#e6eaf0" xmlns="http://www.w3.org/2000/svg" width="1640" height="1420" viewBox="0 0 1640 1420"
+  role="img" aria-labelledby="title description">
+  <title id="title">Forge IDE Mail wireframe</title>
+  <desc id="description">Proposed Mail inbox, new message, active thread, and read-only archive on a phone,
+    with a desktop split view and rules for background delivery and archiving.</desc>
+  <defs>
+    <g id="brand">
+      <rect fill="#1c2026" stroke="#8ebcff" stroke-width="1" class="selected" x="0.5" y="0.5" width="23" height="23" rx="3"/>
+      <text font-size="14px" font-weight="650" fill="#8ebcff" text-anchor="middle" class="strong accent alignment" x="12" y="17">F</text>
+      <text font-size="17px" font-weight="750" class="brand" x="33" y="18">Forge IDE</text>
+    </g>
+
+    <g id="phone-shell">
+      <rect fill="#15181d" stroke="#3a424e" stroke-width="1" class="screen" x=".5" y=".5" width="371" height="657" rx="6"/>
+      <path fill="#1c2026" class="surface" d="M1 49h370v60H1z"/>
+      <path fill="none" stroke="#3a424e" stroke-width="1" class="line" d="M1 49.5h370m-370 59h370"/>
+      <use href="#brand" x="14" y="13"/>
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="14.5" y="57.5" width="58" height="43" rx="3"/>
+      <rect fill="#1c2026" stroke="#8ebcff" stroke-width="1" class="selected" x="80.5" y="57.5" width="58" height="43" rx="3"/>
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="146.5" y="57.5" width="110" height="43" rx="3"/>
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="264.5" y="57.5" width="76" height="43" rx="3"/>
+      <text font-size="14px" font-weight="650" text-anchor="middle" class="alignment strong" x="43" y="84">Chat</text>
+      <text font-size="14px" font-weight="650" fill="#8ebcff" text-anchor="middle" class="alignment strong accent" x="109" y="84">Mail</text>
+      <text font-size="14px" font-weight="650" text-anchor="middle" class="alignment strong" x="201" y="84">Workbench</text>
+      <text font-size="14px" font-weight="650" text-anchor="middle" class="alignment strong" x="302" y="84">Design</text>
+    </g>
+
+    <g id="arrow-left">
+      <path fill="none" stroke="#8ebcff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon" d="M13 8H2m4-4L2 8l4 4"/>
+    </g>
+    <g id="chevron">
+      <path fill="none" stroke="#8ebcff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon" d="m5 3 5 5-5 5"/>
+    </g>
+    <g id="refresh">
+      <path fill="none" stroke="#8ebcff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon" d="M13 7A5 5 0 1 0 13 10m0-3V3m0 4H9"/>
+    </g>
+  </defs>
+
+  <rect fill="#12151a" class="artboard" width="1640" height="1420"/>
+  <text font-size="37px" font-weight="720" letter-spacing="-1px" class="header" x="40" y="69">Mail for Forge IDE</text>
+  <text font-size="16px" fill="#b1bac8" class="subtitle" x="41" y="99">Proposed wireframe with example threads and messages</text>
+  <path fill="none" stroke="#3a424e" stroke-width="1" class="line" d="M40 125.5h1560"/>
+
+  <text font-size="15px" font-weight="650" class="caption" x="40" y="155">Phone · Inbox</text>
+  <text font-size="15px" font-weight="650" class="caption" x="436" y="155">Phone · New message</text>
+  <text font-size="15px" font-weight="650" class="caption" x="832" y="155">Phone · Active thread</text>
+  <text font-size="15px" font-weight="650" class="caption" x="1228" y="155">Phone · Archived thread</text>
+
+  <g id="phone-inbox" transform="translate(40 170)">
+    <use href="#phone-shell"/>
+    <rect fill="#1c2026" stroke="#8ebcff" stroke-width="1" class="selected" x="14.5" y="122.5" width="64" height="43" rx="3"/>
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="86.5" y="122.5" width="76" height="43" rx="3"/>
+    <rect fill="#8ebcff" class="primary" x="228" y="122" width="130" height="44" rx="3"/>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" text-anchor="middle" class="strong accent alignment" x="46.5" y="149">Inbox</text>
+    <text font-size="14px" font-weight="650" text-anchor="middle" class="strong alignment" x="124.5" y="149">Archive</text>
+    <text font-size="14px" fill="#15181d" font-weight="720" text-anchor="middle" class="on-accent alignment" x="293" y="149">New message</text>
+
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="170.5" y="122.5" width="43" height="43" rx="3"/>
+    <use href="#refresh" x="184" y="136"/>
+
+    <g transform="translate(14 183)">
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x=".5" y=".5" width="343" height="67" rx="3"/>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="25">Weekend maintenance plan</text>
+      <text font-size="12px" font-weight="650" fill="#8ebcff" class="fine accent strong" x="12" y="48">Reply ready</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="104" y="48">·  Today, 3:24 PM</text>
+      <use href="#chevron" x="316" y="26"/>
+    </g>
+    <g transform="translate(14 259)">
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x=".5" y=".5" width="343" height="67" rx="3"/>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="25">Draft the team update</text>
+      <text font-size="12px" font-weight="650" fill="#8ebcff" class="fine accent strong" x="12" y="48">Running</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="76" y="48">·  Today, 3:19 PM</text>
+      <use href="#chevron" x="316" y="26"/>
+    </g>
+    <g transform="translate(14 335)">
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x=".5" y=".5" width="343" height="67" rx="3"/>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="25">Compare two backup plans</text>
+      <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine muted strong" x="12" y="48">Queued</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="73" y="48">·  Today, 3:16 PM</text>
+      <use href="#chevron" x="316" y="26"/>
+    </g>
+    <g transform="translate(14 411)">
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x=".5" y=".5" width="343" height="67" rx="3"/>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="25">Summarize service notes</text>
+      <text font-size="12px" font-weight="650" fill="#f2c879" class="fine warning strong" x="12" y="48">Failed</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="61" y="48">·  Yesterday, 6:40 PM</text>
+      <use href="#chevron" x="316" y="26"/>
+    </g>
+
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="14.5" y="496.5" width="124" height="43" rx="3"/>
+    <text font-size="14px" font-weight="650" text-anchor="middle" class="strong alignment" x="76" y="523">Older threads</text>
+  </g>
+
+  <g id="phone-compose" transform="translate(436 170)">
+    <use href="#phone-shell"/>
+    <use href="#arrow-left" x="16" y="126"/>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" class="accent strong" x="38" y="139">Inbox</text>
+
+    <text font-size="22px" font-weight="730" letter-spacing="-.35px" class="h1" x="14" y="183">New message</text>
+    <text font-size="14px" fill="#b1bac8" class="muted" x="14" y="209">To</text>
+    <text font-size="14px" font-weight="650" class="strong" x="38" y="209">GPT-OSS 120B</text>
+
+    <text font-size="14px" font-weight="650" class="label" x="14" y="248">Subject</text>
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="14.5" y="259.5" width="343" height="43" rx="3"/>
+    <text font-size="14px" x="26" y="287">Weekend maintenance plan</text>
+
+    <text font-size="14px" font-weight="650" class="label" x="14" y="332">Message</text>
+    <rect fill="#15181d" stroke="#3a424e" stroke-width="1" class="field" x="14.5" y="343.5" width="343" height="161" rx="3"/>
+    <text font-size="14px" x="26" y="370">
+      <tspan x="26">Write a maintenance note with a schedule,</tspan>
+      <tspan x="26" dy="22">verification steps, and a rollback plan.</tspan>
+    </text>
+
+    <rect fill="#8ebcff" class="primary" x="14" y="521" width="84" height="44" rx="3"/>
+    <text font-size="14px" fill="#15181d" font-weight="720" text-anchor="middle" class="on-accent alignment" x="56" y="548">Send</text>
+    <text font-size="14px" fill="#b1bac8" class="muted" x="14" y="592">
+      <tspan x="14">Replies appear in Mail. You can close this</tspan>
+      <tspan x="14" dy="20">tab while the model works.</tspan>
+    </text>
+  </g>
+
+  <g id="phone-active-thread" transform="translate(832 170)">
+    <use href="#phone-shell"/>
+    <use href="#arrow-left" x="16" y="126"/>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" class="accent strong" x="38" y="139">Inbox</text>
+
+    <text font-size="22px" font-weight="730" letter-spacing="-.35px" class="h1" x="14" y="183">Weekend maintenance plan</text>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" class="strong accent" x="14" y="209">Reply ready</text>
+    <text font-size="12px" fill="#b1bac8" class="fine muted" x="122" y="209">·  Today, 3:24 PM</text>
+
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x="14.5" y="224.5" width="343" height="73" rx="3"/>
+    <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine strong muted" x="26" y="245">You</text>
+    <text font-size="14px" x="26" y="269">
+      <tspan x="26">Write a maintenance note with a schedule,</tspan>
+      <tspan x="26" dy="19">verification steps, and a rollback plan.</tspan>
+    </text>
+
+    <rect fill="#15181d" stroke="#3a424e" stroke-width="1" class="field" x="14.5" y="305.5" width="343" height="225" rx="3"/>
+    <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine strong muted" x="26" y="327">GPT-OSS 120B</text>
+    <text font-size="16px" font-weight="700" class="h2" x="26" y="350">Schedule</text>
+    <text font-size="14px" x="26" y="373">
+      <tspan x="26">Start Saturday at 9:00 AM. Post a status</tspan>
+      <tspan x="26" dy="19">update before maintenance begins.</tspan>
+    </text>
+    <text font-size="16px" font-weight="700" class="h2" x="26" y="420">Verification</text>
+    <text font-size="14px" x="26" y="443">
+      <tspan x="26">Check the home page and a test sign-in.</tspan>
+      <tspan x="26" dy="19">Record the results in the maintenance log.</tspan>
+    </text>
+    <text font-size="16px" font-weight="700" class="h2" x="26" y="489">Rollback</text>
+    <text font-size="14px" x="26" y="512">If either check fails, restore the prior version.</text>
+
+    <text font-size="14px" font-weight="650" fill="#f2c879" class="strong warning" x="14" y="558">Limited context room</text>
+    <text font-size="12px" fill="#b1bac8" class="fine muted" x="14" y="579">Keep your next question short.</text>
+    <rect fill="#8ebcff" class="primary" x="14" y="596" width="108" height="44" rx="3"/>
+    <text font-size="14px" fill="#15181d" font-weight="720" text-anchor="middle" class="on-accent alignment" x="68" y="623">Follow up</text>
+  </g>
+
+  <g id="phone-archived-thread" transform="translate(1228 170)">
+    <use href="#phone-shell"/>
+    <use href="#arrow-left" x="16" y="126"/>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" class="accent strong" x="38" y="139">Archive</text>
+
+    <text font-size="22px" font-weight="730" letter-spacing="-.35px" class="h1" x="14" y="183">Weekend maintenance plan</text>
+    <text font-size="14px" font-weight="650" fill="#b1bac8" class="strong muted" x="14" y="209">Archived · Read only</text>
+
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x="14.5" y="224.5" width="343" height="74" rx="3"/>
+    <path d="M15.5 227v69" stroke="#f2c879" stroke-width="2" stroke-linecap="round"/>
+    <text font-size="14px" font-weight="650" fill="#f2c879" class="strong warning" x="27" y="248">Recall limit reached</text>
+    <text font-size="14px" fill="#b1bac8" class="muted" x="27" y="271">
+      <tspan x="27">The saved thread has too little room</tspan>
+      <tspan x="27" dy="19">for a useful follow-up.</tspan>
+    </text>
+
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x="14.5" y="314.5" width="343" height="73" rx="3"/>
+    <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine strong muted" x="26" y="335">You</text>
+    <text font-size="14px" x="26" y="359">
+      <tspan x="26">Turn the verification section into a short</tspan>
+      <tspan x="26" dy="19">checklist for the on-call team.</tspan>
+    </text>
+
+    <rect fill="#15181d" stroke="#3a424e" stroke-width="1" class="field" x="14.5" y="395.5" width="343" height="143" rx="3"/>
+    <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine strong muted" x="26" y="417">GPT-OSS 120B</text>
+    <text font-size="16px" font-weight="700" class="h2" x="26" y="440">On-call verification</text>
+    <text font-size="14px" x="26" y="464">
+      <tspan x="26">• Open the home page.</tspan>
+      <tspan x="26" dy="22">• Confirm a test sign-in.</tspan>
+      <tspan x="26" dy="22">• Record both results in the log.</tspan>
+    </text>
+
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="14.5" y="554.5" width="159" height="43" rx="3"/>
+    <text font-size="14px" font-weight="650" text-anchor="middle" class="strong alignment" x="94" y="581">Earlier messages</text>
+    <rect fill="#8ebcff" class="primary" x="222" y="554" width="136" height="44" rx="3"/>
+    <text font-size="14px" fill="#15181d" font-weight="720" text-anchor="middle" class="on-accent alignment" x="290" y="581">New message</text>
+  </g>
+
+  <path fill="none" stroke="#3a424e" stroke-width="1" class="line" d="M40 861.5h1560"/>
+  <text font-size="15px" font-weight="650" class="caption" x="40" y="894">Desktop · Inbox and reader</text>
+  <text font-size="15px" font-weight="650" class="caption" x="1136" y="894">Background delivery and recall</text>
+
+  <g id="desktop-inbox-reader" transform="translate(40 910)">
+    <rect fill="#15181d" stroke="#3a424e" stroke-width="1" class="screen" x=".5" y=".5" width="1071" height="469" rx="6"/>
+    <path fill="#1c2026" class="surface" d="M1 49h1070v48H1zM1 97h344v372H1z"/>
+    <path fill="none" stroke="#3a424e" stroke-width="1" class="line" d="M1 49.5h1070m-1070 48h1070M345.5 98v371"/>
+    <use href="#brand" x="16" y="13"/>
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="16.5" y="57.5" width="58" height="31" rx="3"/>
+    <rect fill="#1c2026" stroke="#8ebcff" stroke-width="1" class="selected" x="82.5" y="57.5" width="58" height="31" rx="3"/>
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="148.5" y="57.5" width="110" height="31" rx="3"/>
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="266.5" y="57.5" width="74" height="31" rx="3"/>
+    <text font-size="14px" font-weight="650" text-anchor="middle" class="alignment strong" x="45" y="78">Chat</text>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" text-anchor="middle" class="alignment strong accent" x="111" y="78">Mail</text>
+    <text font-size="14px" font-weight="650" text-anchor="middle" class="alignment strong" x="203" y="78">Workbench</text>
+    <text font-size="14px" font-weight="650" text-anchor="middle" class="alignment strong" x="303" y="78">Design</text>
+
+    <rect fill="#1c2026" stroke="#8ebcff" stroke-width="1" class="selected" x="16.5" y="112.5" width="63" height="31" rx="3"/>
+    <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="button" x="87.5" y="112.5" width="76" height="31" rx="3"/>
+    <rect fill="#8ebcff" class="primary" x="199" y="112" width="131" height="32" rx="3"/>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" text-anchor="middle" class="strong accent alignment" x="48" y="133">Inbox</text>
+    <text font-size="14px" font-weight="650" text-anchor="middle" class="strong alignment" x="125" y="133">Archive</text>
+    <text font-size="14px" fill="#15181d" font-weight="720" text-anchor="middle" class="on-accent alignment" x="264.5" y="133">New message</text>
+
+    <g transform="translate(16 159)">
+      <rect fill="#1c2026" stroke="#8ebcff" stroke-width="1" class="selected" x=".5" y=".5" width="313" height="59" rx="3"/>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="23">Weekend maintenance plan</text>
+      <text font-size="12px" font-weight="650" fill="#8ebcff" class="fine accent strong" x="12" y="44">Reply ready</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="104" y="44">·  Today, 3:24 PM</text>
+    </g>
+    <g transform="translate(16 227)">
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x=".5" y=".5" width="313" height="59" rx="3"/>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="23">Draft the team update</text>
+      <text font-size="12px" font-weight="650" fill="#8ebcff" class="fine accent strong" x="12" y="44">Running</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="77" y="44">·  Today, 3:19 PM</text>
+    </g>
+    <g transform="translate(16 295)">
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x=".5" y=".5" width="313" height="59" rx="3"/>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="23">Compare two backup plans</text>
+      <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine muted strong" x="12" y="44">Queued</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="73" y="44">·  Today, 3:16 PM</text>
+    </g>
+
+    <g transform="translate(377 0)">
+      <text font-size="22px" font-weight="730" letter-spacing="-.35px" class="h1" x="0" y="137">Weekend maintenance plan</text>
+      <text font-size="14px" font-weight="650" fill="#8ebcff" class="strong accent" x="0" y="161">Reply ready</text>
+      <text font-size="12px" fill="#b1bac8" class="fine muted" x="108" y="161">·  Today, 3:24 PM</text>
+
+      <rect fill="#262c34" stroke="#3a424e" stroke-width="1" class="card" x=".5" y="178.5" width="662" height="59" rx="3"/>
+      <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine strong muted" x="12" y="199">You</text>
+      <text font-size="14px" x="12" y="222">Write a maintenance note with a schedule, verification steps, and a rollback plan.</text>
+
+      <rect fill="#15181d" stroke="#3a424e" stroke-width="1" class="field" x=".5" y="247.5" width="662" height="173" rx="3"/>
+      <text font-size="12px" font-weight="650" fill="#b1bac8" class="fine strong muted" x="12" y="270">GPT-OSS 120B</text>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="293">Schedule</text>
+      <text font-size="14px" x="12" y="314">Start Saturday at 9:00 AM. Post a status update before maintenance begins.</text>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="340">Verification</text>
+      <text font-size="14px" x="12" y="361">Check the home page and a test sign-in. Record the results in the maintenance log.</text>
+      <text font-size="16px" font-weight="700" class="h2" x="12" y="387">Rollback</text>
+      <text font-size="14px" x="12" y="408">If either check fails, restore the prior version and update the team.</text>
+
+      <rect fill="#8ebcff" class="primary" x="0" y="429" width="108" height="32" rx="3"/>
+      <text font-size="14px" fill="#15181d" font-weight="720" text-anchor="middle" class="on-accent alignment" x="54" y="450">Follow up</text>
+      <text font-size="12px" font-weight="650" fill="#f2c879" class="fine strong warning" x="124" y="450">Limited context room</text>
+    </g>
+  </g>
+
+  <g id="delivery-and-recall" transform="translate(1136 910)">
+    <rect fill="#15181d" stroke="#3a424e" stroke-width="1" class="screen" x=".5" y=".5" width="463" height="403" rx="6"/>
+    <text font-size="16px" font-weight="700" class="h2" x="18" y="32">While the model works</text>
+    <text font-size="14px" fill="#b1bac8" class="muted" x="18" y="58">
+      <tspan x="18">Send returns to the saved thread as soon as it's queued.</tspan>
+      <tspan x="18" dy="21">Open Mail from any signed-in tab to see the reply.</tspan>
+    </text>
+    <text font-size="14px" font-weight="650" fill="#8ebcff" class="strong accent" x="18" y="112">Queued  →  Running  →  Reply ready</text>
+
+    <path fill="none" stroke="#3a424e" stroke-width="1" class="line" d="M18 135.5h428"/>
+    <text font-size="16px" font-weight="700" class="h2" x="18" y="166">If a draft is too long</text>
+    <text font-size="14px" fill="#b1bac8" class="muted" x="18" y="192">
+      <tspan x="18">Keep the text in the composer so the user can shorten</tspan>
+      <tspan x="18" dy="21">it or use it in a new message. The thread stays active</tspan>
+      <tspan x="18" dy="21">if it has room for a shorter follow-up.</tspan>
+    </text>
+
+    <path fill="none" stroke="#3a424e" stroke-width="1" class="line" d="M18 259.5h428"/>
+    <text font-size="16px" font-weight="700" class="h2" x="18" y="291">When a thread becomes read-only</text>
+    <text font-size="14px" fill="#b1bac8" class="muted" x="18" y="317">
+      <tspan x="18">After a reply is saved, archive the thread when it has</tspan>
+      <tspan x="18" dy="21">too little context room for another useful exchange.</tspan>
+      <tspan x="18" dy="21">The full transcript stays available under Archive.</tspan>
+    </text>
+  </g>
+</svg>

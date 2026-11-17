@@ -72,7 +72,10 @@ impl UiModel {
             return Ok(());
         }
         let request_id = self.next_id(now)?;
-        if let Some(request) = self.chats.send(request_id.clone(), Some(file.clone()))? {
+        if let Some(request) = self
+            .chats
+            .send_with_context(request_id.clone(), file.clone())?
+        {
             if proposal {
                 self.pending_edit = Some(PendingEdit {
                     request_id,
@@ -570,14 +573,9 @@ impl UiModel {
             id: "send-chat-with-file",
             visible: followup.is_some(),
         });
-        let chat_disabled = view
-            .buttons
-            .iter()
-            .find(|button| button.id == "send-chat")
-            .is_none_or(|button| button.disabled);
         view.buttons.push(ButtonBinding {
             id: "send-chat-with-file",
-            disabled: followup.is_none() || chat_disabled,
+            disabled: followup.is_none() || !self.chats.can_send_draft(),
             action: followup.map(|file| RowAction::SendChatWithFile {
                 report: file.report,
                 entry: file.entry,
@@ -681,7 +679,7 @@ impl UiModel {
             return Ok(());
         };
         let request_id = self.next_id(now)?;
-        if let Some(request) = self.chats.send(request_id, Some(file))? {
+        if let Some(request) = self.chats.send_with_context(request_id, file)? {
             effects.push(UiEffect::Chat { request });
         }
         Ok(())

@@ -1,0 +1,68 @@
+.history-contract .intro h1 { max-inline-size: 24ch; }
+.history-contract .design-section > p + p { margin-block-start: 8px; }
+.history-contract .design-section > p { max-inline-size: 78ch; margin-block-start: 12px; }
+.contract-note {
+  padding: 10px 13px;
+  border-inline-start: 2px solid var(--accent);
+  background: var(--surface);
+}
+.history-contract h3 { margin-block: 16px 7px; }
+.history-contract dl { margin-block: 12px; }
+.history-contract dt { font-weight: 650; }
+.history-contract dd { color: var(--muted); overflow-wrap: anywhere; }
+.history-contract dt + dd { margin-block-start: 4px; }
+.history-contract dd + dt { margin-block-start: 12px; }
+.history-contract code {
+  color: var(--accent);
+  font: .9em/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.contract-code {
+  max-inline-size: 100%;
+  overflow: auto;
+  margin-block: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--text);
+  font: .8125rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  tab-size: 2;
+}
+.contract-code code { color: inherit; overflow-wrap: normal; }
+.contract-examples, .contract-sequences {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin-block-start: 14px;
+}
+.contract-example {
+  min-inline-size: 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.contract-example h3 { margin-block-start: 0; }
+.contract-example h4 { margin-block: 15px 5px; }
+.contract-example .contract-code { margin-block-end: 0; }
+.contract-sequences .wireframe h3 { margin-block: 0 5px; }
+.contract-sequences .drawing {
+  overflow: auto;
+  border: 1px solid var(--border);
+  background: var(--background);
+}
+.contract-sequences .drawing img {
+  inline-size: 100%;
+  min-inline-size: 44rem;
+  background: var(--background);
+  border-radius: 0;
+}
+.contract-sequences .open-label { position: sticky; inset-inline-start: 0; border: 0; border-block-start: 1px solid var(--border); border-radius: 0; }
+.contract-sequences figcaption p { max-inline-size: 78ch; }
+.contract-steps { margin-block: 12px 3px; padding-inline-start: 22px; color: var(--muted); font-size: .875rem; }
+.contract-steps li + li { margin-block-start: 4px; }
+@media (min-width: 50rem) {
+  .contract-examples { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .contract-example { padding: 16px; }
+}

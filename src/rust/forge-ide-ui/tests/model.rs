@@ -5,6 +5,9 @@ fn catalog() -> Catalog {
         protocol_version: 1,
         session_epoch: "session-a".into(),
         timeout_ms: 1000,
+        chat_history: false,
+        async_chat: false,
+        mail_enabled: false,
         nodes: vec![NodeChoice {
             key: "lab".into(),
             label: "Lab".into(),
@@ -201,6 +204,226 @@ fn source_request(output: &Output) -> PreparedSource {
             }
         })
         .expect("prepared source")
+}
+
+#[test]
+fn verified_markdown_preview_uses_whole_file_without_changing_raw_windows() {
+    let mut model = connected();
+    let inspection = inspect(&mut model);
+    let mut inspected = report();
+    let mut plain = inspected.entries[1].clone();
+    plain.id = 2;
+    inspected.entries[1].name = NativeName::Utf8("README.Markdown".into());
+    inspected.entries[1].declarations.clear();
+    inspected.entries.push(plain);
+    inspected.files = 2;
+    event(&mut model, result(&inspection, inspected));
+    let opening = event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: inspection.token.clone(),
+            value: 1,
+        },
+    );
+    assert!(opening.view.sources[0].markdown.is_none());
+    let text = format!(
+        "# Title\n\n**Bold** <script>alert(1)</script> [unsafe](javascript:alert(1)) ![diagram](https://example.com/p.png)\n\n{}\n## Tail\n",
+        "A raw line\n".repeat(260),
+    );
+    let opened = event(
+        &mut model,
+        source_result(&source_request(&opening), text.clone()),
+    );
+    let source = &opened.view.sources[0];
+    let markdown = source.markdown.as_ref().unwrap();
+    let html = markdown.rendered_html.as_deref().unwrap();
+    assert!(html.contains("<h1>Title</h1>") && html.contains("<strong>Bold</strong>"));
+    assert!(
+        html.contains("&lt;script&gt;alert(1)&lt;/script&gt;") && html.contains("unsafe diagram")
+    );
+    assert!(html.contains("<h2>Tail</h2>"));
+    assert!(!html.contains("<script") && !html.contains("<img") && !html.contains("href="));
+    assert!(text.starts_with(&source.text) && !source.text.contains("## Tail"));
+
+    let next = event(
+        &mut model,
+        UiEvent::MoreSource {
+            report: inspection.token.clone(),
+            entry: 1,
+        },
+    );
+    assert_eq!(next.view.sources[0].markdown.as_ref(), Some(markdown));
+    assert!(next.view.sources[0].text.contains("## Tail"));
+    let opening = event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: inspection.token,
+            value: 2,
+        },
+    );
+    assert!(opening.view.sources[0].markdown.is_none());
+    let opened = event(
+        &mut model,
+        source_result(&source_request(&opening), "# Raw only".into()),
+    );
+    assert!(opened.view.sources[0].markdown.is_none());
+    assert_eq!(opened.view.sources[0].text, "# Raw only");
+}
+
+#[test]
+fn workspace_restores_source_and_declaration_only_from_fresh_report() {
+    let mut prior = connected();
+    let inspected = inspect(&mut prior);
+    let old_request_id = inspected.token.request_id.clone();
+    let mut original = report();
+    original.entries[1].name = NativeName::UnixBytes(vec![b'f', 0xff]);
+    event(&mut prior, result(&inspected, original.clone()));
+    let selected = event(
+        &mut prior,
+        UiEvent::SelectEntry {
+            report: inspected.token.clone(),
+            value: 1,
+        },
+    );
+    let opened = source_request(&selected);
+    event(
+        &mut prior,
+        UiEvent::SelectDeclaration {
+            report: inspected.token,
+            entry: 1,
+            value: 1,
+        },
+    );
+    let old_source = "Old source must stay out of the snapshot\n";
+    event(&mut prior, source_result(&opened, old_source.into()));
+    assert!(prior.view().sources[0].text.contains(old_source.trim()));
+    let saved = prior.output(None).workspace.unwrap();
+    assert!(saved.is_valid());
+    assert!(saved.workbench_open);
+    let encoded = serde_json::to_string(&saved).unwrap();
+    assert!(!encoded.contains(old_source.trim()));
+    assert!(!encoded.contains(&old_request_id));
+    assert!(!encoded.contains("session_epoch"));
+    let bookmark = saved.workbench.as_ref().unwrap().entry.as_ref().unwrap();
+    assert_eq!(bookmark.path, [NativeName::UnixBytes(vec![b'f', 0xff])]);
+    assert_eq!(bookmark.declaration[1].name, "run");
+
+    let mut reopened = connected_chat();
+    let clean = reopened.output(None);
+    assert!(!clean.has_workspace_work);
+    let mut invalid = saved.clone();
+    invalid
+        .workbench
+        .as_mut()
+        .unwrap()
+        .entry
+        .as_mut()
+        .unwrap()
+        .path
+        .clear();
+    assert!(!invalid.is_valid());
+    let rejected = event(
+        &mut reopened,
+        UiEvent::RestoreWorkspace { snapshot: invalid },
+    );
+    assert_eq!(rejected, clean);
+    let output = reopened
+        .dispatch(Input {
+            now_ms: 200,
+            event: UiEvent::RestoreWorkspace {
+                snapshot: saved.clone(),
+            },
+        })
+        .unwrap();
+    let [UiEffect::Inspect { request }] = output.effects.as_slice() else {
+        panic!("fresh inspection")
+    };
+    assert_eq!(output.workspace, Some(saved));
+    assert!(output.has_workspace_work);
+    assert!(output.view.sources[0].text.is_empty());
+    assert!(rows_named(&reopened, "files").is_empty());
+    assert_ne!(request.token.request_id, old_request_id);
+
+    let shift = &mut original.entries[1];
+    shift.id = 2;
+    shift.declarations[0].id = 1;
+    shift.declarations[1].id = 2;
+    shift.declarations[1].parent = Some(1);
+    shift.declarations[1].span.start.line = 2;
+    shift
+        .declarations
+        .insert(0, declaration(0, None, DeclarationKind::Struct, "Added"));
+    let mut extra = report().entries.pop().unwrap();
+    extra.name = NativeName::Utf8("unrelated.rs".into());
+    original.entries.insert(1, extra);
+    original.files = 2;
+    let resolved = reopened
+        .dispatch(Input {
+            now_ms: 201,
+            event: result(request, original),
+        })
+        .unwrap();
+    let fresh_source = source_request(&resolved);
+    assert_eq!(fresh_source.entry, 2);
+    assert_eq!(fresh_source.report, request.token);
+    assert!(resolved.view.sources[0].text.is_empty());
+    let loaded = reopened
+        .dispatch(Input {
+            now_ms: 202,
+            event: source_result(&fresh_source, "one\ntwo\nthree\n".into()),
+        })
+        .unwrap();
+    assert_eq!(loaded.view.sources[0].target_span.unwrap().start.line, 2);
+}
+
+#[test]
+fn workspace_recovery_reuses_autoload_and_drops_missing_selection() {
+    let mut reopened = UiModel::default();
+    let resume = event(&mut reopened, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &resume.effects[0] else {
+        panic!("resume")
+    };
+    let mut allowed = catalog();
+    allowed.nodes[0].projects.truncate(1);
+    let paired = event(
+        &mut reopened,
+        UiEvent::Paired {
+            request_id: request_id.clone(),
+            catalog: allowed,
+        },
+    );
+    let [UiEffect::Inspect { request }] = paired.effects.as_slice() else {
+        panic!("automatic inspection")
+    };
+    assert!(!paired.has_workspace_work);
+    let mut saved = paired.workspace.unwrap();
+    saved.workbench_open = true;
+    saved.workbench = Some(WorkbenchBookmark {
+        node_key: "lab".into(),
+        project: "workspace".into(),
+        entry: Some(WorkbenchEntryBookmark {
+            path: vec![NativeName::Utf8("removed.rs".into())],
+            kind: EntryKind::File,
+            declaration: vec![],
+        }),
+    });
+    let restored = event(
+        &mut reopened,
+        UiEvent::RestoreWorkspace {
+            snapshot: saved.clone(),
+        },
+    );
+    assert!(restored.effects.is_empty());
+    assert_eq!(restored.workspace, Some(saved));
+    let resolved = event(&mut reopened, result(request, report()));
+    assert!(resolved.effects.is_empty());
+    assert!(resolved
+        .workspace
+        .unwrap()
+        .workbench
+        .unwrap()
+        .entry
+        .is_none());
 }
 
 #[test]
@@ -719,6 +942,58 @@ fn wrong_target_or_expired_success_fails_without_retaining_report() {
     assert_eq!(m.phase(), Phase::Failed);
     assert!(status(&m).contains("Deadline"));
 }
+#[test]
+fn inspection_action_row_follows_cancel_and_reload_visibility() {
+    let assert_visibility = |model: &UiModel, cancel: bool, reload: bool| {
+        let view = model.view();
+        for (id, expected) in [
+            ("inspection-actions", cancel || reload),
+            ("cancel", cancel),
+            ("reload-session", reload),
+        ] {
+            let binding = view.visibility.iter().find(|binding| binding.id == id);
+            assert_eq!(
+                binding.map(|binding| binding.visible),
+                Some(expected),
+                "{id}"
+            );
+        }
+    };
+    let mut model = connected();
+    assert_visibility(&model, false, false);
+
+    let request = inspect(&mut model);
+    assert_visibility(&model, true, false);
+    event(&mut model, result(&request, report()));
+    assert_visibility(&model, false, false);
+
+    let request = inspect(&mut model);
+    let mut partial = report();
+    partial.complete = false;
+    event(&mut model, result(&request, partial));
+    assert_visibility(&model, false, false);
+    event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: request.token,
+            value: 1,
+        },
+    );
+    assert_visibility(&model, true, false);
+    event(&mut model, UiEvent::Cancel {});
+    assert_visibility(&model, false, false);
+
+    let request = inspect(&mut model);
+    event(
+        &mut model,
+        UiEvent::NetworkFailed {
+            request_id: request.token.request_id,
+            category: FailureKind::Unavailable,
+        },
+    );
+    assert_visibility(&model, false, true);
+}
+
 #[test]
 fn failed_network_request_has_no_hidden_retry_and_stale_failures_are_ignored() {
     let mut m = connected();
@@ -2283,6 +2558,68 @@ fn synthetic_root_uses_admitted_project_label_consistently() {
 }
 
 #[test]
+fn workbench_header_context_tracks_admitted_selection() {
+    let assert_context = |model: &UiModel, expected: &str| {
+        let view = model.view();
+        assert_eq!(
+            view.texts
+                .iter()
+                .find(|binding| binding.id == "workbench-context")
+                .unwrap()
+                .text,
+            expected
+        );
+        assert_eq!(
+            view.visibility
+                .iter()
+                .find(|binding| binding.id == "workbench-context")
+                .unwrap()
+                .visible,
+            !expected.is_empty()
+        );
+    };
+    let mut model = UiModel::default();
+    assert_context(&model, "");
+    let resume = event(&mut model, UiEvent::Resume {});
+    let UiEffect::Resume { request_id } = &resume.effects[0] else {
+        panic!("resume")
+    };
+    let mut catalog = catalog();
+    let mut empty = catalog.nodes[0].clone();
+    empty.key = "empty".into();
+    empty.label = "Empty Lab".into();
+    empty.projects.clear();
+    catalog.nodes.push(empty);
+    event(
+        &mut model,
+        UiEvent::Paired {
+            request_id: request_id.clone(),
+            catalog,
+        },
+    );
+    assert_context(&model, "");
+    event(&mut model, UiEvent::OpenWorkbench {});
+    assert_context(&model, "Lab / Workspace");
+    let selected = event(
+        &mut model,
+        UiEvent::SelectProject {
+            value: "other".into(),
+        },
+    );
+    assert!(selected.effects.is_empty());
+    assert_context(&model, "Lab / Other");
+    event(
+        &mut model,
+        UiEvent::SelectNode {
+            value: "empty".into(),
+        },
+    );
+    assert_context(&model, "Empty Lab");
+    event(&mut model, UiEvent::OpenChat {});
+    assert_context(&model, "");
+}
+
+#[test]
 fn chat_is_the_landing_view_and_in_flight_replies_follow_their_conversation() {
     let mut model = connected_chat();
     let visible = |view: &forge_ide_ui::view::ViewModel, id: &str| {
@@ -2382,4 +2719,144 @@ fn chat_is_the_landing_view_and_in_flight_replies_follow_their_conversation() {
         },
     );
     assert_eq!(late.view.transcripts[0].messages.len(), 2);
+}
+
+#[test]
+fn mail_keeps_the_submission_key_and_opens_a_read_only_archive() {
+    let mut model = UiModel::default();
+    let UiEffect::Resume { request_id } = event(&mut model, UiEvent::Resume {}).effects.remove(0)
+    else {
+        panic!("expected pairing");
+    };
+    event(
+        &mut model,
+        UiEvent::Paired {
+            request_id,
+            catalog: Catalog {
+                mail_enabled: true,
+                ..catalog()
+            },
+        },
+    );
+    let output = event(&mut model, UiEvent::OpenMail {});
+    assert!(matches!(
+        output.effects.as_slice(),
+        [UiEffect::Mail(MailRequest::MailList {
+            archived: false,
+            ..
+        })]
+    ));
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "mail" && binding.visible));
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "chat" && !binding.visible));
+    event(&mut model, UiEvent::MailNewMessage {});
+    event(
+        &mut model,
+        UiEvent::SetMailSubject {
+            value: "Maintenance".into(),
+        },
+    );
+    event(
+        &mut model,
+        UiEvent::SetMailDraft {
+            value: "Draft a maintenance note".into(),
+        },
+    );
+    const THREAD: &str = "1b516c5f-c722-462e-a66c-d3f1cac3f880";
+    const RUN: &str = "f75b081b-9ca9-4994-86bc-24c644ccf094";
+    let UiEffect::Mail(MailRequest::MailSend { request_id, .. }) = event(
+        &mut model,
+        UiEvent::SendMail {
+            idempotency_key: THREAD.into(),
+        },
+    )
+    .effects
+    .remove(0) else {
+        panic!("expected Mail send");
+    };
+    event(
+        &mut model,
+        UiEvent::NetworkFailed {
+            request_id,
+            category: FailureKind::Timeout,
+        },
+    );
+    let UiEffect::Mail(MailRequest::MailSend {
+        request_id,
+        idempotency_key,
+        thread_id,
+        subject,
+        content,
+        ..
+    }) = event(
+        &mut model,
+        UiEvent::SendMail {
+            idempotency_key: RUN.into(),
+        },
+    )
+    .effects
+    .remove(0)
+    else {
+        panic!("expected a retry");
+    };
+    assert_eq!(idempotency_key, THREAD);
+    assert_eq!(thread_id, THREAD);
+    assert_eq!(subject.as_deref(), Some("Maintenance"));
+    assert_eq!(content, "Draft a maintenance note");
+    let UiEffect::Mail(MailRequest::MailOpen { request_id, .. }) = event(
+        &mut model,
+        UiEvent::Mail(MailResponse::MailSent {
+            request_id,
+            thread_id: THREAD.into(),
+            run_id: RUN.into(),
+            status: MailStatus::Queued,
+        }),
+    )
+    .effects
+    .remove(0) else {
+        panic!("expected a reader fetch");
+    };
+    let fixture = serde_json::json!({
+        "kind": "mail_opened", "request_id": request_id,
+        "thread": {
+            "thread_id": THREAD, "subject": "Maintenance", "status": "archived",
+            "updated_at": "2026-11-16T21:24:00Z", "turn_count": 1, "revision": 2,
+            "latest_run_id": RUN, "archive_reason": "context_limit", "context_remaining_tokens": null
+        },
+        "messages": [
+            { "sequence": 1, "role": "user", "content": "Draft a maintenance note" },
+            { "sequence": 2, "role": "assistant", "content": "## Maintenance" }
+        ],
+        "next_sequence": null
+    });
+    let output = event(&mut model, serde_json::from_value(fixture).unwrap());
+    assert!(output.effects.is_empty());
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "mail-archive-reason" && binding.visible));
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|binding| binding.id == "mail-follow-up" && !binding.visible));
+    let transcript = output
+        .view
+        .transcripts
+        .iter()
+        .find(|binding| binding.id == "mail-transcript")
+        .unwrap();
+    assert_eq!(
+        transcript.messages[1].rendered_html.as_deref(),
+        Some("<h2>Maintenance</h2>")
+    );
+    assert_eq!(output.mail_navigation.unwrap().draft, "");
 }

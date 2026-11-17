@@ -1,5 +1,6 @@
 use crate::chat::ChatRelay;
-use crate::{assets::Assets, http, session::Session, HostConfig, HostError, SessionAuth};
+use crate::workspace::{WorkspaceReply, WorkspaceRequest};
+use crate::{assets::Assets, history, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_ide::remote::{
@@ -245,6 +246,15 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
         {
             Ok(())
         }
+        destination
+            if (history::is_destination(destination)
+                || ChatRunRequest::is_destination(destination)
+                || MailRequest::is_destination(destination))
+                && c.authenticated
+                && c.csrf_valid =>
+        {
+            Ok(())
+        }
         _ => Err(AdmissionDenied),
     }
 }
@@ -431,7 +441,18 @@ impl State {
         let Command::Chat { mut request } = command else {
             return Err(Rejection::Invalid);
         };
-        if request.request_id != context.request_id || !valid_chat_messages(&request.messages) {
+        // Verified excerpts expand the model input outside the saved transcript.
+        if request.request_id != context.request_id
+            || !valid_chat_messages(&request.messages)
+            || (request.file_context.is_some() && request.chat_id.is_some())
+            || request
+                .chat_id
+                .as_deref()
+                .is_some_and(|id| !valid_chat_id(id))
+            || request.expected_revision.is_some_and(|revision| {
+                request.chat_id.is_none() || !(1..9_007_199_254_740_991).contains(&revision)
+            })
+        {
             return Err(Rejection::Invalid);
         }
         let result = self
@@ -444,12 +465,9 @@ impl State {
                     .checked_sub(std::time::Duration::from_millis(200))
                     .ok_or(FailureKind::Timeout)?;
                 self.attach_chat_source(&mut request, deadline)?;
-                relay.complete(&request.messages, deadline)
+                relay.complete(&request, deadline)
             });
-        let outcome = match result {
-            Ok(content) => ChatOutcome::Answer { content },
-            Err(category) => ChatOutcome::Error { category },
-        };
+        let outcome = result.unwrap_or_else(|category| ChatOutcome::Error { category });
         Ok(Reply {
             protocol_version: PROTOCOL_VERSION,
             event: UiEvent::ChatResult {
@@ -465,7 +483,11 @@ impl State {
         let Command::ProposeEdit { mut request } = command else {
             return Err(Rejection::Invalid);
         };
-        if request.request_id != context.request_id || !valid_chat_messages(&request.messages) {
+        if request.request_id != context.request_id
+            || !valid_chat_messages(&request.messages)
+            || request.chat_id.is_some()
+            || request.expected_revision.is_some()
+        {
             return Err(Rejection::Invalid);
         }
         let result = (|| {
@@ -488,7 +510,10 @@ impl State {
             let source = self
                 .attach_chat_source(&mut request, deadline)?
                 .ok_or(FailureKind::InvalidResponse)?;
-            let answer = relay.complete(&request.messages, deadline)?;
+            let ChatOutcome::Answer { content: answer } = relay.complete(&request, deadline)?
+            else {
+                return Err(FailureKind::InvalidResponse);
+            };
             let plan = crate::edit::preview(
                 &source.source,
                 file.byte_start as usize..file.byte_end as usize,
@@ -877,6 +902,25 @@ impl Host {
     pub fn serve_next(&self, stop: &AtomicBool) -> Result<http::ServeOutcome, HostError> {
         http::serve_next(self, stop)
     }
+    pub(crate) fn workspace_authorized(&self, cookie: Option<&str>, csrf: Option<&str>) -> bool {
+        let session = self.state.session.borrow();
+        session.authenticated(cookie) && session.csrf_matches(csrf)
+    }
+    pub(crate) fn workspace(
+        &self,
+        request: WorkspaceRequest,
+        deadline: Instant,
+    ) -> Result<WorkspaceReply, Rejection> {
+        if let Some(relay) = self
+            .state
+            .chat
+            .as_ref()
+            .filter(|relay| relay.workspace_persistence)
+        {
+            return relay.workspace(request, deadline);
+        }
+        self.state.session.borrow_mut().workspaces.handle(request)
+    }
     pub(crate) fn context(
         &self,
         cookie: Option<&str>,
@@ -911,5 +955,33 @@ impl Host {
                 forge_bridge::DispatchError::Handler(e) => e,
                 _ => Rejection::Invalid,
             })
+    }
+
+    pub(crate) fn postgres_dispatch(
+        &self,
+        header: &Header,
+        body: &[u8],
+        context: &Context,
+    ) -> Result<(u16, hyper::body::Bytes), Rejection> {
+        admit(header, context).map_err(|_| Rejection::Denied)?;
+        let relay = self
+            .state
+            .chat
+            .as_ref()
+            .filter(|relay| relay.workspace_persistence)
+            .ok_or(Rejection::Unavailable)?;
+        if ChatRunRequest::is_destination(header.route().destination()) {
+            if !relay.async_dispatch {
+                return Err(Rejection::Unavailable);
+            }
+            return crate::run_dispatch::dispatch(relay, header, body, context.deadline);
+        }
+        if MailRequest::is_destination(header.route().destination()) {
+            if !relay.mail_enabled {
+                return Err(Rejection::Unavailable);
+            }
+            return crate::mail_dispatch::dispatch(relay, header, body, context.deadline);
+        }
+        history::dispatch(relay, header, body, context.deadline)
     }
 }

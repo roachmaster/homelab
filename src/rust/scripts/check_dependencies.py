@@ -49,7 +49,8 @@ EXTERNAL = {
     "forge-agent": {"serde", "serde_json", "ctrlc"},
     "forge-remote-https": {"hyper", "hyper-util", "http-body-util", "tokio", "tokio-rustls", "rustls",
                            "serde", "serde_json"},
-    "forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng", "sha2"},
+    "forge-ide": {"cap-std", "cap-fs-ext", "syn", "proc-macro2", "quote", "serde", "serde_yaml_ng", "sha2",
+                  "nix", "serde_json"},
 }
 
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
@@ -102,8 +103,8 @@ def validate_packages(packages):
     if ide["features"].get("default", []) != []:
         raise SystemExit("IDE YAML/CLI/remote must remain opt-in")
     for dep in ide["dependencies"]:
-        if dep["name"] in {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract", "forge-remote"} and not dep["optional"]:
-            raise SystemExit("IDE presentation dependencies must remain optional")
+        if dep["name"] in {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract", "forge-remote", "nix", "serde_json"} and not dep["optional"]:
+            raise SystemExit("IDE integration dependencies must remain optional")
     https = packages["forge-remote-https"]
     if https["features"].get("default", []) != []:
         raise SystemExit("HTTPS IDE codec must remain opt-in")

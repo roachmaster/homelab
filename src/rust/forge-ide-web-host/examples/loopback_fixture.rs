@@ -49,7 +49,7 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
     fs::write(project.join("src/lib.rs"),b"pub struct Widget { pub value: u32 }\npub struct Gadget;\npub trait View { fn show(&self); }\nimpl View for Widget { fn show(&self) {} }\nimpl View for Gadget { fn show(&self) {} }\npub fn inspect_me() {}\n")?;
     fs::write(
         project.join("README <safe>.md"),
-        b"Fixture <script> text is never HTML.\n",
+        b"## Fixture overview\n\n**Readable detail**\n\nFixture <script> text is never HTML.\n\n![Fixture image alternative](/fixture-diagram.png)\n",
     )?;
     fs::write(project.join("broken.rs"), b"pub fn broken(\n")?;
     fs::write(project.join("blank.rs"), b"")?;
@@ -84,17 +84,12 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if !(args.len() == 2
-        || (args.len() == 3
-            && (args[2] == "--faults"
-                || args[2] == "--single-project"
-                || args[2] == "--managed-writes")))
-    {
-        return Err(
-            "usage: loopback_fixture GENERATED_ASSETS_DIRECTORY FORGE_AGENT_BINARY [--faults|--single-project|--managed-writes]"
-                .into(),
-        );
-    }
+    let durable = match args.as_slice() {
+        [_, _] => None,
+        [_, _, mode] if mode == "--faults" || mode == "--single-project" || mode == "--managed-writes" => None,
+        [_, _, mode, bind, relay, token] if mode == "--durable" => Some((bind, relay, token)),
+        _ => return Err("usage: loopback_fixture ASSETS AGENT [--faults|--single-project|--managed-writes|--durable BIND RELAY TOKEN_FILE]".into()),
+    };
     let faults = args.get(2).is_some_and(|value| value == "--faults");
     let managed = args.get(2).is_some_and(|value| value == "--managed-writes");
     let single_project = managed || args.get(2).is_some_and(|value| value == "--single-project");
@@ -186,7 +181,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let stop = Arc::new(AtomicBool::new(false));
     let mut host_config = json!({"bind":"127.0.0.1:0","assets":assets,"credentials":credentials("client"),"nodes":[{"key":"lab","label":"Local fixture","projects":projects,"address":address,"server_name":"localhost","node":"fixture-node","incarnation":"fixture-host"}],"timeout_ms":5000});
-    let relay = if managed {
+    let relay = if let Some((bind, relay, token_file)) = durable {
+        host_config["bind"] = json!(bind.to_str().ok_or("invalid host bind address")?);
+        host_config["chat"] = json!({
+            "endpoint": relay.to_str().ok_or("invalid relay address")?,
+            "token_file": PathBuf::from(token_file),
+            "workspace_persistence": true,
+            "async_dispatch": true,
+            "mail_enabled": true,
+        });
+        None
+    } else if managed {
         let (config, relay) = start_managed_chat(&fixture.root, Arc::clone(&stop))?;
         host_config["chat"] = config;
         Some(relay)

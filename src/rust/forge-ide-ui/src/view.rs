@@ -1,5 +1,5 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{ChatMessage, DiffLine, RequestToken, SourceSpan};
+use crate::protocol::{ChatRole, DiffLine, RequestToken, SourceSpan};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -25,7 +25,20 @@ pub struct DiffBinding {
 pub struct TranscriptBinding {
     pub id: &'static str,
     pub conversation: usize,
-    pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assistant_label: Option<&'static str>,
+    pub messages: Vec<TranscriptMessage>,
+}
+
+/// Plain transcript content with an optional sanitized assistant presentation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TranscriptMessage {
+    pub role: ChatRole,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendered_html: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<&'static str>,
 }
 
 /// Exact, bounded UTF-8 window of the accepted read-only source document.
@@ -39,6 +52,15 @@ pub struct SourceBinding {
     pub first_column: u32,
     pub total_lines: u32,
     pub target_span: Option<SourceSpan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<MarkdownPreview>,
+}
+
+/// Sanitized HTML from the entire verified file. `None` means Raw remains
+/// available but the Markdown rendering exceeds its limits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MarkdownPreview {
+    pub rendered_html: Option<String>,
 }
 /// Opaque, model-owned presentation identity. The renderer compares it but does
 /// not infer selection semantics from rows or retain it as domain state.
@@ -103,6 +125,9 @@ pub struct InputBinding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FilterAction {
     SetChatDraft { conversation: usize },
+    SetChatExpiry {},
+    SetMailSubject {},
+    SetMailDraft {},
     SetFileFilter { report: RequestToken },
     SetProjectQuery { report: RequestToken },
     SetSymbolFilter { report: RequestToken, entry: u32 },
@@ -169,6 +194,12 @@ pub enum RowAction {
         entry: u32,
         byte_start: u32,
         conversation: usize,
+    },
+    MailOpenThread {
+        thread_id: String,
+    },
+    OpenSavedChat {
+        chat_id: String,
     },
     SelectSearchResult {
         report: RequestToken,

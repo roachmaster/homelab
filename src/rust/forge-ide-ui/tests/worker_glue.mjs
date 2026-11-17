@@ -195,3 +195,60 @@ console.log('Generated worker strips bounded presentation envelopes before actua
   } finally { h.close(); }
 }
 console.log('Generated worker auto-opens one project and sends guarded source effects; source denial retains the inspection and explicit retry succeeds.');
+
+{
+  // Pairing in a single-project installation starts inspection and model
+  // discovery together. Previous chats must still open on the first click.
+  const single = copy(catalog);
+  single.nodes[0].projects.length = 1;
+  single.chat_history = true;
+  single.async_chat = true;
+  const savedChat = {
+    chat_id: '8452b258-df30-4985-bfa1-cd98245b2a06',
+    title: 'Saved fixture chat',
+    updated_at: '2026-11-16T12:00:00Z',
+    revision: 1,
+    retention: { kind: 'long_term' },
+  };
+  let releaseInspection, releaseModels;
+  const h = await harness(request => {
+    const reply = event => json({ protocol_version: 1, event: { request_id: request.request_id, ...event } });
+    switch (request.kind) {
+      case 'resume': {
+        const response = paired(request);
+        response.event.catalog = single;
+        return json(response);
+      }
+      case 'inspect':
+        return new Promise(resolve => { releaseInspection = () => resolve(json(inspected(request))); });
+      case 'chat_run_models':
+        return new Promise(resolve => { releaseModels = () => resolve(reply({
+          kind: 'chat_run_models_listed', default_model_id: 'gpt-oss-20b',
+          models: [{ model_id: 'gpt-oss-20b', label: 'GPT-OSS 20B', ready: true }],
+        })); });
+      case 'chat_history_list':
+        return reply({ kind: 'chat_history_listed', items: [savedChat], next_cursor: null });
+      default:
+        throw new Error('Unexpected transport request in startup overlap fixture');
+    }
+  });
+  try {
+    const historyFetches = () => h.requests.filter(request => request.body.kind === 'chat_history_list');
+    const historyStatus = () => h.messages.filter(message => message.kind === 'view').at(-1)
+      ?.view.texts.find(text => text.id === 'chat-history-status')?.text ?? '';
+    await until(() => releaseInspection && releaseModels, 'both startup transport slots occupied');
+    await h.send({ kind: 'show_chat_history' });
+    assert.equal(historyFetches().length, 0, 'history waits without exceeding local concurrency');
+    assert.equal(historyStatus(), 'Checking saved chats…');
+    releaseModels();
+    await until(() => h.messages.some(message => message.kind === 'view'
+      && message.view.lists.some(list => list.id === 'chat-history-list'
+        && list.rows.some(row => row.id === savedChat.chat_id))), 'first history click displays saved chats');
+    assert.equal(historyFetches().length, 1, 'single history request runs after a slot opens');
+    assert.equal(historyFetches()[0].headers['Forge-Destination'], 'ide.chat.history.list');
+    releaseInspection();
+    await until(() => /Project ready/.test(h.status()), 'original inspection completes independently');
+    assert.equal(h.messages.some(message => message.kind === 'fatal'), false);
+  } finally { h.close(); }
+}
+console.log('Generated worker waits for a transport slot to open Previous chats during overlapping startup effects.');

@@ -33,8 +33,24 @@ pub enum ButtonEmphasis {
     Standard,
     Primary,
 }
+/// A document served by the same portal origin.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortalDocument {
+    Design,
+}
+impl PortalDocument {
+    pub(crate) fn href(self) -> &'static str {
+        match self {
+            Self::Design => "/design",
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub enum Component {
+    /// Protected text projected next to the document title.
+    BrandContext {
+        id: String,
+    },
     /// Native keyboard-accessible progressive disclosure; presentation only.
     Disclosure {
         id: String,
@@ -56,8 +72,14 @@ pub enum Component {
         id: String,
         children: Vec<Component>,
     },
+    Dialog {
+        id: String,
+        title: String,
+        close_action: String,
+        initial_focus: String,
+        children: Vec<Component>,
+    },
     Toolbar(Vec<Component>),
-    /// A toolbar that can collapse behind a local control in a narrow file pane.
     CompactToolbar {
         id: String,
         label: String,
@@ -68,10 +90,25 @@ pub enum Component {
         title: String,
         children: Vec<Component>,
     },
+    /// Open a portal document in the current tab.
+    NavigationLink {
+        id: String,
+        label: String,
+        document: PortalDocument,
+    },
     ReadingColumn(Vec<Component>),
+    ReaderLayout(Vec<Component>),
     Transcript {
         id: String,
         label: String,
+        user_label: String,
+        assistant_label: String,
+        empty_message: String,
+    },
+    TextField {
+        id: String,
+        label: String,
+        action: String,
     },
     TextArea {
         id: String,
@@ -87,6 +124,10 @@ pub enum Component {
         single_secondary: bool,
         children: Vec<Component>,
     },
+    /// Optional declarations placed next to a pane layout's built-in view options.
+    LayoutControls(Vec<Component>),
+    /// An optional button adjacent to the pane navigation, outside its landmark.
+    PaneAction(Box<Component>),
     Pane {
         id: String,
         title: String,
@@ -117,6 +158,21 @@ pub enum Component {
         action: String,
         emphasis: ButtonEmphasis,
         check_input: Option<String>,
+        controls: Option<String>,
+        uuid_field: Option<String>,
+    },
+    /// A button whose visual glyph is decorative and whose label names the action.
+    IconButton {
+        id: String,
+        label: String,
+        action: String,
+        emphasis: ButtonEmphasis,
+        glyph: char,
+    },
+    DateInput {
+        id: String,
+        label: String,
+        action: String,
     },
     Filter {
         id: String,
@@ -135,6 +191,7 @@ pub enum Component {
     Tree {
         id: String,
         label: String,
+        stacked: bool,
     },
     /// Read-only, bounded source window supplied by the accepted model view.
     Source {
@@ -145,17 +202,30 @@ pub enum Component {
         id: String,
         label: String,
     },
-    /// A presentation-only line-wrap control for a source viewer.
     SourceWrap {
         id: String,
         label: String,
         target: String,
+    },
+    /// Optional raw and Markdown presentations around one read-only source view.
+    SourceFormats {
+        prefix: String,
+        empty_message: String,
+        unavailable_message: String,
+        children: Vec<Component>,
     },
     /// Presentation-only route to a declared pane; no application event.
     PaneLink {
         id: String,
         label: String,
         target: String,
+    },
+    /// A narrow-layout pane link rendered before the pane heading.
+    PaneHeaderLink {
+        id: String,
+        label: String,
+        target: String,
+        glyph: char,
     },
     Details {
         id: String,
@@ -167,13 +237,29 @@ pub enum Component {
 /// Component structure, not a string-template macro. Every text value is escaped.
 #[macro_export]
 macro_rules! component {
+    (brand_context $id:expr) => { $crate::generate::Component::BrandContext { id:$id.into() } };
     (screen $id:expr, $title:expr, $protected:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Screen { id:$id.into(),title:$title.into(),protected:$protected,children:vec![$($child),*] } };
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (region $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Region { id:$id.into(),children:vec![$($child),*] } };
+    (dialog $id:expr, $title:expr, $close:expr, $focus:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Dialog{id:$id.into(),title:$title.into(),close_action:$close.into(),initial_focus:$focus.into(),children:vec![$($child),*]} };
     (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
+    (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
+    (reader_layout [$sidebar:expr, $body:expr $(,)?]) => { $crate::generate::Component::ReaderLayout(vec![$sidebar,$body]) };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
-    (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
+    (transcript $id:expr, $label:expr) => {
+        $crate::component!(transcript $id, $label, "You", "Forge", "Send a message to start this conversation.")
+    };
+    (transcript $id:expr, $label:expr, $user:expr, $assistant:expr, $empty:expr) => {
+        $crate::generate::Component::Transcript {
+            id: $id.into(),
+            label: $label.into(),
+            user_label: $user.into(),
+            assistant_label: $assistant.into(),
+            empty_message: $empty.into(),
+        }
+    };
+    (text_field $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextField{id:$id.into(),label:$label.into(),action:$action.into()} };
     (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:None} };
     (textarea $id:expr, $label:expr, $action:expr, $placeholder:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:Some($placeholder.into())} };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
@@ -182,6 +268,8 @@ macro_rules! component {
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
     (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,children:vec![$($child),*]} };
     (focused_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,children:vec![$($child),*]} };
+    (layout_controls [$($child:expr),* $(,)?]) => { $crate::generate::Component::LayoutControls(vec![$($child),*]) };
+    (pane_action $button:expr) => { $crate::generate::Component::PaneAction(Box::new($button)) };
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
     (pane_footer $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneFooter{id:$id.into(),children:vec![$($child),*]} };
     (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
@@ -190,17 +278,35 @@ macro_rules! component {
     (heading $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Heading} };
     (status $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:true,style:$crate::generate::TextStyle::Body} };
     (select $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Select{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None} };
-    (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:None} };
-    (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into())} };
+    (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:None,uuid_field:None} };
+    (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:None,controls:None,uuid_field:None} };
+    (primary_icon $id:expr, $label:expr, $action:expr, $glyph:expr) => { $crate::generate::Component::IconButton{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,glyph:$glyph} };
+    (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:None} };
+    (uuid_button $id:expr, $label:expr, $action:expr, $input:expr, $uuid_field:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:Some($uuid_field.into())} };
+    (toggle_panel $id:expr, $label:expr, $action:expr, $controls:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:Some($controls.into()),uuid_field:None} };
+    (date_input $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::DateInput{id:$id.into(),label:$label.into(),action:$action.into()} };
     (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into()} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
+    (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:false} };
+    (stacked_tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:true} };
     (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
     (diff $id:expr, $label:expr) => { $crate::generate::Component::Diff{id:$id.into(),label:$label.into()} };
     (source_wrap $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::SourceWrap{id:$id.into(),label:$label.into(),target:$target.into()} };
+    (source_formats $prefix:expr; [$($child:expr),* $(,)?]) => {
+        $crate::component!(source_formats $prefix, "Empty Markdown file.",
+            "Markdown display is unavailable for this file size."; [$($child),*])
+    };
+    (source_formats $prefix:expr, $empty:expr, $unavailable:expr; [$($child:expr),* $(,)?]) => {
+        $crate::generate::Component::SourceFormats {
+            prefix: $prefix.into(),
+            empty_message: $empty.into(),
+            unavailable_message: $unavailable.into(),
+            children: vec![$($child),*],
+        }
+    };
     (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
+    (pane_header_link $id:expr, $label:expr, $target:expr, $glyph:expr) => { $crate::generate::Component::PaneHeaderLink{id:$id.into(),label:$label.into(),target:$target.into(),glyph:$glyph} };
     (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
     (details $id:expr) => { $crate::generate::Component::Details{id:$id.into()} };
 }
@@ -237,8 +343,9 @@ impl Document {
             depth: usize,
             count: &mut usize,
             ids: &mut BTreeSet<String>,
-            in_layout: bool,
+            parent: Option<&Component>,
         ) -> Result<(), &'static str> {
+            let in_layout = matches!(parent, Some(Component::PaneLayout { .. }));
             *count += 1;
             if depth > 12 || *count > 256 {
                 return Err("component declaration limit");
@@ -247,11 +354,16 @@ impl Document {
                 Component::Screen { id, title, .. }
                 | Component::Navigation { id, title, .. }
                 | Component::Panel { id, title, .. }
+                | Component::Dialog { id, title, .. }
                 | Component::Disclosure { id, title, .. }
                 | Component::Pane { id, title, .. } => (Some(id), Some(title), None),
                 Component::Row(_)
                 | Component::Toolbar(_)
                 | Component::ReadingColumn(_)
+                | Component::ReaderLayout(_)
+                | Component::LayoutControls(_)
+                | Component::PaneAction(_)
+                | Component::SourceFormats { .. }
                 | Component::Workspace(_) => (None, None, None),
                 Component::PaneLayout { id, .. }
                 | Component::Region { id, .. }
@@ -261,24 +373,33 @@ impl Document {
                 | Component::Button {
                     id, label, action, ..
                 }
+                | Component::IconButton {
+                    id, label, action, ..
+                }
+                | Component::TextField { id, label, action }
                 | Component::TextArea {
                     id, label, action, ..
                 }
+                | Component::DateInput { id, label, action }
                 | Component::Filter { id, label, action }
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
                 }
-                Component::Transcript { id, label }
-                | Component::Tree { id, label }
+                Component::Transcript { id, label, .. }
+                | Component::Tree { id, label, .. }
                 | Component::Reload { id, label }
                 | Component::CompactToolbar { id, label, .. }
                 | Component::Diff { id, label }
+                | Component::NavigationLink { id, label, .. }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
                 Component::PaneLink { id, label, target }
-                | Component::SourceWrap { id, label, target } => {
-                    (Some(id), Some(label), Some(target))
-                }
-                Component::Details { id } | Component::Facts { id } => (Some(id), None, None),
+                | Component::SourceWrap { id, label, target }
+                | Component::PaneHeaderLink {
+                    id, label, target, ..
+                } => (Some(id), Some(label), Some(target)),
+                Component::Details { id }
+                | Component::Facts { id }
+                | Component::BrandContext { id } => (Some(id), None, None),
             };
             if let Some(id) = id {
                 insert(ids, id)?;
@@ -287,20 +408,119 @@ impl Document {
                 return Err("invalid component label/action");
             }
             match c {
+                Component::ReaderLayout(children)
+                    if children.len() != 2
+                        || children
+                            .iter()
+                            .any(|child| !matches!(child, Component::Region { .. })) =>
+                {
+                    return Err("reader layout requires two regions");
+                }
+                Component::NavigationLink { label, .. }
+                    if !matches!(parent, Some(Component::Navigation { .. }))
+                        || label.trim().is_empty() =>
+                {
+                    return Err("navigation link requires a navigation parent and nonempty label");
+                }
+                Component::Transcript {
+                    user_label,
+                    assistant_label,
+                    empty_message,
+                    ..
+                } if ![user_label, assistant_label, empty_message]
+                    .into_iter()
+                    .all(|label| text(label)) =>
+                {
+                    return Err("invalid transcript copy");
+                }
                 Component::TextArea {
                     placeholder: Some(placeholder),
                     ..
                 } if !text(placeholder) => {
                     return Err("invalid input placeholder");
                 }
-                Component::Button {
-                    check_input: Some(id),
-                    ..
-                } if !key(id) => {
-                    return Err("invalid checked input id");
-                }
-                Component::Workspace(_) => insert(ids, "workspace")?,
                 Component::CompactToolbar { id, .. } => insert(ids, &format!("{id}-toggle"))?,
+                Component::Button {
+                    check_input,
+                    controls,
+                    uuid_field,
+                    ..
+                } if [check_input, controls, uuid_field]
+                    .into_iter()
+                    .flatten()
+                    .any(|id| !key(id)) =>
+                {
+                    return Err("invalid button reference or UUID field");
+                }
+                Component::Dialog {
+                    id,
+                    close_action,
+                    initial_focus,
+                    ..
+                } => {
+                    if !key(close_action) || !key(initial_focus) {
+                        return Err("invalid dialog action or focus reference");
+                    }
+                    insert(ids, &format!("{id}-title"))?;
+                }
+                Component::IconButton { label, glyph, .. }
+                | Component::PaneHeaderLink { label, glyph, .. }
+                    if label.trim().is_empty() || glyph.is_control() || glyph.is_whitespace() =>
+                {
+                    return Err("icon button needs a nonempty label and visible glyph");
+                }
+                Component::BrandContext { .. } if depth != 0 => {
+                    return Err("brand context must be a document child");
+                }
+                Component::PaneHeaderLink { .. }
+                    if !matches!(parent, Some(Component::Pane { .. })) =>
+                {
+                    return Err("pane header link must be a direct child of a pane");
+                }
+                Component::SourceFormats {
+                    prefix,
+                    empty_message,
+                    unavailable_message,
+                    children,
+                } => {
+                    if !text(empty_message) || !text(unavailable_message) {
+                        return Err("invalid source preview copy");
+                    }
+                    if !key(prefix)
+                        || children
+                            .iter()
+                            .filter(|child| matches!(child, Component::Source { .. }))
+                            .count()
+                            != 1
+                    {
+                        return Err("source formats require one direct source view");
+                    }
+                    for suffix in [
+                        "formats",
+                        "format",
+                        "raw",
+                        "raw-pane",
+                        "display",
+                        "preview",
+                        "preview-unavailable",
+                    ] {
+                        insert(ids, &format!("{prefix}-{suffix}"))?;
+                    }
+                }
+                Component::LayoutControls(_) if !in_layout => {
+                    return Err("layout controls must be a direct child of a pane layout");
+                }
+                Component::PaneAction(button)
+                    if !in_layout
+                        || !matches!(
+                            button.as_ref(),
+                            Component::Button { .. } | Component::IconButton { .. }
+                        ) =>
+                {
+                    return Err("pane action requires a button directly in a pane layout");
+                }
+                Component::PaneAction(button) => visit(button, depth + 1, count, ids, Some(c))?,
+                Component::Workspace(_) => insert(ids, "workspace")?,
                 Component::PairForm { id, .. } => {
                     for suffix in ["form", "code"] {
                         insert(ids, &format!("{id}-{suffix}"))?;
@@ -313,6 +533,7 @@ impl Document {
                     min,
                     initial,
                     max,
+                    children,
                     ..
                 } => {
                     if !in_layout
@@ -322,6 +543,14 @@ impl Document {
                         || *max > 960
                     {
                         return Err("invalid pane placement/geometry");
+                    }
+                    if children
+                        .iter()
+                        .filter(|child| matches!(child, Component::PaneHeaderLink { .. }))
+                        .count()
+                        > 1
+                    {
+                        return Err("pane allows one header link");
                     }
                     insert(ids, &format!("{id}-heading"))?;
                     insert(ids, &format!("{id}-switch"))?;
@@ -336,16 +565,25 @@ impl Document {
                         insert(ids, &format!("{id}-{suffix}"))?;
                     }
                     let mut positions = BTreeSet::new();
+                    let mut has_controls = false;
+                    let mut has_action = false;
                     for child in children {
-                        if let Component::Pane { position, .. } = child {
-                            if !positions.insert(position.key()) {
-                                return Err("duplicate pane position");
+                        match child {
+                            Component::Pane { position, .. } => {
+                                if !positions.insert(position.key()) {
+                                    return Err("duplicate pane position");
+                                }
                             }
-                        } else {
-                            return Err("pane layout requires panes");
+                            Component::LayoutControls(_) if !has_controls => has_controls = true,
+                            Component::PaneAction(_) if !has_action => has_action = true,
+                            _ => {
+                                return Err(
+                                    "pane layout requires panes and at most one controls group and action",
+                                )
+                            }
                         }
                     }
-                    if !positions.contains("main") || children.len() > 4 {
+                    if !positions.contains("main") {
                         return Err("pane layout requires one main pane");
                     }
                 }
@@ -356,26 +594,24 @@ impl Document {
                 | Component::CompactToolbar { children, .. }
                 | Component::Screen { children, .. }
                 | Component::Panel { children, .. }
+                | Component::Dialog { children, .. }
                 | Component::Disclosure { children, .. }
                 | Component::PaneLayout { children, .. }
                 | Component::Region { children, .. }
                 | Component::Pane { children, .. }
                 | Component::PaneFooter { children, .. }
+                | Component::SourceFormats { children, .. }
                 | Component::Row(children)
+                | Component::LayoutControls(children)
                 | Component::ReadingColumn(children)
+                | Component::ReaderLayout(children)
                 | Component::Toolbar(children)
                 | Component::Workspace(children) => Some(children),
                 _ => None,
             };
             if let Some(children) = children {
                 for child in children {
-                    visit(
-                        child,
-                        depth + 1,
-                        count,
-                        ids,
-                        matches!(c, Component::PaneLayout { .. }),
-                    )?;
+                    visit(child, depth + 1, count, ids, Some(c))?;
                 }
             }
             Ok(())
@@ -384,10 +620,22 @@ impl Document {
             "runtime-recovery".into(),
             "runtime-message".into(),
             "runtime-reload".into(),
+            "leave-confirmation".into(),
+            "leave-heading".into(),
+            "leave-description".into(),
+            "leave-stay".into(),
+            "leave-confirm".into(),
         ]);
         let mut count = 0;
+        let mut has_brand_context = false;
         for c in &self.children {
-            visit(c, 0, &mut count, &mut ids, false)?;
+            if matches!(c, Component::BrandContext { .. }) {
+                if has_brand_context {
+                    return Err("document allows one brand context");
+                }
+                has_brand_context = true;
+            }
+            visit(c, 0, &mut count, &mut ids, None)?;
         }
         Ok(())
     }

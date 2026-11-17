@@ -1,0 +1,30 @@
+%% `mmdr -t dark -i mail-dispatch-sequence.mmd -o mail-dispatch-sequence.svg`
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","actorTextColor":"#f1f4f8","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"}}}%%
+sequenceDiagram
+    participant Mail as Forge Mail
+    participant MC as Mission Control
+    participant DB as PostgreSQL
+    participant GPU as Forge GPU
+
+    Mail->>MC: Send with idempotency key
+    MC->>DB: Check owner and context, queue run
+    DB-->>MC: Commit message and run
+    MC-->>Mail: 202 with thread and run IDs
+
+    Note over Mail,MC: Mail can close after 202
+    Note over Mail,MC: An oversized draft stays unsent in the composer
+    DB-->>GPU: Notify of new job
+    GPU->>DB: Scan and claim with attempt lease
+    DB-->>GPU: Exact completed pairs and new message
+    GPU->>GPU: GPT-OSS 120B with optional prefix cache
+    GPU->>DB: Renew lease during inference
+    GPU->>DB: Publish reply with attempt token
+
+    DB-->>MC: Notify of completed attempt
+    MC->>DB: Commit reply and archive decision
+    Note over MC,DB: Archive when context leaves too little room for a useful follow-up
+
+    Mail->>MC: Open Inbox or Archive thread
+    MC->>DB: Read owner’s message page
+    DB-->>MC: Saved page and status
+    MC-->>Mail: Archived thread opens read-only

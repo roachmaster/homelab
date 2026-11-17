@@ -4,8 +4,8 @@ use forge_ide_web::{
     component,
     generate::{
         application::{ide_document, ide_transport, IDE_THEME},
-        register_assets, AssetBundle, AssetConfig, Document, HeaderBinding, RequestBinding, Theme,
-        Transport,
+        register_assets, AssetBundle, AssetConfig, Document, HeaderBinding, RequestBinding,
+        RequestPolicy, Theme, Transport,
     },
 };
 use forge_provider::{Factory, InstanceProvider, Singleton};
@@ -62,7 +62,8 @@ fn unrelated_component_document_uses_same_emitters_without_ide_business_code() {
     };
     let assets = build(c);
     let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
-    assert!(html.contains("Counter &lt;example&gt;"));
+    assert!(html.contains("<title>Counter &lt;example&gt;</title>"));
+    assert!(html.contains("<h1>Counter &lt;example&gt;</h1>"));
     assert!(html.contains("0 &lt; 1 &amp; 2"));
     assert!(!html.contains("Project files"));
     assert!(!html.contains("onclick="));
@@ -79,6 +80,27 @@ fn yaml_is_tokens_not_raw_css_or_script() {
     }
     assert!(Theme::parse(&theme_with("background", "red;display:none")).is_err());
     assert!(Theme::parse(&theme_with("font_px", "900")).is_err());
+}
+#[test]
+fn stylesheet_renders_theme_values_and_keeps_responsive_overrides_in_order() {
+    let mut c = config();
+    c.theme_yaml = theme_with("background", "'#123456'");
+    let assets = build(c);
+    let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
+    assert!(css.starts_with(":root{\n--bg:#123456;"));
+    assert!(css.contains("content:'';"));
+    assert!(css.contains(".fg-depth-64{\nmargin-inline-start:768px;}"));
+
+    let toolbar_rules: Vec<_> = css
+        .match_indices(".fg-toolbar>p{")
+        .map(|(i, _)| i)
+        .collect();
+    let mut breakpoints = css.match_indices("@media (max-width:800px){");
+    let (first_breakpoint, _) = breakpoints.next().unwrap();
+    let (second_breakpoint, _) = breakpoints.next().unwrap();
+    assert_eq!(toolbar_rules.len(), 3);
+    assert!(toolbar_rules[0] < first_breakpoint && first_breakpoint < toolbar_rules[1]);
+    assert!(toolbar_rules[1] < second_breakpoint && second_breakpoint < toolbar_rules[2]);
 }
 #[test]
 fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
@@ -100,16 +122,30 @@ fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
     c.transport.bindings[0].headers[0].name = "Authorization".into();
     assert!(register_assets("assets", c).is_err());
     let mut c = config();
+    c.transport.timers[0].effect_kind = c.transport.bindings[0].kind.clone();
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.transport.timers[0].delay_ms = 0;
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.transport.bindings[0].policy.wait_for_slot_ms = Some(30_001);
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
     c.wasm[0] = 1;
     assert!(register_assets("assets", c).is_err());
 }
 #[test]
-fn generated_main_has_no_backend_fetch_or_raw_html_interpretation() {
+fn generated_main_has_no_backend_fetch_or_eval_and_one_sanitized_markdown_sink() {
     let a = build(config());
     let main = std::str::from_utf8(&a.files["main.js"]).unwrap();
     assert!(!main.contains("fetch("));
-    assert!(!main.contains("innerHTML"));
     assert!(!main.contains("eval("));
+    assert_eq!(main.matches("innerHTML").count(), 1);
+    assert!(main.contains("node.innerHTML=html;"));
+    assert!(main.contains("setMarkdown(body,message.rendered_html)"));
+    assert!(main.contains("setMarkdown(format.preview,format.html)"));
+    assert!(!main.contains("outerHTML"));
+    assert!(!main.contains("insertAdjacentHTML"));
     let html = std::str::from_utf8(&a.files["index.html"]).unwrap();
     assert!(!html.contains("<style"));
     assert!(!html.contains("style="));
@@ -117,6 +153,94 @@ fn generated_main_has_no_backend_fetch_or_raw_html_interpretation() {
     let worker = std::str::from_utf8(&a.files["worker.js"]).unwrap();
     assert!(worker.contains("WebAssembly.instantiate"));
     assert!(worker.contains("/forge/v1/dispatch"));
+}
+
+#[test]
+fn guarded_edit_controls_share_the_generated_workbench_with_markdown_formats() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let source = html
+        .split_once("id=\"source-panel\"")
+        .unwrap()
+        .1
+        .split_once("</section>")
+        .unwrap()
+        .0;
+    let (controls, content) = source
+        .split_once("id=\"workbench-source-content\"")
+        .unwrap();
+    assert!(controls.contains("data-source-wrap aria-controls=\"source-view\""));
+    assert!(!content.contains("data-source-wrap"));
+    assert!(source.contains("id=\"source-format\""));
+    assert!(source.contains("id=\"source-pagination\""));
+    let (_, review) = source.split_once("id=\"workbench-edit-diff\"").unwrap();
+    assert!(review.contains("data-diff-view"));
+    assert!(html.contains("<footer class=\"fg-pane-footer\" id=\"workbench-chat\" hidden>"));
+    assert!(html.contains("id=\"send-chat-with-file\" data-action=\"send_chat_with_file\""));
+    let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
+    assert!(css.contains(".fg-source[data-wrap=true] .fg-source-line{"));
+    assert!(css.contains(".fg-diff-line[data-change=removed]{"));
+
+    let transport = ide_transport();
+    for (kind, destination, result) in [
+        ("propose_edit", "ide.propose_edit", "edit_result"),
+        ("edit_write", "ide.edit_write", "edit_write_result"),
+    ] {
+        let request = transport
+            .bindings
+            .iter()
+            .find(|binding| binding.kind == kind)
+            .unwrap();
+        assert!(request.csrf);
+        assert_eq!(request.request_id, "request.request_id");
+        assert_eq!(request.accept_events, [result]);
+        assert!(request
+            .headers
+            .iter()
+            .any(|header| header.name == "Forge-Destination"
+                && header.literal.as_deref() == Some(destination)));
+    }
+}
+
+#[test]
+fn application_can_change_worker_policy_without_changing_its_adapter() {
+    let original = build(config());
+    let mut updated = config();
+    updated.transport.timers[0].delay_ms = 8_000;
+    let polls = updated
+        .transport
+        .bindings
+        .iter_mut()
+        .find(|binding| binding.kind == "chat_run_events")
+        .unwrap();
+    polls.policy.delay_ms = Some(2_000);
+    polls.policy.wait_for_slot_ms = Some(6_000);
+    let updated = build(updated);
+
+    let (original_config, original_adapter) = worker_parts(&original);
+    let (updated_config, updated_adapter) = worker_parts(&updated);
+    assert_eq!(original_adapter, updated_adapter);
+    assert_eq!(original.files["main.js"], updated.files["main.js"]);
+    assert_eq!(original_config["timers"][0]["delay_ms"], 5_000);
+    assert_eq!(updated_config["timers"][0]["delay_ms"], 8_000);
+    let polls = updated_config["bindings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|binding| binding["kind"] == "chat_run_events")
+        .unwrap();
+    assert_eq!(polls["policy"]["delay_ms"], 2_000);
+    assert_eq!(polls["policy"]["wait_for_slot_ms"], 6_000);
+}
+
+fn worker_parts(bundle: &AssetBundle) -> (serde_json::Value, &str) {
+    let script = std::str::from_utf8(&bundle.files["worker.js"]).unwrap();
+    let (config, adapter) = script.split_once('\n').unwrap();
+    let config = config.strip_prefix("const CONFIG=").unwrap();
+    (
+        serde_json::from_str(config.strip_suffix(';').unwrap()).unwrap(),
+        adapter,
+    )
 }
 
 fn widget_document() -> Document {
@@ -172,8 +296,11 @@ fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
             csrf: false,
             deadline: None,
             timeout_ms: None,
+            error_events: vec![],
             accept_events: vec!["collection_loaded".into()],
+            policy: RequestPolicy::default(),
         }],
+        timers: vec![],
     };
     let assets = build(c);
     let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
@@ -248,21 +375,26 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
         "set_file_filter",
         "session_epoch",
         "localStorage",
-        "sessionStorage",
         "history.pushState",
         "fetch(",
-        "innerHTML",
     ] {
         assert!(
             !main.contains(forbidden),
             "application semantics/unsafe storage in primitive: {forbidden}"
         );
     }
+    assert_eq!(main.matches("sessionStorage.").count(), 5);
+    assert!(main.contains("const NAVIGATION_CACHE_KEY='forge-workspace-navigation'"));
+    assert!(main.contains("sessionStorage.getItem(NAVIGATION_CACHE_KEY)"));
+    assert!(main.contains("sessionStorage.setItem(NAVIGATION_CACHE_KEY,cache)"));
+    assert!(main.contains("sessionStorage.removeItem(NAVIGATION_CACHE_KEY)"));
+    assert!(main.contains("sessionStorage.getItem(key)"));
+    assert!(main.contains("sessionStorage.setItem(key,tab)"));
+    assert!(main.contains("const key='forge-workspace-tab'"));
     assert!(main.contains("{...action,value}"));
-    assert!(main.contains("window.addEventListener('pagehide',stop)"));
-    assert!(
-        main.contains("function start(){\n  if(worker||fatalState)return;\n  clearProtected();")
-    );
+    assert!(main.contains("window.addEventListener('pagehide',()=>{"));
+    assert!(main.contains("if(leaveDialog?.open)leaveDialog.close();\n  stop();"));
+    assert!(main.contains("leaving=false;\n  clearProtected();"));
     assert!(main.contains("if(old)old.terminate();clearProtected();"));
     assert!(main.contains("if(worker!==owned||fatalState)return"));
     assert!(main.contains("function fatal(message)"));
@@ -375,6 +507,66 @@ fn focused_layout_and_disclosure_are_declarative_reusable_primitives() {
 }
 
 #[test]
+fn workbench_keeps_project_selects_in_a_closed_native_disclosure() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let (_, header) = html.split_once("<header").unwrap();
+    let (header, _) = header.split_once("</header>").unwrap();
+    assert!(header.contains("id=\"workbench-context\""));
+
+    let (before_options, options) = html.split_once("<details id=\"project-options\"").unwrap();
+    let (attributes, options) = options.split_once('>').unwrap();
+    assert!(!attributes.split_whitespace().any(|part| part == "open"));
+    assert!(attributes.contains("name=\"workspace-options\""));
+    let (_, view) = before_options
+        .split_once("<details id=\"workspace-options\"")
+        .unwrap();
+    let (view_attributes, _) = view.split_once('>').unwrap();
+    assert!(view_attributes.contains("name=\"workspace-options\""));
+    let (options, _) = options.split_once("</details>").unwrap();
+    assert!(options.starts_with("<summary>Project options</summary>"));
+    assert!(options.contains("id=\"node\""));
+    assert!(options.contains("id=\"project\""));
+    assert!(!options.contains("id=\"inspect\""));
+}
+
+#[test]
+fn workbench_refresh_follows_pane_navigation_as_an_action() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let (_, controls) = html.split_once("<div class=\"fg-pane-actions\">").unwrap();
+    let (navigation, actions) = controls.split_once("</nav>").unwrap();
+    let (_, last_switch) = navigation.rsplit_once("<button").unwrap();
+    assert!(last_switch.contains("id=\"problems-panel-switch\""));
+    assert!(!navigation.contains("id=\"inspect\""));
+
+    let (refresh, _) = actions.split_once("</button>").unwrap();
+    assert!(refresh.starts_with("<button"));
+    assert!(refresh.contains("id=\"inspect\""));
+    assert!(refresh.contains("data-action=\"inspect\""));
+    assert!(refresh.contains("aria-label=\"Refresh project\""));
+    assert!(refresh.contains("title=\"Refresh project\""));
+    let (_, glyph) = refresh.split_once('>').unwrap();
+    assert!(glyph.starts_with("<span"));
+    assert!(glyph.contains("aria-hidden=\"true\""));
+    assert!(glyph.contains("data-glyph=\"↻\""));
+    assert!(glyph.ends_with("></span>"));
+    assert!(!refresh.contains("data-pane-switch"));
+}
+
+#[test]
+fn workbench_places_report_phase_in_inspection_details() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let (_, details) = html
+        .split_once("<details id=\"inspection-details\"")
+        .unwrap();
+    let (details, _) = details.split_once("</details>").unwrap();
+    assert!(details.contains("id=\"phase-label\""));
+    assert!(html.contains("id=\"inspection-actions\""));
+}
+
+#[test]
 fn source_and_pane_navigation_are_reusable_safe_declarations() {
     let mut c = config();
     c.document = Document {
@@ -401,7 +593,7 @@ fn source_and_pane_navigation_are_reusable_safe_declarations() {
     let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
     assert!(!main.contains("select_search_result"));
     assert!(!main.contains("ide.source"));
-    assert!(!main.contains("innerHTML"));
+    assert!(main.contains("text.textContent=lines[i];"));
     let transport = ide_transport();
     let source = transport
         .bindings

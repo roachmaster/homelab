@@ -1,6 +1,9 @@
 //! The IDE's authored UI: typed components plus a separate YAML theme.
 //! No application HTML, CSS, JS, raw-code field or string template lives here.
-use super::{Document, HeaderBinding, RequestBinding, Transport};
+use super::{
+    CheckpointBinding, Document, HeaderBinding, RequestBinding, RequestPolicy, TimerBinding,
+    Transport,
+};
 use crate::component;
 
 pub fn ide_document() -> Document {
@@ -8,6 +11,7 @@ pub fn ide_document() -> Document {
         title: "Forge IDE".into(),
         subtitle: "Chat and source workbench".into(),
         children: vec![
+            component!(brand_context "workbench-context"),
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [
                 component!(panel "pair-panel", "Connect to your Forge host"; [
@@ -17,33 +21,135 @@ pub fn ide_document() -> Document {
             ]),
             component!(navigation "ide-navigation", "Forge IDE views"; [
                 component!(button "open-chat", "Chat", "open_chat"),
+                component!(button "open-mail", "Mail", "open_mail"),
                 component!(button "open-workbench", "Workbench", "open_workbench"),
+                component!(navigation_link "open-design", "Design", Design),
             ]),
             component!(screen "chat", "Chat", true; [
                 component!(reading_column [
                     component!(toolbar [
                         component!(select "chat-conversation", "Conversation", "select_chat"),
+                        component!(toggle_panel "chat-history-toggle", "Previous chats", "show_chat_history", "chat-history-panel"),
+                        component!(toggle_panel "chat-manage-toggle", "Manage", "manage_saved_chat", "chat-manage-panel"),
                         component!(button "new-chat", "New chat", "new_chat"),
                     ]),
-                    component!(transcript "chat-transcript", "Chat messages"),
+                    component!(panel "chat-history-panel", "Saved chats"; [
+                        component!(tree "chat-history-list", "Saved chats"),
+                        component!(row [
+                            component!(button "chat-history-newer", "Newer chats", "newer_chat_history"),
+                            component!(button "chat-history-older", "Older chats", "more_chat_history"),
+                        ]),
+                    ]),
+                    component!(panel "chat-manage-panel", "Chat retention"; [
+                        component!(caption "chat-retention-label", ""),
+                        component!(region "chat-retention-actions"; [
+                            component!(row [
+                                component!(button "chat-show-expiry", "Set expiration", "show_chat_expiry"),
+                                component!(button "chat-long-term", "Keep long term", "keep_chat_long_term"),
+                                component!(button "chat-show-delete", "Delete chat", "show_chat_delete"),
+                            ]),
+                        ]),
+                    ]),
+                    component!(status "chat-history-status", ""),
+                    component!(dialog "chat-expiry-dialog", "Set expiration", "close_chat_dialog", "chat-expiry-date"; [
+                        component!(text "chat-expiry-help", "The chat will be kept through the selected date in UTC."),
+                        component!(date_input "chat-expiry-date", "Keep through", "set_chat_expiry"),
+                        component!(status "chat-expiry-status", ""),
+                        component!(row [
+                            component!(button "chat-expiry-cancel", "Cancel", "close_chat_dialog"),
+                            component!(checked_button "chat-expiry-save", "Save expiration", "confirm_chat_expiry", "chat-expiry-date"),
+                        ]),
+                    ]),
+                    component!(dialog "chat-delete-dialog", "Delete chat", "close_chat_dialog", "chat-delete-cancel"; [
+                        component!(text "chat-delete-description", ""),
+                        component!(status "chat-delete-status", ""),
+                        component!(row [
+                            component!(button "chat-delete-cancel", "Cancel", "close_chat_dialog"),
+                            component!(button "chat-delete-confirm", "Delete chat", "confirm_chat_delete"),
+                        ]),
+                    ]),
+                    component!(transcript "chat-transcript", "Chat messages", "You", "Forge",
+                        "Send a message to start this conversation."),
                     component!(status "chat-status", ""),
                     component!(textarea "chat-draft", "Message", "set_chat_draft"),
                     component!(row [
-                        component!(checked_button "send-chat", "Send", "send_chat", "chat-draft"),
+                        component!(region "chat-model-choice"; [
+                            component!(select "chat-model", "Model", "select_chat_model"),
+                        ]),
+                        component!(uuid_button "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id"),
                         component!(checked_button "send-chat-with-file", "Send with file", "send_chat_with_file", "chat-draft"),
+                        component!(button "chat-run-cancel", "Cancel run", "cancel_chat_run"),
+                        component!(button "chat-run-retry", "Retry send", "retry_chat_submit"),
+                    ]),
+                ]),
+            ]),
+            component!(screen "mail", "Mail", true; [
+                component!(reading_column [
+                    component!(toolbar [
+                        component!(navigation "mail-folders", "Mail folders"; [
+                            component!(button "mail-inbox", "Inbox", "mail_inbox"),
+                            component!(button "mail-archive", "Archive", "mail_archive"),
+                        ]),
+                        component!(button "mail-back", "← Back to threads", "mail_back"),
+                        component!(primary_icon "mail-refresh", "Refresh Mail", "mail_refresh", '↻'),
+                        component!(primary "mail-new", "New message", "mail_new_message"),
+                    ]),
+                    component!(status "mail-status", ""),
+                    component!(reader_layout [
+                        component!(region "mail-list-panel"; [
+                            component!(stacked_tree "mail-threads", "Mail threads"),
+                        ]),
+                        component!(region "mail-detail-panel"; [
+                            component!(region "mail-reader"; [
+                                component!(heading "mail-title", "Thread"),
+                                component!(status "mail-thread-status", ""),
+                                component!(caption "mail-run-failure", ""),
+                                component!(text "mail-archive-reason", "Recall limit reached. There is too little room for another exchange in this thread."),
+                                component!(transcript "mail-transcript", "Mail messages", "You", "Forge",
+                                    "Send a message to start this conversation."),
+                                component!(caption "mail-context", ""),
+                                component!(row [
+                                    component!(primary "mail-follow-up", "Follow up", "mail_follow_up"),
+                                    component!(uuid_button "mail-retry", "Retry saved message", "retry_mail", "mail-draft", "idempotency_key"),
+                                ]),
+                            ]),
+                            component!(region "mail-composer"; [
+                                component!(region "mail-subject-panel"; [
+                                    component!(heading "mail-compose-title", "New message"),
+                                    component!(caption "mail-recipient", "To · GPT-OSS 120B"),
+                                    component!(text_field "mail-subject", "Subject", "set_mail_subject"),
+                                ]),
+                                component!(textarea "mail-draft", "Message", "set_mail_draft"),
+                                component!(row [
+                                    component!(uuid_button "mail-send", "Send", "send_mail", "mail-draft", "idempotency_key"),
+                                    component!(button "mail-discard", "Discard draft", "mail_discard_draft"),
+                                ]),
+                            ]),
+                        ]),
+                    ]),
+                    component!(region "mail-page-actions"; [
+                        component!(row [
+                            component!(button "mail-previous", "Previous page", "mail_previous"),
+                            component!(button "mail-next", "Next page", "mail_next"),
+                        ]),
                     ]),
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
-                component!(compact_toolbar "project-controls", "Project controls"; [
-                    component!(select "node", "Node", "select_node"),
-                    component!(select "project", "Project", "select_project"),
-                    component!(primary "inspect", "Refresh project", "inspect"),
-                    component!(button "cancel", "Cancel local wait", "cancel"),
-                    component!(reload "reload-session", "Reload to check session"),
-                    component!(caption "phase-label", "Checking session"),
+                component!(region "inspection-actions"; [
+                    component!(toolbar [
+                        component!(button "cancel", "Cancel local wait", "cancel"),
+                        component!(reload "reload-session", "Reload to check session"),
+                    ]),
                 ]),
                 component!(focused_layout "workspace"; [
+                    component!(layout_controls [
+                        component!(disclosure "project-options", "Project options"; [
+                            component!(select "node", "Node", "select_node"),
+                            component!(select "project", "Project", "select_project"),
+                        ]),
+                    ]),
+                    component!(pane_action component!(primary_icon "inspect", "Refresh project", "inspect", '↻')),
                     component!(pane "explorer-panel", "Explorer", Leading, 180, 250, 400; [
                         component!(filter "project-query", "Find files or symbols", "set_project_query"),
                         component!(region "search-panel"; [
@@ -59,20 +165,23 @@ pub fn ide_document() -> Document {
                         ]),
                     ]),
                     component!(pane "workspace-panel", "File", Main, 240, 480, 960; [
-                        component!(region "file-heading"; [
-                            component!(pane_link "back-to-files", "Back to files", "explorer-panel"),
-                            component!(heading "selection-title", "Select a file to read its source"),
-                        ]),
+                        component!(pane_header_link "back-to-files", "Back to files", "explorer-panel", '←'),
+                        component!(heading "selection-title", "Select a file to read its source"),
                         component!(caption "workspace-summary", "Find a file or symbol in Explorer."),
                         component!(panel "source-panel", "Source · Read only"; [
                             component!(source_wrap "source-wrap", "Wrap", "source-view"),
                             component!(status "source-status", ""),
-                            component!(source "source-view", "Read-only source"),
-                            component!(diff "workbench-edit-diff", "Proposed diff"),
-                            component!(caption "source-range", ""),
-                            component!(region "source-pagination"; [
-                                component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
+                            component!(region "workbench-source-content"; [
+                                component!(source_formats "source", "Empty Markdown file.",
+                                    "Markdown display is unavailable for this file size."; [
+                                    component!(source "source-view", "Read-only source"),
+                                    component!(caption "source-range", ""),
+                                    component!(region "source-pagination"; [
+                                        component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
+                                    ]),
+                                ]),
                             ]),
+                            component!(diff "workbench-edit-diff", "Proposed diff"),
                         ]),
                         component!(panel "declaration-details-panel", "Selected declaration"; [
                             component!(details "declaration-details"),
@@ -124,6 +233,7 @@ pub fn ide_document() -> Document {
                     ]),
                 ]),
                 component!(disclosure "inspection-details", "Inspection details"; [
+                    component!(caption "phase-label", "Checking session"),
                     component!(context "selection-context", ""),
                     component!(caption "summary", "No report yet"),
                     component!(caption "inspection-limits", "Read-only source and declarations. Find searches names in this loaded report, not source contents. Source is checked against the inspected version. Cancel stops only this browser wait."),
@@ -155,25 +265,7 @@ pub fn ide_transport() -> Transport {
         "Forge-Request-Id",
         "request.request_id",
     ));
-    let mut edit = common.clone();
-    edit.push(HeaderBinding::literal(
-        "Forge-Destination",
-        "ide.propose_edit",
-    ));
-    edit.push(HeaderBinding::field(
-        "Forge-Request-Id",
-        "request.request_id",
-    ));
-    let mut write = common.clone();
-    write.push(HeaderBinding::literal(
-        "Forge-Destination",
-        "ide.edit_write",
-    ));
-    write.push(HeaderBinding::field(
-        "Forge-Request-Id",
-        "request.request_id",
-    ));
-    let mut inspect = common;
+    let mut inspect = common.clone();
     inspect.extend([
         HeaderBinding::field("Forge-Destination", "request.destination"),
         HeaderBinding::field("Forge-Request-Id", "request.token.request_id"),
@@ -181,73 +273,188 @@ pub fn ide_transport() -> Transport {
         HeaderBinding::field("Forge-Target-Incarnation", "request.target_incarnation"),
         HeaderBinding::field("Forge-Expires-Unix-Ms", "request.expires_unix_ms"),
     ]);
+    let mut bindings = vec![
+        RequestBinding {
+            kind: "pair".into(),
+            request_id: "request_id".into(),
+            headers: pair,
+            csrf: false,
+            timeout_ms: None,
+            deadline: None,
+            error_events: vec![],
+            accept_events: vec!["paired".into(), "pair_failed".into()],
+            policy: RequestPolicy::default(),
+        },
+        RequestBinding {
+            kind: "resume".into(),
+            request_id: "request_id".into(),
+            headers: resume,
+            csrf: false,
+            // A returning tab can be queued behind its interrupted inference.
+            timeout_ms: Some(30_000),
+            deadline: None,
+            error_events: vec![],
+            accept_events: vec!["paired".into(), "pair_failed".into()],
+            policy: RequestPolicy::default(),
+        },
+        RequestBinding {
+            kind: "inspect".into(),
+            request_id: "request.token.request_id".into(),
+            headers: inspect.clone(),
+            csrf: true,
+            timeout_ms: None,
+            deadline: Some("request.expires_unix_ms".into()),
+            error_events: vec![],
+            accept_events: vec!["result".into()],
+            policy: RequestPolicy::default(),
+        },
+        RequestBinding {
+            kind: "chat".into(),
+            request_id: "request.request_id".into(),
+            headers: chat,
+            csrf: true,
+            timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
+            deadline: None,
+            error_events: vec![],
+            accept_events: vec!["chat_result".into()],
+            policy: RequestPolicy {
+                expire_session_on_denial: true,
+                ..RequestPolicy::default()
+            },
+        },
+        RequestBinding {
+            kind: "source".into(),
+            request_id: "request.token.request_id".into(),
+            headers: inspect,
+            csrf: true,
+            timeout_ms: None,
+            deadline: Some("request.expires_unix_ms".into()),
+            error_events: vec![],
+            accept_events: vec!["source_result".into()],
+            policy: RequestPolicy::default(),
+        },
+    ];
+    for (kind, destination, success_event) in [
+        ("propose_edit", "ide.propose_edit", "edit_result"),
+        ("edit_write", "ide.edit_write", "edit_write_result"),
+    ] {
+        let mut headers = common.clone();
+        headers.push(HeaderBinding::literal("Forge-Destination", destination));
+        headers.push(HeaderBinding::field(
+            "Forge-Request-Id",
+            "request.request_id",
+        ));
+        bindings.push(RequestBinding {
+            kind: kind.into(),
+            request_id: "request.request_id".into(),
+            headers,
+            csrf: true,
+            timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
+            deadline: None,
+            error_events: vec![],
+            accept_events: vec![success_event.into()],
+            policy: RequestPolicy {
+                expire_session_on_denial: true,
+                ..RequestPolicy::default()
+            },
+        });
+    }
+    for (kind, destination, success_event, error_event) in [
+        (
+            "chat_history_list",
+            "ide.chat.history.list",
+            "chat_history_listed",
+            "chat_history_failed",
+        ),
+        (
+            "chat_history_open",
+            "ide.chat.history.open",
+            "chat_history_opened",
+            "chat_history_failed",
+        ),
+        (
+            "chat_history_retention_set",
+            "ide.chat.history.retention.set",
+            "chat_history_retention_set",
+            "chat_history_failed",
+        ),
+        (
+            "chat_history_delete",
+            "ide.chat.history.delete",
+            "chat_history_deleted",
+            "chat_history_failed",
+        ),
+        (
+            "chat_run_submit",
+            "ide.chat.run.submit",
+            "chat_run_accepted",
+            "chat_run_failed",
+        ),
+        (
+            "chat_run_events",
+            "ide.chat.run.events",
+            "chat_run_events",
+            "chat_run_failed",
+        ),
+        (
+            "chat_run_cancel",
+            "ide.chat.run.cancel",
+            "chat_run_cancelled",
+            "chat_run_failed",
+        ),
+        (
+            "chat_run_models",
+            "ide.chat.run.models",
+            "chat_run_models_listed",
+            "chat_run_failed",
+        ),
+        ("mail_list", "ide.mail.list", "mail_listed", "mail_failed"),
+        ("mail_open", "ide.mail.open", "mail_opened", "mail_failed"),
+        ("mail_send", "ide.mail.send", "mail_sent", "mail_failed"),
+        ("mail_retry", "ide.mail.retry", "mail_sent", "mail_failed"),
+    ] {
+        let mut headers = common.clone();
+        headers.push(HeaderBinding::literal("Forge-Destination", destination));
+        headers.push(HeaderBinding::field("Forge-Request-Id", "request_id"));
+        let mut policy = RequestPolicy {
+            wait_for_slot_ms: Some(5_000),
+            expire_session_on_denial: true,
+            ..RequestPolicy::default()
+        };
+        match kind {
+            "chat_run_events" => policy.delay_ms = Some(1_200),
+            "chat_run_submit" => {
+                policy.checkpoint = Some(CheckpointBinding {
+                    snapshot_path: "chat.pending_run".into(),
+                    fields: ["chat_id", "idempotency_key", "model_id"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                });
+            }
+            _ => {}
+        }
+        bindings.push(RequestBinding {
+            kind: kind.into(),
+            request_id: "request_id".into(),
+            headers,
+            csrf: true,
+            timeout_ms: None,
+            deadline: None,
+            accept_events: vec![success_event.into()],
+            error_events: vec![error_event.into()],
+            policy,
+        });
+    }
     Transport {
         initial_event: "resume".into(),
-        bindings: vec![
-            RequestBinding {
-                kind: "pair".into(),
-                request_id: "request_id".into(),
-                headers: pair,
-                csrf: false,
-                timeout_ms: None,
-                deadline: None,
-                accept_events: vec!["paired".into(), "pair_failed".into()],
-            },
-            RequestBinding {
-                kind: "resume".into(),
-                request_id: "request_id".into(),
-                headers: resume,
-                csrf: false,
-                timeout_ms: None,
-                deadline: None,
-                accept_events: vec!["paired".into(), "pair_failed".into()],
-            },
-            RequestBinding {
-                kind: "inspect".into(),
-                request_id: "request.token.request_id".into(),
-                headers: inspect.clone(),
-                csrf: true,
-                timeout_ms: None,
-                deadline: Some("request.expires_unix_ms".into()),
-                accept_events: vec!["result".into()],
-            },
-            RequestBinding {
-                kind: "chat".into(),
-                request_id: "request.request_id".into(),
-                headers: chat,
-                csrf: true,
-                timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
-                deadline: None,
-                accept_events: vec!["chat_result".into()],
-            },
-            RequestBinding {
-                kind: "propose_edit".into(),
-                request_id: "request.request_id".into(),
-                headers: edit,
-                csrf: true,
-                timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
-                deadline: None,
-                accept_events: vec!["edit_result".into()],
-            },
-            RequestBinding {
-                kind: "edit_write".into(),
-                request_id: "request.request_id".into(),
-                headers: write,
-                csrf: true,
-                timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
-                deadline: None,
-                accept_events: vec!["edit_write_result".into()],
-            },
-            RequestBinding {
-                kind: "source".into(),
-                request_id: "request.token.request_id".into(),
-                headers: inspect,
-                csrf: true,
-                timeout_ms: None,
-                deadline: Some("request.expires_unix_ms".into()),
-                accept_events: vec!["source_result".into()],
-            },
-        ],
+        bindings,
+        timers: vec![TimerBinding {
+            effect_kind: "mail_watch".into(),
+            event_kind: "poll_mail".into(),
+            argument_field: "watch".into(),
+            delay_ms: 5_000,
+        }],
     }
 }
 pub const IDE_THEME: &str = include_str!("../../ui/theme.yaml");
