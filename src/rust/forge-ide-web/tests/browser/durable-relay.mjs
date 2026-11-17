@@ -8,6 +8,20 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const maxBytes = 2 * 1024 * 1024;
+export const mailSubject = 'Review ' + 'unbrokenSubject'.repeat(7);
+
+function mailThread(archived) {
+  return {
+    thread_id: archived ? '56ad75f0-8cae-4766-b271-57620606c92d' : '8452b258-df30-4985-bfa1-cd98245b2a06',
+    subject: archived ? 'Archived fixture thread' : mailSubject,
+    status: archived ? 'archived' : 'ready',
+    updated_at: '2026-11-16T22:11:59.293456Z',
+    turn_count: 1,
+    revision: 2,
+    latest_run_id: 'b9b570aa-775d-4c25-b4ac-c122e292e2c3',
+    archive_reason: archived ? 'context_limit' : null,
+  };
+}
 
 async function readJson(request) {
   const chunks = [];
@@ -70,6 +84,26 @@ export async function startDurableRelay(prompt, reply) {
         if (request.headers['forge-request-id'] !== id || request.headers['forge-envelope-version'] !== '1' ||
             request.headers['forge-contract-version'] !== '1') {
           fail(400, 'invalid_request');
+          return;
+        }
+        if (destination === 'ide.mail.list' && body.kind === 'mail_list') {
+          replyTo(200, { kind: 'mail_listed', items: [mailThread(body.archived === true)], next_cursor: null });
+          return;
+        }
+        if (destination === 'ide.mail.open' && body.kind === 'mail_open') {
+          const thread = [mailThread(false), mailThread(true)].find(item => item.thread_id === body.thread_id);
+          if (!thread) {
+            replyTo(404, { kind: 'mail_failed', code: 'not_found' });
+            return;
+          }
+          replyTo(200, { kind: 'mail_opened',
+            thread: { ...thread, context_remaining_tokens: thread.status === 'archived' ? null : 1024 },
+            messages: [
+              { sequence: 1, role: 'user', content: 'Review the fixture' },
+              { sequence: 2, role: 'assistant', content: '## Fixture review' },
+            ],
+            next_sequence: null,
+          });
           return;
         }
         if (destination === 'ide.chat.run.models' && body.kind === 'chat_run_models') {

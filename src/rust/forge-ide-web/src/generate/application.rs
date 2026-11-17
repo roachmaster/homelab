@@ -81,16 +81,18 @@ pub fn ide_document() -> Document {
             component!(screen "mail", "Mail", true; [
                 component!(reading_column [
                     component!(toolbar [
-                        component!(button "mail-inbox", "Inbox", "mail_inbox"),
-                        component!(button "mail-archive", "Archive", "mail_archive"),
+                        component!(navigation "mail-folders", "Mail folders"; [
+                            component!(button "mail-inbox", "Inbox", "mail_inbox"),
+                            component!(button "mail-archive", "Archive", "mail_archive"),
+                        ]),
                         component!(button "mail-back", "← Back to threads", "mail_back"),
-                        component!(button "mail-refresh", "Refresh", "mail_refresh"),
+                        component!(primary_icon "mail-refresh", "Refresh Mail", "mail_refresh", '↻'),
                         component!(primary "mail-new", "New message", "mail_new_message"),
                     ]),
                     component!(status "mail-status", ""),
                     component!(reader_layout [
                         component!(region "mail-list-panel"; [
-                            component!(tree "mail-threads", "Mail threads"),
+                            component!(stacked_tree "mail-threads", "Mail threads"),
                         ]),
                         component!(region "mail-detail-panel"; [
                             component!(region "mail-reader"; [

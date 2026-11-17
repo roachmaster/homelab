@@ -178,6 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "token_file": PathBuf::from(token_file),
             "workspace_persistence": true,
             "async_dispatch": true,
+            "mail_enabled": true,
         });
     }
     let config_path = fixture.root.join("host.json");

@@ -609,8 +609,7 @@ impl Mail {
         };
         view.visibility.extend(
             [
-                ("mail-inbox", active && self.pane == Pane::List),
-                ("mail-archive", active && self.pane == Pane::List),
+                ("mail-folders", active && self.pane == Pane::List),
                 ("mail-page-actions", active && (previous || next)),
             ]
             .map(|(id, visible)| VisibilityBinding { id, visible }),
@@ -733,14 +732,14 @@ impl Mail {
                         id: summary.thread_id.clone(),
                         label: summary.subject.clone(),
                         glyph: String::new(),
-                        icon: RowIcon::Document,
+                        icon: RowIcon::Symbol,
                         kind_label: "Thread",
                         parent: None,
                         depth: 0,
                         secondary: format!(
                             "{} · {}",
                             status_text(summary.status),
-                            summary.updated_at
+                            display_updated_at(&summary.updated_at)
                         ),
                         selected: reading && summary.thread_id == self.reader.thread_id,
                         expanded: None,
@@ -803,4 +802,17 @@ fn failure_text(failure: MailRunFailure) -> &'static str {
         }
         MailRunFailure::GenerationFailed => "The model could not complete this reply.",
     }
+}
+
+fn display_updated_at(timestamp: &str) -> String {
+    let Some((date, time)) = timestamp
+        .strip_suffix('Z')
+        .and_then(|stamp| stamp.split_once('T'))
+    else {
+        return timestamp.into();
+    };
+    let Some(clock) = time.get(..5) else {
+        return timestamp.into();
+    };
+    format!("{date} {clock} UTC")
 }

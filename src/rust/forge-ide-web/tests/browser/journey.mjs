@@ -11,7 +11,7 @@ import { acquireOwned, bounded, cleanupResources, runHarness } from './report.mj
 import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from './diagnostics.mjs';
 import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
-import { startDurableRelay } from './durable-relay.mjs';
+import { mailSubject, startDurableRelay } from './durable-relay.mjs';
 
 let assets, agent, fixtureBinary, output, browser, browserOwner, durableRelayOwner, check, report;
 const active = new Set();
@@ -1004,6 +1004,64 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   report.pass('probe.page.lifecycle');
 }
 
+async function mailLayoutJourney(page, desktop) {
+  process.stderr.write('QA_CHECK mail_folder_layout\n');
+  const inbox = page.locator('#mail-inbox');
+  const archive = page.locator('#mail-archive');
+  const refresh = page.getByRole('button', { name: 'Refresh Mail', exact: true });
+  const row = page.locator('#mail-threads [role="treeitem"]').filter({ hasText: mailSubject });
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.locator('#open-mail').click();
+  await check(inbox).toHaveAttribute('aria-current', 'page');
+  await check(inbox).toHaveCSS('border-top-color', 'rgb(142, 188, 255)');
+  await check(archive).not.toHaveAttribute('aria-current', 'page');
+  await check(row.locator('.fg-row-label')).toHaveText(mailSubject);
+  await check(row.locator('.fg-row-secondary')).toHaveText('Reply ready · 2026-11-16 22:11 UTC');
+  await check(row.locator('.fg-glyph')).toBeHidden();
+
+  for (const width of [320, 375, 390]) {
+    await page.setViewportSize({ width, height: 720 });
+    const [bounds, subject, details, icon, folders, compose] = await Promise.all([
+      row.boundingBox(), row.locator('.fg-row-label').boundingBox(),
+      row.locator('.fg-row-secondary').boundingBox(), refresh.boundingBox(),
+      page.locator('#mail-folders').boundingBox(), page.locator('#mail-new').boundingBox(),
+    ]);
+    assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1, 'Mail row fits the phone');
+    assert.ok(subject && details && details.y >= subject.y + subject.height, 'metadata sits below its subject');
+    assert.ok(icon && icon.width >= 44 && icon.height >= 44 && Math.abs(icon.width - icon.height) <= 1,
+      'Refresh has a compact square touch target');
+    assert.ok(folders && icon && compose && Math.abs(folders.y - compose.y) <= 1 && Math.abs(icon.y - compose.y) <= 1,
+      'Mail folders and actions fit on a single phone toolbar row');
+    assert.equal(await row.evaluate(node => [...node.children].filter(part => part.getClientRects().length)
+      .every(part => part.scrollWidth <= part.clientWidth + 1)), true, 'the subject and metadata wrap without clipping');
+    assert.equal(await page.evaluate(() => {
+      window.scrollTo(1000, 0);
+      return document.documentElement.scrollWidth <= innerWidth + 1 && window.scrollX === 0;
+    }), true, 'the phone page cannot scroll sideways');
+  }
+  await archive.click();
+  await check(archive).toHaveAttribute('aria-current', 'page');
+  await check(inbox).not.toHaveAttribute('aria-current', 'page');
+  await check(page.locator('#mail-threads [role="treeitem"]')).toContainText('Archived fixture thread');
+  await inbox.click();
+  await check(row).toBeVisible();
+
+  await page.setViewportSize(desktop);
+  await row.click();
+  await check(page.locator('#mail-title')).toHaveText(mailSubject);
+  const [sidebar, reader] = await Promise.all([
+    page.locator('#mail-list-panel').boundingBox(), page.locator('#mail-reader').boundingBox(),
+  ]);
+  assert.ok(sidebar && reader && sidebar.x + sidebar.width <= reader.x, 'desktop keeps the thread list beside the reader');
+  await page.setViewportSize({ width: 320, height: 720 });
+  await check(page.locator('#mail-list-panel')).toBeHidden();
+  await check(page.locator('#mail-reader')).toBeVisible();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+    'the single-pane reader fits the narrow phone');
+  await page.setViewportSize(desktop);
+  await page.locator('#open-chat').click();
+}
+
 async function durableHostRestartJourney() {
   const prompt = 'Keep this submitted conversation';
   const reply = '## Durable fixture reply\n\n**Ready after restart.**';
@@ -1071,6 +1129,7 @@ async function durableHostRestartJourney() {
     await restart();
     const { page, traffic } = await startPage();
     await pair(page);
+    await mailLayoutJourney(page, viewport);
     await check(page.locator('#chat')).toBeVisible();
     const model = page.getByRole('combobox', { name: 'Model', exact: true });
     await check(model).toHaveValue('gpt-oss-20b');

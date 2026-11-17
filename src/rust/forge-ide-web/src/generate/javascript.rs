@@ -263,7 +263,8 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       select.setAttribute('aria-level',String(row.depth+1));select.setAttribute('aria-selected',String(row.selected));
       if(row.expanded===null)select.removeAttribute('aria-expanded');else select.setAttribute('aria-expanded',String(row.expanded));
       select.children[0].textContent=row.glyph||'';select.children[1].textContent=row.label;select.children[2].textContent=row.secondary;
-      select.setAttribute('aria-label',row.kind_label?row.label+', '+row.kind_label:row.label);select.title=row.label;
+      const description=n.classList?.contains('fg-stacked-tree')?row.secondary:row.kind_label;
+      select.setAttribute('aria-label',description?row.label+', '+description:row.label);select.title=row.label;
       // Preserve stable rows and their scroll anchor; moving every existing node
       // would transiently reorder the list even when its accepted order is unchanged.
       const at=n.children[rowIndex++];if(at!==item)n.insertBefore(item,at||null);

@@ -345,8 +345,13 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::PairForm { id, label, action } => {
             let _=write!(out,"<form id=\"{id}-form\" data-action=\"{}\" class=\"fg-row\"><label class=\"fg-field\" for=\"{id}-code\"><span>{}</span><input id=\"{id}-code\" name=\"value\" type=\"password\" maxlength=\"128\" autocomplete=\"off\" required></label><button id=\"{id}\" type=\"submit\" disabled>Connect</button></form>",escape(action),escape(label));
         }
-        Component::Tree { id, label } => {
-            let _=write!(out,"<div id=\"{}\" class=\"fg-tree\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
+        Component::Tree { id, label, stacked } => {
+            let class = if *stacked {
+                "fg-tree fg-stacked-tree"
+            } else {
+                "fg-tree"
+            };
+            let _=write!(out,"<div id=\"{}\" class=\"{class}\" role=\"tree\" aria-label=\"{}\" tabindex=\"0\"><p class=\"fg-empty\">No report yet</p></div><p id=\"{}-full-name\" class=\"fg-focus-name\" data-name-for=\"{}\" aria-label=\"Focused item full name\"></p>",escape(id),escape(label),escape(id),escape(id));
         }
         Component::Source { id, label } => {
             let _ = write!(out, "<pre id=\"{}\" class=\"fg-source\" data-source-view tabindex=\"0\" aria-label=\"{}\"></pre>", escape(id), escape(label));

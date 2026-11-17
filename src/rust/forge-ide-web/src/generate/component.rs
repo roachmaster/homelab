@@ -178,6 +178,7 @@ pub enum Component {
     Tree {
         id: String,
         label: String,
+        stacked: bool,
     },
     /// Read-only, bounded source window supplied by the accepted model view.
     Source {
@@ -249,7 +250,8 @@ macro_rules! component {
     (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into()} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into()} };
+    (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:false} };
+    (stacked_tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:true} };
     (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
     (source_formats $prefix:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::SourceFormats{prefix:$prefix.into(),children:vec![$($child),*]} };
     (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
@@ -331,7 +333,7 @@ impl Document {
                     (Some(id), Some(label), Some(action))
                 }
                 Component::Transcript { id, label }
-                | Component::Tree { id, label }
+                | Component::Tree { id, label, .. }
                 | Component::Reload { id, label }
                 | Component::NavigationLink { id, label, .. }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
