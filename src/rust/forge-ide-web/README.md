@@ -49,6 +49,13 @@ profile depends only on the portable model and serialization. Template/bootstrap
 provider/YAML/hash dependencies belong to the native build feature; the native
 host is a different package. No native filesystem/parser/TLS/runtime enters WASM.
 
+The Rust Markdown renderer converts assistant replies and verified Markdown
+file previews to sanitized HTML at view time. It escapes source text, emits
+only approved tags, shows image alt text, and allows HTTP(S) links with
+`target="_blank" rel="noopener noreferrer"`. The generated IDE browser app
+applies that HTML through the shared `setMarkdown` adapter. A generation test
+checks the single `innerHTML` assignment. [Portable UI model](../forge-ide-ui/README.md) · [Generation test](tests/generation.rs)
+
 ## Run from repository root
 
 Prerequisites: stable Rust, `wasm32-unknown-unknown`, Python3 and Node (for checks).

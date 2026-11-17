@@ -33,6 +33,18 @@ If a prerequisite or sandbox blocks a run, report the exact failed stage and wha
 remains unrun. Do not auto-install packages, run an upstream launcher, add MCP
 configuration, start an exposed server or change host security as a fallback.
 
+## Assert the rendered deliverable
+
+Native tests exercise the model and renderer. For changes to generated output,
+also assert what the browser renders.
+
+- Assert heading text, table headers and cells, emphasis, and links in their
+  rendered order.
+- Check that Markdown heading markers and table delimiters disappear from
+  rendered prose. Preserve literal markers in code examples.
+- Capture and inspect screenshots while the content under test is visible.
+  For Chat, capture the reply before switching conversations.
+
 ## Explore without changing the architecture
 
 Use fresh page/accessibility snapshots to identify current controls, and target

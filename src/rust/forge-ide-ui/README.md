@@ -21,8 +21,10 @@ codec, not internal state. The same model runs in native unit tests and real
   once as an effect and is not stored in the model or view; this is not a claim
   of cryptographic memory erasure in Rust or JavaScript.
 - Generated main-thread primitives apply the generic `ViewModel` bindings as text
-  and semantic controls, preserving focus/browser lifecycle. No domain reducer,
-  source-derived HTML, backend fetch or application-specific JavaScript is needed.
+  and semantic controls, preserving focus and browser lifecycle. Assistant replies
+  and verified Markdown file previews pass through the sanitizing Rust renderer
+  in `src/markdown.rs`. The generated IDE browser app applies the resulting HTML
+  through the single `innerHTML` assignment in `setMarkdown`.
 - Host and agent independently authorize every request. Catalog choices, view IDs,
   browser request IDs and this model are **not authentication or authority**.
 
