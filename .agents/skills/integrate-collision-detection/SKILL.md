@@ -47,41 +47,35 @@ Each query has one job. Pick by the question, not by habit:
 | Need | Query | What you get |
 | --- | --- | --- |
 | Is there ground below these feet? | Ray (short, downward) | `Some(Hit)` with the floor tile and distance, or `None` |
-| What does this shot hit first? | Ray (long, aimed) | The nearest hit point, surface normal, distance, and target |
-| What will this fast body hit this tick? | Swept shape | First time-of-impact (Q16 fraction of the tick) + the contact |
-| What is this attack touching? | Phantom overlap | The set of overlapping collidables (stable IDs), bounded at 8 |
-| What is near this trigger volume? | Phantom overlap | The set of overlapping collidables, no response |
+| What does this shot hit first? | Ray (long, aimed) | The nearest hit point, surface normal, distance, target |
+| Will this fast body hit a wall this tick? | Swept shape | First time-of-impact (Q16 fraction) + contact |
+| What does this action box overlap? | Phantom / overlap | Bounded set of stable IDs (≤ 8), no motion |
 
-**Ray.** `raycast(origin, direction, max_distance)` walks the
-tiles along the ray and tests bodies whose AABBs the ray
-crosses, returning the nearest hit. A ray that hits nothing
-returns `None` — an empty result is a normal answer, not an
-error. The hit point is the exact tile boundary or body face
-in Q16; the normal is the entry face's axis. A ray never moves
-a body and never creates a contact.
+**Ray.** `raycast(origin, direction, max_distance)` walks tiles
+and tests bodies, returning the nearest hit. Empty space returns
+`None` — a normal answer, not an error. The hit point is exact
+(Q16); the normal is the entry face. A ray never moves a body
+and never creates a contact. The ground probe is a short
+downward ray from the feet; it is what future foot planting
+reads.
 
-**Swept shape.** Only the step issues a swept query, and only
-for bodies above the 60 tiles/s speed bound. It finds the
-first impact within the tick and resolves there. A body at 90
-tiles/s crossing a 1-tile wall reports the contact at the
-correct sub-tick time and never appears on the far side in any
-published snapshot.
+**Swept shape.** Issued only by the step for bodies above the
+speed bound. Finds the first impact within the tick and resolves
+there. See the physics design's tunneling section for acceptance
+numbers (90 tiles/s and 60 tiles/s cases).
 
-**Phantom.** An overlap query with the same filters as contacts
-but no response. Action boxes and triggers are phantom queries:
-they detect, they never push. A phantom query that needs to
-move something is a design error — the query reports the hit,
-and gameplay applies the impulse through a physics event.
+**Phantom.** Overlap against a volume with the same filters as
+contacts but no response. Result is bounded (≤ 8; overflow drops
+the farthest and counts it). Action boxes and triggers are
+phantom queries: they detect, they never push.
 
-## Resolve contacts
+All queries read the world as of the last completed Collide
+phase. A query issued mid-step sees the previous tick's world;
+a query issued in the Animate phase sees the current tick's.
+The phase a query runs in is part of its contract — record it
+per use.
 
-Contacts resolve in the Collide phase, axis-separated, X then
-Y. Each axis pushes the body out along the minimum penetration
-and projects the velocity: the velocity component into the
-surface becomes zero (restitution 0 for characters — a landing
-is not a bounce). There is no iterative solver for v1 — one
-pass per axis, because tile contacts are axis-aligned and
-non-penetrating after one correction.
+## Contact identity
 
 A contact is identified by `(body-A, body-B-or-tile, axis,
 first-seen-tick)`. The first-seen tick emits the event once;
@@ -91,12 +85,6 @@ is set when the Y-resolution pushes the body upward this tick,
 or when the body was already resting and its vertical velocity
 remains near zero. A contact that persists across ticks never
 fires twice.
-
-All queries read the world as of the last completed Collide
-phase. A query issued mid-step sees the previous tick's world;
-a query issued in the Animate phase sees the current tick's.
-The phase a query runs in is part of its contract — record it
-per use.
 
 ## Verify the integration
 
@@ -144,6 +132,49 @@ per use.
   the volume or split the query.
 - **Sleep is deterministic.** A tick count, never a
   wall-clock timer. Characters never sleep.
+
+## Surface properties and materials
+
+Contact response eventually needs restitution and friction. Those
+numbers come from a surface-properties table delivered by the
+asset pipeline (a cooked level chunk or a resident table), keyed
+by surface ID. For v1:
+
+- Characters use restitution 0 and a single default friction —
+  no table lookup required for the player controller.
+- Dynamic props (when they land) look up the surface ID of the
+  contact and apply the table. Missing IDs are load-time
+  validation errors, not contact-time surprises.
+- Do not hard-code coefficients inside the narrow phase or the
+  resolver. The table is the single source.
+
+## Diagnostic overlays
+
+When verifying contacts and queries, enable the debug overlays
+defined in the physics design:
+
+- Body AABBs (collision world)
+- Contact normals and depths (persistent contact set)
+- Grounded and sleep flags
+- Last ray hit point
+
+Overlays are presentation-only. Use them to confirm that a
+resting contact's normal points out of the floor, that a swept
+hit reports the entry face, and that a phantom overlap moves
+nothing. A wrong normal that is invisible without overlays is
+still a test failure.
+
+## Additional caveats
+
+- **No mid-tick entity-table queries for collision.** The world
+  is rebuilt each tick in v1. A body spawned this tick is
+  invisible until the next Collide phase.
+- **Tile cells are closed solids.** There is no open-mesh
+  winding policy. Inside a solid tile is always a penetration
+  to resolve.
+- **Shared shape edits affect every collidable.** A per-body
+  tweak requires a new shape ID, not an edit to the shared
+  definition.
 
 ## Cross-references
 
