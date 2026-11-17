@@ -6,6 +6,7 @@ data_directory=/mnt/data/forge-homelab/postgres
 socket_directory=/var/run/postgresql
 cluster_unit=postgresql@16-main.service
 runner=forge_agent
+loopback=127.0.0.1
 
 fail() {
     printf '%s\n' "$*" >&2
@@ -44,8 +45,20 @@ check_cluster() {
         SELECT current_setting('server_version_num')::integer / 10000,
                current_setting('data_directory'), current_setting('listen_addresses');
     ")"
-    [[ "$configuration" == "16|$data_directory|" ]] ||
+    [[ "$configuration" == "16|$data_directory|$loopback" ]] ||
         fail "Unexpected cluster configuration: $configuration"
+    local worker_access
+    worker_access="$(psql_as postgres postgres -Atc "
+        SELECT count(*) FILTER (WHERE error IS NOT NULL) = 0
+           AND count(*) FILTER (WHERE rule_number = 1 AND type = 'host'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_gpu_worker']
+             AND address = '$loopback' AND netmask = '255.255.255.255'
+             AND auth_method = 'scram-sha-256') = 1
+           AND count(*) FILTER (WHERE rule_number IN (2, 3) AND auth_method = 'reject'
+             AND type = 'host' AND address = '$loopback' AND netmask = '255.255.255.255') = 2
+        FROM pg_hba_file_rules;
+    ")"
+    [[ "$worker_access" == t ]] || fail 'Unexpected Forge worker authentication rules.'
     psql_as postgres forge_agent -f "$directory/sql/management/verify.sql"
     psql_as "$runner" forge_agent -c "
         SELECT current_user, current_database(), current_setting('server_version') AS server_version,
@@ -57,8 +70,12 @@ check_cluster() {
            AND NOT has_table_privilege(current_user, 'forge_agent.schema_migrations', 'INSERT')
            AND (
                SELECT bool_and(has_table_privilege(current_user, 'forge_agent.' || relation, privilege))
-               FROM unnest(ARRAY['conversations', 'runs', 'messages', 'tool_calls', 'tool_results', 'run_events']) AS relation
+               FROM unnest(ARRAY['conversations', 'runs', 'messages', 'tool_calls', 'tool_results', 'run_events', 'ide_workspace_tabs']) AS relation
                CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS privilege
+           ) AND (
+               SELECT bool_and(has_table_privilege(current_user, 'forge_agent.' || relation, privilege))
+               FROM unnest(ARRAY['ide_workspace_history', 'ide_chats']) AS relation
+               CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE']) AS privilege
            );
     ")"
     [[ "$privileges" == t ]] || fail 'Unexpected Forge database privileges.'
@@ -101,17 +118,45 @@ install -m 0644 "$directory/postgres-storage.conf" "$drop_in/forge-storage.conf"
 cluster_config=/etc/postgresql/16/main
 local_config="$cluster_config/conf.d/90-forge-local.conf"
 configuration_changed=false
+hba_changed=false
+hba_file="$cluster_config/pg_hba.conf"
+hba_include="include forge-worker-hba.conf"
+if ! cmp -s "$directory/postgres-worker-hba.conf" "$cluster_config/forge-worker-hba.conf"; then
+    install -m 0640 -o postgres -g postgres "$directory/postgres-worker-hba.conf" "$cluster_config/forge-worker-hba.conf"
+    hba_changed=true
+fi
+if [[ "$(head -n 1 "$hba_file")" != "$hba_include" ]]; then
+    staged_hba="$(mktemp "$cluster_config/.forge-hba-XXXXXXXX")"
+    trap 'unlink "$staged_hba"' EXIT
+    {
+        printf '%s\n' "$hba_include"
+        awk -v hba_line="$hba_include" '$0 != hba_line' "$hba_file"
+    } > "$staged_hba"
+    chmod --reference="$hba_file" "$staged_hba"
+    chown --reference="$hba_file" "$staged_hba"
+    mv -T "$staged_hba" "$hba_file"
+    trap - EXIT
+    hba_changed=true
+fi
 if ! cmp -s "$directory/postgres-local.conf" "$local_config"; then
     install -m 0644 "$directory/postgres-local.conf" "$local_config"
     configuration_changed=true
 fi
 listen_addresses="$(runuser -u postgres -- /usr/lib/postgresql/16/bin/postgres \
     -D "$data_directory" -c "config_file=$cluster_config/postgresql.conf" -C listen_addresses)"
-[[ -z "$listen_addresses" ]] || fail "Unexpected TCP listen addresses: $listen_addresses"
+[[ "$listen_addresses" == "$loopback" ]] || fail "Unexpected TCP listen addresses: $listen_addresses"
 systemctl daemon-reload
 systemctl enable postgresql.service
-if [[ "$configuration_changed" == true ]] && systemctl is-active --quiet "$cluster_unit"; then
-    systemctl restart "$cluster_unit"
+if systemctl is-active --quiet "$cluster_unit"; then
+    if [[ "$hba_changed" == true ]]; then
+        [[ "$(psql_as postgres postgres -Atc 'SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL')" == 0 ]] ||
+            fail 'Invalid PostgreSQL authentication configuration.'
+    fi
+    if [[ "$configuration_changed" == true ]]; then
+        systemctl restart "$cluster_unit"
+    elif [[ "$hba_changed" == true ]]; then
+        systemctl reload "$cluster_unit"
+    fi
 fi
 systemctl start postgresql.service "$cluster_unit"
 

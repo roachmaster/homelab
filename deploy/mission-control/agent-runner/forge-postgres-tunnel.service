@@ -1,0 +1,13 @@
+[Unit]
+Description=Private Forge connection to the Mission Control job database
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -NT -F %h/.config/forge-postgres-worker/ssh.conf forge-postgres-dispatch
+NoNewPrivileges=yes
+UMask=0077
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=Forge agent event runner
+Requires=postgresql@16-main.service
+After=postgresql@16-main.service
+
+[Service]
+User=forge_agent
+Group=forge_agent
+ExecStart=/usr/bin/python3 -B /opt/homelab-forge/agent-runner/runner.py
+Environment=FORGE_RUNNER_MODE=dispatch
+LoadCredential=runner.token:/etc/homelab-forge/agent-runner/token
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

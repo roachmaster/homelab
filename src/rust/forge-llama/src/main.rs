@@ -43,6 +43,14 @@ struct Job {
     _permit: OwnedSemaphorePermit,
 }
 
+struct CancelOnDrop(Arc<AtomicBool>);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
 struct Http {
     jobs: mpsc::Sender<Job>,
     token: String,
@@ -90,7 +98,8 @@ fn dispatch_error(error: DispatchError<Error>) -> HttpResponse {
             let status = match error {
                 Error::UnknownModel => StatusCode::NOT_FOUND,
                 Error::InvalidPrompt => StatusCode::BAD_REQUEST,
-                Error::ModelMismatch | Error::Busy => StatusCode::CONFLICT,
+                Error::MailProfileMismatch => StatusCode::UNPROCESSABLE_ENTITY,
+                Error::ModelMismatch | Error::Busy | Error::Canceled => StatusCode::CONFLICT,
                 Error::Stopped
                 | Error::ModelUnavailable
                 | Error::GpuUnavailable
@@ -156,10 +165,20 @@ impl Http {
                 Ok(chat) => (Operation::Chat, Request::Chat(chat)),
                 Err((status, code)) => return failure(status, code),
             },
+            (&Method::POST, "/v1/chat/completions/input_tokens") => match body(request).await {
+                Ok(prompt) => (Operation::CountPrompt, Request::CountPrompt(prompt)),
+                Err((status, code)) => return failure(status, code),
+            },
             _ => return failure(StatusCode::NOT_FOUND, "unknown_route"),
         };
         let Ok(permit) = self.slot.clone().try_acquire_owned() else {
             return failure(StatusCode::CONFLICT, "runtime_busy");
+        };
+        let _cancel = match &payload {
+            Request::Chat(chat) if chat.mail_profile.is_some() => {
+                Some(CancelOnDrop(chat.cancellation.clone()))
+            }
+            _ => None,
         };
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let header =

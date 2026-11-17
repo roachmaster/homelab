@@ -24,4 +24,70 @@ INSERT INTO forge_agent.schema_migrations (version, name)
 VALUES (1, 'agent');
 \endif
 
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 2
+) AS apply_0002
+\gset
+
+\if :apply_0002
+\ir migrations/0002_ide_workspace.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (2, 'ide_workspace');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 3
+) AS apply_0003
+\gset
+
+\if :apply_0003
+\ir migrations/0003_ide_chat_history.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (3, 'ide_chat_history');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 4
+) AS apply_0004
+\gset
+
+\if :apply_0004
+\ir migrations/0004_ide_chat_default_expiration.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (4, 'ide_chat_default_expiration');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 5
+) AS apply_0005
+\gset
+
+\if :apply_0005
+\ir migrations/0005_inference_dispatch.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (5, 'inference_dispatch');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 6
+) AS apply_0006
+\gset
+
+\if :apply_0006
+\ir migrations/0006_inference_model_selection.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (6, 'inference_model_selection');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 7
+) AS apply_0007
+\gset
+
+\if :apply_0007
+\ir migrations/0007_ide_mail.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (7, 'ide_mail');
+\endif
+
 COMMIT;

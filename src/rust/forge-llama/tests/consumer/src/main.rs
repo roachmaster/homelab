@@ -38,6 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         context_size: 4096,
         startup_seconds: 10,
         prompt_seconds: 10,
+        mail_expert_paging: None,
     };
     let lock = config.gpu_lock.clone();
     let stop = Arc::new(AtomicBool::new(false));

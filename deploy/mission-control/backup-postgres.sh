@@ -32,6 +32,12 @@ trap cleanup EXIT
 pg_as_admin pg_dump -Fc -d forge_agent > "$archive"
 pg_as_admin createdb --template=template0 --owner=forge_agent_owner "$check_database"
 created=true
+# The archive carries schema ACLs. Reapply the provisioned database ACLs to
+# the disposable restore before verifying effective worker privileges.
+pg_as_admin psql -X -v ON_ERROR_STOP=1 -d postgres -v restore_database="$check_database" <<'SQL'
+REVOKE CONNECT, TEMP ON DATABASE :"restore_database" FROM PUBLIC;
+GRANT CONNECT ON DATABASE :"restore_database" TO forge_agent, forge_gpu_worker;
+SQL
 pg_as_admin pg_restore --exit-on-error --single-transaction -d "$check_database" < "$archive"
 pg_as_admin psql -X -v ON_ERROR_STOP=1 -d "$check_database" \
     -f "$directory/sql/management/verify.sql"

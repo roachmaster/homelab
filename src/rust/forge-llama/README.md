@@ -14,6 +14,7 @@ Every endpoint requires `Authorization: Bearer <token>`. JSON bodies require `Co
 | `GET /v1/runtime` | Report `stopped` or the live, previously ready model |
 | `PUT /v1/runtime` with `{"model":"gpt-oss-20b"}` | Start or switch models and return after readiness. Repeating the active selection is idempotent. |
 | `POST /v1/chat/completions` | Submit a stateless non-streaming chat. An optional `model` must match the active ID. |
+| `POST /v1/chat/completions/input_tokens` | Count the fully templated input for the active Mail model. Send its `model` ID and `messages`. |
 | `DELETE /v1/runtime` | Stop and reap the owned llama.cpp process. Repeating the request succeeds. |
 
 Chat supports text `system`, `user` and `assistant` messages. Supply previous messages for a conversation. The request accepts up to 64 messages, 64 KiB of text and 2,048 completion tokens. The adapter allows one command at a time. While a command is active, a second command returns HTTP 409. Invalid or unlisted models are rejected before changing the current model. If loading fails after the old process is stopped, the runtime is stopped. A transport failure or deadline can stop the model to release an unfinished upstream prompt. Clients explicitly restart it with PUT.
@@ -48,6 +49,26 @@ cargo +stable build --release --locked --manifest-path src/rust/Cargo.toml -p fo
 
 Use the [Forge configuration example](deploy/forge-gpu.example.json) with actual absolute paths. Place the tested llama.cpp executable and its shared libraries together at the configured server path. The SYCL runtime requires the Intel loader library directories shown in the example. Keep the GPU lock path shared with cooperating benchmark launchers. Generate a 32-byte random hex token in a mode-0600 file before starting. Install the built adapter at `~/.local/bin/forge-llama` and its configuration at `~/.config/forge-llama/config.json`.
 
+### Enable the Mail model
+
+Add `gpt-oss-120b` to `models` with the absolute path to its verified MXFP4 GGUF and set the corresponding adapter profile. The Mission Control tokenizer profile must agree with these settings.
+
+```json
+{
+  "mail_expert_paging": {
+    "profile_id": "gpt-oss-120b-harmony-v1",
+    "context_size": 4096,
+    "generation_tokens": 1024,
+    "margin_tokens": 16,
+    "prompt_seconds": 1800
+  }
+}
+```
+
+The current Mail worker pins `max_tokens` to the profile's generation budget and attaches `mail_profile` with `profile_id` and the rendered `prompt_tokens`. The adapter sends the same request to the local llama.cpp input counter and checks the reported token count before inference. A missing or conflicting profile, token count or context budget returns HTTP 422 `mail_profile_mismatch`. Only the visible assistant reply is returned for Mail. Legacy model completion requests use their existing interface and deadline.
+
+The Mail profile uses the pinned SYCL server's `--cpu-moe --moe-cache-mib 4096 --load-mode mmap --no-repack` support and one shared GPU lease. Context shift is disabled. The single active model slot can reuse a prompt prefix in memory. A process restart or model switch releases it. PostgreSQL retains the messages needed to replay the prompt.
+
 ### Start the API at boot
 
 Copy [setup-boot.sh](deploy/setup-boot.sh) and [forge-llama.service](deploy/forge-llama.service)
@@ -75,7 +96,7 @@ The method and path choose the Forge route. JSON is decoded into a typed request
 
 API references were checked through Context7, then against Forge's pinned llama.cpp build. [Upstream server documentation](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
 
-The [child lifecycle check](tests/owned_child.py) exercises the running REST binary against a local test server. It verifies chat, SIGTERM on model replacement, failure of a replacement, and child shutdown when the adapter exits. The [Forge smoke test](tests/forge_smoke.py) loads both real models through the REST API and returns the runtime to stopped. Run that test only when the GPU is available and no model is loaded.
+The [child lifecycle check](tests/owned_child.py) exercises the running REST binary against a local test server. It verifies chat, graceful model replacement and shutdown, the Mail token and launch profile, and cancellation after a Mail client disconnects. The [Forge smoke test](tests/forge_smoke.py) loads the two regular chat models through the REST API and returns the runtime to stopped. Run that test only when the GPU is available and no model is loaded.
 
 ## Forge deployment and incident record
 

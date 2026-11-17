@@ -16,6 +16,8 @@ use std::{
 
 pub use driver::Driver;
 
+pub const MAIL_MODEL_ID: &str = "gpt-oss-120b";
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -30,6 +32,18 @@ pub struct Config {
     pub context_size: u32,
     pub startup_seconds: u64,
     pub prompt_seconds: u64,
+    #[serde(default)]
+    pub mail_expert_paging: Option<MailExpertPaging>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailExpertPaging {
+    pub profile_id: String,
+    pub context_size: u32,
+    pub generation_tokens: u32,
+    pub margin_tokens: u32,
+    pub prompt_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,12 +53,14 @@ pub enum Error {
     ModelUnavailable,
     GpuUnavailable,
     InvalidPrompt,
+    MailProfileMismatch,
     Stopped,
     ModelMismatch,
     Busy,
     StartFailed,
     Backend,
     Timeout,
+    Canceled,
     Shutdown,
 }
 
@@ -64,12 +80,14 @@ impl Error {
             Self::ModelUnavailable => "model_unavailable",
             Self::GpuUnavailable => "gpu_unavailable",
             Self::InvalidPrompt => "invalid_prompt",
+            Self::MailProfileMismatch => "mail_profile_mismatch",
             Self::Stopped => "runtime_stopped",
             Self::ModelMismatch => "model_not_loaded",
             Self::Busy => "runtime_busy",
             Self::StartFailed => "startup_failed",
             Self::Backend => "backend_error",
             Self::Timeout => "backend_timeout",
+            Self::Canceled => "request_canceled",
             Self::Shutdown => "shutting_down",
         }
     }
@@ -82,6 +100,7 @@ pub enum Operation {
     Start,
     Stop,
     Chat,
+    CountPrompt,
 }
 
 impl Operation {
@@ -92,6 +111,7 @@ impl Operation {
             Self::Start => "llama.start",
             Self::Stop => "llama.stop",
             Self::Chat => "llama.chat",
+            Self::CountPrompt => "llama.prompt.count",
         };
         RouteKey::new(name, 1).expect("static route")
     }
@@ -103,6 +123,7 @@ pub enum Request {
     Start { model: String },
     Stop,
     Chat(Chat),
+    CountPrompt(Prompt),
 }
 
 impl Payload for Request {
@@ -114,6 +135,7 @@ impl Payload for Request {
             Self::Start { .. } => Operation::Start,
             Self::Stop => Operation::Stop,
             Self::Chat(_) => Operation::Chat,
+            Self::CountPrompt(_) => Operation::CountPrompt,
         }
     }
 }
@@ -127,6 +149,28 @@ pub struct Chat {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub stream: bool,
+    pub mail_profile: Option<MailPromptProfile>,
+    #[serde(skip)]
+    pub cancellation: Arc<AtomicBool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailPromptProfile {
+    pub profile_id: String,
+    pub prompt_tokens: u32,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Prompt {
+    pub model: String,
+    pub messages: Vec<Message>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct PromptTokens {
+    pub input_tokens: u32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -210,6 +254,7 @@ pub enum Reply {
     Models(Models),
     Status(RuntimeStatus),
     Chat(Completion),
+    PromptTokens(PromptTokens),
 }
 
 /// Staging is pure. Construction opens no listener and starts no process.
@@ -252,6 +297,16 @@ pub fn register_llama(
         || !(512..=65536).contains(&config.context_size)
         || !(1..=180).contains(&config.startup_seconds)
         || !(1..=300).contains(&config.prompt_seconds)
+        || config.models.contains_key(MAIL_MODEL_ID) != config.mail_expert_paging.is_some()
+        || config.mail_expert_paging.as_ref().is_some_and(|profile| {
+            !config.device.starts_with("SYCL")
+                || !valid_model(&profile.profile_id)
+                || !(1024..=8192).contains(&profile.context_size)
+                || !(1..=2048).contains(&profile.generation_tokens)
+                || !(1..=128).contains(&profile.margin_tokens)
+                || profile.generation_tokens + profile.margin_tokens >= profile.context_size
+                || !(1..=1800).contains(&profile.prompt_seconds)
+        })
         || config.models.is_empty()
         || config.models.len() > 32
         || config.models.iter().any(|(id, path)| {
@@ -283,6 +338,7 @@ pub fn register_routes<'a, C>(
         Operation::Start,
         Operation::Stop,
         Operation::Chat,
+        Operation::CountPrompt,
     ] {
         routes.register(op.route(), op, move |request, _| {
             let mut driver = driver.try_borrow_mut().map_err(|_| Error::Busy)?;

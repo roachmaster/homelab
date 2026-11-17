@@ -35,6 +35,13 @@ publish() {
     fi
 }
 publish "$directory/queue_store.py" "$target/queue_store.py"
+publish "$directory/chat_history_store.py" "$target/chat_history_store.py"
+publish "$directory/chat_history_api.py" "$target/chat_history_api.py"
+publish "$directory/chat_run_api.py" "$target/chat_run_api.py"
+publish "$directory/mail_store.py" "$target/mail_store.py"
+publish "$directory/mail_api.py" "$target/mail_api.py"
+publish "$directory/mail_tokenizer.py" "$target/mail_tokenizer.py"
+publish "$directory/model_adapter.py" "$target/model_adapter.py"
 publish "$directory/runner.py" "$target/runner.py"
 publish "$directory/forge-agent-runner.service" "$unit"
 systemctl daemon-reload

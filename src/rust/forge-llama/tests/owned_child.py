@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise lifecycle against a test child without requiring a GPU."""
 import argparse
+from http.client import HTTPConnection
 import json
 from pathlib import Path
 import socket
@@ -12,7 +13,7 @@ import urllib.request
 
 BACKEND = '''#!/usr/bin/python3
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, pathlib, signal, sys
+import json, os, pathlib, signal, sys, time
 
 def value(flag):
     return sys.argv[sys.argv.index(flag) + 1]
@@ -21,6 +22,16 @@ model = pathlib.Path(value("--model"))
 alias = value("--alias")
 if alias == "bad":
     sys.exit(3)
+if alias == "gpt-oss-120b":
+    for flag, expected in {"--ctx-size": "4096", "--moe-cache-mib": "4096", "--load-mode": "mmap",
+                           "--batch-size": "8", "--ubatch-size": "1", "--reasoning-effort": "low"}.items():
+        assert value(flag) == expected
+    assert {"--cpu-moe", "--no-repack", "--no-context-shift"}.issubset(sys.argv)
+    assert os.environ["ZES_ENABLE_SYSMAN"] == "1"
+else:
+    assert value("--ctx-size") == "4096"
+    assert value("--batch-size") == "128"
+    assert "--cpu-moe" not in sys.argv
 
 def stop(_signal, _frame):
     model.with_suffix(".stopped").write_text("SIGTERM")
@@ -42,12 +53,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send({"status": "ok"})
 
     def do_POST(self):
-        assert self.path == "/v1/chat/completions"
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/v1/chat/completions/input_tokens":
+            assert alias == "gpt-oss-120b" and "mail_profile" not in request
+            self.send({"input_tokens": 12 + 5 * len(request["messages"])})
+            return
+        assert self.path == "/v1/chat/completions"
         assert request["model"] == alias and request["stream"] is False
+        assert request["cache_prompt"] == (alias == "gpt-oss-120b")
+        assert "mail_profile" not in request
+        if request["messages"][-1]["content"] == "cancel this completion":
+            model.with_suffix(".running").touch()
+            time.sleep(30)
         self.send({"id": "test", "object": "chat.completion", "created": 0, "model": alias,
+                   "usage": {"prompt_tokens": 12 + 5 * len(request["messages"]),
+                             "completion_tokens": 1, "total_tokens": 13 + 5 * len(request["messages"])},
                    "choices": [{"index": 0, "finish_reason": "stop",
-                                "message": {"role": "assistant", "content": "42"}}]})
+                                "message": {"role": "assistant", "content": "42",
+                                            "reasoning_content": "reasoning"}}]})
 
 HTTPServer(("127.0.0.1", int(value("--port"))), Handler).serve_forever()
 '''
@@ -66,7 +89,8 @@ def main():
         secret = directory / "token"
         secret.touch(mode=0o600)
         secret.write_text(token + "\n")
-        models = {name: directory / (name + ".gguf") for name in ("a", "b", "bad")}
+        mail_model, profile = "gpt-oss-120b", "gpt-oss-120b-harmony-v1"
+        models = {name: directory / (name + ".gguf") for name in ("a", "b", "bad", mail_model)}
         for model in models.values():
             model.write_bytes(b"GGUF")
         with socket.socket() as outer, socket.socket() as inner:
@@ -79,6 +103,8 @@ def main():
             "gpu_lock": str(directory / "gpu.lock"), "token_file": str(secret),
             "models": {name: str(path) for name, path in models.items()},
             "context_size": 4096, "startup_seconds": 3, "prompt_seconds": 3,
+            "mail_expert_paging": {"profile_id": profile, "context_size": 4096,
+                                   "generation_tokens": 1024, "margin_tokens": 16, "prompt_seconds": 6},
         }))
 
         def request(method, path, data=None, expected=200):
@@ -93,7 +119,7 @@ def main():
                 response = error
             with response:
                 body = json.load(response)
-                assert response.status == expected, body
+                assert response.status in ((expected,) if isinstance(expected, int) else expected), body
                 return body
 
         runtime = "/v1/runtime"
@@ -118,6 +144,44 @@ def main():
                 assert request("PUT", runtime, {"model": "bad"}, 502)["error"] == "startup_failed"
                 assert models["b"].with_suffix(".stopped").read_text() == "SIGTERM"
                 assert request("GET", runtime)["state"] == "stopped"
+                assert request("PUT", runtime, {"model": mail_model})["model"] == mail_model
+                completion_path = "/v1/chat/completions"
+                messages = [{"role": "user", "content": "Remember my first question"},
+                            {"role": "assistant", "content": "Yes"},
+                            {"role": "user", "content": "What is 6 times 7?"}]
+                prompt = {"model": mail_model, "messages": messages}
+                assert request("POST", completion_path + "/input_tokens", prompt) == {"input_tokens": 27}
+                metadata = {"profile_id": profile, "prompt_tokens": 27}
+                completion = {**prompt, "mail_profile": metadata, "max_tokens": 1024}
+                cases = [prompt, {**completion, "max_tokens": 1025},
+                         {**completion, "mail_profile": {**metadata, "profile_id": "old"}},
+                         {**completion, "mail_profile": {**metadata, "prompt_tokens": 28}},
+                         {**completion, "mail_profile": {**metadata, "prompt_tokens": 3057}}]
+                for invalid in cases:
+                    reply = request("POST", completion_path, invalid, 422)
+                    assert reply["error"] == "mail_profile_mismatch"
+                reply = request("POST", completion_path, completion)
+                assert reply["choices"][0]["message"] == {"role": "assistant", "content": "42"}
+
+                messages[-1]["content"] = "cancel this completion"
+                wire = HTTPConnection("127.0.0.1", port, timeout=2)
+                wire.request("POST", completion_path, json.dumps(completion),
+                             {"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+                for _ in range(100):
+                    if models[mail_model].with_suffix(".running").exists():
+                        break
+                    time.sleep(0.02)
+                else:
+                    raise AssertionError("test completion never started")
+                wire.sock.shutdown(socket.SHUT_RDWR)
+                wire.close()
+                for _ in range(100):
+                    if request("GET", runtime, expected=(200, 409)).get("state") == "stopped":
+                        break
+                    time.sleep(0.02)
+                else:
+                    raise AssertionError("disconnected Mail inference did not stop")
+                assert models[mail_model].with_suffix(".stopped").read_text() == "SIGTERM"
                 assert request("PUT", runtime, {"model": "a"})["model"] == "a"
                 models["a"].with_suffix(".stopped").unlink()
             finally:
@@ -129,7 +193,7 @@ def main():
                     service.wait()
                     raise
             assert models["a"].with_suffix(".stopped").read_text() == "SIGTERM"
-    print("PASS: chat, model switch, failed replacement, and graceful child shutdown")
+    print("PASS: chat, model switch, Mail token budget, disconnect cancellation, and child shutdown")
 
 
 if __name__ == "__main__":

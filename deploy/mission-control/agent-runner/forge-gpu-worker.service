@@ -1,0 +1,16 @@
+[Unit]
+Description=Forge GPU inference worker
+Wants=forge-postgres-tunnel.service forge-llama.service
+After=forge-postgres-tunnel.service forge-llama.service
+
+[Service]
+ExecStart=/usr/bin/python3 -B %h/.local/lib/forge-gpu-worker/forge_gpu_worker.py
+Environment=PGPASSFILE=%h/.config/forge-postgres-worker/pgpass
+Environment=FORGE_WORKER_MODEL_TOKEN_FILE=%h/.config/forge-llama/token
+Restart=on-failure
+RestartSec=4s
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -52,10 +52,13 @@ sudo deploy/mission-control/setup-postgres.sh --check
 sudo deploy/mission-control/backup-postgres.sh
 ```
 
-The data directory is `/mnt/data/forge-homelab/postgres`. Clients connect through
-the Unix socket at `/var/run/postgresql/.s.PGSQL.5432`. The agent database and
-runtime role are both named `forge_agent`. The matching Linux account uses peer
-authentication. The schema belongs to the separate `forge_agent_owner` role.
+The data directory is `/mnt/data/forge-homelab/postgres`. Mission Control uses
+the Unix socket at `/var/run/postgresql/.s.PGSQL.5432` and the `forge_agent`
+database and peer-authenticated role. The schema belongs to `forge_agent_owner`.
+The loopback TCP listener admits the `forge_gpu_worker` login to the agent
+database using SCRAM. Forge reaches it through its outbound SSH forward.
+The forwarding account uses `forge-postgres-worker-sshd.conf` to allow only the
+loopback database target. The worker uses a private libpq password file.
 
 The backup script publishes a local logical backup under
 `/mnt/data/forge-homelab/postgres-backups` after restoring it into a disposable

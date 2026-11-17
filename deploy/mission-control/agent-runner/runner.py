@@ -1,9 +1,8 @@
-"""Authenticated loopback ingress and a single event-driven Forge worker."""
+"""Authenticated loopback ingress and durable Forge run completion."""
 
 from dataclasses import dataclass
 from enum import Enum, auto
 from http import HTTPStatus
-import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
@@ -18,12 +17,21 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
 import psycopg2
+import chat_history_api as history_api
+import chat_history_store as history_store
+import chat_run_api as run_api
+import mail_api
+from model_adapter import MAX_BODY, ModelAdapter
 import queue_store as store
 from queue_store import Message, Rejected, Submit
 
 PORT = 18083
 DEFAULT_MODEL = "gpt-oss-20b"
-MAX_BODY = 128 * 1024
+WORKSPACE_PATH = "/v1/workspace"
+MAX_WORKSPACE_BODY = 2 * 1024 * 1024
+HISTORY_EXPIRY_INTERVAL_SECONDS = 60
+RESULT_SCAN_SECONDS = 2
+RESULT_BATCH = 20
 LOG = logging.getLogger("forge-agent-runner")
 
 
@@ -31,6 +39,7 @@ class Route(Enum):
     SUBMIT = auto()
     STATUS = auto()
     EVENTS = auto()
+    WORKSPACE = auto()
 
 
 @dataclass(frozen=True)
@@ -38,6 +47,21 @@ class Lookup:
     run_id: UUID
     after: int = 0
     wait: int = 0
+
+
+@dataclass(frozen=True)
+class RestoreWorkspace:
+    tab: str
+    history_enabled: bool = False
+    models: bool = False
+
+
+@dataclass(frozen=True)
+class SaveWorkspace:
+    tab: str
+    lease: str
+    revision: int
+    snapshot: dict
 
 
 def dispatch(route, command):
@@ -56,11 +80,77 @@ def dispatch(route, command):
                         return result
                     store.wait_for_signal(listener, remaining)
         return store.get_events(command.run_id, command.after)
+    if route is Route.WORKSPACE:
+        if isinstance(command, RestoreWorkspace):
+            if command.models:
+                return store.restore_workspace(command.tab, history_enabled=True, models=True)
+            if command.history_enabled:
+                return store.restore_workspace(command.tab, history_enabled=True)
+            return store.restore_workspace(command.tab)
+        if isinstance(command, SaveWorkspace):
+            return store.save_workspace(command.tab, command.lease, command.revision, command.snapshot)
     raise Rejected(400, "invalid_route_payload")
 
 
-def submission(body, key):
+def workspace_command(body):
+    if not isinstance(body, dict):
+        raise Rejected(400, "invalid_workspace_request")
+    operation, tab = body.get("operation"), body.get("tab")
+    if not isinstance(tab, str) or not re.fullmatch(r"[0-9a-f]{32}", tab):
+        raise Rejected(400, "invalid_workspace_tab")
+    if operation == "restore":
+        if body.keys() == {"operation", "tab"}:
+            return RestoreWorkspace(tab)
+        if body.keys() == {"operation", "tab", "history"} and body["history"] is True:
+            return RestoreWorkspace(tab, history_enabled=True)
+        if body.keys() == {"operation", "tab", "history", "models"} and body["history"] is True and body["models"] is True:
+            return RestoreWorkspace(tab, history_enabled=True, models=True)
+    if operation != "save" or body.keys() != {"operation", "tab", "lease", "revision", "snapshot"}:
+        raise Rejected(400, "invalid_workspace_request")
+    lease, revision, snapshot = body["lease"], body["revision"], body["snapshot"]
+    if (not isinstance(lease, str) or not re.fullmatch(r"[0-9a-f]{64}", lease)
+            or type(revision) is not int or not 1 <= revision <= 2**32 - 1):
+        raise Rejected(400, "invalid_workspace_request")
+    if not store.valid_workspace(snapshot):
+        raise Rejected(400, "invalid_workspace_snapshot")
+    return SaveWorkspace(tab, lease, revision, snapshot)
+
+
+def unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def workspace_json(body):
+    return json.dumps(body, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+
+
+def workspace_json_safe(body):
+    # PostgreSQL jsonb rejects U+0000, including in object keys.
+    pending = [iter((body,))]
+    while pending:
+        for value in pending[-1]:
+            if isinstance(value, str) and "\0" in value:
+                return False
+            if isinstance(value, list):
+                pending.append(iter(value))
+                break
+            if isinstance(value, dict):
+                pending.extend((iter(value.values()), iter(value.keys())))
+                break
+        else:
+            pending.pop()
+    return True
+
+
+def submission(body, key, *, allow_partial=False):
     fields = {"model", "messages", "max_tokens", "temperature", "stream", "conversation_id"}
+    if allow_partial:
+        fields.update(("chat_id", "expected_revision"))
     if not isinstance(body, dict) or body.keys() - fields or body.get("stream", False) is not False:
         raise Rejected(400, "invalid_chat")
     messages = body.get("messages")
@@ -88,54 +178,31 @@ def submission(body, key):
         conversation = UUID(conversation)
     if key is not None and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,96}", key):
         raise Rejected(400, "invalid_request_id")
+    linked_chat = history_api.parse_chat_id(body["chat_id"]) if "chat_id" in body else None
+    expected_revision = None
+    if "expected_revision" in body:
+        if linked_chat is None:
+            raise Rejected(400, "invalid_chat_id")
+        expected_revision = history_api.parse_revision(body["expected_revision"])
+    if linked_chat is not None and conversation is not None:
+        raise Rejected(400, "invalid_chat_id")
     return Submit(model, tuple(Message(**m) for m in messages), max_tokens, float(temperature),
-                  conversation, key or str(uuid4()))
+                  conversation, key or str(uuid4()), allow_partial=allow_partial,
+                  chat_id=linked_chat, expected_revision=expected_revision)
 
 
-class Inference:
+class Inference(ModelAdapter):
+    failure = Rejected
+
     def __init__(self, token):
-        self.token = token
-
-    def request(self, method, path, body=None, timeout=185):
-        connection = http.client.HTTPConnection("127.0.0.1", 18082, timeout=timeout)
-        try:
-            connection.request(method, path, json.dumps(body) if body is not None else None,
-                               {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
-            response = connection.getresponse()
-            if response.status != 200:
-                raise Rejected(502, {409: "forge_busy", 504: "forge_timeout"}.get(response.status, "forge_unavailable"))
-            raw = response.read(MAX_BODY + 1)
-            if len(raw) > MAX_BODY:
-                raise Rejected(502, "forge_response_too_large")
-            return json.loads(raw)
-        except TimeoutError as error:
-            raise Rejected(504, "forge_timeout") from error
-        except (OSError, http.client.HTTPException) as error:
-            raise Rejected(502, "forge_unavailable") from error
-        finally:
-            connection.close()
+        super().__init__(token, 18082)
 
     def complete(self, command):
-        runtime = self.request("GET", "/v1/runtime", timeout=3)
-        if runtime.get("state") != "ready" or runtime.get("model") != command.model:
-            raise Rejected(409, "model_not_ready")
-        response = self.request("POST", "/v1/chat/completions", command.payload())
-        choice = response["choices"][0]
-        if choice.get("finish_reason") == "length":
-            raise Rejected(422, "output_budget_exhausted")
-        message = choice["message"]
-        content = message.get("content")
-        if (response.get("model") != command.model or choice.get("finish_reason") != "stop"
-                or message.get("role") != "assistant" or not isinstance(content, str)
-                or not content.strip() or "\0" in content or len(content.encode()) > 65536):
-            raise Rejected(502, "invalid_forge_reply")
-        usage = response.get("usage")
-        return content, usage if isinstance(usage, dict) else {}
+        return self.generate(command.model, command.payload(), allow_partial=command.allow_partial)
 
     def active_model(self):
-        runtime = self.request("GET", "/v1/runtime", timeout=2)
-        model = runtime.get("model")
-        return model if runtime.get("state") == "ready" and isinstance(model, str) and model in store.MODELS else DEFAULT_MODEL
+        model = self.ready_model()
+        return model if model in store.MODELS else DEFAULT_MODEL
 
 
 def worker(inference, ready):
@@ -154,17 +221,42 @@ def worker(inference, ready):
                         continue
                     run_id, command = job
                     try:
-                        answer, usage = inference.complete(command)
+                        answer, usage, finish_reason = inference.complete(command)
                     except Rejected as error:
                         store.finish(run_id, error=error.code)
                     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
                         store.finish(run_id, error="invalid_forge_reply")
                     else:
-                        store.finish(run_id, answer=answer, usage=usage)
+                        store.finish(run_id, answer=answer, usage=usage, finish_reason=finish_reason)
         except (psycopg2.Error, OSError, RuntimeError) as error:
             ready.clear()
             LOG.warning("Worker reconnecting (%s)", type(error).__name__)
             time.sleep(2)
+
+
+def expire_chat_history():
+    while True:
+        try:
+            history_store.dao.expire_due()
+        except (psycopg2.Error, OSError) as error:
+            LOG.warning("Chat history expiry retrying (%s)", type(error).__name__)
+        time.sleep(HISTORY_EXPIRY_INTERVAL_SECONDS)
+
+
+def complete_dispatched_runs(ready):
+    while True:
+        try:
+            with store.listen("forge_agent_results") as listener:
+                while True:
+                    completed = store.finalize_ready(RESULT_BATCH)
+                    expired = store.expire_runs(RESULT_BATCH)
+                    ready.set()
+                    if max(completed, expired) < RESULT_BATCH:
+                        store.wait_for_signal(listener, RESULT_SCAN_SECONDS)
+        except (psycopg2.Error, OSError, RuntimeError) as error:
+            ready.clear()
+            LOG.warning("Dispatch completion reconnecting (%s)", type(error).__name__)
+            time.sleep(RESULT_SCAN_SECONDS)
 
 
 def encode(value):
@@ -190,7 +282,28 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_request()
 
     def respond(self, status, body):
-        payload = json.dumps(body, default=encode).encode()
+        if self.path == WORKSPACE_PATH:
+            try:
+                payload = workspace_json(body)
+            except (TypeError, ValueError, RecursionError):
+                payload = b""
+            if not payload or len(payload) > MAX_WORKSPACE_BODY:
+                status = HTTPStatus.SERVICE_UNAVAILABLE
+                payload = b'{"error":"invalid_workspace_response"}'
+        elif self.path == history_api.PATH:
+            try:
+                payload = json.dumps(body, ensure_ascii=False, allow_nan=False, default=encode,
+                                     separators=(",", ":")).encode("utf-8")
+            except (AttributeError, TypeError, ValueError, RecursionError):
+                payload = b""
+            if not payload or len(payload) > history_api.MAX_RESPONSE_BYTES:
+                api = self.versioned_api()
+                status, body = api.failed(
+                    history_api.request_id(self.headers), Rejected(503, "unavailable")
+                )
+                payload = json.dumps(body).encode()
+        else:
+            payload = json.dumps(body, default=encode).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
@@ -201,7 +314,9 @@ class Handler(BaseHTTPRequestHandler):
     def handle_request(self):
         try:
             authorization = self.headers.get("Authorization", "").encode("latin1")
-            if not secrets.compare_digest(authorization, self.server.authorization):
+            if (not secrets.compare_digest(authorization, self.server.authorization)
+                    or (self.path in (WORKSPACE_PATH, history_api.PATH)
+                        and len(self.headers.get_all("Authorization", [])) != 1)):
                 raise Rejected(401, "unauthorized")
             status, result = self.route()
         except Rejected as error:
@@ -222,6 +337,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.command == "GET" and parsed.path == "/health" and not parsed.query:
             status = HTTPStatus.OK if self.server.ready.is_set() else HTTPStatus.SERVICE_UNAVAILABLE
             return status, {"worker_ready": self.server.ready.is_set()}
+        if self.command == "POST" and self.path == WORKSPACE_PATH:
+            command = workspace_command(self.read_workspace_body())
+            return HTTPStatus.OK, dispatch(Route.WORKSPACE, command)
+        if self.command == "POST" and self.path == history_api.PATH:
+            return self.versioned_request()
         if self.command == "POST" and parsed.path in ("/v1/runs", "/v1/chat/completions") and not parsed.query:
             if self.headers.get_content_type() != "application/json":
                 raise Rejected(415, "json_required")
@@ -230,15 +350,19 @@ class Handler(BaseHTTPRequestHandler):
                 raise Rejected(413, "invalid_body_size")
             body = json.loads(self.rfile.read(size))
             legacy = parsed.path == "/v1/chat/completions"
-            if legacy and isinstance(body, dict) and "model" not in body:
-                try:
-                    body["model"] = self.server.inference.active_model()
-                except (Rejected, ValueError, AttributeError):
-                    body["model"] = DEFAULT_MODEL
-            command = submission(body, self.headers.get("Idempotency-Key"))
-            run = dispatch(Route.SUBMIT, command)
+            distributed = getattr(self.server, "distributed", False)
+            if isinstance(body, dict) and "model" not in body:
+                if distributed:
+                    body["model"] = self.server.pinned_model
+                elif legacy:
+                    try:
+                        body["model"] = self.server.inference.active_model()
+                    except (Rejected, ValueError, AttributeError):
+                        body["model"] = DEFAULT_MODEL
+            command = submission(body, self.headers.get("Idempotency-Key"), allow_partial=legacy)
+            run = store.admit(command, distributed=True) if distributed else dispatch(Route.SUBMIT, command)
             if legacy:
-                return self.await_reply(run["run_id"])
+                return self.await_reply(run["run_id"], command.chat_id is not None)
             return HTTPStatus.ACCEPTED, run
         match = re.fullmatch(r"/v1/runs/([0-9a-fA-F-]{36})(/events)?", parsed.path)
         if self.command == "GET" and match:
@@ -255,15 +379,78 @@ class Handler(BaseHTTPRequestHandler):
                 return HTTPStatus.OK, dispatch(Route.STATUS, Lookup(run_id))
         raise Rejected(404, "route_not_found")
 
-    def await_reply(self, run_id):
+    def versioned_api(self):
+        if mail_api.handles(self.headers):
+            return mail_api
+        return run_api if run_api.handles(self.headers) else history_api
+
+    def versioned_request(self):
+        api = self.versioned_api()
+        correlation = history_api.request_id(self.headers)
+        try:
+            if correlation is None:
+                raise Rejected(400, "invalid_request")
+            route = api.destination(self.headers)
+            body = self.read_json_body(
+                mail_api.MAX_REQUEST_BYTES if api is mail_api else history_api.MAX_REQUEST_BYTES, "invalid_request"
+            )
+            command = api.decode(route, correlation, body)
+            if api in (run_api, mail_api) and not getattr(self.server, "distributed", False):
+                raise Rejected(503, "unavailable")
+            if api is run_api:
+                return api.dispatch(route, correlation, command, self.server.pinned_model, self.server.configured_models)
+            return api.dispatch(route, correlation, command)
+        except Rejected as error:
+            return api.failed(correlation, error)
+        except psycopg2.Error:
+            return api.failed(correlation, Rejected(503, "unavailable"))
+        except TimeoutError:
+            return api.failed(correlation, Rejected(408, "unavailable"))
+
+    def read_workspace_body(self):
+        return self.read_json_body(MAX_WORKSPACE_BODY, "invalid_workspace_json")
+
+    def read_json_body(self, limit, invalid):
+        if len(self.headers.get_all("Content-Type", [])) != 1 or self.headers.get_content_type() != "application/json":
+            raise Rejected(415, "json_required")
+        lengths = self.headers.get_all("Content-Length", [])
+        if (len(lengths) != 1 or not re.fullmatch(r"[1-9][0-9]{0,6}", lengths[0])
+                or self.headers.get_all("Transfer-Encoding")):
+            raise Rejected(413, "invalid_body_size")
+        size = int(lengths[0])
+        if size > limit:
+            raise Rejected(413, "invalid_body_size")
+        raw = self.rfile.read(size)
+        if len(raw) != size:
+            raise Rejected(400, invalid)
+        try:
+            body = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_json_object)
+            encoded = workspace_json(body)
+        except (ValueError, RecursionError):
+            raise Rejected(400, invalid) from None
+        if len(encoded) > limit or not workspace_json_safe(body):
+            raise Rejected(400, invalid)
+        return body
+
+    def await_reply(self, run_id, linked=False):
         deadline = time.monotonic() + 13
         with store.listen("forge_agent_events") as listener:
             while True:
-                run = dispatch(Route.STATUS, Lookup(run_id))
+                try:
+                    run = dispatch(Route.STATUS, Lookup(run_id))
+                except Rejected as error:
+                    if linked and error.code == "run_not_found":
+                        raise Rejected(404, "chat_not_found") from None
+                    raise
                 if run["status"] == "completed":
-                    return HTTPStatus.OK, {"run_id": run_id, "model": run["model"], "choices": [
-                        {"message": {"role": "assistant", "content": run["answer"]}, "finish_reason": "stop"}
+                    finish_reason = run.get("finish_reason", "stop")
+                    answer = store.completion_content(run["answer"], finish_reason)
+                    reply = {"run_id": run_id, "model": run["model"], "choices": [
+                        {"message": {"role": "assistant", "content": answer}, "finish_reason": finish_reason}
                     ]}
+                    if linked:
+                        reply.update(chat_id=run["chat_id"], revision=run["revision"])
+                    return HTTPStatus.OK, reply
                 if run["status"] in store.TERMINAL:
                     return HTTPStatus.BAD_GATEWAY, {"run_id": run_id, "error": run["status"]}
                 remaining = deadline - time.monotonic()
@@ -273,10 +460,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class Server(ThreadingHTTPServer):
-    def __init__(self, token, ready, inference):
+    def __init__(self, token, ready, inference, *, distributed=False, pinned_model=DEFAULT_MODEL,
+                 configured_models=None):
         self.authorization = f"Bearer {token}".encode()
         self.ready = ready
         self.inference = inference
+        self.distributed = distributed
+        self.pinned_model = pinned_model
+        self.configured_models = (pinned_model,) if configured_models is None else configured_models
         self.slots = threading.BoundedSemaphore(24)
         super().__init__(("127.0.0.1", PORT), Handler)
 
@@ -297,17 +488,38 @@ class Server(ThreadingHTTPServer):
             self.slots.release()
 
 
+def configured_models(default_model, setting):
+    models = (default_model,) if setting is None else tuple(model.strip() for model in setting.split(","))
+    if default_model not in models or len(set(models)) != len(models) or not set(models) <= store.MODELS:
+        raise ValueError("Invalid configured runner model catalog")
+    return models
+
+
 def main():
     logging.basicConfig(level=logging.INFO)
+    mode = os.environ.get("FORGE_RUNNER_MODE", "legacy")
+    model = os.environ.get("FORGE_RUNNER_MODEL", DEFAULT_MODEL)
+    if mode not in {"legacy", "dispatch"} or model not in store.MODELS:
+        raise ValueError("Invalid configured runner mode or model")
+    models = configured_models(model, os.environ.get("FORGE_RUNNER_MODELS"))
     credentials = Path(os.environ["CREDENTIALS_DIRECTORY"])
     inbound = (credentials / "runner.token").read_text().strip()
-    outbound = (credentials / "forge.token").read_text().strip()
-    if not all(re.fullmatch(r"[a-fA-F0-9]{32,128}", token) for token in (inbound, outbound)):
-        raise ValueError("Expected two hexadecimal bearer credentials")
+    if not re.fullmatch(r"[a-fA-F0-9]{32,128}", inbound):
+        raise ValueError("Expected a hexadecimal runner bearer credential")
+    inference = None
+    if mode == "legacy":
+        outbound = (credentials / "forge.token").read_text().strip()
+        if not re.fullmatch(r"[a-fA-F0-9]{32,128}", outbound):
+            raise ValueError("Expected a hexadecimal Forge bearer credential")
+        inference = Inference(outbound)
     ready = threading.Event()
-    inference = Inference(outbound)
-    with Server(inbound, ready, inference) as server:
-        threading.Thread(target=worker, args=(inference, ready), daemon=True).start()
+    with Server(inbound, ready, inference, distributed=mode == "dispatch", pinned_model=model,
+                configured_models=models) as server:
+        if mode == "dispatch":
+            threading.Thread(target=complete_dispatched_runs, args=(ready,), daemon=True).start()
+        else:
+            threading.Thread(target=worker, args=(inference, ready), daemon=True).start()
+        threading.Thread(target=expire_chat_history, daemon=True).start()
         LOG.info("Listening on loopback port %d", PORT)
         server.serve_forever()
 

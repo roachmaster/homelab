@@ -1,6 +1,6 @@
 use crate::{
-    backend_address, Chat, Completion, Config, Error, Message, Model, Models, Reply, Request, Role,
-    RuntimeStatus,
+    backend_address, Chat, Completion, Config, Error, Message, Model, Models, Prompt, PromptTokens,
+    Reply, Request, Role, RuntimeStatus, MAIL_MODEL_ID,
 };
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{body::Bytes, client::conn::http1, Request as HttpRequest, StatusCode};
@@ -25,6 +25,8 @@ const RESPONSE_LIMIT: usize = 1024 * 1024;
 const MAX_MESSAGES: usize = 64;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
 const MAX_OUTPUT_TOKENS: u32 = 2048;
+const COUNT_PATH: &str = "/v1/chat/completions/input_tokens";
+const COUNT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct Driver {
     config: Config,
@@ -158,6 +160,7 @@ impl Driver {
                 Ok(Reply::Status(self.status()?))
             }
             Request::Chat(chat) => self.chat(&chat).map(Reply::Chat),
+            Request::CountPrompt(prompt) => self.count_prompt(&prompt).map(Reply::PromptTokens),
         }
     }
 
@@ -267,7 +270,13 @@ impl Driver {
                 .env("GGML_SYCL_ENABLE_GRAPH", "0")
                 .env("GGML_SYCL_FA_ONEDNN_MAX_KV", "32768");
         }
-        let child = command
+        let mail = self
+            .config
+            .mail_expert_paging
+            .as_ref()
+            .filter(|_| model == MAIL_MODEL_ID);
+        let context_size = mail.map_or(self.config.context_size, |profile| profile.context_size);
+        command
             .arg("--model")
             .arg(path)
             .args(["--alias", model, "--host", "127.0.0.1", "--port"])
@@ -281,7 +290,7 @@ impl Driver {
                 "off",
                 "--ctx-size",
             ])
-            .arg(self.config.context_size.to_string())
+            .arg(context_size.to_string())
             .args([
                 "--parallel",
                 "1",
@@ -290,6 +299,36 @@ impl Driver {
                 "--offline",
                 "--jinja",
                 "--no-ui",
+                "--no-warmup",
+                "--reasoning-format",
+                "deepseek",
+                "--api-key-file",
+            ])
+            .arg(&self.config.token_file);
+        if mail.is_some() {
+            command
+                .env("ZES_ENABLE_SYSMAN", "1")
+                .env_remove("GGML_SYCL_FA_ONEDNN_MAX_KV");
+            command.args([
+                "--cpu-moe",
+                "--moe-cache-mib",
+                "4096",
+                "--load-mode",
+                "mmap",
+                "--no-repack",
+                "--batch-size",
+                "8",
+                "--ubatch-size",
+                "1",
+                "--reasoning-effort",
+                "low",
+                "--no-context-shift",
+                "--cache-ram",
+                "0",
+                "--no-cache-idle-slots",
+            ]);
+        } else {
+            command.args([
                 "--batch-size",
                 "128",
                 "--ubatch-size",
@@ -302,18 +341,12 @@ impl Driver {
                 "f16",
                 "--cache-type-v",
                 "f16",
-                "--no-warmup",
-                "--reasoning-format",
-                "deepseek",
-                "--api-key-file",
-            ])
-            .arg(&self.config.token_file)
-            .stdin(Stdio::null())
-            .spawn()
-            .map_err(|err| {
-                eprintln!("llama-server spawn failed: {err}");
-                Error::StartFailed
-            })?;
+            ]);
+        }
+        let child = command.stdin(Stdio::null()).spawn().map_err(|err| {
+            eprintln!("llama-server spawn failed: {err}");
+            Error::StartFailed
+        })?;
         let mut process = Running {
             child,
             model: model.to_string(),
@@ -336,8 +369,12 @@ impl Driver {
             if remaining.is_zero() {
                 return Err(Error::Timeout);
             }
-            let response =
-                self.exchange("/health", None, remaining.min(Duration::from_millis(500)));
+            let response = self.exchange(
+                "/health",
+                None,
+                remaining.min(Duration::from_millis(500)),
+                None,
+            );
             if let Ok(body) = response {
                 if serde_json::from_slice::<Health>(&body).is_ok_and(|health| health.status == "ok")
                     && process
@@ -356,16 +393,50 @@ impl Driver {
         }
     }
 
+    fn validate_messages(messages: &[Message]) -> Result<(), Error> {
+        if !(1..=MAX_MESSAGES).contains(&messages.len())
+            || messages
+                .iter()
+                .any(|message| message.content.trim().is_empty())
+            || !messages
+                .iter()
+                .any(|message| matches!(message.role, Role::User))
+            || messages
+                .iter()
+                .map(|message| message.content.len())
+                .sum::<usize>()
+                > MAX_TEXT_BYTES
+        {
+            return Err(Error::InvalidPrompt);
+        }
+        Ok(())
+    }
+
+    fn count_prompt(&mut self, prompt: &Prompt) -> Result<PromptTokens, Error> {
+        Self::validate_messages(&prompt.messages)?;
+        if prompt.model != MAIL_MODEL_ID || self.status()?.model.as_deref() != Some(MAIL_MODEL_ID) {
+            return Err(Error::ModelMismatch);
+        }
+        let body = serde_json::to_vec(prompt).map_err(|_| Error::InvalidPrompt)?;
+        self.count_tokens(body, None)
+    }
+
+    fn count_tokens(
+        &self,
+        body: Vec<u8>,
+        canceled: Option<&AtomicBool>,
+    ) -> Result<PromptTokens, Error> {
+        let response = self.exchange(COUNT_PATH, Some(body), COUNT_TIMEOUT, canceled)?;
+        serde_json::from_slice(&response).map_err(|_| Error::Backend)
+    }
+
     fn chat(&mut self, chat: &Chat) -> Result<Completion, Error> {
+        Self::validate_messages(&chat.messages)?;
         let max_tokens = chat.max_tokens.unwrap_or(256);
         let temperature = chat.temperature.unwrap_or(0.0);
         if chat.stream
             || !(1..=MAX_OUTPUT_TOKENS).contains(&max_tokens)
             || !(0.0..=2.0).contains(&temperature)
-            || !(1..=MAX_MESSAGES).contains(&chat.messages.len())
-            || chat.messages.iter().any(|m| m.content.trim().is_empty())
-            || !chat.messages.iter().any(|m| matches!(m.role, Role::User))
-            || chat.messages.iter().map(|m| m.content.len()).sum::<usize>() > MAX_TEXT_BYTES
         {
             return Err(Error::InvalidPrompt);
         }
@@ -373,31 +444,69 @@ impl Driver {
         if chat.model.as_ref().is_some_and(|model| model != &active) {
             return Err(Error::ModelMismatch);
         }
+        let mail = self
+            .config
+            .mail_expert_paging
+            .as_ref()
+            .filter(|_| active == MAIL_MODEL_ID);
         let payload = CompletionRequest {
             model: &active,
             messages: &chat.messages,
             max_tokens,
             temperature,
             stream: false,
-            cache_prompt: false,
+            cache_prompt: mail.is_some(),
         };
         let body = serde_json::to_vec(&payload).map_err(|_| Error::InvalidPrompt)?;
+        match (mail, &chat.mail_profile) {
+            (Some(profile), Some(claim))
+                if chat.model.as_deref() == Some(MAIL_MODEL_ID)
+                    && claim.profile_id == profile.profile_id
+                    && max_tokens <= profile.generation_tokens
+                    && (1..=profile.context_size
+                        - profile.generation_tokens
+                        - profile.margin_tokens)
+                        .contains(&claim.prompt_tokens) =>
+            {
+                // Use the same request and native template/tokenizer as inference.
+                let count = self.count_tokens(body.clone(), Some(&chat.cancellation))?;
+                if count.input_tokens != claim.prompt_tokens {
+                    return Err(Error::MailProfileMismatch);
+                }
+            }
+            (None, None) => {}
+            _ => return Err(Error::MailProfileMismatch),
+        }
+        let prompt_seconds =
+            mail.map_or(self.config.prompt_seconds, |profile| profile.prompt_seconds);
         let response = self.exchange(
             "/v1/chat/completions",
             Some(body),
-            Duration::from_secs(self.config.prompt_seconds),
+            Duration::from_secs(prompt_seconds),
+            mail.map(|_| chat.cancellation.as_ref()),
         );
         // An interrupted request may still be running upstream. Reap the child
         // before allowing another request to use this GPU slot.
         if matches!(
             response,
-            Err(Error::Timeout | Error::Shutdown | Error::Backend)
+            Err(Error::Timeout | Error::Shutdown | Error::Canceled | Error::Backend)
         ) {
             self.stop_child()?;
         }
-        let reply: Completion = serde_json::from_slice(&response?).map_err(|_| Error::Backend)?;
+        let mut reply: Completion =
+            serde_json::from_slice(&response?).map_err(|_| Error::Backend)?;
         if reply.model != active || reply.choices.is_empty() {
             return Err(Error::Backend);
+        }
+        if let Some(claim) = &chat.mail_profile {
+            if reply.usage.as_ref().is_none_or(|usage| {
+                usage.prompt_tokens != claim.prompt_tokens || usage.completion_tokens > max_tokens
+            }) {
+                return Err(Error::MailProfileMismatch);
+            }
+            for choice in &mut reply.choices {
+                choice.message.reasoning_content = None;
+            }
         }
         Ok(reply)
     }
@@ -407,6 +516,7 @@ impl Driver {
         path: &str,
         body: Option<Vec<u8>>,
         timeout: Duration,
+        canceled: Option<&AtomicBool>,
     ) -> Result<Bytes, Error> {
         self.http.block_on(async {
             let request = async {
@@ -442,9 +552,18 @@ impl Driver {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             };
+            let cancellation = async {
+                let Some(canceled) = canceled else {
+                    return std::future::pending().await;
+                };
+                while !canceled.load(Ordering::Acquire) {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            };
             tokio::select! {
                 result = tokio::time::timeout(timeout, request) => result.map_err(|_| Error::Timeout)?,
                 () = shutdown => Err(Error::Shutdown),
+                () = cancellation => Err(Error::Canceled),
             }
         })
     }
