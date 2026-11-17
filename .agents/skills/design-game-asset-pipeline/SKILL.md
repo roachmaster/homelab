@@ -34,10 +34,12 @@ Registering early for fix-ups is fine; publishing early is not. A handle that ou
 Resolution order is part of the contract:
 
 1. Cooked output directory for the active build.
-2. Optional, explicitly configured override directory.
+2. Optional, explicitly configured alternate directory.
 3. Nothing else — especially not source trees.
 
-Record the order. A missing asset fails with the ID and the step named. Do not open a recipe file as a runtime fallback.
+Record the order and verify the resolved bytes against the active manifest.
+For changed development content, cook a separate manifest. Report missing
+cooked data with the asset ID and failed stage.
 
 ## Async buffer lifetime
 
@@ -49,15 +51,17 @@ A clean cook and an incremental cook must produce identical bytes. A hash mismat
 
 ## Publication boundary
 
-An asset that becomes ready mid-tick waits for the next tick boundary. Mid-tick publication would put new geometry under a step that started with the old world.
+Stage I/O and initialization outside simulation. Activate a ready level at a
+tick boundary only while its request generation is current. Record the manifest
+identity and activation tick, and preload the recorded inputs during replay.
 
 ## Additional verification
 
 - **Identity round-trip.** A save that stores only asset IDs (plus dynamic state) reloads the same room after the memory layout changes.
-- **Search path.** With an override directory present, the resolved bytes match the override; without it, they match the cooked build. Source files are never opened.
+- **Search path.** Prefer the active cooked directory. Verify that an explicitly configured alternate location can supply the same manifest-verified bytes when the primary file is absent.
 - **Stale completion.** Unload a level while a fetch is in flight; the completion must not publish and must not panic.
 - **Dependency invalidation.** Change a recipe that an atlas depends on; the cook rebuilds the atlas and the build manifest records the new hash. A clean cook and an incremental cook produce identical bytes.
-- **Failed load.** A failed atlas load degrades to the primitive-shape renderer. A failed level load leaves the previous level (or loading screen) up, with the error naming the asset and the step.
+- **Failed load.** A missing optional Scout atlas falls back to primitive drawing. A failure in required level or collision data keeps the active level or loading screen and reports the asset ID and stage.
 
 ## Caveats
 

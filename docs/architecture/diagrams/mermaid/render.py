@@ -20,6 +20,7 @@ SOURCES = [ROOT / f"{name}.mmd" for name in (
     "m19-ui-layout", "m20-ui-build-runtime", "m21-ui-request", "m22-ui-state", "m23-ui-trust", "m24-ui-contracts", "m25-ui-implementation",
     "m26-ui-components", "m27-ui-navigation", "m28-ui-transitions",
     "game-physics-tick", "game-physics-animation", "game-physics-authority",
+    "game-asset-pipeline-cook", "game-asset-pipeline-load", "game-asset-pipeline-contract",
 )]
 MANIFEST = ROOT / "render-manifest.json"
 

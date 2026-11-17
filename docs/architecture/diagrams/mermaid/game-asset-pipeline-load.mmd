@@ -1,0 +1,22 @@
+---
+title: Proposed Forge asset pipeline - load and activate
+---
+sequenceDiagram
+    participant W as World loader
+    participant R as Asset registry
+    participant F as Byte source
+    participant T as Tick scheduler
+    Note over W,T: Proposed load sequence
+    W->>R: Request level by stable asset ID
+    R->>R: Resolve cooked locator
+    Note over W,T: Active cooked output first, then the configured alternate location.
+    R->>F: Read with epoch and retained buffer
+    F-->>R: Completion and buffer
+    R->>R: Check the level epoch
+    Note over W,T: Drop stale completion and release its buffer.
+    R->>R: Verify digest and required assets
+    Note over W,T: Required failure keeps the active level.<br/>Missing optional atlas uses primitives.
+    R->>R: Initialize validated assets
+    R->>T: Stage level with manifest identity
+    T->>R: Record activation tick and publish
+    T-->>W: Activate the validated level

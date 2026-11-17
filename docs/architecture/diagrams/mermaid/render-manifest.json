@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "0eaf7462a6959017a8fbce706e942ca27885c87e93f0b098b827ad553bd5b3f2",
-    "validate.mjs": "8f6e41890afde4949a87bbeb5e7b5796692354f3adafb4b588aa2a2a7f736ffe"
+    "render.py": "6997308fd476d4c035e36e36f17182e483adbf170f80fa25df365ffeb75c50fc",
+    "validate.mjs": "3715840a7859a03a09944abfb50c0b7350bf61916f7362ead75139e7845d6a89"
   },
   "diagrams": [
     {
@@ -199,6 +199,24 @@
       "source_sha256": "3674cae0fa8b93678cca316d7856527c837b93c5b37e74da1f5bd1f6a1d1b379",
       "svg": "images/game-physics-authority.svg",
       "svg_sha256": "ae743169687e74282cb4ab5563d477f1adf325ccee935a9681d78f5236c84b8c"
+    },
+    {
+      "source": "game-asset-pipeline-cook.mmd",
+      "source_sha256": "b482ea8c7d1770220579bc8b9c193c9659a492e447ea6d21c836f3b9e92e6efe",
+      "svg": "images/game-asset-pipeline-cook.svg",
+      "svg_sha256": "1adbbd1957629add717a19f1cd4e95b905f0bb249b9f92d812b4b9414cac7214"
+    },
+    {
+      "source": "game-asset-pipeline-load.mmd",
+      "source_sha256": "4460e8e2c0db75a1ca0ae3aa48bd33ccb03f4a800fc3bad5fe9c060a3a53ec34",
+      "svg": "images/game-asset-pipeline-load.svg",
+      "svg_sha256": "d180d6ce766bd318ea3a3325cda458983a40284170fe8afefd6ca0a08a1ab9e6"
+    },
+    {
+      "source": "game-asset-pipeline-contract.mmd",
+      "source_sha256": "de2e349e7d1fbbb710ba9b0a615770395f5e5c4fb39c6cca7939dd8467b68343",
+      "svg": "images/game-asset-pipeline-contract.svg",
+      "svg_sha256": "fc8c8db62c89b222388b954173c7f3a93395ba9fbf4005154fbfea8e4106b02a"
     }
   ]
 }

@@ -1,0 +1,23 @@
+---
+title: Proposed Forge asset pipeline - cook and publish
+---
+sequenceDiagram
+    actor A as Author
+    participant C as Cook command
+    participant V as Asset tools
+    participant D as Cooked output
+    Note over A,D: Proposed build sequence
+    A->>C: Cook authored sources
+    C->>V: Validate recipes and chunks
+    V-->>C: Source and dependency results
+    alt Rejected
+        C-->>A: Report invalid data or asset ID
+    else Valid
+        C->>C: Plan rebuild from changed inputs
+        C->>V: Export affected assets
+        V-->>C: Cooked bytes and dependencies
+        C->>C: Hash outputs and build manifest
+        C->>D: Publish loose files and manifest
+        D-->>A: Active build
+    end
+    Note over A,D: CI checks clean and incremental outputs match.

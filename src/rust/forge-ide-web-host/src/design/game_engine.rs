@@ -5,7 +5,9 @@ pub(super) const BODY: &[Node] = &[
     element!(Nav [Class = "section-nav", AriaLabel = "Game engine links"];
         element!(A [Href = "/playtest"]; text("Open browser playtest")),
         element!(A [Href = "/design/game-physics"]; text("Game physics design")),
+        element!(A [Href = "/design/game-asset-pipeline"]; text("Game asset pipeline design")),
     ),
+    element!(P; text("The asset pipeline proposal connects Studio exports to runtime level chunks and sprite atlases. The physics proposal defines how the runtime uses level geometry, surface properties, and collision queries.")),
     Node::GameEngineReport,
 ];
 

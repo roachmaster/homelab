@@ -34,6 +34,17 @@ const GAME_PHYSICS_ANIMATION: &[u8] = include_bytes!(
 const GAME_PHYSICS_AUTHORITY: &[u8] = include_bytes!(
     "../../../../docs/architecture/diagrams/mermaid/images/game-physics-authority.svg"
 );
+const GAME_ASSET_PIPELINE_HTML: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/game-asset-pipeline.html"));
+const GAME_ASSET_PIPELINE_COOK: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/game-asset-pipeline-cook.svg"
+);
+const GAME_ASSET_PIPELINE_LOAD: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/game-asset-pipeline-load.svg"
+);
+const GAME_ASSET_PIPELINE_CONTRACT: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/game-asset-pipeline-contract.svg"
+);
 const PLAYTEST_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.html"));
 const PLAYTEST_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.css"));
 const PLAYTEST_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.js"));
@@ -108,6 +119,14 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/game-physics/tick.svg" => Some(("image/svg+xml", GAME_PHYSICS_TICK)),
         "/design/game-physics/animation.svg" => Some(("image/svg+xml", GAME_PHYSICS_ANIMATION)),
         "/design/game-physics/authority.svg" => Some(("image/svg+xml", GAME_PHYSICS_AUTHORITY)),
+        "/design/game-asset-pipeline" | "/design/game-asset-pipeline/" => {
+            Some(("text/html; charset=utf-8", GAME_ASSET_PIPELINE_HTML))
+        }
+        "/design/game-asset-pipeline/cook.svg" => Some(("image/svg+xml", GAME_ASSET_PIPELINE_COOK)),
+        "/design/game-asset-pipeline/load.svg" => Some(("image/svg+xml", GAME_ASSET_PIPELINE_LOAD)),
+        "/design/game-asset-pipeline/contract.svg" => {
+            Some(("image/svg+xml", GAME_ASSET_PIPELINE_CONTRACT))
+        }
         "/playtest" | "/playtest/" => Some(("text/html; charset=utf-8", PLAYTEST_HTML)),
         "/playtest/style.css" => Some(("text/css; charset=utf-8", PLAYTEST_CSS)),
         "/playtest/main.js" => Some(("text/javascript; charset=utf-8", PLAYTEST_JS)),

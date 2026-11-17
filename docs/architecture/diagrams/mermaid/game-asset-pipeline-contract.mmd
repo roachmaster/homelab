@@ -1,0 +1,34 @@
+---
+title: Proposed Forge asset pipeline - identity and runtime ownership
+---
+classDiagram
+    class AssetId {
+        stable name
+    }
+    class CookedManifestEntry {
+        asset ID
+        locator
+        output digest
+        dependency IDs
+    }
+    class RegistrySlot {
+        asset ID
+        generation
+        readiness
+    }
+    class LoadRequest {
+        asset ID
+        level epoch
+    }
+    class ReadBuffer {
+        cooked bytes
+    }
+    class PublishedAsset {
+        ready generation
+        effective tick
+    }
+    CookedManifestEntry --> AssetId
+    RegistrySlot --> AssetId
+    LoadRequest --> RegistrySlot
+    LoadRequest *-- ReadBuffer : retains
+    RegistrySlot ..> PublishedAsset : publishes

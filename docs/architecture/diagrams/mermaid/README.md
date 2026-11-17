@@ -419,3 +419,17 @@ position snapshot. Its transport remains open.
 | Fixed tick, collision, and publication | [Mermaid](game-physics-tick.mmd) | [SVG](images/game-physics-tick.svg) |
 | Landing contact and animation bridge | [Mermaid](game-physics-animation.mmd) | [SVG](images/game-physics-animation.svg) |
 | Transform authority and publication | [Mermaid](game-physics-authority.mmd) | [SVG](images/game-physics-authority.svg) |
+
+## Forge game asset pipeline proposal
+
+The [asset pipeline proposal](../../proposals/forge-game-asset-pipeline.md)
+separates cooking and publication from runtime loading and activation. The
+contract view distinguishes persistent asset identity, a cooked manifest
+locator, the buffer retained by an asynchronous request, and the generation
+visible to gameplay at a tick boundary.
+
+| Proposed view | Source | Image |
+| --- | --- | --- |
+| Validate, cook, and publish a build | [Mermaid](game-asset-pipeline-cook.mmd) | [SVG](images/game-asset-pipeline-cook.svg) |
+| Resolve, load, and activate a level | [Mermaid](game-asset-pipeline-load.mmd) | [SVG](images/game-asset-pipeline-load.svg) |
+| Identity, address, and readiness | [Mermaid](game-asset-pipeline-contract.mmd) | [SVG](images/game-asset-pipeline-contract.svg) |

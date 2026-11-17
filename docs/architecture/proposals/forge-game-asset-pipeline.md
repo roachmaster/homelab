@@ -3,14 +3,19 @@
 Give authored content a reproducible path from source files to
 runtime objects — so a level, a character atlas, and their
 dependencies load by identity, validate before they activate,
-and unload together — while keeping the fixed tick, determinism,
-and the snapshot interface exactly as they are.
+and unload together. The proposal keeps loading outside the fixed tick
+and preserves the existing v1 snapshot layout.
 
 **Planning baseline** — GitHub `main` at `947b124` on 2026-11-17.
 This design applies Gregory chapter 6 (§§6.1–6.2), chapter 15
 (§§15.3–15.5), and the synthesis's streaming-door example, and
 it follows the Forge package-boundary conventions (see "How this
 integrates with the Forge philosophy" below).
+
+The [editable diagrams](../diagrams/mermaid/README.md#forge-game-asset-pipeline-proposal)
+show [cook and publication](../diagrams/mermaid/images/game-asset-pipeline-cook.svg),
+[lookup and activation](../diagrams/mermaid/images/game-asset-pipeline-load.svg),
+and [asset identity and ownership](../diagrams/mermaid/images/game-asset-pipeline-contract.svg).
 
 ## The problem
 
@@ -124,16 +129,21 @@ collapsed:
 
 | Concept | Form in Forge | Lifetime | Purpose |
 | --- | --- | --- | --- |
-| Identity | Asset ID (typed string / handle) | Permanent across loads and saves | Names the resource in chunks, saves, traces, and the registry |
+| Identity | Stable typed asset ID | Stable across loads and saves | Names the resource in chunks, saves, traces, and the registry |
+| Locator | Manifest-relative path or archive entry | Bound to a cooked build | Tells the loader where to read the bytes |
 | Address | Runtime pointer / slice into a loaded buffer | Valid only while the buffer is retained | Used by the loader and the registry; never stored in a save or a chunk |
-| Readiness | "Published" flag / generation at a tick boundary | From successful post-load init until unload | Gameplay and physics may observe the asset only after publication |
+| Readiness | Published flag and generation at a tick boundary | From successful post-load init until unload | Gameplay and physics may observe the asset only after publication |
 
-A resolved registry entry is not the same as a ready asset.
-Registering early can help fix up cross-references; publishing
-for general use waits until every required dependency is ready
-and post-load initialization has finished. A handle that outlives
-its buffer is a use-after-free; the generational or epoch check
-on the handle detects it.
+Registering a resolved entry early can help fix up cross-references.
+Publishing for general use waits until every required dependency is ready
+and post-load initialization has finished. Runtime handles check the owner
+generation before dereferencing a loaded address.
+
+Treat the level chunk, terrain, and collision inputs as required.
+If any fails, keep the active level or loading screen and report the
+asset ID and failed stage. The Scout atlas is an optional presentation
+asset for v1. Use the primitive renderer if it cannot load, with
+gameplay geometry supplied by the validated level and collision data.
 
 ## Search path and resolution order (§6.1)
 
@@ -141,15 +151,15 @@ When the same relative name exists in more than one location,
 resolution order is observable behavior. For v1:
 
 1. The cooked output directory for the active build (authoritative).
-2. An optional override directory for local experimentation
-   (explicitly configured, never implicit).
+2. An optional, explicitly configured alternate directory.
 3. No further fallbacks. A missing asset is an error that names
    the ID and the step, not a silent search into source trees.
 
-Record the order in the loader config so a clean build and a
-developer machine resolve the same inputs. Do not let the
-runtime open source recipe files as a fallback — that bypasses
-the cook and the hash.
+Verify bytes from every location against the active manifest's digest.
+An alternate directory can supply the same cooked bytes when the active
+directory lacks them. For local experiments with changed bytes, cook a
+separate development manifest. Record the search order in the loader
+configuration. The runtime reads only cooked artifacts.
 
 ## Async completion and buffer lifetime
 
@@ -159,6 +169,15 @@ either published the asset or recorded a failure. The buffer is
 not recycled while a pending request still points at it. A
 completion that arrives after the requesting level has been
 unloaded is dropped; it must not publish into a foreign arena.
+
+## Tick-boundary activation and replay
+
+I/O and post-load initialization stage a candidate outside the simulation
+step. A ready candidate can replace the active level only at a tick
+boundary and only if its request generation is still current. Record the
+manifest identity and activation tick for replay. Replay preloads the
+recorded cooked inputs before applying that activation so asynchronous
+completion timing cannot move the transition to another tick.
 
 ## Caveats and things to consider
 
@@ -174,7 +193,8 @@ unloaded is dropped; it must not publish into a foreign arena.
   to a different room, the cooker's default handling is
   wrong.
 - **Publication is a tick boundary, never mid-tick.** An
-  asset that becomes ready mid-tick waits. No exceptions.
+  asset that becomes ready mid-tick waits for a boundary. A stale
+  request cannot replace the active level.
 - **The placeholder is the current renderer.** The
   primitive-shape rendering stays until the atlas loader
   lands, because it is the fallback a failed atlas load
@@ -185,8 +205,8 @@ unloaded is dropped; it must not publish into a foreign arena.
   file or a package. Do not let packaging decisions leak
   into game code.
 - **Search path order is recorded.** A clean build and a
-  developer machine must resolve the same asset ID to the
-  same bytes. An unrecorded override is a reproducibility bug.
+  developer machine using the same manifest must resolve an
+  asset ID to the same bytes.
 - **Identity is not an address.** Never store a runtime
   pointer in a save, a chunk, or a trace. Use the asset ID.
 - **Buffers outlive their requests.** A pending async
@@ -226,5 +246,4 @@ unloaded is dropped; it must not publish into a foreign arena.
   (recipe format, exporters, manifest versions).
 - The `design-package-boundaries` skill (`.agents/skills/`) for
   the typed-contract, boundedness, and dependency-direction
-  conventions applied throughout, summarized in "How this
-  integrates with the Forge philosophy" above.
+  conventions applied throughout.

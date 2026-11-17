@@ -9,6 +9,7 @@ pub(super) const BODY: &[Node] = &[
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Game physics design sections"];
             element!(A [Href = "#fixed-tick"]; text("Fixed tick")),
+            element!(A [Href = "#collision-world"]; text("Collision world")),
             element!(A [Href = "#animation"]; text("Animation and contacts")),
             element!(A [Href = "#authority"]; text("Transform ownership")),
             element!(A [Href = "#rollout"]; text("Rollout")),
@@ -35,6 +36,12 @@ pub(super) const BODY: &[Node] = &[
                 ),
             ),
         ),
+    ),
+    element!(Section [Id = "collision-world", Class = "design-section", AriaLabelledby = "collision-world-title"];
+        element!(H2 [Id = "collision-world-title"]; text("Collision world and diagnostics")),
+        element!(P; text("Build v1 terrain from closed solid tiles in the cooked level chunk. Resolve penetrations by pushing bodies out. A tile or body can reference a stable surface ID for friction and restitution. Validate referenced IDs before level activation. Characters start with fixed friction and zero restitution.")),
+        element!(P; text("A ray reports a hit for ground checks or aiming, a swept shape reports first time of impact for fast motion, and an overlap returns a bounded set of stable IDs for triggers and action boxes. Outside the step, queries read the last completed collision state. The solver can sweep during its own phase to resolve contacts and move bodies.")),
+        element!(P; text("Debug overlays can show body bounds, contact normals and depth, grounded and sleep state, and ray hits. The presentation layer consumes those diagnostics outside the simulation step without changing replay results.")),
     ),
     element!(Section [Id = "animation", Class = "design-section", AriaLabelledby = "animation-title"];
         element!(H2 [Id = "animation-title"]; text("Animation and contacts")),
@@ -87,6 +94,7 @@ pub(super) const BODY: &[Node] = &[
         element!(Nav [Class = "section-nav", AriaLabel = "Related game designs"];
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-game-physics.md"]; text("Full physics proposal")),
             element!(A [Href = "/design/game-studio"]; text("Game engine design")),
+            element!(A [Href = "/design/game-asset-pipeline"]; text("Game asset pipeline design")),
             element!(A [Href = "/playtest"]; text("Open Room One playtest")),
         ),
     ),

@@ -1057,6 +1057,8 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/design/mail\""));
         assert!(response.contains("href=\"/design/game-studio\""));
         assert!(response.contains("href=\"/design/game-physics\">Game physics design</a>"));
+        assert!(response
+            .contains("href=\"/design/game-asset-pipeline\">Game asset pipeline design</a>"));
         assert!(response.contains("href=\"/playtest\">Room One playtest</a>"));
     }
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
@@ -1092,6 +1094,8 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/design/game-engine-build-sequence.svg\""));
         assert!(response.contains("href=\"/playtest\""));
         assert!(response.contains("href=\"/design/game-physics\""));
+        assert!(response
+            .contains("href=\"/design/game-asset-pipeline\">Game asset pipeline design</a>"));
         assert!(!response.contains("<script"));
         let head = request("HEAD", path);
         assert!(head.starts_with("HTTP/1.1 200 OK"));
@@ -1111,6 +1115,8 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/design/game-physics/tick.svg\""));
         assert!(response.contains("href=\"/design/game-physics/animation.svg\""));
         assert!(response.contains("href=\"/design/game-physics/authority.svg\""));
+        assert!(response.contains("Collision world and diagnostics"));
+        assert!(response.contains("href=\"/design/game-asset-pipeline\""));
         assert!(!response.contains("<script"));
         assert!(!response.contains("target=\"_blank\""));
         let head = request("HEAD", path);
@@ -1118,6 +1124,28 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(head.ends_with("\r\n\r\n"));
     }
     assert!(request("POST", "/design/game-physics").starts_with("HTTP/1.1 405"));
+    for path in [
+        "/design/game-asset-pipeline",
+        "/design/game-asset-pipeline/",
+    ] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("Content-Security-Policy:"));
+        assert!(response.contains("<h1>Asset Pipeline for the Forge Game Runtime</h1>"));
+        assert!(response.contains("<strong>Design proposal.</strong>"));
+        assert!(response.contains("href=\"/design/game-studio\""));
+        assert!(response.contains("href=\"/design/game-physics\""));
+        assert!(response.contains("href=\"/design/game-asset-pipeline/cook.svg\""));
+        assert!(response.contains("href=\"/design/game-asset-pipeline/load.svg\""));
+        assert!(response.contains("href=\"/design/game-asset-pipeline/contract.svg\""));
+        assert!(!response.contains("<script"));
+        assert!(!response.contains("target=\"_blank\""));
+        let head = request("HEAD", path);
+        assert!(head.starts_with("HTTP/1.1 200 OK"));
+        assert!(head.ends_with("\r\n\r\n"));
+    }
+    assert!(request("POST", "/design/game-asset-pipeline").starts_with("HTTP/1.1 405"));
     for path in [
         "/design/chat-dispatch-sequence.svg",
         "/design/forge-ide-mail-wireframe.svg",
@@ -1127,6 +1155,9 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         "/design/game-physics/tick.svg",
         "/design/game-physics/animation.svg",
         "/design/game-physics/authority.svg",
+        "/design/game-asset-pipeline/cook.svg",
+        "/design/game-asset-pipeline/load.svg",
+        "/design/game-asset-pipeline/contract.svg",
     ] {
         let diagram = request("HEAD", path);
         assert!(diagram.starts_with("HTTP/1.1 200 OK"));
@@ -1135,6 +1166,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
     }
     assert!(request("GET", "/design/chat-dispatch-sequence.mmd").starts_with("HTTP/1.1 404"));
     assert!(request("GET", "/design/game-physics/tick.mmd").starts_with("HTTP/1.1 404"));
+    assert!(request("GET", "/design/game-asset-pipeline/cook.mmd").starts_with("HTTP/1.1 404"));
     for path in [
         "/design/forge-ide-chat-desktop.png",
         "/design/forge-ide-chat-phone.png",

@@ -58,6 +58,7 @@ macro_rules! element {
 }
 
 mod dispatch;
+mod game_asset_pipeline;
 pub mod game_engine;
 mod game_physics;
 mod history;
@@ -103,6 +104,7 @@ pub enum DesignPage {
     Mail,
     GameStudio,
     GamePhysics,
+    GameAssetPipeline,
     Playtest,
 }
 
@@ -140,6 +142,12 @@ impl DesignPage {
                 "/design",
                 "Back to Design",
                 game_physics::BODY,
+            ),
+            Self::GameAssetPipeline => (
+                "Asset Pipeline for the Forge Game Runtime · Forge IDE",
+                "/design",
+                "Back to Design",
+                game_asset_pipeline::BODY,
             ),
             Self::Playtest => (
                 "Room One · Forge Playtest",
