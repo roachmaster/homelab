@@ -21,6 +21,7 @@ core contracts. [Implemented Mermaid flow](architecture/diagrams/mermaid/README.
 
 - [Forge IDE UI proposal](architecture/proposals/forge-ide-ui.md) · [earlier PDF snapshot](architecture/proposals/forge-ide-ui.pdf) — proposed browser state, generated assets, same-origin admission and phased tests
 - [Extending Homelab with a Rust game engine](architecture/proposals/forge-game-engine.md) — runtime packages, graphics and physics APIs, and a staged Forge Studio build and preview flow
+- [Simulation-to-presentation snapshot for the Forge game runtime](architecture/proposals/forge-game-snapshot.md) — one versioned, batched snapshot per frame replacing the scalar per-cell WASM interface
 - [Repository reviews — 16 reports](reviews/forge/README.md)
 - [Debug and trace layer for the Forge game runtime](architecture/proposals/forge-game-debug.md) — bounded trace ring, live state inspector, frame timing, and pause/step control for the playtest
 - [Detailed future foundation modules and interfaces](architecture/foundation-interfaces.md) · [Rust contract sketches](architecture/foundation-contracts.md)
