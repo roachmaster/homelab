@@ -1264,6 +1264,7 @@ async function durableHostRestartJourney() {
     assert.equal(await freshPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.equal(relay.completions(), 1, 'retention and deletion do not call inference');
     await freshPage.locator('#new-chat').click();
+    await check(freshPage.locator('#chat-conversation')).toHaveValue('1');
     const cancelled = freshPage.locator('#chat-draft');
     await cancelled.fill(cancelledDraft);
     await freshPage.locator('#send-chat').click();
