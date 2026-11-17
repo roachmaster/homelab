@@ -18,6 +18,23 @@ fn children(items: &[Component], out: &mut String) {
         emit(child, out);
     }
 }
+fn disclosure(id: &str, title: &str, items: &[Component], group: Option<&str>, out: &mut String) {
+    let _ = write!(
+        out,
+        "<details id=\"{}\" class=\"fg-disclosure\"",
+        escape(id)
+    );
+    if let Some(name) = group {
+        let _ = write!(out, " name=\"{name}\"");
+    }
+    let _ = write!(
+        out,
+        "><summary>{}</summary><div class=\"fg-disclosure-body\">",
+        escape(title)
+    );
+    children(items, out);
+    out.push_str("</div></details>");
+}
 pub(crate) fn emit(c: &Component, out: &mut String) {
     match c {
         Component::BrandContext { id } => {
@@ -47,11 +64,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             id,
             title,
             children: items,
-        } => {
-            let _ = write!(out, "<details id=\"{}\" class=\"fg-disclosure\"><summary>{}</summary><div class=\"fg-disclosure-body\">", escape(id), escape(title));
-            children(items, out);
-            out.push_str("</div></details>");
-        }
+        } => disclosure(id, title, items, None, out),
         Component::Panel {
             id,
             title,
@@ -105,9 +118,11 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children: items,
         } => {
             let id = escape(id);
-            let controls = items
-                .iter()
-                .find(|item| matches!(item, Component::LayoutControls(_)));
+            let options = format!("{id}-options");
+            let controls = items.iter().find_map(|item| match item {
+                Component::LayoutControls(items) => Some(items),
+                _ => None,
+            });
             let action = items
                 .iter()
                 .find(|item| matches!(item, Component::PaneAction(_)));
@@ -115,7 +130,10 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             if controls.is_some() {
                 out.push_str("<div class=\"fg-layout-options\">");
             }
-            let _=write!(out,"<details id=\"{id}-options\" class=\"fg-view-options\"><summary>View options</summary><div class=\"fg-option-list\">");
+            let _ = write!(
+                out,
+                "<details id=\"{options}\" class=\"fg-view-options\" name=\"{options}\"><summary>View options</summary><div class=\"fg-option-list\">"
+            );
             for pane in items {
                 if let Component::Pane {
                     id,
@@ -130,8 +148,17 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 }
             }
             let _=write!(out,"<button type=\"button\" id=\"{id}-reset\" data-layout-reset>Reset panes</button></div></details>");
-            if let Some(slot) = controls {
-                emit(slot, out);
+            if let Some(controls) = controls {
+                for item in controls {
+                    match item {
+                        Component::Disclosure {
+                            id,
+                            title,
+                            children,
+                        } => disclosure(id, title, children, Some(&options), out),
+                        _ => emit(item, out),
+                    }
+                }
                 out.push_str("</div>");
             }
             if action.is_some() {

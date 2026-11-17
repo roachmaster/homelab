@@ -470,7 +470,12 @@ fn workbench_keeps_project_selects_in_a_closed_native_disclosure() {
     let (before_options, options) = html.split_once("<details id=\"project-options\"").unwrap();
     let (attributes, options) = options.split_once('>').unwrap();
     assert!(!attributes.split_whitespace().any(|part| part == "open"));
-    assert!(before_options.contains("id=\"workspace-options\""));
+    assert!(attributes.contains("name=\"workspace-options\""));
+    let (_, view) = before_options
+        .split_once("<details id=\"workspace-options\"")
+        .unwrap();
+    let (view_attributes, _) = view.split_once('>').unwrap();
+    assert!(view_attributes.contains("name=\"workspace-options\""));
     let (options, _) = options.split_once("</details>").unwrap();
     assert!(options.starts_with("<summary>Project options</summary>"));
     assert!(options.contains("id=\"node\""));

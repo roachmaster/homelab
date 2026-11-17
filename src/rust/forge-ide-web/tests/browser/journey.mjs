@@ -341,9 +341,15 @@ async function checkRefreshPlacement(page) {
   await refresh.click({ trial: true });
 }
 async function projectOptionsJourney(page, traffic) {
+  await disclosure(page, 'workspace-options', false);
+  await disclosure(page, 'project-options', false);
   await checkRefreshPlacement(page);
+  const projectDetails = page.locator('#project-options');
+  const viewDetails = page.locator('#workspace-options');
   const projectOptions = page.locator('#project-options > summary');
   const viewOptions = page.locator('#workspace-options > summary');
+  const projectPanel = page.locator('#project-options > .fg-disclosure-body');
+  const viewPanel = page.locator('#workspace-options > .fg-option-list');
   await check(projectOptions).toHaveText('Project options');
   await check(projectOptions).toBeInViewport();
   await check(viewOptions).toBeInViewport();
@@ -353,7 +359,14 @@ async function projectOptionsJourney(page, traffic) {
     viewBounds.y < projectBounds.y + projectBounds.height, 'project and view options share a row');
   const requests = ['resume', 'pair', 'inspect', 'source', 'other'];
   const before = requests.map(traffic.count);
+  await disclosure(page, 'workspace-options', true);
+  await check(viewPanel).toBeVisible();
+  await check(projectDetails).toHaveJSProperty('open', false);
+  await check(projectPanel).toBeHidden();
   await disclosure(page, 'project-options', true);
+  await check(projectPanel).toBeVisible();
+  await check(viewDetails).toHaveJSProperty('open', false);
+  await check(viewPanel).toBeHidden();
   await page.keyboard.press('Tab');
   await check(page.locator('#node')).toBeFocused();
   await page.keyboard.press('Tab');
@@ -363,10 +376,15 @@ async function projectOptionsJourney(page, traffic) {
   'open context selectors keep readable widths');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
     'open project options do not overflow the viewport');
-  await disclosure(page, 'project-options', false);
+  await disclosure(page, 'workspace-options', true);
+  await check(viewPanel).toBeVisible();
+  await check(projectDetails).toHaveJSProperty('open', false);
+  await check(projectPanel).toBeHidden();
   await check(page.locator('#node')).toBeHidden();
   await check(page.locator('#project')).toBeHidden();
-  assert.deepEqual(requests.map(traffic.count), before, 'project options open and close locally');
+  await disclosure(page, 'workspace-options', false);
+  await check(viewPanel).toBeHidden();
+  assert.deepEqual(requests.map(traffic.count), before, 'view and project options open and close locally');
 }
 async function ensurePane(page, id) {
   if (!await page.locator(`#${id}`).isVisible()) await page.locator(`#${id}-switch`).click();
