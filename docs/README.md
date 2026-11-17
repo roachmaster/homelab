@@ -24,7 +24,7 @@ core contracts. [Implemented Mermaid flow](architecture/diagrams/mermaid/README.
 - [Simulation-to-presentation snapshot for the Forge game runtime](architecture/proposals/forge-game-snapshot.md) — one versioned, batched snapshot per frame replacing the scalar per-cell WASM interface
 - [Debug and trace layer for the Forge game runtime](architecture/proposals/forge-game-debug.md) — bounded trace ring, live state inspector, frame timing, and pause/step control for the playtest
 - [Entity model for the Forge game runtime](architecture/proposals/forge-game-entity-model.md) — typed, bounded entities with stable IDs, generational handles, update phases, and targeted events
-- [Physics for the Forge game runtime](architecture/proposals/forge-game-physics.md) — gravity, velocity, and tile collision in fixed point, with the animation bridge
+- [Asset pipeline for the Forge game runtime](architecture/proposals/forge-game-asset-pipeline.md) — stable asset IDs, a runtime loader, a cooking step, and the level chunk format
 - [Repository reviews — 16 reports](reviews/forge/README.md)
 - [Detailed future foundation modules and interfaces](architecture/foundation-interfaces.md) · [Rust contract sketches](architecture/foundation-contracts.md)
 - [Two-machine Forge IDE proposal](architecture/proposals/remote-ide.md) · [visual PDF](architecture/proposals/remote-ide-proposal.pdf) — next milestone, not deployed remote IDE
