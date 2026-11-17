@@ -88,6 +88,12 @@ phantom queries, never contacts (§12.3). A projectile never
 contacts its owner — the filter, not a special case in the
 narrow phase.
 
+A body starts with one AABB. Keep a shape reference at the collider
+boundary so a later table can share one shape across differently
+placed and filtered bodies. The proposed table holds up to 64 shape
+definitions. A per-body change uses a distinct shape ID. Composite
+colliders arrive with the later general-shape adapter.
+
 ## Units and spaces (authoritative)
 
 Gregory §4 requires every vector to name its source space, destination space, and units. The following table is the only admitted contract inside the simulation:
@@ -100,6 +106,7 @@ Gregory §4 requires every vector to name its source space, destination space, a
 | Collider offset     | Q8 relative to pivot    | Recipe body-hitbox `at` point                        |
 | Recipe pivot        | Pixel cell origin       | Authoring space; converted once at load              |
 | Contact normal      | Axis-aligned unit       | +X, −X, +Y, or −Y only for v1                        |
+| Time of impact      | Q16 fraction of a tick  | Swept intersection time, with 0 at the start and 65,536 at the end |
 
 Board rows remain y-down. The publication adapter converts current and previous
 entity positions and event tiles to the existing y-up wire coordinates. At
@@ -168,6 +175,21 @@ reserved `Animate` position when implementing this order.
 
 ## Collision: tile grid, axis-separated resolution
 
+**Collision world.** The world holds the bounded collidable set, the static
+tile grid, and persistent contacts. It owns collidable registration, removal,
+and transform updates. Each tick, rebuild the collidable set in stable entity
+order and carry forward the contact set. A mid-tick spawn first participates
+in the next tick. An incremental broad phase can later replace the rebuild
+behind this interface. Collision queries read this world through their phase
+contract.
+
+**Static tile geometry.** Tile cells are closed solids. A body inside a solid
+cell has a penetration to resolve. Exact axis-aligned tile tests determine
+contacts. Adjacent cells may share internal faces. If profiling warrants it,
+derive exposed-face adjacency from the validated grid during cook or load,
+and preserve the closed-solid overlap checks for embedded bodies. A candidate
+cache must give the same collision and query results as direct grid tests.
+
 **Broad phase.** The tile grid is the broad phase for terrain:
 a body's AABB overlaps a bounded set of tiles (a 1-tile body
 touches at most 4 tiles; the bound is max body size + 1 per
@@ -181,7 +203,9 @@ feared one.
 **Narrow phase.** AABB vs tile AABB, and AABB vs AABB, both
 exact in fixed point. Contact information is the minimum
 penetration axis and depth, plus the contact normal (axis-aligned
-by construction).
+by construction). For AABBs, the separating-axis test uses two axes.
+Coincident faces are exactly touching in fixed point. The tests distinguish
+touching from overlap without an epsilon.
 
 **Resolution.** Axis-separated, in a fixed order: resolve X,
 then Y. Each axis pushes the body out along the minimum
@@ -243,6 +267,24 @@ undetected. The time-of-impact is recorded as a fraction of the
 current tick (Q16) so the resolution can place the body at the
 exact contact plane before the remaining velocity is applied.
 
+## Queries: rays, sweeps, and phantoms
+
+| Query | Result | Consumers |
+| --- | --- | --- |
+| Ray | Nearest hit or empty result, with Q16 tile-space point and distance, an entry-face normal, and a tile or stable entity ID | Foot probe, aiming |
+| Swept AABB | Earliest Q16 time of impact and the contact | The fixed step for a body above the discrete speed bound |
+| Phantom overlap | Up to eight stable entity IDs matched by the collision filter | Action boxes and triggers |
+
+Read-only rays and overlaps observe the last completed `Collide` state.
+During `Animate` that is the current tick. The step's swept test uses the
+current motion candidate and returns an intersection for the resolver to
+apply. Query evaluation itself leaves body state intact. Use stable target
+ordering for equal distances and count phantom results dropped beyond the
+nearest eight. Test a downward ray's distance and upward entry-face normal,
+an empty ray, and a phantom entry with the reported body's transform intact.
+The [collision integration skill](../../../.agents/skills/integrate-collision-detection/SKILL.md)
+records the expected phase for each use.
+
 ## Transform authority (§12.5)
 
 §12.5: "Assign transform authority per object and per update
@@ -269,8 +311,8 @@ The snapshot publishes the resolved root at the end of the tick. The v1
 entity record has no pose field. Pair a proposed companion pose payload
 with the completed snapshot by run epoch, tick, and stable entity ID.
 Until that payload is specified, the sequence and authority views describe
-the logical publication boundary. Physics queries inside the tick use
-phase-authoritative state, and the renderer reads only completed ticks.
+the logical publication boundary. Read-only queries use the last completed collision state. The renderer reads
+only completed ticks.
 
 ## Events: physics speaks through the ring
 
@@ -392,13 +434,39 @@ Before a recipe can be driven by this physics design:
 A recipe that still carries airborne root offsets will produce
 visible double-motion and is rejected by the bridge skill.
 
+## Surface properties and cooked levels
+
+The [asset pipeline](forge-game-asset-pipeline.md) supplies the validated tile
+grid and a surface table keyed by stable surface ID. A cooked level or resident
+dependency supplies referenced coefficients. The loader resolves references
+before activation and rejects missing IDs. The v1 character controller uses
+zero restitution and one default friction value. When dynamic props arrive,
+the resolver uses the validated surface ID on the contact for restitution and
+friction. Keep numeric coefficients in the surface data so the narrow phase
+remains a geometry test.
+
+## Collision diagnostics
+
+| Overlay | Published source |
+| --- | --- |
+| Body AABBs | Collidable set |
+| Contact normal and depth | Persistent contact set |
+| Grounded and sleep flags | Body state |
+| Last ray hit point | Query result |
+
+Render overlays in presentation from completed tick data. Keep debug output
+out of step decisions and tick-path allocation. Verify the floor normal points
+up, a sweep reports its entry face, and the phantom query leaves bodies in
+place. Replay the same input with overlays enabled and disabled and compare the
+resulting state, contacts, and events.
+
 ## Determinism and replay
 
 Fixed point only; no floats; no wall-clock input to the step;
 iteration order by entity index; axis resolution in a fixed
 order. The replay test extends to physics: the same inputs,
 chunked differently, reach the same positions, the same
-landing tick, and the same events. A physics divergence is a
+landing tick, and the same contacts, first-seen ticks, and events. A physics divergence is a
 test failure, not a tuning note. The trace records physics
 events (contacts, landings, sleep/wake) on the simulation
 channel with the phase tag, so a divergence is diagnosable
@@ -412,6 +480,8 @@ from the log.
 | Body size | ≤ 4×4 tiles | Bounds the broad-phase tile set (≤ 25 tiles) |
 | Speed | ≤ 60 tiles/s, swept above | The tunneling threshold (§6) |
 | Contacts per body per tick | ≤ 8 | Tile contacts (≤ 4) + entity contacts (≤ 4); overflow drops the deepest and counts it |
+| Ray queries per tick | ≤ 16 | Bound the ground-probe and aiming budget |
+| Phantom results per query | ≤ 8 | Drop the farthest results and count them |
 | Sleep | After 30 ticks at rest | Deterministic, visible in the trace |
 
 The tick path allocates nothing; all physics state lives in
@@ -499,7 +569,10 @@ and confines Rapier types to the adapter module.
   Kinematic targets are the mechanism; the first platform
   arrives with the first level that needs one.
 - **Prop restitution and friction — tuned when props land.**
-  The constants are named in slice 4, not guessed now.
+  Set coefficients in the cooked surface table when the first prop needs them.
+- **Compound colliders and islands.** Defer compounds until general shapes
+  are needed, and connected simulation islands until interacting dynamic
+  bodies require grouped solving or sleep.
 
 ## References
 
