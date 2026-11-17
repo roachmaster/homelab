@@ -433,3 +433,18 @@ visible to gameplay at a tick boundary.
 | Validate, cook, and publish a build | [Mermaid](game-asset-pipeline-cook.mmd) | [SVG](images/game-asset-pipeline-cook.svg) |
 | Resolve, load, and activate a level | [Mermaid](game-asset-pipeline-load.mmd) | [SVG](images/game-asset-pipeline-load.svg) |
 | Identity, address, and readiness | [Mermaid](game-asset-pipeline-contract.mmd) | [SVG](images/game-asset-pipeline-contract.svg) |
+
+## Forge worker and main-thread ownership proposal
+
+The [worker ownership proposal](../../proposals/forge-worker-ownership.md)
+separates browser rendering, authoritative Rust execution, JavaScript
+support work, and durable Studio build execution. The IDE already uses
+a Web Worker. The current playtest instantiates its WASM runtime on the
+page thread. The diagrams propose the logical handoff and a native
+Studio build worker.
+
+| Proposed view | Source | Image |
+| --- | --- | --- |
+| Ownership and communication boundaries | [Mermaid](forge-worker-ownership.mmd) | [SVG](images/forge-worker-ownership.svg) |
+| Game tick, level activation, and replay handoff | [Mermaid](forge-game-worker-handoff.mmd) | [SVG](images/forge-game-worker-handoff.svg) |
+| Studio submission, lease, and status | [Mermaid](forge-studio-worker-lease.mmd) | [SVG](images/forge-studio-worker-lease.svg) |

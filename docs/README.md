@@ -26,6 +26,7 @@ core contracts. [Implemented Mermaid flow](architecture/diagrams/mermaid/README.
 - [Entity model for the Forge game runtime](architecture/proposals/forge-game-entity-model.md) — typed, bounded entities with stable IDs, generational handles, update phases, and targeted events
 - [Physics for the Forge game runtime](architecture/proposals/forge-game-physics.md) — gravity, velocity, and tile collision in fixed point, with the animation bridge
 - [Asset pipeline for the Forge game runtime](architecture/proposals/forge-game-asset-pipeline.md) — stable asset IDs, a runtime loader, a cooking step, and the level chunk format
+- [Forge worker and main-thread ownership](architecture/proposals/forge-worker-ownership.md) — JavaScript rendering and worker I/O, Rust authority, level replay, and Studio builds
 - [Repository reviews — 16 reports](reviews/forge/README.md)
 - [Detailed future foundation modules and interfaces](architecture/foundation-interfaces.md) · [Rust contract sketches](architecture/foundation-contracts.md)
 - [Two-machine Forge IDE proposal](architecture/proposals/remote-ide.md) · [visual PDF](architecture/proposals/remote-ide-proposal.pdf) — next milestone, not deployed remote IDE

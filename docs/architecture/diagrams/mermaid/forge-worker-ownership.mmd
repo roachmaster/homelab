@@ -1,0 +1,26 @@
+---
+title: Proposed Forge worker and main-thread ownership
+---
+flowchart TB
+    subgraph Browser["Browser execution contexts"]
+        Main["Main JS thread<br/>Capture actions and render Canvas or DOM"]
+        ViewBridge(["Actions and frame time to Rust<br/>Committed views to JS"])
+        Runtime["Rust main thread<br/>Own policy, fixed ticks, assets and replay"]
+        Effects(["Typed work requests to JS<br/>Correlated results to Rust"])
+        Support["JS support workers<br/>Run requested I/O or computations"]
+        Compute["Rust support backend<br/>Run independent compute when configured"]
+        Main <--> ViewBridge <--> Runtime
+        Runtime <--> Effects <--> Support
+        Support -. Relay committed views .-> Main
+        Support <--> Compute
+    end
+    subgraph Services[" "]
+        Host["Studio service boundary<br/>Forge host admits commands and queues builds"]
+        Queue["PostgreSQL<br/>Persist Studio jobs, leases and events"]
+        Builder["Native Studio build worker<br/>Claim leases and execute pinned builds<br/>Resolve worker-scoped providers"]
+        Artifacts["Artifact store<br/>Immutable bytes by digest"]
+        Host <--> Queue
+        Queue <--> Builder
+        Builder --> Artifacts
+    end
+    Support <--> Host

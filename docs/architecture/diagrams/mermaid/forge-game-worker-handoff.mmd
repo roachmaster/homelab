@@ -1,0 +1,20 @@
+---
+title: Proposed Forge game - worker support and Rust tick handoff
+---
+sequenceDiagram
+    participant M as Main JS thread
+    participant R as Rust main thread
+    participant W as JS support worker
+    participant J as Replay journal
+    M->>R: Request level
+    R->>W: Request cooked assets with generation
+    W->>W: Fetch, hash, or delegate to Rust support outside tick
+    W-->>R: Return bytes or failure with generation
+    Note over R,W: Keep active room on required failure.<br/>Draw primitives for missing optional art.
+    R->>R: Reject stale result or validate and stage candidate
+    M->>R: Send ordered input edges and frame timing
+    R->>R: Run bounded fixed ticks
+    R->>J: Retain old input segment and transition
+    R->>R: Activate ready candidate at tick boundary
+    R-->>M: Publish snapshot and pose for one epoch and tick
+    Note over M,R: Main JS draws the frame.<br/>Support worker may relay the committed view.

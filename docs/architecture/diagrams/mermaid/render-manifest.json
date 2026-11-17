@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "6997308fd476d4c035e36e36f17182e483adbf170f80fa25df365ffeb75c50fc",
-    "validate.mjs": "3715840a7859a03a09944abfb50c0b7350bf61916f7362ead75139e7845d6a89"
+    "render.py": "fe47bed52d7885c7dbf583887bd4402f478c0e8f1e326d86d581ff4770e02388",
+    "validate.mjs": "e2852d4be299507bfd971937cdbb9aa1c189f99a7546edef323cbc759f5d009b"
   },
   "diagrams": [
     {
@@ -217,6 +217,24 @@
       "source_sha256": "de2e349e7d1fbbb710ba9b0a615770395f5e5c4fb39c6cca7939dd8467b68343",
       "svg": "images/game-asset-pipeline-contract.svg",
       "svg_sha256": "fc8c8db62c89b222388b954173c7f3a93395ba9fbf4005154fbfea8e4106b02a"
+    },
+    {
+      "source": "forge-worker-ownership.mmd",
+      "source_sha256": "32f2f43dfc3dcc386b7532ab6629a2a4ecdeecac4cd56cb110316d3da59eb052",
+      "svg": "images/forge-worker-ownership.svg",
+      "svg_sha256": "b0b1e36a2dce8485c392a2e9352942a543c87f3a6fe6c15691253ed14ac7de79"
+    },
+    {
+      "source": "forge-game-worker-handoff.mmd",
+      "source_sha256": "2b57c22eb60cfab4445d6022b187ac7d4fcae94a658a056ddbe1e808ab6ed6f0",
+      "svg": "images/forge-game-worker-handoff.svg",
+      "svg_sha256": "d7ba12aa0052e6fb16e2dadaa8be554a85fbf7789cc0b9b97c23b1b0fd54ab86"
+    },
+    {
+      "source": "forge-studio-worker-lease.mmd",
+      "source_sha256": "0d61e70944549d06f37a6e674da500d1f2291bb474c2c08299d93b37132a8489",
+      "svg": "images/forge-studio-worker-lease.svg",
+      "svg_sha256": "13ed81ebdbadab177fcce8b26f010f27be9eac446823647372f8a835770a4061"
     }
   ]
 }

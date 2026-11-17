@@ -1,0 +1,33 @@
+---
+title: Proposed Forge Studio worker - durable build attempt
+---
+sequenceDiagram
+    actor M as Main JS thread
+    participant R as Browser Rust
+    participant S as JS I/O worker
+    participant F as Forge host
+    participant D as Studio database
+    participant W as Build worker
+    M->>R: Forward build action
+    R->>S: Emit typed dispatch effect
+    S->>F: Dispatch game.build.submit
+    Note over F,D: Reject before storage effects if admission fails.
+    F->>F: Check session, project and typed request
+    F->>D: Commit job and queued event using idempotency key
+    D-->>F: Durable receipt
+    F-->>S: Return build ID and state
+    S-->>R: Deliver correlated receipt
+    R-->>M: Publish build view
+    W->>D: Claim job with lease and attempt token
+    D-->>W: Pinned revision and approved profile
+    W->>W: Build in isolation and store verified artifact by digest
+    W->>D: Attach artifact and finish current attempt
+    Note over D,W: An expired or superseded attempt cannot attach its result.
+    M->>R: Reconnect or refresh build status
+    R->>S: Request admitted status
+    S->>F: Dispatch game.build.get
+    F->>D: Read authorized job and ordered events
+    D-->>F: Status and committed artifact metadata
+    F-->>S: Return typed status
+    S-->>R: Deliver correlated status
+    R-->>M: Publish status and authorized preview

@@ -123,6 +123,11 @@ sequenceDiagram
 
 ## Portal integration
 
+The [worker ownership proposal](forge-worker-ownership.md) expands the split
+between main-thread rendering, Rust authority, browser support workers, and
+the separate Studio build worker. It specifies the messages for level activation
+and replay capture as well as build admission and status.
+
 Add a generated `/design/game-studio` page to the existing Design index if this proposal should be visible on the portal. Follow the Rust design renderer and its fixed asset routes. The operational Studio view can later live beside Chat, Mail and Workbench. Let it reuse the authorized project selector and keep the selected project, revision and build ID in the existing Rust-owned workspace model. Scope those fields to Studio so returning from a preview can restore the tools the user was working with. [Design renderer](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/src/design/mod.rs) · [Design asset routing](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/src/assets.rs) · [Portal UI declarations](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web/src/generate/application.rs)
 
 Serve executable game previews from a separate origin with its own access policy. Navigate in the same tab with a return path to Studio. Preserve the portal's session and browser state, and keep its credentials on the portal origin. Use immutable preview builds and a digest-bearing manifest so a user can tell exactly what is running. Desktop and narrow-browser tests should exercise leaving, returning, and recovering the selected build.
