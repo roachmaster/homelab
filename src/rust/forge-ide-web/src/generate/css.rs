@@ -40,8 +40,8 @@ pub(crate) fn emit(t: &Theme) -> String {
   width:6px;height:6px;border:solid var(--accent);border-width:0 1.5px 1.5px 0;transform:rotate(-45deg)}
 @media(min-width:901px){.fg-reader-layout .fg-stacked-tree{max-height:65dvh;overflow-y:auto}}
 @media(max-width:360px){
-  .fg-reading-column:has(>.fg-reader-layout) .fg-toolbar{gap:6px}
-  .fg-reading-column:has(>.fg-reader-layout)>.fg-toolbar button:not(.fg-button-icon){padding-inline:7px;font-size:13px}
+  .fg-reading-column:has(>.fg-reader-layout) .fg-toolbar{gap:4px}
+  .fg-reading-column:has(>.fg-reader-layout)>.fg-toolbar button:not(.fg-button-icon){padding-inline:6px;font-size:13px}
 }
 .fg-modal{width:min(26rem,calc(100% - 24px));padding:16px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 8px 32px #0008}.fg-modal::backdrop{background:#0009}.fg-modal>h2{font-size:16px;margin-bottom:10px}.fg-modal>.fg-text{margin-bottom:12px}.fg-modal>[role=status]{padding:0;border:0;min-height:0;margin-top:8px}.fg-modal>[role=status]:empty{display:none}.fg-modal>.fg-row{justify-content:flex-end;margin:12px 0 0}.fg-modal .fg-field input{width:100%}
 .fg-reading-column>[role=status]{border:0;padding:0;min-height:0}.fg-reading-column>[role=status]:empty{display:none}
