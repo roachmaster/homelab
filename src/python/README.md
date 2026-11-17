@@ -4,6 +4,8 @@ Put each Python capability or tool under `src/python/<purpose>/`.
 
 - [Pixel-art authoring](pixel-art/README.md) builds layered character sprites,
   drawing-step previews, and animation manifests.
+- [Game asset cooker](game-assets/README.md) validates authored levels and
+  publishes a versioned, digest-checked runtime bundle.
 
 - For a real packaged project, keep `pyproject.toml` at that project's root and
   importable code under `<purpose>/src/<import_name>/`; use underscores for Python

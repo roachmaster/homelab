@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "id": "room-one",
+  "mode": "tile",
+  "width": 13,
+  "height": 9,
+  "tiles": [
+    "#############",
+    "#...#.......#",
+    "###.#.#####.#",
+    "#...#...#...#",
+    "#.#####.#.#.#",
+    "#.....#.#...#",
+    "###.#.#.###.#",
+    "#...#.......#",
+    "#############"
+  ],
+  "spawns": [
+    {"id": 1, "kind": "player", "x": 1, "y": 1},
+    {"id": 2, "kind": "key", "x": 1, "y": 7},
+    {"id": 3, "kind": "exit", "x": 11, "y": 4},
+    {"id": 4, "kind": "guard", "x": 6, "y": 1, "patrol": {"first_x": 5, "last_x": 10, "period_ticks": 12}}
+  ],
+  "atlas": "scout-atlas",
+  "surface": "stone",
+  "surfaces": [
+    {"id": "stone", "friction_q16": 16384, "restitution_q16": 0}
+  ]
+}

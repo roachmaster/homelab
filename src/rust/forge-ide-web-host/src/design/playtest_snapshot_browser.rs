@@ -3,6 +3,8 @@
 pub(super) const SNAPSHOT_READERS: &str = r#"
   const snapshotBytes = 10284;
   const traceBytes = 8216;
+  const poseBytes = 32;
+  const activationBytes = 48;
 
   function memoryView(memory, getOffset, getLength, length, label) {
     let view;
@@ -53,20 +55,59 @@ pub(super) const SNAPSHOT_READERS: &str = r#"
     };
   }
 
-  function snapshotEntities(snapshot) {
-    const { view, entities } = snapshot;
-    return Array.from({ length: entities }, (_, index) => {
+  function readEntity(view, offset) {
+    return {
+      id: view.getUint16(offset, true),
+      kind: view.getUint8(offset + 2),
+      state: view.getUint8(offset + 3),
+      x: view.getInt32(offset + 4, true) / 256,
+      y: view.getInt32(offset + 8, true) / 256,
+      previousX: view.getInt32(offset + 12, true) / 256,
+      previousY: view.getInt32(offset + 16, true) / 256,
+    };
+  }
+
+  function snapshotEntities({ view, entities }) {
+    return Array.from({ length: entities }, (_, index) => readEntity(view, 4128 + index * 20));
+  }
+
+  function snapshotPlayer({ view, entities }, id) {
+    for (let index = 0; index < entities; index++) {
       const offset = 4128 + index * 20;
-      return {
-        id: view.getUint16(offset, true),
-        kind: view.getUint8(offset + 2),
-        state: view.getUint8(offset + 3),
-        x: view.getInt32(offset + 4, true) / 256,
-        y: view.getInt32(offset + 8, true) / 256,
-        previousX: view.getInt32(offset + 12, true) / 256,
-        previousY: view.getInt32(offset + 16, true) / 256,
-      };
-    });
+      if (view.getUint16(offset, true) !== id || view.getUint8(offset + 2) !== debugSpec.player_kind) continue;
+      return readEntity(view, offset);
+    }
+    return null;
+  }
+
+  function readPose(view, snapshot) {
+    if (view.getUint32(0, true) !== 0x31504746 || view.getUint32(4, true) !== snapshot.epoch ||
+        view.getUint32(8, true) !== snapshot.tick) return null;
+    const player = snapshotPlayer(snapshot, view.getUint16(12, true));
+    const clip = assetSpec.pose_clips[view.getUint8(14)];
+    const facing = view.getUint8(15);
+    const grounded = view.getUint8(20), contacts = view.getUint8(21), normal = view.getUint8(26);
+    if (!player || !clip || facing > 1 || (grounded & ~1) !== 0 || (contacts & ~7) !== 0 ||
+        normal > 4 || view.getUint8(27) !== 0) return null;
+    const contact = normal ? {
+      x: view.getInt16(22, true), y: view.getInt16(24, true), normal,
+      speedQ16: view.getInt32(28, true),
+    } : null;
+    return {
+      player, clip, facing, frame: view.getUint32(16, true), grounded: grounded === 1,
+      contacts, contact,
+    };
+  }
+
+  function readActivation(view, snapshot) {
+    const slot = view.getUint32(12, true);
+    if (view.getUint32(0, true) !== 0x314c4746 || view.getUint32(4, true) !== snapshot.epoch ||
+        slot === 0 || !assetSpec.levels.some(choice => choice.level === slot)) return null;
+    const digest = new Uint8Array(view.buffer, view.byteOffset + 16, 32);
+    return {
+      slot, priorWorldTick: view.getUint32(8, true),
+      manifestSha256: Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join(''),
+    };
   }
 
   function snapshotEvents(snapshot) {

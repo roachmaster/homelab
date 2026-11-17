@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "id": "traversal-yard",
+  "mode": "platform",
+  "width": 13,
+  "height": 7,
+  "tiles": [
+    "#############",
+    "#...........#",
+    "#...........#",
+    "#...........#",
+    "#...........#",
+    "#...........#",
+    "#############"
+  ],
+  "spawns": [
+    {"id": 1, "kind": "player", "x": 1, "y": 5},
+    {"id": 2, "kind": "key", "x": 6, "y": 4},
+    {"id": 3, "kind": "exit", "x": 11, "y": 5}
+  ],
+  "atlas": "scout-atlas",
+  "surface": "stone",
+  "surfaces": [
+    {"id": "stone", "friction_q16": 16384, "restitution_q16": 0}
+  ]
+}

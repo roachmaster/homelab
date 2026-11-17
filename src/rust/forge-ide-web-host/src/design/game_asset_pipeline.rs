@@ -7,6 +7,7 @@ pub(super) const BODY: &[Node] = &[
             element!(Strong; text("Design proposal.")),
             text(" Cook Room One’s level, Scout atlas, and collision data into validated assets. Load them by identity and activate the level at a fixed tick boundary."),
         ),
+        element!(P; text("The web playtest build now includes cooked Room One and Traversal Yard levels. It can switch between them after the requested level is ready.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Asset pipeline design sections"];
             element!(A [Href = "#cooking"]; text("Cook and verify")),
             element!(A [Href = "#level-data"]; text("Level data and ownership")),

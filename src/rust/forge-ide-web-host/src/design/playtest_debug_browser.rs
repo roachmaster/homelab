@@ -92,6 +92,15 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
         `Snapshot: ${snapshotBytes} bytes · Trace: ${traceBytes} bytes`,
       ];
       if (mainEntity) lines.push(`Player: (${mainEntity.x}, ${mainEntity.y}) · ID ${mainEntity.id}`);
+      const pose = player.pose?.(snapshot);
+      if (pose) {
+        lines.push(`Pose: ${pose.clip} · frame ${pose.frame} · grounded: ${pose.grounded ? 'yes' : 'no'}`);
+        if (pose.contact) {
+          const { x, y, normal, speedQ16 } = pose.contact;
+          const side = ['', 'left', 'right', 'up', 'down'][normal];
+          lines.push(`Contact tile: (${x}, ${y}) · normal: ${side} · impact: ${speedQ16} Q16/tick`);
+        }
+      }
       for (const event of eventViews.slice(-4)) {
         lines.push(`${spec.event_names[event.kind] ?? event.kind} · target ${event.target} · (${event.x}, ${event.y})`);
       }
@@ -123,6 +132,7 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
         timing: { budgetMs: spec.budget_ms, samples, summary: timingSummary() },
       };
       if (kind === 'trace') {
+        const activation = player.activation?.(snapshot);
         Object.assign(exportData, {
           replayComplete: trace.replayComplete,
           trace: { ...trace, records: traceRecords({ ...trace, view }) },
@@ -130,6 +140,7 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
           inputEdgesDropped: snapshot.inputDropped,
           eventsDropped: snapshot.eventsDropped,
         });
+        if (activation) exportData.activation = activation;
       }
       const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' }));
       const anchor = document.createElement('a');

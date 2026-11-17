@@ -3,9 +3,9 @@ name: Rust CI
 on:
   push:
     branches: [main, validation/forge-ide-ui]
-    paths: ['Makefile', 'src/rust/**', '.github/workflows/rust.yml']
+    paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', '.github/workflows/rust.yml']
   pull_request:
-    paths: ['Makefile', 'src/rust/**', '.github/workflows/rust.yml']
+    paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', '.github/workflows/rust.yml']
   workflow_dispatch:
 
 permissions:
@@ -34,5 +34,13 @@ jobs:
           node --version
       - name: Fetch locked optional capability dependencies
         run: cargo fetch --manifest-path src/rust/Cargo.toml --locked
+      - name: Install game asset cooker prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgdk-pixbuf2.0-bin librsvg2-common imagemagick
+      - name: Verify game asset cooking and pixel-art exports
+        run: |
+          python3 -B -m unittest discover -s src/python/game-assets/tests -v
+          python3 -B -m unittest discover -s src/python/pixel-art/tests -v
       - name: Shared repository quality gates
         run: make ci

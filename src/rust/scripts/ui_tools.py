@@ -6,11 +6,13 @@ import hashlib
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+GAME_COOKER = ROOT.parent / "python/game-assets/cook.py"
 
 def cargo(*args):
     return ["cargo", args[0], "--manifest-path", str(ROOT / "Cargo.toml"), "--offline", "--locked", *args[1:]]
@@ -26,12 +28,23 @@ def build():
     wasm = base / "wasm32-unknown-unknown/release/forge_ide_web.wasm"
     parent = ROOT / "target/ui-assets"
     parent.mkdir(parents=True, exist_ok=True)
-    output = Path(tempfile.mkdtemp(prefix="build-", dir=parent)) / "assets"
+    workspace = Path(tempfile.mkdtemp(prefix="build-", dir=parent))
+    output = workspace / "assets"
     run(cargo("run", "-p", "forge-ide-web", "--features", "build-assets", "--bin", "forge-ui-assets", "--", "--wasm", str(wasm), "--output", str(output)))
+    cooked = workspace / "cooked-game"
+    run([sys.executable, "-B", str(GAME_COOKER), "--out", str(cooked)])
+    # Each UI release pins its own cooker generation before copying bytes.
+    shutil.copytree(
+        cooked.resolve(strict=True), output / "game-assets",
+        symlinks=True, ignore=shutil.ignore_patterns("cook-state.json"),
+    )
     return output, wasm
 
 def inventory(root):
-    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.iterdir())}
+    return {
+        p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(root.rglob("*")) if p.is_file()
+    }
 
 def main():
     if len(sys.argv) != 2 or sys.argv[1] not in ("build", "check", "serve"):

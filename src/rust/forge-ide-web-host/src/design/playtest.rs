@@ -2,7 +2,7 @@ use super::{markup, text, Attribute, Node, Tag};
 
 pub(super) const BODY: &[Node] = &[element!(Article [Class = "playtest"];
     element!(Div [Class = "playtest-heading"];
-        element!(H1; text("Room One")),
+        element!(H1 [Id = "playtest-title"]; text("Room One")),
         element!(P; text("Find the key and reach the exit.")),
     ),
     element!(Div [Class = "playtest-layout"];
@@ -16,6 +16,11 @@ pub(super) const BODY: &[Node] = &[element!(Article [Class = "playtest"];
             element!(P [Id = "playtest-status", Role = "status", AriaAtomic = "true"];
                 text("Loading playtest…"),
             ),
+            element!(Div [Id = "playtest-levels", Class = "playtest-levels", Role = "group", AriaLabel = "Level", Hidden = ""];
+                element!(Button [Id = "playtest-room-one", Type = "button", AriaPressed = "true"]; text("Room One")),
+                element!(Button [Id = "playtest-traversal", Type = "button", AriaPressed = "false"]; text("Traversal")),
+            ),
+            element!(P [Id = "playtest-load-status", Role = "status", Hidden = ""]),
             element!(H2 [Id = "playtest-controls-title"]; text("Controls")),
             element!(P [Id = "playtest-instructions"];
                 text("Use arrow keys or WASD, or hold a direction below."),
@@ -25,6 +30,7 @@ pub(super) const BODY: &[Node] = &[element!(Article [Class = "playtest"];
                 element!(Button [Type = "button", Disabled = "", DataPlaytestAction = "2", AriaLabel = "Move left"]; text("←")),
                 element!(Button [Type = "button", Disabled = "", DataPlaytestAction = "1", AriaLabel = "Move down"]; text("↓")),
                 element!(Button [Type = "button", Disabled = "", DataPlaytestAction = "3", AriaLabel = "Move right"]; text("→")),
+                element!(Button [Type = "button", Disabled = "", Hidden = "", DataPlaytestAction = "4"]; text("Jump")),
             ),
             element!(Button [Id = "playtest-restart", Type = "button", Disabled = ""]; text("Restart")),
         ),
@@ -197,8 +203,16 @@ const STYLES: markup::Styles = &[
             ("color", "var(--background)"),
         ],
     ),
+    (
+        ".playtest-levels:not([hidden])",
+        &[("display", "flex"), ("flex-wrap", "wrap"), ("gap", "6px"), ("margin-block-start", "10px")],
+    ),
+    (".playtest-levels button", &[("padding-inline", "10px")]),
+    (".playtest-levels button[aria-pressed='true']", &[("border-color", "var(--accent)"), ("color", "var(--accent)")]),
+    ("#playtest-load-status", &[("margin-block-start", "8px"), ("color", "var(--muted)")]),
     ("[data-playtest-action='0']", &[("grid-column", "2")]),
     ("[data-playtest-action='2']", &[("grid-column", "1")]),
+    ("[data-playtest-action='4']", &[("grid-column", "1 / -1")]),
     ("#playtest-restart", &[("padding-inline", "13px")]),
     ("#playtest-debug", &[("margin-block-start", "14px"), ("padding", "14px")]),
     (

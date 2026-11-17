@@ -1987,8 +1987,15 @@ async function gameEngineDesignJourney(page, designUrl) {
   const board = page.locator('canvas#playtest-board');
   const status = page.locator('#playtest-status');
   const restart = page.getByRole('button', { name: 'Restart', exact: true });
+  const assetsUrl = new URL('/playtest/assets/', designUrl);
+  const cooked = (await page.request.get(new URL('manifest.json', assetsUrl).href)).ok();
+  const levelGroup = page.locator('#playtest-levels');
   await check(board).toBeVisible();
   await check(status).toHaveText('Find the key.');
+  if (cooked) {
+    await check(levelGroup).toHaveAttribute('aria-busy', 'false');
+    await check(board).toHaveAttribute('data-playtest-art', 'atlas');
+  }
   for (const direction of ['up', 'down', 'left', 'right']) {
     await check(page.getByRole('button', { name: `Move ${direction}`, exact: true })).toBeEnabled();
   }
@@ -2062,6 +2069,86 @@ async function gameEngineDesignJourney(page, designUrl) {
   const trace = JSON.parse(await readFile(await download.path(), 'utf8'));
   assert.equal(trace.replayComplete, false, 'masked movement makes the replay export incomplete');
   await download.delete();
+
+  if (cooked) {
+    const traversal = page.getByRole('button', { name: 'Traversal', exact: true });
+    const roomOne = page.getByRole('button', { name: 'Room One', exact: true });
+    const jump = page.getByRole('button', { name: 'Jump', exact: true });
+    const loadStatus = page.locator('#playtest-load-status');
+    const levelUrl = new URL('levels/traversal-yard.json', assetsUrl).href;
+    const corruptLevel = route => route.fulfill({
+      status: 200, contentType: 'application/json', body: '{}',
+    });
+    await page.route(levelUrl, corruptLevel);
+    try {
+      await traversal.click();
+      await check(loadStatus).toContainText('Could not open Traversal Yard');
+      await check(roomOne).toHaveAttribute('aria-pressed', 'true');
+      await check(jump).toBeHidden();
+    } finally {
+      await page.unroute(levelUrl, corruptLevel);
+    }
+
+    // A prepared level remains staged while paused. One manual tick admits it.
+    await traversal.click();
+    await check(loadStatus).toContainText('Resume or step to open it.');
+    await check(page.getByRole('heading', { level: 1 })).toHaveText('Room One');
+    await step.click();
+    await check(page.getByRole('heading', { level: 1 })).toHaveText('Traversal Yard');
+    await check(traversal).toHaveAttribute('aria-pressed', 'true');
+    await check(jump).toBeEnabled();
+    await check(page.getByRole('button', { name: 'Move up', exact: true })).toBeHidden();
+    await check(board).toHaveAttribute('data-playtest-art', 'atlas');
+    await check(inspector).toContainText('grounded: yes');
+    const playerY = async () => Number((await inspector.textContent()).match(/\bPlayer: \([^,]+, ([^)]+)\)/)[1]);
+    const groundedY = await playerY();
+    await board.focus();
+    await page.keyboard.press('Space');
+    await step.click();
+    await check(inspector).toContainText('Pose: jump');
+    await check(inspector).toContainText('grounded: no');
+    assert((await playerY()) > groundedY, 'the fixed tick raises the player after a Space jump');
+    await pause.click();
+    await check(inspector).toContainText('grounded: yes');
+    await pause.click();
+    assert.equal(await playerY(), groundedY);
+    await jump.click();
+    await step.click();
+    await check(inspector).toContainText('grounded: no');
+
+    const [levelTrace] = await Promise.all([
+      page.waitForEvent('download'),
+      debug.getByRole('button', { name: 'Export trace', exact: true }).click(),
+    ]);
+    const activation = JSON.parse(await readFile(await levelTrace.path(), 'utf8')).activation;
+    assert.equal(activation.slot, 2);
+    assert.match(activation.manifestSha256, /^[a-f0-9]{64}$/);
+    assert(Number.isInteger(activation.priorWorldTick));
+    await levelTrace.delete();
+
+    await roomOne.click();
+    await check(loadStatus).toContainText('Resume or step to open it.');
+    await step.click();
+    await check(page.getByRole('heading', { level: 1 })).toHaveText('Room One');
+    await check(roomOne).toHaveAttribute('aria-pressed', 'true');
+    await check(page.getByRole('button', { name: 'Move up', exact: true })).toBeEnabled();
+
+    const imageUrl = new URL('atlas/sheet.png', assetsUrl).href;
+    const missingAtlas = route => route.fulfill({ status: 404, body: '' });
+    await page.route(imageUrl, missingAtlas);
+    try {
+      const [unavailable] = await Promise.all([
+        page.waitForResponse(response => response.url() === imageUrl),
+        page.reload(),
+      ]);
+      assert.equal(unavailable.status(), 404);
+      await check(status).toHaveText('Find the key.');
+      await check(board).toHaveAttribute('data-playtest-art', 'primitive');
+      await check(page.getByRole('button', { name: 'Move up', exact: true })).toBeEnabled();
+    } finally {
+      await page.unroute(imageUrl, missingAtlas);
+    }
+  }
 
   await page.getByRole('link', { name: 'Back to game engine design', exact: true }).click();
   await check(page).toHaveURL(gameDesignUrl);

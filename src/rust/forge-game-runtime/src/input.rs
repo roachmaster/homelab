@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 
+use crate::physics::{Horizontal, MotionInput};
 use crate::Action;
 
 const MAX_EDGES: usize = 32;
@@ -14,7 +15,7 @@ struct Edge {
 
 pub(super) struct InputBuffer {
     edges: VecDeque<Edge>,
-    observed: [bool; 4],
+    observed: [bool; 5],
     held: Vec<Action>,
     repeat_ticks: u8,
 }
@@ -23,8 +24,8 @@ impl InputBuffer {
     pub(super) fn new() -> Self {
         Self {
             edges: VecDeque::with_capacity(MAX_EDGES),
-            observed: [false; 4],
-            held: Vec::with_capacity(4),
+            observed: [false; 5],
+            held: Vec::with_capacity(5),
             repeat_ticks: 0,
         }
     }
@@ -82,6 +83,33 @@ impl InputBuffer {
             return Some(direction);
         }
         None
+    }
+
+    pub(super) fn next_motion(&mut self) -> MotionInput {
+        let mut tap = Horizontal::Neutral;
+        let mut jump = false;
+        while let Some(edge) = self.edges.pop_front() {
+            if edge.pressed {
+                self.held.push(edge.action);
+                match edge.action {
+                    Action::Left => tap = Horizontal::Left,
+                    Action::Right => tap = Horizontal::Right,
+                    Action::Jump => jump = true,
+                    _ => {}
+                }
+            } else {
+                self.held.retain(|&action| action != edge.action);
+            }
+        }
+        let direction = self.held.iter().rev().find_map(|action| match action {
+            Action::Left => Some(Horizontal::Left),
+            Action::Right => Some(Horizontal::Right),
+            _ => None,
+        });
+        MotionInput {
+            horizontal: direction.unwrap_or(tap),
+            jump,
+        }
     }
 }
 

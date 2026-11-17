@@ -4,14 +4,24 @@
 //! reads the complete room after advancing it. The simulation owns no clock,
 //! display, input device, or platform resources.
 
+mod animation;
 mod entity;
 mod input;
+mod level;
+pub mod physics;
 mod ring;
 
+use animation::Animator;
+pub use animation::{AnimationTiming, PlayerPose};
 pub use entity::EntityView;
 use entity::{Descriptor, Entity, EntityId, Handle, Kind, Patrol, Position, Table};
 use input::InputBuffer;
+pub use level::{
+    Level, LevelError, LevelId, LevelMode, LevelSpec, PatrolSpec, SpawnKind, SpawnSpec, SurfaceSpec,
+};
+use physics::{Character, Collider, Contact, Horizontal, MotionFrame, TileGrid, Vector, TILE};
 use ring::Ring;
+use std::sync::Arc;
 
 const TICKS_PER_SECOND: u64 = 60;
 const MICROS_PER_SECOND: u64 = 1_000_000;
@@ -77,6 +87,7 @@ pub enum Action {
     Down,
     Left,
     Right,
+    Jump,
 }
 
 /// Stable values for the room's presentation adapter.
@@ -108,6 +119,9 @@ enum EventKind {
     ExitUnlocked = 2,
     Completed = 3,
     GuardBlocked = 4,
+    Landed = 5,
+    HeadBump = 6,
+    WallContact = 7,
 }
 
 #[derive(Clone, Copy)]
@@ -140,13 +154,16 @@ pub struct TraceRecord {
     pub data: u32,
 }
 
-/// An independent room with an integer tile position and a fixed simulation clock.
+/// An independent authored room with a fixed simulation clock.
 pub struct Room {
+    level: Arc<Level>,
     table: Table,
     player: Handle,
     key: Option<Handle>,
     exit: Handle,
-    guard: Handle,
+    guard: Option<Handle>,
+    character: Option<Character>,
+    animator: Animator,
     status: Status,
     epoch: u32,
     tick: u32,
@@ -164,21 +181,32 @@ pub struct Room {
 
 impl Room {
     pub fn new() -> Self {
-        Self::from_level(1, DEFAULT_TRACE_MASK)
+        Self::from_level(Arc::new(Level::builtin()), 1, DEFAULT_TRACE_MASK)
     }
 
-    fn from_level(epoch: u32, trace_mask: u32) -> Self {
+    pub fn from_validated(level: Level, epoch: u32, trace_mask: u32) -> Self {
+        Self::from_level(Arc::new(level), epoch, trace_mask & TRACE_CHANNEL_MASK)
+    }
+
+    fn from_level(level: Arc<Level>, epoch: u32, trace_mask: u32) -> Self {
         let mut table = Table::new(epoch);
-        let player = table.spawn(PLAYER).expect("Room One player descriptor");
-        let key = table.spawn(KEY).expect("Room One key descriptor");
-        let exit = table.spawn(EXIT).expect("Room One exit descriptor");
-        let guard = table.spawn(GUARD).expect("Room One guard descriptor");
+        let player = table.spawn(&level, level.player).expect("validated player");
+        let key = table.spawn(&level, level.key).expect("validated key");
+        let exit = table.spawn(&level, level.exit).expect("validated exit");
+        let guard = level
+            .guard
+            .map(|guard| table.spawn(&level, guard).expect("validated guard"));
+        let character = (level.mode == LevelMode::Platform)
+            .then(|| level.spawn_character().expect("validated platform spawn"));
         let mut room = Self {
+            level,
             table,
             player,
             key: Some(key),
             exit,
             guard,
+            character,
+            animator: Animator::new(),
             status: Status::FindKey,
             epoch,
             tick: 0,
@@ -198,11 +226,11 @@ impl Room {
     }
 
     pub fn width(&self) -> u32 {
-        WIDTH
+        self.level.width
     }
 
     pub fn height(&self) -> u32 {
-        HEIGHT
+        self.level.height
     }
 
     /// Returns the cell code with x increasing rightward and y increasing
@@ -211,7 +239,10 @@ impl Room {
         let position = Position { x, y };
         let cell = if position == self.entity(self.player).position {
             Cell::Player
-        } else if position == self.entity(self.guard).position {
+        } else if self
+            .guard
+            .is_some_and(|guard| position == self.entity(guard).position)
+        {
             Cell::Guard
         } else if self
             .key
@@ -224,7 +255,7 @@ impl Room {
             } else {
                 Cell::OpenExit
             }
-        } else if position.is_wall() {
+        } else if self.level.solid(position) {
             Cell::Wall
         } else {
             Cell::Floor
@@ -247,6 +278,15 @@ impl Room {
     /// The residual simulation time in millionths of one fixed tick.
     pub fn interpolation(&self) -> u32 {
         self.tick_fraction as u32
+    }
+
+    /// Prepared rooms can replace this run only before a simulation tick.
+    /// A completed room is already resting at a published boundary.
+    pub fn activation_boundary(&self, elapsed_micros: u32) -> bool {
+        elapsed_micros != 0
+            && (self.status == Status::Completed
+                || self.tick_fraction + u64::from(elapsed_micros) * TICKS_PER_SECOND
+                    >= MICROS_PER_SECOND)
     }
 
     pub fn ticks_run(&self) -> u32 {
@@ -275,7 +315,34 @@ impl Room {
     }
 
     pub fn entities(&self) -> impl Iterator<Item = EntityView> + '_ {
-        self.table.views()
+        self.table.views(self.height()).map(|mut entity| {
+            if entity.kind == Kind::Player as u8 {
+                if let Some(motion) = self.motion() {
+                    (entity.x, entity.y) = self.wire_position(motion.position);
+                    (entity.previous_x, entity.previous_y) = self.wire_position(motion.previous);
+                }
+            }
+            entity
+        })
+    }
+
+    pub fn pose(&self) -> PlayerPose {
+        let player = self.entity(self.player);
+        self.animator
+            .view(player.id.0, player.facing == Action::Left, self.motion())
+    }
+
+    pub fn motion(&self) -> Option<MotionFrame> {
+        self.character.as_ref().map(Character::frame)
+    }
+
+    fn wire_position(&self, anchor: Vector) -> (i32, i32) {
+        // v1 publishes tile anchors in y-up space. Physics owns a center-x,
+        // foot-y anchor in the grid's continuous y-down space.
+        (
+            (anchor.x - TILE / 2) / 256,
+            (self.height() as i32 * TILE - anchor.y) / 256,
+        )
     }
 
     pub fn trace(&self) -> impl Iterator<Item = TraceRecord> + '_ {
@@ -304,11 +371,12 @@ impl Room {
 
     /// Queues a press or release for playback at the next simulation tick.
     pub fn input(&mut self, action: Action, pressed: bool) {
-        if self.status != Status::Completed {
+        if self.status != Status::Completed && (action != Action::Jump || self.character.is_some())
+        {
             let dropped = self.input.enqueue(action, pressed);
             if dropped != 0 {
                 self.input_dropped = self.input_dropped.saturating_add(dropped);
-                self.record_trace(INPUT_PHASE, ERROR_CHANNEL, PLAYER.id.0, dropped);
+                self.record_trace(INPUT_PHASE, ERROR_CHANNEL, self.level.player.id.0, dropped);
             }
         }
     }
@@ -354,7 +422,7 @@ impl Room {
     /// leaves the final run intact, so handles and event IDs never alias.
     pub fn restart(&mut self) {
         if let Some(epoch) = self.epoch.checked_add(1) {
-            *self = Self::from_level(epoch, self.trace_mask);
+            *self = Self::from_level(Arc::clone(&self.level), epoch, self.trace_mask);
         }
     }
 
@@ -369,15 +437,29 @@ impl Room {
             return;
         }
 
-        // Input, guard movement, player collision, triggers/goal, then event effects.
+        if self.character.is_some() {
+            self.run_platform_tick();
+            return;
+        }
+        // Input, movement, collisions, animation, then event effects.
         let action = self.input.next_step();
         if let Some(action) = action {
             self.replay_complete &= self.trace_mask & (1 << INPUT_CHANNEL) != 0;
-            self.record_trace(INPUT_PHASE, INPUT_CHANNEL, PLAYER.id.0, action as u32);
+            self.record_trace(
+                INPUT_PHASE,
+                INPUT_CHANNEL,
+                self.level.player.id.0,
+                action as u32,
+            );
         }
         self.move_guard();
+        let previous = self.entity(self.player).position;
         let blocked = action.and_then(|action| self.move_player(action));
         let (pickup, objective) = self.update_objective();
+        self.animator.advance_tile(
+            self.entity(self.player).position != previous,
+            self.level.timing,
+        );
         for event in [blocked, pickup, objective].into_iter().flatten() {
             self.deliver(event);
         }
@@ -388,8 +470,83 @@ impl Room {
         }
     }
 
+    fn run_platform_tick(&mut self) {
+        let input = self.input.next_motion();
+        let horizontal = match input.horizontal {
+            Horizontal::Left => Some(Action::Left),
+            Horizontal::Right => Some(Action::Right),
+            Horizontal::Neutral => None,
+        };
+        let player_id = self.level.player.id.0;
+        for action in [horizontal, input.jump.then_some(Action::Jump)]
+            .into_iter()
+            .flatten()
+        {
+            self.replay_complete &= self.trace_mask & (1 << INPUT_CHANNEL) != 0;
+            self.record_trace(INPUT_PHASE, INPUT_CHANNEL, player_id, action as u32);
+        }
+
+        let grid = RoomCollision {
+            level: &self.level,
+            closed_exit: (self.status == Status::FindKey).then(|| self.entity(self.exit).position),
+        };
+        let motion = self
+            .character
+            .as_mut()
+            .expect("platform character")
+            .step(&grid, input);
+        let position = self.anchor_tile(motion.position);
+        let player = self.table.get_mut(self.player).expect("live player");
+        player.position = position;
+        if let Some(direction) = horizontal {
+            player.facing = direction;
+        }
+
+        let (pickup, objective) = self.update_objective();
+        self.animator.advance(motion, self.level.timing);
+        for (kind, contact) in [
+            (EventKind::Landed, motion.landed),
+            (EventKind::HeadBump, motion.head_bump),
+            (EventKind::WallContact, motion.wall_contact),
+        ] {
+            if let Some(contact) = contact {
+                self.deliver_contact(kind, contact);
+            }
+        }
+        for event in [pickup, objective].into_iter().flatten() {
+            self.deliver(event);
+        }
+        if pickup.is_some() {
+            if let Some(key) = self.key.take() {
+                self.table.despawn(key);
+            }
+        }
+    }
+
+    fn anchor_tile(&self, anchor: Vector) -> Position {
+        // Key and exit are tile triggers. Test the player's body center.
+        Position {
+            x: anchor.x.div_euclid(TILE).clamp(0, self.width() as i32 - 1) as u32,
+            y: (anchor.y - TILE * 2 / 5)
+                .div_euclid(TILE)
+                .clamp(0, self.height() as i32 - 1) as u32,
+        }
+    }
+
+    fn deliver_contact(&mut self, kind: EventKind, contact: Contact) {
+        self.deliver(PendingEvent {
+            kind,
+            target: self.player,
+            position: Position {
+                x: contact.tile_x.clamp(0, self.width() as i32 - 1) as u32,
+                y: contact.tile_y.clamp(0, self.height() as i32 - 1) as u32,
+            },
+        });
+    }
+
     fn move_guard(&mut self) {
-        let guard = self.entity(self.guard);
+        let Some(handle) = self.guard else { return };
+        let guard = self.entity(handle);
         let patrol = guard.patrol.expect("validated guard patrol");
         if !self.tick.is_multiple_of(patrol.period_ticks) {
             return;
@@ -404,23 +561,25 @@ impl Room {
             return;
         };
         if target != player_position {
-            self.move_entity(self.guard, target, direction);
+            self.move_entity(handle, target, direction);
         }
     }
 
     fn move_player(&mut self, action: Action) -> Option<PendingEvent> {
         let target = self.entity(self.player).position.next(action)?;
-        if target.is_wall()
+        if self.level.solid(target)
             || (target == self.entity(self.exit).position && self.status == Status::FindKey)
         {
             return None;
         }
-        if target == self.entity(self.guard).position {
-            return Some(PendingEvent {
-                kind: EventKind::GuardBlocked,
-                target: self.guard,
-                position: target,
-            });
+        if let Some(guard) = self.guard {
+            if target == self.entity(guard).position {
+                return Some(PendingEvent {
+                    kind: EventKind::GuardBlocked,
+                    target: guard,
+                    position: target,
+                });
+            }
         }
         self.move_entity(self.player, target, action);
         None
@@ -435,22 +594,22 @@ impl Room {
             SIMULATE_PHASE,
             SIMULATION_CHANNEL,
             id.0,
-            position.x | (position.world_y() << 16),
+            position.x | (position.world_y(self.height()) << 16),
         );
     }
 
     fn update_objective(&mut self) -> (Option<PendingEvent>, Option<PendingEvent>) {
-        let position = self.entity(self.player).position;
         let exit_position = self.entity(self.exit).position;
         if let Some(key) = self.key {
-            if self.entity(key).position == position {
+            let key_position = self.entity(key).position;
+            if self.overlaps_objective(key_position) {
                 self.status = Status::ExitUnlocked;
                 self.table.get_mut(self.exit).expect("live exit").state = 1;
                 return (
                     Some(PendingEvent {
                         kind: EventKind::KeyCollected,
                         target: key,
-                        position,
+                        position: key_position,
                     }),
                     Some(PendingEvent {
                         kind: EventKind::ExitUnlocked,
@@ -459,7 +618,7 @@ impl Room {
                     }),
                 );
             }
-        } else if position == exit_position {
+        } else if self.overlaps_objective(exit_position) {
             self.status = Status::Completed;
             self.clear_input();
             return (
@@ -467,11 +626,25 @@ impl Room {
                 Some(PendingEvent {
                     kind: EventKind::Completed,
                     target: self.exit,
-                    position,
+                    position: exit_position,
                 }),
             );
         }
         (None, None)
+    }
+
+    fn overlaps_objective(&self, target: Position) -> bool {
+        match self.motion() {
+            None => self.entity(self.player).position == target,
+            Some(motion) => self.level.collider.overlaps(
+                motion.position,
+                Collider::new(TILE / 2, TILE).expect("tile-sized trigger"),
+                Vector {
+                    x: target.x as i32 * TILE + TILE / 2,
+                    y: (target.y as i32 + 1) * TILE,
+                },
+            ),
+        }
     }
 
     fn deliver(&mut self, pending: PendingEvent) {
@@ -482,13 +655,14 @@ impl Room {
         };
         let target = entity.id.0;
         let kind = pending.kind as u8;
+        let y = pending.position.world_y(self.height()) as u16;
         self.events.push(|sequence| Event {
             sequence,
             tick: self.tick,
             target,
             kind,
             x: pending.position.x as u16,
-            y: pending.position.world_y() as u16,
+            y,
         });
         self.record_trace(SIMULATE_PHASE, EVENT_CHANNEL, target, u32::from(kind));
     }
@@ -514,6 +688,25 @@ impl Room {
 impl Default for Room {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+struct RoomCollision<'a> {
+    level: &'a Level,
+    closed_exit: Option<Position>,
+}
+
+impl TileGrid for RoomCollision<'_> {
+    fn width(&self) -> u32 {
+        self.level.width
+    }
+
+    fn height(&self) -> u32 {
+        self.level.height
+    }
+
+    fn is_solid(&self, x: u32, y: u32) -> bool {
+        self.closed_exit == Some(Position { x, y }) || self.level.is_solid(x, y)
     }
 }
 
@@ -673,7 +866,7 @@ mod tests {
         assert_eq!(room.trace().next().unwrap().data, 1);
         room.deliver(PendingEvent {
             kind: EventKind::GuardBlocked,
-            target: prior,
+            target: prior.unwrap(),
             position: GUARD.spawn,
         });
         assert_eq!(room.events().count(), 0);
@@ -745,7 +938,7 @@ mod tests {
         for _ in 0..70 {
             room.deliver(PendingEvent {
                 kind: EventKind::GuardBlocked,
-                target: room.guard,
+                target: room.guard.unwrap(),
                 position: GUARD.spawn,
             });
         }

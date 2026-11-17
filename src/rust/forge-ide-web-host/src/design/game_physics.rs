@@ -5,8 +5,9 @@ pub(super) const BODY: &[Node] = &[
         element!(H1; text("Physics for the Forge Game Runtime")),
         element!(P;
             element!(Strong; text("Design proposal.")),
-            text(" Give the Scout gravity, jumps and collision response while keeping fixed-tick replay and the existing v1 snapshot layout. The Room One playtest still uses tile movement."),
+            text(" Give the Scout gravity, jumps and collision response while keeping fixed-tick replay and the existing v1 snapshot layout."),
         ),
+        element!(P; text("In the web playtest build, choose Traversal Yard to try the fixed-point controller. Room One is the four-direction puzzle.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Game physics design sections"];
             element!(A [Href = "#fixed-tick"]; text("Fixed tick")),
             element!(A [Href = "#collision-world"]; text("Collision world")),
@@ -17,7 +18,7 @@ pub(super) const BODY: &[Node] = &[
     ),
     element!(Section [Id = "fixed-tick", Class = "design-section", AriaLabelledby = "fixed-tick-title"];
         element!(H2 [Id = "fixed-tick-title"]; text("One physics step per fixed tick")),
-        element!(P; text("Room One starts with a kinematic character controller and axis-aligned boxes against the static tile grid. At 60 Hz, the controller integrates velocity before position. Bounded tile candidates are tested in a stable order, with a swept test for moves that exceed the discrete safety bound.")),
+        element!(P; text("Traversal Yard uses a kinematic character controller and an axis-aligned body box against the static tile grid. At 60 Hz, the controller integrates velocity before position. It tests bounded tile candidates in a stable order and sweeps to the earliest blocking contact.")),
         element!(Div [Class = "gallery contract-sequences"];
             element!(Figure [Class = "wireframe"];
                 element!(Figcaption;
