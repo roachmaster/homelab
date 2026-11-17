@@ -234,7 +234,7 @@ identity).
 ## The animation bridge
 
 This section is the contract the
-[`bridge-animation-physics`](../../../../.agents/skills/bridge-animation-physics/SKILL.md)
+[`bridge-animation-physics`](../../../.agents/skills/bridge-animation-physics/SKILL.md)
 skill implements. The bridge answers one question per §11.7:
 "which component gets the final say about a given joint" — and
 per §11.11: who owns root motion.
@@ -475,7 +475,7 @@ touch.
   events), the
   [simulation-to-presentation snapshot](forge-game-snapshot.md)
   (Q8 positions, interpolation), and the
-  [pixel-art authoring README](../../../../src/python/pixel-art/README.md)
+  [pixel-art authoring README](../../../src/python/pixel-art/README.md)
   (root-motion rule, hitboxes, manifest).
 - The `design-package-boundaries` skill (`.agents/skills/`) for
   the typed-contract, boundedness, and dependency-direction
