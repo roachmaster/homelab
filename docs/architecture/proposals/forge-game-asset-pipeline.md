@@ -44,113 +44,33 @@ to use and safe to release." The stages, mapped to Forge:
 | Conditioning (cook) | The cook command (see below) | Cooked outputs + a build manifest (the asset database) |
 | Runtime representation | Atlas PNG + manifest JSON; level chunk JSON | Bytes the runtime can load without authoring tools |
 | Registry | The in-memory asset registry, keyed by asset ID | Deduplicated loaded objects |
-| Lifetime | Resident (session) vs level-owned (arena) | A defined release point per asset |
-| Publication | The tick-boundary commit | A ready generation the simulation may use |
+| Lifetime | Resident (session) vs level-owned (arena) | A defined release point |
 
-A stage's output is the next stage's input, and no stage skips
-the one before it: the runtime never reads a source file, and
-the game never uses an asset that has not passed through the
-registry.
+No stage skips the one before it. The runtime never reads a
+source file. A shortcut that loads a recipe directly bypasses
+validation, hashing, and dependency resolution — it is a bug,
+not a convenience.
 
-## Stable asset IDs
+## Asset identity
 
-Every runtime asset has one identity: an authored string ID
-plus a content hash.
+Every loadable object has a stable asset ID. The ID is the only
+name that appears in level chunks, save files, traces, and the
+registry. It is not a path and not a pointer. Changing an ID is
+a deliberate rename that updates every reference; the cook
+rejects a dangling ID.
 
-- **The ID** names the asset. It follows the recipe's
-  identifier rule (`[A-Za-z][A-Za-z0-9_-]{0,63}`), is unique
-  across the whole registry (one namespace — `scout-atlas`
-  names one thing), and is stable across rebuilds: recooking
-  the same source produces the same ID. The ID is what a level
-  references, what the loader fetches by, and what an error
-  message names.
-- **The hash** (SHA-256 of the cooked bytes, recorded in the
-  cooked manifest) verifies the asset. It answers "is this
-  the asset I think it is?" at load time and "is the cooked
-  output stale?" at cook time. It is not the identity — two
-  builds of the same source have the same ID and the same hash,
-  and a changed source has the same ID and a new hash.
+## The cook
 
-The registry record for an asset is typed:
-
-```rust
-struct AssetRecord {
-    id: AssetId,            // authored string, unique
-    kind: AssetKind,        // Atlas | Level (v1)
-    format_version: u16,    // the cooked format's version
-    content_hash: [u8; 32], // SHA-256 of the cooked bytes
-    dependencies: Vec<AssetId>, // at most 16, resolved first
-    state: AssetState,      // Unloaded | Loading | Verifying
-                            // | Resolving | Ready | Failed
-}
-```
-
-Asset kinds are a typed enum, not a string: `Atlas` (a sprite
-sheet + its manifest) and `Level` (a chunk) for v1. The recipe
-is a source, not a runtime asset — it never appears in the
-registry. New kinds (audio, tilesets) extend the enum; they do
-not appear as ad-hoc strings.
-
-## The runtime loader
-
-The loader fetches by ID and publishes only when the asset is
-fully ready. Ch6's rule: an asset is usable only after the
-loader "verifies the I/O result and completes the format-specific
-steps, including any reference resolution and post-load setup
-required by that resource" — not when the bytes arrive.
-
-The load states, in order:
-
-| State | What happens | On failure |
-| --- | --- | --- |
-| Unloaded | Nothing; the asset is known only by ID | — |
-| Loading | Fetch the cooked bytes (async in the browser) | Fetch error → Failed, with the ID and the reason |
-| Verifying | Check size and content hash; parse; validate against the schema (deny unknown fields, bounded counts, errors naming their context) | Hash mismatch or validation error → Failed, with the ID, the step, and the offending field |
-| Resolving | Load each dependency (recursively, dependencies first); a missing dependency fails the load | Missing or failed dependency → Failed, with the dependency's ID named |
-| Ready | Post-load setup (decode the PNG, build the collision shapes, construct the room) completes; the asset is published to the registry | Setup error → Failed, with the ID and the step |
-
-A failed load is a counted error, not a panic. The game falls
-back to a placeholder: for an atlas, the primitive-shape
-rendering the Room One renderer already does today — the
-current renderer IS the placeholder, which is why it stays
-until the atlas loader lands. A level that fails to load does
-not activate: the previous level (or the loading screen) stays
-up, and the error names the asset and the step.
-
-The loader is async in the browser (`fetch` is async), but the
-game sees a load request with a completion point, not a
-callback maze: request the asset by ID, and the registry
-reports Ready or Failed. Request priority (a preload vs an
-about-to-be-visible asset, §6.1) is deferred — v1 loads one
-level at a time, and the queue has one request in flight.
-
-## The cooking step
-
-The cook turns sources into cooked outputs and records what it
-did. It is a command (a Python tool beside the pixel-art
-package, `src/python/game-assets/cook.py`) that:
-
-1. Reads the source assets (recipes, level JSON, skins).
-2. Runs the exporters and validators (the pixel-art CLI for
-   atlases; the level validator for chunks).
-3. Computes content hashes and writes the cooked outputs.
-4. Writes a build manifest — the asset database (ch6): one
-   entry per asset with its ID, source path, source hash,
-   dependencies, cooked path, and format version.
-
-**Invalidation.** A cooked output is stale if its source hash,
-any dependency hash, or the format version changed. The cook
-rebuilds only stale outputs: "The build system needs enough
-information to rebuild correct outputs without converting the
-entire library on every edit" (ch6). A clean cook from scratch
-and an incremental cook produce identical bytes — the cook is
-deterministic, so a hash mismatch after a clean rebuild is a
-bug, not a rebuild artifact.
+The cook is deterministic: same inputs produce the same bytes.
+It records conversion settings and dependencies in a build
+manifest so a change to either invalidates the correct outputs.
+A clean cook and an incremental cook must produce identical
+bytes. A hash mismatch after a clean rebuild is a bug in the
+cook — investigate it, do not re-cook around it.
 
 **CI.** The cook runs in CI, and the pixel-art tests run with
-it. This closes the gap flagged in the 7ba1235 review: the
-Python tests currently run by hand only. A recipe edit that
-breaks an export fails the gate; a stale atlas never ships.
+it. A recipe edit that breaks an export fails the gate; a stale
+atlas never ships.
 
 ## The level chunk format (§15.3)
 
@@ -195,145 +115,83 @@ simple ownership and bulk release. The level owns its assets;
 unloading the level releases them together (an arena — one
 release point for the whole group). Resident assets (shared
 atlases, UI art) stay for the session. Continuous streaming is
-the world-streaming skill's territory and arrives with the
-first game that needs it.
+the world-streaming skill's territory and a later milestone.
 
-The load/unload state machine:
+## Address, identity, and readiness (synthesis)
 
-```
-Unloaded → Loading → Ready → Unloading → Unloaded
-```
+The synthesis and §6.2 separate three facts that must not be
+collapsed:
 
-The transition is unload-then-load: the old level releases
-before the new one loads. Retaining both concurrently would
-reduce the visible loading gap but raise the peak memory
-requirement (ch6); v1 pays the gap instead of the memory, and
-the gap is masked by a loading screen — §15.4's air lock, in
-its simplest form. The simulation commit happens at a tick
-boundary: the loader provides a ready generation, gameplay
-checks that the generation is still current, and only then
-does the new level publish. The synthesis's door example is
-the template: "At a tick boundary the loader provides a ready
-generation and gameplay checks that the door target still
-refers to it. Only then can the door open."
+| Concept | Form in Forge | Lifetime | Purpose |
+| --- | --- | --- | --- |
+| Identity | Asset ID (typed string / handle) | Permanent across loads and saves | Names the resource in chunks, saves, traces, and the registry |
+| Address | Runtime pointer / slice into a loaded buffer | Valid only while the buffer is retained | Used by the loader and the registry; never stored in a save or a chunk |
+| Readiness | "Published" flag / generation at a tick boundary | From successful post-load init until unload | Gameplay and physics may observe the asset only after publication |
 
-The generation tag is the level's load count. A save file is
-the chunk ID + the format version + the dynamic state (entity
-positions, status, inventory) — the entity design's save seam
-("serialize descriptors + dynamic state, not runtime layout"),
-with the chunk supplying the descriptors. A save remains
-meaningful after the memory layout changes because it
-references the level by ID, not by address (§15.4: "Keep
-logical state and resource discovery separate").
+A resolved registry entry is not the same as a ready asset.
+Registering early can help fix up cross-references; publishing
+for general use waits until every required dependency is ready
+and post-load initialization has finished. A handle that outlives
+its buffer is a use-after-free; the generational or epoch check
+on the handle detects it.
 
-## Dependency resolution
+## Search path and resolution order (§6.1)
 
-A composite asset is usable once its required parts and their
-references are ready (ch6). The resolution order is
-dependencies first, then the asset: the level depends on the
-atlas; the atlas depends on nothing; the collision world is
-built from the loaded chunk (the tile grid) plus the colliders
-(the recipe hitboxes, reached through the atlas). Ch6's worked
-example — a collision-shape object depending on the shared
-surface-properties table through that table's ID — is the
-model: the collision world needs its shapes from assets, so
-the asset pipeline delivers them by ID.
+When the same relative name exists in more than one location,
+resolution order is observable behavior. For v1:
 
-Rules:
+1. The cooked output directory for the active build (authoritative).
+2. An optional override directory for local experimentation
+   (explicitly configured, never implicit).
+3. No further fallbacks. A missing asset is an error that names
+   the ID and the step, not a silent search into source trees.
 
-- A missing dependency fails the load, with the dependency's
-  ID named. There is no silent partial load.
-- A circular dependency is rejected at cook time, with the
-  cycle named. The runtime never sees one.
-- A dependency's version is recorded in the cooked manifest.
-  Loading a level whose atlas has a newer format version than
-  the runtime understands is a load failure, not a silent
-  downgrade.
+Record the order in the loader config so a clean build and a
+developer machine resolve the same inputs. Do not let the
+runtime open source recipe files as a fallback — that bypasses
+the cook and the hash.
 
-## Packaging: deferred, by design
+## Async completion and buffer lifetime
 
-Ch6: "Scene code should use the resource identity so the
-packager can make those decisions independently." For v1 the
-packaging decision is: loose files. The loader fetches by ID,
-and it does not care whether the bytes came from a loose file
-or a package — the fetch is by ID, the packaging is behind
-that call. A bundle format (grouping commonly-loaded objects,
-simplifying distribution) arrives when load times or update
-granularity demand it, and the proposal's immutable
-content-hash artifacts are the Studio-side packaging for build
-outputs, not the runtime's. Nothing in the game changes when
-the packager does.
-
-## How this integrates with the Forge philosophy
-
-- **Typed contracts.** Asset IDs, kinds, and load states are
-  typed values, never strings passed around as payloads. The
-  chunk format is validated JSON with deny-unknown-fields,
-  the same discipline as the recipe format. No untyped
-  payloads anywhere in the pipeline.
-- **Bounded everything.** Registry entries, dependencies,
-  level size, chunk size, atlas size, and concurrent loads
-  are capped in the table below; the loader allocates nothing
-  per tick (loading happens between ticks, never inside one).
-- **Package boundaries.** The cook is a Python tool beside
-  the pixel-art package, not a Rust crate: it runs at build
-  time, and the runtime never imports it. The loader lives in
-  the host/adapter layer (it fetches bytes and decodes PNGs),
-  not in `forge-game-runtime`, which stays zero-dependency
-  and receives only constructed objects. The runtime does not
-  know where its assets came from — a file, a package, or a
-  test fixture.
-- **Determinism.** The cook is deterministic (same inputs,
-  same cooked bytes, same hashes). The runtime load order is
-  deterministic (dependencies first, then by ID). The
-  simulation never sees a half-loaded asset: publication
-  happens at a tick boundary, or not at all.
-- **Verification is the deliverable.** The cook's output is
-  verified by hash on every load; the chunk is validated
-  before it constructs anything; the journey asserts the
-  loaded level (the Scout stands on the floor it loaded from
-  a file, not from a const).
-
-## Bounds
-
-| Bound | Value | Reason |
-| --- | --- | --- |
-| Registry entries | ≤ 256 | One namespace; the same scale as the entity table |
-| Dependencies per asset | ≤ 16 | A level references a handful of atlases, not hundreds |
-| Level dimensions | ≤ 64×64 tiles | Matches the adapter's `max_dimension` cap |
-| Chunk file | ≤ 1 MiB | A level description, not a texture |
-| Atlas | ≤ 4,096 px per side | The illustrated Scout sheet is 1,024×2,288; the bound has headroom without inviting an unbounded sheet |
-| Concurrent loads | ≤ 4 | One level at a time, plus its dependencies |
+An asynchronous read (or a fetch) keeps its destination buffer
+valid until the completion handler finishes and the loader has
+either published the asset or recorded a failure. The buffer is
+not recycled while a pending request still points at it. A
+completion that arrives after the requesting level has been
+unloaded is dropped; it must not publish into a foreign arena.
 
 ## Caveats and things to consider
 
-- **An ID is forever.** Renaming an asset breaks every level
-  that references it. Rename by adding the new ID, updating
-  the references, and removing the old one — never by editing
-  the ID in place and hoping the references follow.
-- **A failed load is not a retry loop.** The loader reports
-  Failed once, with the ID and the step. Retrying is a
-  gameplay decision (the player presses "retry"), not a
-  loader behavior — an automatic retry on a hash mismatch
-  would fetch the same wrong bytes forever.
+- **No stage skips the one before it.** The runtime never
+  reads a source file. A shortcut that loads a recipe
+  directly bypasses validation, hashing, and dependency
+  resolution — it is a bug, not a convenience.
 - **The cook is deterministic or it is broken.** A clean cook
-  and an incremental cook must produce identical bytes. A
-  hash mismatch after a clean rebuild is a bug in the cook,
-  not a rebuild artifact — investigate it, do not re-cook
-  around it.
-- **Publication is a tick boundary, never mid-tick.** An asset
-  that becomes ready mid-tick waits for the next tick. A
-  mid-tick publication would put a new level's geometry under
-  a step that started with the old one's.
+  and an incremental cook must produce identical bytes.
+  Investigate a mismatch; do not re-cook around it.
 - **Defaults live in the cooked chunk.** A default change
-  affects only newly authored levels. An old chunk cooks to
-  the same room it always did — if it does not, the cooker's
-  default handling is wrong.
+  affects only newly authored levels. If an old chunk cooks
+  to a different room, the cooker's default handling is
+  wrong.
+- **Publication is a tick boundary, never mid-tick.** An
+  asset that becomes ready mid-tick waits. No exceptions.
 - **The placeholder is the current renderer.** The
   primitive-shape rendering stays until the atlas loader
   lands, because it is the fallback a failed atlas load
   degrades to. Removing it before the loader exists removes
   the fallback.
+- **Packaging is behind the fetch.** The loader fetches by
+  ID and does not care whether the bytes came from a loose
+  file or a package. Do not let packaging decisions leak
+  into game code.
+- **Search path order is recorded.** A clean build and a
+  developer machine must resolve the same asset ID to the
+  same bytes. An unrecorded override is a reproducibility bug.
+- **Identity is not an address.** Never store a runtime
+  pointer in a save, a chunk, or a trace. Use the asset ID.
+- **Buffers outlive their requests.** A pending async
+  completion keeps its buffer valid; a completion after unload
+  is dropped, not published.
 
 ## Open decisions
 
