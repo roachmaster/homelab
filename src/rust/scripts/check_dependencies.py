@@ -9,8 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
     "forge-llama": {(name, "normal") for name in ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider")},
     "forge-ide-ui": set(),
-    "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-bootstrap","forge-provider","forge-template")},
-    "forge-ide-web-host": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")},
+    "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-bootstrap","forge-provider","forge-template","forge-game-runtime")},
+    "forge-ide-web-host": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")} | {("forge-ide-ui", "build")},
+    "forge-game-runtime": set(),
     "forge-agent": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-command","forge-kernel","forge-ide","forge-remote","forge-remote-https")},
     "forge-remote": {(name, "normal") for name in ("forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task")},
     "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-bootstrap", "forge-provider", "forge-io-client", "forge-ingress-contract", "forge-ide")} | {(name, "dev") for name in ("forge-kernel", "forge-task")},
@@ -40,6 +41,7 @@ ALLOWED = {
                               "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
+EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
     "forge-llama": {"ctrlc", "nix", "http-body-util", "hyper", "hyper-util", "serde", "serde_json", "subtle", "tokio"},
     "forge-ide-ui": {"serde"},
@@ -77,11 +79,12 @@ def validate_packages(packages):
     if set(packages) != set(ALLOWED):
         raise SystemExit("Workspace membership changed; review the architecture guard explicitly.")
     edges = {name: set() for name in packages}
+    external = {"normal": EXTERNAL, "dev": EXTERNAL_DEV, "build": EXTERNAL_BUILD}
     for name, package in packages.items():
         for dependency in package["dependencies"]:
             target = dependency["name"]
             kind = dependency["kind"] or "normal"
-            if (target in EXTERNAL.get(name, set()) and kind == "normal") or (target in EXTERNAL_DEV.get(name, set()) and kind == "dev"):
+            if target in external.get(kind, {}).get(name, set()):
                 if dependency.get("path") or not (dependency.get("source") or "").startswith("registry+"):
                     raise SystemExit(f"Unexpected external dependency origin: {target}")
                 continue
@@ -99,6 +102,8 @@ def validate_packages(packages):
     for dep in web["dependencies"]:
         if dep["name"] in {"forge-bootstrap","forge-provider","forge-template","serde_yaml_ng","sha2"} and not dep["optional"]:
             raise SystemExit("Asset build dependency leaked into WASM default")
+        if dep["name"] == "forge-game-runtime" and dep["target"] != 'cfg(target_arch = "wasm32")':
+            raise SystemExit("Game runtime must remain a WASM-only dependency of forge-ide-web")
     ide = packages["forge-ide"]
     if ide["features"].get("default", []) != []:
         raise SystemExit("IDE YAML/CLI/remote must remain opt-in")
@@ -200,6 +205,9 @@ def negative_fixtures(packages):
     bad=copy.deepcopy(packages)
     next(d for d in bad["forge-ide-web"]["dependencies"] if d["name"]=="forge-template")["optional"]=False
     fixtures.append(("generator in WASM facade",bad))
+    bad = copy.deepcopy(packages)
+    next(d for d in bad["forge-ide-web"]["dependencies"] if d["name"] == "forge-game-runtime")["target"] = None
+    fixtures.append(("game runtime in native UI tooling", bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
@@ -251,10 +259,13 @@ def main():
     if not {"forge-ide", "forge-remote-https", "ctrlc"} <= consumer_tree(package="forge-agent"):
         raise SystemExit("Agent must explicitly select its capabilities")
     portable=consumer_tree(package="forge-ide-ui")
-    wasm=consumer_tree(package="forge-ide-web")
-    if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable|wasm) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable|wasm):
+    web_native = consumer_tree(package="forge-ide-web")
+    wasm = consumer_tree("--target", "wasm32-unknown-unknown", package="forge-ide-web")
+    if "forge-game-runtime" in web_native or wasm != web_native | {"forge-game-runtime"}:
+        raise SystemExit("Game runtime must load only in the default WASM profile")
+    if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host"})
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
