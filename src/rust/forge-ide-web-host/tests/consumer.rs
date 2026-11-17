@@ -1056,6 +1056,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/design/chat-dispatch\""));
         assert!(response.contains("href=\"/design/mail\""));
         assert!(response.contains("href=\"/design/game-studio\""));
+        assert!(response.contains("href=\"/playtest\">Room One playtest</a>"));
     }
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
     assert!(request("GET", "/design/previous-chats.js")

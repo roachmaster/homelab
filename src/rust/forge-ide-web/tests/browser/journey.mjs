@@ -1924,6 +1924,8 @@ async function previousChatsDesignJourney(design, designUrl) {
 async function gameEngineDesignJourney(page, designUrl) {
   const pages = page.context().pages();
   const link = page.getByRole('link', { name: 'Game engine design', exact: true });
+  await check(page.getByRole('link', { name: 'Room One playtest', exact: true }))
+    .toHaveAttribute('href', '/playtest');
   await check(link).toHaveAttribute('href', '/design/game-studio');
   await link.click();
   const gameDesignUrl = new URL('/design/game-studio', designUrl).href;
@@ -1960,7 +1962,23 @@ async function gameEngineDesignJourney(page, designUrl) {
   const playtest = report.getByRole('link', { name: 'Open browser playtest', exact: true });
   await check(playtest).toHaveAttribute('href', '/playtest');
   await page.setViewportSize({ width: 320, height: 720 });
-  await playtest.click();
+  const context = page.context();
+  const wasmUrl = new URL('/app.wasm', designUrl).href;
+  const cookieName = 'forge_fixture_playtest_asset';
+  // Model an access proxy's same-origin cookie without touching the Forge session.
+  await context.addCookies([{
+    name: cookieName, value: 'present', domain: new URL(wasmUrl).hostname, path: '/app.wasm',
+  }]);
+  try {
+    const [wasm] = await Promise.all([
+      page.waitForResponse(response => response.url() === wasmUrl),
+      playtest.click(),
+    ]);
+    assert.equal(wasm.status(), 200);
+    assert.match(await wasm.request().headerValue('cookie') ?? '', /forge_fixture_playtest_asset=present/);
+  } finally {
+    await context.clearCookies({ name: cookieName });
+  }
   await check(page).toHaveURL(new URL('/playtest', designUrl).href);
   assert.deepEqual(page.context().pages(), pages, 'the playtest opens in Design’s tab');
   await page.bringToFront();

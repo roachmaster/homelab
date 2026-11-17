@@ -203,7 +203,7 @@ const CANVAS_ADAPTER: &str = r#"(config => {
     const ctx = board?.getContext('2d', { alpha: false });
     if (!ctx || !status || !restart) throw new Error('Canvas controls unavailable');
     const response = await fetch(wasm.path, {
-      mode: 'same-origin', credentials: 'omit', redirect: 'error',
+      mode: 'same-origin', credentials: 'same-origin', redirect: 'error',
     });
     if (!response.ok) throw new Error('Canvas WASM asset unavailable');
     const { instance } = await WebAssembly.instantiateStreaming(response, {});
