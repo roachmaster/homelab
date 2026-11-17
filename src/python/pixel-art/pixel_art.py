@@ -9,7 +9,7 @@ import struct
 from tempfile import TemporaryDirectory
 import zlib
 
-from recipe import RecipeError, STAGES, part_poses, read_recipe, visible_layers
+from recipe import RecipeError, STAGES, frame_hitboxes, frame_poses, read_recipe, visible_layers
 
 
 class Raster:
@@ -152,11 +152,6 @@ def operation_bounds(operation):
     return min(xs), min(ys), max(xs) - min(xs) + 1, max(ys) - min(ys) + 1
 
 
-def frame_poses(recipe, frame):
-    mirror_axis = recipe["canvas"]["pivot"][0] if frame.get("flip_x") else None
-    return part_poses(recipe["parts"], frame.get("offsets", {}), frame.get("rotations", {}), mirror_axis)
-
-
 def rgba_palette(recipe):
     return {name: bytes.fromhex(value[1:]) + b"\xff" for name, value in recipe["palette"].items()}
 
@@ -195,10 +190,7 @@ def export_sprites(recipe, args):
             clips[clip].append({
                 "rect": atlas.add(image),
                 "duration_ms": frame["duration_ms"],
-                "hitboxes": {
-                    name: poses[box["part"]].bounds(*box["at"], *box["size"])
-                    for name, box in frame.get("hitboxes", {}).items()
-                },
+                "hitboxes": frame_hitboxes(frame, poses),
             })
     write_output(args.out, atlas, "manifest.json", {
         "version": 1,
@@ -263,9 +255,11 @@ def main():
     steps = commands.add_parser("steps", help="show cumulative drawing operations for one pose")
     for command in (export, steps):
         command.add_argument("recipe", type=Path)
-        command.add_argument("--stage", choices=STAGES, default="greybox")
+        command.add_argument("--stage", choices=STAGES)
         command.add_argument("--skin", help="include layers tagged with this skin")
         command.add_argument("--out", type=Path, required=True, help="output directory")
+    export.add_argument("--illustrated", type=Path, metavar="SKIN_JSON", help="use editable SVG part art")
+    export.add_argument("--scale", type=int, help="pixels per logical unit for illustrated art (default 4)")
     steps.add_argument("--clip", required=True)
     steps.add_argument("--frame", type=int, default=0, help="zero-based frame index")
     steps.add_argument("--layer", help="record only this visible layer over its underlying art")
@@ -276,10 +270,20 @@ def main():
         if args.command == "check":
             print(f"Valid recipe: {len(recipe['parts'])} parts, {len(recipe['clips'])} clips")
             return
-        if args.command == "export":
-            export_sprites(recipe, args)
+        if args.command == "export" and args.illustrated is not None:
+            from illustrated import export_illustrated
+
+            if args.skin is not None or args.stage not in (None, "final"):
+                raise RecipeError("illustrated export takes its finished art from the illustrated skin")
+            export_illustrated(recipe, args.illustrated, args.scale, args.out)
         else:
-            export_steps(recipe, args)
+            args.stage = args.stage or "greybox"
+            if args.command == "export":
+                if args.scale is not None:
+                    raise RecipeError("--scale requires --illustrated")
+                export_sprites(recipe, args)
+            else:
+                export_steps(recipe, args)
     except (OSError, ValueError, RecursionError) as error:
         parser.exit(2, f"{parser.prog}: {error}\n")
     print(args.out)

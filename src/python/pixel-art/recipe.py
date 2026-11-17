@@ -214,7 +214,7 @@ def validate_frame(frame, parts, views, context):
         pair(box["size"], f"{box_context}.size", 1)
 
 
-def part_poses(parts, offsets, rotations, mirror_axis=None):
+def part_poses(parts, offsets, rotations, mirror_axis=None, *, snap=True):
     poses = {}
     visiting = set()
 
@@ -235,14 +235,27 @@ def part_poses(parts, offsets, rotations, mirror_axis=None):
 
     for name in parts:
         resolve(name)
-    return {
-        name: PartPose(
-            round(pose.x) if mirror_axis is None else 2 * mirror_axis - round(pose.x),
-            round(pose.y),
-            pose.angle,
-            mirror_axis is not None,
+    for name, pose in poses.items():
+        x, y = (round(pose.x), round(pose.y)) if snap else (pose.x, pose.y)
+        poses[name] = PartPose(
+            x if mirror_axis is None else 2 * mirror_axis - x,
+            y, pose.angle, mirror_axis is not None,
         )
-        for name, pose in poses.items()
+    return poses
+
+
+def frame_poses(recipe, frame, *, snap=True):
+    mirror_axis = recipe["canvas"]["pivot"][0] if frame.get("flip_x") else None
+    return part_poses(
+        recipe["parts"], frame.get("offsets", {}), frame.get("rotations", {}),
+        mirror_axis, snap=snap,
+    )
+
+
+def frame_hitboxes(frame, poses):
+    return {
+        name: poses[box["part"]].bounds(*box["at"], *box["size"])
+        for name, box in frame.get("hitboxes", {}).items()
     }
 
 

@@ -4,7 +4,8 @@ Build a greybox mannequin and animation set as editable pixel operations. Add
 silhouette, costume, and lighting layers when the poses are ready. The same
 recipe exports each stage with shared frame geometry and timing.
 
-Uses Python 3.12 and its standard library. Run commands from the Homelab root.
+The pixel renderer uses Python 3.12 and its standard library. Run commands
+from the Homelab root.
 
 ```bash
 tool=src/python/pixel-art/pixel_art.py
@@ -64,6 +65,31 @@ The recipe is plain JSON with `version: 1`. Check it after editing. The renderer
 clips drawings at cell edges. Inspect extreme poses at native size to catch
 cropping and check that the action box tracks the correct part.
 
+## Export an illustrated skin
+
+Use the [illustrated skin skill](../../../.agents/skills/illustrate-character-skin/SKILL.md)
+to draw editable vector parts for the same rig. The Scout skin has side, front,
+back, and ladder views, with alternate gloves for some contact frames. This
+export uses `gdk-pixbuf-thumbnailer` with its SVG loader and ImageMagick
+`convert` on the authoring machine.
+
+```bash
+python3 -B src/python/pixel-art/pixel_art.py export \
+  src/python/pixel-art/examples/room-one-scout.json \
+  --illustrated src/python/pixel-art/examples/room-one-scout-illustrated.json \
+  --scale 4 --out src/python/pixel-art/out/illustrated
+```
+
+Each skin view points to an SVG with the recipe's logical canvas as its view
+box. Use a single drawing group containing the named part groups in paint
+order, and keep each part's drawing in its own joint coordinates. The
+exporter places the group at the animated joint, so the top-level part
+transform can show a neutral preview when the SVG is opened directly.
+The optional `grips` map lists which part IDs switch to their
+`data-grip="grab"` art at each zero-based frame. The `hidden` map omits
+part artwork at selected frames, as when the Scout stows the probe while
+climbing the ledge.
+
 ### Study the scout's key poses
 
 - In `crouch`, the hips lower, the knees bend forward, and the shins angle
@@ -100,7 +126,13 @@ to place the destination cell. Hitboxes are `[x, y, width, height]` in that
 cell's local coordinate space. Apply the same top-left offset to position them.
 The manifest also includes the stage, selected skin, and fixed frame size.
 For a given recipe the frame rectangles, durations, pivot, and hitboxes are
-identical across exports.
+identical across 1× stages and skins.
+
+Illustrated atlases use manifest version 2. The Scout's `frame_size` is
+`[128, 176]` atlas pixels at `atlas_scale: 4`. Its `logical_frame_size` is
+`[32, 44]`. Hitboxes and `pivot` remain in logical units, and the separate
+`atlas_pivot` gives the pivot in atlas pixels. Use the atlas-pixel source
+rectangle and divide its dimensions by `atlas_scale` for the destination.
 
 The Room One browser renderer currently draws primitive shapes and has no atlas
 loader. These files are an integration input for that renderer or another
@@ -125,7 +157,8 @@ sits 12 pixels above the floor.
 python3 -B -m unittest discover -s src/python/pixel-art/tests -v
 ```
 
-There is no build step or external formatter, linter, or runtime dependency.
+There is no build step. Illustrated export tests use the same image tools as
+the illustrated CLI.
 
 ## Drawing references
 

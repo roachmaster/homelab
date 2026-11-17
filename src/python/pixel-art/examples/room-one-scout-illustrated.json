@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "views": {
+    "side": "room-one-scout-illustrated-idle.svg",
+    "front": "room-one-scout-illustrated-front.svg",
+    "back": "room-one-scout-illustrated-back.svg",
+    "ladder": "room-one-scout-illustrated-ladder.svg"
+  },
+  "hidden": {
+    "ledge_pull_up": {
+      "1": ["probe"],
+      "2": ["probe"],
+      "3": ["probe"],
+      "4": ["probe"],
+      "5": ["probe"],
+      "6": ["probe"],
+      "7": ["probe"]
+    }
+  },
+  "grips": {
+    "ledge_pull_up": {
+      "2": ["near_forearm", "far_forearm"],
+      "3": ["near_forearm", "far_forearm"],
+      "4": ["near_forearm", "far_forearm"],
+      "5": ["near_forearm", "far_forearm"]
+    },
+    "rope_climb": {
+      "0": ["near_forearm", "far_forearm"],
+      "1": ["near_forearm"],
+      "2": ["near_forearm", "far_forearm"],
+      "3": ["far_forearm"],
+      "4": ["far_forearm", "near_forearm"],
+      "5": ["far_forearm"],
+      "6": ["near_forearm", "far_forearm"],
+      "7": ["near_forearm", "far_forearm"]
+    },
+    "barrel_vault": {
+      "2": ["far_forearm"]
+    }
+  }
+}
