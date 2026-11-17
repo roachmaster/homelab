@@ -148,3 +148,64 @@ policy stays: one writer per joint, named in advance.
 - **Boundary.** A body hitbox change re-validates the collider;
   an action-box change re-checks the query frames. Changing
   one must not silently change the other.
+
+## Migrating an existing Scout recipe
+
+Before a recipe can be driven by the physics design, perform these
+checks in order. Do not skip any step; a missed step produces
+visible double-motion or a silent hitbox mismatch.
+
+1. **Zero airborne root offsets.** In the authoring tool set every
+   airborne frame's root offset to `[0, 0]` and re-export. Keep
+   limb rotations and action boxes; discard only the root
+   translation that previously simulated the jump arc.
+2. **Manifest parity.** Greybox, final, and illustrated manifests
+   must agree on frame counts, `duration_ms` values, pivots, and
+   body hitboxes. A mismatch is a recipe error, not a runtime
+   tolerance.
+3. **Hitbox re-validation.** At load, reject a zero-size box, a
+   box that extends outside the cell, or a pivot offset that
+   disagrees with the recipe. Name the part and frame in the
+   error.
+4. **Bridge acceptance.** Run the verification list below. A
+   recipe that still carries airborne root offsets will fail the
+   "no double motion" check and must not be shipped.
+
+## Caveats and things to consider
+
+- **One writer per joint.** Physics owns the root; animation owns
+  the limbs. Nothing else may write a joint. If a future feature
+  (foot planting, look-at, recoil) needs to adjust a joint, name
+  the writer in advance and run it in the Animate phase after
+  clip selection. An unnamed second writer is a contract violation.
+- **Clip time vs simulation time.** These are different clocks.
+  Never advance the animation clock by wall-clock time or by a
+  variable render delta. A frame boundary occurs only at a tick
+  boundary.
+- **Landing is an event, not a state.** The land/crouch clip is
+  selected by the `Landed` event on the landing tick. Do not
+  infer landing solely from "grounded this tick and not grounded
+  last tick" — the event carries impact speed and is the single
+  source of truth.
+- **Action boxes never push.** They are phantom queries only.
+  Knock-back or hit reactions must be applied through a physics
+  impulse or gameplay event, never by treating an action box as
+  a contact.
+- **Future IK.** Deferred for v1. When added, the solver must
+  read the ground query, write only the leg joints, and leave
+  the root under physics ownership. The policy does not change.
+- **Replay surface.** Clip selection is part of the deterministic
+  surface. The same inputs must produce the same clip sequence.
+  A clip-selection divergence is a bridge failure, not a visual
+  polish issue.
+
+## Cross-references
+
+- Physics design: [forge-game-physics.md](../../../docs/architecture/proposals/forge-game-physics.md)
+  (ownership table, units/spaces, contact identity, phase mapping)
+- Entity model: [forge-game-entity-model.md](../../../docs/architecture/proposals/forge-game-entity-model.md)
+  (phase names, generation tags)
+- Gregory study notes (study-notes repo): chapter 11 §§11.4, 11.7,
+  11.11 and chapter 12 §§12.3, 12.5
+- Pixel-art authoring: [README](../../../src/python/pixel-art/README.md)
+  (root-motion rule, hitboxes, manifest)
