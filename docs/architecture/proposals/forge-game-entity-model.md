@@ -6,10 +6,11 @@ not invent them ad hoc. The player, the key, the exit, and every
 future moving thing are entities; the map is terrain.
 
 **Planning baseline** — GitHub `main` at `e402c23` on 2026-11-17 (the
-snapshot design merged). This branch builds on
-`design/game-debug-layer` (`9f89607`) for the phase vocabulary and
-the trace; merging this branch brings the debug design with it. The
-design applies Gregory chapters 14 (§§14.1–14.4) and 15 (§§15.1–15.9)
+snapshot design merged). This design builds on the [debug and trace
+layer](forge-game-debug.md) (`design/game-debug-layer`) for the
+phase vocabulary and the trace; merge the debug branch before this
+one so that reference resolves. The design applies Gregory chapters
+14 (§§14.1–14.4) and 15 (§§15.1–15.9)
 and the `design-gameplay-runtime` catalog entry, and it follows the
 Forge package-boundary conventions (§11 below).
 
