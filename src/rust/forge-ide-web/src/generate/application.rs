@@ -1,6 +1,9 @@
 //! The IDE's authored UI: typed components plus a separate YAML theme.
 //! No application HTML, CSS, JS, raw-code field or string template lives here.
-use super::{Document, HeaderBinding, RequestBinding, Transport};
+use super::{
+    CheckpointBinding, Document, HeaderBinding, RequestBinding, RequestPolicy, TimerBinding,
+    Transport,
+};
 use crate::component;
 
 pub fn ide_document() -> Document {
@@ -65,7 +68,8 @@ pub fn ide_document() -> Document {
                             component!(button "chat-delete-confirm", "Delete chat", "confirm_chat_delete"),
                         ]),
                     ]),
-                    component!(transcript "chat-transcript", "Chat messages"),
+                    component!(transcript "chat-transcript", "Chat messages", "You", "Forge",
+                        "Send a message to start this conversation."),
                     component!(status "chat-status", ""),
                     component!(textarea "chat-draft", "Message", "set_chat_draft"),
                     component!(row [
@@ -100,7 +104,8 @@ pub fn ide_document() -> Document {
                                 component!(status "mail-thread-status", ""),
                                 component!(caption "mail-run-failure", ""),
                                 component!(text "mail-archive-reason", "Recall limit reached. There is too little room for another exchange in this thread."),
-                                component!(transcript "mail-transcript", "Mail messages"),
+                                component!(transcript "mail-transcript", "Mail messages", "You", "Forge",
+                                    "Send a message to start this conversation."),
                                 component!(caption "mail-context", ""),
                                 component!(row [
                                     component!(primary "mail-follow-up", "Follow up", "mail_follow_up"),
@@ -164,7 +169,8 @@ pub fn ide_document() -> Document {
                         component!(caption "workspace-summary", "Find a file or symbol in Explorer."),
                         component!(panel "source-panel", "Source · Read only"; [
                             component!(status "source-status", ""),
-                            component!(source_formats "source"; [
+                            component!(source_formats "source", "Empty Markdown file.",
+                                "Markdown display is unavailable for this file size."; [
                                 component!(source "source-view", "Read-only source"),
                                 component!(caption "source-range", ""),
                                 component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
@@ -251,6 +257,7 @@ pub fn ide_transport() -> Transport {
             deadline: None,
             error_events: vec![],
             accept_events: vec!["paired".into(), "pair_failed".into()],
+            policy: RequestPolicy::default(),
         },
         RequestBinding {
             kind: "resume".into(),
@@ -262,6 +269,7 @@ pub fn ide_transport() -> Transport {
             deadline: None,
             error_events: vec![],
             accept_events: vec!["paired".into(), "pair_failed".into()],
+            policy: RequestPolicy::default(),
         },
         RequestBinding {
             kind: "inspect".into(),
@@ -272,6 +280,7 @@ pub fn ide_transport() -> Transport {
             deadline: Some("request.expires_unix_ms".into()),
             error_events: vec![],
             accept_events: vec!["result".into()],
+            policy: RequestPolicy::default(),
         },
         RequestBinding {
             kind: "chat".into(),
@@ -282,6 +291,10 @@ pub fn ide_transport() -> Transport {
             deadline: None,
             error_events: vec![],
             accept_events: vec!["chat_result".into()],
+            policy: RequestPolicy {
+                expire_session_on_denial: true,
+                ..RequestPolicy::default()
+            },
         },
         RequestBinding {
             kind: "source".into(),
@@ -292,6 +305,7 @@ pub fn ide_transport() -> Transport {
             deadline: Some("request.expires_unix_ms".into()),
             error_events: vec![],
             accept_events: vec!["source_result".into()],
+            policy: RequestPolicy::default(),
         },
     ];
     for (kind, destination, success_event, error_event) in [
@@ -351,6 +365,24 @@ pub fn ide_transport() -> Transport {
         let mut headers = common.clone();
         headers.push(HeaderBinding::literal("Forge-Destination", destination));
         headers.push(HeaderBinding::field("Forge-Request-Id", "request_id"));
+        let mut policy = RequestPolicy {
+            wait_for_slot_ms: Some(5_000),
+            expire_session_on_denial: true,
+            ..RequestPolicy::default()
+        };
+        match kind {
+            "chat_run_events" => policy.delay_ms = Some(1_200),
+            "chat_run_submit" => {
+                policy.checkpoint = Some(CheckpointBinding {
+                    snapshot_path: "chat.pending_run".into(),
+                    fields: ["chat_id", "idempotency_key", "model_id"]
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect(),
+                });
+            }
+            _ => {}
+        }
         bindings.push(RequestBinding {
             kind: kind.into(),
             request_id: "request_id".into(),
@@ -360,11 +392,18 @@ pub fn ide_transport() -> Transport {
             deadline: None,
             accept_events: vec![success_event.into()],
             error_events: vec![error_event.into()],
+            policy,
         });
     }
     Transport {
         initial_event: "resume".into(),
         bindings,
+        timers: vec![TimerBinding {
+            effect_kind: "mail_watch".into(),
+            event_kind: "poll_mail".into(),
+            argument_field: "watch".into(),
+            delay_ms: 5_000,
+        }],
     }
 }
 pub const IDE_THEME: &str = include_str!("../../ui/theme.yaml");

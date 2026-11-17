@@ -1,7 +1,7 @@
 # Forge IDE generated web application
 
 The real browser application is built from **typed Rust components/macros and
-validated YAML style tokens**, not handwritten application HTML, CSS or JS.
+YAML style declarations and validated theme tokens**, not handwritten application HTML, CSS or JS.
 It opens to Chat after admission and includes a read-only source workbench. The worker runs the actual compiled
 [`forge-ide-ui`](../forge-ide-ui/README.md) Rust model through the bounded WASM ABI.
 The [native host](../forge-ide-web-host/README.md) supplies protected selectors and
@@ -13,20 +13,34 @@ reversible keyboard/narrow panes. Chat uses the local ABI 4 bundle.
 
 ## Authoring and build boundary
 
-- `src/generate/application.rs`: application structure and declarative action/header
-  mappings using `component!`; no raw markup, scripts, styles or template escape.
+- `src/generate/application.rs`: declare screens, labels, and actions in
+  `ide_document()`. Change request headers, polling delays, slot waits, and
+  checkpoint requirements in `ide_transport()`.
 - `ui/theme.yaml`: validated colors and bounded numeric tokens. Unknown fields and
   raw CSS/script fields are rejected.
+- [`ui/styles.yaml`](ui/styles.yaml): editable selectors and ordered
+  `[property, value]` pairs, grouped by media query where needed.
+- [`ui/stylesheet.forge`](ui/stylesheet.forge): the generator template for
+  `style.css`.
+- [`ui/document.forge`](ui/document.forge): the shared HTML shell for
+  `index.html`. Screen content comes from the typed component tree.
 - `src/generate/{component,html,css,javascript}.rs`: reusable audited generation
   primitives. These own web syntax, DOM/message plumbing and transport mechanics;
   they do not own IDE selection, report algorithms or request state transitions.
 - `src/wasm.rs`: real worker ABI and owned buffers, not a dummy WASM blob.
 
+For an application behavior change, update the Rust model in `forge-ide-ui`.
+The asset build emits `main.js` and `worker.js` from the browser adapter and
+validated declarations. The main thread applies typed views and owns browser
+events and worker lifecycle. The worker schedules timers and runs requests
+through the declared bindings.
+
 `register_assets(id, AssetConfig)` stages a reusable `AssetFactory` with no I/O,
 rendering or WASM execution. The consumer registers/freezes, calls the factory,
 and can acquire the bundle through `Singleton`. The factory composes the existing
-public template registrar/factory/provider for the semantic document shell.
-Only typed component-emitted escaped markup enters its raw content slot.
+public template registrar/factory/provider for the document shell and stylesheet.
+The shell escapes text fields and inserts markup from the typed component emitter.
+Rebuild the bundle with `make ui-build` to apply source edits.
 The build CLI then writes a **new** directory; existing output is never overwritten.
 No build code or generator runs inside the native web host.
 

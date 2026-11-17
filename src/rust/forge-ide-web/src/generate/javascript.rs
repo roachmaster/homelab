@@ -139,7 +139,7 @@ function showSourceFormat(format){
   format.rawButton.setAttribute('aria-pressed',String(!display));
   format.displayButton.setAttribute('aria-pressed',String(display));
   if(display&&format.rendered!==format.html){
-    if(format.html==='')format.preview.textContent='Empty Markdown file.';
+    if(format.html==='')format.preview.textContent=format.preview.dataset.sourcePreviewEmpty??'';
     else setMarkdown(format.preview,format.html);
     format.rendered=format.html;
     format.preview.scrollTop=0;
@@ -284,7 +284,10 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     n.dataset.conversation=conversation;
     if(!b.messages.length){
       if(!n.firstChild?.classList.contains('fg-empty')){
-        const empty=document.createElement('p');empty.className='fg-empty';empty.textContent='Send a message to start this conversation.';n.replaceChildren(empty);
+        const empty=document.createElement('p');
+        empty.className='fg-empty';
+        empty.textContent=n.dataset.transcriptEmpty??'';
+        n.replaceChildren(empty);
       }
       continue;
     }
@@ -298,7 +301,8 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       }
       const role=message.role==='user'?'user':'assistant';
       node.dataset.role=role;
-      node.children[0].textContent=role==='user'?'You':b.assistant_label??'Forge';
+      const label=role==='user'?n.dataset.transcriptUser:b.assistant_label??n.dataset.transcriptAssistant;
+      node.children[0].textContent=label??'';
       const previous=node.children[1];
       const existingNotice=node.children[2];
       if(typeof message.notice==='string'){
@@ -615,11 +619,22 @@ let latestCheckpoint=null;
 let latestWorkspace=null;
 let mailNavigation=null;
 let mailNavigationLocked=false;
-let mailWatchTimer=null;
 let workspaceEpoch=null;
 let navigationCache=null;
 const pending=new Map();
-function field(value,path){for(const part of path.split('.')){if(value===null || typeof value!=='object' || !Object.hasOwn(value,part))throw new Error('Missing declared field');value=value[part];}if(typeof value!=='string' && typeof value!=='number')throw new Error('Invalid declared field');return value;}
+const timers=new Map();
+function valueAt(value,path){
+  for(const part of path.split('.')){
+    if(value===null||typeof value!=='object'||!Object.hasOwn(value,part))return undefined;
+    value=value[part];
+  }
+  return value;
+}
+function field(value,path){
+  const result=valueAt(value,path);
+  if(typeof result!=='string'&&typeof result!=='number')throw new Error('Invalid declared field');
+  return result;
+}
 function safeJson(text){let depth=0,quoted=false,escape=false;for(const c of text){if(quoted){if(escape)escape=false;else if(c==='\\')escape=true;else if(c==='"')quoted=false;}else if(c==='"')quoted=true;else if(c==='{'||c==='['){if(++depth>64)throw new Error('Nesting limit');}else if(c==='}'||c===']')depth--;}return JSON.parse(text);}
 async function bounded(response,limit){const reader=response.body?.getReader();if(!reader)throw new Error('Missing response body');const chunks=[];let total=0;try{for(;;){const {value,done}=await reader.read();if(done)break;total+=value.length;if(total>limit){await reader.cancel();throw new Error('Byte limit');}chunks.push(value);}}finally{reader.releaseLock();}const bytes=new Uint8Array(total);let at=0;for(const c of chunks){bytes.set(c,at);at+=c.length;}return bytes;}
 async function workspaceRequest(body,keepalive,signal){
@@ -712,10 +727,11 @@ function navigationSnapshot(snapshot){
   return {chat:{selected:chat.selected,model_id:chat.model_id,conversations},
     workbench:snapshot.workbench,workbench_open:snapshot.workbench_open};
 }
-async function checkpointedRun(effect){
+async function checkpointMatches(effect,binding){
   if(!workspaceLease||!workspaceJSON)return false;
-  const intent=safeJson(workspaceJSON).chat?.pending_run;
-  if(intent?.chat_id!==effect.chat_id||intent.idempotency_key!==effect.idempotency_key||intent.model_id!==effect.model_id)return false;
+  const intent=valueAt(safeJson(workspaceJSON),binding.snapshot_path);
+  if(!intent||typeof intent!=='object')return false;
+  if(!binding.fields.every(key=>valueAt(intent,key)===valueAt(effect,key)))return false;
   const checkpoint=latestCheckpoint;
   if(!checkpoint)return true; // Restored from a durable checkpoint.
   await checkpoint.pending;
@@ -742,23 +758,42 @@ function dispatch(event,presentation_sequence=null,suppressView=false){
   }
   for(const effect of result.effects)run(effect).catch(()=>fatal('Invalid application effect. Reload to retry.'));
 }
-function fatal(message){if(closed)return;closed=true;for(const c of pending.values())c.abort();pending.clear();csrf=null;wasm=null;postMessage({kind:'fatal',message});}
+function fatal(message){
+  if(closed)return;
+  closed=true;
+  for(const c of pending.values())c.abort();
+  for(const timer of timers.values())clearTimeout(timer);
+  pending.clear();
+  timers.clear();
+  csrf=null;
+  wasm=null;
+  postMessage({kind:'fatal',message});
+}
 function failed(id,category){try{dispatch({kind:'network_failed',request_id:id,category});}catch(_){fatal('The worker could not accept a transport result. Reload to retry.');}}
 async function run(effect){
   if(effect.kind==='abort'){const active=pending.get(effect.token.request_id);if(active)active.abort();return;}
-  if(effect.kind==='mail_watch'){
-    clearTimeout(mailWatchTimer);
-    mailWatchTimer=setTimeout(()=>{if(!closed)dispatch({kind:'poll_mail',watch:effect.watch});},5000);
+  const timerBinding=CONFIG.timers.find(timer=>timer.effect_kind===effect.kind);
+  if(timerBinding){
+    const argument=field(effect,timerBinding.argument_field);
+    clearTimeout(timers.get(effect.kind));
+    const timer=setTimeout(()=>{
+      timers.delete(effect.kind);
+      if(!closed)dispatch({kind:timerBinding.event_kind,[timerBinding.argument_field]:argument});
+    },timerBinding.delay_ms);
+    timers.set(effect.kind,timer);
     return;
   }
   const binding=CONFIG.bindings.find(b=>b.kind===effect.kind);if(!binding)throw new Error('Undeclared transport effect');
   const id=String(field(effect,binding.request_id));
-  // Run pages are short requests so they can share the host with inspection and history.
-  if(binding.kind==='chat_run_events')await new Promise(resolve=>setTimeout(resolve,1200));
-  if(binding.kind==='chat_run_submit'&&!await checkpointedRun(effect)){failed(id,'unavailable');return;}
-  if(binding.kind.startsWith('mail_')||binding.kind.startsWith('chat_history_')||binding.kind.startsWith('chat_run_')){
+  const {delay_ms,wait_for_slot_ms,checkpoint,expire_session_on_denial}=binding.policy;
+  if(delay_ms)await new Promise(resolve=>setTimeout(resolve,delay_ms));
+  if(checkpoint&&!await checkpointMatches(effect,checkpoint)){
+    failed(id,'unavailable');
+    return;
+  }
+  if(wait_for_slot_ms){
     // Wait for an initial slot. This does not replay a dispatched request.
-    const slotDeadline=Date.now()+5000;
+    const slotDeadline=Date.now()+wait_for_slot_ms;
     while(!closed&&pending.size>=2&&Date.now()<slotDeadline)await new Promise(resolve=>setTimeout(resolve,100));
   }
   if(closed)return;
@@ -774,7 +809,7 @@ async function run(effect){
     const body=JSON.stringify(effect);if(encoder.encode(body).length>16384)throw new Error('Request limit');
     const response=await fetch('/forge/v1/dispatch',{method:'POST',headers,body,credentials:'same-origin',redirect:'error',signal:controller.signal,cache:'no-store'});
     const typedErrors=binding.error_events??[];
-    if((binding.kind==='chat'||typedErrors.length)&&(response.status===401||response.status===403)){
+    if(expire_session_on_denial&&(response.status===401||response.status===403)){
       if(response.body)await response.body.cancel();
       fatal('Your Forge session expired. Reload to reconnect.');return;
     }

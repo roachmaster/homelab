@@ -1,0 +1,1477 @@
+# Ordered Forge IDE styles. Rule and declaration order determines the cascade.
+# Each declaration is a [property, value] pair.
+
+- rules:
+    - selector: "*"
+      declarations:
+        - ["box-sizing", "border-box"]
+    - selector: "html"
+      declarations:
+        - ["color-scheme", "dark"]
+    - selector: "body"
+      declarations:
+        - ["margin", "0"]
+        - ["background", "var(--bg)"]
+        - ["color", "var(--text)"]
+        - ["font", "var(--font)/1.45 ui-sans-serif,system-ui,sans-serif"]
+    - selector: "button,input,select,summary"
+      declarations:
+        - ["font", "inherit"]
+    - selector: "button,input,select"
+      declarations:
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--raised)"]
+        - ["color", "var(--text)"]
+        - ["min-height", "var(--control)"]
+    - selector: "button"
+      declarations:
+        - ["padding", "4px 10px"]
+        - ["cursor", "pointer"]
+        - ["font-weight", "600"]
+    - selector: "button:hover:enabled,summary:hover"
+      declarations:
+        - ["border-color", "var(--accent)"]
+    - selector: "button:disabled"
+      declarations:
+        - ["background", "transparent"]
+        - ["border-color", "transparent"]
+        - ["color", "var(--muted)"]
+        - ["cursor", "default"]
+        - ["font-weight", "400"]
+    - selector: ".fg-button-primary:enabled"
+      declarations:
+        - ["background", "var(--accent)"]
+        - ["border-color", "var(--accent)"]
+        - ["color", "var(--bg)"]
+    - selector: ".fg-button-primary:hover:enabled"
+      declarations:
+        - ["filter", "brightness(1.08)"]
+    - selector: ".fg-button-primary:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--text)"]
+        - ["outline-offset", "3px"]
+        - ["box-shadow", "0 0 0 2px var(--bg)"]
+    - selector: ":focus-visible"
+      declarations:
+        - ["outline", "2px dashed var(--accent)"]
+        - ["outline-offset", "-2px"]
+    - selector: "input,select"
+      declarations:
+        - ["padding", "4px 8px"]
+        - ["max-width", "100%"]
+        - ["min-width", "0"]
+    - selector: "h1,h2,h3,p"
+      declarations:
+        - ["margin", "0"]
+    - selector: "h1"
+      declarations:
+        - ["font-size", "17px"]
+        - ["letter-spacing", "-.4px"]
+    - selector: "h2"
+      declarations:
+        - ["font-size", "12px"]
+        - ["font-weight", "650"]
+        - ["letter-spacing", ".15px"]
+    - selector: "p"
+      declarations:
+        - ["overflow-wrap", "anywhere"]
+    - selector: "p:not([role=status])"
+      declarations:
+        - ["color", "var(--muted)"]
+    - selector: "[role=status]"
+      declarations:
+        - ["color", "var(--muted)"]
+        - ["font-weight", "500"]
+        - ["font-size", "12px"]
+        - ["min-height", "28px"]
+        - ["padding", "5px 12px"]
+        - ["border-bottom", "1px solid var(--border)"]
+        - ["border-inline-start", "3px solid transparent"]
+    - selector: "[data-bind-text][data-tone=accent]"
+      declarations:
+        - ["color", "var(--accent)"]
+    - selector: "[data-bind-text][data-tone=warning]"
+      declarations:
+        - ["color", "var(--warning)"]
+    - selector: "[data-bind-text][data-tone=error]"
+      declarations:
+        - ["color", "var(--error)"]
+    - selector: "[role=status][data-tone=warning]"
+      declarations:
+        - ["border-inline-start-color", "var(--warning)"]
+    - selector: "[role=status][data-tone=error]"
+      declarations:
+        - ["border-inline-start-color", "var(--error)"]
+    - selector: ".fg-header"
+      declarations:
+        - ["min-height", "36px"]
+        - ["padding", "5px 12px"]
+        - ["border-bottom", "1px solid var(--border)"]
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["gap", "var(--gap)"]
+    - selector: ".fg-header>p"
+      declarations:
+        - ["font-size", "12px"]
+    - selector: ".fg-brand"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "8px"]
+    - selector: ".fg-mark"
+      declarations:
+        - ["display", "grid"]
+        - ["place-items", "center"]
+        - ["width", "22px"]
+        - ["height", "22px"]
+        - ["border", "1px solid var(--accent)"]
+        - ["color", "var(--accent)"]
+        - ["font-weight", "800"]
+        - ["border-radius", "var(--radius)"]
+    - selector: ".fg-app"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(0,1fr)"]
+        - ["gap", "0"]
+    - selector: ".fg-screen"
+      declarations:
+        - ["min-width", "0"]
+    - selector: ".fg-screen:not([data-protected])"
+      declarations:
+        - ["max-width", "680px"]
+        - ["margin", "36px auto"]
+        - ["padding", "0 16px"]
+        - ["width", "100%"]
+    - selector: ".fg-panel"
+      declarations:
+        - ["background", "var(--surface)"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["padding", "16px"]
+        - ["min-width", "0"]
+    - selector: ".fg-panel>h2"
+      declarations:
+        - ["margin-bottom", "12px"]
+    - selector: ".fg-panel>p"
+      declarations:
+        - ["margin-bottom", "10px"]
+    - selector: ".fg-row"
+      declarations:
+        - ["display", "flex"]
+        - ["gap", "var(--gap)"]
+        - ["align-items", "flex-end"]
+        - ["flex-wrap", "wrap"]
+        - ["margin", "10px 0"]
+    - selector: ".fg-toolbar"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "end"]
+        - ["gap", "var(--gap)"]
+        - ["padding", "6px 10px"]
+        - ["background", "var(--surface)"]
+        - ["border-bottom", "1px solid var(--border)"]
+        - ["flex-wrap", "wrap"]
+    - selector: ".fg-toolbar>p"
+      declarations:
+        - ["align-self", "center"]
+        - ["font-size", "12px"]
+        - ["margin-left", "auto"]
+        - ["padding", "3px 8px"]
+        - ["border", "1px solid currentColor"]
+        - ["border-radius", "var(--radius)"]
+    - selector: ".fg-field"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "3px"]
+        - ["min-width", "0"]
+    - selector: ".fg-field>span"
+      declarations:
+        - ["font-size", "12px"]
+        - ["color", "var(--muted)"]
+        - ["font-weight", "600"]
+        - ["letter-spacing", ".3px"]
+    - selector: ".fg-field select"
+      declarations:
+        - ["width", "clamp(150px,18vw,260px)"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-filter"
+      declarations:
+        - ["margin", "8px 10px"]
+    - selector: ".fg-filter input"
+      declarations:
+        - ["width", "100%"]
+    - selector: ".fg-pane-layout"
+      declarations:
+        - ["min-width", "0"]
+    - selector: ".fg-layout-controls"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "8px"]
+        - ["border-bottom", "1px solid var(--border)"]
+        - ["background", "var(--surface)"]
+        - ["padding", "4px 10px"]
+        - ["min-height", "34px"]
+        - ["position", "relative"]
+    - selector: ".fg-view-options summary"
+      declarations:
+        - ["cursor", "pointer"]
+        - ["list-style-position", "inside"]
+        - ["padding", "3px 7px"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["font-size", "12px"]
+    - selector: ".fg-option-list"
+      declarations:
+        - ["position", "absolute"]
+        - ["z-index", "5"]
+        - ["top", "100%"]
+        - ["left", "10px"]
+        - ["display", "grid"]
+        - ["gap", "5px"]
+        - ["padding", "10px"]
+        - ["background", "var(--raised)"]
+        - ["border", "1px solid var(--border)"]
+        - ["box-shadow", "0 8px 18px #0005"]
+        - ["min-width", "190px"]
+    - selector: ".fg-option-list button"
+      declarations:
+        - ["text-align", "left"]
+    - selector: ".fg-option-list button[aria-expanded=true]::before"
+      declarations:
+        - ["content", "'✓ '"]
+        - ["color", "var(--accent)"]
+    - selector: ".fg-option-list button[aria-expanded=false]::before"
+      declarations:
+        - ["content", "'+ '"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-pane-switches"
+      declarations:
+        - ["display", "flex"]
+        - ["gap", "4px"]
+        - ["flex-wrap", "wrap"]
+    - selector: ".fg-pane-switches button"
+      declarations:
+        - ["font-size", "12px"]
+        - ["min-height", "26px"]
+        - ["padding", "2px 9px"]
+        - ["background", "transparent"]
+        - ["border-color", "transparent"]
+        - ["font-weight", "500"]
+    - selector: ".fg-pane-switches button[aria-pressed=true]"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["border-color", "var(--border)"]
+        - ["color", "var(--text)"]
+    - selector: "[data-narrow=false] .fg-pane-switches [data-pane-position=main]"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-panes"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "var(--leading-size,250px) var(--leading-divider,6px) minmax(0,1fr) var(--trailing-divider,6px) var(--trailing-size,280px)"]
+        - ["grid-template-rows", "minmax(260px,1fr) var(--bottom-divider,6px) var(--bottom-size,170px)"]
+        - ["height", "max(440px,calc(100dvh - 220px))"]
+        - ["min-width", "0"]
+    - selector: ".fg-pane"
+      declarations:
+        - ["background", "var(--surface)"]
+        - ["min-width", "0"]
+        - ["min-height", "0"]
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["overflow", "hidden"]
+    - selector: ".fg-pane-leading"
+      declarations:
+        - ["grid-area", "1/1"]
+    - selector: ".fg-pane-main"
+      declarations:
+        - ["grid-area", "1/3"]
+        - ["background", "var(--bg)"]
+    - selector: ".fg-pane-trailing"
+      declarations:
+        - ["grid-area", "1/5"]
+    - selector: ".fg-pane-bottom"
+      declarations:
+        - ["grid-area", "3/1/4/6"]
+    - selector: ".fg-pane-header"
+      declarations:
+        - ["min-height", "32px"]
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["gap", "8px"]
+        - ["padding", "4px 10px"]
+        - ["border-bottom", "1px solid var(--border)"]
+        - ["background", "var(--raised)"]
+    - selector: ".fg-pane-header h2"
+      declarations:
+        - ["min-width", "0"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-pane-header h2:focus-visible"
+      declarations:
+        - ["outline-offset", "3px"]
+    - selector: ".fg-pane-close"
+      declarations:
+        - ["padding", "0 6px"]
+        - ["border", "0"]
+        - ["min-height", "24px"]
+        - ["background", "transparent"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "17px"]
+    - selector: ".fg-pane-body"
+      declarations:
+        - ["overflow", "auto"]
+        - ["min-height", "0"]
+        - ["flex", "1"]
+        - ["scrollbar-color", "var(--border) var(--surface)"]
+        - ["padding-bottom", "8px"]
+    - selector: ".fg-pane-body>p"
+      declarations:
+        - ["font-size", "12px"]
+        - ["padding", "5px 10px"]
+    - selector: ".fg-pane:not(.fg-pane-main)>.fg-pane-body"
+      declarations:
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["overflow", "auto"]
+    - selector: ".fg-pane:not(.fg-pane-main)>.fg-pane-body>.fg-tree"
+      declarations:
+        - ["flex", "1"]
+        - ["min-height", "28px"]
+    - selector: ".fg-pane-body>.fg-filter,.fg-pane-body>.fg-caption,.fg-pane-body>.fg-row,.fg-pane-body>.fg-focus-name"
+      declarations:
+        - ["flex", "none"]
+    - selector: ".fg-pane-body>.fg-row"
+      declarations:
+        - ["margin", "0"]
+        - ["padding", "6px 8px"]
+        - ["border-top", "1px solid var(--border)"]
+        - ["gap", "4px"]
+        - ["justify-content", "space-between"]
+    - selector: ".fg-pane-body>.fg-row button"
+      declarations:
+        - ["font-size", "12px"]
+        - ["padding", "4px 7px"]
+        - ["font-weight", "500"]
+    - selector: ".fg-pane-body>button"
+      declarations:
+        - ["margin", "4px 4px 4px 10px"]
+        - ["font-size", "12px"]
+    - selector: ".fg-pane-main>.fg-pane-body"
+      declarations:
+        - ["padding", "12px 16px"]
+    - selector: ".fg-pane-main>.fg-pane-body>p"
+      declarations:
+        - ["padding", "0 0 10px"]
+    - selector: ".fg-selection-heading"
+      declarations:
+        - ["font-size", "20px"]
+        - ["font-weight", "650"]
+        - ["color", "var(--text)"]
+        - ["line-height", "1.3"]
+        - ["max-height", "150px"]
+        - ["overflow", "auto"]
+        - ["white-space", "pre-wrap"]
+        - ["overflow-wrap", "anywhere"]
+        - ["margin-bottom", "8px"]
+    - selector: ".fg-caption"
+      declarations:
+        - ["font-size", "12px"]
+    - selector: ".fg-context"
+      declarations:
+        - ["font", "12px ui-monospace,monospace"]
+    - selector: ".fg-pane-main .fg-panel"
+      declarations:
+        - ["margin-top", "12px"]
+        - ["padding", "10px 0 0"]
+        - ["background", "transparent"]
+        - ["border", "0"]
+        - ["border-top", "1px solid var(--border)"]
+        - ["border-radius", "0"]
+    - selector: ".fg-pane-main .fg-panel>h2"
+      declarations:
+        - ["margin-bottom", "10px"]
+    - selector: ".fg-pane-main .fg-panel>.fg-caption"
+      declarations:
+        - ["padding", "0 0 8px"]
+    - selector: ".fg-pane-main .fg-panel>.fg-tree"
+      declarations:
+        - ["padding", "0"]
+    - selector: ".fg-separator"
+      declarations:
+        - ["background", "var(--border)"]
+        - ["touch-action", "none"]
+        - ["position", "relative"]
+    - selector: ".fg-separator:hover,.fg-separator:focus-visible"
+      declarations:
+        - ["background", "var(--accent)"]
+    - selector: ".fg-separator-leading"
+      declarations:
+        - ["grid-area", "1/2"]
+        - ["cursor", "col-resize"]
+    - selector: ".fg-separator-trailing"
+      declarations:
+        - ["grid-area", "1/4"]
+        - ["cursor", "col-resize"]
+    - selector: ".fg-separator-bottom"
+      declarations:
+        - ["grid-area", "2/1/3/6"]
+        - ["cursor", "row-resize"]
+    - selector: ".fg-separator::after"
+      declarations:
+        - ["content", "''"]
+        - ["position", "absolute"]
+        - ["inset", "30% 1px"]
+        - ["border", "1px dotted var(--muted)"]
+    - selector: ".fg-separator-bottom::after"
+      declarations:
+        - ["inset", "1px 46%"]
+    - selector: ".fg-tree"
+      declarations:
+        - ["overflow", "auto"]
+        - ["padding", "3px 5px"]
+        - ["min-width", "0"]
+        - ["scrollbar-color", "var(--border) var(--surface)"]
+    - selector: ".fg-tree-row"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "1px"]
+        - ["margin", "1px 0"]
+        - ["min-width", "0"]
+    - selector: ".fg-tree-row[data-selected=true]"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["box-shadow", "inset 2px 0 var(--accent)"]
+    - selector: ".fg-tree-row button"
+      declarations:
+        - ["background", "transparent"]
+        - ["border", "0"]
+        - ["font-weight", "400"]
+        - ["text-align", "left"]
+        - ["min-height", "var(--row)"]
+        - ["padding", "3px 5px"]
+        - ["border-radius", "0"]
+    - selector: ".fg-row-select"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "7px"]
+        - ["flex", "1"]
+        - ["min-width", "0"]
+    - selector: ".fg-row-label"
+      declarations:
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+        - ["white-space", "nowrap"]
+    - selector: ".fg-row-secondary"
+      declarations:
+        - ["font-size", "11px"]
+        - ["color", "var(--muted)"]
+        - ["margin-left", "auto"]
+        - ["white-space", "nowrap"]
+        - ["max-width", "46%"]
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-glyph"
+      declarations:
+        - ["display", "inline-grid"]
+        - ["place-items", "center"]
+        - ["min-width", "18px"]
+        - ["height", "17px"]
+        - ["border", "0"]
+        - ["border-radius", "2px"]
+        - ["font", "10px ui-monospace,monospace"]
+        - ["color", "var(--accent)"]
+        - ["flex", "none"]
+    - selector: ".fg-toggle"
+      declarations:
+        - ["width", "19px"]
+        - ["flex", "none"]
+        - ["color", "var(--muted)"]
+        - ["padding", "3px!important"]
+    - selector: ".fg-toggle[hidden]"
+      declarations:
+        - ["display", "block!important"]
+        - ["visibility", "hidden"]
+    - selector: ".fg-focus-name"
+      declarations:
+        - ["max-height", "90px"]
+        - ["overflow", "auto"]
+        - ["white-space", "pre-wrap"]
+        - ["border-top", "1px solid var(--border)"]
+        - ["font", "11px ui-monospace,monospace"]
+        - ["overflow-wrap", "anywhere"]
+        - ["margin", "8px 5px 0"]
+        - ["padding", "6px!important"]
+        - ["min-height", "26px"]
+    - selector: ".fg-focus-name:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-pane:not(.fg-pane-main) .fg-focus-name"
+      declarations:
+        - ["height", "28px"]
+        - ["min-height", "28px"]
+        - ["max-height", "28px"]
+    - selector: ".fg-pane:not(.fg-pane-main) .fg-focus-name:empty"
+      declarations:
+        - ["display", "block"]
+        - ["visibility", "hidden"]
+    - selector: ".fg-empty"
+      declarations:
+        - ["padding", "15px 8px"]
+        - ["font-size", "12px"]
+    - selector: ".fg-details"
+      declarations:
+        - ["margin", "0"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-property"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(110px,1fr) minmax(0,3fr)"]
+        - ["border-bottom", "1px solid var(--border)"]
+        - ["min-width", "0"]
+    - selector: ".fg-details dt,.fg-details dd"
+      declarations:
+        - ["padding", "5px"]
+        - ["margin", "0"]
+        - ["white-space", "pre-wrap"]
+        - ["max-height", "220px"]
+        - ["overflow", "auto"]
+        - ["min-width", "0"]
+    - selector: ".fg-details dt"
+      declarations:
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+    - selector: ".fg-details dd"
+      declarations:
+        - ["font-family", "ui-monospace,monospace"]
+        - ["font-size", "12px"]
+    - selector: ".fg-facts"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "repeat(auto-fit,minmax(180px,1fr))"]
+        - ["gap", "12px 20px"]
+    - selector: ".fg-facts>.fg-property"
+      declarations:
+        - ["display", "block"]
+        - ["border", "0"]
+    - selector: ".fg-facts dt,.fg-facts dd"
+      declarations:
+        - ["padding", "0"]
+    - selector: ".fg-facts dt"
+      declarations:
+        - ["margin-bottom", "3px"]
+    - selector: ".fg-facts dd"
+      declarations:
+        - ["font-size", "13px"]
+    - selector: ".fg-screen[data-protected]>p"
+      declarations:
+        - ["padding", "5px 12px"]
+        - ["font-size", "12px"]
+        - ["border-bottom", "1px solid var(--border)"]
+    - selector: ".fg-app>p:last-child"
+      declarations:
+        - ["font-size", "11px"]
+        - ["padding", "5px 12px"]
+        - ["border-top", "1px solid var(--border)"]
+    - selector: ".fg-recovery"
+      declarations:
+        - ["margin", "24px"]
+        - ["padding", "20px"]
+        - ["border", "1px solid var(--error)"]
+    - selector: ".fg-recovery button"
+      declarations:
+        - ["margin-top", "12px"]
+    - selector: ".fg-workspace"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "var(--sidebar) 1fr var(--details)"]
+        - ["gap", "var(--gap)"]
+    - selector: "[hidden]"
+      declarations:
+        - ["display", "none!important"]
+    - selector: "[data-narrow=true] .fg-pane-switches"
+      declarations:
+        - ["display", "flex"]
+        - ["gap", "4px"]
+        - ["flex-wrap", "wrap"]
+    - selector: "[data-narrow=true] .fg-pane-switches button"
+      declarations:
+        - ["font-size", "11px"]
+        - ["padding", "3px 7px"]
+    - selector: "[data-narrow=true] .fg-pane-switches button[aria-pressed=true]"
+      declarations:
+        - ["border-color", "var(--accent)"]
+        - ["color", "var(--accent)"]
+    - selector: "[data-narrow=true] .fg-panes"
+      declarations:
+        - ["display", "block"]
+        - ["height", "max(440px,calc(100dvh - 250px))"]
+    - selector: "[data-narrow=true] .fg-pane"
+      declarations:
+        - ["height", "100%"]
+    - selector: "[data-narrow=true] .fg-separator"
+      declarations:
+        - ["display", "none"]
+    - selector: "[data-narrow=true] .fg-layout-controls"
+      declarations:
+        - ["flex-wrap", "wrap"]
+
+- media: "(max-width:800px)"
+  rules:
+    - selector: ".fg-header"
+      declarations:
+        - ["padding", "7px 10px"]
+    - selector: ".fg-header>p"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-toolbar"
+      declarations:
+        - ["gap", "6px"]
+    - selector: ".fg-toolbar .fg-field"
+      declarations:
+        - ["flex", "1"]
+        - ["min-width", "120px"]
+    - selector: ".fg-toolbar .fg-field select"
+      declarations:
+        - ["width", "100%"]
+    - selector: ".fg-toolbar>p"
+      declarations:
+        - ["margin", "0"]
+        - ["margin-left", "auto"]
+    - selector: ".fg-pane-main>.fg-pane-body"
+      declarations:
+        - ["padding", "12px"]
+    - selector: ".fg-row-secondary"
+      declarations:
+        - ["max-width", "40%"]
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-property"
+      declarations:
+        - ["grid-template-columns", "minmax(100px,1fr) minmax(0,2fr)"]
+    - selector: ".fg-facts"
+      declarations:
+        - ["grid-template-columns", "repeat(auto-fit,minmax(160px,1fr))"]
+    - selector: ".fg-screen:not([data-protected])"
+      declarations:
+        - ["margin", "20px auto"]
+    - selector: ".fg-workspace"
+      declarations:
+        - ["display", "block"]
+
+- rules:
+    - selector: ".fg-disclosure"
+      declarations:
+        - ["border-top", "1px solid var(--border)"]
+        - ["min-width", "0"]
+    - selector: ".fg-disclosure>summary"
+      declarations:
+        - ["cursor", "pointer"]
+        - ["padding", "8px 0"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["font-weight", "600"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-disclosure[open]>summary"
+      declarations:
+        - ["color", "var(--text)"]
+    - selector: ".fg-disclosure-body"
+      declarations:
+        - ["padding", "0 0 10px"]
+        - ["min-width", "0"]
+    - selector: ".fg-disclosure-body>p"
+      declarations:
+        - ["font-size", "12px"]
+        - ["padding", "0 0 8px"]
+    - selector: ".fg-disclosure-body>.fg-row"
+      declarations:
+        - ["margin", "4px 0"]
+    - selector: ".fg-disclosure-body>.fg-tree"
+      declarations:
+        - ["padding", "0"]
+    - selector: ".fg-disclosure .fg-disclosure"
+      declarations:
+        - ["margin", "4px 0"]
+    - selector: ".fg-screen>.fg-disclosure"
+      declarations:
+        - ["padding", "0 12px"]
+        - ["background", "var(--surface)"]
+    - selector: ".fg-tree-row[data-icon=folder] .fg-glyph,.fg-tree-row[data-icon=document] .fg-glyph"
+      declarations:
+        - ["color", "var(--muted)"]
+        - ["font-size", "0"]
+        - ["position", "relative"]
+    - selector: ".fg-tree-row[data-icon=document] .fg-glyph::after"
+      declarations:
+        - ["content", "''"]
+        - ["width", "11px"]
+        - ["height", "14px"]
+        - ["border", "1px solid currentColor"]
+        - ["border-radius", "1px"]
+    - selector: ".fg-tree-row[data-icon=folder] .fg-glyph::after"
+      declarations:
+        - ["content", "''"]
+        - ["width", "14px"]
+        - ["height", "10px"]
+        - ["border", "1px solid currentColor"]
+        - ["border-radius", "1px"]
+    - selector: ".fg-tree-row[data-icon=folder] .fg-glyph::before"
+      declarations:
+        - ["content", "''"]
+        - ["position", "absolute"]
+        - ["top", "1px"]
+        - ["left", "2px"]
+        - ["width", "6px"]
+        - ["height", "3px"]
+        - ["border", "1px solid currentColor"]
+        - ["border-bottom", "0"]
+        - ["border-radius", "1px 1px 0 0"]
+    - selector: ".fg-pane-main .fg-tree-row button"
+      declarations:
+        - ["min-height", "28px"]
+    - selector: ".fg-pane-main .fg-row-secondary"
+      declarations:
+        - ["max-width", "48%"]
+    - selector: ".fg-region"
+      declarations:
+        - ["min-width", "0"]
+        - ["min-height", "0"]
+    - selector: ".fg-pane:not(.fg-pane-main)>.fg-pane-body>.fg-region"
+      declarations:
+        - ["display", "flex"]
+        - ["flex", "1"]
+        - ["flex-direction", "column"]
+        - ["min-height", "80px"]
+    - selector: ".fg-region>.fg-tree"
+      declarations:
+        - ["flex", "1"]
+        - ["min-height", "28px"]
+    - selector: ".fg-region>.fg-caption"
+      declarations:
+        - ["padding", "5px 10px"]
+    - selector: ".fg-region>.fg-row"
+      declarations:
+        - ["margin", "0"]
+        - ["padding", "6px 8px"]
+        - ["border-top", "1px solid var(--border)"]
+        - ["gap", "4px"]
+        - ["justify-content", "space-between"]
+    - selector: ".fg-region>.fg-row button"
+      declarations:
+        - ["font-size", "12px"]
+        - ["padding", "4px 7px"]
+        - ["font-weight", "500"]
+    - selector: ".fg-pane-link"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-source"
+      declarations:
+        - ["margin", "0"]
+        - ["max-height", "65dvh"]
+        - ["overflow", "auto"]
+        - ["tab-size", "4"]
+        - ["line-height", "1.55"]
+        - ["font", "13px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace"]
+        - ["background", "var(--bg)"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["padding", "6px 0"]
+        - ["scrollbar-color", "var(--border) var(--surface)"]
+    - selector: ".fg-source:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-source-line"
+      declarations:
+        - ["display", "flex"]
+        - ["min-width", "100%"]
+        - ["width", "max-content"]
+        - ["min-height", "1.55em"]
+    - selector: ".fg-source-line[data-highlight=true]"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["box-shadow", "inset 2px 0 var(--accent)"]
+    - selector: ".fg-source-number"
+      declarations:
+        - ["position", "sticky"]
+        - ["left", "0"]
+        - ["display", "inline-block"]
+        - ["flex", "none"]
+        - ["min-width", "6ch"]
+        - ["padding", "0 12px 0 6px"]
+        - ["text-align", "right"]
+        - ["color", "var(--muted)"]
+        - ["background", "var(--bg)"]
+        - ["user-select", "none"]
+        - ["white-space", "pre"]
+    - selector: ".fg-source-text"
+      declarations:
+        - ["display", "inline-block"]
+        - ["padding-right", "12px"]
+        - ["white-space", "pre"]
+        - ["min-height", "1.55em"]
+    - selector: ".fg-source-line[data-highlight=true]>.fg-source-number"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["color", "var(--accent)"]
+    - selector: ".fg-pane-main .fg-panel>[role=status]"
+      declarations:
+        - ["border", "0"]
+        - ["min-height", "0"]
+        - ["padding", "0 0 8px"]
+        - ["font-weight", "400"]
+    - selector: ".fg-pane-main .fg-panel>[role=status]:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-pane-main .fg-panel>.fg-source+.fg-caption"
+      declarations:
+        - ["padding", "6px 0 0"]
+    - selector: ".fg-pane-main .fg-panel>.fg-row"
+      declarations:
+        - ["margin", "6px 0"]
+    - selector: ".fg-pane-main .fg-selection-heading"
+      declarations:
+        - ["font-size", "18px"]
+    - selector: "[data-narrow=true] .fg-pane-link"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["margin", "0 0 10px"]
+    - selector: "[data-narrow=true] .fg-pane-switches button"
+      declarations:
+        - ["min-height", "var(--touch)"]
+        - ["font-size", "12px"]
+        - ["padding", "5px 10px"]
+    - selector: "[data-narrow=true] .fg-view-options summary"
+      declarations:
+        - ["min-height", "var(--touch)"]
+        - ["display", "flex"]
+        - ["align-items", "center"]
+    - selector: "[data-narrow=true] .fg-pane-close"
+      declarations:
+        - ["min-width", "var(--touch)"]
+        - ["min-height", "var(--touch)"]
+    - selector: "[data-narrow=true] .fg-tree-row button"
+      declarations:
+        - ["min-height", "var(--touch)"]
+    - selector: "[data-narrow=true] .fg-toggle"
+      declarations:
+        - ["width", "var(--touch)"]
+    - selector: "[data-narrow=true] .fg-toggle[hidden]"
+      declarations:
+        - ["width", "0"]
+        - ["padding", "0!important"]
+    - selector: "[data-narrow=true] .fg-tree-row[data-icon=document] .fg-row-secondary"
+      declarations:
+        - ["max-width", "35%"]
+
+- media: "(max-width:800px)"
+  rules:
+    - selector: "button,input,select"
+      declarations:
+        - ["min-height", "var(--touch)"]
+    - selector: ".fg-toolbar .fg-field"
+      declarations:
+        - ["min-width", "140px"]
+    - selector: ".fg-toolbar>p"
+      declarations:
+        - ["border", "0"]
+        - ["padding", "0"]
+    - selector: ".fg-layout-controls"
+      declarations:
+        - ["gap", "4px"]
+    - selector: ".fg-source"
+      declarations:
+        - ["max-height", "60dvh"]
+        - ["font-size", "12px"]
+    - selector: ".fg-source-number"
+      declarations:
+        - ["min-width", "5ch"]
+        - ["padding-right", "8px"]
+    - selector: ".fg-source-text"
+      declarations:
+        - ["padding-right", "8px"]
+    - selector: ".fg-source-line"
+      declarations:
+        - ["min-height", "1.55em"]
+    - selector: ".fg-pane-main>.fg-pane-body"
+      declarations:
+        - ["padding", "10px"]
+    - selector: ".fg-region>.fg-row button"
+      declarations:
+        - ["min-height", "var(--touch)"]
+
+- rules:
+    - selector: ".fg-navigation"
+      declarations:
+        - ["background", "var(--surface)"]
+    - selector: ".fg-navigation button:disabled"
+      declarations:
+        - ["border-color", "var(--accent)"]
+        - ["color", "var(--accent)"]
+        - ["opacity", "1"]
+    - selector: ".fg-navigation-link"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "center"]
+        - ["min-height", "var(--control)"]
+        - ["padding", "4px 10px"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--raised)"]
+        - ["color", "var(--text)"]
+        - ["font", "inherit"]
+        - ["font-weight", "600"]
+        - ["text-decoration", "none"]
+    - selector: ".fg-navigation-link:hover"
+      declarations:
+        - ["border-color", "var(--accent)"]
+
+- media: "(max-width:800px)"
+  rules:
+    - selector: ".fg-navigation-link"
+      declarations:
+        - ["min-width", "var(--touch)"]
+        - ["min-height", "var(--touch)"]
+
+- rules:
+    - selector: ".fg-reading-column"
+      declarations:
+        - ["width", "min(100%,56rem)"]
+        - ["margin-inline", "auto"]
+        - ["padding", "clamp(12px,3vw,28px)"]
+        - ["display", "grid"]
+        - ["gap", "12px"]
+        - ["min-width", "0"]
+    # The reader takes over on phones. Wide readers keep their index beside the content.
+    - selector: ".fg-reading-column:has(>.fg-reader-layout)"
+      declarations:
+        - ["grid-template-columns", "minmax(0,1fr)"]
+    - selector: ".fg-reader-layout,.fg-reader-layout>.fg-region"
+      declarations:
+        - ["min-width", "0"]
+    - selector: ".fg-reader-layout>.fg-region:nth-child(2)"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(0,1fr)"]
+        - ["gap", "12px"]
+        - ["align-content", "start"]
+    - selector: ".fg-reader-layout .fg-transcript"
+      declarations:
+        - ["max-height", "none"]
+    - selector: ".fg-message-notice"
+      declarations:
+        - ["margin-top", "8px"]
+        - ["font-size", "12px"]
+        - ["color", "var(--warning)!important"]
+
+- media: "(min-width:901px)"
+  rules:
+    - selector: ".fg-reading-column:has(>.fg-reader-layout)"
+      declarations:
+        - ["width", "min(100%,76rem)"]
+    - selector: ".fg-reader-layout:has(>:first-child:not([hidden])+ :nth-child(2):not([hidden]))"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(240px,30%) minmax(0,1fr)"]
+        - ["gap", "20px"]
+        - ["align-items", "start"]
+    - selector: ".fg-reader-layout .fg-tree"
+      declarations:
+        - ["max-height", "65dvh"]
+
+- media: "(max-width:900px)"
+  rules:
+    - selector: ".fg-reader-layout:has(>:nth-child(2):not([hidden]))>:first-child"
+      declarations:
+        - ["display", "none"]
+
+- rules:
+    - selector: ".fg-reading-column .fg-toolbar"
+      declarations:
+        - ["padding", "0"]
+        - ["border", "0"]
+        - ["background", "transparent"]
+    - selector: ".fg-reading-column .fg-field"
+      declarations:
+        - ["min-width", "0"]
+    - selector: ".fg-reading-column select"
+      declarations:
+        - ["max-width", "min(100%,22rem)"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-reading-column .fg-panel"
+      declarations:
+        - ["padding", "12px"]
+    - selector: ".fg-reading-column .fg-panel>.fg-row:has(>button:not([hidden]))"
+      declarations:
+        - ["margin", "8px 0 0"]
+    - selector: ".fg-reading-column .fg-panel>.fg-row:has(>button):not(:has(>button:not([hidden])))"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-reading-column .fg-tree"
+      declarations:
+        - ["max-height", "min(18rem,36dvh)"]
+        - ["padding", "0"]
+    - selector: ".fg-reading-column .fg-tree-row .fg-toggle[hidden]"
+      declarations:
+        - ["display", "none!important"]
+    - selector: ".fg-reading-column .fg-tree-row button"
+      declarations:
+        - ["min-height", "var(--touch)"]
+    - selector: ".fg-reading-column .fg-empty:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-reading-column .fg-focus-name"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-reading-column button[aria-expanded=true]"
+      declarations:
+        - ["border-color", "var(--accent)"]
+        - ["color", "var(--accent)"]
+    # A flat summary stays readable when its title or metadata wraps.
+    - selector: ".fg-reading-column .fg-stacked-tree"
+      declarations:
+        - ["max-height", "none"]
+        - ["overflow", "visible"]
+    - selector: ".fg-stacked-tree .fg-tree-row"
+      declarations:
+        - ["margin", "0 0 8px"]
+        - ["border-radius", "var(--radius)"]
+    - selector: ".fg-stacked-tree .fg-row-select"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(0,1fr) 10px"]
+        - ["gap", "3px 10px"]
+        - ["padding", "9px 12px"]
+        - ["background", "var(--raised)"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+    - selector: ".fg-stacked-tree .fg-row-select:hover:enabled,.fg-stacked-tree [data-selected=true] .fg-row-select"
+      declarations:
+        - ["border-color", "var(--accent)"]
+    - selector: ".fg-stacked-tree .fg-glyph"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-stacked-tree .fg-row-label,.fg-stacked-tree .fg-row-secondary"
+      declarations:
+        - ["grid-column", "1"]
+        - ["white-space", "normal"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-stacked-tree .fg-row-label"
+      declarations:
+        - ["font-weight", "650"]
+    - selector: ".fg-stacked-tree .fg-row-secondary"
+      declarations:
+        - ["margin", "0"]
+        - ["max-width", "none"]
+        - ["font-size", "12px"]
+    - selector: ".fg-stacked-tree .fg-row-select::after"
+      declarations:
+        - ["content", "''"]
+        - ["grid-column", "2"]
+        - ["grid-row", "1 / span 2"]
+        - ["justify-self", "center"]
+        - ["width", "6px"]
+        - ["height", "6px"]
+        - ["border", "solid var(--accent)"]
+        - ["border-width", "0 1.5px 1.5px 0"]
+        - ["transform", "rotate(-45deg)"]
+
+- media: "(min-width:901px)"
+  rules:
+    - selector: ".fg-reader-layout .fg-stacked-tree"
+      declarations:
+        - ["max-height", "65dvh"]
+        - ["overflow-y", "auto"]
+
+- media: "(max-width:360px)"
+  rules:
+    - selector: ".fg-reading-column:has(>.fg-reader-layout) .fg-toolbar"
+      declarations:
+        - ["gap", "4px"]
+    - selector: ".fg-reading-column:has(>.fg-reader-layout)>.fg-toolbar button:not(.fg-button-icon)"
+      declarations:
+        - ["padding-inline", "6px"]
+        - ["font-size", "13px"]
+
+- rules:
+    - selector: ".fg-modal"
+      declarations:
+        - ["width", "min(26rem,calc(100% - 24px))"]
+        - ["padding", "16px"]
+        - ["background", "var(--surface)"]
+        - ["color", "var(--text)"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["box-shadow", "0 8px 32px #0008"]
+    - selector: ".fg-modal::backdrop"
+      declarations:
+        - ["background", "#0009"]
+    - selector: ".fg-modal>h2"
+      declarations:
+        - ["font-size", "16px"]
+        - ["margin-bottom", "10px"]
+    - selector: ".fg-modal>.fg-text"
+      declarations:
+        - ["margin-bottom", "12px"]
+    - selector: ".fg-modal>[role=status]"
+      declarations:
+        - ["padding", "0"]
+        - ["border", "0"]
+        - ["min-height", "0"]
+        - ["margin-top", "8px"]
+    - selector: ".fg-modal>[role=status]:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-modal>.fg-row"
+      declarations:
+        - ["justify-content", "flex-end"]
+        - ["margin", "12px 0 0"]
+    - selector: ".fg-modal .fg-field input"
+      declarations:
+        - ["width", "100%"]
+    - selector: ".fg-reading-column>[role=status]"
+      declarations:
+        - ["border", "0"]
+        - ["padding", "0"]
+        - ["min-height", "0"]
+    - selector: ".fg-reading-column>[role=status]:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-transcript"
+      declarations:
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["gap", "16px"]
+        - ["min-height", "min(36dvh,320px)"]
+        - ["max-height", "54dvh"]
+        - ["overflow", "auto"]
+        - ["padding", "clamp(12px,2vw,24px)"]
+        - ["background", "var(--surface)"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["scrollbar-color", "var(--border) var(--surface)"]
+    - selector: ".fg-transcript .fg-empty"
+      declarations:
+        - ["margin", "auto"]
+        - ["text-align", "center"]
+    - selector: ".fg-message"
+      declarations:
+        - ["align-self", "flex-start"]
+        - ["width", "fit-content"]
+        - ["max-width", "min(100%,66ch)"]
+        - ["padding", "10px 14px"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--bg)"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-message[data-role=user]"
+      declarations:
+        - ["align-self", "flex-end"]
+        - ["background", "var(--raised)"]
+    - selector: ".fg-message>strong"
+      declarations:
+        - ["display", "block"]
+        - ["margin-bottom", "4px"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+    - selector: ".fg-message p"
+      declarations:
+        - ["margin", "0"]
+        - ["white-space", "pre-wrap"]
+        - ["line-height", "1.55"]
+    - selector: ":is(.fg-message-body,.fg-source-preview)"
+      declarations:
+        - ["min-width", "0"]
+        - ["line-height", "1.55"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) p+p"
+      declarations:
+        - ["margin-top", "8px"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) :is(h1,h2,h3,h4,h5,h6)"
+      declarations:
+        - ["margin", "12px 0 6px"]
+        - ["color", "var(--text)"]
+        - ["line-height", "1.3"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) :is(h1,h2,h3,h4,h5,h6):first-child"
+      declarations:
+        - ["margin-top", "0"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) h1"
+      declarations:
+        - ["font-size", "1.25em"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) h2"
+      declarations:
+        - ["font-size", "1.15em"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) h3"
+      declarations:
+        - ["font-size", "1.05em"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) :is(h4,h5,h6)"
+      declarations:
+        - ["font-size", "1em"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) code"
+      declarations:
+        - ["font-family", "ui-monospace,monospace"]
+        - ["font-size", ".9em"]
+        - ["background", "var(--raised)"]
+        - ["border-radius", "4px"]
+        - ["padding", "1px 4px"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) pre"
+      declarations:
+        - ["margin", "8px 0"]
+        - ["padding", "10px 12px"]
+        - ["background", "var(--raised)"]
+        - ["border-radius", "var(--radius)"]
+        - ["overflow", "auto"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) pre code"
+      declarations:
+        - ["background", "none"]
+        - ["padding", "0"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) :is(ul,ol)"
+      declarations:
+        - ["margin", "8px 0"]
+        - ["padding-inline-start", "22px"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) blockquote"
+      declarations:
+        - ["margin", "8px 0"]
+        - ["padding", "4px 12px"]
+        - ["border-inline-start", "3px solid var(--border)"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) hr"
+      declarations:
+        - ["margin", "12px 0"]
+        - ["border", "0"]
+        - ["border-top", "1px solid var(--border)"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) table"
+      declarations:
+        - ["margin", "8px 0"]
+        - ["border-collapse", "collapse"]
+        - ["display", "block"]
+        - ["overflow-x", "auto"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) :is(th,td)"
+      declarations:
+        - ["padding", "6px 10px"]
+        - ["border", "1px solid var(--border)"]
+        - ["text-align", "start"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) th"
+      declarations:
+        - ["background", "var(--raised)"]
+    - selector: ":is(.fg-message-body,.fg-source-preview) a"
+      declarations:
+        - ["color", "var(--accent)"]
+    - selector: ".fg-source-format"
+      declarations:
+        - ["display", "flex"]
+        - ["gap", "4px"]
+        - ["margin", "6px 0 10px"]
+    - selector: ".fg-source-format>button"
+      declarations:
+        - ["min-width", "var(--touch)"]
+        - ["font-size", "12px"]
+    - selector: ".fg-source-format>button[aria-pressed=true]"
+      declarations:
+        - ["border-color", "var(--accent)"]
+        - ["color", "var(--accent)"]
+    - selector: ".fg-source-preview"
+      declarations:
+        - ["max-height", "65dvh"]
+        - ["overflow", "auto"]
+        - ["overflow-wrap", "anywhere"]
+        - ["padding", "12px"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--bg)"]
+    - selector: ".fg-source-preview>p,.fg-source-preview li"
+      declarations:
+        - ["color", "var(--text)"]
+    - selector: "[data-source-preview-unavailable]"
+      declarations:
+        - ["font-size", "12px"]
+        - ["margin", "0 0 8px"]
+    - selector: "[data-source-raw]>.fg-caption"
+      declarations:
+        - ["padding", "6px 0 8px"]
+    - selector: "[data-source-raw]>.fg-row"
+      declarations:
+        - ["margin", "6px 0"]
+
+- media: "(max-width:800px)"
+  rules:
+    - selector: ".fg-source-preview"
+      declarations:
+        - ["max-height", "60dvh"]
+        - ["padding", "10px"]
+
+- rules:
+    - selector: ".fg-textarea"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "4px"]
+    - selector: ".fg-textarea textarea"
+      declarations:
+        - ["font", "inherit"]
+        - ["font-size", "max(16px,1em)"]
+        - ["width", "100%"]
+        - ["min-width", "0"]
+        - ["min-height", "4.5rem"]
+        - ["max-height", "35dvh"]
+        - ["resize", "vertical"]
+        - ["padding", "10px 12px"]
+        - ["background", "var(--bg)"]
+        - ["color", "var(--text)"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+    - selector: ".fg-textarea textarea:focus-visible,.fg-transcript:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "2px"]
+
+- media: "(max-width:600px)"
+  rules:
+    - selector: ".fg-reading-column .fg-toolbar"
+      declarations:
+        - ["gap", "8px"]
+    - selector: ".fg-reading-column .fg-toolbar .fg-field"
+      declarations:
+        - ["flex", "1 1 8rem"]
+    - selector: ".fg-message"
+      declarations:
+        - ["max-width", "100%"]
+    - selector: ".fg-transcript"
+      declarations:
+        - ["max-height", "46dvh"]
+
+- rules:
+    - selector: ".fg-brand:has(>.fg-brand-context:not([hidden]))"
+      declarations:
+        - ["min-width", "0"]
+        - ["flex-wrap", "wrap"]
+    - selector: ".fg-brand-context"
+      declarations:
+        - ["min-width", "0"]
+        - ["font-size", "12px"]
+        - ["color", "var(--muted)"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-layout-options"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "inherit"]
+    - selector: ".fg-layout-options>.fg-disclosure"
+      declarations:
+        - ["border", "0"]
+    - selector: ".fg-layout-options>.fg-disclosure>summary"
+      declarations:
+        - ["cursor", "pointer"]
+        - ["list-style-position", "inside"]
+        - ["padding", "3px 7px"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["font-size", "12px"]
+        - ["font-weight", "400"]
+        - ["color", "var(--text)"]
+    - selector: ".fg-layout-options>.fg-disclosure>.fg-disclosure-body"
+      declarations:
+        - ["position", "absolute"]
+        - ["z-index", "5"]
+        - ["top", "100%"]
+        - ["inset-inline-start", "10px"]
+        - ["width", "min(18rem,calc(100% - 20px))"]
+        - ["display", "grid"]
+        - ["gap", "8px"]
+        - ["padding", "10px"]
+        - ["background", "var(--raised)"]
+        - ["border", "1px solid var(--border)"]
+        - ["box-shadow", "0 8px 18px #0005"]
+    - selector: ".fg-layout-options>.fg-disclosure select"
+      declarations:
+        - ["width", "100%"]
+    - selector: "[data-narrow=true] .fg-layout-options>.fg-disclosure>summary"
+      declarations:
+        - ["min-height", "var(--touch)"]
+        - ["display", "flex"]
+        - ["align-items", "center"]
+    - selector: ".fg-pane-actions"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "4px"]
+        - ["max-width", "100%"]
+        - ["min-width", "0"]
+    - selector: ".fg-pane-actions>.fg-pane-switches"
+      declarations:
+        - ["min-width", "0"]
+    - selector: ".fg-pane-actions>.fg-button"
+      declarations:
+        - ["flex", "none"]
+        - ["white-space", "nowrap"]
+    - selector: "[data-narrow=true] .fg-pane-actions"
+      declarations:
+        - ["align-items", "flex-end"]
+    - selector: "[data-narrow=true] .fg-pane-actions>.fg-pane-switches>button"
+      declarations:
+        - ["min-width", "var(--touch)"]
+    - selector: ".fg-button-icon"
+      declarations:
+        - ["display", "grid"]
+        - ["place-items", "center"]
+        - ["width", "var(--control)"]
+        - ["height", "var(--control)"]
+        - ["padding", "0"]
+        - ["font-size", "18px"]
+        - ["line-height", "1"]
+    - selector: ".fg-button-icon>[data-glyph]::before"
+      declarations:
+        - ["content", "attr(data-glyph)"]
+    - selector: ".fg-button-icon.fg-button-primary:enabled"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["border-color", "var(--border)"]
+        - ["color", "var(--text)"]
+    - selector: ".fg-button-icon.fg-button-primary:hover:enabled"
+      declarations:
+        - ["border-color", "var(--accent)"]
+        - ["filter", "none"]
+
+- media: "(max-width:800px)"
+  rules:
+    - selector: ".fg-button-icon"
+      declarations:
+        - ["width", "var(--touch)"]
+        - ["height", "var(--touch)"]
+
+- rules:
+    - selector: ".fg-pane-header-link"
+      declarations:
+        - ["display", "none"]
+    - selector: "[data-narrow=true] .fg-pane-header:has(>.fg-pane-header-link)"
+      declarations:
+        - ["justify-content", "flex-start"]
+    - selector: "[data-narrow=true] .fg-pane-header>.fg-pane-header-link"
+      declarations:
+        - ["display", "grid"]
+        - ["flex", "none"]
+    - selector: "[data-narrow=true] .fg-pane-header:has(>.fg-pane-header-link)>.fg-pane-close"
+      declarations:
+        - ["margin-inline-start", "auto"]
+    - selector: ".fg-leave-dialog"
+      declarations:
+        - ["width", "min(400px,calc(100% - 32px))"]
+        - ["padding", "20px"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--surface)"]
+        - ["color", "var(--text)"]
+    - selector: ".fg-leave-dialog::backdrop"
+      declarations:
+        - ["background", "rgb(0 0 0 / .65)"]
+    - selector: ".fg-leave-dialog>h2"
+      declarations:
+        - ["font-size", "17px"]
+        - ["margin-bottom", "8px"]
+    - selector: ".fg-leave-dialog>.fg-row"
+      declarations:
+        - ["justify-content", "flex-end"]
+        - ["margin", "16px 0 0"]

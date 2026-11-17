@@ -96,6 +96,9 @@ pub enum Component {
     Transcript {
         id: String,
         label: String,
+        user_label: String,
+        assistant_label: String,
+        empty_message: String,
     },
     TextField {
         id: String,
@@ -188,6 +191,8 @@ pub enum Component {
     /// Optional raw and Markdown presentations around one read-only source view.
     SourceFormats {
         prefix: String,
+        empty_message: String,
+        unavailable_message: String,
         children: Vec<Component>,
     },
     /// Presentation-only route to a declared pane; no application event.
@@ -223,7 +228,18 @@ macro_rules! component {
     (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
     (reader_layout [$sidebar:expr, $body:expr $(,)?]) => { $crate::generate::Component::ReaderLayout(vec![$sidebar,$body]) };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
-    (transcript $id:expr, $label:expr) => { $crate::generate::Component::Transcript{id:$id.into(),label:$label.into()} };
+    (transcript $id:expr, $label:expr) => {
+        $crate::component!(transcript $id, $label, "You", "Forge", "Send a message to start this conversation.")
+    };
+    (transcript $id:expr, $label:expr, $user:expr, $assistant:expr, $empty:expr) => {
+        $crate::generate::Component::Transcript {
+            id: $id.into(),
+            label: $label.into(),
+            user_label: $user.into(),
+            assistant_label: $assistant.into(),
+            empty_message: $empty.into(),
+        }
+    };
     (text_field $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextField{id:$id.into(),label:$label.into(),action:$action.into()} };
     (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into()} };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
@@ -253,7 +269,18 @@ macro_rules! component {
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:false} };
     (stacked_tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:true} };
     (source $id:expr, $label:expr) => { $crate::generate::Component::Source{id:$id.into(),label:$label.into()} };
-    (source_formats $prefix:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::SourceFormats{prefix:$prefix.into(),children:vec![$($child),*]} };
+    (source_formats $prefix:expr; [$($child:expr),* $(,)?]) => {
+        $crate::component!(source_formats $prefix, "Empty Markdown file.",
+            "Markdown display is unavailable for this file size."; [$($child),*])
+    };
+    (source_formats $prefix:expr, $empty:expr, $unavailable:expr; [$($child:expr),* $(,)?]) => {
+        $crate::generate::Component::SourceFormats {
+            prefix: $prefix.into(),
+            empty_message: $empty.into(),
+            unavailable_message: $unavailable.into(),
+            children: vec![$($child),*],
+        }
+    };
     (pane_link $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::PaneLink{id:$id.into(),label:$label.into(),target:$target.into()} };
     (pane_header_link $id:expr, $label:expr, $target:expr, $glyph:expr) => { $crate::generate::Component::PaneHeaderLink{id:$id.into(),label:$label.into(),target:$target.into(),glyph:$glyph} };
     (facts $id:expr) => { $crate::generate::Component::Facts{id:$id.into()} };
@@ -332,7 +359,7 @@ impl Document {
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
                 }
-                Component::Transcript { id, label }
+                Component::Transcript { id, label, .. }
                 | Component::Tree { id, label, .. }
                 | Component::Reload { id, label }
                 | Component::NavigationLink { id, label, .. }
@@ -365,6 +392,17 @@ impl Document {
                         || label.trim().is_empty() =>
                 {
                     return Err("navigation link requires a navigation parent and nonempty label");
+                }
+                Component::Transcript {
+                    user_label,
+                    assistant_label,
+                    empty_message,
+                    ..
+                } if ![user_label, assistant_label, empty_message]
+                    .into_iter()
+                    .all(|label| text(label)) =>
+                {
+                    return Err("invalid transcript copy");
                 }
                 Component::Button {
                     check_input,
@@ -403,7 +441,15 @@ impl Document {
                 {
                     return Err("pane header link must be a direct child of a pane");
                 }
-                Component::SourceFormats { prefix, children } => {
+                Component::SourceFormats {
+                    prefix,
+                    empty_message,
+                    unavailable_message,
+                    children,
+                } => {
+                    if !text(empty_message) || !text(unavailable_message) {
+                        return Err("invalid source preview copy");
+                    }
                     if !key(prefix)
                         || children
                             .iter()

@@ -4,8 +4,8 @@ use forge_ide_web::{
     component,
     generate::{
         application::{ide_document, ide_transport, IDE_THEME},
-        register_assets, AssetBundle, AssetConfig, Document, HeaderBinding, RequestBinding, Theme,
-        Transport,
+        register_assets, AssetBundle, AssetConfig, Document, HeaderBinding, RequestBinding,
+        RequestPolicy, Theme, Transport,
     },
 };
 use forge_provider::{Factory, InstanceProvider, Singleton};
@@ -62,7 +62,8 @@ fn unrelated_component_document_uses_same_emitters_without_ide_business_code() {
     };
     let assets = build(c);
     let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
-    assert!(html.contains("Counter &lt;example&gt;"));
+    assert!(html.contains("<title>Counter &lt;example&gt;</title>"));
+    assert!(html.contains("<h1>Counter &lt;example&gt;</h1>"));
     assert!(html.contains("0 &lt; 1 &amp; 2"));
     assert!(!html.contains("Project files"));
     assert!(!html.contains("onclick="));
@@ -79,6 +80,27 @@ fn yaml_is_tokens_not_raw_css_or_script() {
     }
     assert!(Theme::parse(&theme_with("background", "red;display:none")).is_err());
     assert!(Theme::parse(&theme_with("font_px", "900")).is_err());
+}
+#[test]
+fn stylesheet_renders_theme_values_and_keeps_responsive_overrides_in_order() {
+    let mut c = config();
+    c.theme_yaml = theme_with("background", "'#123456'");
+    let assets = build(c);
+    let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
+    assert!(css.starts_with(":root{\n--bg:#123456;"));
+    assert!(css.contains("content:'';"));
+    assert!(css.contains(".fg-depth-64{\nmargin-inline-start:768px;}"));
+
+    let toolbar_rules: Vec<_> = css
+        .match_indices(".fg-toolbar>p{")
+        .map(|(i, _)| i)
+        .collect();
+    let mut breakpoints = css.match_indices("@media (max-width:800px){");
+    let (first_breakpoint, _) = breakpoints.next().unwrap();
+    let (second_breakpoint, _) = breakpoints.next().unwrap();
+    assert_eq!(toolbar_rules.len(), 3);
+    assert!(toolbar_rules[0] < first_breakpoint && first_breakpoint < toolbar_rules[1]);
+    assert!(toolbar_rules[1] < second_breakpoint && second_breakpoint < toolbar_rules[2]);
 }
 #[test]
 fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
@@ -98,6 +120,15 @@ fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
     assert!(register_assets("assets", c).is_err());
     let mut c = config();
     c.transport.bindings[0].headers[0].name = "Authorization".into();
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.transport.timers[0].effect_kind = c.transport.bindings[0].kind.clone();
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.transport.timers[0].delay_ms = 0;
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.transport.bindings[0].policy.wait_for_slot_ms = Some(30_001);
     assert!(register_assets("assets", c).is_err());
     let mut c = config();
     c.wasm[0] = 1;
@@ -122,6 +153,47 @@ fn generated_main_has_no_backend_fetch_or_eval_and_one_sanitized_markdown_sink()
     let worker = std::str::from_utf8(&a.files["worker.js"]).unwrap();
     assert!(worker.contains("WebAssembly.instantiate"));
     assert!(worker.contains("/forge/v1/dispatch"));
+}
+
+#[test]
+fn application_can_change_worker_policy_without_changing_its_adapter() {
+    let original = build(config());
+    let mut updated = config();
+    updated.transport.timers[0].delay_ms = 8_000;
+    let polls = updated
+        .transport
+        .bindings
+        .iter_mut()
+        .find(|binding| binding.kind == "chat_run_events")
+        .unwrap();
+    polls.policy.delay_ms = Some(2_000);
+    polls.policy.wait_for_slot_ms = Some(6_000);
+    let updated = build(updated);
+
+    let (original_config, original_adapter) = worker_parts(&original);
+    let (updated_config, updated_adapter) = worker_parts(&updated);
+    assert_eq!(original_adapter, updated_adapter);
+    assert_eq!(original.files["main.js"], updated.files["main.js"]);
+    assert_eq!(original_config["timers"][0]["delay_ms"], 5_000);
+    assert_eq!(updated_config["timers"][0]["delay_ms"], 8_000);
+    let polls = updated_config["bindings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|binding| binding["kind"] == "chat_run_events")
+        .unwrap();
+    assert_eq!(polls["policy"]["delay_ms"], 2_000);
+    assert_eq!(polls["policy"]["wait_for_slot_ms"], 6_000);
+}
+
+fn worker_parts(bundle: &AssetBundle) -> (serde_json::Value, &str) {
+    let script = std::str::from_utf8(&bundle.files["worker.js"]).unwrap();
+    let (config, adapter) = script.split_once('\n').unwrap();
+    let config = config.strip_prefix("const CONFIG=").unwrap();
+    (
+        serde_json::from_str(config.strip_suffix(';').unwrap()).unwrap(),
+        adapter,
+    )
 }
 
 fn widget_document() -> Document {
@@ -179,7 +251,9 @@ fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
             timeout_ms: None,
             error_events: vec![],
             accept_events: vec!["collection_loaded".into()],
+            policy: RequestPolicy::default(),
         }],
+        timers: vec![],
     };
     let assets = build(c);
     let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();

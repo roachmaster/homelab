@@ -2,6 +2,10 @@
 //! labels escape here; only this generator owns markup syntax.
 use super::{ButtonEmphasis, Component, PanePosition, TextStyle};
 use std::fmt::Write;
+
+// Only output from this component emitter enters the shell's raw slots.
+pub(super) const SHELL: &str = include_str!("../../ui/document.forge");
+
 pub(crate) fn escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -317,8 +321,25 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             children(items, out);
             out.push_str("</div>");
         }
-        Component::Transcript { id, label } => {
-            let _ = write!(out, "<div id=\"{}\" class=\"fg-transcript\" role=\"region\" aria-label=\"{}\" tabindex=\"0\" data-transcript></div>", escape(id), escape(label));
+        Component::Transcript {
+            id,
+            label,
+            user_label,
+            assistant_label,
+            empty_message,
+        } => {
+            let _ = write!(
+                out,
+                concat!(
+                    "<div id=\"{}\" class=\"fg-transcript\" role=\"region\" aria-label=\"{}\" tabindex=\"0\" data-transcript",
+                    " data-transcript-user=\"{}\" data-transcript-assistant=\"{}\" data-transcript-empty=\"{}\"></div>",
+                ),
+                escape(id),
+                escape(label),
+                escape(user_label),
+                escape(assistant_label),
+                escape(empty_message)
+            );
         }
         Component::TextField { id, label, action } => {
             let id = escape(id);
@@ -358,14 +379,36 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         }
         Component::SourceFormats {
             prefix,
+            empty_message,
+            unavailable_message,
             children: items,
         } => {
             let prefix = escape(prefix);
             let raw_pane = format!("{prefix}-raw-pane");
             let preview = format!("{prefix}-preview");
-            let _ = write!(out, "<div data-source-formats><div id=\"{prefix}-format\" class=\"fg-source-format\" data-source-format role=\"group\" aria-label=\"Markdown view\" hidden><button type=\"button\" id=\"{prefix}-raw\" data-source-mode=\"raw\" aria-controls=\"{raw_pane}\" aria-pressed=\"true\">Raw</button><button type=\"button\" id=\"{prefix}-display\" data-source-mode=\"display\" aria-controls=\"{preview}\" aria-pressed=\"false\">Display</button></div><p data-source-preview-unavailable class=\"fg-caption\" hidden>Markdown display is unavailable for this file size.</p><div id=\"{raw_pane}\" data-source-raw>");
+            let _ = write!(
+                out,
+                concat!(
+                    "<div data-source-formats><div id=\"{prefix}-format\" class=\"fg-source-format\" data-source-format role=\"group\" aria-label=\"Markdown view\" hidden>",
+                    "<button type=\"button\" id=\"{prefix}-raw\" data-source-mode=\"raw\" aria-controls=\"{raw_pane}\" aria-pressed=\"true\">Raw</button>",
+                    "<button type=\"button\" id=\"{prefix}-display\" data-source-mode=\"display\" aria-controls=\"{preview}\" aria-pressed=\"false\">Display</button>",
+                    "</div><p data-source-preview-unavailable class=\"fg-caption\" hidden>{}</p><div id=\"{raw_pane}\" data-source-raw>",
+                ),
+                escape(unavailable_message),
+                prefix = prefix,
+                raw_pane = raw_pane,
+                preview = preview
+            );
             children(items, out);
-            let _ = write!(out, "</div><div id=\"{preview}\" class=\"fg-source-preview\" data-source-preview role=\"region\" aria-label=\"Markdown display\" tabindex=\"0\" hidden></div></div>");
+            let _ = write!(
+                out,
+                concat!(
+                    "</div><div id=\"{preview}\" class=\"fg-source-preview\" data-source-preview data-source-preview-empty=\"{}\"",
+                    " role=\"region\" aria-label=\"Markdown display\" tabindex=\"0\" hidden></div></div>",
+                ),
+                escape(empty_message),
+                preview = preview
+            );
         }
         Component::PaneLink { id, label, target } => {
             let _ = write!(out, "<button type=\"button\" id=\"{}\" class=\"fg-pane-link\" data-pane-reveal=\"{}\">{}</button>", escape(id), escape(target), escape(label));
@@ -401,6 +444,28 @@ mod tests {
     use crate::generate::application::ide_document;
 
     #[test]
+    fn presentation_copy_is_escaped_for_browser_bindings() {
+        let mut output = String::new();
+        emit(
+            &crate::component!(transcript "messages", "Messages", "You & me", "\"Assistant\"", "<Empty>"),
+            &mut output,
+        );
+        assert!(output.contains("data-transcript-user=\"You &amp; me\""));
+        assert!(output.contains("data-transcript-assistant=\"&quot;Assistant&quot;\""));
+        assert!(output.contains("data-transcript-empty=\"&lt;Empty&gt;\""));
+
+        output.clear();
+        emit(
+            &crate::component!(source_formats "source", "\"Empty\"", "<Unavailable>"; [
+                crate::component!(source "file", "Source"),
+            ]),
+            &mut output,
+        );
+        assert!(output.contains("data-source-preview-empty=\"&quot;Empty&quot;\""));
+        assert!(output.contains("hidden>&lt;Unavailable&gt;</p>"));
+    }
+
+    #[test]
     fn design_opens_in_the_forge_tab_from_the_protected_navigation() {
         let document = ide_document();
         document.validate().unwrap();
@@ -416,6 +481,3 @@ mod tests {
         assert_eq!(after_button, "<a id=\"open-design\" class=\"fg-navigation-link\" href=\"/design\" data-workspace-navigation>Design</a></nav><p data-workspace-navigation-status role=\"status\" hidden></p>");
     }
 }
-
-// A reusable shell/recovery primitive; content is exclusively typed emitter output.
-pub(crate) const SHELL: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{{title}}</title><link rel=\"stylesheet\" href=\"/style.css\"><script src=\"/main.js\" defer></script></head><body><header class=\"fg-header\"><div class=\"fg-brand\"><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{{title}}</h1>{{{brand_context}}}</div><p>{{subtitle}}</p></header><section id=\"runtime-recovery\" class=\"fg-recovery\" hidden><p id=\"runtime-message\" role=\"alert\"></p><button id=\"runtime-reload\" type=\"button\" data-reload>Reload application</button></section><div class=\"fg-app\">{{{content}}}</div><dialog id=\"leave-confirmation\" class=\"fg-leave-dialog\" aria-labelledby=\"leave-heading\" aria-describedby=\"leave-description\"><h2 id=\"leave-heading\">Leave this page?</h2><p id=\"leave-description\">Forge will reload and try to restore your workspace. Any work that hasn’t been saved may be lost.</p><div class=\"fg-row\"><button id=\"leave-stay\" class=\"fg-button-primary\" type=\"button\" autofocus>Stay</button><button id=\"leave-confirm\" type=\"button\">Leave</button></div></dialog><noscript>This application requires JavaScript and WebAssembly.</noscript></body></html>";

@@ -1,0 +1,5 @@
+{{#groups}}{{#media}}@media {{{.}}}{
+{{/media}}{{#rules}}{{{selector}}}{
+{{#declarations}}{{{property}}}:{{{value}}};{{/declarations}}}
+{{/rules}}{{#media}}}
+{{/media}}{{/groups}}

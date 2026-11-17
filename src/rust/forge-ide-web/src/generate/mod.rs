@@ -55,11 +55,39 @@ pub struct RequestBinding {
     pub timeout_ms: Option<u32>,
     pub accept_events: Vec<String>,
     pub error_events: Vec<String>,
+    pub policy: RequestPolicy,
+}
+
+/// Conditions the worker applies before dispatching a browser request.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct RequestPolicy {
+    pub delay_ms: Option<u32>,
+    pub wait_for_slot_ms: Option<u32>,
+    pub checkpoint: Option<CheckpointBinding>,
+    pub expire_session_on_denial: bool,
+}
+
+/// Match a request against the corresponding intent in the saved workspace.
+#[derive(Clone, Debug, Serialize)]
+pub struct CheckpointBinding {
+    pub snapshot_path: String,
+    pub fields: Vec<String>,
+}
+
+/// Turn a typed effect into a delayed model event. A new effect of the same
+/// kind supersedes the previous timer.
+#[derive(Clone, Debug, Serialize)]
+pub struct TimerBinding {
+    pub effect_kind: String,
+    pub event_kind: String,
+    pub argument_field: String,
+    pub delay_ms: u32,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct Transport {
     pub initial_event: String,
     pub bindings: Vec<RequestBinding>,
+    pub timers: Vec<TimerBinding>,
 }
 impl Transport {
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -69,12 +97,14 @@ impl Transport {
         if !component::key(&self.initial_event)
             || self.bindings.is_empty()
             || self.bindings.len() > 24
+            || self.timers.len() > 8
         {
             return Err("invalid transport declarations");
         }
         let mut kinds = BTreeSet::new();
         for b in &self.bindings {
             if !component::key(&b.kind)
+                || b.kind == "abort"
                 || !kinds.insert(&b.kind)
                 || !path(&b.request_id)
                 || b.headers.len() > 12
@@ -89,6 +119,26 @@ impl Transport {
                 || b.deadline.as_ref().is_some_and(|v| !path(v))
             {
                 return Err("invalid request binding");
+            }
+            if [b.policy.delay_ms, b.policy.wait_for_slot_ms]
+                .into_iter()
+                .flatten()
+                .any(|ms| !(1..=30_000).contains(&ms))
+                || (b.policy.expire_session_on_denial && !b.csrf)
+            {
+                return Err("invalid request policy");
+            }
+            if let Some(checkpoint) = &b.policy.checkpoint {
+                let fields: BTreeSet<_> = checkpoint.fields.iter().collect();
+                if !b.csrf
+                    || !path(&checkpoint.snapshot_path)
+                    || fields.is_empty()
+                    || fields.len() > 8
+                    || fields.len() != checkpoint.fields.len()
+                    || !fields.iter().all(|field| component::key(field))
+                {
+                    return Err("invalid checkpoint binding");
+                }
             }
             let mut headers = BTreeSet::new();
             for h in &b.headers {
@@ -107,6 +157,18 @@ impl Transport {
                     (None, Some(s)) if path(s) => {}
                     _ => return Err("invalid header value declaration"),
                 }
+            }
+        }
+        for timer in &self.timers {
+            if !component::key(&timer.effect_kind)
+                || timer.effect_kind == "abort"
+                || !kinds.insert(&timer.effect_kind)
+                || !component::key(&timer.event_kind)
+                || !component::key(&timer.argument_field)
+                || timer.argument_field == "kind"
+                || !(1..=30_000).contains(&timer.delay_ms)
+            {
+                return Err("invalid timer binding");
             }
         }
         Ok(())
@@ -129,6 +191,7 @@ pub enum AssetError {
     Configuration(&'static str),
     Assembly(Box<dyn Error>),
     Template(forge_template::TemplateError),
+    StyleDeclarations(serde_yaml_ng::Error),
     Serialization(serde_json::Error),
 }
 impl fmt::Display for AssetError {
@@ -137,6 +200,7 @@ impl fmt::Display for AssetError {
             Self::Configuration(e) => write!(f, "asset configuration: {e}"),
             Self::Assembly(e) => write!(f, "asset assembly: {e}"),
             Self::Template(e) => e.fmt(f),
+            Self::StyleDeclarations(e) => write!(f, "stylesheet declarations: {e}"),
             Self::Serialization(e) => e.fmt(f),
         }
     }
@@ -147,6 +211,7 @@ impl Error for AssetError {
             Self::Configuration(_) => None,
             Self::Assembly(e) => Some(e.as_ref()),
             Self::Template(e) => Some(e),
+            Self::StyleDeclarations(e) => Some(e),
             Self::Serialization(e) => Some(e),
         }
     }
@@ -209,24 +274,6 @@ impl Factory<AssetBundle> for AssetFactory {
                 .collect(),
             allow_unknown: false,
         };
-        let group = register_renderer(
-            "web.document",
-            RenderConfig::Embedded {
-                source: html::SHELL,
-                schema,
-                limits: Limits::default(),
-            },
-            MethodRegistry::new(),
-        )
-        .map_err(|e| AssetError::Assembly(Box::new(e)))?;
-        let frozen = Registry::new()
-            .register(group)
-            .map_err(|e| AssetError::Assembly(Box::new(e)))?
-            .freeze()
-            .map_err(|e| AssetError::Assembly(Box::new(e)))?;
-        let ((), factory) = frozen.into_factories();
-        let provider = Singleton::new(factory.create().map_err(AssetError::Template)?);
-        let renderer = provider.acquire().unwrap_or_else(|never| match never {});
         let mut brand_context = String::new();
         let mut content = String::new();
         for c in &self.config.document.children {
@@ -249,13 +296,14 @@ impl Factory<AssetBundle> for AssetFactory {
             ("brand_context".into(), Value::Text(brand_context)),
             ("content".into(), Value::Text(content)),
         ]));
-        let html = renderer.render(&context).map_err(AssetError::Template)?;
+        let html = render_asset("web.document", html::SHELL, schema, &context)?;
+        let stylesheet = css::render(&self.theme)?;
         let declaration =
             serde_json::to_string(&self.config.transport).map_err(AssetError::Serialization)?;
         let worker = format!("const CONFIG={declaration};\n{}", javascript::WORKER);
         let files: BTreeMap<String, Vec<u8>> = BTreeMap::from([
             ("index.html".into(), html.into_bytes()),
-            ("style.css".into(), css::emit(&self.theme).into_bytes()),
+            ("style.css".into(), stylesheet.into_bytes()),
             ("main.js".into(), javascript::MAIN.as_bytes().to_vec()),
             ("worker.js".into(), worker.into_bytes()),
             ("app.wasm".into(), self.config.wasm.clone()),
@@ -276,4 +324,31 @@ impl Factory<AssetBundle> for AssetFactory {
             manifest: serde_json::to_vec_pretty(&manifest).map_err(AssetError::Serialization)?,
         })
     }
+}
+
+fn render_asset(
+    id: &str,
+    source: &'static str,
+    schema: Schema,
+    context: &Value,
+) -> Result<String, AssetError> {
+    let group = register_renderer(
+        id,
+        RenderConfig::Embedded {
+            source,
+            schema,
+            limits: Limits::default(),
+        },
+        MethodRegistry::new(),
+    )
+    .map_err(|e| AssetError::Assembly(Box::new(e)))?;
+    let frozen = Registry::new()
+        .register(group)
+        .map_err(|e| AssetError::Assembly(Box::new(e)))?
+        .freeze()
+        .map_err(|e| AssetError::Assembly(Box::new(e)))?;
+    let ((), factory) = frozen.into_factories();
+    let provider = Singleton::new(factory.create().map_err(AssetError::Template)?);
+    let renderer = provider.acquire().unwrap_or_else(|never| match never {});
+    renderer.render(context).map_err(AssetError::Template)
 }
