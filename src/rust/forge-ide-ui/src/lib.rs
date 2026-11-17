@@ -5,6 +5,7 @@ pub mod model;
 pub mod protocol;
 pub mod shape;
 mod validate;
+pub use markdown::render_markdown;
 pub mod view;
 pub use model::{name_label, Output, Phase, UiModel};
 use std::{error::Error, fmt};

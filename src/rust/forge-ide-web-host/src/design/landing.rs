@@ -11,6 +11,7 @@ pub(super) const BODY: &[Node] = &[
             element!(A [Href = "#data"]; text("Data flow")),
             element!(A [Href = "/design/chat-dispatch"]; text("PostgreSQL dispatch")),
             element!(A [Href = "/design/mail"]; text("Mail design")),
+            element!(A [Href = "/design/game-studio"]; text("Game engine design")),
         ),
     ),
     element!(Section [Id = "previous-chats", Class = "design-section", AriaLabelledby = "previous-chats-title"];

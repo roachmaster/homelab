@@ -1682,6 +1682,7 @@ async function designJourney(page, traffic) {
     return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
   }), true, 'desktop wireframe cards display side by side');
   await previousChatsDesignJourney(page, designUrl);
+  await gameEngineDesignJourney(page, designUrl);
   assert.deepEqual(counts(), before, 'Design does not send requests through the Forge gateway');
   if (originalViewport) await page.setViewportSize(originalViewport);
   await page.getByRole('link', { name: 'Back to Forge', exact: true }).click();
@@ -1918,6 +1919,47 @@ async function previousChatsDesignJourney(design, designUrl) {
   await design.getByRole('link', { name: /back to design/i }).click();
   const landingLink = design.getByRole('link', { name: 'PostgreSQL dispatch', exact: true });
   await check(landingLink).toHaveAttribute('href', '/design/chat-dispatch');
+}
+
+async function gameEngineDesignJourney(page, designUrl) {
+  const pages = page.context().pages();
+  const link = page.getByRole('link', { name: 'Game engine design', exact: true });
+  await check(link).toHaveAttribute('href', '/design/game-studio');
+  await link.click();
+  await check(page).toHaveURL(new URL('/design/game-studio', designUrl).href);
+  assert.deepEqual(page.context().pages(), pages, 'the game engine report opens in Design’s tab');
+
+  const report = page.getByRole('main');
+  await check(report.getByRole('heading', {
+    level: 1, name: 'Extending Homelab with a Rust Game Engine', exact: true,
+  })).toBeVisible();
+  for (const name of [
+    'What Homelab already provides', 'Package layout and ownership', 'In-process engine API',
+    'Platform and library APIs', 'Forge project and build APIs', 'Portal integration',
+    'Delivery and acceptance',
+  ]) {
+    await check(report.getByRole('heading', { level: 2, name, exact: true })).toBeVisible();
+  }
+  await check(report.getByRole('table')).toHaveCount(5);
+  const diagrams = report.getByRole('img');
+  await check(diagrams).toHaveCount(2);
+  for (const diagram of await diagrams.all()) {
+    await check(diagram).toHaveAttribute('src', /\.svg$/);
+    await check(diagram).toHaveAttribute('alt', /\S/);
+    await diagram.scrollIntoViewIfNeeded();
+    await check.poll(() => diagram.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0))
+      .toBe(true);
+  }
+  for (const width of [320, 390, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+      true, `the game engine report fits the ${width}px viewport`);
+  }
+
+  await page.getByRole('link', { name: 'Back to Design', exact: true }).click();
+  await check(page).toHaveURL(designUrl);
+  await check(link).toBeVisible();
+  assert.deepEqual(page.context().pages(), pages, 'the game engine report returns in the same tab');
 }
 
 async function themeColor(page, token) {

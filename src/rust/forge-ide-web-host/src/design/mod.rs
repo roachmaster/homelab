@@ -17,13 +17,13 @@ macro_rules! html_names {
 }
 
 html_names!(Tag {
-    A => "a", Aside => "aside", Button => "button", Code => "code",
+    A => "a", Article => "article", Aside => "aside", Button => "button", Code => "code",
     Dd => "dd", Details => "details", Dialog => "dialog", Div => "div",
     Dl => "dl", Dt => "dt", Figcaption => "figcaption", Figure => "figure",
     Form => "form", H1 => "h1", H2 => "h2", H3 => "h3", H4 => "h4",
     Img => "img", Input => "input", Label => "label", Li => "li", Nav => "nav",
     Ol => "ol", P => "p", Pre => "pre", Section => "section", Small => "small",
-    Span => "span", Strong => "strong", Summary => "summary", Textarea => "textarea",
+    Span => "span", Strong => "strong", Summary => "summary", Table => "table", Textarea => "textarea",
 });
 
 html_names!(Attribute {
@@ -41,6 +41,7 @@ html_names!(Attribute {
 enum Node {
     Text(&'static str),
     Element(Tag, &'static [(Attribute, &'static str)], &'static [Node]),
+    GameEngineReport,
 }
 
 const fn text(value: &'static str) -> Node {
@@ -54,6 +55,7 @@ macro_rules! element {
 }
 
 mod dispatch;
+pub mod game_engine;
 mod history;
 mod landing;
 mod mail;
@@ -63,18 +65,28 @@ fn render(nodes: &[Node], output: &mut String) {
         match node {
             Node::Text(value) => output.push_str(&escape(value)),
             Node::Element(tag, attributes, children) => {
-                let name = tag.name();
-                let _ = write!(output, "<{name}");
-                for (attribute, value) in *attributes {
-                    let _ = write!(output, " {}=\"{}\"", attribute.name(), escape(value));
-                }
-                output.push('>');
-                if !matches!(tag, Tag::Img | Tag::Input) {
-                    render(children, output);
-                    let _ = write!(output, "</{name}>");
-                }
+                render_element(*tag, attributes, output, |out| render(children, out));
             }
+            Node::GameEngineReport => game_engine::render_report(output),
         }
+    }
+}
+
+fn render_element(
+    tag: Tag,
+    attributes: &[(Attribute, &str)],
+    output: &mut String,
+    body: impl FnOnce(&mut String),
+) {
+    let name = tag.name();
+    let _ = write!(output, "<{name}");
+    for (attribute, value) in attributes {
+        let _ = write!(output, " {}=\"{}\"", attribute.name(), escape(value));
+    }
+    output.push('>');
+    if !matches!(tag, Tag::Img | Tag::Input) {
+        body(output);
+        let _ = write!(output, "</{name}>");
     }
 }
 
@@ -83,6 +95,7 @@ pub enum DesignPage {
     ChatHistory,
     ChatDispatch,
     Mail,
+    GameStudio,
 }
 
 impl DesignPage {
@@ -108,6 +121,12 @@ impl DesignPage {
                 "Back to Design",
                 mail::BODY,
             ),
+            Self::GameStudio => (
+                "Extending Homelab with a Rust Game Engine · Forge IDE",
+                "/design",
+                "Back to Design",
+                game_engine::BODY,
+            ),
         };
         let overview = matches!(self, Self::Overview);
         let mut output = String::from(
@@ -119,10 +138,10 @@ impl DesignPage {
             "<title>{}</title><link rel=\"stylesheet\" href=\"/design/style.css\">",
             escape(title),
         );
-        output.push_str(if overview {
-            "<script src=\"/design/previous-chats.js\" defer></script>"
-        } else {
-            "<link rel=\"stylesheet\" href=\"/design/chat-history.css\">"
+        output.push_str(match self {
+            Self::Overview => "<script src=\"/design/previous-chats.js\" defer></script>",
+            Self::GameStudio => "<link rel=\"stylesheet\" href=\"/design/game-studio.css\">",
+            _ => "<link rel=\"stylesheet\" href=\"/design/chat-history.css\">",
         });
         let main = if overview {
             "page-width"

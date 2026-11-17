@@ -27,6 +27,10 @@ subtle = "2"
 sha2 = "0.10"
 ctrlc = { version = "=3.5.2", features = ["termination"] }
 
+[build-dependencies]
+forge-ide-ui = { path = "../forge-ide-ui" }
+sha2 = "0.10"
+
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
 

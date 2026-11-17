@@ -21,6 +21,10 @@ const CHAT_DISPATCH_SEQUENCE: &[u8] = include_bytes!("../design/chat-dispatch-se
 const MAIL_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/mail.html"));
 const MAIL_WIREFRAME: &[u8] = include_bytes!("../design/forge-ide-mail-wireframe.svg");
 const MAIL_SEQUENCE: &[u8] = include_bytes!("../design/mail-dispatch-sequence.svg");
+const GAME_STUDIO_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/game-studio.html"));
+const GAME_STUDIO_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/game-studio.css"));
+const GAME_ENGINE_ARCHITECTURE: &[u8] = include_bytes!("../design/game-engine-architecture.svg");
+const GAME_ENGINE_BUILD: &[u8] = include_bytes!("../design/game-engine-build-sequence.svg");
 const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
     (
         "forge-ide-chat-desktop.png",
@@ -80,6 +84,12 @@ fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/mail" | "/design/mail/" => Some(("text/html; charset=utf-8", MAIL_HTML)),
         "/design/forge-ide-mail-wireframe.svg" => Some(("image/svg+xml", MAIL_WIREFRAME)),
         "/design/mail-dispatch-sequence.svg" => Some(("image/svg+xml", MAIL_SEQUENCE)),
+        "/design/game-studio" | "/design/game-studio/" => {
+            Some(("text/html; charset=utf-8", GAME_STUDIO_HTML))
+        }
+        "/design/game-studio.css" => Some(("text/css; charset=utf-8", GAME_STUDIO_CSS)),
+        "/design/game-engine-architecture.svg" => Some(("image/svg+xml", GAME_ENGINE_ARCHITECTURE)),
+        "/design/game-engine-build-sequence.svg" => Some(("image/svg+xml", GAME_ENGINE_BUILD)),
         _ => {
             let name = path.strip_prefix("/design/")?;
             DESIGN_IMAGES
