@@ -6,16 +6,11 @@ dependencies load by identity, validate before they activate,
 and unload together — while keeping the fixed tick, determinism,
 and the snapshot interface exactly as they are.
 
-**Planning baseline** — GitHub `main` at `7ba1235` on 2026-11-17.
+**Planning baseline** — GitHub `main` at `947b124` on 2026-11-17.
 This design applies Gregory chapter 6 (§§6.1–6.2), chapter 15
 (§§15.3–15.5), and the synthesis's streaming-door example, and
 it follows the Forge package-boundary conventions (see "How this
 integrates with the Forge philosophy" below).
-
-**Merge order.** This design references the physics design's
-collider mapping and collision world, which live on branch
-`design/game-physics`, not on main. Merge that branch first;
-until then the physics references below dangle.
 
 ## The problem
 
@@ -368,8 +363,7 @@ the packager does.
   [entity model](forge-game-entity-model.md) (spawn
   descriptors, save seam, generational handles), the
   [physics design](forge-game-physics.md) (collider mapping,
-  collision world — on branch `design/game-physics`, merge
-  that branch first), and the
+  collision world), and the
   [pixel-art authoring README](../../../src/python/pixel-art/README.md)
   (recipe format, exporters, manifest versions).
 - The `design-package-boundaries` skill (`.agents/skills/`) for
