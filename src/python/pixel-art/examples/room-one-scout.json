@@ -1,0 +1,1639 @@
+{
+  "version": 1,
+  "canvas": {"width": 32, "height": 44, "pivot": [13, 41]},
+  "palette": {
+    "guide_dark": "#30394F",
+    "guide_joint": "#F7F7EC",
+    "guide_head": "#FF9680",
+    "guide_torso": "#619AF4",
+    "guide_far": "#45C5B3",
+    "guide_near": "#F5C565",
+    "guide_prop": "#D392F2",
+    "ink": "#151A30",
+    "deep": "#243254",
+    "shade": "#394A6D",
+    "coat": "#55799B",
+    "coat_light": "#83B7C2",
+    "leather_dark": "#66405A",
+    "leather": "#B86F55",
+    "tan": "#E5A667",
+    "cream": "#F5D794",
+    "glass_dark": "#275364",
+    "glass": "#6BDBCF",
+    "glint": "#CBF4D9",
+    "ember_shade": "#A74650",
+    "ember": "#E26A50",
+    "frost_shade": "#5267A5",
+    "frost": "#9CB8F3"
+  },
+  "parts": {
+    "ground": {"offset": [13, 41]},
+    "root": {"parent": "ground", "offset": [0, 0]},
+    "hips": {"parent": "root", "offset": [0, -10]},
+    "torso": {"parent": "hips", "offset": [0, -4]},
+    "head": {"parent": "torso", "offset": [1, -6]},
+    "pack": {"parent": "torso", "offset": [-5, 0]},
+    "far_arm": {"parent": "torso", "offset": [3, 0]},
+    "far_forearm": {"parent": "far_arm", "offset": [0, 3]},
+    "near_arm": {"parent": "torso", "offset": [-3, 1]},
+    "near_forearm": {"parent": "near_arm", "offset": [0, 3]},
+    "far_thigh": {"parent": "hips", "offset": [2, 1]},
+    "far_shin": {"parent": "far_thigh", "offset": [0, 4]},
+    "far_boot": {"parent": "far_shin", "offset": [0, 4]},
+    "near_thigh": {"parent": "hips", "offset": [-2, 1]},
+    "near_shin": {"parent": "near_thigh", "offset": [0, 4]},
+    "near_boot": {"parent": "near_shin", "offset": [0, 4]},
+    "probe": {"parent": "near_forearm", "offset": [2, 2]},
+    "spin_torso": {"parent": "root", "offset": [0, -14]},
+    "spin_helmet": {"parent": "spin_torso", "offset": [0, -6]},
+    "spin_left_arm": {"parent": "spin_torso", "offset": [-5, 0]},
+    "spin_right_arm": {"parent": "spin_torso", "offset": [5, 0]},
+    "spin_left_boot": {"parent": "spin_torso", "offset": [-3, 6]},
+    "spin_right_boot": {"parent": "spin_torso", "offset": [3, 6]},
+    "spin_pack": {"parent": "spin_torso", "offset": [0, 0]},
+    "spin_front_probe": {"parent": "spin_left_arm", "offset": [1, 5]},
+    "spin_back_probe": {"parent": "spin_right_arm", "offset": [1, 5]}
+  },
+  "layers": [
+    {
+      "name": "far-upper-arm-axis", "stage": "greybox", "part": "far_arm",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "far-forearm-axis", "stage": "greybox", "part": "far_forearm",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "far-hip-to-knee", "stage": "greybox", "part": "far_thigh",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 6], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "far-knee-to-ankle", "stage": "greybox", "part": "far_shin",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "far-boot-axis", "stage": "greybox", "part": "far_boot",
+      "draw": [
+        {"op": "rect", "at": [-1, -2], "size": [5, 3], "color": "guide_far"},
+        {"op": "pixel", "at": [0, -1], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "pack-volume", "stage": "greybox", "part": "pack",
+      "draw": [
+        {"op": "rect", "at": [-2, -1], "size": [4, 6], "color": "guide_dark"},
+        {"op": "line", "from": [-2, 0], "to": [-2, 3], "color": "guide_far"}
+      ]
+    },
+    {
+      "name": "torso-centerline", "stage": "greybox", "part": "torso",
+      "draw": [
+        {"op": "rect", "at": [-4, -2], "size": [9, 8], "color": "guide_torso"},
+        {"op": "line", "from": [0, -1], "to": [0, 5], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "near-hip-to-knee", "stage": "greybox", "part": "near_thigh",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 6], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "near-knee-to-ankle", "stage": "greybox", "part": "near_shin",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 4], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "near-boot-axis", "stage": "greybox", "part": "near_boot",
+      "draw": [
+        {"op": "rect", "at": [-1, -2], "size": [5, 3], "color": "guide_near"},
+        {"op": "pixel", "at": [0, -1], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "head-eye-line", "stage": "greybox", "part": "head",
+      "draw": [
+        {"op": "rect", "at": [-4, -5], "size": [9, 9], "color": "guide_head"},
+        {"op": "line", "from": [0, -1], "to": [4, -1], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "near-upper-arm-axis", "stage": "greybox", "part": "near_arm",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "near-forearm-axis", "stage": "greybox", "part": "near_forearm",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "probe-socket-and-reach", "stage": "greybox", "part": "probe",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [7, 0], "color": "guide_prop"},
+        {"op": "line", "from": [7, -1], "to": [7, 1], "color": "guide_prop"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "floor-pivot", "stage": "greybox", "part": "ground",
+      "draw": [
+        {"op": "line", "from": [-2, 0], "to": [2, 0], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "far-upper-sleeve-flats", "stage": "flat", "part": "far_arm",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [2, -1], [2, 1], [1, 3], [-1, 4], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "far-forearm-and-glove-flats", "stage": "flat", "part": "far_forearm",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [2, 3], [1, 4], [-1, 4], [-1, 2]], "color": "deep"},
+        {"op": "rect", "at": [0, 2], "size": [2, 2], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "far-thigh-flats", "stage": "flat", "part": "far_thigh",
+      "draw": [
+        {"op": "polygon", "points": [[-2, -1], [2, -1], [2, 2], [1, 4], [-1, 4], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "far-shin-flats", "stage": "flat", "part": "far_shin",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [1, 3], [-1, 3], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "far-boot-flats", "stage": "flat", "part": "far_boot",
+      "draw": [
+        {"op": "polygon", "points": [[-2, -2], [1, -2], [2, -1], [3, -1], [4, 0], [-2, 0]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "pack-flats", "stage": "flat", "part": "pack",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -2], [1, -2], [2, -1], [2, 4], [0, 5], [-2, 4], [-3, 2], [-3, 0]], "color": "leather_dark"},
+        {"op": "rect", "at": [-2, -1], "size": [3, 4], "color": "leather"}
+      ]
+    },
+    {
+      "name": "pack-folds", "stage": "finish", "part": "pack",
+      "draw": [
+        {"op": "line", "from": [-2, 0], "to": [0, 0], "color": "tan"},
+        {"op": "pixel", "at": [-1, 2], "color": "cream"}
+      ]
+    },
+    {
+      "name": "coat-flats", "stage": "flat", "part": "torso",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -3], [3, -3], [5, -1], [4, 3], [5, 5], [3, 7], [-4, 6], [-5, 3], [-5, -1]], "color": "coat"},
+        {"op": "rect", "at": [-3, 5], "size": [7, 2], "color": "leather_dark"},
+        {"op": "line", "from": [-2, 0], "to": [2, 4], "color": "tan"}
+      ]
+    },
+    {
+      "name": "coat-folds-and-buckle", "stage": "finish", "part": "torso",
+      "draw": [
+        {"op": "line", "from": [-4, 3], "to": [-3, 5], "color": "shade"},
+        {"op": "line", "from": [3, 1], "to": [4, 4], "color": "shade"},
+        {"op": "pixel", "at": [2, 4], "color": "cream"},
+        {"op": "line", "from": [1, 6], "to": [3, 6], "color": "ink"},
+        {"op": "line", "from": [-1, -1], "to": [2, -1], "color": "coat_light"}
+      ]
+    },
+    {
+      "name": "near-thigh-flats", "stage": "flat", "part": "near_thigh",
+      "draw": [
+        {"op": "polygon", "points": [[-2, -1], [2, -1], [2, 2], [1, 4], [-1, 4], [-2, 2]], "color": "shade"}
+      ]
+    },
+    {
+      "name": "near-shin-flats", "stage": "flat", "part": "near_shin",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [1, 2], [-1, 3], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "near-boot-flats", "stage": "flat", "part": "near_boot",
+      "draw": [
+        {"op": "polygon", "points": [[-2, -2], [1, -2], [2, -1], [3, -1], [4, 0], [-2, 0]], "color": "shade"}
+      ]
+    },
+    {
+      "name": "near-boot-sole", "stage": "finish", "part": "near_boot",
+      "draw": [
+        {"op": "line", "from": [-2, 0], "to": [4, 0], "color": "ink"},
+        {"op": "pixel", "at": [2, -1], "color": "tan"}
+      ]
+    },
+    {
+      "name": "near-knee-light", "stage": "finish", "part": "near_shin",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [1, 0], "color": "coat_light"},
+        {"op": "pixel", "at": [-1, 2], "color": "deep"}
+      ]
+    },
+    {
+      "name": "helmet-and-visor-flats", "stage": "flat", "part": "head",
+      "draw": [
+        {"op": "polygon", "points": [[-4, -3], [-2, -5], [2, -5], [4, -3], [5, -1], [5, 1], [3, 3], [1, 4], [-2, 3], [-4, 1]], "color": "tan"},
+        {"op": "polygon", "points": [[0, -2], [4, -2], [5, -1], [5, 1], [3, 2], [1, 2], [0, 1]], "color": "glass_dark"},
+        {"op": "rect", "at": [-3, -1], "size": [2, 3], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "helmet-light-and-visor-reflection", "stage": "finish", "part": "head",
+      "draw": [
+        {"op": "line", "from": [-2, -5], "to": [2, -5], "color": "cream"},
+        {"op": "pixel", "at": [-3, -4], "color": "cream"},
+        {"op": "line", "from": [-4, 0], "to": [-2, 2], "color": "leather"},
+        {"op": "line", "from": [0, 3], "to": [2, 3], "color": "leather_dark"},
+        {"op": "line", "from": [1, -1], "to": [4, -1], "color": "glass"},
+        {"op": "pixel", "at": [3, -1], "color": "glint"},
+        {"op": "pixel", "at": [-2, 0], "color": "coat_light"}
+      ]
+    },
+    {
+      "name": "ember-helmet-panel", "stage": "finish", "part": "head", "skin": "ember",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "ember"},
+        {"op": "line", "from": [-3, -3], "to": [0, -3], "color": "ember_shade"}
+      ]
+    },
+    {
+      "name": "frost-helmet-panel", "stage": "finish", "part": "head", "skin": "frost",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "frost"},
+        {"op": "line", "from": [-3, -3], "to": [0, -3], "color": "frost_shade"}
+      ]
+    },
+    {
+      "name": "near-upper-sleeve-flats", "stage": "flat", "part": "near_arm",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [2, -1], [2, 1], [1, 3], [-1, 4], [-2, 2]], "color": "shade"}
+      ]
+    },
+    {
+      "name": "near-shoulder-plate", "stage": "finish", "part": "near_arm",
+      "draw": [
+        {"op": "rect", "at": [-1, 0], "size": [3, 2], "color": "coat"},
+        {"op": "line", "from": [-1, 0], "to": [1, 0], "color": "coat_light"}
+      ]
+    },
+    {
+      "name": "ember-shoulder-panel", "stage": "finish", "part": "near_arm", "skin": "ember",
+      "draw": [
+        {"op": "line", "from": [-1, 0], "to": [1, 0], "color": "ember"},
+        {"op": "line", "from": [-1, 1], "to": [1, 1], "color": "ember_shade"}
+      ]
+    },
+    {
+      "name": "frost-shoulder-panel", "stage": "finish", "part": "near_arm", "skin": "frost",
+      "draw": [
+        {"op": "line", "from": [-1, 0], "to": [1, 0], "color": "frost"},
+        {"op": "line", "from": [-1, 1], "to": [1, 1], "color": "frost_shade"}
+      ]
+    },
+    {
+      "name": "near-forearm-and-glove-flats", "stage": "flat", "part": "near_forearm",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [2, 3], [1, 4], [-1, 4], [-1, 2]], "color": "shade"},
+        {"op": "rect", "at": [0, 2], "size": [2, 2], "color": "leather"}
+      ]
+    },
+    {
+      "name": "near-glove-light", "stage": "finish", "part": "near_forearm",
+      "draw": [
+        {"op": "pixel", "at": [1, 2], "color": "tan"}
+      ]
+    },
+    {
+      "name": "probe-flats", "stage": "flat", "part": "probe",
+      "draw": [
+        {"op": "line", "from": [1, 0], "to": [7, 0], "color": "glass_dark"},
+        {"op": "rect", "at": [6, -1], "size": [2, 3], "color": "glass_dark"}
+      ]
+    },
+    {
+      "name": "probe-indicator", "stage": "finish", "part": "probe",
+      "draw": [
+        {"op": "line", "from": [3, 0], "to": [7, 0], "color": "glass"},
+        {"op": "pixel", "at": [7, -1], "color": "glint"}
+      ]
+    },
+    {
+      "name": "spin-front-left-leg-landmarks", "view": "front", "stage": "greybox", "part": "spin_left_boot",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 8], "color": "guide_near"},
+        {"op": "rect", "at": [-2, 6], "size": [4, 2], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 2], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-front-right-leg-landmarks", "view": "front", "stage": "greybox", "part": "spin_right_boot",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 8], "color": "guide_far"},
+        {"op": "rect", "at": [-1, 6], "size": [4, 2], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 2], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-front-left-arm-landmarks", "view": "front", "stage": "greybox", "part": "spin_left_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, 0], [-2, 5], [0, 6], [1, 3], [1, 0]], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"},
+        {"op": "pixel", "at": [-1, 3], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-front-right-arm-landmarks", "view": "front", "stage": "greybox", "part": "spin_right_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, 0], [0, 5], [2, 6], [1, 3], [1, 0]], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"},
+        {"op": "pixel", "at": [1, 3], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-front-torso-mass", "view": "front", "stage": "greybox", "part": "spin_torso",
+      "draw": [
+        {"op": "polygon", "points": [[-4, -2], [4, -2], [5, 0], [4, 5], [3, 7], [-3, 7], [-4, 5], [-5, 0]], "color": "guide_torso"},
+        {"op": "line", "from": [-4, 0], "to": [4, 0], "color": "guide_dark"},
+        {"op": "line", "from": [0, -1], "to": [0, 6], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-front-helmet-mass", "view": "front", "stage": "greybox", "part": "spin_helmet",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -5], [3, -5], [5, -3], [5, 2], [3, 4], [-3, 4], [-5, 2], [-5, -3]], "color": "guide_head"},
+        {"op": "line", "from": [-4, -1], "to": [4, -1], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-front-probe-end", "view": "front", "stage": "greybox", "part": "spin_front_probe",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [-2, 4], "color": "guide_prop"},
+        {"op": "line", "from": [-1, 4], "to": [-2, 4], "color": "guide_prop"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-front-floor-anchor", "view": "front", "stage": "greybox", "part": "ground",
+      "draw": [
+        {"op": "line", "from": [-2, 0], "to": [2, 0], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-back-left-leg-landmarks", "view": "back", "stage": "greybox", "part": "spin_left_boot",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 8], "color": "guide_far"},
+        {"op": "rect", "at": [-2, 6], "size": [4, 2], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 2], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-right-leg-landmarks", "view": "back", "stage": "greybox", "part": "spin_right_boot",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 8], "color": "guide_near"},
+        {"op": "rect", "at": [-1, 6], "size": [4, 2], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 2], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-left-arm-landmarks", "view": "back", "stage": "greybox", "part": "spin_left_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, 0], [-2, 5], [0, 6], [1, 3], [1, 0]], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"},
+        {"op": "pixel", "at": [-1, 3], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-right-arm-landmarks", "view": "back", "stage": "greybox", "part": "spin_right_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, 0], [0, 5], [2, 6], [1, 3], [1, 0]], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"},
+        {"op": "pixel", "at": [1, 3], "color": "guide_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-torso-mass", "view": "back", "stage": "greybox", "part": "spin_torso",
+      "draw": [
+        {"op": "polygon", "points": [[-4, -2], [4, -2], [5, 0], [4, 5], [3, 7], [-3, 7], [-4, 5], [-5, 0]], "color": "guide_torso"},
+        {"op": "line", "from": [-4, 0], "to": [4, 0], "color": "guide_dark"},
+        {"op": "line", "from": [0, -1], "to": [0, 6], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-back-pack-volume", "view": "back", "stage": "greybox", "part": "spin_pack",
+      "draw": [
+        {"op": "rect", "at": [-3, 0], "size": [7, 7], "color": "guide_dark"},
+        {"op": "line", "from": [-2, 1], "to": [2, 1], "color": "guide_far"},
+        {"op": "line", "from": [0, 1], "to": [0, 5], "color": "guide_far"}
+      ]
+    },
+    {
+      "name": "spin-back-helmet-mass", "view": "back", "stage": "greybox", "part": "spin_helmet",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -5], [3, -5], [5, -3], [5, 2], [3, 4], [-3, 4], [-5, 2], [-5, -3]], "color": "guide_head"},
+        {"op": "line", "from": [0, -4], "to": [0, 3], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-back-probe-end", "view": "back", "stage": "greybox", "part": "spin_back_probe",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [2, 4], "color": "guide_prop"},
+        {"op": "line", "from": [1, 4], "to": [2, 4], "color": "guide_prop"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-back-floor-anchor", "view": "back", "stage": "greybox", "part": "ground",
+      "draw": [
+        {"op": "line", "from": [-2, 0], "to": [2, 0], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "spin-front-left-boot", "view": "front", "stage": "flat", "part": "spin_left_boot",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 2], [1, 4], [2, 5], [2, 7], [-2, 7], [-2, 5], [-1, 3]], "color": "shade"},
+        {"op": "line", "from": [-1, 4], "to": [1, 4], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-front-left-sole", "view": "front", "stage": "finish", "part": "spin_left_boot",
+      "draw": [
+        {"op": "line", "from": [-2, 7], "to": [2, 7], "color": "ink"},
+        {"op": "pixel", "at": [0, 1], "color": "coat_light"}
+      ]
+    },
+    {
+      "name": "spin-front-right-boot", "view": "front", "stage": "flat", "part": "spin_right_boot",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 2], [1, 4], [2, 5], [2, 7], [-2, 7], [-2, 5], [-1, 3]], "color": "deep"},
+        {"op": "line", "from": [-1, 4], "to": [1, 4], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-front-right-sole", "view": "front", "stage": "finish", "part": "spin_right_boot",
+      "draw": [
+        {"op": "line", "from": [-2, 7], "to": [2, 7], "color": "ink"},
+        {"op": "pixel", "at": [0, 1], "color": "coat_light"}
+      ]
+    },
+    {
+      "name": "spin-front-left-sleeve", "view": "front", "stage": "flat", "part": "spin_left_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, -1], [-2, 0], [-2, 4], [-2, 6], [0, 6], [1, 3], [2, 0], [1, -1]], "color": "shade"},
+        {"op": "rect", "at": [-2, 4], "size": [2, 2], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-front-left-cuff", "view": "front", "stage": "finish", "part": "spin_left_arm",
+      "draw": [
+        {"op": "line", "from": [-2, 6], "to": [0, 6], "color": "ink"},
+        {"op": "pixel", "at": [-1, 4], "color": "tan"}
+      ]
+    },
+    {
+      "name": "spin-front-right-sleeve", "view": "front", "stage": "flat", "part": "spin_right_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, -1], [-2, 0], [0, 4], [0, 6], [2, 6], [1, 3], [2, 0], [1, -1]], "color": "deep"},
+        {"op": "rect", "at": [0, 4], "size": [2, 2], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-front-right-cuff", "view": "front", "stage": "finish", "part": "spin_right_arm",
+      "draw": [
+        {"op": "line", "from": [0, 6], "to": [2, 6], "color": "ink"},
+        {"op": "pixel", "at": [1, 4], "color": "tan"}
+      ]
+    },
+    {
+      "name": "spin-front-coat", "view": "front", "stage": "flat", "part": "spin_torso",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -3], [3, -3], [5, -1], [4, 3], [4, 5], [3, 7], [-3, 7], [-4, 5], [-4, 3], [-5, -1]], "color": "coat"},
+        {"op": "rect", "at": [-3, 5], "size": [7, 2], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "spin-front-coat-folds", "view": "front", "stage": "finish", "part": "spin_torso",
+      "draw": [
+        {"op": "line", "from": [-4, 3], "to": [-3, 5], "color": "shade"},
+        {"op": "line", "from": [4, 3], "to": [3, 5], "color": "shade"},
+        {"op": "line", "from": [-2, 7], "to": [2, 7], "color": "ink"}
+      ]
+    },
+    {
+      "name": "spin-front-chest-strap", "view": "front", "stage": "finish", "part": "spin_torso",
+      "draw": [
+        {"op": "line", "from": [-1, -2], "to": [3, 4], "color": "tan"},
+        {"op": "line", "from": [-2, -1], "to": [-2, 3], "color": "coat_light"},
+        {"op": "pixel", "at": [3, 4], "color": "cream"},
+        {"op": "pixel", "at": [0, 5], "color": "ink"}
+      ]
+    },
+    {
+      "name": "spin-front-helmet-shell", "view": "front", "stage": "flat", "part": "spin_helmet",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -5], [3, -5], [5, -3], [5, 1], [4, 3], [2, 4], [-2, 4], [-4, 3], [-5, 1], [-5, -3]], "color": "tan"}
+      ]
+    },
+    {
+      "name": "spin-front-broad-visor", "view": "front", "stage": "flat", "part": "spin_helmet",
+      "draw": [
+        {"op": "polygon", "points": [[-4, -2], [4, -2], [4, 1], [2, 2], [-2, 2], [-4, 1]], "color": "glass_dark"},
+        {"op": "line", "from": [-3, 3], "to": [3, 3], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "spin-front-visor-reflection", "view": "front", "stage": "finish", "part": "spin_helmet",
+      "draw": [
+        {"op": "line", "from": [-4, -4], "to": [-3, -5], "color": "cream"},
+        {"op": "line", "from": [-3, -5], "to": [2, -5], "color": "cream"},
+        {"op": "line", "from": [-3, -1], "to": [3, -1], "color": "glass"},
+        {"op": "pixel", "at": [-2, -1], "color": "glint"},
+        {"op": "line", "from": [2, 4], "to": [3, 3], "color": "leather"},
+        {"op": "line", "from": [-3, 3], "to": [-2, 4], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-front-ember-helmet", "view": "front", "stage": "finish", "part": "spin_helmet", "skin": "ember",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "ember"},
+        {"op": "line", "from": [-2, -3], "to": [1, -3], "color": "ember_shade"}
+      ]
+    },
+    {
+      "name": "spin-front-ember-shoulder", "view": "front", "stage": "finish", "part": "spin_left_arm", "skin": "ember",
+      "draw": [
+        {"op": "line", "from": [-1, 0], "to": [0, 0], "color": "ember"}
+      ]
+    },
+    {
+      "name": "spin-front-frost-helmet", "view": "front", "stage": "finish", "part": "spin_helmet", "skin": "frost",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "frost"},
+        {"op": "line", "from": [-2, -3], "to": [1, -3], "color": "frost_shade"}
+      ]
+    },
+    {
+      "name": "spin-front-frost-shoulder", "view": "front", "stage": "finish", "part": "spin_left_arm", "skin": "frost",
+      "draw": [
+        {"op": "line", "from": [-1, 0], "to": [0, 0], "color": "frost"}
+      ]
+    },
+    {
+      "name": "spin-front-probe-foreshortening", "view": "front", "stage": "flat", "part": "spin_front_probe",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [-2, 4], "color": "glass_dark"},
+        {"op": "line", "from": [-1, 4], "to": [-2, 4], "color": "glass_dark"}
+      ]
+    },
+    {
+      "name": "spin-front-probe-light", "view": "front", "stage": "finish", "part": "spin_front_probe",
+      "draw": [
+        {"op": "line", "from": [-1, 2], "to": [-2, 4], "color": "glass"},
+        {"op": "pixel", "at": [-2, 4], "color": "glint"}
+      ]
+    },
+    {
+      "name": "spin-back-left-boot", "view": "back", "stage": "flat", "part": "spin_left_boot",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 2], [1, 4], [2, 5], [2, 7], [-2, 7], [-2, 5], [-1, 3]], "color": "shade"},
+        {"op": "line", "from": [-1, 4], "to": [1, 4], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-left-sole", "view": "back", "stage": "finish", "part": "spin_left_boot",
+      "draw": [
+        {"op": "line", "from": [-2, 7], "to": [2, 7], "color": "ink"},
+        {"op": "pixel", "at": [0, 1], "color": "coat"}
+      ]
+    },
+    {
+      "name": "spin-back-right-boot", "view": "back", "stage": "flat", "part": "spin_right_boot",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 2], [1, 4], [2, 5], [2, 7], [-2, 7], [-2, 5], [-1, 3]], "color": "deep"},
+        {"op": "line", "from": [-1, 4], "to": [1, 4], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-right-sole", "view": "back", "stage": "finish", "part": "spin_right_boot",
+      "draw": [
+        {"op": "line", "from": [-2, 7], "to": [2, 7], "color": "ink"},
+        {"op": "pixel", "at": [0, 1], "color": "coat"}
+      ]
+    },
+    {
+      "name": "spin-back-left-sleeve", "view": "back", "stage": "flat", "part": "spin_left_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, -1], [-2, 0], [-2, 4], [-2, 6], [0, 6], [1, 3], [2, 0], [1, -1]], "color": "shade"},
+        {"op": "rect", "at": [-2, 4], "size": [2, 2], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-back-left-cuff", "view": "back", "stage": "finish", "part": "spin_left_arm",
+      "draw": [
+        {"op": "line", "from": [-2, 6], "to": [0, 6], "color": "ink"},
+        {"op": "pixel", "at": [-1, 4], "color": "tan"}
+      ]
+    },
+    {
+      "name": "spin-back-right-sleeve", "view": "back", "stage": "flat", "part": "spin_right_arm",
+      "draw": [
+        {"op": "polygon", "points": [[0, -1], [-1, -1], [-2, 0], [0, 4], [0, 6], [2, 6], [1, 3], [2, 0], [1, -1]], "color": "deep"},
+        {"op": "rect", "at": [0, 4], "size": [2, 2], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-back-right-cuff", "view": "back", "stage": "finish", "part": "spin_right_arm",
+      "draw": [
+        {"op": "line", "from": [0, 6], "to": [2, 6], "color": "ink"},
+        {"op": "pixel", "at": [1, 4], "color": "tan"}
+      ]
+    },
+    {
+      "name": "spin-back-coat", "view": "back", "stage": "flat", "part": "spin_torso",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -3], [3, -3], [5, -1], [4, 3], [4, 5], [3, 7], [-3, 7], [-4, 5], [-4, 3], [-5, -1]], "color": "coat"},
+        {"op": "rect", "at": [-3, 5], "size": [7, 2], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-coat-folds", "view": "back", "stage": "finish", "part": "spin_torso",
+      "draw": [
+        {"op": "line", "from": [-4, 3], "to": [-3, 5], "color": "shade"},
+        {"op": "line", "from": [4, 3], "to": [3, 5], "color": "shade"},
+        {"op": "line", "from": [-2, 7], "to": [2, 7], "color": "ink"}
+      ]
+    },
+    {
+      "name": "spin-back-harness", "view": "back", "stage": "flat", "part": "spin_torso",
+      "draw": [
+        {"op": "line", "from": [-4, -2], "to": [-2, 4], "color": "tan"},
+        {"op": "line", "from": [4, -2], "to": [2, 4], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-back-pack", "view": "back", "stage": "flat", "part": "spin_pack",
+      "draw": [
+        {"op": "polygon", "points": [[-2, -1], [2, -1], [4, 1], [4, 5], [2, 7], [-2, 7], [-4, 5], [-4, 1]], "color": "leather_dark"},
+        {"op": "polygon", "points": [[-2, 0], [2, 0], [3, 1], [3, 4], [2, 5], [-2, 5], [-3, 4], [-3, 1]], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-back-pack-fold-and-latch", "view": "back", "stage": "finish", "part": "spin_pack",
+      "draw": [
+        {"op": "line", "from": [-2, 0], "to": [2, 0], "color": "tan"},
+        {"op": "line", "from": [-2, 2], "to": [2, 2], "color": "leather_dark"},
+        {"op": "pixel", "at": [0, 2], "color": "cream"},
+        {"op": "line", "from": [-2, 6], "to": [2, 6], "color": "ink"}
+      ]
+    },
+    {
+      "name": "spin-back-helmet-shell", "view": "back", "stage": "flat", "part": "spin_helmet",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -5], [3, -5], [5, -3], [5, 1], [4, 3], [2, 4], [-2, 4], [-4, 3], [-5, 1], [-5, -3]], "color": "tan"}
+      ]
+    },
+    {
+      "name": "spin-back-helmet-back-seams", "view": "back", "stage": "flat", "part": "spin_helmet",
+      "draw": [
+        {"op": "line", "from": [-4, 0], "to": [4, 0], "color": "leather"},
+        {"op": "polygon", "points": [[-3, 1], [3, 1], [3, 2], [1, 4], [-1, 4], [-3, 2]], "color": "leather"}
+      ]
+    },
+    {
+      "name": "spin-back-helmet-back-rim", "view": "back", "stage": "finish", "part": "spin_helmet",
+      "draw": [
+        {"op": "line", "from": [-3, -5], "to": [2, -5], "color": "cream"},
+        {"op": "line", "from": [-4, -3], "to": [-4, -1], "color": "cream"},
+        {"op": "line", "from": [-4, 2], "to": [-2, 3], "color": "leather_dark"},
+        {"op": "line", "from": [3, 2], "to": [2, 3], "color": "leather_dark"},
+        {"op": "pixel", "at": [0, 2], "color": "tan"}
+      ]
+    },
+    {
+      "name": "spin-back-ember-helmet", "view": "back", "stage": "finish", "part": "spin_helmet", "skin": "ember",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "ember"},
+        {"op": "line", "from": [-2, -3], "to": [1, -3], "color": "ember_shade"}
+      ]
+    },
+    {
+      "name": "spin-back-ember-shoulder", "view": "back", "stage": "finish", "part": "spin_right_arm", "skin": "ember",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [1, 0], "color": "ember"}
+      ]
+    },
+    {
+      "name": "spin-back-frost-helmet", "view": "back", "stage": "finish", "part": "spin_helmet", "skin": "frost",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "frost"},
+        {"op": "line", "from": [-2, -3], "to": [1, -3], "color": "frost_shade"}
+      ]
+    },
+    {
+      "name": "spin-back-frost-shoulder", "view": "back", "stage": "finish", "part": "spin_right_arm", "skin": "frost",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [1, 0], "color": "frost"}
+      ]
+    },
+    {
+      "name": "spin-back-probe-foreshortening", "view": "back", "stage": "flat", "part": "spin_back_probe",
+      "draw": [
+        {"op": "line", "from": [0, 0], "to": [2, 4], "color": "glass_dark"},
+        {"op": "line", "from": [1, 4], "to": [2, 4], "color": "glass_dark"}
+      ]
+    },
+    {
+      "name": "spin-back-probe-light", "view": "back", "stage": "finish", "part": "spin_back_probe",
+      "draw": [
+        {"op": "line", "from": [1, 2], "to": [2, 4], "color": "glass"},
+        {"op": "pixel", "at": [2, 4], "color": "glint"}
+      ]
+    },
+    {
+      "name": "ladder-far-thigh-axis", "view": "ladder", "part": "far_thigh", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 6], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-far-shin-axis", "view": "ladder", "part": "far_shin", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-far-boot-axis", "view": "ladder", "part": "far_boot", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -2], "size": [3, 3], "color": "guide_far"}
+      ]
+    },
+    {
+      "name": "ladder-far-thigh", "view": "ladder", "part": "far_thigh", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-2, -1], [2, -1], [2, 2], [1, 4], [-1, 4], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "ladder-far-shin", "view": "ladder", "part": "far_shin", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [1, 3], [-1, 3], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "ladder-far-boot", "view": "ladder", "part": "far_boot", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -3], [1, -3], [2, -1], [2, 0], [-2, 0], [-2, -1]], "color": "deep"},
+        {"op": "line", "from": [-2, 0], "to": [2, 0], "color": "ink"}
+      ]
+    },
+    {
+      "name": "ladder-near-thigh-axis", "view": "ladder", "part": "near_thigh", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 6], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-near-shin-axis", "view": "ladder", "part": "near_shin", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 4], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-near-boot-axis", "view": "ladder", "part": "near_boot", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -2], "size": [3, 3], "color": "guide_near"}
+      ]
+    },
+    {
+      "name": "ladder-near-thigh", "view": "ladder", "part": "near_thigh", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-2, -1], [2, -1], [2, 2], [1, 4], [-1, 4], [-2, 2]], "color": "shade"}
+      ]
+    },
+    {
+      "name": "ladder-near-shin", "view": "ladder", "part": "near_shin", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [1, 2], [-1, 3], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "ladder-near-boot", "view": "ladder", "part": "near_boot", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -3], [1, -3], [2, -1], [2, 0], [-2, 0], [-2, -1]], "color": "shade"},
+        {"op": "line", "from": [-2, 0], "to": [2, 0], "color": "ink"}
+      ]
+    },
+    {
+      "name": "ladder-torso-guide", "view": "ladder", "part": "torso", "stage": "greybox",
+      "draw": [
+        {"op": "polygon", "points": [[-4, -2], [4, -2], [5, 0], [4, 5], [3, 7], [-3, 7], [-4, 5], [-5, 0]], "color": "guide_torso"},
+        {"op": "line", "from": [-4, 0], "to": [4, 0], "color": "guide_dark"},
+        {"op": "line", "from": [0, -1], "to": [0, 6], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"},
+        {"op": "rect", "at": [-3, 0], "size": [7, 7], "color": "guide_dark"},
+        {"op": "line", "from": [-2, 1], "to": [2, 1], "color": "guide_far"},
+        {"op": "line", "from": [0, 1], "to": [0, 5], "color": "guide_far"}
+      ]
+    },
+    {
+      "name": "ladder-helmet-guide", "view": "ladder", "part": "head", "stage": "greybox",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -5], [3, -5], [5, -3], [5, 2], [3, 4], [-3, 4], [-5, 2], [-5, -3]], "color": "guide_head"},
+        {"op": "line", "from": [0, -4], "to": [0, 3], "color": "guide_dark"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-coat-and-pack", "view": "ladder", "part": "torso", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -3], [3, -3], [5, -1], [4, 3], [4, 5], [3, 7], [-3, 7], [-4, 5], [-4, 3], [-5, -1]], "color": "coat"},
+        {"op": "rect", "at": [-3, 5], "size": [7, 2], "color": "leather_dark"},
+        {"op": "line", "from": [-4, -2], "to": [-2, 4], "color": "tan"},
+        {"op": "line", "from": [4, -2], "to": [2, 4], "color": "leather"},
+        {"op": "polygon", "points": [[-2, -1], [2, -1], [4, 1], [4, 5], [2, 7], [-2, 7], [-4, 5], [-4, 1]], "color": "leather_dark"},
+        {"op": "polygon", "points": [[-2, 0], [2, 0], [3, 1], [3, 4], [2, 5], [-2, 5], [-3, 4], [-3, 1]], "color": "leather"}
+      ]
+    },
+    {
+      "name": "ladder-coat-and-pack-light", "view": "ladder", "part": "torso", "stage": "finish",
+      "draw": [
+        {"op": "line", "from": [-4, 3], "to": [-3, 5], "color": "shade"},
+        {"op": "line", "from": [4, 3], "to": [3, 5], "color": "shade"},
+        {"op": "line", "from": [-2, 7], "to": [2, 7], "color": "ink"},
+        {"op": "line", "from": [-2, 0], "to": [2, 0], "color": "tan"},
+        {"op": "line", "from": [-2, 2], "to": [2, 2], "color": "leather_dark"},
+        {"op": "pixel", "at": [0, 2], "color": "cream"},
+        {"op": "line", "from": [-2, 6], "to": [2, 6], "color": "ink"}
+      ]
+    },
+    {
+      "name": "ladder-helmet", "view": "ladder", "part": "head", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-3, -5], [3, -5], [5, -3], [5, 1], [4, 3], [2, 4], [-2, 4], [-4, 3], [-5, 1], [-5, -3]], "color": "tan"},
+        {"op": "line", "from": [-4, 0], "to": [4, 0], "color": "leather"},
+        {"op": "polygon", "points": [[-3, 1], [3, 1], [3, 2], [1, 4], [-1, 4], [-3, 2]], "color": "leather"}
+      ]
+    },
+    {
+      "name": "ladder-helmet-light", "view": "ladder", "part": "head", "stage": "finish",
+      "draw": [
+        {"op": "line", "from": [-3, -5], "to": [2, -5], "color": "cream"},
+        {"op": "line", "from": [-4, -3], "to": [-4, -1], "color": "cream"},
+        {"op": "line", "from": [-4, 2], "to": [-2, 3], "color": "leather_dark"},
+        {"op": "line", "from": [3, 2], "to": [2, 3], "color": "leather_dark"},
+        {"op": "pixel", "at": [0, 2], "color": "tan"}
+      ]
+    },
+    {
+      "name": "ladder-far-upper-arm-axis", "view": "ladder", "part": "far_arm", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-far-forearm-axis", "view": "ladder", "part": "far_forearm", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_far"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-far-upper-arm", "view": "ladder", "part": "far_arm", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [2, -1], [2, 1], [1, 3], [-1, 4], [-2, 2]], "color": "deep"}
+      ]
+    },
+    {
+      "name": "ladder-far-forearm", "view": "ladder", "part": "far_forearm", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [2, 3], [1, 4], [-1, 4], [-1, 2]], "color": "deep"},
+        {"op": "rect", "at": [0, 2], "size": [2, 2], "color": "leather_dark"}
+      ]
+    },
+    {
+      "name": "ladder-near-upper-arm-axis", "view": "ladder", "part": "near_arm", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-near-forearm-axis", "view": "ladder", "part": "near_forearm", "stage": "greybox",
+      "draw": [
+        {"op": "rect", "at": [-1, -1], "size": [3, 5], "color": "guide_near"},
+        {"op": "pixel", "at": [0, 0], "color": "guide_joint"}
+      ]
+    },
+    {
+      "name": "ladder-near-upper-arm", "view": "ladder", "part": "near_arm", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [2, -1], [2, 1], [1, 3], [-1, 4], [-2, 2]], "color": "shade"}
+      ]
+    },
+    {
+      "name": "ladder-near-forearm", "view": "ladder", "part": "near_forearm", "stage": "flat",
+      "draw": [
+        {"op": "polygon", "points": [[-1, -1], [1, -1], [2, 1], [2, 3], [1, 4], [-1, 4], [-1, 2]], "color": "shade"},
+        {"op": "rect", "at": [0, 2], "size": [2, 2], "color": "leather"}
+      ]
+    },
+    {
+      "name": "ladder-ember-helmet", "view": "ladder", "part": "head", "stage": "finish", "skin": "ember",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "ember"},
+        {"op": "line", "from": [-2, -3], "to": [1, -3], "color": "ember_shade"}
+      ]
+    },
+    {
+      "name": "ladder-frost-helmet", "view": "ladder", "part": "head", "stage": "finish", "skin": "frost",
+      "draw": [
+        {"op": "line", "from": [-2, -4], "to": [2, -4], "color": "frost"},
+        {"op": "line", "from": [-2, -3], "to": [1, -3], "color": "frost_shade"}
+      ]
+    }
+  ],
+  "clips": {
+    "idle": [
+      {
+        "duration_ms": 240,
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [14, 26]}}
+      }
+    ],
+    "walk": [
+      {
+        "duration_ms": 105,
+        "offsets": {"root": [0, 0], "hips": [0, 0]},
+        "rotations": {"near_thigh": -21, "near_shin": 7, "near_boot": 14, "far_thigh": 25, "far_shin": 7, "far_boot": -32, "near_arm": 21, "near_forearm": -10, "far_arm": -24, "far_forearm": -10, "torso": 3, "head": -3},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [15, 25]}}
+      },
+      {
+        "duration_ms": 85,
+        "offsets": {"root": [0, 0], "hips": [0, 0]},
+        "rotations": {"near_thigh": -7, "near_shin": 16, "near_boot": -9, "far_thigh": -24, "far_shin": 47, "far_boot": -23, "near_arm": 0, "near_forearm": -10, "far_arm": -8, "far_forearm": -10, "torso": 2, "head": -2},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [15, 25]}}
+      },
+      {
+        "duration_ms": 105,
+        "offsets": {"root": [0, 0], "hips": [0, 0]},
+        "rotations": {"near_thigh": 25, "near_shin": 7, "near_boot": -32, "far_thigh": -21, "far_shin": 7, "far_boot": 14, "near_arm": -24, "near_forearm": -10, "far_arm": 24, "far_forearm": -10, "torso": 3, "head": -3},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [15, 25]}}
+      },
+      {
+        "duration_ms": 85,
+        "offsets": {"root": [0, 0], "hips": [0, 0]},
+        "rotations": {"near_thigh": -24, "near_shin": 47, "near_boot": -23, "far_thigh": -7, "far_shin": 16, "far_boot": -9, "near_arm": -8, "near_forearm": -10, "far_arm": 0, "far_forearm": -10, "torso": 2, "head": -2},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [15, 25]}}
+      }
+    ],
+    "crouch": [
+      {
+        "duration_ms": 80,
+        "offsets": {"root": [0, 0], "hips": [-1, 2]},
+        "rotations": {"near_thigh": -45, "near_shin": 75, "near_boot": -30, "far_thigh": -44, "far_shin": 75, "far_boot": -31, "near_arm": -18, "near_forearm": -26, "far_arm": -20, "far_forearm": -20, "torso": 12, "head": -12},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -23], "size": [15, 23]}}
+      },
+      {
+        "duration_ms": 300,
+        "offsets": {"root": [0, 0], "hips": [0, 4]},
+        "rotations": {"near_thigh": -56, "near_shin": 112, "near_boot": -56, "far_thigh": -60, "far_shin": 120, "far_boot": -60, "near_arm": -35, "near_forearm": -36, "far_arm": -41, "far_forearm": -24, "torso": 18, "head": -18},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -21], "size": [15, 21]}}
+      },
+      {
+        "duration_ms": 80,
+        "offsets": {"root": [0, 0], "hips": [-1, 2]},
+        "rotations": {"near_thigh": -45, "near_shin": 75, "near_boot": -30, "far_thigh": -44, "far_shin": 75, "far_boot": -31, "near_arm": -18, "near_forearm": -26, "far_arm": -20, "far_forearm": -20, "torso": 12, "head": -12},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -23], "size": [15, 23]}}
+      },
+      {
+        "duration_ms": 85,
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [14, 26]}}
+      }
+    ],
+    "jump": [
+      {
+        "duration_ms": 105,
+        "offsets": {"root": [0, 0], "hips": [0, 4]},
+        "rotations": {"near_thigh": -56, "near_shin": 112, "near_boot": -56, "far_thigh": -60, "far_shin": 120, "far_boot": -60, "near_arm": 58, "near_forearm": 18, "far_arm": 52, "far_forearm": 12, "torso": 14, "head": -14, "probe": -50},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -21], "size": [15, 21]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, 0], "hips": [0, -1], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -4, "near_shin": 7, "near_boot": 15, "far_thigh": 8, "far_shin": -13, "far_boot": 20, "near_arm": -105, "near_forearm": -40, "far_arm": -105, "far_forearm": -30, "torso": 3, "head": -3, "probe": 112},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -27], "size": [15, 27]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, -6], "hips": [0, 0], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -23, "near_shin": 41, "near_boot": -5, "far_thigh": -8, "far_shin": 24, "far_boot": 0, "near_arm": -113, "near_forearm": -31, "far_arm": -115, "far_forearm": -30, "torso": 3, "head": -3, "probe": 99},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 25]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, -10], "hips": [0, 0], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -44, "near_shin": 79, "near_boot": -30, "far_thigh": -21, "far_shin": 58, "far_boot": -28, "near_arm": -105, "near_forearm": -42, "far_arm": -104, "far_forearm": -38, "torso": 6, "head": -6, "probe": 118},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 25]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, -12], "hips": [0, 0], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -60, "near_shin": 109, "near_boot": -51, "far_thigh": -35, "far_shin": 80, "far_boot": -40, "near_arm": -96, "near_forearm": -49, "far_arm": -95, "far_forearm": -45, "torso": 9, "head": -9, "probe": 128},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 24]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, -13], "hips": [0, 0], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -64, "near_shin": 123, "near_boot": -62, "far_thigh": -48, "far_shin": 97, "far_boot": -45, "near_arm": -85, "near_forearm": -48, "far_arm": -88, "far_forearm": -44, "torso": 10, "head": -10, "probe": 129},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 23]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, -12], "hips": [0, 0], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -49, "near_shin": 103, "near_boot": -50, "far_thigh": -35, "far_shin": 76, "far_boot": -36, "near_arm": -68, "near_forearm": -44, "far_arm": -68, "far_forearm": -36, "torso": 7, "head": -7, "probe": 120},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 24]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, -10], "hips": [0, 0]},
+        "rotations": {"near_thigh": -38, "near_shin": 67, "near_boot": -26, "far_thigh": -22, "far_shin": 51, "far_boot": -24, "near_arm": -57, "near_forearm": -38, "far_arm": -50, "far_forearm": -32, "torso": 6, "head": -6, "probe": 107},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 24]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"root": [0, -6], "hips": [0, 0]},
+        "rotations": {"near_thigh": -20, "near_shin": 41, "near_boot": -18, "far_thigh": -11, "far_shin": 35, "far_boot": -19, "near_arm": -42, "near_forearm": -46, "far_arm": -40, "far_forearm": -30, "torso": 2, "head": -2, "probe": 101},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 26]}}
+      },
+      {
+        "duration_ms": 80,
+        "offsets": {"root": [0, 0], "hips": [-1, 3]},
+        "rotations": {"near_thigh": -61, "near_shin": 93, "near_boot": -32, "far_thigh": -60, "far_shin": 91, "far_boot": -31, "near_arm": -51, "near_forearm": -34, "far_arm": -44, "far_forearm": -29, "torso": 17, "head": -17, "probe": 73},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -22], "size": [15, 22]}}
+      },
+      {
+        "duration_ms": 80,
+        "offsets": {"root": [0, 0], "hips": [-1, 2]},
+        "rotations": {"near_thigh": -45, "near_shin": 75, "near_boot": -30, "far_thigh": -44, "far_shin": 75, "far_boot": -31, "near_arm": -30, "near_forearm": -20, "far_arm": -29, "far_forearm": -20, "torso": 10, "head": -10, "probe": 40},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -23], "size": [15, 23]}}
+      },
+      {
+        "duration_ms": 100,
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [14, 26]}}
+      }
+    ],
+    "attack": [
+      {
+        "duration_ms": 105,
+        "offsets": {"hips": [-1, 0], "near_arm": [-1, 0]},
+        "rotations": {"near_thigh": -11, "near_shin": 22, "near_boot": -11, "far_thigh": 8, "far_shin": -16, "far_boot": 8, "near_arm": 15, "near_forearm": -40, "far_arm": -10, "far_forearm": -18, "probe": 18},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [14, 26]}}
+      },
+      {
+        "duration_ms": 75,
+        "offsets": {"hips": [1, 0], "head": [1, 0], "near_arm": [1, 0], "probe": [1, 0]},
+        "rotations": {"near_thigh": -26, "near_shin": 35, "near_boot": -9, "far_thigh": -10, "far_shin": 18, "far_boot": -8, "near_arm": -73, "near_forearm": -16, "far_arm": -10, "far_forearm": -12, "probe": 81, "torso": 8},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [14, 26]}, "attack": {"part": "probe", "at": [1, -1], "size": [8, 3]}}
+      },
+      {
+        "duration_ms": 135,
+        "offsets": {"hips": [0, 1]},
+        "rotations": {"near_thigh": -27, "near_shin": 47, "near_boot": -20, "far_thigh": -20, "far_shin": 41, "far_boot": -21, "near_arm": -36, "near_forearm": -14, "far_arm": -8, "far_forearm": -10, "probe": 45, "torso": 5},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [14, 26]}}
+      }
+    ],
+    "spin": [
+      {
+        "duration_ms": 85,
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 70,
+        "view": "front",
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 70,
+        "flip_x": true,
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 70,
+        "view": "back",
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      }
+    ],
+    "kick": [
+      {
+        "duration_ms": 80,
+        "offsets": {"hips": [1, 1], "far_boot": [0, -1]},
+        "rotations": {"torso": 8, "head": -8, "far_thigh": 12, "far_shin": -31, "far_boot": 19, "near_thigh": -29, "near_shin": 49, "near_boot": -20, "near_arm": 18, "near_forearm": -32, "far_arm": -44, "far_forearm": -30, "probe": -8},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 85,
+        "offsets": {"hips": [1, 0]},
+        "rotations": {"torso": 9, "head": -9, "far_thigh": 8, "far_shin": -16, "far_boot": 8, "near_thigh": -92, "near_shin": 115, "near_boot": -18, "near_arm": 24, "near_forearm": -34, "far_arm": -55, "far_forearm": -36, "probe": -26},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 85,
+        "offsets": {"hips": [2, 0], "far_boot": [-1, 0]},
+        "rotations": {"torso": 16, "head": -16, "far_thigh": 18, "far_shin": -36, "far_boot": 18, "near_thigh": -91, "near_shin": 6, "near_boot": 77, "near_arm": 37, "near_forearm": -29, "far_arm": -105, "far_forearm": -45, "probe": -59},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}, "attack": {"part": "near_boot", "at": [-1, -3], "size": [6, 4]}}
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"hips": [1, 0]},
+        "rotations": {"torso": 11, "head": -11, "far_thigh": 12, "far_shin": -24, "far_boot": 12, "near_thigh": -70, "near_shin": 91, "near_boot": -20, "near_arm": 25, "near_forearm": -40, "far_arm": -40, "far_forearm": -24, "probe": -25},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"hips": [1, 1], "far_boot": [0, -1]},
+        "rotations": {"torso": 3, "head": -3, "far_thigh": 12, "far_shin": -30, "far_boot": 18, "near_thigh": -27, "near_shin": 46, "near_boot": -19, "near_arm": 12, "near_forearm": -23, "far_arm": -20, "far_forearm": -17, "probe": -12},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 115,
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      }
+    ],
+    "roundhouse_kick": [
+      {
+        "duration_ms": 95,
+        "offsets": {"hips": [-1, 1]},
+        "rotations": {"torso": -15, "head": 12, "far_thigh": 23, "far_shin": -53, "far_boot": 30, "near_thigh": -26, "near_shin": 61, "near_boot": -35, "near_arm": -54, "near_forearm": -39, "far_arm": 29, "far_forearm": -30, "probe": 74},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 60,
+        "view": "front",
+        "offsets": {"spin_torso": [-1, 0], "spin_left_boot": [1, -2]},
+        "rotations": {"spin_helmet": -11, "spin_left_boot": 36, "spin_right_boot": -9, "spin_left_arm": -32, "spin_right_arm": 38, "spin_front_probe": 19},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"hips": [1, -1]},
+        "rotations": {"torso": 29, "head": -29, "far_thigh": -16, "far_shin": 31, "far_boot": 1, "near_thigh": -129, "near_shin": 16, "near_boot": 93, "near_arm": 30, "near_forearm": 23, "far_arm": 18, "far_forearm": -29, "probe": -110},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}, "attack": {"part": "near_boot", "at": [-1, -3], "size": [6, 4]}}
+      },
+      {
+        "duration_ms": 55,
+        "offsets": {"hips": [1, -1]},
+        "rotations": {"torso": 22, "head": -22, "far_thigh": -9, "far_shin": 19, "far_boot": 8, "near_thigh": -111, "near_shin": 14, "near_boot": 89, "near_arm": 39, "near_forearm": 5, "far_arm": 14, "far_forearm": -30, "probe": -97},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}, "attack": {"part": "near_boot", "at": [-1, -3], "size": [6, 4]}}
+      },
+      {
+        "duration_ms": 65,
+        "view": "back",
+        "offsets": {"spin_torso": [1, 0], "spin_right_boot": [-1, -1]},
+        "rotations": {"spin_helmet": 10, "spin_left_boot": 4, "spin_right_boot": -38, "spin_left_arm": -40, "spin_right_arm": 30, "spin_back_probe": -24},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 85,
+        "offsets": {"hips": [1, 2], "far_shin": [0, -1], "far_boot": [-1, 1]},
+        "rotations": {"torso": 11, "head": -11, "far_thigh": -22, "far_shin": 76, "far_boot": -54, "near_thigh": -32, "near_shin": 79, "near_boot": -47, "near_arm": -22, "near_forearm": 8, "far_arm": 18, "far_forearm": -16, "probe": -7},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      },
+      {
+        "duration_ms": 105,
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [13, 26]}}
+      }
+    ],
+    "punch": [
+      {
+        "duration_ms": 95,
+        "offsets": {"hips": [0, 1]},
+        "rotations": {"near_thigh": -24, "near_shin": 42, "near_boot": -18, "far_thigh": -18, "far_shin": 42, "far_boot": -24, "torso": -10, "head": 7, "far_arm": 36, "far_forearm": -109, "near_arm": -12, "near_forearm": 18, "probe": 122},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [15, 25]}}
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"hips": [0, 0], "far_arm": [1, 0]},
+        "rotations": {"near_thigh": -14, "near_shin": 22, "near_boot": -8, "far_thigh": 8, "far_shin": -15, "far_boot": 7, "torso": 13, "head": -13, "far_arm": -97, "far_forearm": -7, "near_arm": 23, "near_forearm": 16, "probe": 80},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 26]}, "attack": {"part": "far_forearm", "at": [-1, 2], "size": [4, 4]}}
+      },
+      {
+        "duration_ms": 75,
+        "offsets": {"hips": [0, 0]},
+        "rotations": {"near_thigh": -10, "near_shin": 20, "near_boot": -10, "far_thigh": 7, "far_shin": -14, "far_boot": 7, "torso": 6, "head": -6, "far_arm": -37, "far_forearm": -49, "near_arm": 12, "near_forearm": 21, "probe": 92},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 26]}}
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"hips": [0, 0]},
+        "rotations": {},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 26]}}
+      }
+    ],
+    "uppercut": [
+      {
+        "duration_ms": 110,
+        "offsets": {"hips": [0, 3]},
+        "rotations": {"near_thigh": -54, "near_shin": 103, "near_boot": -49, "far_thigh": -49, "far_shin": 96, "far_boot": -47, "torso": 8, "head": -8, "far_arm": 16, "far_forearm": -23, "near_arm": 18, "near_forearm": -13, "probe": 135},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -23], "size": [15, 23]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"hips": [0, 1], "far_arm": [1, 0]},
+        "rotations": {"near_thigh": -26, "near_shin": 51, "near_boot": -25, "far_thigh": -23, "far_shin": 47, "far_boot": -24, "torso": 5, "head": -11, "far_arm": -73, "far_forearm": -63, "near_arm": 14, "near_forearm": 7, "probe": 105},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [15, 25]}, "attack": {"part": "far_forearm", "at": [-1, 2], "size": [4, 4]}}
+      },
+      {
+        "duration_ms": 70,
+        "offsets": {"hips": [0, 0], "far_arm": [2, -1], "far_forearm": [0, 1]},
+        "rotations": {"near_thigh": -10, "near_shin": 17, "near_boot": -7, "far_thigh": -7, "far_shin": 14, "far_boot": -7, "torso": -6, "head": -9, "far_arm": -127, "far_forearm": -44, "near_arm": 22, "near_forearm": 8, "probe": 94},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 26]}, "attack": {"part": "far_forearm", "at": [-1, 2], "size": [4, 4]}}
+      },
+      {
+        "duration_ms": 85,
+        "offsets": {"hips": [0, 1]},
+        "rotations": {"near_thigh": -22, "near_shin": 44, "near_boot": -22, "far_thigh": -22, "far_shin": 44, "far_boot": -22, "torso": 2, "head": -6, "far_arm": -39, "far_forearm": -44, "near_arm": 4, "near_forearm": 8, "probe": 104},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [15, 25]}}
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"hips": [0, 0]},
+        "rotations": {},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [15, 26]}}
+      }
+    ],
+    "roll": [
+      {
+        "duration_ms": 100,
+        "offsets": {"hips": [0, 4], "head": [0, 1], "root": [0, -2]},
+        "rotations": {"near_thigh": -55, "near_shin": 110, "near_boot": -55, "far_thigh": -48, "far_shin": 94, "far_boot": -46, "near_arm": -48, "near_forearm": -33, "far_arm": -65, "far_forearm": -40, "torso": 22, "head": -18, "probe": 85},
+        "hitboxes": {"body": {"part": "root", "at": [-9, -19], "size": [18, 21]}}
+      },
+      {
+        "duration_ms": 70,
+        "offsets": {"torso": [0, 1], "head": [0, 3], "probe": [-2, 1], "root": [-2, 1]},
+        "rotations": {"torso": 15, "head": 18, "near_thigh": -77, "near_shin": 144, "near_boot": -55, "far_thigh": -73, "far_shin": 136, "far_boot": -55, "near_arm": -40, "near_forearm": -85, "far_arm": -90, "far_forearm": -43, "probe": 151, "hips": 43},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -18], "size": [16, 17]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"torso": [0, 1], "head": [0, 3], "probe": [-2, 1], "root": [-2, -1]},
+        "rotations": {"torso": 15, "head": 12, "near_thigh": -77, "near_shin": 144, "near_boot": -55, "far_thigh": -73, "far_shin": 136, "far_boot": -55, "near_arm": -93, "near_forearm": -50, "far_arm": -90, "far_forearm": -43, "probe": 165, "hips": 101},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -18], "size": [16, 17]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"torso": [0, 1], "head": [0, 3], "probe": [-2, 1], "root": [0, -2]},
+        "rotations": {"torso": 15, "head": 12, "near_thigh": -77, "near_shin": 144, "near_boot": -55, "far_thigh": -73, "far_shin": 136, "far_boot": -55, "near_arm": -93, "near_forearm": -50, "far_arm": -90, "far_forearm": -43, "probe": 165, "hips": 160},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -14], "size": [18, 16]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"torso": [0, 1], "head": [0, 3], "probe": [-2, 1], "root": [2, 1]},
+        "rotations": {"torso": 15, "head": 12, "near_thigh": -77, "near_shin": 144, "near_boot": -55, "far_thigh": -73, "far_shin": 136, "far_boot": -55, "near_arm": -93, "near_forearm": -50, "far_arm": -90, "far_forearm": -43, "probe": 165, "hips": -140},
+        "hitboxes": {"body": {"part": "root", "at": [-10, -18], "size": [16, 17]}}
+      },
+      {
+        "duration_ms": 50,
+        "offsets": {"torso": [0, 1], "head": [0, 3], "probe": [-2, 1], "root": [2, 1]},
+        "rotations": {"torso": 15, "head": 12, "near_thigh": -77, "near_shin": 144, "near_boot": -55, "far_thigh": -73, "far_shin": 136, "far_boot": -55, "near_arm": -93, "near_forearm": -50, "far_arm": -90, "far_forearm": -43, "probe": 165, "hips": -83},
+        "hitboxes": {"body": {"part": "root", "at": [-10, -17], "size": [16, 16]}}
+      },
+      {
+        "duration_ms": 70,
+        "offsets": {"torso": [0, 1], "head": [0, 3], "probe": [-2, 1], "root": [0, 3]},
+        "rotations": {"torso": 20, "head": 12, "near_thigh": -51, "near_shin": 97, "near_boot": -12, "far_thigh": -54, "far_shin": 109, "far_boot": -21, "near_arm": -93, "near_forearm": -50, "far_arm": -90, "far_forearm": -43, "probe": 165, "hips": -34},
+        "hitboxes": {"body": {"part": "root", "at": [-10, -21], "size": [20, 18]}}
+      },
+      {
+        "duration_ms": 110,
+        "offsets": {"hips": [0, 4], "head": [0, 1], "root": [0, -2]},
+        "rotations": {"near_thigh": -55, "near_shin": 110, "near_boot": -55, "far_thigh": -48, "far_shin": 94, "far_boot": -46, "near_arm": -48, "near_forearm": -33, "far_arm": -65, "far_forearm": -40, "torso": 22, "head": -18, "probe": 85},
+        "hitboxes": {"body": {"part": "root", "at": [-9, -19], "size": [18, 21]}}
+      },
+      {
+        "duration_ms": 100,
+        "hitboxes": {"body": {"part": "root", "at": [-5, -26], "size": [14, 26]}}
+      }
+    ],
+    "ledge_pull_up": [
+      {
+        "duration_ms": 105,
+        "offsets": {"root": [-4, 0], "hips": [0, 3]},
+        "rotations": {"torso": 15, "head": -15, "far_arm": -176, "far_forearm": 161, "near_arm": -18, "near_forearm": -87, "far_thigh": -62, "far_shin": 107, "far_boot": -45, "near_thigh": -51, "near_shin": 107, "near_boot": -56, "probe": 90},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -22], "size": [15, 22]}}
+      },
+      {
+        "duration_ms": 60,
+        "offsets": {"root": [-3, -1], "hips": [0, -1], "near_arm": [1, 0], "near_forearm": [0, 1], "probe": [-4, -8]},
+        "rotations": {"torso": 9, "head": -10, "far_arm": -169, "far_forearm": 70, "near_arm": -149, "near_forearm": 23, "far_thigh": -7, "far_shin": -7, "far_boot": -6, "near_thigh": 0, "near_shin": 0, "near_boot": 12, "probe": -23},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [14, 24]}}
+      },
+      {
+        "duration_ms": 75,
+        "offsets": {"root": [1, -2], "hips": [0, 0], "near_arm": [2, 0], "near_forearm": [0, 1], "probe": [-6, -8]},
+        "rotations": {"torso": 2, "head": -4, "far_arm": -83, "far_forearm": 9, "near_arm": -92, "near_forearm": 18, "far_thigh": -62, "far_shin": 107, "far_boot": -62, "near_thigh": -41, "near_shin": 86, "near_boot": -63, "probe": -88},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [14, 22]}}
+      },
+      {
+        "duration_ms": 135,
+        "offsets": {"root": [2, 2], "hips": [0, 0], "near_arm": [2, 0], "near_forearm": [0, 1], "probe": [-5, -10]},
+        "rotations": {"torso": -9, "head": -8, "far_arm": -126, "far_forearm": 63, "near_arm": -111, "near_forearm": 15, "far_thigh": -41, "far_shin": 86, "far_boot": -57, "near_thigh": -39, "near_shin": 102, "near_boot": -87, "probe": -55},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [13, 23]}}
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"root": [3, -3], "hips": [0, 0], "near_arm": [2, 0], "probe": [-7, -6]},
+        "rotations": {"torso": 4, "head": -12, "far_arm": -109, "far_forearm": 105, "near_arm": -85, "near_forearm": 28, "far_thigh": -29, "far_shin": 56, "far_boot": -42, "near_thigh": -20, "near_shin": 54, "near_boot": -54, "probe": -107},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [12, 23]}}
+      },
+      {
+        "duration_ms": 100,
+        "offsets": {"root": [5, -8], "hips": [0, 0], "near_arm": [1, 0], "far_forearm": [0, 1], "near_forearm": [0, 1], "probe": [-6, -6]},
+        "rotations": {"torso": 17, "head": -22, "far_arm": -57, "far_forearm": 58, "near_arm": -53, "near_forearm": 9, "far_thigh": 41, "far_shin": -41, "far_boot": -32, "near_thigh": -83, "near_shin": 7, "near_boot": 68, "probe": -131},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -24], "size": [15, 22]}}
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"root": [8, -11], "hips": [0, 1], "near_forearm": [0, 1], "probe": [-6, -5]},
+        "rotations": {"torso": 21, "head": -21, "far_arm": -111, "far_forearm": 108, "near_arm": -70, "near_forearm": 22, "far_thigh": 88, "far_shin": -102, "far_boot": -26, "near_thigh": -88, "near_shin": 74, "near_boot": 14, "probe": -128},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -23], "size": [15, 19]}}
+      },
+      {
+        "duration_ms": 105,
+        "offsets": {"root": [10, -13], "hips": [0, 2], "near_forearm": [0, 1], "probe": [-5, -6]},
+        "rotations": {"torso": 14, "head": -14, "far_arm": -101, "far_forearm": 124, "near_arm": -68, "near_forearm": 9, "far_thigh": -62, "far_shin": 107, "far_boot": -45, "near_thigh": -69, "near_shin": 96, "near_boot": -27, "probe": -120},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -23], "size": [15, 22]}}
+      },
+      {
+        "duration_ms": 140,
+        "offsets": {"root": [11, -14]},
+        "rotations": {},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [12, 24]}}
+      }
+    ],
+    "rope_climb": [
+      {
+        "duration_ms": 90,
+        "offsets": {"root": [-3, -1], "torso": [1, -3], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [6, -11]},
+        "rotations": {"torso": 9, "head": -13, "near_arm": -116, "near_forearm": -27, "near_thigh": -70, "near_shin": 0, "near_boot": 69, "far_arm": -12, "far_forearm": -67, "far_thigh": -59, "far_shin": 51, "far_boot": -2, "probe": 42},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"root": [-3, -1], "torso": [1, -3], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [4, -12]},
+        "rotations": {"torso": 10, "head": -14, "near_arm": -139, "near_forearm": 0, "near_thigh": -70, "near_shin": 0, "near_boot": 69, "far_arm": -23, "far_forearm": -116, "far_thigh": -75, "far_shin": 74, "far_boot": -13, "probe": 37},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      },
+      {
+        "duration_ms": 70,
+        "offsets": {"root": [-2, -2], "torso": [1, -2], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [9, -7]},
+        "rotations": {"torso": 12, "head": -16, "near_arm": -105, "near_forearm": -67, "near_thigh": -55, "near_shin": 0, "near_boot": 44, "far_arm": -85, "far_forearm": -124, "far_thigh": -88, "far_shin": 103, "far_boot": -34, "probe": 68},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      },
+      {
+        "duration_ms": 95,
+        "offsets": {"root": [-2, -2], "torso": [1, -2], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [8, -8]},
+        "rotations": {"torso": 6, "head": -10, "near_arm": -48, "near_forearm": -96, "near_thigh": -55, "near_shin": 0, "near_boot": 34, "far_arm": -118, "far_forearm": -84, "far_thigh": -103, "far_shin": 116, "far_boot": -23, "probe": 46},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"root": [-2, -1], "torso": [1, -2], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [6, -9]},
+        "rotations": {"torso": 1, "head": -5, "near_arm": -43, "near_forearm": -96, "near_thigh": -60, "near_shin": 0, "near_boot": 45, "far_arm": -113, "far_forearm": -84, "far_thigh": -103, "far_shin": 116, "far_boot": -18, "probe": 46},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      },
+      {
+        "duration_ms": 70,
+        "offsets": {"root": [-3, -1], "torso": [1, -3], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [-1, -13]},
+        "rotations": {"torso": 1, "head": -5, "near_arm": -43, "near_forearm": -52, "near_thigh": -76, "near_shin": 0, "near_boot": 66, "far_arm": -51, "far_forearm": -116, "far_thigh": -90, "far_shin": 90, "far_boot": -5, "probe": 2},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"root": [-3, -1], "torso": [1, -3], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [6, -11]},
+        "rotations": {"torso": 5, "head": -9, "near_arm": -75, "near_forearm": -64, "near_thigh": -83, "near_shin": 0, "near_boot": 78, "far_arm": -8, "far_forearm": -106, "far_thigh": -75, "far_shin": 74, "far_boot": -3, "probe": 42},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"root": [-3, -1], "torso": [1, -3], "near_arm": [6, -2], "far_arm": [2, -1], "probe": [6, -11]},
+        "rotations": {"torso": 8, "head": -12, "near_arm": -115, "near_forearm": -27, "near_thigh": -70, "near_shin": 0, "near_boot": 69, "far_arm": -11, "far_forearm": -67, "far_thigh": -59, "far_shin": 51, "far_boot": -2, "probe": 42},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}}
+      }
+    ],
+    "ladder_climb": [
+      {
+        "duration_ms": 90,
+        "offsets": {"root": [0, 0], "torso": [0, -1], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": 0, "head": 0, "near_arm": 161, "near_forearm": 0, "near_thigh": 175, "near_shin": -133, "near_boot": -42, "far_arm": -19, "far_forearm": -141, "far_thigh": -74, "far_shin": 86, "far_boot": -12},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"root": [0, 0], "torso": [0, -1], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": 1, "head": -1, "near_arm": 160, "near_forearm": 0, "near_thigh": 175, "near_shin": -133, "near_boot": -42, "far_arm": -74, "far_forearm": -124, "far_thigh": -88, "far_shin": 103, "far_boot": -14},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      },
+      {
+        "duration_ms": 70,
+        "offsets": {"root": [0, 0], "torso": [0, -2], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": 4, "head": -4, "near_arm": 108, "near_forearm": 84, "near_thigh": 158, "near_shin": -136, "near_boot": -22, "far_arm": -97, "far_forearm": -106, "far_thigh": -120, "far_shin": 126, "far_boot": -7},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      },
+      {
+        "duration_ms": 95,
+        "offsets": {"root": [0, 0], "torso": [0, -2], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": 5, "head": -5, "near_arm": 88, "near_forearm": 106, "near_thigh": 138, "near_shin": -133, "near_boot": -5, "far_arm": -98, "far_forearm": -106, "far_thigh": -138, "far_shin": 133, "far_boot": 5},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"root": [0, 0], "torso": [0, -1], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": 4, "head": -4, "near_arm": 108, "near_forearm": 84, "near_thigh": 138, "near_shin": -133, "near_boot": -5, "far_arm": -97, "far_forearm": -106, "far_thigh": -120, "far_shin": 126, "far_boot": -7},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      },
+      {
+        "duration_ms": 70,
+        "offsets": {"root": [0, 0], "torso": [0, -1], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": 0, "head": 0, "near_arm": 161, "near_forearm": 0, "near_thigh": 158, "near_shin": -136, "near_boot": -22, "far_arm": -73, "far_forearm": -124, "far_thigh": -103, "far_shin": 116, "far_boot": -13},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"root": [0, 0], "torso": [0, -1], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": -2, "head": 2, "near_arm": 166, "near_forearm": 0, "near_thigh": -173, "near_shin": -126, "near_boot": -60, "far_arm": -46, "far_forearm": -136, "far_thigh": -88, "far_shin": 103, "far_boot": -14},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"root": [0, 0], "torso": [0, -1], "head": [-1, 0], "near_arm": [-2, -1], "far_arm": [2, 0], "near_thigh": [-1, 0], "far_thigh": [1, 0]},
+        "rotations": {"torso": 0, "head": 0, "near_arm": 161, "near_forearm": 0, "near_thigh": 175, "near_shin": -133, "near_boot": -42, "far_arm": -19, "far_forearm": -141, "far_thigh": -74, "far_shin": 86, "far_boot": -12},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -29], "size": [18, 27]}},
+        "view": "ladder"
+      }
+    ],
+    "barrel_vault": [
+      {
+        "duration_ms": 100,
+        "offsets": {"root": [0, 0], "hips": [0, 0]},
+        "rotations": {"near_thigh": 25, "near_shin": 7, "near_boot": -32, "far_thigh": -21, "far_shin": 7, "far_boot": 14, "near_arm": -24, "near_forearm": -10, "far_arm": 24, "far_forearm": -10, "torso": 3, "head": -3},
+        "hitboxes": {"body": {"part": "root", "at": [-8, -25], "size": [17, 25]}}
+      },
+      {
+        "duration_ms": 90,
+        "offsets": {"root": [0, 0], "hips": [0, 4]},
+        "rotations": {"near_thigh": -56, "near_shin": 112, "near_boot": -56, "far_thigh": -60, "far_shin": 120, "far_boot": -60, "near_arm": 51, "near_forearm": 18, "far_arm": -38, "far_forearm": -39, "torso": 19, "head": -17, "probe": -68},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -20], "size": [15, 20]}}
+      },
+      {
+        "duration_ms": 95,
+        "offsets": {"root": [0, -4], "hips": [0, 0]},
+        "rotations": {"torso": 29, "head": -20, "near_arm": 37, "near_forearm": 15, "far_arm": -88, "far_forearm": 10, "near_thigh": -45, "near_shin": 91, "near_boot": -25, "far_thigh": -61, "far_shin": 103, "far_boot": -26, "probe": -35},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -24], "size": [16, 24]}}
+      },
+      {
+        "duration_ms": 62,
+        "offsets": {"root": [0, -8], "hips": [0, -1]},
+        "rotations": {"torso": 44, "head": -35, "near_arm": 37, "near_forearm": 14, "far_arm": -60, "far_forearm": 34, "near_thigh": -50, "near_shin": 84, "near_boot": -30, "far_thigh": -70, "far_shin": 118, "far_boot": -40, "probe": -80},
+        "hitboxes": {"body": {"part": "root", "at": [-7, -24], "size": [18, 21]}}
+      },
+      {
+        "duration_ms": 66,
+        "offsets": {"root": [0, -12], "hips": [1, -1]},
+        "rotations": {"torso": 38, "head": -30, "near_arm": 26, "near_forearm": 48, "far_arm": -22, "far_forearm": -17, "near_thigh": -77, "near_shin": 127, "near_boot": -44, "far_thigh": -98, "far_shin": 130, "far_boot": -22, "probe": -103},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -24], "size": [17, 19]}}
+      },
+      {
+        "duration_ms": 66,
+        "offsets": {"root": [0, -12], "hips": [1, 0]},
+        "rotations": {"torso": 17, "head": -12, "near_arm": -44, "near_forearm": -37, "far_arm": -32, "far_forearm": -43, "near_thigh": -53, "near_shin": 101, "near_boot": -38, "far_thigh": -61, "far_shin": 104, "far_boot": -34, "probe": 74},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -24], "size": [15, 22]}}
+      },
+      {
+        "duration_ms": 65,
+        "offsets": {"root": [0, -8], "hips": [0, 0]},
+        "rotations": {"torso": 10, "head": -8, "near_arm": -43, "near_forearm": -27, "far_arm": -41, "far_forearm": -35, "near_thigh": -36, "near_shin": 62, "near_boot": -24, "far_thigh": -27, "far_shin": 51, "far_boot": -19, "probe": 62},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -25], "size": [14, 24]}}
+      },
+      {
+        "duration_ms": 100,
+        "offsets": {"root": [0, 0], "hips": [-1, 3]},
+        "rotations": {"near_thigh": -61, "near_shin": 93, "near_boot": -32, "far_thigh": -60, "far_shin": 91, "far_boot": -31, "near_arm": -51, "near_forearm": -34, "far_arm": -44, "far_forearm": -29, "torso": 17, "head": -17, "probe": 73},
+        "hitboxes": {"body": {"part": "root", "at": [-7, -21], "size": [15, 21]}}
+      },
+      {
+        "duration_ms": 126,
+        "offsets": {"root": [0, 0]},
+        "rotations": {},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [12, 25]}}
+      }
+    ],
+    "barrel_jump_off": [
+      {
+        "duration_ms": 130,
+        "offsets": {"root": [0, -12]},
+        "rotations": {},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [12, 25]}}
+      },
+      {
+        "duration_ms": 110,
+        "offsets": {"root": [0, -12], "hips": [0, 4]},
+        "rotations": {"near_thigh": -56, "near_shin": 112, "near_boot": -56, "far_thigh": -60, "far_shin": 120, "far_boot": -60, "near_arm": 43, "near_forearm": 29, "far_arm": 44, "far_forearm": 19, "torso": 14, "head": -14, "probe": -75},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -21], "size": [14, 21]}}
+      },
+      {
+        "duration_ms": 64,
+        "offsets": {"root": [0, -12], "hips": [0, -1], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -4, "near_shin": 7, "near_boot": 15, "far_thigh": 8, "far_shin": -13, "far_boot": 20, "near_arm": -94, "near_forearm": -30, "far_arm": -95, "far_forearm": -36, "torso": 12, "head": -9, "probe": 110},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -26], "size": [14, 26]}}
+      },
+      {
+        "duration_ms": 58,
+        "offsets": {"root": [0, -15], "hips": [0, 0], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -60, "near_shin": 109, "near_boot": -51, "far_thigh": -35, "far_shin": 80, "far_boot": -40, "near_arm": -96, "near_forearm": -49, "far_arm": -95, "far_forearm": -45, "torso": 15, "head": -15, "probe": 128},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -25], "size": [15, 23]}}
+      },
+      {
+        "duration_ms": 58,
+        "offsets": {"root": [0, -14], "hips": [0, 0], "near_arm": [1, 0]},
+        "rotations": {"near_thigh": -49, "near_shin": 103, "near_boot": -50, "far_thigh": -35, "far_shin": 76, "far_boot": -36, "near_arm": -68, "near_forearm": -44, "far_arm": -68, "far_forearm": -36, "torso": 16, "head": -14, "probe": 120},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -24], "size": [15, 22]}}
+      },
+      {
+        "duration_ms": 58,
+        "offsets": {"root": [0, -12], "hips": [0, 0]},
+        "rotations": {"near_thigh": -38, "near_shin": 67, "near_boot": -26, "far_thigh": -22, "far_shin": 51, "far_boot": -24, "near_arm": -57, "near_forearm": -38, "far_arm": -50, "far_forearm": -32, "torso": 12, "head": -10, "probe": 107},
+        "hitboxes": {"body": {"part": "root", "at": [-6, -25], "size": [14, 24]}}
+      },
+      {
+        "duration_ms": 58,
+        "offsets": {"root": [0, -7], "hips": [0, 0]},
+        "rotations": {"near_thigh": -20, "near_shin": 41, "near_boot": -18, "far_thigh": -11, "far_shin": 35, "far_boot": -19, "near_arm": -42, "near_forearm": -46, "far_arm": -40, "far_forearm": -30, "torso": 2, "head": -2, "probe": 101},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [12, 25]}}
+      },
+      {
+        "duration_ms": 58,
+        "offsets": {"root": [0, -3], "hips": [0, 0]},
+        "rotations": {"near_thigh": -8, "near_shin": 23, "near_boot": -13, "far_thigh": -3, "far_shin": 17, "far_boot": -12, "near_arm": -42, "near_forearm": -46, "far_arm": -40, "far_forearm": -30, "torso": 2, "head": -2, "probe": 101},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [12, 25]}}
+      },
+      {
+        "duration_ms": 100,
+        "offsets": {"root": [0, 0], "hips": [-1, 3]},
+        "rotations": {"near_thigh": -61, "near_shin": 93, "near_boot": -32, "far_thigh": -60, "far_shin": 91, "far_boot": -31, "near_arm": -51, "near_forearm": -34, "far_arm": -44, "far_forearm": -29, "torso": 17, "head": -17, "probe": 73},
+        "hitboxes": {"body": {"part": "root", "at": [-7, -21], "size": [15, 21]}}
+      },
+      {
+        "duration_ms": 130,
+        "offsets": {"root": [0, 0]},
+        "rotations": {},
+        "hitboxes": {"body": {"part": "root", "at": [-5, -25], "size": [12, 25]}}
+      }
+    ]
+  }
+}

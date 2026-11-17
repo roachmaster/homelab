@@ -1,7 +1,9 @@
 # Python source sets
 
 Put each Python capability or tool under `src/python/<purpose>/`.
-No Python projects exist yet.
+
+- [Pixel-art authoring](pixel-art/README.md) builds layered character sprites,
+  drawing-step previews, and animation manifests.
 
 - For a real packaged project, keep `pyproject.toml` at that project's root and
   importable code under `<purpose>/src/<import_name>/`; use underscores for Python

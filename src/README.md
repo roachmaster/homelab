@@ -54,6 +54,7 @@ Do not scaffold a bridge or framework just to satisfy a directory diagram.
 5. Keep generated output and local secrets out of Git. Add targeted ignore rules
    and update the language README with a link to the new source set.
 
-The [Rust workspace](rust/README.md) now contains the first Forge core packages,
-a runnable in-process example and local check commands. Python and Bash remain
-organizational guides until actual source sets are added.
+The [Rust workspace](rust/README.md) contains the Forge core packages, a runnable
+in-process example, and local check commands. [Python](python/README.md) indexes
+standalone tools, including pixel-art authoring. [Bash](bash/README.md) documents
+the source layout for shell tools.
