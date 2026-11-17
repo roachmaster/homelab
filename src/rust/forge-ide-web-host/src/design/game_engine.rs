@@ -1,9 +1,12 @@
-use super::{render, render_element, text, Attribute, Node, Tag};
+use super::{markup, render, render_element, text, Attribute, Node, Tag};
 use forge_ide_ui::render_markdown;
 use sha2::{Digest, Sha256};
-use std::fmt::Write;
-
-pub(super) const BODY: &[Node] = &[Node::GameEngineReport];
+pub(super) const BODY: &[Node] = &[
+    element!(Nav [Class = "section-nav", AriaLabel = "Game engine playtest"];
+        element!(A [Href = "/playtest"]; text("Open browser playtest")),
+    ),
+    Node::GameEngineReport,
+];
 
 pub const SOURCE_PATH: &str = "../../../docs/architecture/proposals/forge-game-engine.md";
 const REPORT: &str =
@@ -91,7 +94,7 @@ fn render_prose(markdown: &str, output: &mut String) {
     }
 }
 
-const STYLES: &[(&str, &[(&str, &str)])] = &[
+const STYLES: markup::Styles = &[
     (
         ".game-engine-report",
         &[
@@ -186,13 +189,5 @@ const STYLES: &[(&str, &[(&str, &str)])] = &[
 ];
 
 pub fn stylesheet() -> String {
-    let mut css = String::new();
-    for (selector, declarations) in STYLES {
-        let _ = writeln!(css, "{selector} {{");
-        for (property, value) in *declarations {
-            let _ = writeln!(css, "  {property}: {value};");
-        }
-        css.push_str("}\n");
-    }
-    css
+    markup::stylesheet(STYLES)
 }

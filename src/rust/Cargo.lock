@@ -350,6 +350,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "forge-game-runtime"
+version = "0.1.0"
+
+[[package]]
 name = "forge-ide"
 version = "0.1.0"
 dependencies = [
@@ -386,6 +390,7 @@ name = "forge-ide-web"
 version = "0.1.0"
 dependencies = [
  "forge-bootstrap",
+ "forge-game-runtime",
  "forge-ide-ui",
  "forge-provider",
  "forge-template",

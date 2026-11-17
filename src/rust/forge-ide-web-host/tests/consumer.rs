@@ -1088,6 +1088,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert_eq!(response.matches("<table>").count(), 5);
         assert!(response.contains("href=\"/design/game-engine-architecture.svg\""));
         assert!(response.contains("href=\"/design/game-engine-build-sequence.svg\""));
+        assert!(response.contains("href=\"/playtest\""));
         assert!(!response.contains("<script"));
         let head = request("HEAD", path);
         assert!(head.starts_with("HTTP/1.1 200 OK"));
@@ -1129,6 +1130,37 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
     }
     assert!(request("GET", "/design/manifest.json").starts_with("HTTP/1.1 404 Not Found"));
     assert!(request("POST", "/design").starts_with("HTTP/1.1 405 Method Not Allowed"));
+}
+
+#[test]
+fn browser_playtest_serves_generated_assets_on_fixed_paths() {
+    let f = Files::new();
+    let (h, _) = host(&f);
+    let request = |method, path| {
+        exchange(
+            &h,
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: {}\r\n\r\n",
+                h.local_addr().unwrap()
+            ),
+        )
+    };
+    for path in ["/playtest", "/playtest/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("Content-Security-Policy:"));
+        assert!(response.contains("<canvas id=\"playtest-board\""));
+        assert!(response.contains("href=\"/design/game-studio\""));
+        assert!(response.contains("src=\"/playtest/main.js\""));
+        assert!(request("HEAD", path).ends_with("\r\n\r\n"));
+    }
+    assert!(request("GET", "/playtest/style.css").contains("Content-Type: text/css; charset=utf-8"));
+    let script = request("GET", "/playtest/main.js");
+    assert!(script.contains("Content-Type: text/javascript; charset=utf-8"));
+    assert!(script.contains("requestAnimationFrame"));
+    assert!(request("POST", "/playtest").starts_with("HTTP/1.1 405"));
+    assert!(request("GET", "/playtest/unknown.js").starts_with("HTTP/1.1 404"));
 }
 
 #[test]

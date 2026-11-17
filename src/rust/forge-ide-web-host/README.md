@@ -239,6 +239,16 @@ bounds remain independent. Native parser work is trusted-source synchronous work
 not an adversarial-input sandbox. Operational credential provisioning, multi-user
 identity/delegation, public TLS hosting and file editing are deferred.
 
+## Browser playtest
+
+Open **Design → Game engine design → Open browser playtest** to play Room One.
+The host embeds its Rust-generated HTML, CSS and browser adapter at `/playtest`.
+The player loads the verified `app.wasm` from the current UI bundle and runs its
+own Rust game state and fixed simulation ticks in the tab. The browser draws the
+board with Canvas 2D and maps keyboard and on-screen direction controls to game
+actions. The playtest has no command requests or storage. Rebuild the host and
+regenerate the UI bundle together.
+
 ## Reproducible real-browser acceptance
 
 The browser suite is test code, not hand-authored application JavaScript. It lives

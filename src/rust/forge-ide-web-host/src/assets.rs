@@ -25,6 +25,9 @@ const GAME_STUDIO_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/game-s
 const GAME_STUDIO_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/game-studio.css"));
 const GAME_ENGINE_ARCHITECTURE: &[u8] = include_bytes!("../design/game-engine-architecture.svg");
 const GAME_ENGINE_BUILD: &[u8] = include_bytes!("../design/game-engine-build-sequence.svg");
+const PLAYTEST_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.html"));
+const PLAYTEST_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.css"));
+const PLAYTEST_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.js"));
 const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
     (
         "forge-ide-chat-desktop.png",
@@ -68,7 +71,7 @@ const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
     ),
 ];
 
-fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
+fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     match path {
         "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
         "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
@@ -90,6 +93,9 @@ fn design_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/game-studio.css" => Some(("text/css; charset=utf-8", GAME_STUDIO_CSS)),
         "/design/game-engine-architecture.svg" => Some(("image/svg+xml", GAME_ENGINE_ARCHITECTURE)),
         "/design/game-engine-build-sequence.svg" => Some(("image/svg+xml", GAME_ENGINE_BUILD)),
+        "/playtest" | "/playtest/" => Some(("text/html; charset=utf-8", PLAYTEST_HTML)),
+        "/playtest/style.css" => Some(("text/css; charset=utf-8", PLAYTEST_CSS)),
+        "/playtest/main.js" => Some(("text/javascript; charset=utf-8", PLAYTEST_JS)),
         _ => {
             let name = path.strip_prefix("/design/")?;
             DESIGN_IMAGES
@@ -155,6 +161,6 @@ impl Assets {
         self.0
             .get(name)
             .map(|(mime, b)| (*mime, b.as_slice()))
-            .or_else(|| design_asset(path))
+            .or_else(|| embedded_asset(path))
     }
 }

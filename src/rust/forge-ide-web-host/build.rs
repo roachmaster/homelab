@@ -18,11 +18,17 @@ fn main() -> io::Result<()> {
         ("chat-dispatch.html", DesignPage::ChatDispatch),
         ("mail.html", DesignPage::Mail),
         ("game-studio.html", DesignPage::GameStudio),
+        ("playtest.html", DesignPage::Playtest),
     ] {
         fs::write(output.join(name), page.render())?;
     }
     fs::write(
         output.join("game-studio.css"),
         design::game_engine::stylesheet(),
+    )?;
+    fs::write(output.join("playtest.css"), design::playtest::stylesheet())?;
+    fs::write(
+        output.join("playtest.js"),
+        design::playtest_browser::javascript(),
     )
 }

@@ -1926,7 +1926,8 @@ async function gameEngineDesignJourney(page, designUrl) {
   const link = page.getByRole('link', { name: 'Game engine design', exact: true });
   await check(link).toHaveAttribute('href', '/design/game-studio');
   await link.click();
-  await check(page).toHaveURL(new URL('/design/game-studio', designUrl).href);
+  const gameDesignUrl = new URL('/design/game-studio', designUrl).href;
+  await check(page).toHaveURL(gameDesignUrl);
   assert.deepEqual(page.context().pages(), pages, 'the game engine report opens in Design’s tab');
 
   const report = page.getByRole('main');
@@ -1956,6 +1957,57 @@ async function gameEngineDesignJourney(page, designUrl) {
       true, `the game engine report fits the ${width}px viewport`);
   }
 
+  const playtest = report.getByRole('link', { name: 'Open browser playtest', exact: true });
+  await check(playtest).toHaveAttribute('href', '/playtest');
+  await page.setViewportSize({ width: 320, height: 720 });
+  await playtest.click();
+  await check(page).toHaveURL(new URL('/playtest', designUrl).href);
+  assert.deepEqual(page.context().pages(), pages, 'the playtest opens in Design’s tab');
+  await page.bringToFront();
+  await check(page.getByRole('heading', { level: 1, name: 'Room One', exact: true })).toBeVisible();
+  const board = page.locator('canvas#playtest-board');
+  const status = page.locator('#playtest-status');
+  const restart = page.getByRole('button', { name: 'Restart', exact: true });
+  await check(board).toBeVisible();
+  await check(status).toHaveText('Find the key.');
+  for (const direction of ['up', 'down', 'left', 'right']) {
+    await check(page.getByRole('button', { name: `Move ${direction}`, exact: true })).toBeEnabled();
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+    true, 'the playtest fits the 320px viewport');
+
+  // Give each short press enough real display frames for the fixed-step game
+  // loop to consume it before the next press. The browser drives the runtime.
+  const waitForTicks = () => page.evaluate(() => new Promise(resolve => {
+    requestAnimationFrame(start => {
+      const next = now => {
+        if (now - start >= 50) resolve();
+        else requestAnimationFrame(next);
+      };
+      requestAnimationFrame(next);
+    });
+  }));
+  const keys = { U: 'ArrowUp', D: 'ArrowDown', L: 'ArrowLeft', R: 'ArrowRight' };
+  const move = async sequence => {
+    for (const direction of sequence) {
+      await page.keyboard.press(keys[direction]);
+      await waitForTicks();
+    }
+  };
+  await page.getByRole('button', { name: 'Move right', exact: true }).click();
+  await waitForTicks();
+  await board.focus();
+  await check(board).toBeFocused();
+  await move('RDDLLDDRRDDLL');
+  await check(status).toHaveText('Exit open. Reach the exit.');
+  await move('RRUURRDDRRRRRRUUU');
+  await check(status).toHaveText('You won!');
+  await restart.click();
+  await check(status).toHaveText('Find the key.');
+
+  await page.getByRole('link', { name: 'Back to game engine design', exact: true }).click();
+  await check(page).toHaveURL(gameDesignUrl);
+  assert.deepEqual(page.context().pages(), pages, 'the playtest returns in the same tab');
   await page.getByRole('link', { name: 'Back to Design', exact: true }).click();
   await check(page).toHaveURL(designUrl);
   await check(link).toBeVisible();

@@ -17,7 +17,7 @@ macro_rules! html_names {
 }
 
 html_names!(Tag {
-    A => "a", Article => "article", Aside => "aside", Button => "button", Code => "code",
+    A => "a", Article => "article", Aside => "aside", Button => "button", Canvas => "canvas", Code => "code",
     Dd => "dd", Details => "details", Dialog => "dialog", Div => "div",
     Dl => "dl", Dt => "dt", Figcaption => "figcaption", Figure => "figure",
     Form => "form", H1 => "h1", H2 => "h2", H3 => "h3", H4 => "h4",
@@ -32,6 +32,7 @@ html_names!(Attribute {
     AriaLabelledby => "aria-labelledby", AriaLive => "aria-live", Autofocus => "autofocus",
     Class => "class", DataHistoryDismiss => "data-history-dismiss",
     DataPreviewChat => "data-preview-chat", DataRole => "data-role",
+    DataPlaytestAction => "data-playtest-action", Disabled => "disabled",
     For => "for", Height => "height", Hidden => "hidden", Href => "href",
     Id => "id", Loading => "loading", Method => "method", Open => "open",
     Rel => "rel", Required => "required", Role => "role", Rows => "rows",
@@ -59,6 +60,8 @@ pub mod game_engine;
 mod history;
 mod landing;
 mod mail;
+pub mod playtest;
+pub mod playtest_browser;
 
 fn render(nodes: &[Node], output: &mut String) {
     for node in nodes {
@@ -96,6 +99,7 @@ pub enum DesignPage {
     ChatDispatch,
     Mail,
     GameStudio,
+    Playtest,
 }
 
 impl DesignPage {
@@ -127,8 +131,13 @@ impl DesignPage {
                 "Back to Design",
                 game_engine::BODY,
             ),
+            Self::Playtest => (
+                "Room One · Forge Playtest",
+                "/design/game-studio",
+                "Back to game engine design",
+                playtest::BODY,
+            ),
         };
-        let overview = matches!(self, Self::Overview);
         let mut output = String::from(
             "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
              <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
@@ -141,9 +150,13 @@ impl DesignPage {
         output.push_str(match self {
             Self::Overview => "<script src=\"/design/previous-chats.js\" defer></script>",
             Self::GameStudio => "<link rel=\"stylesheet\" href=\"/design/game-studio.css\">",
+            Self::Playtest => concat!(
+                "<link rel=\"stylesheet\" href=\"/playtest/style.css\">",
+                "<script src=\"/playtest/main.js\" defer></script>",
+            ),
             _ => "<link rel=\"stylesheet\" href=\"/design/chat-history.css\">",
         });
-        let main = if overview {
+        let main = if matches!(self, Self::Overview | Self::Playtest) {
             "page-width"
         } else {
             "page-width history-contract"

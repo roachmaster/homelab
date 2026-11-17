@@ -2,6 +2,8 @@
 //! Application UI is declared in typed components and YAML style tokens.
 //! Generator implementation owns reusable web syntax; no application code blobs.
 #[cfg(target_arch = "wasm32")]
+mod playtest;
+#[cfg(target_arch = "wasm32")]
 mod wasm;
 
 #[cfg(feature = "build-assets")]
