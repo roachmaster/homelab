@@ -35,6 +35,12 @@ configuration, start an exposed server or change host security as a fallback.
 
 ## Assert the rendered deliverable
 
+Review changed screens against
+[Design Modern UI](../design-modern-ui/SKILL.md). Check the primary action,
+launcher and documentation differentiation, readable surfaces, responsive
+grouping, keyboard focus, and any reduced-motion behavior while the screen
+is visible.
+
 Native tests exercise the model and renderer. For changes to generated output,
 also assert what the browser renders.
 

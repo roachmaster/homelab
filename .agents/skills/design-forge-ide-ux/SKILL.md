@@ -5,6 +5,10 @@ description: Design or review Forge IDE Chat and Workbench UX, including respons
 
 # Design Forge IDE UX
 
+Use [Design Modern UI](../design-modern-ui/SKILL.md) before layout changes
+to choose the action hierarchy, typography, surfaces, and responsive spacing.
+Keep those choices centered on the IDE task described below.
+
 Build a **task-oriented IDE**. In Workbench, start with the user's work in an
 authorized project. Help them find a file, select it, and use the dominant work
 area. Inspection, source-shape analysis, metrics and

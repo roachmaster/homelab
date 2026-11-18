@@ -11,3 +11,10 @@ freeze the startup registry, create the selected instances, and inject ready
 ports. Inject a scoped provider where the consumer needs runtime acquisition.
 Keep dependency selection at the composition root and keep pure logic and
 contract types independent of provisioning.
+
+Before changing a page, layout, or frontend component, use
+[Design Modern UI](.agents/skills/design-modern-ui/SKILL.md) to define its
+visual hierarchy and interaction states. Follow
+[Design Forge UI](.agents/skills/design-forge-ui/SKILL.md) for typed Rust/YAML
+authoring and [Test Forge UI](.agents/skills/test-forge-ui/SKILL.md) to verify
+the rendered result.

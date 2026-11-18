@@ -20,9 +20,9 @@ html_names!(Tag {
     A => "a", Article => "article", Aside => "aside", Button => "button", Canvas => "canvas", Code => "code",
     Dd => "dd", Details => "details", Dialog => "dialog", Div => "div",
     Dl => "dl", Dt => "dt", Figcaption => "figcaption", Figure => "figure",
-    Form => "form", H1 => "h1", H2 => "h2", H3 => "h3", H4 => "h4",
+    Footer => "footer", Form => "form", H1 => "h1", H2 => "h2", H3 => "h3", H4 => "h4",
     Img => "img", Input => "input", Label => "label", Li => "li", Nav => "nav",
-    Ol => "ol", P => "p", Pre => "pre", Section => "section", Select => "select", Small => "small",
+    Ol => "ol", P => "p", Path => "path", Pre => "pre", Section => "section", Select => "select", Small => "small", Svg => "svg",
     Span => "span", Strong => "strong", Summary => "summary", Table => "table", Textarea => "textarea", Ul => "ul",
 });
 
@@ -35,16 +35,25 @@ html_names!(Attribute {
     DataPreviewChat => "data-preview-chat", DataRole => "data-role",
     DataPlaytestAction => "data-playtest-action",
     DataPlaytestTraceChannel => "data-playtest-trace-channel", Disabled => "disabled",
-    For => "for", Height => "height", Hidden => "hidden", Href => "href",
+    D => "d", Fill => "fill", Focusable => "focusable", For => "for", Height => "height", Hidden => "hidden", Href => "href",
     Id => "id", Loading => "loading", Maxlength => "maxlength", Method => "method", Open => "open",
     Rel => "rel", Required => "required", Role => "role", Rows => "rows",
-    Src => "src", Tabindex => "tabindex", Target => "target", Type => "type", Width => "width",
+    Src => "src", Stroke => "stroke", StrokeLinecap => "stroke-linecap", StrokeLinejoin => "stroke-linejoin", StrokeWidth => "stroke-width",
+    Tabindex => "tabindex", Target => "target", Type => "type", ViewBox => "viewBox", Width => "width",
 });
+
+#[derive(Clone, Copy)]
+enum Icon {
+    Terminal,
+    Studio,
+    Playtest,
+}
 
 enum Node {
     Text(&'static str),
     Element(Tag, &'static [(Attribute, &'static str)], &'static [Node]),
     GameEngineReport,
+    Icon(Icon),
 }
 
 const fn text(value: &'static str) -> Node {
@@ -89,8 +98,44 @@ fn render(nodes: &[Node], output: &mut String) {
                 render_element(*tag, attributes, output, |out| render(children, out));
             }
             Node::GameEngineReport => game_engine::render_report(output),
+            Node::Icon(icon) => render_icon(*icon, output),
         }
     }
+}
+
+fn render_icon(icon: Icon, output: &mut String) {
+    let paths: &[&str] = match icon {
+        Icon::Terminal => &[
+            "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+            "m7 9 3 3-3 3M13 15h4",
+        ],
+        Icon::Studio => &["m12 3 9 5-9 5-9-5 9-5Z", "m3 12 9 5 9-5M3 16l9 5 9-5"],
+        Icon::Playtest => &[
+            "M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z",
+            "m10 8 6 4-6 4V8Z",
+        ],
+    };
+    render_element(
+        Tag::Svg,
+        &[
+            (Attribute::ViewBox, "0 0 24 24"),
+            (Attribute::Width, "20"),
+            (Attribute::Height, "20"),
+            (Attribute::AriaHidden, "true"),
+            (Attribute::Focusable, "false"),
+            (Attribute::Fill, "none"),
+            (Attribute::Stroke, "currentColor"),
+            (Attribute::StrokeWidth, "1.6"),
+            (Attribute::StrokeLinecap, "round"),
+            (Attribute::StrokeLinejoin, "round"),
+        ],
+        output,
+        |out| {
+            for path in paths {
+                render_element(Tag::Path, &[(Attribute::D, path)], out, |_| {});
+            }
+        },
+    );
 }
 
 fn render_element(
@@ -212,10 +257,7 @@ impl DesignPage {
             escape(title),
         );
         output.push_str(match self {
-            Self::Home => concat!(
-                "<link rel=\"stylesheet\" href=\"/design/index.css\">",
-                "<link rel=\"stylesheet\" href=\"/design/home.css\">",
-            ),
+            Self::Home => "<link rel=\"stylesheet\" href=\"/design/home.css\">",
             Self::Overview => concat!(
                 "<link rel=\"stylesheet\" href=\"/design/index.css\">",
                 "<script src=\"/design/previous-chats.js\" defer></script>",
@@ -236,16 +278,42 @@ impl DesignPage {
         } else {
             "page-width history-contract"
         };
+        let body_class = if matches!(self, Self::Home) {
+            "home-page"
+        } else {
+            ""
+        };
         let _ = write!(
             output,
-            "</head><body><a class=\"skip-link\" href=\"#main\">Skip to content</a>\
+            "</head><body class=\"{body_class}\"><a class=\"skip-link\" href=\"#main\">Skip to content</a>\
              <header class=\"site-header\"><div class=\"page-width header-inner\">\
-             <span class=\"wordmark\"><span class=\"mark\" aria-hidden=\"true\">F</span> Forge IDE</span>\
-             <a class=\"return-link\" href=\"{}\"><span aria-hidden=\"true\">←</span> {}</a>\
-             </div></header><main id=\"main\" class=\"{main}\">",
-            escape(back_href),
-            escape(back_label),
+             <a class=\"wordmark return-link\" href=\"/home\"><span class=\"mark\" aria-hidden=\"true\">F</span> Forge IDE</a>",
         );
+        if matches!(self, Self::Home) {
+            render_element(
+                Tag::A,
+                &[
+                    (Attribute::Class, "return-link home-github"),
+                    (Attribute::Href, "https://github.com/roachmaster/homelab"),
+                    (Attribute::AriaLabel, "GitHub"),
+                ],
+                &mut output,
+                |out| {
+                    out.push_str("GitHub ");
+                    render_element(Tag::Span, &[(Attribute::AriaHidden, "true")], out, |out| {
+                        out.push('↗')
+                    });
+                },
+            );
+        } else {
+            let _ = write!(
+                output,
+                "<a class=\"return-link\" href=\"{}\"><span aria-hidden=\"true\">←</span> {}</a>",
+                escape(back_href),
+                escape(back_label)
+            );
+        }
+        let _ = write!(output, "</div></header><main id=\"main\" class=\"{main}\">");
         render(body, &mut output);
         output.push_str("</main></body></html>\n");
         output

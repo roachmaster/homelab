@@ -3,6 +3,22 @@
 **Status** Implemented v1 at `/home`.
 **Planning baseline:** GitHub `main` at `c57ef4b`.
 
+## Current launcher layout
+
+The visual revision uses a solid primary IDE action beside the Design action,
+three full-card tool links with decorative line icons, and a compact grid of
+five documentation links. IDE screen guidance lives with the wireframe link.
+The header provides the Home wordmark and GitHub link. A compact footer carries
+repository information. The page uses a static Homelab workspace label.
+
+The Home styles are declared in Rust and scoped to this page. They provide
+three dark surface levels, subtle borders, visible keyboard focus, and a
+responsive launcher and documentation grid. The shared Design index retains
+its own stylesheet. Follow the
+[modern UI quality skill](../../../.agents/skills/design-modern-ui/SKILL.md)
+when revising the layout. The remaining sections preserve the initial design
+and its route and behavior decisions.
+
 ## The problem
 
 The portal has no starting point. Every surface exists, but there is no page
@@ -136,9 +152,9 @@ it does not rewire the existing graph.
    The landing page uses the portal palette, like every other portal-shell
    page. Reconciling the two palettes is a separate design decision, not a
    landing-page dependency.
-6. **A clickable wordmark.** The shell's wordmark is a span, not a link, on
-   all thirteen pages. Making it a link changes every page; v1 leaves the
-   shell alone. Open decision below.
+6. **Clickable wordmark — implemented.** The Forge name in the IDE and
+   shared document header opens `/home`. The IDE uses its existing workspace
+   handoff to preserve drafts and selection across navigation.
 
 ### 6. Constraints honored
 
@@ -257,9 +273,7 @@ the chat journey keeps `ide-chat-rendered.png`.
 2. **Deep links into IDE screens.** Hash routing (`/#chat`) needs app-shell
    work and a session-restore decision. Until then, the landing page links
    to `/` and names the screens.
-3. **Clickable wordmark.** The shell's wordmark is a span on all pages.
-   Making it link to `/home` (or `/`) is a shell-wide change to consider on
-   its own, not inside this design.
+3. **Clickable wordmark — decided.** The shared wordmark opens `/home`.
 4. **Palette reconciliation.** The portal shell and the IDE theme differ. The
    landing page accepts the portal palette; unifying the two is a separate
    design.

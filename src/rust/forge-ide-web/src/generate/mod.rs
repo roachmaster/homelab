@@ -260,7 +260,7 @@ impl Factory<AssetBundle> for AssetFactory {
     type Error = AssetError;
     fn create(&self) -> Result<AssetBundle, AssetError> {
         let schema = Schema::Object {
-            fields: ["title", "subtitle", "brand_context", "content"]
+            fields: ["title", "subtitle", "brand", "brand_context", "content"]
                 .into_iter()
                 .map(|k| {
                     (
@@ -274,15 +274,24 @@ impl Factory<AssetBundle> for AssetFactory {
                 .collect(),
             allow_unknown: false,
         };
+        let mut brand = String::new();
         let mut brand_context = String::new();
         let mut content = String::new();
         for c in &self.config.document.children {
-            let target = if matches!(c, Component::BrandContext { .. }) {
-                &mut brand_context
-            } else {
-                &mut content
+            let target = match c {
+                Component::BrandLink { .. } => &mut brand,
+                Component::BrandContext { .. } => &mut brand_context,
+                _ => &mut content,
             };
             html::emit(c, target);
+        }
+        if brand.is_empty() {
+            use std::fmt::Write;
+            let _ = write!(
+                brand,
+                "<span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{}</h1>",
+                html::escape(&self.config.document.title)
+            );
         }
         let context = Value::Object(BTreeMap::from([
             (
@@ -293,6 +302,7 @@ impl Factory<AssetBundle> for AssetFactory {
                 "subtitle".into(),
                 Value::Text(self.config.document.subtitle.clone()),
             ),
+            ("brand".into(), Value::Text(brand)),
             ("brand_context".into(), Value::Text(brand_context)),
             ("content".into(), Value::Text(content)),
         ]));

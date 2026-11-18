@@ -1111,12 +1111,15 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
         assert!(response.contains("Content-Security-Policy:"));
         assert!(!response.contains("Set-Cookie:"));
         assert!(response.contains("<h1>Forge portal</h1>"));
-        assert!(response.contains("href=\"/design/index.css\""));
         assert!(response.contains("href=\"/design/home.css\""));
-        assert!(response.contains("class=\"return-link\" href=\"/\""));
+        assert!(response.contains("id=\"home-tools\""));
+        assert!(response.contains("id=\"home-docs\""));
+        assert!(response.contains("class=\"home-footer\""));
+        assert!(response.contains("aria-label=\"GitHub\""));
+        assert!(!response.contains("Back to Forge"));
         for (destination, label) in [
             ("/", "Open Forge IDE"),
-            ("/design", "Browse the design docs"),
+            ("/design", "Browse design docs"),
             ("/", "Forge IDE"),
             ("/studio", "Forge Studio"),
             ("/playtest", "Room One playtest"),
@@ -1126,15 +1129,21 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
             ("/design#game-development", "Game development"),
             (
                 "/design#wireframes-and-workspace",
-                "Wireframes and workspace",
+                "Wireframes &amp; IDE screens",
             ),
-            ("/", "Forge IDE screens"),
             (
                 "https://github.com/roachmaster/homelab",
                 "Homelab on GitHub",
             ),
         ] {
-            assert!(response.contains(&format!("href=\"{destination}\">{label}</a>")));
+            assert!(
+                response.contains(&format!("href=\"{destination}\"")),
+                "{destination}"
+            );
+            assert!(
+                response.contains(&format!("aria-label=\"{label}\"")),
+                "{label}"
+            );
         }
         assert!(!response.contains("<script"));
         assert!(!response.contains("target=\"_blank\""));
@@ -1151,9 +1160,29 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
     let stylesheet = request("GET", "/design/home.css");
     assert!(stylesheet.starts_with("HTTP/1.1 200 OK"));
     assert!(stylesheet.contains("Content-Type: text/css; charset=utf-8"));
-    assert!(stylesheet.contains(".home-actions .home-primary"));
+    assert!(stylesheet.contains(".home-primary"));
     assert!(request("GET", "/home/unknown").starts_with("HTTP/1.1 404 Not Found"));
     assert!(request("GET", "/design").contains("href=\"/home\">portal home page</a>"));
+    for path in [
+        "/home",
+        "/design",
+        "/design/forge-providers",
+        "/studio",
+        "/playtest",
+    ] {
+        let response = request("GET", path);
+        let header = response
+            .split_once("<header class=\"site-header\">")
+            .unwrap()
+            .1
+            .split_once("</header>")
+            .unwrap()
+            .0;
+        assert!(
+            header.contains("class=\"wordmark return-link\" href=\"/home\""),
+            "{path}"
+        );
+    }
 }
 
 #[test]

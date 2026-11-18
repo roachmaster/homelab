@@ -49,6 +49,12 @@ impl PortalDocument {
 }
 #[derive(Clone, Debug)]
 pub enum Component {
+    /// Document identity linking to a portal document in the current tab.
+    BrandLink {
+        id: String,
+        label: String,
+        document: PortalDocument,
+    },
     /// Protected text projected next to the document title.
     BrandContext {
         id: String,
@@ -239,6 +245,7 @@ pub enum Component {
 /// Component structure, not a string-template macro. Every text value is escaped.
 #[macro_export]
 macro_rules! component {
+    (brand_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::BrandLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
     (brand_context $id:expr) => { $crate::generate::Component::BrandContext { id:$id.into() } };
     (screen $id:expr, $title:expr, $protected:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Screen { id:$id.into(),title:$title.into(),protected:$protected,children:vec![$($child),*] } };
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
@@ -392,6 +399,7 @@ impl Document {
                 | Component::Reload { id, label }
                 | Component::CompactToolbar { id, label, .. }
                 | Component::Diff { id, label }
+                | Component::BrandLink { id, label, .. }
                 | Component::NavigationLink { id, label, .. }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
                 Component::PaneLink { id, label, target }
@@ -473,6 +481,9 @@ impl Document {
                 }
                 Component::BrandContext { .. } if depth != 0 => {
                     return Err("brand context must be a document child");
+                }
+                Component::BrandLink { .. } if depth != 0 => {
+                    return Err("brand link must be a document child");
                 }
                 Component::PaneHeaderLink { .. }
                     if !matches!(parent, Some(Component::Pane { .. })) =>
@@ -629,8 +640,15 @@ impl Document {
             "leave-confirm".into(),
         ]);
         let mut count = 0;
+        let mut has_brand_link = false;
         let mut has_brand_context = false;
         for c in &self.children {
+            if matches!(c, Component::BrandLink { .. }) {
+                if has_brand_link {
+                    return Err("document allows one brand link");
+                }
+                has_brand_link = true;
+            }
             if matches!(c, Component::BrandContext { .. }) {
                 if has_brand_context {
                     return Err("document allows one brand context");

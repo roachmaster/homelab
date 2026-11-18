@@ -1635,8 +1635,17 @@ async function homeJourney(page, traffic) {
   const tabKey = () => page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
   const originalTab = await tabKey();
   assert.match(originalTab, /^[a-f0-9]{32}$/);
+  const originalDraft = await page.locator('#chat-draft').inputValue();
   const counts = () => ['resume', 'pair', 'inspect', 'source', 'other'].map(traffic.count);
   const before = counts();
+  const brandLink = page.locator('header').getByRole('link', { name: 'Forge IDE', exact: true });
+  await check(brandLink).toBeVisible();
+  await check(brandLink).toHaveAttribute('href', '/home');
+  await check(brandLink).toHaveAttribute('data-workspace-navigation', '');
+  await check(brandLink).not.toHaveAttribute('target', /.+/);
+  const brandBounds = await brandLink.boundingBox();
+  assert.ok(brandBounds && brandBounds.width >= 44 && brandBounds.height >= 44,
+    'the Forge name has a phone-sized touch target');
   const homeLink = page.locator('#ide-navigation').getByRole('link', { name: 'Home', exact: true });
   await check(homeLink).toBeVisible();
   await check(homeLink).toHaveAttribute('href', '/home');
@@ -1644,8 +1653,8 @@ async function homeJourney(page, traffic) {
   await check(homeLink).not.toHaveAttribute('target', /.+/);
   const bounds = await homeLink.boundingBox();
   assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, 'the IDE Home link has a phone-sized touch target');
-  await homeLink.focus();
-  await check(homeLink).toBeFocused();
+  await brandLink.focus();
+  await check(brandLink).toBeFocused();
 
   async function open(href, activate) {
     const target = new URL(href, homeUrl);
@@ -1667,22 +1676,54 @@ async function homeJourney(page, traffic) {
   assert.equal(await tabKey(), originalTab, 'Home keeps the same workspace key');
   await check(page.getByRole('heading', { level: 1, name: 'Forge portal', exact: true })).toBeVisible();
   await check(page.locator('main').getByRole('heading', { level: 2 })).toHaveText([
-    'Tools', 'Design documentation', 'Inside the IDE', 'About',
+    'Tools', 'Design documentation',
   ]);
+  await check(page.locator('header').getByRole('link', { name: 'GitHub', exact: true }))
+    .toHaveAttribute('href', 'https://github.com/roachmaster/homelab');
+  await check(page.getByRole('link', { name: 'Back to Forge', exact: true })).toHaveCount(0);
+  await check(page.locator('.home-footer').getByRole('link', { name: 'Homelab on GitHub', exact: true }))
+    .toHaveAttribute('href', 'https://github.com/roachmaster/homelab');
   await check(page.locator('script')).toHaveCount(0);
   assert.deepEqual(counts(), before, 'Home performs no Forge gateway dispatches');
 
   process.stderr.write('QA_CHECK portal_home_layout\n');
-  const panels = page.locator('main .design-index > .index-panel');
+  const launchers = page.locator('#home-tools .home-launcher');
+  const docs = page.locator('#home-docs .home-doc-link');
+  const primary = page.getByRole('link', { name: 'Open Forge IDE', exact: true });
+  const secondary = page.getByRole('link', { name: 'Browse design docs', exact: true });
+  await check(launchers).toHaveCount(3);
+  await check(docs).toHaveCount(5);
+  await check(launchers.locator('svg[aria-hidden="true"]')).toHaveCount(3);
+  await primary.focus();
+  assert.equal(await primary.evaluate(link => {
+    const style = getComputedStyle(link);
+    const channels = color => color.match(/[\d.]+/g).map(Number);
+    const foreground = channels(style.color);
+    const background = channels(style.backgroundColor);
+    const luminance = values => values.slice(0, 3).map(channel => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    }).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+    const lights = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+    return (background.length === 3 || background[3] === 1)
+      && (lights[0] + 0.05) / (lights[1] + 0.05) >= 4.5
+      && link.matches(':focus-visible') && Number.parseFloat(style.outlineWidth) >= 2;
+  }), true, 'the primary launch action has an opaque readable fill and visible keyboard focus');
   for (const width of [375, 390]) {
     await page.setViewportSize({ width, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
       true, 'Home fits the phone viewport');
-    assert.equal(await panels.evaluateAll(nodes => {
+    const primaryBounds = await primary.boundingBox();
+    const secondaryBounds = await secondary.boundingBox();
+    assert.ok(primaryBounds && secondaryBounds
+      && Math.abs(primaryBounds.y - secondaryBounds.y) <= 1
+      && primaryBounds.x + primaryBounds.width <= secondaryBounds.x + 1,
+    'primary and secondary Home actions share one row on phones');
+    assert.equal(await launchers.evaluateAll(nodes => {
       const boxes = nodes.map(node => node.getBoundingClientRect());
       return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
-    }), true, 'Home panels stack on phones');
-    assert.equal(await page.locator('main a, header .return-link').evaluateAll(links =>
+    }), true, 'Home launch cards stack on phones');
+    assert.equal(await page.locator('main a, header a').evaluateAll(links =>
       links.every(link => {
         const bounds = link.getBoundingClientRect();
         return bounds.width >= 44 && bounds.height >= 44;
@@ -1690,18 +1731,37 @@ async function homeJourney(page, traffic) {
   }
   await screenshot(page, 'ide-portal-home-phone.png', { home: true });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  assert.equal(await panels.evaluateAll(([first, second]) => {
+  assert.equal(await docs.evaluateAll(([first, second]) => {
     const left = first.getBoundingClientRect();
     const right = second.getBoundingClientRect();
     return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
-  }), true, 'Home panels display side by side on desktop');
+  }), true, 'compact Home documentation links use multiple desktop columns');
+  const firstLauncher = launchers.first();
+  const launcherSurface = await firstLauncher.evaluate(link => getComputedStyle(link).backgroundColor);
+  const documentSurface = await docs.first().evaluate(link => getComputedStyle(link).backgroundColor);
+  assert.notEqual(launcherSurface, documentSurface, 'launchers have distinct visual weight from compact documentation rows');
+  await firstLauncher.hover();
+  await check.poll(() => firstLauncher.evaluate(link => getComputedStyle(link).backgroundColor))
+    .not.toBe(launcherSurface);
+  await page.keyboard.press('Tab');
+  await firstLauncher.focus();
+  assert.equal(await firstLauncher.evaluate(link =>
+    link.matches(':focus-visible') && Number.parseFloat(getComputedStyle(link).outlineWidth) >= 2),
+  true, 'launch cards expose a visible keyboard focus state');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const control of [primary, firstLauncher]) {
+    assert.equal(await control.evaluate(link =>
+      getComputedStyle(link).transitionDuration.split(',').every(value => Number.parseFloat(value) === 0)),
+    true, 'Home respects reduced motion for interactive controls');
+  }
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await screenshot(page, 'ide-portal-home-desktop.png', { home: true });
 
   process.stderr.write('QA_CHECK portal_home_destinations\n');
   const homeMain = page.locator('main');
   const destinations = [
     ['Open Forge IDE', '/'],
-    ['Browse the design docs', '/design'],
+    ['Browse design docs', '/design'],
     ['Forge IDE', '/'],
     ['Forge Studio', '/studio'],
     ['Room One playtest', '/playtest'],
@@ -1709,12 +1769,8 @@ async function homeJourney(page, traffic) {
     ['Forge foundations', '/design#forge-foundations'],
     ['Chat and Mail', '/design#chat-and-mail'],
     ['Game development', '/design#game-development'],
-    ['Wireframes and workspace', '/design#wireframes-and-workspace'],
-    ['Forge IDE screens', '/'],
+    ['Wireframes & IDE screens', '/design#wireframes-and-workspace'],
   ];
-  await check(homeMain.getByRole('link')).toHaveText([
-    ...destinations.map(([label]) => label), 'Homelab on GitHub',
-  ]);
   for (const [label, href] of destinations) {
     const destination = homeMain.getByRole('link', { name: label, exact: true });
     await check(destination).toHaveAttribute('href', href);
@@ -1726,7 +1782,10 @@ async function homeJourney(page, traffic) {
     } else if (href === '/design') {
       const designHome = page.locator('main .intro').getByRole('link', { name: 'portal home page' });
       await check(designHome).toHaveAttribute('href', '/home');
-      await open('/home', () => designHome.click());
+      const documentBrand = page.locator('header a.wordmark');
+      await check(documentBrand).toHaveAccessibleName('Forge IDE');
+      await check(documentBrand).toHaveAttribute('href', '/home');
+      await open('/home', () => documentBrand.click());
     } else {
       await page.goBack({ waitUntil: 'domcontentloaded' });
       await check(page).toHaveURL(homeUrl);
@@ -1736,13 +1795,18 @@ async function homeJourney(page, traffic) {
     .toHaveAttribute('href', 'https://github.com/roachmaster/homelab');
 
   if (originalViewport) await page.setViewportSize(originalViewport);
-  const back = page.getByRole('link', { name: 'Back to Forge', exact: true });
-  await check(back).toHaveAttribute('href', '/');
-  await open('/', () => back.click());
+  await check(primary).toHaveAttribute('href', '/');
+  await open('/', () => primary.click());
   await check(page).toHaveURL(ideUrl);
   await check(page.locator('#workspace-panel')).toBeVisible();
+  await check(page.locator('#chat-draft')).toHaveValue(originalDraft);
   assert.equal(await tabKey(), originalTab, 'returning from Home restores the same tab workspace');
   assert.equal(page.workers().length, 1, 'returning from Home starts one Forge worker');
+  await open('/home', () => brandLink.click());
+  await open('/', () => primary.click());
+  await check(page.locator('#workspace-panel')).toBeVisible();
+  await check(page.locator('#chat-draft')).toHaveValue(originalDraft);
+  assert.equal(await tabKey(), originalTab, 'clicking the Forge name preserves the workspace');
 }
 
 async function designJourney(page, traffic) {

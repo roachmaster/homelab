@@ -5,6 +5,12 @@ description: "Design, implement or review Forge UI authoring and execution bound
 
 # Design Forge UI
 
+Before changing UI declarations, use
+[Design Modern UI](../design-modern-ui/SKILL.md) to establish the primary
+action, content hierarchy, surfaces, responsive spacing, and interaction
+states. Apply its quality checks to the rendered page alongside this skill's
+authoring and execution rules.
+
 **Application authors do not hand-write HTML, CSS or JavaScript.** This is the
 user's Forge authoring constraint, not a universal web-development rule. Read the
 [current UI proposal](../../../docs/architecture/proposals/forge-ide-ui.md#5-build-output-is-not-runtime-behavior)

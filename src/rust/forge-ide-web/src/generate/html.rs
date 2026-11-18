@@ -37,6 +37,13 @@ fn disclosure(id: &str, title: &str, items: &[Component], group: Option<&str>, o
 }
 pub(crate) fn emit(c: &Component, out: &mut String) {
     match c {
+        Component::BrandLink {
+            id,
+            label,
+            document,
+        } => {
+            let _ = write!(out, "<a id=\"{}\" class=\"fg-brand-link\" href=\"{}\" data-workspace-navigation><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{}</h1></a>", escape(id), document.href(), escape(label));
+        }
         Component::BrandContext { id } => {
             let _ = write!(out, "<span id=\"{}\" class=\"fg-brand-context\" data-bind-text data-protected hidden></span>", escape(id));
         }

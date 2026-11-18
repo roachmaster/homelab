@@ -21,3 +21,7 @@ pub(super) fn stylesheet(styles: Styles) -> String {
     }
     css
 }
+
+pub(super) fn media_stylesheet(media: &str, styles: Styles) -> String {
+    format!("@media {media} {{\n{}}}\n", stylesheet(styles))
+}

@@ -218,6 +218,7 @@ license and pinned reconstruction provenance.
 
 ### Forge design and implementation skills
 
+- [Design Modern UI](.agents/skills/design-modern-ui/SKILL.md) establishes the action hierarchy, launcher and documentation treatments, dark surfaces, and responsive layout before UI declarations change.
 - [Design Package Boundaries](.agents/skills/design-package-boundaries/SKILL.md): capability-first packages and practical hexagonal boundaries, without unnecessary layers.
 - [Model Forge Modules](.agents/skills/model-forge-module/SKILL.md): explain the composition DSL and model a capability/module assembly.
 - [Design Forge IDE UX](.agents/skills/design-forge-ide-ux/SKILL.md): design and review a task-oriented IDE, recognizable Explorer and dominant selected work area, with truthful capabilities and progressively disclosed analysis.

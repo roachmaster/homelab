@@ -11,6 +11,7 @@ pub fn ide_document() -> Document {
         title: "Forge IDE".into(),
         subtitle: "Chat and source workbench".into(),
         children: vec![
+            component!(brand_link "forge-home", "Forge IDE", Home),
             component!(brand_context "workbench-context"),
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [

@@ -120,6 +120,14 @@
         - ["display", "flex"]
         - ["align-items", "center"]
         - ["gap", "8px"]
+    - selector: ".fg-brand-link"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["gap", "8px"]
+        - ["min-height", "var(--touch)"]
+        - ["color", "var(--text)"]
+        - ["text-decoration", "none"]
     - selector: ".fg-mark"
       declarations:
         - ["display", "grid"]

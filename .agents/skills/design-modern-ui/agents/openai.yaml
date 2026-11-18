@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Modern UI"
+  short_description: "Shape clear UI hierarchy, launchers, and dark surfaces"
+  default_prompt: "Use $design-modern-ui before changing this screen to define its action hierarchy, visual depth, responsive layout, and browser checks."

@@ -10,8 +10,7 @@
   <body>
     <header class="fg-header">
       <div class="fg-brand">
-        <span class="fg-mark" aria-hidden="true">F</span>
-        <h1>{{title}}</h1>
+        {{{brand}}}
         {{{brand_context}}}
       </div>
       <p>{{subtitle}}</p>
