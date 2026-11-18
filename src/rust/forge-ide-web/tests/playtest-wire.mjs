@@ -248,11 +248,36 @@ assert.equal(verified.forge_playtest_level(), 1);
 assert.deepEqual(copyBytes(levelSnapshot(verified)).slice(16), Uint8Array.from(cookedManifestDigest));
 assert.deepEqual([0, 1, 2, 3].map(index => verified.forge_playtest_level_collider(index)),
   Object.values(collider));
+
+// The authored Room One chunk and the builtin Rust const describe the same
+// room. The loaded snapshot must match a fresh builtin instance on the board
+// and the entity records; only the epoch differs, because activation starts
+// a new epoch. If either side changes without the other, this fails.
+const builtin = game();
+const builtinSnapshot = snapshot(builtin);
+const loadedSnapshot = snapshot(verified);
+assert.equal(tick(loadedSnapshot), 0, 'the loaded room starts at its initial state');
+assert.equal(epoch(builtinSnapshot), 1);
+assert.equal(epoch(loadedSnapshot), 2, 'activation starts a new epoch');
+assert.equal(state(loadedSnapshot), state(builtinSnapshot));
+assert.equal(loadedSnapshot.getUint16(6, true), builtinSnapshot.getUint16(6, true));
+assert.equal(loadedSnapshot.getUint16(8, true), builtinSnapshot.getUint16(8, true));
+assert.equal(loadedSnapshot.getUint16(10, true), builtinSnapshot.getUint16(10, true));
+assert.deepEqual(
+  new Uint8Array(loadedSnapshot.buffer, loadedSnapshot.byteOffset + BOARD, 117),
+  new Uint8Array(builtinSnapshot.buffer, builtinSnapshot.byteOffset + BOARD, 117),
+  'the authored chunk and the builtin const publish the same board',
+);
+assert.deepEqual(
+  new Uint8Array(loadedSnapshot.buffer, loadedSnapshot.byteOffset + ENTITIES, 80),
+  new Uint8Array(builtinSnapshot.buffer, builtinSnapshot.byteOffset + ENTITIES, 80),
+  'the authored chunk and the builtin const publish the same entities',
+);
 const cancelled = verified.forge_playtest_level_request(2);
 verified.forge_playtest_level_fail(cancelled);
 assert.equal(uploadAsset(verified, 2, cancelled, cookedLevelBytes.get(2)), 0,
   'an I/O failure invalidates a later result for that request');
-console.log('Playtest WASM: Rust verifies raw asset digests, request generations and active collider.');
+console.log('Playtest WASM: Rust verifies raw asset digests, request generations and active collider; the authored Room One agrees with the builtin const.');
 
 function playerPose(exports) {
   const published = snapshot(exports);
