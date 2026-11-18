@@ -92,6 +92,19 @@ pub enum Component {
         initial_focus: String,
         children: Vec<Component>,
     },
+    /// Presentation-only native dialog; it does not dispatch an application event.
+    Sheet {
+        id: String,
+        title: String,
+        initial_focus: String,
+        children: Vec<Component>,
+    },
+    SheetTrigger {
+        id: String,
+        label: String,
+        target: String,
+        glyph: Option<char>,
+    },
     Toolbar(Vec<Component>),
     CompactToolbar {
         id: String,
@@ -135,6 +148,8 @@ pub enum Component {
         id: String,
         /// Keep the two secondary tools mutually exclusive; main/leading remain independent.
         single_secondary: bool,
+        /// Put layout options in a header-triggered sheet.
+        header_options: bool,
         children: Vec<Component>,
     },
     /// Optional declarations placed next to a pane layout's built-in view options.
@@ -193,6 +208,7 @@ pub enum Component {
         id: String,
         label: String,
         action: String,
+        placeholder: Option<String>,
     },
     Reload {
         id: String,
@@ -259,6 +275,9 @@ macro_rules! component {
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (panel $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Panel { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (region $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Region { id:$id.into(),children:vec![$($child),*] } };
+    (sheet $id:expr, $title:expr, $focus:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Sheet { id:$id.into(),title:$title.into(),initial_focus:$focus.into(),children:vec![$($child),*] } };
+    (sheet_trigger $id:expr, $label:expr, $target:expr) => { $crate::generate::Component::SheetTrigger { id:$id.into(),label:$label.into(),target:$target.into(),glyph:None } };
+    (sheet_icon $id:expr, $label:expr, $target:expr, $glyph:expr) => { $crate::generate::Component::SheetTrigger { id:$id.into(),label:$label.into(),target:$target.into(),glyph:Some($glyph) } };
     (dialog $id:expr, $title:expr, $close:expr, $focus:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Dialog{id:$id.into(),title:$title.into(),close_action:$close.into(),initial_focus:$focus.into(),children:vec![$($child),*]} };
     (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
     (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
@@ -283,8 +302,9 @@ macro_rules! component {
     (compact_toolbar $id:expr, $label:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::CompactToolbar{id:$id.into(),label:$label.into(),children:vec![$($child),*]} };
     (row [$($child:expr),* $(,)?]) => { $crate::generate::Component::Row(vec![$($child),*]) };
     (workspace [$($child:expr),* $(,)?]) => { $crate::generate::Component::Workspace(vec![$($child),*]) };
-    (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,children:vec![$($child),*]} };
-    (focused_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,children:vec![$($child),*]} };
+    (layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:false,header_options:false,children:vec![$($child),*]} };
+    (focused_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,header_options:false,children:vec![$($child),*]} };
+    (compact_layout $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneLayout{id:$id.into(),single_secondary:true,header_options:true,children:vec![$($child),*]} };
     (layout_controls [$($child:expr),* $(,)?]) => { $crate::generate::Component::LayoutControls(vec![$($child),*]) };
     (pane_action $button:expr) => { $crate::generate::Component::PaneAction(Box::new($button)) };
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
@@ -303,7 +323,8 @@ macro_rules! component {
     (uuid_button $id:expr, $label:expr, $action:expr, $input:expr, $uuid_field:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:Some($uuid_field.into())} };
     (toggle_panel $id:expr, $label:expr, $action:expr, $controls:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:Some($controls.into()),uuid_field:None} };
     (date_input $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::DateInput{id:$id.into(),label:$label.into(),action:$action.into()} };
-    (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into()} };
+    (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:None} };
+    (filter $id:expr, $label:expr, $action:expr, $placeholder:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:Some($placeholder.into())} };
     (reload $id:expr, $label:expr) => { $crate::generate::Component::Reload{id:$id.into(),label:$label.into()} };
     (pair $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::PairForm{id:$id.into(),label:$label.into(),action:$action.into()} };
     (tree $id:expr, $label:expr) => { $crate::generate::Component::Tree{id:$id.into(),label:$label.into(),stacked:false} };
@@ -373,6 +394,7 @@ impl Document {
                 | Component::Navigation { id, title, .. }
                 | Component::Panel { id, title, .. }
                 | Component::Dialog { id, title, .. }
+                | Component::Sheet { id, title, .. }
                 | Component::Disclosure { id, title, .. }
                 | Component::Pane { id, title, .. } => (Some(id), Some(title), None),
                 Component::Row(_)
@@ -400,7 +422,9 @@ impl Document {
                     id, label, action, ..
                 }
                 | Component::DateInput { id, label, action }
-                | Component::Filter { id, label, action }
+                | Component::Filter {
+                    id, label, action, ..
+                }
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
                 }
@@ -412,7 +436,10 @@ impl Document {
                 | Component::BrandLink { id, label, .. }
                 | Component::NavigationLink { id, label, .. }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
-                Component::PaneLink { id, label, target }
+                Component::SheetTrigger {
+                    id, label, target, ..
+                }
+                | Component::PaneLink { id, label, target }
                 | Component::SourceWrap { id, label, target }
                 | Component::PaneHeaderLink {
                     id, label, target, ..
@@ -456,6 +483,10 @@ impl Document {
                 Component::TextArea {
                     placeholder: Some(placeholder),
                     ..
+                }
+                | Component::Filter {
+                    placeholder: Some(placeholder),
+                    ..
                 } if !text(placeholder) => {
                     return Err("invalid input placeholder");
                 }
@@ -494,7 +525,22 @@ impl Document {
                     }
                     insert(ids, &format!("{id}-title"))?;
                 }
-                Component::IconButton { label, glyph, .. }
+                Component::Sheet {
+                    id, initial_focus, ..
+                } => {
+                    if !key(initial_focus) {
+                        return Err("invalid sheet focus reference");
+                    }
+                    for suffix in ["title", "close"] {
+                        insert(ids, &format!("{id}-{suffix}"))?;
+                    }
+                }
+                Component::SheetTrigger {
+                    glyph: Some(glyph),
+                    label,
+                    ..
+                }
+                | Component::IconButton { label, glyph, .. }
                 | Component::PaneHeaderLink { label, glyph, .. }
                     if label.trim().is_empty() || glyph.is_control() || glyph.is_whitespace() =>
                 {
@@ -510,9 +556,12 @@ impl Document {
                     return Err("brand link must be a document child");
                 }
                 Component::PaneHeaderLink { .. }
-                    if !matches!(parent, Some(Component::Pane { .. })) =>
+                    if !matches!(
+                        parent,
+                        Some(Component::Pane { .. } | Component::Region { .. })
+                    ) =>
                 {
-                    return Err("pane header link must be a direct child of a pane");
+                    return Err("pane header link requires a pane or region parent");
                 }
                 Component::SourceFormats {
                     prefix,
@@ -597,9 +646,19 @@ impl Document {
                         }
                     }
                 }
-                Component::PaneLayout { id, children, .. } => {
+                Component::PaneLayout {
+                    id,
+                    children,
+                    header_options,
+                    ..
+                } => {
                     for suffix in ["options", "reset"] {
                         insert(ids, &format!("{id}-{suffix}"))?;
+                    }
+                    if *header_options {
+                        for suffix in ["options-title", "options-close"] {
+                            insert(ids, &format!("{id}-{suffix}"))?;
+                        }
                     }
                     let mut positions = BTreeSet::new();
                     let mut has_controls = false;
@@ -633,6 +692,7 @@ impl Document {
                 | Component::Screen { children, .. }
                 | Component::Panel { children, .. }
                 | Component::Dialog { children, .. }
+                | Component::Sheet { children, .. }
                 | Component::Disclosure { children, .. }
                 | Component::PaneLayout { children, .. }
                 | Component::Region { children, .. }

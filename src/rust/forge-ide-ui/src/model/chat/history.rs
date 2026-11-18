@@ -618,6 +618,7 @@ impl Chats {
             ("chat-delete-cancel", waiting),
         ] {
             view.buttons.push(ButtonBinding {
+                pressed: None,
                 id,
                 disabled,
                 action: None,

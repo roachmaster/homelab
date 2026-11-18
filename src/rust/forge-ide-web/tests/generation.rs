@@ -435,7 +435,6 @@ fn declarative_hierarchy_emphasis_and_facts_are_reusable_safe_components() {
     assert!(register_assets("assets", c).is_err());
     let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
     assert!(!css.contains("p:first-child"));
-    assert!(!css.contains("#selection-title"));
     assert!(css.contains("[data-tone=warning]"));
 }
 
@@ -507,27 +506,60 @@ fn focused_layout_and_disclosure_are_declarative_reusable_primitives() {
 }
 
 #[test]
-fn workbench_keeps_project_selects_in_a_closed_native_disclosure() {
+fn workbench_keeps_project_selects_in_a_closed_native_sheet() {
     let assets = build(config());
     let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
     let (_, header) = html.split_once("<header").unwrap();
     let (header, _) = header.split_once("</header>").unwrap();
     assert!(header.contains("id=\"workbench-context\""));
+    assert!(header.contains("data-sheet-open=\"project-options\""));
+    assert!(header.contains("data-sheet-open=\"workspace-options\""));
+    for id in ["project-options", "workspace-options"] {
+        let (_, sheet) = html.split_once(&format!("<dialog id=\"{id}\"")).unwrap();
+        let (attributes, contents) = sheet.split_once('>').unwrap();
+        assert!(!attributes.split_whitespace().any(|part| part == "open"));
+        assert!(attributes.contains("data-sheet"));
+        let (contents, _) = contents.split_once("</dialog>").unwrap();
+        assert!(contents.contains(&format!("id=\"{id}-close\"")));
+        if id == "project-options" {
+            assert!(contents.contains("id=\"node\""));
+            assert!(contents.contains("id=\"project\""));
+            assert!(!contents.contains("id=\"inspect\""));
+        } else {
+            assert!(contents.contains("id=\"workspace-reset\""));
+        }
+    }
+    assert!(!html.contains("id=\"file-filter\""));
+    assert!(html.contains("id=\"explorer-filter-mode\""));
+}
 
-    let (before_options, options) = html.split_once("<details id=\"project-options\"").unwrap();
-    let (attributes, options) = options.split_once('>').unwrap();
-    assert!(!attributes.split_whitespace().any(|part| part == "open"));
-    assert!(attributes.contains("name=\"workspace-options\""));
-    let (_, view) = before_options
-        .split_once("<details id=\"workspace-options\"")
-        .unwrap();
-    let (view_attributes, _) = view.split_once('>').unwrap();
-    assert!(view_attributes.contains("name=\"workspace-options\""));
-    let (options, _) = options.split_once("</details>").unwrap();
-    assert!(options.starts_with("<summary>Project options</summary>"));
-    assert!(options.contains("id=\"node\""));
-    assert!(options.contains("id=\"project\""));
-    assert!(!options.contains("id=\"inspect\""));
+#[test]
+fn presentation_sheets_escape_labels_and_reject_derived_id_collisions() {
+    let mut c = config();
+    c.document = Document {
+        title: "Sheet fixture".into(),
+        subtitle: "Independent presentation consumer".into(),
+        children: vec![
+            component!(sheet_trigger "context-open", "Choose <context>", "context-sheet"),
+            component!(sheet "context-sheet", "Choose <context>", "context-input"; [
+                component!(text_field "context-input", "Context", "set_context"),
+            ]),
+        ],
+    };
+    let document = c.document.clone();
+    let assets = build(c);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    assert!(html.contains("aria-haspopup=\"dialog\""));
+    assert!(html.contains("aria-label=\"Choose &lt;context&gt;\""));
+    assert!(html.contains("data-initial-focus=\"context-input\""));
+    assert!(html.contains("data-sheet-close=\"context-sheet\""));
+    assert_eq!(assets.files["main.js"], build(config()).files["main.js"]);
+    let mut c = config();
+    c.document = document;
+    c.document
+        .children
+        .push(component!(button "context-sheet-close", "Collision", "noop"));
+    assert!(register_assets("assets", c).is_err());
 }
 
 #[test]

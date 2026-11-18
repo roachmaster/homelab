@@ -259,6 +259,7 @@ impl Chats {
                 visible: connected && visible,
             });
             view.buttons.push(ButtonBinding {
+                pressed: None,
                 id,
                 disabled: !connected || disabled,
                 action: None,

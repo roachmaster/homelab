@@ -35,6 +35,11 @@ fn disclosure(id: &str, title: &str, items: &[Component], group: Option<&str>, o
     children(items, out);
     out.push_str("</div></details>");
 }
+fn sheet_start(id: &str, title: &str, initial_focus: &str, out: &mut String) {
+    let id = escape(id);
+    let title = escape(title);
+    let _ = write!(out, "<dialog id=\"{id}\" class=\"fg-sheet\" data-sheet data-initial-focus=\"{}\" aria-labelledby=\"{id}-title\"><header class=\"fg-sheet-header\"><h2 id=\"{id}-title\">{title}</h2><button id=\"{id}-close\" class=\"fg-sheet-close\" type=\"button\" data-sheet-close=\"{id}\" aria-label=\"Close {title}\">×</button></header><div class=\"fg-sheet-body\">", escape(initial_focus));
+}
 pub(crate) fn emit(c: &Component, out: &mut String) {
     match c {
         Component::BrandLink {
@@ -42,7 +47,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             label,
             document,
         } => {
-            let _ = write!(out, "<a id=\"{}\" class=\"fg-brand-link\" href=\"{}\" data-workspace-navigation><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{}</h1></a>", escape(id), document.href(), escape(label));
+            let _ = write!(out, "<a id=\"{}\" class=\"fg-brand-link\" href=\"{}\" aria-label=\"{}\" data-workspace-navigation><span class=\"fg-mark\" aria-hidden=\"true\">F</span><h1>{}</h1></a>", escape(id), document.href(), escape(label), escape(label));
         }
         Component::BrandContext { id } => {
             let _ = write!(out, "<span id=\"{}\" class=\"fg-brand-context\" data-bind-text data-protected hidden></span>", escape(id));
@@ -84,6 +89,35 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             title,
             children: items,
         } => disclosure(id, title, items, None, out),
+        Component::Sheet {
+            id,
+            title,
+            initial_focus,
+            children: items,
+        } => {
+            sheet_start(id, title, initial_focus, out);
+            children(items, out);
+            out.push_str("</div></dialog>");
+        }
+        Component::SheetTrigger {
+            id,
+            label,
+            target,
+            glyph,
+        } => {
+            let label = escape(label);
+            let _ = write!(out, "<button id=\"{}\" type=\"button\" class=\"fg-sheet-trigger{}\" data-sheet-open=\"{}\" aria-controls=\"{}\" aria-haspopup=\"dialog\" aria-expanded=\"false\" aria-label=\"{label}\" title=\"{label}\"{}>", escape(id), if glyph.is_some() { " fg-button-icon" } else { "" }, escape(target), escape(target), if glyph.is_none() { " data-bind-text" } else { "" });
+            if let Some(glyph) = glyph {
+                let _ = write!(
+                    out,
+                    "<span aria-hidden=\"true\" data-glyph=\"{}\"></span>",
+                    escape(&glyph.to_string())
+                );
+            } else {
+                out.push_str(&label);
+            }
+            out.push_str("</button>");
+        }
         Component::Panel {
             id,
             title,
@@ -144,6 +178,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::PaneLayout {
             id,
             single_secondary,
+            header_options,
             children: items,
         } => {
             let id = escape(id);
@@ -155,14 +190,26 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let action = items
                 .iter()
                 .find(|item| matches!(item, Component::PaneAction(_)));
-            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout data-single-secondary=\"{single_secondary}\"><div class=\"fg-layout-controls\">");
-            if controls.is_some() {
-                out.push_str("<div class=\"fg-layout-options\">");
+            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane-layout\" data-layout data-single-secondary=\"{single_secondary}\" data-header-options=\"{header_options}\">");
+            if *header_options {
+                let initial = items
+                    .iter()
+                    .find_map(|item| match item {
+                        Component::Pane { id, position, .. } if *position != PanePosition::Main => {
+                            Some(format!("{id}-toggle"))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| format!("{options}-close"));
+                sheet_start(&options, "View options", &initial, out);
+                out.push_str("<div class=\"fg-option-list\">");
+            } else {
+                out.push_str("<div class=\"fg-layout-controls\">");
+                if controls.is_some() {
+                    out.push_str("<div class=\"fg-layout-options\">");
+                }
+                let _ = write!(out, "<details id=\"{options}\" class=\"fg-view-options\" name=\"{options}\"><summary>View options</summary><div class=\"fg-option-list\">");
             }
-            let _ = write!(
-                out,
-                "<details id=\"{options}\" class=\"fg-view-options\" name=\"{options}\"><summary>View options</summary><div class=\"fg-option-list\">"
-            );
             for pane in items {
                 if let Component::Pane {
                     id,
@@ -176,7 +223,15 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                     }
                 }
             }
-            let _=write!(out,"<button type=\"button\" id=\"{id}-reset\" data-layout-reset>Reset panes</button></div></details>");
+            let _ = write!(
+                out,
+                "<button type=\"button\" id=\"{id}-reset\" data-layout-reset>Reset panes</button>"
+            );
+            if *header_options {
+                out.push_str("</div></div></dialog><div class=\"fg-layout-controls\">");
+            } else {
+                out.push_str("</div></details>");
+            }
             if let Some(controls) = controls {
                 for item in controls {
                     match item {
@@ -184,11 +239,15 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                             id,
                             title,
                             children,
-                        } => disclosure(id, title, children, Some(&options), out),
+                        } if !header_options => {
+                            disclosure(id, title, children, Some(&options), out)
+                        }
                         _ => emit(item, out),
                     }
                 }
-                out.push_str("</div>");
+                if !header_options {
+                    out.push_str("</div>");
+                }
             }
             if action.is_some() {
                 out.push_str("<div class=\"fg-pane-actions\">");
@@ -202,7 +261,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                     ..
                 } = pane
                 {
-                    let _=write!(out,"<button type=\"button\" id=\"{}-switch\" data-pane-position=\"{}\" data-pane-switch=\"{}\" aria-controls=\"{}\" aria-pressed=\"false\">{}</button>",escape(id),position.key(),escape(id),escape(id),escape(title));
+                    let _=write!(out,"<button type=\"button\" id=\"{}-switch\" data-pane-position=\"{}\" data-pane-switch=\"{}\" aria-controls=\"{}\" aria-pressed=\"false\" aria-label=\"{}\" data-bind-text>{}</button>",escape(id),position.key(),escape(id),escape(id),escape(title),escape(title));
                 }
             }
             out.push_str("</nav>");
@@ -233,7 +292,7 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let id = escape(id);
             let title = escape(title);
             let position_key = position.key();
-            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane fg-pane-{position_key}\" data-pane=\"{position_key}\" data-min=\"{min}\" data-default=\"{initial}\" data-max=\"{max}\" aria-labelledby=\"{id}-heading\"><header class=\"fg-pane-header\">");
+            let _=write!(out,"<section id=\"{id}\" class=\"fg-pane fg-pane-{position_key}\" tabindex=\"-1\" data-pane=\"{position_key}\" data-min=\"{min}\" data-default=\"{initial}\" data-max=\"{max}\" aria-labelledby=\"{id}-heading\"><header class=\"fg-pane-header\">");
             if let Some(link) = items
                 .iter()
                 .find(|item| matches!(item, Component::PaneHeaderLink { .. }))
@@ -299,9 +358,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             } else {
                 ""
             };
+            let focus = if *style == TextStyle::Heading {
+                " tabindex=\"-1\" data-pane-focus"
+            } else {
+                ""
+            };
             let _ = write!(
                 out,
-                "<{tag} id=\"{}\" class=\"{class}\" data-bind-text{role}>{}</{tag}>",
+                "<{tag} id=\"{}\" class=\"{class}\" data-bind-text{role}{focus}>{}</{tag}>",
                 escape(id),
                 escape(text)
             );
@@ -450,8 +514,16 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             let id = escape(id);
             let _ = write!(out, "<label class=\"fg-field\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"date\" data-action=\"{}\" max=\"9999-12-31\" required disabled></label>", escape(label), escape(action));
         }
-        Component::Filter { id, label, action } => {
-            let _=write!(out,"<label class=\"fg-field fg-filter\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"search\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" maxlength=\"256\" disabled></label>",escape(label),escape(action));
+        Component::Filter {
+            id,
+            label,
+            action,
+            placeholder,
+        } => {
+            let placeholder = placeholder.as_ref().map_or_else(String::new, |value| {
+                format!(" placeholder=\"{}\"", escape(value))
+            });
+            let _=write!(out,"<label class=\"fg-field fg-filter\" for=\"{id}\"><span>{}</span><input id=\"{id}\" type=\"search\" data-action=\"{}\" data-dynamic-action autocomplete=\"off\" maxlength=\"256\"{placeholder} disabled></label>",escape(label),escape(action));
         }
         Component::Reload { id, label } => {
             let _ = write!(

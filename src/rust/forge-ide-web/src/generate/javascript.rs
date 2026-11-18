@@ -26,6 +26,8 @@ const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map
 const draftFields=[...document.querySelectorAll('textarea[data-action],[data-workspace-draft]')].filter(n=>n!==activeEditor);
 const leaveDialog=document.getElementById('leave-confirmation');
 const dialogs=new Map([...document.querySelectorAll('[data-modal]')].map(n=>[n.id,n]));
+const sheets=new Map([...document.querySelectorAll('[data-sheet]')].map(n=>[n.id,n]));
+const sheetOpeners=new WeakMap();
 const panelToggles=new Map([...document.querySelectorAll('button[data-action][aria-expanded][aria-controls]')].map(n=>[n.getAttribute('aria-controls'),n]));
 const layouts=new Map();
 const sourceFormats=new Map();
@@ -117,6 +119,16 @@ function visible(n){
   }
   return n.getClientRects?.().length!==0;
 }
+function openSheet(sheet,trigger){
+  if(!sheet?.hasAttribute('data-sheet')||sheet.closest('[hidden]'))return;
+  for(const other of sheets.values())if(other!==sheet&&other.open)other.close();
+  sheetOpeners.set(sheet,trigger||document.activeElement);
+  if(!sheet.open)sheet.showModal();
+  for(const n of document.querySelectorAll('[data-sheet-open]'))n.setAttribute('aria-expanded',String(n.dataset.sheetOpen===sheet.id));
+  const target=element(sheet.dataset.initialFocus);
+  if(visible(target)&&!target.disabled)target.focus();
+  else sheet.querySelector('[data-sheet-close]')?.focus();
+}
 function tell(event,sequence){if(worker && !fatalState)worker.postMessage(sequence===undefined?event:{event,presentation_sequence:sequence});}
 function sendAction(n,value,sequence){
   if(!visible(n)||n.disabled)return;
@@ -191,8 +203,8 @@ function clearProtected(){
   for(const n of document.querySelectorAll('[data-name-for]'))n.textContent='';
   for(const n of document.querySelectorAll('.fg-pane-body'))n.scrollTop=0;
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
-  for(const n of dialogs.values())if(n.open)n.close();
-  for(const n of panelToggles.values())n.setAttribute('aria-expanded','false');
+  for(const n of [...dialogs.values(),...sheets.values()])if(n.open)n.close();
+  for(const n of [...panelToggles.values(),...document.querySelectorAll('[data-sheet-open]')])n.setAttribute('aria-expanded','false');
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();diffViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
   workspaceWork=false;
@@ -240,8 +252,9 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     if(dialogs.has(b.id)){dialogBindings.push([n,b.visible]);continue;}
     n.hidden=!b.visible;
   }
+  for(const sheet of sheets.values())if(sheet.open&&sheet.closest('[hidden]'))sheet.close();
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
-  for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
+  for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;if(typeof b.pressed==='boolean')n.setAttribute('aria-pressed',String(b.pressed));actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
   for(const b of view.inputs||[]){
     const n=element(b.id);if(!n)continue;
     const context=JSON.stringify(b.action);const draft=inputDrafts.get(n);
@@ -463,12 +476,12 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
         if(!direct){
           state.focus.delete(b.id);
           state.resetScroll.add(b.id);
-          if(pane.contains(focus))invalidatedFocus=element(pane.id+'-heading');
+          if(pane.contains(focus))invalidatedFocus=paneFocus(pane);
         }
       }
       if(Number.isSafeInteger(b.reveal)&&b.reveal>0&&state.reveal.get(b.id)!==b.reveal){
         state.reveal.set(b.id,b.reveal);
-        if(state.narrow.matches&&!direct){openPane(state,pane);state.active=pane.id;invalidatedFocus=element(pane.id+'-heading');}
+        if(state.narrow.matches&&!direct){openPane(state,pane);state.active=pane.id;invalidatedFocus=paneFocus(pane);}
       }
     }
   }
@@ -491,7 +504,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       source.scrollTop+=target.getBoundingClientRect().top-source.getBoundingClientRect().top-source.clientTop;
     }
     const anchor=target.children[0];anchor.scrollIntoView({block:'nearest',inline:'nearest'});
-    const heading=pane?element(pane.id+'-heading'):null;
+    const heading=pane?paneFocus(pane):null;
     if((heading&&(invalidatedFocus===heading||focus===heading))||(direct&&focus.disabled))sourceFocus=anchor;
   }
   const focusedDialog=focus?.closest?.('[data-modal]');
@@ -512,7 +525,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     const revealedInput=visible(controlled)&&[...controlled.querySelectorAll('textarea,input,select')].find(n=>!n.disabled&&visible(n));
     if(revealedInput){revealedInput.focus({preventScroll:true});return;}
     const footerControl=priorFooter&&[...priorFooter.querySelectorAll(':is(textarea,input,button):not(:disabled)')].find(visible);
-    let target=footerControl||(visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):null);
+    let target=footerControl||(visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?paneFocus(priorPane):null);
     if(!target){
       const controls=[...document.querySelectorAll('.fg-screen:not([hidden]) :is(select,input,button):not(:disabled)')].filter(visible);
       target=controls.find(n=>n.classList.contains('fg-button-primary'))||controls[0];
@@ -582,6 +595,22 @@ for(const n of document.querySelectorAll('input[data-action],textarea[data-actio
   });
   n.addEventListener('compositionend',()=>{if(inputDrafts.get(n)?.composing){inputDrafts.delete(n);updateInput();}});
 }
+for(const n of document.querySelectorAll('[data-sheet-open]'))n.addEventListener('click',()=>openSheet(sheets.get(n.dataset.sheetOpen),n));
+for(const n of document.querySelectorAll('[data-sheet-close]'))n.addEventListener('click',()=>sheets.get(n.dataset.sheetClose)?.close());
+for(const sheet of sheets.values()){
+  sheet.addEventListener('click',event=>{
+    if(event.target!==sheet)return;
+    const box=sheet.getBoundingClientRect();
+    if(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom)sheet.close();
+  });
+  sheet.addEventListener('close',()=>{
+    for(const trigger of document.querySelectorAll('[data-sheet-open]'))if(trigger.dataset.sheetOpen===sheet.id)trigger.setAttribute('aria-expanded','false');
+    const opener=sheetOpeners.get(sheet);
+    const active=document.activeElement;
+    const repair=active===document.body||sheet.contains(active)||!visible(active);
+    if(repair&&![...sheets.values(),...dialogs.values()].some(n=>n.open)&&visible(opener)&&!opener.disabled)opener.focus({preventScroll:true});
+  });
+}
 for(const n of dialogs.values())n.addEventListener('cancel',event=>{event.preventDefault();tell({kind:n.dataset.modal});});
 for(const n of document.querySelectorAll('form[data-action]'))n.addEventListener('submit',e=>{e.preventDefault();const input=n.querySelector('input[name="value"]');if(!input||n.querySelector('button')?.disabled)return;const value=input.value;input.value='';sendAction(n,value);});
 for(const n of document.querySelectorAll('[data-reload]'))n.addEventListener('click',()=>{
@@ -636,7 +665,12 @@ for(const tree of document.querySelectorAll('[role="tree"]')){
     e.preventDefault();focusRow(rows[next]);
   });
 }
-function paneControl(state,pane){const options=element(state.root.id+'-options');if(options)options.open=true;return element(pane.id+'-toggle')||element(pane.id+'-switch');}
+function paneFocus(pane){
+  const heading=element(pane.id+'-heading');if(visible(heading))return heading;
+  const anchor=pane.querySelector('[data-pane-focus]');if(anchor&&!anchor.hidden)return anchor;
+  return [...pane.querySelectorAll('[data-pane-focus], [role="tree"], textarea, input, button, [data-bind-text]')].find(n=>visible(n)&&!n.disabled)||pane;
+}
+function paneControl(state,pane){const options=element(state.root.id+'-options');if(options?.hasAttribute('data-sheet'))openSheet(options,element(state.root.id+'-options-toggle'));else if(options)options.open=true;return element(pane.id+'-toggle')||element(pane.id+'-switch');}
 function updateLayout(state){
   state.root.dataset.narrow=String(state.narrow.matches);
   if(!state.narrow.matches && state.grid.clientWidth){
@@ -678,19 +712,19 @@ for(const root of document.querySelectorAll('[data-layout]')){
   const main=panes.find(n=>n.dataset.pane==='main');if(!main)continue;
   const local=selector=>[...root.querySelectorAll(selector)].filter(n=>n.closest('[data-layout]')===root);
   const singleSecondary=root.dataset.singleSecondary==='true';
-  const state={root,grid:root.querySelector('.fg-panes'),panes,main,singleSecondary,open:defaultPanes(panes,singleSecondary),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map(),context:new Map(),reveal:new Map(),resetScroll:new Set()};layouts.set(root.id,state);
+  const state={root,grid:root.querySelector('.fg-panes'),panes,main,singleSecondary,open:defaultPanes(panes,singleSecondary),sizes:new Map(panes.map(n=>[n.id,Number(n.dataset.default)])),active:root.dataset.headerOptions==='true'?(panes.find(p=>p.dataset.pane==='leading')||main).id:main.id,narrow:matchMedia('(max-width:800px)'),focus:new Map(),context:new Map(),reveal:new Map(),resetScroll:new Set()};layouts.set(root.id,state);
   for(const pane of panes)pane.addEventListener('focusin',e=>{if(e.target.closest('[data-layout]')===root)state.focus.set(pane.id,{node:e.target,key:focusKeyByElement.get(e.target)});});
   for(const n of local('[data-pane-reveal]'))n.addEventListener('click',()=>{
     const pane=panes.find(p=>p.id===n.dataset.paneReveal);if(!pane)return;
     openPane(state,pane);state.active=pane.id;updateLayout(state);
-    const target=state.focus.get(pane.id);if(target?.node.isConnected&&visible(target.node)&&(target.key===undefined||focusKeyByElement.get(target.node)===target.key))target.node.focus();else element(pane.id+'-heading')?.focus();
+    const target=state.focus.get(pane.id);if(target?.node.isConnected&&visible(target.node)&&(target.key===undefined||focusKeyByElement.get(target.node)===target.key))target.node.focus();else paneFocus(pane)?.focus();
   });
   for(const n of local('[data-pane-toggle]'))n.addEventListener('click',()=>{const pane=panes.find(p=>p.id===n.dataset.paneToggle);if(pane)togglePane(state,pane);});
   for(const n of local('[data-pane-switch]'))n.addEventListener('click',()=>{
     const pane=panes.find(p=>p.id===n.dataset.paneSwitch);if(!pane)return;
     if(!state.narrow.matches&&pane!==main){togglePane(state,pane);return;}
     openPane(state,pane);state.active=pane.id;updateLayout(state);
-    const target=state.focus.get(pane.id);if(target?.node.isConnected&&visible(target.node)&&(target.key===undefined||focusKeyByElement.get(target.node)===target.key))target.node.focus();else element(pane.id+'-heading')?.focus();
+    const target=state.focus.get(pane.id);if(target?.node.isConnected&&visible(target.node)&&(target.key===undefined||focusKeyByElement.get(target.node)===target.key))target.node.focus();else paneFocus(pane)?.focus();
   });
   root.querySelector('[data-layout-reset]').addEventListener('click',()=>{state.open=defaultPanes(panes,state.singleSecondary);state.sizes=new Map(panes.map(n=>[n.id,Number(n.dataset.default)]));state.active=main.id;updateLayout(state);});
   for(const separator of local('[data-resize-pane]')){

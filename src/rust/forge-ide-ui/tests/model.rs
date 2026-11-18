@@ -1,4 +1,11 @@
+use forge_ide_ui::view::{FilterAction, ViewModel};
 use forge_ide_ui::{protocol::*, *};
+
+fn visible(view: &ViewModel, id: &str) -> bool {
+    view.visibility
+        .iter()
+        .any(|binding| binding.id == id && binding.visible)
+}
 fn catalog() -> Catalog {
     Catalog {
         recent_write: None,
@@ -132,6 +139,150 @@ fn status(m: &UiModel) -> String {
         .find(|t| t.id == "status")
         .unwrap()
         .text
+}
+
+#[test]
+fn unified_explorer_search_preserves_text_and_rejects_old_mode_and_report_events() {
+    let mut model = connected();
+    let inspection = inspect(&mut model);
+    event(&mut model, result(&inspection, report()));
+    let edited = event(
+        &mut model,
+        UiEvent::SetExplorerQuery {
+            report: inspection.token.clone(),
+            entry_names: false,
+            value: "lib".into(),
+        },
+    );
+    assert!(edited.effects.is_empty());
+    assert!(visible(&model.view(), "search-panel"));
+    let toggled = event(
+        &mut model,
+        UiEvent::ToggleExplorerFilter {
+            report: inspection.token.clone(),
+        },
+    );
+    assert!(toggled.effects.is_empty());
+    let current = model.view();
+    let input = current
+        .inputs
+        .iter()
+        .find(|input| input.id == "project-query")
+        .unwrap();
+    assert_eq!(input.value, "lib");
+    assert!(matches!(
+        input.action,
+        Some(FilterAction::SetExplorerQuery {
+            entry_names: true,
+            ..
+        })
+    ));
+    assert!(current.inputs.iter().all(|input| input.id != "file-filter"));
+    assert_eq!(
+        current
+            .buttons
+            .iter()
+            .find(|button| button.id == "explorer-filter-mode")
+            .unwrap()
+            .pressed,
+        Some(true)
+    );
+    assert!(visible(&current, "files-panel"));
+    event(
+        &mut model,
+        UiEvent::SetExplorerQuery {
+            report: inspection.token.clone(),
+            entry_names: false,
+            value: "late edit".into(),
+        },
+    );
+    assert_eq!(model.view(), current);
+    event(
+        &mut model,
+        UiEvent::ToggleExplorerFilter {
+            report: inspection.token.clone(),
+        },
+    );
+    assert_eq!(
+        model
+            .view()
+            .inputs
+            .iter()
+            .find(|input| input.id == "project-query")
+            .unwrap()
+            .value,
+        "lib"
+    );
+    let refreshed = inspect(&mut model);
+    event(&mut model, result(&refreshed, report()));
+    let current = model.view();
+    event(
+        &mut model,
+        UiEvent::ToggleExplorerFilter {
+            report: inspection.token,
+        },
+    );
+    assert_eq!(model.view(), current);
+}
+
+#[test]
+fn workbench_idle_chrome_reports_actual_file_and_problem_availability() {
+    let mut model = connected();
+    let inspection = inspect(&mut model);
+    event(&mut model, result(&inspection, report()));
+    let idle = model.view();
+    assert!(!visible(&idle, "status"));
+    assert!(visible(&idle, "file-empty"));
+    assert!(
+        idle.buttons
+            .iter()
+            .find(|button| button.id == "workspace-panel-switch")
+            .unwrap()
+            .disabled
+    );
+    assert_eq!(
+        idle.texts
+            .iter()
+            .find(|text| text.id == "problems-panel-switch")
+            .unwrap()
+            .text,
+        "Problems (0)"
+    );
+    assert_eq!(
+        idle.lists
+            .iter()
+            .find(|list| list.id == "outline")
+            .unwrap()
+            .empty_message,
+        "No file selected"
+    );
+    event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: inspection.token,
+            value: 1,
+        },
+    );
+    let selected = model.view();
+    assert!(!visible(&selected, "file-empty"));
+    assert!(
+        !selected
+            .buttons
+            .iter()
+            .find(|button| button.id == "workspace-panel-switch")
+            .unwrap()
+            .disabled
+    );
+    assert!(visible(&selected, "status"));
+    assert_eq!(
+        selected
+            .texts
+            .iter()
+            .find(|text| text.id == "status")
+            .unwrap()
+            .text,
+        "Loading file…"
+    );
 }
 
 #[test]

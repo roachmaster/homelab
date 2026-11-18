@@ -81,6 +81,24 @@ data; the absence of metadata is preferable to a made-up email cue.
 Use the [Mail layout checks](../test-forge-ui/SKILL.md#mail-layout-checks) to
 verify the generated states and their keyboard/touch interactions.
 
+## Shape a mobile Workbench
+
+Follow the [IDE and tooling workspace rule](../design-modern-ui/SKILL.md#ide-and-tooling-workspace-rule).
+Use the current node/project breadcrumb in the identity header to open a native
+project sheet; put View options beside it. Below that header, retain only the
+global view strip and the local pane strip before the file area. Keep the idle
+ready message in inspection details and display actionable/loading state when
+needed. Hide repeated mobile pane headings and collapse controls; the pane tabs
+already identify the active tool.
+
+Combine file/symbol search and entry filtering into one named field with an
+inline mode button. Keep its meaning and scope explicit and preserve accepted
+report keys. Use compact tree rows, clear folder/file glyphs, subtle indentation,
+and restrained selection. Display actual supplied diagnostic counts on Problems
+and concise truthful empty states. Keep File disabled or present an honest empty
+state until a file is available. Project and layout sheets must preserve source,
+scroll, focus, and drafts unless the user actually changes the admitted context.
+
 ## Workbench guardrails
 
 - **Recognizable Explorer.** Use familiar folder/file hierarchy, distinct expansion
@@ -106,14 +124,13 @@ interaction tests cannot excuse the wrong primary product shape.
 
 ## Make source the main work area on phones
 
-- **Keep at most two header/navigation bars.** Share identity and current
-  context in the first bar and put view navigation in the second. Keep pane,
-  Project and View controls local to the work area, with project selectors
-  inside a disclosure while a file is active. Put Back to files beside the
-  filename. Keep actionable warnings visible and use one short source status.
-- **Give each control a recognizable role.** Use a recessed segmented track
-  with a solid raised selected segment, an underline for the active mobile
-  pane, and a quiet chevron with text for back navigation. Use the primary
+- **Keep the file area close to navigation.** Put node/project and View choices
+  in the compact identity header. Keep the global and pane tabs as the only two
+  control strips before source. Open project/layout choices in native sheets.
+  Put Back to files beside the filename, retain one short source status, and
+  keep actionable warnings visible.
+- **Give each control a recognizable role.** Use underline tabs for the active
+  view and pane, and a named Back icon beside the filename. Use the primary
   accent fill and dark text for the pressed Wrap pill. Preserve the 44 px
   mobile hit area with a smaller visible pill and draw a solid keyboard focus
   ring around that pill. Selection and keyboard focus need distinct cues.

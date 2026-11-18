@@ -654,6 +654,7 @@ impl Mail {
                 ("mail-send", loading || !can_send),
             ]
             .map(|(id, disabled)| ButtonBinding {
+                pressed: None,
                 id,
                 disabled,
                 action: None,

@@ -580,6 +580,7 @@ impl Chats {
             ),
         ] {
             view.buttons.push(ButtonBinding {
+                pressed: None,
                 id,
                 disabled,
                 action: None,
@@ -657,16 +658,19 @@ impl Chats {
             }),
         });
         view.buttons.push(ButtonBinding {
+            pressed: None,
             id: "send-workbench-chat",
             disabled: action.is_none() || !self.can_send_draft(),
             action,
         });
         view.buttons.push(ButtonBinding {
+            pressed: None,
             id: "propose-workbench-edit",
             disabled: proposal.is_none() || !self.can_send_draft(),
             action: proposal,
         });
         view.buttons.push(ButtonBinding {
+            pressed: None,
             id: "discard-workbench-edit",
             disabled: !reviewing,
             action: None,

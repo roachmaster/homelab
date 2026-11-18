@@ -85,7 +85,7 @@ async function stopFixture(state) {
   finally { state.stopping = null; }
 }
 const LONG_FILE_NAME = 'remote_project_request_validation_and_admission_contract_with_a_deliberately_long_safe_name_for_filtering.rs';
-const localActions = ['select_entry', 'toggle_entry', 'select_declaration', 'select_problem', 'set_file_filter', 'set_symbol_filter', 'more_tree', 'previous_tree', 'more_outline', 'previous_outline', 'more_problems', 'previous_problems'];
+const localActions = ['select_entry', 'toggle_entry', 'select_declaration', 'select_problem', 'set_explorer_query', 'set_symbol_filter', 'more_tree', 'previous_tree', 'more_outline', 'previous_outline', 'more_problems', 'previous_problems'];
 
 // Test-only observation: never replace the Worker implementation, WASM or gateway.
 // Retain only local report actions in ephemeral page memory, never pairing events,
@@ -128,8 +128,11 @@ async function observe(context) {
         if (kind === 'set_symbol_filter' && !Number.isSafeInteger(action.entry)) {
           throw new Error('Symbol filter omitted its selected-entry context');
         }
-        if (kind.endsWith('_filter') && (typeof action.value !== 'string' || new TextEncoder().encode(action.value).length > 256)) {
+        if ((kind.endsWith('_filter') || kind === 'set_explorer_query') && (typeof action.value !== 'string' || new TextEncoder().encode(action.value).length > 256)) {
           throw new Error('Filter event omitted its bounded query value');
+        }
+        if (kind === 'set_explorer_query' && typeof action.entry_names !== 'boolean') {
+          throw new Error('Explorer query omitted its accepted mode');
         }
         probe.saved.set(slot, structuredClone(action));
       },
@@ -239,8 +242,19 @@ async function selectFile(page, name) {
   if (narrow) await check(page.locator('#workspace-panel')).toBeVisible();
   return item;
 }
+async function setExplorerMode(page, entryNames) {
+  const toggle = page.locator('#explorer-filter-mode');
+  await check(toggle).toBeEnabled();
+  if (await toggle.getAttribute('aria-pressed') !== String(entryNames)) await toggle.click();
+  await check(toggle).toHaveAttribute('aria-pressed', String(entryNames));
+}
+async function searchProject(page, query) {
+  await setExplorerMode(page, false);
+  await page.locator('#project-query').fill(query);
+}
 async function filterFiles(page, query) {
-  await page.locator('#file-filter').fill(query);
+  await setExplorerMode(page, true);
+  await page.locator('#project-query').fill(query);
   // An accepted view updates the summary as well as the input, so the caller's
   // eventual row assertions, not fill() alone, prove WASM handled the query.
 }
@@ -280,8 +294,9 @@ async function assertTone(page, id, tone) {
   }, tone), true, 'typed status tone survives the stylesheet cascade');
 }
 async function selectProject(page, project) {
-  await disclosure(page, 'project-options', true);
+  await sheet(page, 'project-options', true);
   await page.locator('#project').selectOption(project);
+  await sheet(page, 'project-options', false);
 }
 async function inspect(page, project, expected = 'Partial inspection:') {
   await selectProject(page, project);
@@ -296,7 +311,30 @@ async function replayAction(page, slot) {
   await page.evaluate(s => window.__forgeBrowserProbe.replay(s), slot);
 }
 
+async function sheet(page, id, open) {
+  const dialog = page.locator('#' + id);
+  const trigger = page.locator(id === 'project-options' ? '#workbench-context' : '#workspace-options-toggle');
+  if (await dialog.evaluate(node => node.open) !== open) {
+    if (open) {
+      for (const other of ['project-options', 'workspace-options'].filter(name => name !== id)) {
+        if (await page.locator('#' + other).evaluate(node => node.open)) {
+          await page.locator('#' + other + '-close').click();
+          await check(page.locator('#' + other)).toHaveJSProperty('open', false);
+        }
+      }
+      await check(trigger).toBeVisible();
+      await trigger.focus();
+      await page.keyboard.press('Enter');
+    } else {
+      await page.locator('#' + id + '-close').click();
+    }
+  }
+  await check(dialog).toHaveJSProperty('open', open);
+  if (open) await check(dialog).toBeVisible();
+  else await check(dialog).toBeHidden();
+}
 async function disclosure(page, id, open) {
+  if (['project-options', 'workspace-options'].includes(id)) return sheet(page, id, open);
   const details = page.locator(`#${id}`);
   const caller = Number(new Error().stack.split('\n').slice(2)
     .map(line => line.match(/journey\.mjs:(\d+):\d+/)?.[1]).find(Boolean) ?? 0);
@@ -363,14 +401,24 @@ async function checkRefreshPlacement(page) {
   await check(refresh).toBeEnabled();
   await check(problems).toBeInViewport();
   await check(refresh).toBeInViewport();
-  assert.ok(await refresh.evaluate(button => {
+  await page.mouse.move(0, 0);
+  assert.equal(await refresh.evaluate(button => {
     const reference = document.createElement('span');
-    reference.style.backgroundColor = 'var(--raised)';
     document.body.append(reference);
-    const neutral = getComputedStyle(button).backgroundColor === getComputedStyle(reference).backgroundColor;
+    const color = token => {
+      reference.style.backgroundColor = `var(--${token})`;
+      return getComputedStyle(reference).backgroundColor;
+    };
+    const background = getComputedStyle(button).backgroundColor;
+    const neutral = ['rgba(0, 0, 0, 0)', color('bg'), color('surface'), color('raised')].includes(background);
+    const accent = color('accent');
     reference.remove();
-    return neutral;
-  }), 'refresh uses the neutral raised surface');
+    return neutral && background !== accent;
+  }), true, 'refresh uses the neutral canvas or a transparent surface');
+  const restingBackground = await refresh.evaluate(button => getComputedStyle(button).backgroundColor);
+  await refresh.hover();
+  await check.poll(() => refresh.evaluate(button => getComputedStyle(button).backgroundColor)).not.toBe(restingBackground);
+  await page.mouse.move(0, 0);
   const [problemsBounds, refreshBounds] = await Promise.all([problems.boundingBox(), refresh.boundingBox()]);
   assert(problemsBounds && refreshBounds && problemsBounds.y < refreshBounds.y + refreshBounds.height &&
     refreshBounds.y < problemsBounds.y + problemsBounds.height, 'Problems and Refresh project share a row');
@@ -379,58 +427,115 @@ async function checkRefreshPlacement(page) {
       'phone refresh target is 44 by 44 CSS pixels');
   }
   const gap = refreshBounds.x - (problemsBounds.x + problemsBounds.width);
-  assert(gap >= -1 && gap <= 12, 'Refresh project immediately follows Problems');
+  assert(gap >= -1 && refreshBounds.x + refreshBounds.width <= page.viewportSize().width + 1,
+    'Refresh project follows Problems at the toolbar trailing edge');
+  if (page.viewportSize().width <= 800) assert(gap <= 12, 'phone Refresh remains adjacent to the pane tabs');
   await problems.focus();
   await page.keyboard.press('Tab');
   await check(refresh).toBeFocused();
+  assert.equal(await refresh.evaluate(button => {
+    const style = getComputedStyle(button);
+    return button.matches(':focus-visible') && style.outlineStyle === 'solid' && Number.parseFloat(style.outlineWidth) >= 2;
+  }), true, 'refresh retains a clear keyboard focus ring');
   await refresh.click({ trial: true });
 }
 async function projectOptionsJourney(page, traffic) {
-  await disclosure(page, 'workspace-options', false);
-  await disclosure(page, 'project-options', false);
+  await sheet(page, 'workspace-options', false);
+  await sheet(page, 'project-options', false);
   await checkRefreshPlacement(page);
-  const projectDetails = page.locator('#project-options');
-  const viewDetails = page.locator('#workspace-options');
-  const projectOptions = page.locator('#project-options > summary');
-  const viewOptions = page.locator('#workspace-options > summary');
-  const projectPanel = page.locator('#project-options > .fg-disclosure-body');
-  const viewPanel = page.locator('#workspace-options > .fg-option-list');
-  await check(projectOptions).toHaveText('Project options');
-  await check(projectOptions).toBeInViewport();
-  await check(viewOptions).toBeInViewport();
-  const projectBounds = await projectOptions.boundingBox();
-  const viewBounds = await viewOptions.boundingBox();
+  const projectDialog = page.getByRole('dialog', { name: 'Project options', exact: true });
+  const viewDialog = page.getByRole('dialog', { name: 'View options', exact: true });
+  const projectTrigger = page.getByRole('button', { name: 'Project options', exact: true });
+  const viewTrigger = page.getByRole('button', { name: 'View options', exact: true });
+  await check(projectTrigger).toHaveAttribute('id', 'workbench-context');
+  await check(projectTrigger).toBeInViewport();
+  await check(viewTrigger).toBeInViewport();
+  const [projectBounds, viewBounds] = await Promise.all([projectTrigger.boundingBox(), viewTrigger.boundingBox()]);
   assert(projectBounds && viewBounds && projectBounds.y < viewBounds.y + viewBounds.height &&
-    viewBounds.y < projectBounds.y + projectBounds.height, 'project and view options share a row');
+    viewBounds.y < projectBounds.y + projectBounds.height, 'project breadcrumb and view options share the identity header');
   const requests = ['resume', 'pair', 'inspect', 'source', 'other'];
   const before = requests.map(traffic.count);
-  await disclosure(page, 'workspace-options', true);
-  await check(viewPanel).toBeVisible();
-  await check(projectDetails).toHaveJSProperty('open', false);
-  await check(projectPanel).toBeHidden();
-  await disclosure(page, 'project-options', true);
-  await check(projectPanel).toBeVisible();
-  await check(viewDetails).toHaveJSProperty('open', false);
-  await check(viewPanel).toBeHidden();
-  await page.keyboard.press('Tab');
+  await sheet(page, 'workspace-options', true);
+  await check(viewDialog).toBeVisible();
+  await check(page.locator('#explorer-panel-toggle')).toBeFocused();
+  await check(projectDialog).toBeHidden();
+  await page.keyboard.press('Escape');
+  await check(viewDialog).toBeHidden();
+  await check(viewTrigger).toBeFocused();
+  await sheet(page, 'project-options', true);
+  await check(projectDialog).toBeVisible();
+  await check(viewDialog).toBeHidden();
   await check(page.locator('#node')).toBeFocused();
   await page.keyboard.press('Tab');
   await check(page.locator('#project')).toBeFocused();
-  assert.ok(await page.locator('#project-options select').evaluateAll(fields =>
-    fields.length === 2 && fields.every(field => field.getBoundingClientRect().width >= 120)),
-  'open context selectors keep readable widths');
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
-    'open project options do not overflow the viewport');
-  await disclosure(page, 'workspace-options', true);
-  await check(viewPanel).toBeVisible();
-  await check(projectDetails).toHaveJSProperty('open', false);
-  await check(projectPanel).toBeHidden();
+  assert.equal(await page.locator('#project-options select').evaluateAll(fields =>
+    fields.length === 2 && fields.every(field => field.getBoundingClientRect().width >= 120 && field.getBoundingClientRect().height >= 44)),
+  true, 'sheet selectors retain readable widths and touch targets');
+  if (page.viewportSize().width < 640) {
+    const bounds = await projectDialog.boundingBox();
+    const viewport = page.viewportSize();
+    assert(bounds && bounds.x >= -1 && bounds.x + bounds.width <= viewport.width + 1
+      && Math.abs(bounds.y + bounds.height - viewport.height) <= 2,
+    'project options use a viewport-width bottom sheet on phones');
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+    'open project sheet does not overflow the viewport');
+  await page.keyboard.press('Escape');
+  await check(projectDialog).toBeHidden();
+  await check(projectTrigger).toBeFocused();
   await check(page.locator('#node')).toBeHidden();
   await check(page.locator('#project')).toBeHidden();
-  await disclosure(page, 'workspace-options', false);
-  await check(viewPanel).toBeHidden();
-  assert.deepEqual(requests.map(traffic.count), before, 'view and project options open and close locally');
+  await sheet(page, 'workspace-options', true);
+  await check(viewDialog).toBeVisible();
+  if (page.viewportSize().width < 640) {
+    const bounds = await viewDialog.boundingBox();
+    assert(bounds && Math.abs(bounds.y + bounds.height - page.viewportSize().height) <= 2,
+      'view options use a phone bottom sheet');
+    await screenshot(page, 'ide-workbench-options-phone.png');
+  }
+  await sheet(page, 'workspace-options', false);
+  await check(viewTrigger).toBeFocused();
+  await sheet(page, 'project-options', true);
+  await page.evaluate(() => {
+    document.getElementById('project-options').close();
+    document.getElementById('inspect').focus({ preventScroll: true });
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await check(projectDialog).toBeHidden();
+  await check(projectTrigger).toHaveAttribute('aria-expanded', 'false');
+  await check(page.locator('#inspect')).toBeFocused();
+  assert.deepEqual(requests.map(traffic.count), before, 'project and view sheets remain presentation-only');
 }
+
+async function checkWorkbenchChrome(page) {
+  const viewport = page.viewportSize();
+  await check(page.locator('#workbench')).toBeVisible();
+  await check(page.locator('#file-filter')).toHaveCount(0);
+  const mode = page.locator('#explorer-filter-mode');
+  await check(mode).toHaveAttribute('aria-label', 'Filter entry names');
+  await check(page.locator('#project-query')).toHaveAttribute('placeholder', 'Search files or symbols…');
+  if (viewport.width < 640) {
+    const [identity, globalTabs, paneTabs] = await Promise.all([
+      page.locator('.fg-header').boundingBox(), page.locator('#ide-navigation').boundingBox(),
+      page.locator('#workspace .fg-pane-actions').boundingBox(),
+    ]);
+    assert(identity && identity.height <= 56 && globalTabs && globalTabs.height <= 48
+      && paneTabs && paneTabs.height <= 48,
+    'mobile Workbench has a compact identity header and two control/tab strips');
+    await check(page.locator('#workspace .fg-layout-options')).toHaveCount(0);
+    for (const pane of ['explorer-panel', 'workspace-panel', 'outline-panel', 'problems-panel']) {
+      await check(page.locator('#' + pane + ' > .fg-pane-header')).toBeHidden();
+    }
+    await check(page.locator('#workspace .fg-pane-close:visible')).toHaveCount(0);
+    for (const id of ['workbench-context', 'workspace-options-toggle', 'explorer-panel-switch', 'outline-panel-switch', 'problems-panel-switch', 'inspect']) {
+      const box = await page.locator('#' + id).boundingBox();
+      assert(box && box.width >= 44 && box.height >= 44, 'mobile Workbench controls retain touch targets');
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      'compact Workbench has no horizontal page overflow');
+  }
+}
+
 async function ensurePane(page, id) {
   if (!await page.locator(`#${id}`).isVisible()) await page.locator(`#${id}-switch`).click();
   await check(page.locator(`#${id}`)).toBeVisible();
@@ -498,13 +603,13 @@ async function keyboardAndFilters(page, traffic) {
   await check(page.locator('#outline')).toContainText('Widget');
 
   await filterFiles(page, '');
-  await page.locator('#file-filter').pressSequentially('zz-pagination-matchX');
-  await page.locator('#file-filter').press('Backspace');
-  await check(page.locator('#file-filter')).toHaveValue('zz-pagination-match');
+  await page.locator('#project-query').pressSequentially('zz-pagination-matchX');
+  await page.locator('#project-query').press('Backspace');
+  await check(page.locator('#project-query')).toHaveValue('zz-pagination-match');
   await check(page.locator('#files')).toContainText('bulk');
   await check(page.locator('#files')).toContainText('zz-pagination-match.txt');
   await check(page.locator('#selection-title')).toContainText('lib.rs');
-  await check(page.locator('#file-filter-summary')).toContainText(/hidden by filter/i);
+  await check(page.locator('#explorer-summary')).toContainText(/hidden by filter/i);
   await filterFiles(page, 'deliberately_long_safe_name');
   await selectFile(page, LONG_FILE_NAME);
   await check(page.locator('#details')).toContainText(LONG_FILE_NAME);
@@ -521,17 +626,17 @@ async function keyboardAndFilters(page, traffic) {
     await check(page.locator('#details')).toContainText(safeName);
     assert.match(safeName, /ff/i, 'native representation preserves the non-UTF8 byte');
   }
-  const filterEvents = await page.evaluate(() => window.__forgeBrowserProbe.count('set_file_filter'));
-  await page.locator('#file-filter').fill('é'.repeat(129));
-  assert.equal(await page.locator('#file-filter').evaluate(input => input.validity.valid), false, 'UTF-8 byte bound is enforced, not merely character count');
-  assert.equal(await page.evaluate(() => window.__forgeBrowserProbe.count('set_file_filter')), filterEvents, 'oversized filter never reaches the worker');
+  const filterEvents = await page.evaluate(() => window.__forgeBrowserProbe.count('set_explorer_query'));
+  await page.locator('#project-query').fill('é'.repeat(129));
+  assert.equal(await page.locator('#project-query').evaluate(input => input.validity.valid), false, 'UTF-8 byte bound is enforced, not merely character count');
+  assert.equal(await page.evaluate(() => window.__forgeBrowserProbe.count('set_explorer_query')), filterEvents, 'oversized filter never reaches the worker');
   await filterFiles(page, 'NO-MATCH');
   await check(page.locator('#files [role="treeitem"]')).toHaveCount(0);
   await check(page.locator('#files')).toContainText(/match/i);
   await filterFiles(page, '');
   await check(fileRow(page, 'blank.rs')).toBeVisible();
   await selectFile(page, 'blank.rs');
-  await check(page.locator('#outline')).toContainText(/No declarations were emitted/i);
+  await check(page.locator('#outline')).toHaveText('No symbols in this file.');
   await replayAction(page, 'old-symbol-filter');
   await check(page.locator('#symbol-filter')).toHaveValue('');
   await check(page.locator('#selection-title')).toContainText('blank.rs');
@@ -631,8 +736,9 @@ async function panesAndNarrow(page, traffic) {
     }
     await page.keyboard.press('End');
     await check(splitter).toHaveAttribute('aria-valuenow', await splitter.getAttribute('aria-valuemax'));
-    if (!await page.locator('#workspace-options').evaluate(e => e.open)) await page.locator('#workspace-options > summary').click();
+    await sheet(page, 'workspace-options', true);
     await page.locator('#workspace-reset').click();
+    await sheet(page, 'workspace-options', false);
     await ensurePane(page, pane);
     await check(splitter).toHaveAttribute('aria-valuenow', String(initial));
     const bounds = await splitter.boundingBox();
@@ -643,7 +749,9 @@ async function panesAndNarrow(page, traffic) {
     await page.mouse.move(x + (pane === 'explorer-panel' ? 20 : pane === 'outline-panel' ? -20 : 0), y + (orientation === 'horizontal' ? -20 : 0));
     await page.mouse.up();
     await check(splitter).toHaveAttribute('aria-valuenow', String(initial + 20));
+    await sheet(page, 'workspace-options', true);
     await page.locator('#workspace-reset').click();
+    await sheet(page, 'workspace-options', false);
     await ensurePane(page, pane);
     await check(splitter).toHaveAttribute('aria-valuenow', String(initial));
     await splitter.focus();
@@ -653,17 +761,24 @@ async function panesAndNarrow(page, traffic) {
     await page.keyboard.press('Enter');
     await check(page.locator(`#${pane}`)).toBeVisible();
     await assertVisibleFocus(page);
+    await sheet(page, 'workspace-options', false);
     await page.locator(`#${pane}-close`).focus();
     await page.keyboard.press('Enter');
     await check(page.locator(`#${pane}-toggle`)).toBeFocused();
     await page.keyboard.press('Enter');
     await check(page.locator(`#${pane}`)).toBeVisible();
+    await sheet(page, 'workspace-options', false);
   }
-  if (await page.locator('#workspace-options').evaluate(e => e.open)) await page.locator('#workspace-options > summary').click();
+  await sheet(page, 'workspace-options', false);
   await check(page.locator('#selection-title')).toContainText('lib.rs');
   report.pass('real.panes.desktop');
   report.start('real.panes.narrow');
 
+  // A resize preserves the foreground pane's focus. The preceding desktop
+  // exercise ends in Problems management, so establish the intended selected
+  // file as foreground before checking its narrow presentation.
+  await page.locator('#selection-title').focus();
+  await check(page.locator('#selection-title')).toBeFocused();
   await page.setViewportSize({ width: 760, height: 1000 });
   await check(page.locator('#workspace-panel')).toBeVisible();
   await check(page.locator('#explorer-panel')).toBeHidden();
@@ -916,12 +1031,12 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   await filterFiles(page, LONG_FILE_NAME);
   await selectFile(page, LONG_FILE_NAME);
   await saveAction(page, 'select_entry', 'old-report-row');
-  await saveAction(page, 'set_file_filter', 'old-report-filter');
+  await saveAction(page, 'set_explorer_query', 'old-report-filter');
   await inspect(page, 'workspace');
   await noSelectedFileFromPriorReport(page);
   await replayAction(page, 'old-report-row');
   await replayAction(page, 'old-report-filter');
-  await check(page.locator('#file-filter')).toHaveValue('');
+  await check(page.locator('#project-query')).toHaveValue('');
   await noSelectedFileFromPriorReport(page);
   const rows = await page.locator('#files [role="treeitem"]').count();
   const target = fileRow(page, 'README <safe>.md');
@@ -951,6 +1066,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
     assert.equal(page.workers().length, 1);
   }
   let before = requestCounts();
+  await sheet(page, 'workspace-options', true);
   const cleared = await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
     return {
@@ -961,8 +1077,9 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
       declarations: document.getElementById('declaration-details').textContent,
       disclosuresClosed: [...document.querySelectorAll('.fg-disclosure')].every(node => !node.open),
       hidden: document.getElementById('workbench').hidden,
-      contextHidden: document.getElementById('workbench-context').hidden,
+      contextHidden: document.getElementById('workbench-context').closest('[hidden]') !== null,
       contextText: document.getElementById('workbench-context').textContent,
+      sheetsClosed: ['project-options', 'workspace-options'].every(id => !document.getElementById(id).open),
       threadTitleCleared: document.getElementById('chat-history-toggle').textContent === 'Previous chats',
       source: document.getElementById('source-view').textContent,
       markdown: document.getElementById('source-preview').textContent,
@@ -978,7 +1095,8 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   assert.equal(cleared.disclosuresClosed, true, 'teardown closes disclosures as well as clearing their protected contents');
   assert.equal(cleared.hidden, true, 'teardown hides protected composition before resume');
   assert.equal(cleared.contextHidden, true, 'teardown hides project context before resume');
-  assert.equal(cleared.contextText, '', 'teardown clears project context before resume');
+  assert.equal(cleared.contextText.includes('Local fixture'), false, 'teardown clears the projected project context before resume');
+  assert.equal(cleared.sheetsClosed, true, 'teardown closes both presentation sheets before resume');
   assert.equal(cleared.threadTitleCleared, true, 'teardown clears the protected active thread title before resume');
   assert.equal(cleared.source, '', 'teardown clears verified source before resume');
   assert.equal(cleared.markdown, '', 'teardown clears displayed Markdown before resume');
@@ -990,7 +1108,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   });
   await checkRestoredWorkbench(before);
   process.stderr.write('QA_CHECK native_back_warning\n');
-  await page.locator('#workbench-context').click();
+  await page.locator('.fg-header').click({ position: { x: 2, y: 2 } });
   before = requestCounts();
   const forgeUrl = page.url();
   await respondToLeaveWarning(() => page.evaluate(() => history.back()), 'stay');
@@ -1003,7 +1121,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   await page.goForward({ waitUntil: 'domcontentloaded' });
   await checkRestoredWorkbench(before);
   process.stderr.write('QA_CHECK reload_restore\n');
-  await page.locator('#workbench-context').click();
+  await page.locator('.fg-header').click({ position: { x: 2, y: 2 } });
   before = requestCounts();
   await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
   await checkRestoredWorkbench(before);
@@ -1442,9 +1560,9 @@ async function noSelectedFileFromPriorReport(page) {
 }
 
 async function checkPhoneFileBack(page) {
-  const header = page.locator('#workspace-panel > .fg-pane-header');
-  const heading = header.getByRole('heading', { name: 'File', exact: true });
-  const back = header.getByRole('button', { name: 'Back to files', exact: true });
+  const header = page.locator('#file-heading');
+  const heading = page.locator('#selection-title');
+  const back = page.getByRole('button', { name: 'Back to files', exact: true });
   await check(back).toHaveAttribute('id', 'back-to-files');
   await check(back).toHaveAttribute('aria-label', 'Back to files');
   await check(back).toHaveAttribute('title', 'Back to files');
@@ -1454,7 +1572,8 @@ async function checkPhoneFileBack(page) {
   assert(icon && title && Math.abs(icon.width - 44) < 1 && Math.abs(icon.height - 44) < 1,
     'the phone Back icon has a 44 by 44 CSS pixel target');
   assert(icon.x + icon.width <= title.x + 1 && icon.y < title.y + title.height && title.y < icon.y + icon.height,
-    'the Back icon and File heading share the same header row');
+    'Back to files shares the selected filename row');
+  await check(header).toBeVisible();
   await back.focus();
   await page.keyboard.press('Enter');
   await check(page.locator('#explorer-panel')).toBeVisible();
@@ -1511,15 +1630,27 @@ async function sourceSearchJourney() {
     const traffic = await observe(context);
     const { page, errors, respondToLeaveWarning } = await connect(context, fixture, true);
     await projectOptionsJourney(page, traffic);
+    await checkWorkbenchChrome(page);
+    await check(page.locator('#workspace-panel-switch')).toBeDisabled();
+    await screenshot(page, 'ide-workbench-explorer-phone.png');
     process.stderr.write('QA_CHECK source_search_connected\n');
     assert.equal(traffic.count('inspect'), 1, 'one admitted project opens automatically');
     await check(page.locator('#explorer-panel')).toBeVisible();
     process.stderr.write('QA_CHECK source_search_explorer\n');
     const reads = traffic.count('source');
-    await page.locator('#project-query').fill('INSPECT_ME');
+    await searchProject(page, 'INSPECT_ME');
     const match = page.locator('#search-results [role="treeitem"]').filter({ hasText: 'inspect_me' });
     await check(match).toHaveCount(1);
     process.stderr.write('QA_CHECK source_search_match\n');
+    await saveAction(page, 'set_explorer_query', 'old-explorer-mode');
+    await setExplorerMode(page, true);
+    await filterFiles(page, 'lib.rs');
+    await check(fileRow(page, 'lib.rs')).toBeVisible();
+    await replayAction(page, 'old-explorer-mode');
+    await check(page.locator('#explorer-filter-mode')).toHaveAttribute('aria-pressed', 'true');
+    await check(page.locator('#project-query')).toHaveValue('lib.rs');
+    await searchProject(page, 'INSPECT_ME');
+    await check(match).toHaveCount(1);
     await check(match).toContainText(/src\s*\/\s*lib\.rs/);
     assert.equal(traffic.count('source'), reads, 'searching symbols does not read files');
     await match.focus();
@@ -1597,7 +1728,7 @@ async function sourceSearchJourney() {
       await dock.getByRole('button', { name: 'Propose edit' }).click();
       await check(dock.locator('#workbench-chat-status')).toHaveText('Preparing proposal…');
       await checkPhoneFileBack(page);
-      await page.locator('#project-query').fill('README <safe>');
+      await searchProject(page, 'README <safe>');
       await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'README <safe>.md' }).click();
       await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
       releasePreview();
@@ -1613,7 +1744,7 @@ async function sourceSearchJourney() {
     await checkMarkdownSource(page, traffic);
     await page.getByRole('button', { name: 'Back to files', exact: true }).click();
     await check(page.locator('#explorer-panel')).toBeVisible();
-    await page.locator('#project-query').fill('paged.txt');
+    await searchProject(page, 'paged.txt');
     await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'paged.txt' }).click();
     await check(page.locator('#source-view')).toContainText('Source line 1:');
     await check(page.locator('#source-format')).toBeHidden();
@@ -1644,7 +1775,7 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view')).toContainText('Source line 257:');
     assert.equal(traffic.count('source'), pageReads, 'source paging reuses the exact accepted file');
     await page.getByRole('button', { name: 'Back to files', exact: true }).click();
-    await page.locator('#project-query').fill('late_view');
+    await searchProject(page, 'late_view');
     const saved = checkpointSaved(page, snapshot => snapshot.workbench_open &&
       snapshot.workbench?.entry?.declaration.at(-1)?.name === 'late_view');
     await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'late_view' }).click();
@@ -1699,7 +1830,7 @@ async function sourceSearchJourney() {
 
 async function managedWriteJourney(page, context, respondToLeaveWarning) {
   await ensurePane(page, 'explorer-panel');
-  await page.locator('#project-query').fill('managed.txt');
+  await searchProject(page, 'managed.txt');
   await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'managed.txt' }).click();
   const source = page.locator('#source-view');
   const dock = page.locator('#workbench-chat');
@@ -1754,7 +1885,7 @@ async function managedWriteJourney(page, context, respondToLeaveWarning) {
   ]);
   await check(page.locator('#status')).toContainText('Partial inspection:');
   await ensurePane(page, 'explorer-panel');
-  await page.locator('#project-query').fill('managed.txt');
+  await searchProject(page, 'managed.txt');
   await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'managed.txt' }).click();
   await check(source.locator('[data-line="3"]')).toContainText('extra line');
   await check(dock.locator('#workbench-write-status')).toContainText(/Applied · rev [0-9a-f]{8}/);
@@ -2880,6 +3011,9 @@ async function realJourney() {
   await disclosure(page, 'project-options', false);
   await page.locator('#inspect').click();
   await check(page.locator('#status')).toContainText('Project ready.');
+  await check(page.locator('#status')).toBeHidden();
+  await check(page.locator('#workspace-panel-switch')).toBeDisabled();
+  await check(page.locator('#problems-panel-switch')).toContainText('Problems (0)');
   await check(page.locator('#summary')).toContainText('0 files');
   await check(page.locator('#files [role="treeitem"]')).toHaveCount(1);
   await check(page.locator('#problems [role="treeitem"]')).toHaveCount(0);
@@ -2906,6 +3040,7 @@ async function realJourney() {
 // in exactly their original order; this is NOT a fabricated reorder scenario.
 async function controlledInputDraftJourney(page) {
   report.start('probe.presentation.ordered_drafts');
+  await setExplorerMode(page, true);
   const worker = page.workers()[0];
   await worker.evaluate(() => {
     const original = self.postMessage;
@@ -2937,7 +3072,7 @@ async function controlledInputDraftJourney(page) {
     await worker.evaluate(() => self.__forgeQueuedPresentation.release());
     await check.poll(() => page.evaluate(() => window.__forgeBrowserProbe.receivedViews())).toBe(before + 1);
   };
-  const input = page.locator('#file-filter');
+  const input = page.locator('#project-query');
   await input.fill('f');
   await input.pressSequentially('o');
   await input.press('Backspace');
@@ -2977,7 +3112,10 @@ async function controlledLifecycleJourney() {
   await disclosure(page, 'project-options', false);
   const before = traffic.count('inspect');
   await page.locator('#inspect').evaluate(button => { button.click(); button.click(); button.click(); });
-  await check(page.locator('#status')).toContainText('Inspecting');
+  // Repeated intents are rejected as Busy while the first request remains
+  // pending. Its status copy can be superseded by that rejection; the model's
+  // phase and admitted Cancel control establish the stable pending contract.
+  await check(page.locator('#phase-label')).toHaveText('Inspecting');
   await check(page.locator('#inspect')).toBeDisabled();
   const actions = page.locator('#inspection-actions');
   await check(actions).toBeVisible();
@@ -3035,9 +3173,12 @@ async function controlledLifecycleJourney() {
   await selectProject(page, 'slow');
   await page.locator('#inspect').click();
   await check(page.locator('#status')).toContainText('Inspecting');
+  await sheet(page, 'project-options', true);
   await page.locator('#project').focus();
+  await check(page.locator('#project')).toBeFocused();
   await check(page.locator('#status')).toContainText('Project ready.');
   await check(page.locator('#project')).toBeFocused();
+  await sheet(page, 'project-options', false);
   report.pass('injected.requests.refresh_focus');
   report.start('injected.failures.unavailable_timeout');
 
@@ -3130,7 +3271,7 @@ async function controlledLifecycleJourney() {
     for (const node of body.event.catalog.nodes) node.projects = [];
     await route.fulfill({ response, json: body });
   });
-  await page.locator('#workbench-context').click();
+  await page.locator('.fg-header').click({ position: { x: 2, y: 2 } });
   await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
   await check(page.locator('#status')).toContainText('Connected.');
   await check(page.locator('#workbench')).toBeVisible();

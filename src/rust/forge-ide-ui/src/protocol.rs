@@ -802,6 +802,14 @@ pub enum UiEvent {
         report: RequestToken,
         value: String,
     },
+    SetExplorerQuery {
+        report: RequestToken,
+        entry_names: bool,
+        value: String,
+    },
+    ToggleExplorerFilter {
+        report: RequestToken,
+    },
     SetSymbolFilter {
         report: RequestToken,
         entry: u32,

@@ -516,10 +516,14 @@ impl UiModel {
         };
         let key = self.accepted_report.as_ref();
         let entry = self.current_entry();
+        let file_open = entry.is_some_and(|entry| entry.kind == EntryKind::File);
+        let searching = !self.explorer_filter && !self.project_query.0.trim().is_empty();
         let tree = self.tree_page();
         let search = self.search_page();
         let outline = self.outline_page();
         let problems = self.problems_page();
+        let outline_has_rows = !outline.rows.is_empty();
+        let problems_have_rows = !problems.rows.is_empty();
         let source_shape = self.source_shape();
         let shape = self.shape_page_from(source_shape.as_ref());
         let shape_details = self.shape_details(source_shape.as_ref());
@@ -694,8 +698,9 @@ impl UiModel {
             Some(r) => format!("{} · {} supplied diagnostics in this {} report. No compiler severity or source location is inferred.{}",problems.range(),problems.total,if r.complete { "complete" } else { "partial" },if r.complete { "" } else { " Missing diagnostics do not mean a clean or complete project." }),
         };
         let outline_empty_message = entry
+            .filter(|entry| entry.kind == EntryKind::File)
             .map(|e| outline_empty(e, !self.symbol_filter.is_empty()))
-            .unwrap_or("Select an inspected file to inspect its declarations.")
+            .unwrap_or("No file selected")
             .to_owned();
         let opaque_entries = source_shape
             .as_ref()
@@ -756,60 +761,353 @@ impl UiModel {
 
         let mut view = ViewModel {
             document_dirty: false,
-            panes: vec![PaneBinding {
-                id: "workspace-panel", context: context.clone(), reveal: if entry.is_some_and(|e| e.kind == EntryKind::File) { navigation } else { None },
-            }, PaneBinding { id: "explorer-panel", context, reveal: if entry.is_some_and(|e| e.kind != EntryKind::File) { navigation } else { None } }],
+            panes: vec![
+                PaneBinding {
+                    id: "workspace-panel",
+                    context: context.clone(),
+                    reveal: if entry.is_some_and(|e| e.kind == EntryKind::File) {
+                        navigation
+                    } else {
+                        None
+                    },
+                },
+                PaneBinding {
+                    id: "explorer-panel",
+                    context,
+                    reveal: if entry.is_some_and(|e| e.kind != EntryKind::File) {
+                        navigation
+                    } else {
+                        None
+                    },
+                },
+            ],
             sources: vec![source_binding],
             texts: vec![
-                tone_text("status", self.message.clone(), status_tone),
-                tone_text("phase-label", if no_project { "No allowed project" } else { phase_label(self.phase) }, status_tone),
+                tone_text(
+                    "status",
+                    if source_loading {
+                        "Loading file…".into()
+                    } else {
+                        self.message.clone()
+                    },
+                    status_tone,
+                ),
+                tone_text(
+                    "phase-label",
+                    if no_project {
+                        "No allowed project"
+                    } else {
+                        phase_label(self.phase)
+                    },
+                    status_tone,
+                ),
                 text("workbench-context", workbench_context),
-                text("source-status", source_status), text("source-range", source_range), text("search-summary", search_summary),
-                text("inspect-label", if key.is_some() { "Refresh" } else { "Open project" }),
+                text(
+                    "explorer-summary",
+                    format!(
+                        "{} matches{}",
+                        if searching {
+                            search.matches
+                        } else {
+                            tree.matches
+                        },
+                        if hidden_entry {
+                            " · selection hidden by filter"
+                        } else {
+                            ""
+                        }
+                    ),
+                ),
+                text(
+                    "problems-panel-switch",
+                    self.report.as_ref().map_or_else(
+                        || "Problems".into(),
+                        |_| format!("Problems ({})", problems.total),
+                    ),
+                ),
+                text("source-status", source_status),
+                text("source-range", source_range),
+                text("search-summary", search_summary),
+                text(
+                    "inspect-label",
+                    if key.is_some() {
+                        "Refresh"
+                    } else {
+                        "Open project"
+                    },
+                ),
                 text("source-shape-summary", shape_summary),
                 text("summary", summary),
-                tone_text("workspace-summary",workspace_summary,if hidden_entry || entry.is_some_and(|e| e.content_status == "rust_unavailable") { Tone::Warning } else { Tone::Neutral }),
-                text("selection-title", entry.map(|e| self.entry_name(e)).unwrap_or_else(|| "Project overview".into())),
-                text("selection-context", if connected { format!("{} / {}",self.node,self.project) } else { "Not connected".into() }),
-                text("file-filter-summary",file_summary), text("symbol-filter-summary",symbol_summary.clone()), text("declarations-summary",symbol_summary), text("problems-summary",problems_summary),
+                tone_text(
+                    "workspace-summary",
+                    workspace_summary,
+                    if hidden_entry || entry.is_some_and(|e| e.content_status == "rust_unavailable")
+                    {
+                        Tone::Warning
+                    } else {
+                        Tone::Neutral
+                    },
+                ),
+                text(
+                    "selection-title",
+                    entry
+                        .map(|e| self.entry_name(e))
+                        .unwrap_or_else(|| "Project overview".into()),
+                ),
+                text(
+                    "selection-context",
+                    if connected {
+                        format!("{} / {}", self.node, self.project)
+                    } else {
+                        "Not connected".into()
+                    },
+                ),
+                text("file-filter-summary", file_summary),
+                text("symbol-filter-summary", symbol_summary.clone()),
+                text("declarations-summary", symbol_summary),
+                text("problems-summary", problems_summary),
             ],
-            choices: vec![SelectBinding { id:"node",value:self.node.clone(),disabled:!connected,options:nodes },SelectBinding { id:"project",value:self.project.clone(),disabled:!connected,options:projects }],
+            choices: vec![
+                SelectBinding {
+                    id: "node",
+                    value: self.node.clone(),
+                    disabled: !connected,
+                    options: nodes,
+                },
+                SelectBinding {
+                    id: "project",
+                    value: self.project.clone(),
+                    disabled: !connected,
+                    options: projects,
+                },
+            ],
             inputs: vec![
-                InputBinding { id:"project-query",value:self.project_query.0.clone(),disabled:key.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.map(|k| FilterAction::SetProjectQuery { report:k.clone() }) },
-                InputBinding { id:"file-filter",value:self.file_filter.0.clone(),disabled:key.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.map(|k| FilterAction::SetFileFilter { report:k.clone() }) },
-                InputBinding { id:"symbol-filter",value:self.symbol_filter.0.clone(),disabled:entry.is_none(),max_bytes:MAX_FILTER_BYTES,action:key.zip(entry).map(|(k,e)| FilterAction::SetSymbolFilter { report:k.clone(),entry:e.id }) },
+                InputBinding {
+                    id: "project-query",
+                    value: if self.explorer_filter {
+                        self.file_filter.0.clone()
+                    } else {
+                        self.project_query.0.clone()
+                    },
+                    disabled: key.is_none(),
+                    max_bytes: MAX_FILTER_BYTES,
+                    action: key.map(|k| FilterAction::SetExplorerQuery {
+                        report: k.clone(),
+                        entry_names: self.explorer_filter,
+                    }),
+                },
+                InputBinding {
+                    id: "symbol-filter",
+                    value: self.symbol_filter.0.clone(),
+                    disabled: entry.is_none(),
+                    max_bytes: MAX_FILTER_BYTES,
+                    action: key.zip(entry).map(|(k, e)| FilterAction::SetSymbolFilter {
+                        report: k.clone(),
+                        entry: e.id,
+                    }),
+                },
             ],
             buttons: vec![
-                button("pair",self.pairing.is_some() || connected,None), button("inspect",!connected || loading || self.project.is_empty(),None),button("cancel",!can_cancel,None),
-                button("search-more",!search_more,key.map(|k| RowAction::MoreSearch { report:k.clone() })),
-                button("search-previous",self.search_window.history.is_empty(),key.map(|k| RowAction::PreviousSearch { report:k.clone() })),
-                button("source-more",!self.source.as_ref().is_some_and(|s| s.has_next()),key.zip(entry).map(|(k,e)| RowAction::MoreSource { report:k.clone(),entry:e.id })),
-                button("source-previous",!self.source.as_ref().is_some_and(|s| s.has_previous()),key.zip(entry).map(|(k,e)| RowAction::PreviousSource { report:k.clone(),entry:e.id })),
-                button("shape-more",!shape_more,key.map(|k| RowAction::MoreShape { report:k.clone() })),
-                button("shape-previous",self.shape_window.history.is_empty(),key.map(|k| RowAction::PreviousShape { report:k.clone() })),
-                button("tree-more",!tree_more,key.map(|k| RowAction::MoreTree { report:k.clone() })),
-                button("outline-more",!outline_more,key.zip(entry).map(|(k,e)| RowAction::MoreOutline { report:k.clone(),entry:e.id })),
-                button("problems-more",!problems_more,key.map(|k| RowAction::MoreProblems { report:k.clone() })),
-                button("tree-previous",self.tree_window.history.is_empty(),key.map(|k| RowAction::PreviousTree { report:k.clone() })),
-                button("outline-previous",self.outline_window.history.is_empty(),key.zip(entry).map(|(k,e)| RowAction::PreviousOutline { report:k.clone(),entry:e.id })),
-                button("problems-previous",self.problems_window.history.is_empty(),key.map(|k| RowAction::PreviousProblems { report:k.clone() })),
+                ButtonBinding {
+                    id: "explorer-filter-mode",
+                    disabled: key.is_none(),
+                    pressed: Some(self.explorer_filter),
+                    action: key.map(|report| RowAction::ToggleExplorerFilter {
+                        report: report.clone(),
+                    }),
+                },
+                button("workspace-panel-switch", !file_open, None),
+                button("pair", self.pairing.is_some() || connected, None),
+                button(
+                    "inspect",
+                    !connected || loading || self.project.is_empty(),
+                    None,
+                ),
+                button("cancel", !can_cancel, None),
+                button(
+                    "search-more",
+                    !search_more,
+                    key.map(|k| RowAction::MoreSearch { report: k.clone() }),
+                ),
+                button(
+                    "search-previous",
+                    self.search_window.history.is_empty(),
+                    key.map(|k| RowAction::PreviousSearch { report: k.clone() }),
+                ),
+                button(
+                    "source-more",
+                    !self.source.as_ref().is_some_and(|s| s.has_next()),
+                    key.zip(entry).map(|(k, e)| RowAction::MoreSource {
+                        report: k.clone(),
+                        entry: e.id,
+                    }),
+                ),
+                button(
+                    "source-previous",
+                    !self.source.as_ref().is_some_and(|s| s.has_previous()),
+                    key.zip(entry).map(|(k, e)| RowAction::PreviousSource {
+                        report: k.clone(),
+                        entry: e.id,
+                    }),
+                ),
+                button(
+                    "shape-more",
+                    !shape_more,
+                    key.map(|k| RowAction::MoreShape { report: k.clone() }),
+                ),
+                button(
+                    "shape-previous",
+                    self.shape_window.history.is_empty(),
+                    key.map(|k| RowAction::PreviousShape { report: k.clone() }),
+                ),
+                button(
+                    "tree-more",
+                    !tree_more,
+                    key.map(|k| RowAction::MoreTree { report: k.clone() }),
+                ),
+                button(
+                    "outline-more",
+                    !outline_more,
+                    key.zip(entry).map(|(k, e)| RowAction::MoreOutline {
+                        report: k.clone(),
+                        entry: e.id,
+                    }),
+                ),
+                button(
+                    "problems-more",
+                    !problems_more,
+                    key.map(|k| RowAction::MoreProblems { report: k.clone() }),
+                ),
+                button(
+                    "tree-previous",
+                    self.tree_window.history.is_empty(),
+                    key.map(|k| RowAction::PreviousTree { report: k.clone() }),
+                ),
+                button(
+                    "outline-previous",
+                    self.outline_window.history.is_empty(),
+                    key.zip(entry).map(|(k, e)| RowAction::PreviousOutline {
+                        report: k.clone(),
+                        entry: e.id,
+                    }),
+                ),
+                button(
+                    "problems-previous",
+                    self.problems_window.history.is_empty(),
+                    key.map(|k| RowAction::PreviousProblems { report: k.clone() }),
+                ),
             ],
             lists: vec![
-                ListBinding { id:"files",rows:tree.rows,empty_message:if self.report.is_some() { "No entry names match this filter in the accepted report." } else { "Inspect a project to browse its structure." }.into() },
-                ListBinding { id:"outline",rows:outline.rows,empty_message:outline_empty_message },
-                ListBinding { id:"declarations",rows:vec![],empty_message:"Use Outline or Find to navigate declarations in this file.".into() },
-                ListBinding { id:"problems",rows:problems.rows,empty_message:match &self.report { None => "Inspect a project to see supplied diagnostics.",Some(r) if !r.complete => "No diagnostic strings were supplied in this partial report. Uninspected content remains unknown.",Some(_) => "No diagnostic strings were supplied. This is not a compiler or type-check result." }.into() },
-                ListBinding { id:"source-shape",rows:shape.rows,empty_message:"No source shape is available in the accepted report.".into() },
-                ListBinding { id:"search-results",rows:search.rows,empty_message:"No matching file or Rust symbol names in this inspection.".into() },
+                ListBinding {
+                    id: "files",
+                    rows: tree.rows,
+                    empty_message: if self.report.is_some() {
+                        "No entry names match this filter in the accepted report."
+                    } else {
+                        "Inspect a project to browse its structure."
+                    }
+                    .into(),
+                },
+                ListBinding {
+                    id: "outline",
+                    rows: outline.rows,
+                    empty_message: outline_empty_message,
+                },
+                ListBinding {
+                    id: "declarations",
+                    rows: vec![],
+                    empty_message: "Use Outline or Find to navigate declarations in this file."
+                        .into(),
+                },
+                ListBinding {
+                    id: "problems",
+                    rows: problems.rows,
+                    empty_message: match &self.report {
+                        None => "Inspect a project to see problems",
+                        Some(r) if !r.complete => {
+                            "No supplied diagnostics; other content is unknown."
+                        }
+                        Some(_) => "No problems detected in this inspection.",
+                    }
+                    .into(),
+                },
+                ListBinding {
+                    id: "source-shape",
+                    rows: shape.rows,
+                    empty_message: "No source shape is available in the accepted report.".into(),
+                },
+                ListBinding {
+                    id: "search-results",
+                    rows: search.rows,
+                    empty_message: "No matching file or Rust symbol names in this inspection."
+                        .into(),
+                },
             ],
-            tables: vec![TableBinding { id:"details",rows:details },TableBinding { id:"declaration-details",rows:declaration_details },TableBinding { id:"source-shape-details",rows:shape_details }],
+            tables: vec![
+                TableBinding {
+                    id: "details",
+                    rows: details,
+                },
+                TableBinding {
+                    id: "declaration-details",
+                    rows: declaration_details,
+                },
+                TableBinding {
+                    id: "source-shape-details",
+                    rows: shape_details,
+                },
+            ],
             visibility: vec![
                 visible("workbench-context", workbench_node.is_some()),
+                visible("ide-header-actions", connected),
+                visible(
+                    "workbench-header-actions",
+                    connected && self.chats.workbench,
+                ),
+                visible("selection-title", file_open),
+                visible("file-empty", !file_open),
+                visible(
+                    "workspace-summary",
+                    hidden_entry
+                        || entry.is_some_and(|entry| entry.content_status == "rust_unavailable"),
+                ),
+                visible(
+                    "symbol-filter-summary",
+                    outline_has_rows || !self.symbol_filter.is_empty(),
+                ),
+                visible(
+                    "symbol-filter",
+                    file_open && (outline_has_rows || !self.symbol_filter.is_empty()),
+                ),
+                visible("problems-summary", problems_have_rows),
                 visible("inspection-actions", can_cancel || can_reload),
                 visible("cancel", can_cancel),
                 visible("reload-session", can_reload),
-                visible("search-panel",!self.project_query.0.trim().is_empty()),visible("files-panel",self.project_query.0.trim().is_empty()),visible("source-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
-                visible("status",!connected || self.chats.workbench),visible("connection",!connected),visible("pair-panel",!connected && self.pairing_required && self.pairing.is_none()),visible("workbench",connected && self.chats.workbench),visible("workspace",connected),visible("declaration-details-panel",self.selected_declaration.is_some()),visible("file-metadata-panel",entry.is_some()),visible("file-declarations-panel",entry.is_some_and(|e| e.kind == EntryKind::File)),
+                visible("search-panel", searching),
+                visible("files-panel", !searching),
+                visible("source-panel", file_open),
+                visible(
+                    "status",
+                    !connected
+                        || self.chats.workbench
+                            && (can_cancel
+                                || can_reload
+                                || no_project
+                                || matches!(self.phase, Phase::Partial | Phase::Cancelled)),
+                ),
+                visible("connection", !connected),
+                visible(
+                    "pair-panel",
+                    !connected && self.pairing_required && self.pairing.is_none(),
+                ),
+                visible("workbench", connected && self.chats.workbench),
+                visible("workspace", connected),
+                visible(
+                    "declaration-details-panel",
+                    self.selected_declaration.is_some(),
+                ),
+                visible("file-metadata-panel", entry.is_some()),
+                visible("file-declarations-panel", file_open),
             ],
             transcripts: vec![],
             diffs: vec![],
@@ -955,6 +1253,7 @@ fn visible(id: &'static str, visible: bool) -> VisibilityBinding {
 }
 fn button(id: &'static str, disabled: bool, action: Option<RowAction>) -> ButtonBinding {
     ButtonBinding {
+        pressed: None,
         id,
         disabled,
         action,
@@ -1012,13 +1311,13 @@ fn outline_empty(e: &EntryView, filtering: bool) -> &'static str {
         return "No declaration names match this filter in the selected entry.";
     }
     match (e.kind,e.content_status.as_str()) {
-        (EntryKind::File,"rust_unavailable") => "Rust declarations are unavailable; this is not an empty successful outline.",
-        (EntryKind::File,"binary") => "Binary content has no inspected text outline.",
-        (EntryKind::File,"unreadable") => "File contents could not be read; declaration count is unknown.",
-        (EntryKind::File,"too_large") => "File contents exceed the inspection limit; declaration count is unknown.",
-        (EntryKind::File,"text") if e.declarations.is_empty() => "No declarations were emitted for this inspected text file; this is not a compiler result.",
+        (EntryKind::File,"rust_unavailable") => "Rust declarations are unavailable.",
+        (EntryKind::File,"binary") => "Binary file has no text outline.",
+        (EntryKind::File,"unreadable") => "File could not be read; symbols unknown.",
+        (EntryKind::File,"too_large") => "File exceeds the inspection limit; symbols unknown.",
+        (EntryKind::File,"text") if e.declarations.is_empty() => "No symbols in this file.",
         (EntryKind::File,"text") => "Select a declaration in Outline for supplied structural details; no signature or source body is inferred.",
-        _ => "Select an inspected text file to view its structural declarations.",
+        _ => "No file selected",
     }
 }
 fn entry_secondary(e: &EntryView) -> String {

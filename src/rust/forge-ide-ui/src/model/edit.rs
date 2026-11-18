@@ -258,11 +258,13 @@ impl UiModel {
         });
         view.buttons.extend([
             ButtonBinding {
+                pressed: None,
                 id: "open-document",
                 disabled: action.is_none(),
                 action,
             },
             ButtonBinding {
+                pressed: None,
                 id: "save-document",
                 disabled: pending || !editor.is_some_and(Editor::can_save),
                 action: id
@@ -270,6 +272,7 @@ impl UiModel {
                     .map(|editor_id| RowAction::SaveDocument { editor_id }),
             },
             ButtonBinding {
+                pressed: None,
                 id: "close-document",
                 disabled: pending || editor.is_none(),
                 action: id.map(|editor_id| RowAction::CloseDocument { editor_id }),
@@ -836,6 +839,7 @@ impl UiModel {
             visible: followup.is_some(),
         });
         view.buttons.push(ButtonBinding {
+            pressed: None,
             id: "send-chat-with-file",
             disabled: followup.is_none() || !self.chats.can_send_draft(),
             action: followup.map(|file| RowAction::SendChatWithFile {
@@ -861,6 +865,7 @@ impl UiModel {
         ]);
         view.buttons.extend([
             ButtonBinding {
+                pressed: None,
                 id: "apply-workbench-edit",
                 disabled: !can_apply,
                 action: proposal_id.map(|id| RowAction::ApplyEdit {
@@ -868,6 +873,7 @@ impl UiModel {
                 }),
             },
             ButtonBinding {
+                pressed: None,
                 id: "undo-workbench-edit",
                 disabled: undo.is_none() || pending.is_some(),
                 action: undo.map(|applied| RowAction::UndoEdit {
@@ -875,6 +881,7 @@ impl UiModel {
                 }),
             },
             ButtonBinding {
+                pressed: None,
                 id: "check-workbench-write",
                 disabled: !check,
                 action: None,

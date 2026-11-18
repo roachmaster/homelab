@@ -1679,7 +1679,7 @@
 
 # Conversation views reserve the viewport for reading; secondary controls are contextual.
 - rules:
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])))"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])))"
       declarations:
         - ["--bg", "#0b0e14"]
         - ["--surface", "#121721"]
@@ -1690,7 +1690,7 @@
         - ["display", "flex"]
         - ["flex-direction", "column"]
         - ["overflow", "hidden"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) .fg-header"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-header"
       declarations:
         - ["flex", "none"]
         - ["height", "48px"]
@@ -1698,16 +1698,16 @@
         - ["padding", "2px 12px"]
         - ["gap", "8px"]
         - ["border-color", "rgba(255,255,255,.08)"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) .fg-header>p,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) .fg-brand-context"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-header>p,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand-context"
       declarations:
         - ["display", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) .fg-brand"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand"
       declarations:
         - ["flex", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) .fg-brand-link"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand-link"
       declarations:
         - ["min-height", "44px"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) .fg-brand h1"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand h1"
       declarations:
         - ["font-size", "15px"]
     - selector: "#chat-header-actions"
@@ -1766,7 +1766,7 @@
       declarations:
         - ["outline", "2px solid var(--accent)"]
         - ["outline-offset", "-2px"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) .fg-app"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-app"
       declarations:
         - ["display", "flex"]
         - ["flex-direction", "column"]
@@ -1776,7 +1776,7 @@
     - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #status[data-tone=neutral]"
       declarations:
         - ["display", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #ide-navigation"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation"
       declarations:
         - ["display", "flex"]
         - ["flex", "none"]
@@ -1789,7 +1789,7 @@
         - ["border-color", "rgba(255,255,255,.08)"]
         - ["overflow-x", "auto"]
         - ["scrollbar-width", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link)"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link)"
       declarations:
         - ["display", "inline-flex"]
         - ["align-items", "center"]
@@ -1807,16 +1807,16 @@
         - ["font-weight", "600"]
         - ["white-space", "nowrap"]
         - ["transition", "color 150ms ease,background-color 150ms ease"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #ide-navigation>button[aria-current=page]"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>button[aria-current=page]"
       declarations:
         - ["border-bottom-color", "var(--accent)"]
         - ["color", "var(--text)"]
         - ["font-weight", "700"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):hover"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):hover"
       declarations:
         - ["background", "var(--surface)"]
         - ["color", "var(--text)"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):focus-visible"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):focus-visible"
       declarations:
         - ["outline", "2px solid var(--accent)"]
         - ["outline-offset", "-4px"]
@@ -2145,7 +2145,7 @@
 
 - media: "(prefers-reduced-motion:reduce)"
   rules:
-    - selector: "#chat-header-actions button,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link),#chat-composer #send-chat"
+    - selector: "#chat-header-actions button,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link),#chat-composer #send-chat"
       declarations:
         - ["transition", "none"]
 
@@ -2738,3 +2738,428 @@
     - selector: "#mail :is(button,.fg-row-select)"
       declarations:
         - ["transition", "none"]
+
+
+# Workbench keeps project choices in the identity bar and the file area dominant.
+- rules:
+    - selector: "#ide-header-actions"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["flex", "1"]
+        - ["min-width", "0"]
+    - selector: "#workbench-header-actions"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "4px"]
+        - ["width", "100%"]
+        - ["min-width", "0"]
+    - selector: "#workbench-header-actions>button"
+      declarations:
+        - ["min-height", "44px"]
+        - ["border", "0"]
+        - ["border-radius", "8px"]
+        - ["background", "transparent"]
+        - ["color", "var(--text)"]
+        - ["transition", "background-color 150ms ease,color 150ms ease"]
+    - selector: "#workbench-header-actions>button:hover:enabled"
+      declarations:
+        - ["background", "var(--raised)"]
+    - selector: "#workbench-header-actions>button:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-2px"]
+    - selector: "#workbench-context"
+      declarations:
+        - ["position", "relative"]
+        - ["flex", "1"]
+        - ["min-width", "44px"]
+        - ["padding", "8px 26px 8px 10px"]
+        - ["text-align", "left"]
+        - ["font-size", "13px"]
+        - ["font-weight", "500"]
+        - ["overflow", "hidden"]
+        - ["white-space", "nowrap"]
+        - ["text-overflow", "ellipsis"]
+    - selector: "#workbench-context::after"
+      declarations:
+        - ["content", "''"]
+        - ["position", "absolute"]
+        - ["inset-inline-end", "10px"]
+        - ["top", "calc(50% - 4px)"]
+        - ["width", "6px"]
+        - ["height", "6px"]
+        - ["border", "solid var(--muted)"]
+        - ["border-width", "0 1.5px 1.5px 0"]
+        - ["transform", "rotate(45deg)"]
+    - selector: "#workspace-options-toggle"
+      declarations:
+        - ["flex", "none"]
+        - ["width", "44px"]
+        - ["height", "44px"]
+        - ["padding", "0"]
+        - ["font-size", "22px"]
+    - selector: "#workbench:not([hidden])"
+      declarations:
+        - ["display", "flex"]
+        - ["flex", "1"]
+        - ["flex-direction", "column"]
+        - ["min-height", "0"]
+        - ["overflow", "hidden"]
+    - selector: "#workspace"
+      declarations:
+        - ["display", "flex"]
+        - ["flex", "1"]
+        - ["flex-direction", "column"]
+        - ["min-height", "0"]
+        - ["overflow", "hidden"]
+    - selector: "#workspace>.fg-layout-controls"
+      declarations:
+        - ["flex", "none"]
+        - ["padding", "0 8px"]
+        - ["min-height", "44px"]
+        - ["border-bottom", "1px solid rgba(255,255,255,.08)"]
+        - ["background", "var(--bg)"]
+    - selector: "#workspace>.fg-layout-controls>.fg-pane-actions"
+      declarations:
+        - ["width", "100%"]
+        - ["justify-content", "space-between"]
+        - ["align-items", "stretch"]
+        - ["gap", "0"]
+    - selector: "#workspace .fg-pane-switches"
+      declarations:
+        - ["flex-wrap", "nowrap"]
+        - ["gap", "0"]
+        - ["min-width", "0"]
+    - selector: "#workspace .fg-pane-switches>button"
+      declarations:
+        - ["min-height", "44px"]
+        - ["padding", "6px 9px"]
+        - ["border", "0"]
+        - ["border-bottom", "2px solid transparent"]
+        - ["border-radius", "0"]
+        - ["background", "transparent"]
+        - ["font-size", "12px"]
+        - ["white-space", "nowrap"]
+        - ["color", "var(--muted)"]
+    - selector: "#workspace .fg-pane-switches>button[aria-pressed=true]"
+      declarations:
+        - ["border-bottom-color", "var(--accent)"]
+        - ["color", "var(--text)"]
+        - ["font-weight", "650"]
+    - selector: "#workspace .fg-pane-switches>button:disabled"
+      declarations:
+        - ["opacity", ".55"]
+    - selector: "#workspace .fg-pane-switches>button:hover:enabled"
+      declarations:
+        - ["background", "var(--surface)"]
+        - ["color", "var(--text)"]
+    - selector: "#workspace .fg-pane-switches>button:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-4px"]
+    - selector: "#workspace #inspect"
+      declarations:
+        - ["width", "44px"]
+        - ["height", "44px"]
+        - ["min-height", "44px"]
+        - ["border", "0"]
+        - ["background", "transparent"]
+        - ["color", "var(--muted)"]
+    - selector: "#workspace #inspect:hover:enabled"
+      declarations:
+        - ["background", "var(--surface)"]
+        - ["color", "var(--text)"]
+    - selector: "#workspace>.fg-panes"
+      declarations:
+        - ["flex", "1"]
+        - ["height", "auto"]
+        - ["min-height", "0"]
+        - ["grid-template-rows", "minmax(0,1fr) var(--bottom-divider,6px) var(--bottom-size,170px)"]
+    - selector: "#inspection-details"
+      declarations:
+        - ["flex", "none"]
+        - ["max-height", "25dvh"]
+        - ["overflow", "auto"]
+        - ["border-top", "1px solid rgba(255,255,255,.08)"]
+    - selector: "#explorer-search"
+      declarations:
+        - ["position", "relative"]
+        - ["display", "grid"]
+        - ["flex", "none"]
+        - ["min-height", "44px"]
+        - ["margin", "8px 10px 4px"]
+    - selector: "#explorer-search>.fg-filter"
+      declarations:
+        - ["margin", "0"]
+        - ["gap", "0"]
+    - selector: "#explorer-search>.fg-filter>span"
+      declarations:
+        - ["position", "absolute"]
+        - ["width", "1px"]
+        - ["height", "1px"]
+        - ["overflow", "hidden"]
+        - ["clip-path", "inset(50%)"]
+        - ["white-space", "nowrap"]
+    - selector: "#explorer-search input"
+      declarations:
+        - ["min-height", "44px"]
+        - ["padding", "8px 58px 8px 12px"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "12px"]
+        - ["background", "var(--bg)"]
+        - ["font-size", "max(16px,1em)"]
+    - selector: "#explorer-filter-mode"
+      declarations:
+        - ["position", "absolute"]
+        - ["inset", "0 0 auto auto"]
+        - ["width", "44px"]
+        - ["height", "44px"]
+        - ["border", "0"]
+        - ["border-radius", "0 12px 12px 0"]
+        - ["background", "transparent"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "20px"]
+    - selector: "#explorer-filter-mode:hover:enabled,#explorer-filter-mode[aria-pressed=true]"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["color", "var(--accent)"]
+    - selector: "#explorer-filter-mode:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-4px"]
+    - selector: "#files-panel,#search-panel"
+      declarations:
+        - ["min-height", "0"]
+    - selector: "#workspace .fg-tree-row[data-selected=true]"
+      declarations:
+        - ["background", "color-mix(in srgb,var(--accent) 7%,var(--surface))"]
+        - ["box-shadow", "inset 2px 0 var(--accent)"]
+    - selector: "#workspace .fg-tree-row.fg-depth-0[data-selected=true]"
+      declarations:
+        - ["background", "transparent"]
+        - ["box-shadow", "none"]
+    - selector: "#workspace .fg-tree-row:not(.fg-depth-0)"
+      declarations:
+        - ["border-inline-start", "1px solid rgba(255,255,255,.06)"]
+    - selector: "#workspace .fg-tree-row[data-icon=folder] .fg-row-label"
+      declarations:
+        - ["font-weight", "500"]
+    - selector: "#workspace .fg-focus-name:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: "#file-heading"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "8px"]
+        - ["min-width", "0"]
+        - ["margin-bottom", "8px"]
+    - selector: "#file-heading>#selection-title"
+      declarations:
+        - ["min-width", "0"]
+        - ["margin", "0"]
+    - selector: "#file-empty"
+      declarations:
+        - ["padding", "32px 16px"]
+        - ["color", "var(--muted)"]
+        - ["text-align", "center"]
+    - selector: "#workspace .fg-tree:has(>.fg-empty)"
+      declarations:
+        - ["display", "grid"]
+        - ["align-content", "center"]
+        - ["min-height", "120px"]
+    - selector: "#workspace .fg-tree>.fg-empty"
+      declarations:
+        - ["text-align", "center"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-sheet"
+      declarations:
+        - ["position", "fixed"]
+        - ["inset", "auto 0 0"]
+        - ["margin", "0 auto"]
+        - ["width", "min(100%,32rem)"]
+        - ["max-width", "100%"]
+        - ["max-height", "80dvh"]
+        - ["padding", "16px 16px max(20px,env(safe-area-inset-bottom))"]
+        - ["overflow-y", "auto"]
+        - ["border", "1px solid rgba(255,255,255,.1)"]
+        - ["border-bottom", "0"]
+        - ["border-radius", "20px 20px 0 0"]
+        - ["background", "var(--surface)"]
+        - ["color", "var(--text)"]
+        - ["box-shadow", "0 -8px 32px #0005"]
+        - ["overscroll-behavior", "contain"]
+    - selector: ".fg-sheet::backdrop"
+      declarations:
+        - ["background", "rgba(0,0,0,.6)"]
+    - selector: ".fg-sheet-header"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["gap", "12px"]
+        - ["margin-bottom", "16px"]
+    - selector: ".fg-sheet-header h2"
+      declarations:
+        - ["font-size", "18px"]
+        - ["font-weight", "650"]
+    - selector: ".fg-sheet-close"
+      declarations:
+        - ["flex", "none"]
+        - ["min-width", "44px"]
+        - ["min-height", "44px"]
+        - ["padding", "0"]
+        - ["border", "0"]
+        - ["border-radius", "50%"]
+        - ["background", "transparent"]
+        - ["color", "var(--text)"]
+        - ["font-size", "23px"]
+    - selector: ".fg-sheet-close:hover"
+      declarations:
+        - ["background", "var(--raised)"]
+    - selector: ".fg-sheet-body"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "8px"]
+    - selector: ".fg-sheet-body>button"
+      declarations:
+        - ["width", "100%"]
+        - ["min-height", "44px"]
+        - ["padding", "10px 12px"]
+        - ["border", "1px solid rgba(255,255,255,.08)"]
+        - ["border-radius", "10px"]
+        - ["text-align", "left"]
+    - selector: ".fg-sheet-body>button[data-pane-toggle]::before"
+      declarations:
+        - ["content", "'+ '"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-sheet-body>button[data-pane-toggle][aria-expanded=true]::before"
+      declarations:
+        - ["content", "'✓ '"]
+        - ["color", "var(--accent)"]
+    - selector: ".fg-sheet .fg-field"
+      declarations:
+        - ["gap", "6px"]
+        - ["margin-bottom", "16px"]
+    - selector: ".fg-sheet .fg-field>span"
+      declarations:
+        - ["font-size", "12px"]
+    - selector: ".fg-sheet :is(input,select)"
+      declarations:
+        - ["width", "100%"]
+        - ["min-height", "44px"]
+        - ["max-width", "none"]
+    - selector: ".fg-sheet .fg-option-list"
+      declarations:
+        - ["position", "static"]
+        - ["padding", "0"]
+        - ["background", "transparent"]
+        - ["border", "0"]
+        - ["box-shadow", "none"]
+        - ["min-width", "0"]
+    - selector: ".fg-sheet .fg-option-list>button"
+      declarations:
+        - ["min-height", "44px"]
+        - ["padding", "10px 12px"]
+        - ["border-color", "rgba(255,255,255,.08)"]
+        - ["border-radius", "10px"]
+        - ["text-align", "left"]
+
+- media: "(max-width:800px)"
+  rules:
+    - selector: "#workspace[data-narrow=true]>.fg-panes"
+      declarations:
+        - ["height", "auto"]
+        - ["min-height", "0"]
+        - ["grid-template-rows", "minmax(0,1fr)"]
+    - selector: "#workspace[data-narrow=true] .fg-pane-header"
+      declarations:
+        - ["display", "none"]
+    - selector: "#workspace[data-narrow=true] #file-heading>#back-to-files"
+      declarations:
+        - ["display", "grid"]
+        - ["flex", "none"]
+        - ["width", "44px"]
+        - ["height", "44px"]
+        - ["border", "0"]
+        - ["border-radius", "8px"]
+        - ["background", "transparent"]
+    - selector: "#workspace[data-narrow=true] #file-heading>#back-to-files:hover"
+      declarations:
+        - ["background", "var(--raised)"]
+    - selector: "#workspace[data-narrow=true] #selection-title"
+      declarations:
+        - ["font-size", "16px"]
+        - ["line-height", "1.3"]
+    - selector: "#workspace[data-narrow=true] .fg-pane-main>.fg-pane-body"
+      declarations:
+        - ["padding", "8px 12px"]
+    - selector: "#workspace[data-narrow=true] .fg-tree-row"
+      declarations:
+        - ["margin-block", "0"]
+    - selector: "#workspace[data-narrow=true] .fg-tree-row button"
+      declarations:
+        - ["min-height", "44px"]
+        - ["padding-block", "4px"]
+    - selector: "#workspace[data-narrow=true] .fg-pane-switches"
+      declarations:
+        - ["flex", "1"]
+    - selector: "#workspace[data-narrow=true] .fg-pane-switches>button"
+      declarations:
+        - ["flex", "1 1 auto"]
+        - ["min-width", "0"]
+        - ["padding-inline", "6px"]
+    - selector: "#workspace[data-narrow=true] #source-panel"
+      declarations:
+        - ["margin-top", "8px"]
+    - selector: "#workspace[data-narrow=true] #source-panel>h2"
+      declarations:
+        - ["font-size", "12px"]
+    - selector: "#workspace[data-narrow=true] #workspace-summary[data-tone=neutral]"
+      declarations:
+        - ["display", "none"]
+
+- media: "(max-width:639px)"
+  rules:
+    - selector: "body:has(#workbench:not([hidden])) .fg-brand-link"
+      declarations:
+        - ["width", "44px"]
+        - ["min-width", "44px"]
+        - ["justify-content", "center"]
+    - selector: "body:has(#workbench:not([hidden])) .fg-brand-link>h1"
+      declarations:
+        - ["position", "absolute"]
+        - ["width", "1px"]
+        - ["height", "1px"]
+        - ["overflow", "hidden"]
+        - ["clip-path", "inset(50%)"]
+        - ["white-space", "nowrap"]
+
+- media: "(min-width:801px)"
+  rules:
+    - selector: ".fg-sheet"
+      declarations:
+        - ["inset", "50% auto auto 50%"]
+        - ["margin", "0"]
+        - ["transform", "translate(-50%,-50%)"]
+        - ["border-bottom", "1px solid rgba(255,255,255,.1)"]
+        - ["border-radius", "16px"]
+
+- media: "(prefers-reduced-motion:reduce)"
+  rules:
+    - selector: "#workbench-header-actions>button"
+      declarations:
+        - ["transition", "none"]
+
+
+# A short landscape tree still needs room for one full touch row and its padding.
+- media: "(max-width:800px) and (max-height:500px)"
+  rules:
+    - selector: "#workspace[data-narrow=true] .fg-pane-body"
+      declarations:
+        - ["overflow-y", "auto"]
+    - selector: "#workspace[data-narrow=true] .fg-tree"
+      declarations:
+        - ["min-height", "50px"]

@@ -70,6 +70,7 @@ pub struct UiModel {
     file_filter: BoundedQuery,
     symbol_filter: BoundedQuery,
     project_query: BoundedQuery,
+    explorer_filter: bool,
     search_window: RowWindow,
     selected_problem: Option<(u32, u16)>,
     selected_entry: Option<u32>,
@@ -111,6 +112,7 @@ impl Default for UiModel {
             file_filter: BoundedQuery::default(),
             symbol_filter: BoundedQuery::default(),
             project_query: BoundedQuery::default(),
+            explorer_filter: false,
             search_window: RowWindow::default(),
             selected_problem: None,
             selected_entry: None,
@@ -144,6 +146,13 @@ impl UiModel {
                 };
                 status.tone = Tone::Warning;
             }
+            if let Some(status) = view
+                .visibility
+                .iter_mut()
+                .find(|binding| binding.id == "status")
+            {
+                status.visible = true;
+            }
         }
         Output {
             protocol_version: PROTOCOL_VERSION,
@@ -173,6 +182,7 @@ impl UiModel {
         self.file_filter = BoundedQuery::default();
         self.symbol_filter = BoundedQuery::default();
         self.project_query = BoundedQuery::default();
+        self.explorer_filter = false;
         self.search_window = RowWindow::default();
         self.selected_problem = None;
         self.selected_entry = None;
@@ -847,6 +857,38 @@ impl UiModel {
                 self.selected_problem = Some((entry, value));
             }
             UiEvent::SourceResult { result } => self.accept_source(result, input.now_ms),
+            UiEvent::ToggleExplorerFilter { report } => {
+                if !self.matches_report(&report) {
+                    return Ok(self.output(None));
+                }
+                self.explorer_filter = !self.explorer_filter;
+                if self.explorer_filter {
+                    self.file_filter = std::mem::take(&mut self.project_query);
+                } else {
+                    self.project_query = std::mem::take(&mut self.file_filter);
+                }
+                self.tree_window = RowWindow::default();
+                self.search_window = RowWindow::default();
+            }
+            UiEvent::SetExplorerQuery {
+                report,
+                entry_names,
+                value,
+            } => {
+                if !self.matches_report(&report) || entry_names != self.explorer_filter {
+                    return Ok(self.output(None));
+                }
+                let value = BoundedQuery::new(value)?;
+                if entry_names {
+                    self.file_filter = value;
+                    self.project_query = BoundedQuery::default();
+                    self.tree_window = RowWindow::default();
+                } else {
+                    self.project_query = value;
+                    self.file_filter = BoundedQuery::default();
+                    self.search_window = RowWindow::default();
+                }
+            }
             UiEvent::SetProjectQuery { report, value } => {
                 if !self.matches_report(&report) {
                     return Ok(self.output(None));

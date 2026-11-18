@@ -157,6 +157,28 @@ acceptance, inspect fresh screenshots **and** exercise the affected controls:
 Report which criteria passed, failed or were not exercised. Keep product hierarchy
 findings separate from functional test results; neither proves the other.
 
+## Mobile Workbench chrome checks
+
+Inspect the actual generated Workbench at phone and short landscape sizes.
+Measure the compact identity breadcrumb header, global view strip, and pane
+strip. Verify there are no additional idle options/status/pane-title bars
+between navigation and the file tree or source. A meaningful loading, partial,
+stale, or error state remains visible when it affects the next action.
+
+- Open project and layout sheets by keyboard and touch. Check Node/Project,
+  pane controls, Reset, Escape, close buttons, backdrop behavior, focus return,
+  and no unintended inspection/source request when only showing a sheet.
+- Exercise the single search field in file/symbol and entry-filter modes. Check
+  mode naming/pressed state, query preservation, bounded input, report guards,
+  pagination, focused versus selected rows, and full-name disclosure.
+- Open an actual file and verify Back and filename share a row. Check mobile
+  pane headings/collapse controls do not repeat the active tab. Confirm File
+  cannot navigate to invented source when no file is selected.
+- Check Problems counts against supplied report diagnostics and inspect complete,
+  partial, unavailable and no-file empty states. Keep count labels distinct from
+  compiler/test claims. Verify useful content begins high enough in the phone
+  viewport to read several rows or source lines without scrolling the page.
+
 ## Mobile source checks
 
 Open an actual inspected file with long lines, such as the Homelab Makefile
@@ -164,8 +186,8 @@ in an owned loopback fixture. Capture the initial view at 390 × 844 and
 compare the source's top edge and the number of fully visible lines with the
 baseline. Check narrower and short landscape viewports when changing layout.
 
-- Open Project controls with the keyboard and confirm the selectors and View
-  options are reachable. Exercise Back to files and the pane tabs. Check that
+- Open the project breadcrumb sheet with the keyboard and confirm the selectors
+  and View options sheet are reachable. Exercise Back to files and the pane tabs. Check that
   the main controls retain their touch hit areas and remain on screen.
 - Tab to Wrap and toggle it with Space. Inspect both pressed states and
   verify the solid ring follows the visible pill with a gap and remains

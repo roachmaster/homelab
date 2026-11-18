@@ -122,6 +122,8 @@ pub struct ButtonBinding {
     pub action: Option<RowAction>,
     pub id: &'static str,
     pub disabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pressed: Option<bool>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct InputBinding {
@@ -136,15 +138,30 @@ pub struct InputBinding {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FilterAction {
-    SetChatDraft { conversation: usize },
-    SetDocument { editor_id: String },
+    SetExplorerQuery {
+        report: RequestToken,
+        entry_names: bool,
+    },
+    SetChatDraft {
+        conversation: usize,
+    },
+    SetDocument {
+        editor_id: String,
+    },
     SetChatExpiry {},
     SetChatHistoryQuery {},
     SetMailSubject {},
     SetMailDraft {},
-    SetFileFilter { report: RequestToken },
-    SetProjectQuery { report: RequestToken },
-    SetSymbolFilter { report: RequestToken, entry: u32 },
+    SetFileFilter {
+        report: RequestToken,
+    },
+    SetProjectQuery {
+        report: RequestToken,
+    },
+    SetSymbolFilter {
+        report: RequestToken,
+        entry: u32,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct VisibilityBinding {
@@ -197,6 +214,9 @@ pub struct CorrespondenceRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    ToggleExplorerFilter {
+        report: RequestToken,
+    },
     OpenDocument {
         report: RequestToken,
         entry: u32,

@@ -72,6 +72,28 @@ controls progressively so the user can read before managing the workspace.
 Verify this budget in the rendered phone view with the ordinary drawer closed;
 loading and actionable errors must still remain available.
 
+## IDE and tooling workspace rule
+
+Keep at most two control or tab strips between the compact identity header and
+primary file tree or code viewer. In Forge Workbench, the global view tabs are
+one strip and the local pane tabs are the second. Put the current node/project
+in an interactive header breadcrumb and put layout controls in the same header.
+Open these choices in native touch-friendly sheets with keyboard dismissal and
+focus return. Never repeat the active pane's title in a second bar below its tab.
+
+Use one search input with an inline mode toggle for file/symbol search or entry
+filtering. Give the mode an accessible name and pressed state, keep its accepted
+query in Rust, and preserve report guards when changing modes. Scope search and
+counts to the accepted report. An inspected Problems count is not compiler or
+test success. Concise empty states must distinguish no selected file, no supplied
+problems, unavailable data, and a partial report.
+
+Keep idle ready guidance in supporting details. Use visible status for loading,
+actionable errors, stale data, or partial results. Keep file rows dense and
+scannable while preserving touch targets, focused versus selected state, and a
+way to read full truncated names. A file tab without a selected file should show
+a concise empty state or remain disabled until source can be opened.
+
 ## Email view pattern
 
 Present Mail as correspondence with an inbox, a thread reader, and an explicit

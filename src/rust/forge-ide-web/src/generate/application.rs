@@ -12,10 +12,15 @@ pub fn ide_document() -> Document {
         subtitle: "Chat and source workbench".into(),
         children: vec![
             component!(brand_link "forge-home", "Forge IDE", Home),
-            component!(brand_context "workbench-context"),
-            component!(header_actions "chat-header-actions"; [
-                component!(toggle_panel "chat-history-toggle", "Previous chats", "show_chat_history", "chat-history-panel"),
-                component!(primary_icon "new-chat", "New chat", "new_chat", '+'),
+            component!(header_actions "ide-header-actions"; [
+                component!(region "chat-header-actions"; [
+                    component!(toggle_panel "chat-history-toggle", "Previous chats", "show_chat_history", "chat-history-panel"),
+                    component!(primary_icon "new-chat", "New chat", "new_chat", '+'),
+                ]),
+                component!(region "workbench-header-actions"; [
+                    component!(sheet_trigger "workbench-context", "Project options", "project-options"),
+                    component!(sheet_icon "workspace-options-toggle", "View options", "workspace-options", '⋯'),
+                ]),
             ]),
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [
@@ -148,37 +153,41 @@ pub fn ide_document() -> Document {
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [
+                component!(sheet "project-options", "Project options", "node"; [
+                    component!(select "node", "Node", "select_node"),
+                    component!(select "project", "Project", "select_project"),
+                ]),
                 component!(region "inspection-actions"; [
                     component!(toolbar [
                         component!(button "cancel", "Cancel local wait", "cancel"),
                         component!(reload "reload-session", "Reload to check session"),
                     ]),
                 ]),
-                component!(focused_layout "workspace"; [
-                    component!(layout_controls [
-                        component!(disclosure "project-options", "Project options"; [
-                            component!(select "node", "Node", "select_node"),
-                            component!(select "project", "Project", "select_project"),
-                        ]),
-                    ]),
+                component!(compact_layout "workspace"; [
                     component!(pane_action component!(primary_icon "inspect", "Refresh project", "inspect", '↻')),
                     component!(pane "explorer-panel", "Explorer", Leading, 180, 250, 400; [
-                        component!(filter "project-query", "Find files or symbols", "set_project_query"),
+                        component!(region "explorer-search"; [
+                            component!(filter "project-query", "Search files or symbols", "set_project_query", "Search files or symbols…"),
+                            component!(primary_icon "explorer-filter-mode", "Filter entry names", "toggle_explorer_filter", 'ƒ'),
+                        ]),
+                        component!(caption "explorer-summary", ""),
                         component!(region "search-panel"; [
-                            component!(caption "search-summary", "Search names in the loaded project."),
                             component!(tree "search-results", "Project search results"),
                             component!(row [component!(button "search-previous", "Previous matches", "previous_search"), component!(button "search-more", "Next matches", "more_search")]),
                         ]),
                         component!(region "files-panel"; [
-                            component!(filter "file-filter", "Filter entry names", "set_file_filter"),
-                            component!(caption "file-filter-summary", ""),
                             component!(tree "files", "Project files"),
                             component!(row [component!(button "tree-previous", "Previous page", "previous_tree"), component!(button "tree-more", "Next page", "more_tree")]),
                         ]),
                     ]),
                     component!(pane "workspace-panel", "File", Main, 240, 480, 960; [
-                        component!(pane_header_link "back-to-files", "Back to files", "explorer-panel", '←'),
-                        component!(heading "selection-title", "Select a file to read its source"),
+                        component!(region "file-heading"; [
+                            component!(pane_header_link "back-to-files", "Back to files", "explorer-panel", '←'),
+                            component!(heading "selection-title", "Select a file to read its source"),
+                        ]),
+                        component!(region "file-empty"; [
+                            component!(text "file-empty-label", "Select a file from Explorer"),
+                        ]),
                         component!(caption "workspace-summary", "Find a file or symbol in Explorer."),
                         component!(panel "source-panel", "Source"; [
                             component!(button "open-document", "Edit file", "open_document"),
@@ -257,6 +266,8 @@ pub fn ide_document() -> Document {
                     component!(caption "phase-label", "Checking session"),
                     component!(context "selection-context", ""),
                     component!(caption "summary", "No report yet"),
+                    component!(caption "search-summary", "Search names in the loaded project."),
+                    component!(caption "file-filter-summary", ""),
                     component!(caption "inspection-limits", "Read-only source and declarations. Find searches names in this loaded report, not source contents. Source is checked against the inspected version. Cancel stops only this browser wait."),
                 ]),
             ]),
