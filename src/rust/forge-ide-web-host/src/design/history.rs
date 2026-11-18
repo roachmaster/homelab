@@ -3,7 +3,8 @@ use super::{text, Attribute, Node, Tag};
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Previous chats technical design")),
-        element!(P; text("Contracts for opening, retaining, deleting, and expiring saved chats through Forge dispatch.")),
+        element!(P; text("Implemented contracts for the Conversations drawer: open, retain, delete, and expire saved chats through Forge dispatch.")),
+        element!(P [Class = "contract-note"]; text("Implementation reviewed 18 November 2026. The thread-title trigger opens Conversations; saved history search is limited to the loaded page. Manage current chat exposes retention and confirmed deletion. Renaming and cross-page full-text search are not implemented.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Technical design sections"];
             element!(A [Href = "#dispatch"]; text("Dispatch")),
             element!(A [Href = "#dto"]; text("DTOs")),
@@ -18,7 +19,7 @@ pub(super) const BODY: &[Node] = &[
             element!(Li;
                 element!(H3; text("Browser → Forge web host")),
                 element!(P;
-                    text("Send "),
+                    text("The main thread passes a typed action to Rust/WASM in the JavaScript worker. Rust prepares the request and the generated worker adapter sends "),
                     element!(Code; text("application/json")),
                     text(" to "),
                     element!(Code; text("POST /forge/v1/dispatch")),
@@ -48,7 +49,7 @@ pub(super) const BODY: &[Node] = &[
                 element!(P;
                     text("After admission, the host sends the validated request to the existing runner’s private "),
                     element!(Code; text("POST /v1/dispatch")),
-                    text(". It uses the same destination, versions and request ID with the runner’s bearer credential. The host keeps browser cookies and CSRF values at the browser boundary. The runner derives the operator from its admitted credential and selects the registered handler."),
+                    text(". It uses the same destination, versions and request ID with the runner’s bearer credential. The host keeps browser cookies and CSRF values at the browser boundary. The runner authenticates the configured credential and selects the typed handler. Its current DAO scope is the configured mission-control owner; a caller cannot submit an owner ID."),
                 ),
             ),
             element!(Li;
@@ -222,48 +223,48 @@ pub(super) const BODY: &[Node] = &[
         element!(H2 [Id = "dao-title"]; text("PostgreSQL data access")),
         element!(P;
             element!(Code; text("ChatHistoryDao")),
-            text(" belongs to the Forge runner. Every operation takes the operator scope established at admission. Stable chat IDs connect committed messages, retention, and authorized run links. Tab selections and drafts refer to those IDs."),
+            text(" belongs to the Forge runner and reads its fixed mission-control owner scope. Stable chat IDs connect committed messages, retention, and authorized run links. Tab selections and drafts refer to those IDs."),
         ),
         element!(Dl [Class = "storage"];
             element!(Div;
                 element!(Dt;
-                    element!(Code; text("commit_transcript(owner, chat_id, messages)")),
+                    element!(Code; text("commit_transcript(cursor, chat_id, messages)")),
                 ),
-                element!(Dd; text("Save the transcript with the default expiration on its first committed turn. Subsequent turns retain the existing policy.")),
+                element!(Dd; text("Save the transcript in the successful run-completion transaction. The first committed turn sets a fixed keep-through UTC date 30 days later, expiring at midnight after that date. Later turns retain the existing policy; keeping long term is an explicit override.")),
             ),
             element!(Div;
                 element!(Dt;
-                    element!(Code; text("list(owner, limit, cursor)")),
+                    element!(Code; text("list_chats(cursor_token=None, limit=50)")),
                 ),
                 element!(Dd; text("Read available summaries in descending last-committed-turn time, with the stable ID as the cursor tie-breaker. Omit transcripts, drafts, tombstones, and already-due chats.")),
             ),
             element!(Div;
                 element!(Dt;
-                    element!(Code; text("get(owner, chat_id)")),
+                    element!(Code; text("open_chat(chat_id)")),
                 ),
                 element!(Dd; text("Read the summary and ordered committed messages from a consistent snapshot. Apply the same ownership and expiry predicates as the list.")),
             ),
             element!(Div;
                 element!(Dt;
-                    element!(Code; text("set_retention(owner, chat_id, expected_revision, policy)")),
+                    element!(Code; text("set_retention(chat_id, expected_revision, policy)")),
                 ),
                 element!(Dd; text("Lock the chat row, verify its revision and availability, and persist the resolved policy with the next revision in one transaction.")),
             ),
             element!(Div;
                 element!(Dt;
-                    element!(Code; text("delete(owner, chat_id, expected_revision)")),
+                    element!(Code; text("delete_chat(chat_id, expected_revision)")),
                 ),
                 element!(Dd; text("Lock the chat row, compare the revision, and commit the tombstone and content removal together. Preserve the ID, revision, and removal reason so stale writers cannot recreate it.")),
             ),
             element!(Div;
                 element!(Dt;
-                    element!(Code; text("expire_due(now, batch_limit)")),
+                    element!(Code; text("expire_due(batch_limit=20)")),
                 ),
-                element!(Dd; text("Run bounded batches in the existing runner scheduler. Recheck the policy, due instant, and candidate revision under the row lock, then use the same removal transaction as manual deletion. A policy change committed before that check takes effect.")),
+                element!(Dd; text("Every minute, select up to 20 due active chats with FOR UPDATE SKIP LOCKED in one transaction, then use the same removal routine as manual deletion. Due predicates and locks protect a retention change; the scheduler does not receive a browser expected_revision.")),
             ),
         ),
         element!(P [Class = "contract-note"]; text("The removal transaction covers the committed transcript, chat-owned linked run content, and recoverable checkpoint copies. Use explicit chat ownership links to determine which records belong to the chat. Check the tombstone at checkpoint save, restore, and late run completion so an open tab or a finishing request cannot revive the chat.")),
-        element!(P [Class = "contract-note"]; text("The runner imports shared workspace transcripts as saved chats. Separate copies in older tabs, unlinked runner snapshots, and existing backups follow their existing retention scope.")),
+        element!(P [Class = "contract-note"]; text("The first history-aware request imports legacy shared workspace transcripts into ide_chats and records history activation in ide_workspace_history. ide_workspace_tabs holds the recoverable per-tab copies. Unlinked legacy runs and backups have independent retention; the chat deletion transaction is not a backup-erasure policy.")),
     ),
     element!(Section [Id = "sequences", Class = "design-section", AriaLabelledby = "sequence-title"];
         element!(H2 [Id = "sequence-title"]; text("Sequence diagrams")),
@@ -273,7 +274,7 @@ pub(super) const BODY: &[Node] = &[
                     element!(H3; text("Open a saved chat")),
                 ),
                 element!(A [Class = "drawing", Href = "/design/chat-history-open.png"];
-                    element!(Img [Src = "/design/chat-history-open.png", Width = "1449", Height = "1608", Loading = "lazy", Alt = "Saved chat list and open requests pass through Forge dispatch to the runner’s PostgreSQL reads."]),
+                    element!(Img [Src = "/design/chat-history-open.png", Width = "1077", Height = "1187", Loading = "lazy", Alt = "Saved chat list and open requests pass through Forge dispatch to the runner’s PostgreSQL reads."]),
                     element!(Span [Class = "open-label"];
                         text("Open full-size diagram "),
                         element!(Span [AriaHidden = "true"]; text("↗")),
@@ -290,7 +291,7 @@ pub(super) const BODY: &[Node] = &[
                     element!(H3; text("Set retention")),
                 ),
                 element!(A [Class = "drawing", Href = "/design/chat-history-retention.png"];
-                    element!(Img [Src = "/design/chat-history-retention.png", Width = "1590", Height = "1544", Loading = "lazy", Alt = "A retention choice flows through Forge dispatch to a revision-checked PostgreSQL update."]),
+                    element!(Img [Src = "/design/chat-history-retention.png", Width = "1067", Height = "1255", Loading = "lazy", Alt = "A retention choice flows through Forge dispatch to a revision-checked PostgreSQL update."]),
                     element!(Span [Class = "open-label"];
                         text("Open full-size diagram "),
                         element!(Span [AriaHidden = "true"]; text("↗")),
@@ -307,7 +308,7 @@ pub(super) const BODY: &[Node] = &[
                     element!(H3; text("Delete a saved chat")),
                 ),
                 element!(A [Class = "drawing", Href = "/design/chat-history-delete.png"];
-                    element!(Img [Src = "/design/chat-history-delete.png", Width = "1564", Height = "1501", Loading = "lazy", Alt = "Confirmed deletion goes through Forge dispatch to a PostgreSQL transaction that removes chat content and records its tombstone."]),
+                    element!(Img [Src = "/design/chat-history-delete.png", Width = "1156", Height = "1307", Loading = "lazy", Alt = "Confirmed deletion goes through Forge dispatch to a PostgreSQL transaction that removes chat content and records its tombstone."]),
                     element!(Span [Class = "open-label"];
                         text("Open full-size diagram "),
                         element!(Span [AriaHidden = "true"]; text("↗")),
@@ -324,7 +325,7 @@ pub(super) const BODY: &[Node] = &[
                     element!(H3; text("Expire due chats")),
                 ),
                 element!(A [Class = "drawing", Href = "/design/chat-history-expiry.png"];
-                    element!(Img [Src = "/design/chat-history-expiry.png", Width = "1202", Height = "1120", Loading = "lazy", Alt = "The Forge runner scheduler checks due chat policies and applies the removal transaction in PostgreSQL."]),
+                    element!(Img [Src = "/design/chat-history-expiry.png", Width = "761", Height = "921", Loading = "lazy", Alt = "The Forge runner scheduler checks due chat policies and applies the removal transaction in PostgreSQL."]),
                     element!(Span [Class = "open-label"];
                         text("Open full-size diagram "),
                         element!(Span [AriaHidden = "true"]; text("↗")),
@@ -332,7 +333,7 @@ pub(super) const BODY: &[Node] = &[
                 ),
                 element!(Ol [Class = "contract-steps"];
                     element!(Li; text("The runner scheduler starts a bounded batch and finds due chats.")),
-                    element!(Li; text("The DAO locks each eligible chat and rechecks its persisted expiry before removing linked content and writing a tombstone.")),
+                    element!(Li; text("The DAO selects due chats under SKIP LOCKED row locks, removes linked content, scrubs matching checkpoints, and writes tombstones in the same transaction.")),
                     element!(Li;
                         text("Subsequent browser lists omit those chats. An open request for an expired chat returns "),
                         element!(Code; text("404")),
@@ -340,6 +341,14 @@ pub(super) const BODY: &[Node] = &[
                     ),
                 ),
             ),
+        ),
+        element!(P;
+            text("Source evidence: "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/agent-runner/chat_history_api.py"]; text("request DTOs and routing")),
+            text(" · "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/agent-runner/chat_history_store.py"]; text("ChatHistoryDao")),
+            text(" · "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/agent-runner/runner.py"]; text("expiry scheduler")),
         ),
     ),
 ];

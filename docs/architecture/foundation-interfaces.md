@@ -1,14 +1,16 @@
 # Foundation interfaces: jobs, access and remote calls
 
-**Implementation checkpoint:** the narrower [node-info network slice](remote-node-info.md)
-now implements a transport-neutral typed call/client/task and optional mutual-TLS
-HTTPS loopback adapter. The broader generic access/delegation and remote-execution
-interfaces below remain proposals, not exports or production guarantees.
+**Current checkpoint — 18 November 2026:** the repository now includes the
+[volatile stepped counter](../../src/rust/forge-local/JOBS.md), a separate
+[durable sum-job store and worker](../../src/rust/forge-jobs/README.md),
+[verified access contexts and route grants](../../src/rust/forge-access/src/lib.rs),
+and the [typed HTTPS boundary](remote-node-info.md) used by the configured agent.
+The agent also supplies source reads and explicitly granted managed-project writes.
+See the [source-backed implementation inventory](forge-framework-blueprint.md#current-implementation).
 
-**Broader proposal; a narrow local jobs subset is implemented.** The
-[bounded counter guide](../../src/rust/forge-local/JOBS.md) covers actual explicit
-stepping, volatile history and trusted-local owner checks. Generic jobs, production
-identity and remote interfaces below remain proposals.
+**Broader proposal:** the generic job/program/delegation interfaces and type names
+below retain the original design. They are not a replacement API for the narrower
+implemented crates, nor evidence that every capability is enabled in a live host.
 
 **Original design baseline.** Reviewed against public
 homelab `67b80a8e6f16f1d81995596dfb7865e0f986a399` on 2026-10-31. Names and Rust
@@ -39,11 +41,12 @@ remote milestone.
 
 ## 2. Coherent internal modules, not a class-per-crate tree
 
-Use these **logical units first**. Initial jobs/access orchestration may live in
-private `forge-local` modules. Extract candidate `forge-jobs`, `forge-access` and
-`forge-remote` packages when independent consumers or an external adapter make the
-boundary useful. No empty crates are to be created by this design. Contract-only
-packages need no ceremonial registrar.
+The original design below proposes logical units and import responsibilities.
+`forge-jobs`, `forge-access` and `forge-remote` are now real workspace members;
+their current interfaces and dependencies are the linked source inventory above.
+The broader table remains a proposed decomposition, not the actual Cargo DAG.
+No empty crates are needed to complete that drawing. Contract-only packages need
+no ceremonial registrar.
 
 | Unit and candidate home | Internal modules / visibility | Imports and forbidden knowledge |
 | --- | --- | --- |
@@ -80,7 +83,10 @@ shows these **proposed** edges, separately from the actual package DAG.
 ## 3. Jobs: admission, stepping and bounded records
 
 A job is an owned execution record around a program, not a `Task` replacement.
-The first engine is **volatile, single-owner and cooperative**. A separate
+This section describes the original **volatile, single-owner and cooperative**
+generic engine design. The local counter implements the bounded stepped form;
+the separate durable sum-job implementation uses file-store leases and has its
+own concrete commands and cancellation semantics. A proposed
 `JobProgram` prepares a bounded `JobStepper`; it does not change Task's input or
 force every task to accept cancellation tokens. A known-short pure Task may be
 adapted to one step, but a blocking Task cannot be called a responsive job merely
@@ -387,10 +393,12 @@ layout.
    peers, real identity verification, bounded codecs, mismatched target/version/
    reply rejection, budget consumption and uncertain outcomes. Keep disk/jobs
    remotely inaccessible. A fake channel test is not network/security proof.
-4. **Later remote jobs/durability:** implement atomic persistence/recovery only if
-   needed; prove duplicate submission after lost reply and across restart, retained
-   receipt lookup, permission changes, late retries and downstream partial effects.
-   No exactly-once or transparent-location claim.
+4. **Durability and later remote jobs:** the local `forge-jobs` slice now supplies
+   committed receipts, restart recovery and fenced attempts. Its
+   [durable integration tests](../../src/rust/forge-jobs/tests/durable.rs) define
+   that proof surface. Remote job delivery, permission changes across remote
+   retries and downstream partial effects remain separate extensions. No
+   exactly-once or transparent-location claim follows from local persistence.
 
 The [contract sketches](foundation-contracts.md) include the explicit migration cost of extending today's public exhaustive application enums. Keeping core traits unchanged does not automatically make such an application change source-compatible. They make the proposed seams concrete;
 they deliberately do not pretend a new implementation or finished security model.

@@ -2,6 +2,63 @@ use super::markup;
 
 const STYLES: markup::Styles = &[
     (
+        ".implementation-report .engine-table table",
+        &[("table-layout", "fixed")],
+    ),
+    (
+        ".implementation-report .engine-table th:first-child",
+        &[("inline-size", "8rem")],
+    ),
+    (
+        ".implementation-report .engine-table th, .implementation-report .engine-table td",
+        &[("overflow-wrap", "normal")],
+    ),
+    (
+        ".implementation-report h1",
+        &[
+            ("font-size", "clamp(1.75rem, 4vw, 2.5rem)"),
+            ("line-height", "1.15"),
+            ("margin-block", "12px 20px"),
+        ],
+    ),
+    (
+        ".implementation-report h2",
+        &[("margin-block", "32px 12px")],
+    ),
+    (
+        ".implementation-report p, .implementation-report li",
+        &[("line-height", "1.65"), ("color", "var(--muted)")],
+    ),
+    (
+        ".docs-reader .engine-table",
+        &[
+            ("max-inline-size", "100%"),
+            ("overflow", "auto"),
+            ("margin-block", "16px"),
+            ("border", "1px solid var(--border)"),
+            ("border-radius", "8px"),
+        ],
+    ),
+    (
+        ".docs-reader .engine-table table",
+        &[
+            ("min-inline-size", "42rem"),
+            ("inline-size", "100%"),
+            ("border-collapse", "collapse"),
+            ("text-align", "start"),
+            ("font-size", ".875rem"),
+        ],
+    ),
+    (
+        ".docs-reader .engine-table th, .docs-reader .engine-table td",
+        &[
+            ("padding", "12px"),
+            ("text-align", "start"),
+            ("vertical-align", "top"),
+            ("border-block-end", "1px solid var(--border)"),
+        ],
+    ),
+    (
         ".docs-page",
         &[
             ("--background", "#0b0e14"),
@@ -493,7 +550,6 @@ const STYLES: markup::Styles = &[
             ("max-block-size", "38rem"),
             ("object-fit", "contain"),
             ("background", "#202732"),
-            ("filter", "brightness(.85) saturate(.85)"),
         ],
     ),
     (

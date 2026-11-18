@@ -1,36 +1,30 @@
----
-title: M26 Workbench composition - design names, implemented primitives
----
 classDiagram
   direction LR
-  class ShellRegion {
-    <<implemented composition>>
-    C01 AppShell
-    C02 ConnectionView
-    C03 ContextToolbar
-    C08 ViewControls
-    C09 StatusRegion
+  class ShellComposition {
+    <<design compositions>>
+    Brand and HeaderActions
+    Navigation and Screen
+    Project and View sheets
   }
-  class InspectionRegion {
-    <<implemented composition>>
-    C04 ExplorerPane
-    C05 InspectionWorkspace
-    C06 OutlinePane
-    C07 ProblemsPane
+  class WorkspaceComposition {
+    <<design compositions>>
+    Explorer and unified query
+    Verified source and Outline
+    Problems and edit review
   }
   class Presentation {
     <<generated primitives>>
-    DOM focus scroll lifetime
-    typed ABI2 view bindings
-    panes filters and splitters
+    ABI4 typed bindings
+    DOM focus and lifetime
+    panes dialogs wrap display
   }
   class UiModel {
-    <<existing WASM owner>>
-    UiEvent and ViewModel
-    request and selection policy
-    accepted report-keyed intents
-    UiEffect to existing worker
+    <<Rust WASM owner>>
+    screen and request policy
+    report mode source guards
+    chat mail and edit state
+    typed effects and views
   }
-  ShellRegion *-- InspectionRegion
-  InspectionRegion ..> Presentation
+  ShellComposition *-- WorkspaceComposition
+  WorkspaceComposition ..> Presentation
   Presentation --> UiModel

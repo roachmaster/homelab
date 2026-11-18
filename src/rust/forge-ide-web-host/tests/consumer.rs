@@ -1166,6 +1166,7 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
     for path in [
         "/home",
         "/design",
+        "/design/implementation",
         "/design/forge-providers",
         "/studio",
         "/playtest",
@@ -1205,6 +1206,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Content-Security-Policy:"));
         assert!(response.contains("Forge IDE design"));
         assert!(response.contains("href=\"/design/index.css\""));
+        assert!(response.contains("href=\"/design/implementation\""));
         assert!(response.contains("href=\"/design/forge-providers\""));
         assert!(response.contains("href=\"/design/chat-dispatch\""));
         assert!(response.contains("href=\"/design/mail\""));
@@ -1233,6 +1235,11 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
     assert!(request("GET", "/design/index.css").contains("Content-Type: text/css; charset=utf-8"));
     assert!(request("GET", "/design/docs.css").contains("Content-Type: text/css; charset=utf-8"));
     for (path, heading, marker) in [
+        (
+            "/design/implementation",
+            "Current Forge implementation",
+            "class=\"implementation-report\"",
+        ),
         (
             "/design/previous-chats",
             "Previous chats",
@@ -1274,6 +1281,14 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         }
         assert!(request("GET", &format!("{path}/unknown")).starts_with("HTTP/1.1 404"));
     }
+    let implementation = request("GET", "/design/implementation");
+    assert!(implementation.contains("4,096 context / 1,024 completion"));
+    assert!(implementation.contains("no Studio relay configured"));
+    assert!(implementation.contains("without managed-write opt-in"));
+    assert!(implementation.contains("revision/journal checks"));
+    assert!(implementation.contains("<a href=\"/design/chat-history\">Chat history</a>"));
+    assert!(!implementation.contains("target=\"_blank\""));
+    assert!(!implementation.contains("<script"));
     let preview = request("GET", "/design/previous-chats");
     assert!(preview.contains("Interactive preview"));
     assert!(preview.contains("aria-label=\"Reset preview\""));
@@ -1341,7 +1356,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Content-Type: text/html; charset=utf-8"));
         assert!(response.contains("Content-Security-Policy:"));
         assert!(response.contains("<h1>Physics for the Forge Game Runtime</h1>"));
-        assert!(response.contains("<strong>Design proposal.</strong>"));
+        assert!(response.contains("<strong>Implemented repository slice.</strong>"));
         assert!(response.contains("href=\"/design/game-physics/tick.svg\""));
         assert!(response.contains("href=\"/design/game-physics/animation.svg\""));
         assert!(response.contains("href=\"/design/game-physics/authority.svg\""));
@@ -1363,7 +1378,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Content-Type: text/html; charset=utf-8"));
         assert!(response.contains("Content-Security-Policy:"));
         assert!(response.contains("<h1>Asset Pipeline for the Forge Game Runtime</h1>"));
-        assert!(response.contains("<strong>Design proposal.</strong>"));
+        assert!(response.contains("<strong>Implemented repository slice.</strong>"));
         assert!(response.contains("href=\"/design/game-studio\""));
         assert!(response.contains("href=\"/design/game-physics\""));
         assert!(response.contains("href=\"/design/game-asset-pipeline/cook.svg\""));
@@ -1397,7 +1412,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
             "Studio build worker flow",
             "studio.svg",
             "/design/forge-workers",
-            "The durable Studio build service is a separate future milestone.",
+            "The durable Studio build service is implemented for the static-web profile.",
         ),
     ] {
         for target in [path.to_owned(), format!("{path}/")] {
@@ -1406,7 +1421,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
             assert!(response.contains("Content-Type: text/html; charset=utf-8"));
             assert!(response.contains("Content-Security-Policy:"));
             assert!(response.contains("<h1") && response.contains(&format!(">{heading}</h1>")));
-            assert!(response.contains("<strong>Design proposal.</strong>"));
+            assert!(response.contains("<strong>Implemented repository slice.</strong>"));
             assert!(response.contains(detail));
             assert!(response.contains(&format!("href=\"/design/forge-workers/{diagram}\"")));
             assert!(response.contains(&format!("href=\"{cross_link}\"")));
@@ -1451,6 +1466,11 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         "/design/forge-ide-workbench-desktop.png",
         "/design/forge-ide-workbench-phone.png",
         "/design/forge-ide-workbench-project-options.png",
+        "/design/forge-ide-chat-history-phone.png",
+        "/design/forge-ide-workbench-explorer-phone.png",
+        "/design/forge-ide-mail-inbox-phone.png",
+        "/design/forge-ide-mail-thread-phone.png",
+        "/design/forge-ide-mail-thread-desktop.png",
         "/design/chat-history-open.png",
         "/design/chat-history-retention.png",
         "/design/chat-history-delete.png",

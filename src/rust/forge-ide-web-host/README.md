@@ -252,7 +252,9 @@ The host build renders the portal home and Design reference from typed Rust
 declarations in `forge-ide-web-host/src/design`. Open **Home** in the IDE or
 visit `/home` for links to the IDE, Studio, the Room One playtest, and Design.
 The host embeds these documents with their styles and diagrams. The Design
-overview is a compact index with sticky topics and focused readers. The sample
+overview is a compact index with sticky topics and focused readers. `/design/implementation`
+is the current source/configuration checkpoint; current controlled captures are in the
+wireframe reader. The sample
 Previous chats sandbox is at `/design/previous-chats`, layout snapshots are at
 `/design/wireframes`, and recovery notes are at `/design/workspace`. The chat
 history contracts and sequence diagrams are at `/design/chat-history`.

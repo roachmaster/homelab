@@ -1,6 +1,14 @@
 # Dependency injection: factories, providers, and owned lifetimes
 
-**Status:** Proposed Rust assembly contract, informed by a focused source reinspection of older Forge patterns and standalone HPVS. This is not an implemented DI container or a claim of drop-in compatibility. The [initial `forge-provider` crate](../../src/rust/forge-provider/README.md) now implements only synchronous factory/provider/lease primitives plus singleton/transient scopes; graph validation, pools and managed host lifecycle below remain proposed.
+**Status: implemented explicit assembly with a broader lifecycle design.** Reviewed
+against the repository on 18 November 2026. [`forge-provider`](../../src/rust/forge-provider/README.md)
+implements synchronous factory/provider/lease primitives and singleton/transient
+scopes; [`forge-bootstrap`](bootstrap-registrars.md) implements typed staging,
+dependency-order validation and consuming freeze. The agent, portal host, model
+runtime and durable-jobs executable use those boundaries in their normal entry
+paths. This is explicit application composition, not a universal reflective DI
+container. Automatic graph execution, generic pools and managed async lifecycle
+remain proposed. [Current implementation inventory](forge-framework-blueprint.md#current-implementation).
 
 ## Implemented narrow step: registrars stage factories
 
@@ -69,7 +77,14 @@ A provider may hold a configured factory; the factory is not responsible for dec
 
 The generic associated lease type deliberately supports borrowed ownership. It is not a promise that `dyn Provider<T>` works: a trait with a generic associated type is not dyn-compatible. Keep this boundary generic/concrete, or design a separate **capability-specific**, object-safe interface with a concrete owned handle/lease. Choose that only when runtime substitution is actually needed. Likewise, native async trait methods are not a shortcut to a dyn-compatible async provider; a selected async interface must state its future, lifetime and `Send` requirements. [Rust trait dyn compatibility](https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility)
 
-For the first reference application, the simplest binding is a host-owned store adapter exposed as `Arc<dyn JobStore + Send + Sync>` if its port is object-safe and its implementation supports those bounds. Composition passes it into the jobs handler constructor. The host separately retains the resource owner's lifecycle handle. A new generic registry of unrelated service types is unnecessary; explicit typed assembly functions and a small plan for diagnostic identities can coexist without `Any` or downcasts.
+The durable-jobs consumer now uses this concrete pattern: an acquired
+`Arc<dyn JobStore>` is injected into the authenticated bridge and bound to the
+worker recipe after freeze. Its `JobStore` contract requires `Send + Sync`.
+The [Unix executable](../../src/rust/forge-terminal/src/bin/forge-jobs.rs) selects
+the operator verifier and private store, then retains and shuts down the owned
+worker. This does not require a generic registry of unrelated runtime services.
+Explicit typed assembly and diagnostic binding identities coexist without `Any`
+or downcasts.
 
 The implemented [disk client](../../src/rust/forge-kernel/README.md) makes scope observable: each factory creation owns a fresh cwd; a shared singleton deliberately shares navigation, while transient acquisition starts again at the configured location. Registration is filesystem-free; factory construction validates the native directory. Provider scope is not filesystem authorization.
 

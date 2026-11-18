@@ -331,7 +331,7 @@ test('Home screenshot evidence requires explicit selection and an owned clean UR
 });
 
 test('Docs screenshots require an explicitly selected fixed reader and retain privacy checks', async () => {
-  for (const path of ['/design', '/design/previous-chats', '/design/wireframes#phone', '/design/wireframes#desktop']) {
+  for (const path of ['/design', '/design/implementation', '/design/previous-chats', '/design/wireframes#phone', '/design/wireframes#desktop']) {
     const candidate = screenshotFixture({ url: `http://127.0.0.1:1234${path}` });
     assert.equal(await screenshotEligibility(candidate.page, candidate.fixtures, { docs: true }), 'safe');
     assert.equal(await screenshotEligibility(candidate.page, candidate.fixtures), 'skipped_unsafe_page');
@@ -339,6 +339,8 @@ test('Docs screenshots require an explicitly selected fixed reader and retain pr
   for (const options of [
     { url: 'http://127.0.0.1:1234/design?draft=value' },
     { url: 'http://127.0.0.1:1234/design#unknown' },
+    { url: 'http://127.0.0.1:1234/design/implementation?draft=value' },
+    { url: 'http://127.0.0.1:1234/design/implementation#unknown' },
     { url: 'http://127.0.0.1:1234/design/wireframes#unknown' },
     { url: 'http://127.0.0.1:1234/design/mail' },
     { url: 'https://example.com/design' },

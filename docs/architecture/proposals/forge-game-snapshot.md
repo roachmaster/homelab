@@ -1,28 +1,30 @@
 # Simulation-to-Presentation Snapshot for the Forge Game Runtime
 
-Replace the scalar per-cell WASM interface with one versioned, batched
-snapshot per frame, so the playtest can grow past Room One without
-reworking the runtime-to-presentation boundary for every new feature.
+**Implementation reference — reviewed 18 November 2026.** The batched FGS1
+snapshot is implemented in `forge-ide-web/src/playtest_wire.rs` and consumed by
+the generated playtest adapter. The original scalar path remains a compatibility
+fallback. Current game publication also includes a 32-byte FGP1 player pose and
+5,216-byte FGC1 collision diagnostic buffer; they preserve the v1 world layout.
 
-**Planning baseline** — GitHub `main` at `6e1e70e` on 2026-11-17. This
-design follows the [game engine proposal](forge-game-engine.md) and its
-`WorldSnapshot` / `FrameOutcome` / `GameEvent` contracts, and applies the
-simulation-to-presentation trace from the `design-game-engine` skill.
-It covers the snapshot interface only: the entity model, level loading,
-camera, and audio belong to their own designs.
+Source: [wire writer](../../../src/rust/forge-ide-web/src/playtest_wire.rs),
+[pose writer/exports](../../../src/rust/forge-ide-web/src/playtest.rs),
+[collision writer](../../../src/rust/forge-ide-web/src/playtest_collision.rs),
+[generated reader](../../../src/rust/forge-ide-web-host/src/design/playtest_snapshot_browser.rs).
+The [engine reference](forge-game-engine.md) distinguishes this shipped slice
+from future desktop and simulation-worker placement.
 
 ## The original interface
 
 The original interface had eight scalar WASM exports (`width`, `height`,
 `cell`, `status`, `input`, `advance`, `clear_input`, `restart`). Every
-frame the adapter calls `cell(x, y)` once per tile: 117 boundary
+frame the original adapter called `cell(x, y)` once per tile: 117 boundary
 crossings per frame at Room One's 13×9. The adapter already redrew only
 changed cells. The call count comes from inspecting the loop. Relative
 cost requires a browser profile. The scalar interface carried no
 interpolation data, no events, no dynamic values (score, health,
 timers), no entity data, and no report of dropped ticks after a hitch
 (`advance` returns nothing, although the proposal requires discarded
-time to be reported). Each of those would today need another scalar
+time to be reported). Each additional feature would have needed another scalar
 export. The snapshot fixes the shape once.
 
 ## Representative scenario
@@ -31,8 +33,8 @@ Room One, played to completion in the browser: the player moves with
 keyboard or buttons, collects the key, reaches the exit, and restarts.
 The frame loop is unchanged (requestAnimationFrame drives `advance`,
 then paint). What changes is what paint reads: one snapshot instead of
-117 scalar calls. The existing journey already plays this scenario end
-to end; it becomes the acceptance check for the new interface.
+117 scalar calls. The existing browser journey plays this scenario end
+to end through the implemented snapshot path.
 
 ## Snapshot layout
 
@@ -52,7 +54,7 @@ sections except the count-bounded arrays below.
 Total size is fixed at 10,284 bytes.
 The buffer is fixed-size by design: the header counts say how much of
 each array is live, the adapter allocates its read view once and reuses
-it, and the runtime never allocates per frame.
+it, and the snapshot writer reuses this fixed buffer rather than allocating it per frame.
 
 ## Transport: one stable buffer in WASM memory
 
@@ -92,14 +94,14 @@ not know is a failure, not a best-effort read.
 A single buffer suffices while the runtime and the adapter run on the
 same thread: `advance` and paint are sequential inside one frame
 callback, so the adapter can never observe a half-written snapshot.
-If rendering ever moves to a worker, the snapshot becomes double
-buffered (the runtime publishes to the back buffer and swaps at the
-tick boundary); the layout and the adapter's read path do not change.
+A future worker placement needs an explicit complete-buffer transfer or
+synchronization contract. Double buffering is one option, not an implemented
+worker transport or a promise that the current adapter can be moved unchanged.
 
 The interpolation numerator uses a denominator of 1,000,000. The
-snapshot carries previous and current transforms for future smooth
-movement. Room One draws tile-discrete positions. Collision reads
-authoritative tick state.
+snapshot carries previous and current transforms. Room One keeps its
+tile-discrete game rules; Traversal Yard publishes fixed-point motion.
+Collision reads authoritative tick state; Canvas owns presentation.
 
 ## Coordinates
 
@@ -120,9 +122,21 @@ they occurred even after the target despawns.
 `advance` publishes ticks run, ticks dropped (whole-tick
 debt discarded after the four-tick cap), and fractional time preserved.
 The counts land in the stats section each frame. This closes the gap
-where the current `advance` returns nothing: a 250 ms hitch now
+where the original scalar `advance` returned nothing: a 250 ms hitch now
 reports its dropped ticks instead of absorbing them silently. The
 debug inspector displays the clock diagnostics.
+
+## Same-tick pose and diagnostics
+
+FGP1 is a separate 32-byte buffer with room epoch, tick, player ID, phase, facing,
+frame index, grounded/contact flags and selected contact facts. The reader
+requires it to match the FGS1 world identity before drawing the selected atlas
+frame. It is implemented, not an open proposed transport.
+
+FGC1 is a separate bounded diagnostic buffer for body boxes, current contacts
+and the forward room ray. Debug drawing reads it after publication and cannot
+change simulation or replay. The 512-record FGT1 trace remains distinct from the
+full bounded Rust session recorder used for exported replay.
 
 ## Compatibility
 

@@ -1,0 +1,22 @@
+sequenceDiagram
+    actor User
+    participant DOM as Main JS
+    participant W as Rust and worker I/O
+    participant H as Native host
+    participant DB as Configured store
+    User->>DOM: Open Home or Design
+    DOM->>W: Flush latest acknowledged workspace
+    W->>H: Save checkpoint
+    H->>DB: Commit accepted revision
+    DB-->>H: Commit acknowledged
+    H-->>W: Saved checkpoint
+    W-->>DOM: Handoff JSON and saved acknowledgement
+    DOM->>DOM: Navigate same tab
+    User->>DOM: Return to Chat Mail or Workbench
+    DOM->>W: Start fresh owned worker
+    W->>H: Resume admission and restore
+    H-->>W: Catalog and accepted snapshot
+    W->>W: Restore then dispatch declared entry action
+    W-->>DOM: Typed view and entry acknowledgement
+    DOM->>DOM: Render and consume matching fragment
+    DOM-->>User: Restored view

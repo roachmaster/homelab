@@ -1,17 +1,21 @@
 # First remote boundary: authenticated node.info
 
-**Scope note:** this document records the original node-only boundary. The
-[configured agent](../../src/rust/forge-agent/README.md) now reuses it and adds
-optional allowed-project IDE inspection, persistent serving and named-node CLI
-configuration. The original `make remote` example and node public APIs remain
-compatible. Two-process localhost validation is not a deployed two-host system.
+**Scope: original node-only proof with current extension notes.** Reviewed against
+the repository on 18 November 2026. The typed node-info contracts and optional
+HTTPS adapter remain the narrow public API documented below. The configured
+[agent composition](../../src/rust/forge-agent/src/host.rs) now reuses that boundary
+for named projects, bounded source reads and explicitly granted managed writes.
+Managed mutations require a provisioned private Unix workspace and independent
+project grants; they are not granted by a node-info or project-read permission.
+The original `make remote` example stays compatible and uses real loopback TCP.
 
-
-**Implemented narrow slice:** typed node-info contracts and an optional HTTPS
-adapter, exercised over real loopback TCP. **Not implemented:** a network-reachable
-agent deployment, generic remote jobs, remote IDE/file access, credential operations,
-end-user delegation, gRPC or Bitwave. This is a replaceable transport boundary, not
-an OS or a promise of location-transparent calls.
+The optional adapter does not implement generic remote jobs, automatic credential
+provisioning, end-user delegation, gRPC or Bitwave. A localhost fixture is not
+physical deployment evidence; current operational enablement is recorded in the
+[service inventory](forge-ide-system-inventory.yaml). See the
+[current blueprint inventory](forge-framework-blueprint.md#current-implementation)
+for exact implemented packages rather than treating this original proof as the
+entire current system.
 
 ## Why this first choice
 

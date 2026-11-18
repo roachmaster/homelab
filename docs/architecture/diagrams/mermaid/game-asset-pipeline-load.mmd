@@ -1,22 +1,22 @@
 ---
-title: Proposed Forge asset pipeline - load and activate
+title: Implemented cooked level loading and activation
 ---
 sequenceDiagram
-    participant W as World loader
-    participant R as Asset registry
-    participant F as Byte source
-    participant T as Tick scheduler
-    Note over W,T: Proposed load sequence
-    W->>R: Request level by stable asset ID
-    R->>R: Resolve cooked locator
-    Note over W,T: Active cooked output first, then the configured alternate location.
-    R->>F: Read with epoch and retained buffer
-    F-->>R: Completion and buffer
-    R->>R: Check the level epoch
-    Note over W,T: Drop stale completion and release its buffer.
-    R->>R: Verify digest and required assets
-    Note over W,T: Required failure keeps the active level.<br/>Missing optional atlas uses primitives.
-    R->>R: Initialize validated assets
-    R->>T: Stage level with manifest identity
-    T->>R: Record activation tick and publish
-    T-->>W: Activate the validated level
+    participant B as Generated page adapter
+    participant R as Rust Assets and Loader
+    participant I as JS I/O worker
+    participant H as Native verified asset source
+    participant T as Rust fixed tick
+    Note over B,T: A stale or failed required result keeps the active room.<br/>Optional art failure retains primitive rendering.
+    B->>R: Request supported level slot
+    R-->>B: Required asset and generation
+    B->>I: read asset and request ID
+    I->>H: Bounded same-origin GET
+    H-->>I: Approved cooked bytes
+    I-->>B: asset-result with owned buffer
+    B->>R: Upload bytes and generation
+    R->>R: Verify digest and format
+    R->>R: Prepare newest candidate
+    T->>R: Commit at activation boundary
+    R->>R: Seal replay and replace Room
+    R-->>B: Publish incoming epoch at tick zero

@@ -6,8 +6,23 @@ bounded job lifecycle, then one explicitly selected remote boundary. Reuse the
 six core crates and optional `forge-kernel` clients; do not start a new kernel,
 distributed scheduler or shell platform.
 
-**Research baseline:** checked against homelab
-`1267205e1ee0af849bdefd347167836dab82bd28` on 2026-10-31. The local node/disk/terminal and bounded counter-jobs checkpoints are implemented. [Actual job commands and limits](../../src/rust/forge-local/JOBS.md) are distinct from broader generic/remote contracts below. The original research plan selected no transport/runtime/device. The later [node-info network proof](remote-node-info.md) selected optional HTTPS/mTLS. The [configured agent](../../src/rust/forge-agent/README.md) now reuses that boundary for allowlisted read-only IDE inspection with named nodes and a persistent synchronous serving loop. Actual validation uses two localhost processes; no user device, physical-host deployment or production credential provisioning is claimed.
+**Current checkpoint — 18 November 2026:** local node/disk/terminal and the
+[volatile stepped counter](../../src/rust/forge-local/JOBS.md) are implemented.
+A separate [durable sum-job capability](../../src/rust/forge-jobs/README.md) owns a
+locked file store, restart-persistent receipts and leased worker attempts.
+[`forge-access`](../../src/rust/forge-access/src/lib.rs) supplies verified
+subject/deadline contexts and exact-route grants. The configured HTTPS agent
+provides node/project/source operations and explicitly granted managed writes.
+Automatic peer discovery, generic remote jobs, broad delegation and a bootable
+kernel remain outside these hosted capabilities.
+
+**Historical research baseline:** homelab
+`1267205e1ee0af849bdefd347167836dab82bd28`, 31 October 2026. The phase proposals
+and DOT planning diagram below preserve that design sequence. The later
+[node-info proof](remote-node-info.md) selected optional HTTPS/mTLS. Source and
+localhost tests are distinct from deployment and credential provisioning in the
+[service inventory](forge-ide-system-inventory.yaml). See the
+[current implementation inventory](forge-framework-blueprint.md#current-implementation).
 
 [Source ledger](forge-kernel-sources.md) · [Plan diagram](diagrams/07-hosted-kernel-plan.svg) ·
 [Existing bootstrap](bootstrap-registrars.md) · [Current disk client](../../src/rust/forge-kernel/README.md)
@@ -17,7 +32,7 @@ The [Pi Cluster Control review](../reviews/forge/pi-cluster-control.md) supplies
 The next foundations now have a [detailed module/interface proposal](foundation-interfaces.md)
 and [Rust contract sketches](foundation-contracts.md). They refine bounded jobs,
 identity/policy and remote-read interfaces without freezing an untested API.
-The local counter and configured read-only node/IDE agent subsets exist; broader identity/delegation and remote-execution APIs remain proposals.
+The local counter, durable sum worker, verified-context boundary and configured node/IDE agent now exist with narrower exact APIs. Broader delegation and generic remote-execution sketches remain proposals.
 
 ## What kernel means here
 
@@ -61,7 +76,9 @@ The demo's caller-controlled admission flag is **not authentication**.
 | Already implemented | `DiskRequest::{Pwd,List,ChangeDirectory,Permissions}` | Native disk client; current demo routes use `demo.disk.*` |
 | Implemented local slice | `node.info`, `node.status`, `system.commands` | Configured node label/target, client-instance uptime/responding, actual registered commands |
 | Implemented local module | `jobs.submit`, `jobs.inspect`, `jobs.list`, `jobs.step`, `jobs.cancel` | Volatile pure counter, owner-scoped and explicitly stepped; not arbitrary execution |
-| After a remote boundary is chosen | `nodes.list` plus remote node reads | Configured peers with last observation and explicit reachability state |
+| Implemented separate durable consumer | `jobs.submit`, `jobs.status`, `jobs.cancel` plus a foreground worker | Authenticated Unix operator, private durable store and bounded sum work; distinct from the volatile counter |
+| Implemented configured agent | `node.info`, `ide.inspect`, `ide.source`, `ide.managed_write` | Admitted target/project operations; writes additionally require explicit grants and a private provisioned Unix workspace |
+| Later discovery extension | `nodes.list` | Automatic peer discovery and fleet reachability policy are not supplied by the configured node catalog |
 | Later if a consumer needs them | `resources.inspect`, structured recent events | Query limits and retention first; no unbounded monitoring platform |
 
 The implemented terminal help is a presentation of the admitted registered catalog. Keep any richer generic home/menu as a future presentation over these operations. It must
@@ -101,14 +118,16 @@ pure consumer still excludes optional clients. Keep calls local and read-only.
 
 **Narrow implemented checkpoint:** [local counter jobs](../../src/rust/forge-local/JOBS.md)
 now provide volatile admission/history, local owner checks, manual bounded stepping
-and cooperative cancellation. Generic hosting, background input pumps, persistence
-and managed shutdown remain extensions, not completed features.
+and cooperative cancellation. The separate durable sum-job consumer now adds
+persistence and an owned worker with explicit shutdown. Generic program hosting
+and a universal lifecycle engine remain extensions.
 
 A **task** is code; a **job** is one execution record with an owner, input,
 state and outcome. Neither is an OS process. Start with one short, pure,
 checkpointable computation—not arbitrary executable paths or blocking disk work.
 Use an application/capability-owned job module; extract a separate reusable
-`forge-jobs` package only when the boundary has a real second consumer. Do not put
+package only when the boundary has a real consumer. That extraction now exists as
+`forge-jobs` for durable bounded sum work. Do not put
 workflow policy into `forge-kernel`, the bridge or a global business enum.
 
 Implemented local counter state model: accepted/queued → running → succeeded or failed. A cancel
@@ -265,11 +284,11 @@ catalog coverage.
 
 | Decision | Recommendation now | Revisit before |
 | --- | --- | --- |
-| Next separately scoped work | Authorized physical-host trial and credential lifecycle for the configured read-only agent; useful job choice if needed | No automatic exposure/durability expansion |
+| Next separately scoped work | Credential lifecycle, host-specific deployment evidence, generic remote jobs or telemetry only for an actual consumer | No automatic exposure or broader authority from a design document |
 | First job implemented | Pure counter with explicit checkpoints and volatile history | Useful domain job can be chosen later |
 | Executor | Single owner with cooperative steps first | Blocking work or parallelism |
 | Discovery | Explicit peer config; show observed freshness | More than a small managed peer set |
-| Transport and identity | Optional HTTPS/mTLS node-info + allowed-project inspection chosen; production issuance/rotation/exposure still undecided | Any extension beyond current loopback scope |
+| Transport and identity | Optional HTTPS/mTLS agent and verified-subject local jobs are implemented; deployment settings and trust rotation are operational choices | Federation, delegation, remote jobs or a different transport |
 | Disk exposure | Local/trusted only, no file mutations | Remote filesystem access or multi-user use |
 | Durability | Label volatile acceptance honestly | Restart-safe promises or effectful remote retries |
 | Raspberry Pi | Run the hosted application on a supported OS first | Actual hardware/target selection and tests |
@@ -281,4 +300,4 @@ and a bare-metal kernel are different projects. Target compatibility must be
 built and tested on selected hardware; no cross-compilation, flashing or kernel
 replacement is authorized here. [Raspberry Pi kernel documentation](https://www.raspberrypi.com/documentation/computers/linux_kernel.html)
 
-**Current checkpoint:** local node/discovery/terminal, the explicitly stepped counter and a configured authenticated read-only node/IDE agent are implemented; the network milestone is tested using two localhost processes. Broader telemetry, identity/delegation, durable jobs and remotely deployed services remain future work, not authorized merely by this plan.
+**Current checkpoint:** local tools, the volatile stepped counter, durable sum-job store/worker, verified access contexts and the configured node/project/source/managed-write agent are implemented. Their exact entry points are in the blueprint inventory. Local test evidence, configured deployment and broader identity/delegation or remote-job guarantees remain separate. This plan is not authority to expose a new service or enable a writable project.

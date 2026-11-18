@@ -4,8 +4,8 @@ pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("PostgreSQL event dispatch for Forge GPU inference")),
         element!(P;
-            element!(Strong; text("Dispatch design.")),
-            text(" In PostgreSQL dispatch mode, Mission Control accepts chat turns while Forge GPU is offline. A worker on Forge claims pending jobs and calls the model locally."),
+            element!(Strong; text("Implemented dispatch mode.")),
+            text(" Reviewed 18 November 2026 against the committed runner, SQL worker API, Rust request contracts, and generated UI. Mission Control can admit work while Forge GPU is offline; the Forge worker claims eligible jobs and calls its local model adapter."),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Event dispatch design sections"];
             element!(A [Href = "#overview"]; text("Overview")),
@@ -21,11 +21,11 @@ pub(super) const BODY: &[Node] = &[
         element!(Div [Class = "contract-examples"];
             element!(Section [Class = "contract-example", AriaLabelledby = "deployed-title"];
                 element!(H3 [Id = "deployed-title"]; text("Direct inference mode")),
-                element!(P; text("The Mission Control runner writes runs, input messages and replayable events to PostgreSQL. Its worker calls Forge GPU over an inference tunnel. The chat compatibility route can query the active model before queueing and wait up to 13 seconds for a reply.")),
+                element!(P; text("The retained legacy runner mode owns an inference worker on Mission Control and calls Forge over the model tunnel. Its compatibility chat route can wait up to 13 seconds. It remains an explicit alternate configuration; it is not the durable GPU-worker path.")),
             ),
             element!(Section [Class = "contract-example", AriaLabelledby = "proposed-title"];
                 element!(H3 [Id = "proposed-title"]; text("PostgreSQL dispatch mode")),
-                element!(P; text("Mission Control commits the chat turn and returns a run ID. Forge GPU claims the job and publishes a result through PostgreSQL. Mission Control commits the transcript and serves ordered events to the browser.")),
+                element!(P; text("The dispatch service unit selects FORGE_RUNNER_MODE=dispatch. Mission Control commits the turn and returns 202 with a run ID. The Forge GPU Python worker claims through the restricted PostgreSQL API, publishes a result inbox row, and Mission Control finalizes the transcript and ordered terminal event.")),
             ),
         ),
         element!(P; text("PostgreSQL stays on Mission Control and is the shared availability dependency. During a database outage, the API cannot confirm new jobs and Forge cannot claim work or publish results. Committed jobs and results are available after database recovery.")),
@@ -38,7 +38,7 @@ pub(super) const BODY: &[Node] = &[
                     element!(H3; text("From chat submission to saved reply")),
                 ),
                 element!(A [Class = "drawing", Href = "/design/chat-dispatch-sequence.svg"];
-                    element!(Img [Src = "/design/chat-dispatch-sequence.svg", Width = "1072", Height = "1355", Loading = "lazy", Alt = "Sequence showing the IDE, Mission Control, PostgreSQL, Forge GPU worker and local model adapter."]),
+                    element!(Img [Src = "/design/chat-dispatch-sequence.svg", Width = "1455", Height = "1887", Loading = "lazy", Alt = "Sequence showing the IDE, Mission Control, PostgreSQL, Forge GPU worker and local model adapter."]),
                     element!(Span [Class = "open-label"];
                         text("Open full-size diagram "),
                         element!(Span [AriaHidden = "true"]; text("↗")),
@@ -52,7 +52,7 @@ pub(super) const BODY: &[Node] = &[
                         element!(Code; text("202 Accepted")),
                         text(" with the run ID. The job waits in PostgreSQL while Forge is offline."),
                     ),
-                    element!(Li; text("The Forge worker subscribes to job notifications and scans for eligible jobs. It claims a job, receives an attempt token and calls its local model adapter. It renews the lease while inference runs.")),
+                    element!(Li; text("The Forge worker subscribes before scanning. It selects the next eligible model, loads it through its local adapter, then claims an eligible job with an attempt token and a 60-second lease. A local inference thread permits lease renewal every ten seconds; bounded five-second scans recover missed wake-ups.")),
                     element!(Li; text("The worker publishes the bounded reply or failure for the current attempt. PostgreSQL commits the result and wakes the Mission Control completion consumer.")),
                     element!(Li; text("Mission Control commits the transcript, final status and terminal event. The IDE requests the events after its last sequence and receives the saved reply on completion.")),
                 ),
@@ -62,7 +62,7 @@ pub(super) const BODY: &[Node] = &[
     element!(Section [Id = "data-access", Class = "design-section", AriaLabelledby = "data-access-title"];
         element!(H2 [Id = "data-access-title"]; text("PostgreSQL data access")),
         element!(P;
-            text("The queue reuses "),
+            text("The implemented queue reuses "),
             element!(Code; text("runs")),
             text(", "),
             element!(Code; text("messages")),
@@ -162,7 +162,7 @@ pub(super) const BODY: &[Node] = &[
                 element!(Dd; text("Send the run ID. Receive the current cancellation or terminal status.")),
             ),
         ),
-        element!(P; text("The runner pins the chosen model for each run. Forge loads it locally if needed and then claims the job. The IDE keeps the pending run ID and its model in the tab checkpoint. A reload resumes authorized event reads even for a first turn that is still waiting to appear in Previous chats. The browser uses short event-page requests because the current web host serves one request at a time. Chat history actions keep their existing destinations.")),
+        element!(P; text("The runner pins a configured GPT-OSS 20B or Qwen2.5-Coder 7B model for each Chat run. GPT-OSS 120B is the separate fixed Mail recipient. Chat submissions currently reserve 384 completion tokens and expire after ten minutes; Mail uses its own profile and four-hour deadline. Forge loads the next eligible model before claiming its job. The IDE keeps the pending run ID and its model in the tab checkpoint. A reload resumes authorized event reads even for a first turn that is still waiting to appear in Previous chats. The browser uses short event-page requests because the current web host serves one request at a time. Chat history actions keep their existing destinations.")),
         element!(Div [Class = "contract-examples"];
             element!(Section [Class = "contract-example", AriaLabelledby = "claim-dto-title"];
                 element!(H3 [Id = "claim-dto-title"]; text("Worker claim DTO")),
@@ -173,31 +173,31 @@ pub(super) const BODY: &[Node] = &[
                 element!(P; text("Run ID, attempt token and bounded reply or failure.")),
             ),
         ),
-        element!(P; text("PostgreSQL derives the worker identity from its connection role. Mission Control derives chat ownership from the admitted session.")),
+        element!(P; text("PostgreSQL derives the worker identity from its connection role. The runner uses its configured mission-control owner after native session and runner-credential admission; clients cannot select an owner.")),
     ),
     element!(Section [Id = "connection", Class = "design-section", AriaLabelledby = "connection-title"];
         element!(H2 [Id = "connection-title"]; text("Connection and privileges")),
         element!(P;
-            text("Forge initiates an SSH forward to a PostgreSQL listener bound to Mission Control loopback. Mission Control keeps its Unix socket connection. Limit the forwarding account to the database destination and disable shell and subsystem sessions. Limit host-based authentication on loopback to the agent database and the Forge worker login. "),
+            text("The supplied forge-postgres-tunnel service creates a Forge-initiated local forward to Mission Control’s loopback PostgreSQL listener; the worker connects through Forge loopback port 15432. Mission Control’s runner uses its Unix socket. Provisioning restricts the forwarding account and worker database role; configured service files are deployment inputs, not proof that a remote machine is currently online. "),
             element!(A [Href = "https://man.openbsd.org/sshd_config#PermitOpen"]; text("OpenSSH forwarding controls")),
             text(" · "),
             element!(A [Href = "https://www.postgresql.org/docs/16/auth-pg-hba-conf.html"]; text("PostgreSQL host-based authentication")),
         ),
         element!(P;
-            text("Give the Forge login execution grants for worker readiness, claim, renew and publish operations. It receives inference input through the claim and has no table grants for chat history, browser checkpoints or unrelated jobs. Use a trusted function search path and revoke public execution in the same transaction that creates the functions. "),
+            text("The migrations define the forge_agent_worker_api advertise, next_model, claim, renew, and publish operations. The worker gets execution grants and no direct chat/checkpoint table access. SECURITY DEFINER functions set a trusted search path, derive the worker from session_user, and revoke default public execution. "),
             element!(A [Href = "https://www.postgresql.org/docs/16/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY"]; text("PostgreSQL function privileges")),
         ),
     ),
     element!(Section [Id = "rollout", Class = "design-section", AriaLabelledby = "rollout-title"];
-        element!(H2 [Id = "rollout-title"]; text("Cutover and acceptance checks")),
+        element!(H2 [Id = "rollout-title"]; text("Implemented controls and acceptance checks")),
         element!(Ol [Class = "flow"];
             element!(Li;
-                element!(H3; text("Stage dispatch")),
-                element!(P; text("Exercise the queue operations, role and API with a fake Forge worker and disposable PostgreSQL. Drop the notification listener during submission and verify the reconnect scan finds the job.")),
+                element!(H3; text("Durable queue controls")),
+                element!(P; text("SQL migrations and worker/runner test modules cover the queue, current-attempt publication, and reconnect scans. LISTEN/NOTIFY carries empty wake-up payloads; committed rows remain authoritative. Running this documentation build does not repeat remote outage or hardware qualification.")),
             ),
             element!(Li;
-                element!(H3; text("Test offline and retry")),
-                element!(P; text("Submit with Forge off and verify the job completes when Forge returns. Test duplicate submission, a worker crash, a rejected late result and a Mission Control restart after publication.")),
+                element!(H3; text("Offline and retry behavior")),
+                element!(P; text("A committed run can wait offline until its deadline. Expired leases permit another eligible attempt, so inference can execute more than once; only an accepted current attempt can finalize. Duplicate submission uses the same idempotency key. New deployments should still exercise a powered-off Forge, worker loss, and a Mission Control restart.")),
             ),
             element!(Li;
                 element!(H3; text("Test browser and retention")),
@@ -208,9 +208,17 @@ pub(super) const BODY: &[Node] = &[
                 ),
             ),
             element!(Li;
-                element!(H3; text("Move inference to Forge")),
-                element!(P; text("Drain and disable the legacy worker before enabling Forge claims. Its recovery process marks running jobs interrupted. Retire the old inference tunnel after verification. To roll back, stop Forge claims and resolve its leases and receipts before restoring the legacy worker.")),
+                element!(H3; text("Mode selection and rollback")),
+                element!(P; text("Dispatch mode starts the completion consumer instead of the legacy inference worker. An explicitly configured tool repository can still start a separate tools-only worker on Mission Control; it must not claim distributed Chat/Mail runs. Before changing modes, drain or resolve leases and result inbox rows. The retained legacy recovery path must not run concurrently against distributed inference.")),
             ),
+        ),
+        element!(P;
+            text("Source evidence: "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/agent-runner/runner.py"]; text("runner modes and completion loop")),
+            text(" · "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/agent-runner/forge_gpu_worker.py"]; text("Forge worker")),
+            text(" · "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/sql/migrations/0005_inference_dispatch.sql"]; text("leased worker SQL API")),
         ),
     ),
 ];

@@ -80,34 +80,43 @@ startup is not a business API call.
 
 ## When an editor host is requested
 
-A real JavaScript editor widget is compatible with this architecture. Do not
-misread "WASM owns application logic" as requiring a DOM editor inside WASM, or
-"no handwritten application JS" as banning a generated widget adapter. Follow the
-[proposed editor lifecycle](../../../src/rust/forge-ide-web/WORKBENCH.md#proposed-unimplemented-editor-host-lifecycle):
+The generated Workbench already has a bounded textarea editor. Use its
+[direct-edit contract](../../../src/rust/forge-ide-web/WORKBENCH.md#direct-file-editing),
+[typed declarations](../../../src/rust/forge-ide-web/src/generate/application.rs)
+and [Rust editor model](../../../src/rust/forge-ide-ui/src/model/edit.rs) as the
+implementation reference. Do not describe all source writes or editor bindings
+as unimplemented merely because a third-party widget is not installed.
 
-- WASM accepts authorized source results, owns document identity/revision,
-  selection, dirty/conflict/save policy and stale-message acceptance. It requests
-  editor display/update/close through an explicit typed presentation effect or
-  view binding. The current API has no editor effect/binding; name new contracts
-  proposed until implemented, rather than pretending `UiEffect` already has them.
-- The reusable **generated main-thread editor host** mounts/updates/disposes the
-  widget, owns DOM/focus/caret/composition and a bounded presentation buffer, and
-  returns typed lifecycle/change events. It does not choose documents, fetch/save
-  source or become a second authoritative application model. Keep presentation
-  effects separate from remote I/O; mounting a widget is not a backend request.
-- Preserve instance/document/base-revision guards, edit/ack ordering, non-echoing
-  programmatic updates and cleanup on context loss, pagehide or fatal recovery.
-  Hiding a pane is not permission to discard a document or unsaved changes.
-  Only WASM prepares a typed write effect; native host/agent retain independent
-  authorization and revision checks. No optimistic callback proves a save.
-- Author the mount, configuration and events through typed components/declarations
-  and an audited reusable adapter. Do not insert widget setup or application
-  policy as handwritten HTML/CSS/JS, raw strings or YAML code. Missing source
-  operations, model/ABI or generator support are explicit implementation gaps.
+- `OpenDocument` binds the accepted report and file. `SetDocument`,
+  `SaveDocument` and `CloseDocument` carry the editor instance identity. The
+  current editor accepts verified nonempty text up to 4 KiB with consistent
+  newline conventions; Rust owns its original text, draft, dirty/conflict state
+  and write intent. Existing input/button/visibility bindings project that
+  lifecycle; there is no need to invent a widget-mount `UiEffect` for it.
+- Main-thread glue owns textarea DOM, caret, composition and bounded unacknowledged
+  presentation input. Rust accepts the edits and ignores stale identity/context.
+  Dirty or pending file work blocks changing its file/project/report. Chat ↔
+  Workbench switching retains the editor; the generated portal handoff blocks
+  leaving while a file draft is unsaved. Do not claim file drafts are durable
+  Chat-navigation checkpoints. Protected DOM clears on teardown and fatal/resume
+  recovery.
+- Saving prepares the typed browser `ide.edit_write` effect. The native host
+  revalidates source and translates it to the agent's `ide.managed_write` contract.
+  The agent requires explicit read/write project grants and a provisioned managed
+  workspace, then enforces revision/journal guards. A local draft or optimistic
+  callback is not proof of a committed save. Keep conflicts and uncertain operation
+  outcomes available for review/status checks; preserve actual Undo limits.
 
-This is future integration guidance, not a claim that source read/write, an editor
-widget or its lifecycle is shipped. Review it when editing is requested; do not
-add an editor merely because this skill is used.
+A future CodeMirror/Monaco-style widget or LSP integration needs its own declared
+presentation/lifecycle contract. A generated adapter would mount/update/dispose
+that widget and own DOM focus, caret and composition; Rust would retain document
+identity, accepted revision, dirty/conflict/save policy and stale-result checks.
+Keep widget presentation separate from native I/O. Define instance/context guards,
+non-echoing programmatic updates and cleanup before calling new widget APIs
+implemented. Author configuration/actions through typed declarations and audited
+reusable generator primitives, following the same boundary as the current
+textarea. Widget/LSP work is a separate scope from documenting or refining the
+shipped editor.
 
 ## Review a proposed change
 

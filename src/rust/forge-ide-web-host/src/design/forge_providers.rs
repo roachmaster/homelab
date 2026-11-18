@@ -7,6 +7,9 @@ pub(super) const BODY: &[Node] = &[
             text("Use "), element!(Code; text("$wire-forge-providers")),
             text(" when adding or replacing a Forge capability, adapter, worker, or runtime dependency. The host selects an implementation of the consumer’s typed port."),
         ),
+        element!(P [Class = "contract-note"];
+            text("Implementation review · 18 November 2026. Typed registrars, singleton/transient providers, configured native hosts, durable jobs, and the generated portal are implemented. Enabled features still depend on each host’s configuration."),
+        ),
         element!(Nav [Class = "section-nav", AriaLabel = "On this page"];
             element!(A [Href = "#wiring-sequence"]; text("Wiring sequence")),
             element!(A [Href = "#factory-provider-roles"]; text("Factory and provider roles")),
@@ -61,19 +64,31 @@ pub(super) const BODY: &[Node] = &[
         element!(Dl [Class = "storage"];
             element!(Div;
                 element!(Dt; text("Agent managed writers")),
-                element!(Dd; text("The Agent freezes startup registration before opening journals and gives each writable project its own writer.")),
+                element!(Dd; text("The Agent stages node, project, managed-writer and gateway recipes, then freezes before construction. Each explicitly writable private Unix project gets its own retained writer. Read grants do not grant mutation.")),
+                element!(Dd;
+                    element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/src/rust/forge-agent/src/host.rs"]; text("Agent composition source")),
+                ),
             ),
             element!(Div;
                 element!(Dt; text("Portal resources")),
-                element!(Dd; text("Each host owns its selected Chat and Studio relays and asset storage.")),
+                element!(Dd; text("HostFactory validates configuration, creates the selected assets and optional Chat/Studio relays, and retains them in host-owned singletons. Remote client factory groups freeze before their clients are created; runtime requests use injected ports.")),
+                element!(Dd;
+                    element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/src/rust/forge-ide-web-host/src/service.rs"]; text("Portal host factory source")),
+                ),
             ),
             element!(Div;
                 element!(Dt; text("Model runtime")),
                 element!(Dd; text("The provider supplies a GPU reservation. A factory starts the selected model process. Model switches retain the reservation.")),
+                element!(Dd;
+                    element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/src/rust/forge-llama/src/model_runtime.rs"]; text("Model runtime provider source")),
+                ),
             ),
             element!(Div;
                 element!(Dt; text("Durable jobs")),
-                element!(Dd; text("The terminal selects the operator verifier and store through typed factories. The worker recipe receives the acquired store.")),
+                element!(Dd; text("The optional Unix jobs command stages its operator verifier, private file store and worker recipe. After freeze it creates the verifier/store, authenticates the account, and injects the acquired store into the admitted bridge or owned worker. Receipts and results survive reopening that store.")),
+                element!(Dd;
+                    element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/src/rust/forge-terminal/src/bin/forge-jobs.rs"]; text("Durable jobs composition source")),
+                ),
             ),
             element!(Div;
                 element!(Dt; text("Playtest asset reads")),
@@ -88,6 +103,7 @@ pub(super) const BODY: &[Node] = &[
     ),
     element!(Section [Class = "design-section", AriaLabelledby = "verification"];
         element!(H2 [Id = "verification"]; text("Verify a change")),
+        element!(P; text("Current bootstrap validates declared dependency availability and order; hosts execute the constructors explicitly. Automatic graph execution, generic provider pools, async cleanup, federation/delegation, and generic remote jobs remain separate proposals. Pure logic and DTO-only modules need no empty registrar.")),
         element!(Ol [Class = "contract-steps"];
             element!(Li; text("Trace the normal entry point through registration, freeze, construction, and acquisition. Check that rejecting startup leaves resources untouched.")),
             element!(Li; text("Select a second implementation of the same port. Check that the host uses the selected instance and leaves the unused factory untouched.")),
@@ -102,6 +118,7 @@ pub(super) const BODY: &[Node] = &[
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/.agents/skills/wire-forge-providers/SKILL.md"]; text("Read the provider skill")),
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/bootstrap-registrars.md"]; text("Bootstrap and registrar APIs")),
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/dependency-injection.md"]; text("Provider lifetime reference")),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/forge-framework-blueprint.md#current-implementation"]; text("Current implementation inventory")),
         ),
     ),
 ];

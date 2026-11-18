@@ -1,34 +1,37 @@
 ---
-title: Proposed Forge asset pipeline - identity and runtime ownership
+title: Implemented asset identity and bounded ownership
 ---
 classDiagram
-    class AssetId {
-        stable name
+    class VerifiedManifest {
+        digest
+        supportedEntries
     }
-    class CookedManifestEntry {
-        asset ID
-        locator
-        output digest
-        dependency IDs
+    class Assets {
+        uploadBuffer
+        verifiedAtlas
     }
-    class RegistrySlot {
-        asset ID
-        generation
-        readiness
+    class Loader {
+        latestRequest
+        preparedRoom
+        retainedReplayLevels
     }
-    class LoadRequest {
-        asset ID
-        level epoch
+    class Room {
+        epoch
+        tick
+        validatedLevel
     }
-    class ReadBuffer {
-        cooked bytes
+    class Timeline {
+        segments
+        manifestDigests
+        effectiveInputs
     }
-    class PublishedAsset {
-        ready generation
-        effective tick
+    class ArchivePort {
+        readGeneration
+        missingDigest
     }
-    CookedManifestEntry --> AssetId
-    RegistrySlot --> AssetId
-    LoadRequest --> RegistrySlot
-    LoadRequest *-- ReadBuffer : retains
-    RegistrySlot ..> PublishedAsset : publishes
+    Assets *-- VerifiedManifest
+    Assets --> Loader
+    Loader --> Room
+    Loader --> Timeline
+    Timeline --> ArchivePort
+    ArchivePort --> Assets

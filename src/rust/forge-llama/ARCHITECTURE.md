@@ -184,7 +184,7 @@ sequenceDiagram
     Client->>Client: Append assistant reply
 ```
 
-The second turn is illustrative. The adapter sends each request upstream with `stream: false` and `cache_prompt: false`. It checks that a supplied model ID matches the ready model. A new request gets its own Forge envelope. The client saves the messages when it wants to resume a conversation later.
+The second turn is illustrative. The adapter sends requests upstream with `stream: false`. Ordinary completion requests use `cache_prompt: false`; requests carrying the validated Mail profile use `cache_prompt: true` so the loaded slot may reuse an unchanged prompt prefix. Model replacement or restart loses that in-memory cache. The Mail runner stores the completed exchanges in PostgreSQL and supplies them again for cold replay; there is no persistent KV snapshot contract. The adapter checks that the supplied model ID matches the ready model, and validates the Mail profile and rendered input-token count before inference. A new request gets its own Forge envelope. See the [implemented request preparation](src/driver.rs) and [Mail configuration](README.md).
 
 ## UML state — Model lifecycle
 

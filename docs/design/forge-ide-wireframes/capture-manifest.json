@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-11-18",
+  "scope": "Disposable generated-UI acceptance fixtures; editable controls masked; no operator data.",
+  "source": {
+    "revision": "7e03991fc941c314dc9651bcf5ea33f61eae432f",
+    "dirty": true,
+    "source_sha256": "77a5287db58e289ed0e845b555380ea432d182ac2e6cd7357ff062df085dbe78"
+  },
+  "captures": [
+    {
+      "asset": "forge-ide-chat-phone.png",
+      "fixture_capture": "ide-chat-phone.png",
+      "width": 390,
+      "height": 664,
+      "sha256": "add9ba5d034804735c9970c6e9c1b3eaec81946ba0d0b70227d1e1ca63fe27c3"
+    },
+    {
+      "asset": "forge-ide-chat-desktop.png",
+      "fixture_capture": "ide-chat-desktop.png",
+      "width": 1440,
+      "height": 1000,
+      "sha256": "ef6c807de4ac701d973993bba261b531fa884509321bb071647ed68ddd8431b9"
+    },
+    {
+      "asset": "forge-ide-chat-history-phone.png",
+      "fixture_capture": "ide-chat-history-phone.png",
+      "width": 390,
+      "height": 664,
+      "sha256": "cb16a6ca3230c75dc7cd05de4054e9bcbff6b2bce5211e74a8a49ee624c79bfa"
+    },
+    {
+      "asset": "forge-ide-workbench-phone.png",
+      "fixture_capture": "ide-viewport-iphone13-portrait.png",
+      "width": 390,
+      "height": 664,
+      "sha256": "a60f7c3167191eeafa50e816134df64fe55a08c2d2a66bb9926c7c597842ba61"
+    },
+    {
+      "asset": "forge-ide-workbench-explorer-phone.png",
+      "fixture_capture": "ide-workbench-explorer-phone.png",
+      "width": 390,
+      "height": 664,
+      "sha256": "9e5fadfdbe7ee5314932ee6436a67e3cf5aed8e3da6f13cd089ee6ed34256143"
+    },
+    {
+      "asset": "forge-ide-workbench-project-options.png",
+      "fixture_capture": "ide-workbench-project-options-phone.png",
+      "width": 375,
+      "height": 667,
+      "sha256": "e4d1ea8ea451f6849992c57a6eabf312d57768cd103015dbeee4de1a5cfe5ed8"
+    },
+    {
+      "asset": "forge-ide-workbench-desktop.png",
+      "fixture_capture": "ide-workbench-desktop.png",
+      "width": 1440,
+      "height": 1000,
+      "sha256": "3adfba3bbd3d60fc497c78787fb2d4de93787cc9467d754fadf904a9f8d04e0c"
+    },
+    {
+      "asset": "forge-ide-mail-inbox-phone.png",
+      "fixture_capture": "ide-mail-inbox-phone.png",
+      "width": 390,
+      "height": 720,
+      "sha256": "9d4b99cd3ee6d28149b94db944f2391adb3ef9ff33b18190f43d503250b3710b"
+    },
+    {
+      "asset": "forge-ide-mail-thread-phone.png",
+      "fixture_capture": "ide-mail-thread-phone.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "0752a223c17bdd4c1eb6bbd9dc6a9693a9e3332d13ca85a0796d5afda7078ac0"
+    },
+    {
+      "asset": "forge-ide-mail-thread-desktop.png",
+      "fixture_capture": "ide-mail-thread-desktop.png",
+      "width": 1440,
+      "height": 1000,
+      "sha256": "ec36c254785256f2c55fe4c820901acab2d69e95a1ec1a2e8262163461794c30"
+    }
+  ]
+}

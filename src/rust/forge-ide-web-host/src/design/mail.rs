@@ -3,7 +3,8 @@ use super::{text, Attribute, Node, Tag};
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Forge Mail design")),
-        element!(P; text("Proposed workspace for drafting requests to GPT-OSS 120B, returning for replies and reviewing complete threads after their recall limit.")),
+        element!(P; text("Implemented correspondence for GPT-OSS 120B: queue a request, return for its reply, and read the complete thread after automatic recall-limit archiving.")),
+        element!(P [Class = "contract-note"]; text("Implementation reviewed 18 November 2026. This page describes the committed Rust UI, Python runner, PostgreSQL migrations, and Forge adapter. Operational model settings must match on both hosts.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Mail design sections"];
             element!(A [Href = "#wireframe"]; text("Wireframe")),
             element!(A [Href = "#recall"]; text("Recall and archive")),
@@ -14,32 +15,48 @@ pub(super) const BODY: &[Node] = &[
     ),
     element!(Section [Id = "wireframe", Class = "design-section", AriaLabelledby = "wireframe-title"];
         element!(H2 [Id = "wireframe-title"]; text("Mail workspace")),
-        element!(Div [Class = "gallery contract-sequences"];
+        element!(Div [Class = "gallery phone-gallery"];
             element!(Figure [Class = "wireframe"];
-                element!(Figcaption; element!(H3; text("Inbox, compose, thread and archive"))),
-                element!(A [Class = "drawing", Href = "/design/forge-ide-mail-wireframe.svg"];
-                    element!(Img [Src = "/design/forge-ide-mail-wireframe.png", Width = "1640", Height = "1420", Loading = "lazy", Alt = "Proposed Forge Mail screens showing inbox statuses, a new message, follow-up and read-only archive."]),
-                    element!(Span [Class = "open-label"]; text("Open full-size wireframe ↗")),
+                element!(Figcaption; element!(H3; text("Current phone inbox")), element!(P; text("Controlled browser fixture: folder tabs, sender, date, subject, preview, and Compose."))),
+                element!(Div [Class = "wireframe-stage"];
+                    element!(A [Class = "drawing", Href = "/design/forge-ide-mail-inbox-phone.png"];
+                        element!(Img [Src = "/design/forge-ide-mail-inbox-phone.png", Width = "390", Height = "720", Loading = "lazy", Alt = "Current Forge Mail inbox with compact folder tabs, preview rows, and Compose."]),
+                        element!(Span [Class = "open-label"]; text("Open full-size inbox →")),
+                    ),
+                ),
+            ),
+            element!(Figure [Class = "wireframe"];
+                element!(Figcaption; element!(H3; text("Current phone thread")), element!(P; text("Controlled browser fixture: email headers, rendered message bodies, and Reply to thread."))),
+                element!(Div [Class = "wireframe-stage"];
+                    element!(A [Class = "drawing", Href = "/design/forge-ide-mail-thread-phone.png"];
+                        element!(Img [Src = "/design/forge-ide-mail-thread-phone.png", Width = "390", Height = "844", Loading = "lazy", Alt = "Current Forge Mail thread with email-style messages and its reply control."]),
+                        element!(Span [Class = "open-label"]; text("Open full-size thread →")),
+                    ),
                 ),
             ),
         ),
+        element!(P;
+            text("The "),
+            element!(A [Href = "/design/forge-ide-mail-wireframe.svg"]; text("original Mail wireframe")),
+            text(" is retained as an earlier design record. The captures above and the behavior below describe the implemented interface."),
+        ),
         element!(Ol [Class = "contract-steps"];
-            element!(Li; text("Open Mail from the IDE navigation. Inbox shows one row per thread with its subject, current status and last activity. Archive opens read-only threads. Desktop can show the list and reader side by side. On a phone, the reader opens on its own with a back-to-list control.")),
-            element!(Li; text("Choose New message, enter a subject and message, and select Send. The composer identifies GPT-OSS 120B as the recipient. Once accepted, the saved thread shows Queued, Waiting for Forge, Running, Reply ready or Failed. You can close the tab and return to the same thread.")),
-            element!(Li; text("Read the rendered Markdown reply and send a follow-up in the same thread. One reply can be pending per thread. A failed run shows a retry action for the saved message. Automatic status changes preserve focus and any draft.")),
-            element!(Li; text("Archive shows the full transcript and the reason it closed. New message opens a fresh thread. An unsent draft can be carried over at your direction.")),
+            element!(Li; text("Open Mail from the shared IDE navigation. Inbox and Archive are compact folder tabs with Refresh. Inbox rows show the GPT-OSS 120B sender, available date, subject, status, and a bounded preview; Compose is a floating action. Desktop keeps a list and reader together. A phone shows one pane with Back to threads.")),
+            element!(Li; text("Choose Compose, enter a subject and message, and select Send. The recipient is fixed to GPT-OSS 120B. After the runner commits the message and run, the saved thread shows Queued, Waiting for Forge, Running, Reply ready, or Failed. Closing the browser after acceptance does not cancel the queued job.")),
+            element!(Li; text("Read email-style sender and recipient headers, per-message dates when supplied, and safe rendered Markdown. Reply to thread opens the inline follow-up composer. One run can be active per thread. Retry saved message reuses the failed inference input. Automatic five-second refresh is scheduled by Rust while a visible list or thread contains processing work.")),
+            element!(Li; text("Archive retains the ordered transcript and the recall-limit reason, with message paging. Archived threads are read-only. Compose starts a separate thread. There is no manual archive/delete operation or persisted read/unread flag; Reply ready is the generation status.")),
         ),
     ),
     element!(Section [Id = "recall", Class = "design-section", AriaLabelledby = "recall-title"];
         element!(H2 [Id = "recall-title"]; text("Recall and automatic archive")),
         element!(P; text("PostgreSQL stores the ordered user messages and visible assistant replies. For each run, Forge receives the completed exchanges and the current message, in order. Paging the thread in the browser only changes what you see. It leaves the prompt history intact.")),
-        element!(P; text("Pin the model artifact, Harmony template and tokenizer to the thread profile. Size the fully rendered prompt on Mission Control, so sending works while Forge sleeps. Reserve generation tokens for both reasoning and the visible reply, plus a small operating margin. Forge verifies the same profile before inference.")),
+        element!(P; text("Each thread pins gpt-oss-120b-harmony-v1. Mission Control counts the complete Harmony prompt offline, including the system message and next assistant prefix. The Forge adapter checks the profile and token count again before inference. Browser message paging does not increase the model context.")),
         element!(P [Class = "contract-note"];
-            text("Archive after a saved reply when the existing transcript leaves less than the profile’s minimum useful follow-up allowance, with the next reply reserve included. Keep every saved message. If a large draft alone exceeds the budget while a shorter follow-up can still fit, keep the thread open and the draft editable."),
+            text("After a saved reply, archive when the remaining input allowance is below 256 tokens, or when the 64-message / 65,536-byte replay bound is reached. The next generation reserve and margin are included in the calculation. An oversized new draft returns context_limit before a message or job is created; it remains editable instead of archiving an otherwise usable thread."),
         ),
-        element!(P; text("Warn beside the composer as room gets low. On archive, replace Follow up with the reason and New message. Every completed exchange stays in the prompt until the thread closes. Earlier failed submissions stay visible in the transcript. Retry uses the original run input and appends at most one completed reply.")),
+        element!(P; text("The reader shows remaining recall allowance when the thread is idle. Archive removes Reply to thread and shows its reason. Replay includes only exchanges with a completed assistant reply, followed by the new message. Failed user submissions remain visible but do not become completed recall pairs. Retry uses the saved run input; finalization adds at most one assistant reply for that source turn. A generation-limit reply is retained with a length marker.")),
         element!(P;
-            text("A loaded model can reuse the unchanged prefix through llama.cpp’s prompt KV cache. When the cache is cold, Forge rebuilds the prompt from the saved text. Measure warm versus cold replay before considering local KV snapshots. "),
+            text("The adapter enables cache_prompt for Mail. One loaded model slot can reuse the unchanged prefix in memory; model replacement or restart discards it. PostgreSQL messages rebuild a cold prompt. Persistent KV snapshots, summaries, and external semantic memory are not implemented. "),
             element!(A [Href = "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md"]; text("llama.cpp server documentation")),
         ),
     ),
@@ -50,7 +67,7 @@ pub(super) const BODY: &[Node] = &[
             element!(Figure [Class = "wireframe"];
                 element!(Figcaption; element!(H3; text("From Send to Reply ready or Archive"))),
                 element!(A [Class = "drawing", Href = "/design/mail-dispatch-sequence.svg"];
-                    element!(Img [Src = "/design/mail-dispatch-sequence.svg", Width = "921", Height = "1778", Loading = "lazy", Alt = "Mission Control commits a job in PostgreSQL and returns acceptance. Forge claims it, runs GPT-OSS 120B and publishes the reply. Mission Control saves the reply and decides whether to archive."]),
+                    element!(Img [Src = "/design/mail-dispatch-sequence.svg", Width = "1463", Height = "1963", Loading = "lazy", Alt = "Mission Control commits a job in PostgreSQL and returns acceptance. Forge claims it, runs GPT-OSS 120B and publishes the reply. Mission Control saves the reply and decides whether to archive."]),
                     element!(Span [Class = "open-label"]; text("Open full-size sequence ↗")),
                 ),
             ),
@@ -63,7 +80,7 @@ pub(super) const BODY: &[Node] = &[
     element!(Section [Id = "contracts", Class = "design-section", AriaLabelledby = "contracts-title"];
         element!(H2 [Id = "contracts-title"]; text("Data access and transfer objects")),
         element!(P;
-            text("Proposed destinations share "),
+            text("Implemented destinations share "),
             element!(Code; text("POST /forge/v1/dispatch")),
             text(". The "),
             element!(Code; text("Forge-Destination")),
@@ -72,26 +89,35 @@ pub(super) const BODY: &[Node] = &[
         element!(Dl [Class = "storage"];
             element!(Div;
                 element!(Dt; element!(Code; text("ide.mail.list"))),
-                element!(Dd; text("Inbox or Archive filter and cursor in. Thread summaries, statuses and next cursor out.")),
+                element!(Dd; text("Inbox or Archive filter and cursor in. Default 20 summaries, maximum 50, with the next cursor. include_metadata opts into the bounded body preview.")),
             ),
             element!(Div;
                 element!(Dt; element!(Code; text("ide.mail.open"))),
-                element!(Dd; text("Thread ID and message cursor in. Thread revision, status, archive reason, remaining recall allowance, ordered message page and next cursor out.")),
+                element!(Dd; text("Thread ID and after_sequence in. Default 10 messages, maximum 20, with thread revision, status, archive reason, optional remaining recall allowance, and next_sequence. include_metadata adds actual per-message dates.")),
             ),
             element!(Div;
                 element!(Dt; element!(Code; text("ide.mail.send"))),
-                element!(Dd; text("Subject for a new thread, or thread ID and expected revision for a follow-up. Include the message and an idempotency key. Return 202 with the saved thread and run IDs after commit. Reusing the key returns the original receipt.")),
+                element!(Dd; text("Client-generated thread ID, subject for a new thread or expected_revision for a follow-up, message, and idempotency key. Return 202 with the saved thread and run IDs after commit. Reusing the same key and content returns the original receipt; changed content conflicts.")),
             ),
             element!(Div;
                 element!(Dt; element!(Code; text("ide.mail.retry"))),
                 element!(Dd; text("Failed run ID and idempotency key in. Return the new run receipt using the saved inference input, after validating that the thread is still eligible.")),
             ),
         ),
-        element!(P; text("The Mail DAO owns ordered thread messages, model profile, revision and archive metadata. Lock the thread while admitting a turn and associate the run with a fixed message boundary. Finalization adds the visible reply once, then updates recall and archive state in the same transaction. The GPU worker receives the bounded inference payload through the existing claim contract.")),
+        element!(P; text("mail_store owns ordered mail_threads and mail_messages reads and writes. queue_store owns turn admission, idempotency, saved inference input, and finalization transactions. The MailRequest / MailResponse Rust DTOs and Python command dataclasses enforce the same four operations. The runner uses its configured mission-control owner; callers cannot supply an owner. The GPU worker receives only the bounded inference payload through the restricted claim API.")),
     ),
     element!(Section [Id = "qualification", Class = "design-section", AriaLabelledby = "qualification-title"];
         element!(H2 [Id = "qualification-title"]; text("Forge qualification")),
-        element!(P; text("The prior hardware trial used a 1,024-token context, a 4 GiB expert cache and NVMe-backed model weights. It completed two short prompts, with 60 prompt tokens reused on the second. That trial establishes a starting configuration for testing.")),
-        element!(P; text("Qualify 2,048 context tokens with a 768-token generation reserve as a first test, then try 4,096 and 8,192 with longer replies. The initial profile leaves at most 1,280 tokens for the input and its template. Choose the release profile after a long answer and several meaningful follow-ups pass under paging. Run a cold-cache replay, a restart during a queued job, a duplicate Send, and an oversized draft near the archive boundary. Verify that the entire closed thread can be read on a second device.")),
+        element!(P; text("The committed Mail profile uses 4,096 context tokens, a 1,024-token generation reserve covering reasoning and visible text, a 16-token margin, and a 256-token minimum useful follow-up. A message is also limited to 4,096 UTF-8 bytes, the subject to 120 bytes, and the saved visible reply to 32,768 bytes. These byte limits are independent of token counts.")),
+        element!(P; text("The adapter supports configured Mail context sizes up to 8,192, but changing the adapter alone does not change admission: Mission Control and Forge must use the same profile budget and tokenizer. Mail runs have a four-hour queue deadline and up to 30 minutes for local inference. Current code supports prefix-cache replay, lease recovery, duplicate-send protection, and bounded transcript paging; a new hardware/context setting still requires its own measured qualification.")),
+        element!(P; text("Sent messages and replies are durable. Unsent Mail drafts live in the current Rust model and the bounded same-tab Home/Design handoff cache. They are not a cross-device draft store; regular reload is a separate leave-guard path.")),
+        element!(P;
+            text("Source evidence: "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/agent-runner/mail_tokenizer.py"]; text("profile and tokenizer")),
+            text(" · "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/deploy/mission-control/agent-runner/mail_store.py"]; text("Mail data access")),
+            text(" · "),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/src/rust/forge-ide-ui/src/model/mail.rs"]; text("Rust Mail state")),
+        ),
     ),
 ];

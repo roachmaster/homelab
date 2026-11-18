@@ -1,11 +1,20 @@
 # Proposed foundation contract sketches
 
-**Illustrative APIs, not the exact implemented exports.** A narrower fixed-counter
-[local jobs subset](../../src/rust/forge-local/JOBS.md) now exists; generic job/access/remote
-contracts below remain proposals. A narrower [node-info network slice](remote-node-info.md)
-now exists with different exact public names and limited peer authorization; it
-does not implement every generic sketch. This companion makes the [module design and invariants](foundation-interfaces.md)
-concrete. Supporting value types are summarized rather than implemented here;
+**Illustrative APIs, not the exact implemented exports.** Reviewed against the
+repository on 18 November 2026. The sketches below preserve the original broader
+design; several narrower capabilities now exist with different public names:
+
+| Sketch area | Actual implementation to use |
+| --- | --- |
+| Verified access | [`forge_access::Verifier`, `AuthenticatedBoundary`, `Context`, `Grant`, `RoutePolicy`](../../src/rust/forge-access/src/lib.rs): verified subject, bounded call deadline and exact-route grants; no generic delegation/federation contract |
+| Explicitly stepped jobs | [`forge-local` counter](../../src/rust/forge-local/JOBS.md): volatile, owner-scoped and manually progressed |
+| Durable jobs | [`forge-jobs`](../../src/rust/forge-jobs/README.md): bounded sum work, committed file-store receipts, leased worker attempts and restart recovery; not the generic `JobProgram` API below |
+| Remote conversation | [`forge-remote`](../../src/rust/forge-remote/src/lib.rs), [HTTPS boundary](remote-node-info.md) and [configured agent composition](../../src/rust/forge-agent/src/host.rs): typed node/project/source calls and explicitly granted managed writes, not arbitrary remote jobs |
+
+The [current blueprint inventory](forge-framework-blueprint.md#current-implementation)
+and source files distinguish these concrete APIs from the proposed type spellings
+in this companion. It makes the [module design and invariants](foundation-interfaces.md)
+concrete. Supporting value types in the sketches are summarized rather than implemented here;
 these fragments are not a new compilable crate, a wire specification or a stability
 promise. Exact signatures should change if the first consumer tests expose a
 better boundary. These sketches do not claim that the entire foundation has been implemented.

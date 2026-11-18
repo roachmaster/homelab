@@ -1,24 +1,29 @@
 ---
-title: Proposed Forge worker and main-thread ownership
+title: Implemented Forge browser placements and service boundaries
 ---
 flowchart TB
-    subgraph Browser["Browser execution contexts"]
-        Main["Main JS thread<br/>Capture actions and render Canvas or DOM"]
-        ViewBridge(["Actions and frame time to Rust<br/>Committed views to JS"])
-        Runtime["Rust main thread<br/>Own game state, fixed ticks and replay<br/>Verify digests and validate assets"]
-        Effects(["Typed I/O requests to JS<br/>Correlated results to Rust"])
-        IO["JS I/O workers<br/>Fetch bounded bytes and deliver results"]
-        Main <--> ViewBridge <--> Runtime
-        Runtime <--> Effects <--> IO
-        IO -. Relay committed views .-> Main
+    subgraph IDE["IDE Chat, Mail and Workbench"]
+        DOM["Main JS<br/>DOM, focus and lifecycle"]
+        IW["Dedicated browser worker<br/>Rust WASM intent and state<br/>Generated I/O glue"]
+        DOM <--> IW
     end
-    subgraph Services[" "]
-        Host["Future Studio milestone<br/>Forge host admits commands and queues builds"]
-        Queue["PostgreSQL<br/>Persist Studio jobs, leases and events"]
-        Builder["Native Studio build worker<br/>Claim leases and execute pinned builds<br/>Resolve worker-scoped providers"]
-        Artifacts["Artifact store<br/>Immutable bytes by digest"]
-        Host <--> Queue
-        Queue <--> Builder
-        Builder --> Artifacts
+    subgraph Game["Playtest"]
+        Canvas["Main JS<br/>Input and Canvas"]
+        Wasm["Page-hosted Rust WASM<br/>Ticks, assets, animation and replay"]
+        IO["JS I/O worker<br/>Bounded bytes and correlated errors"]
+        Canvas <--> Wasm
+        Wasm <--> IO
     end
-    IO <--> Host
+    subgraph Studio["Optional Studio service"]
+        Legacy["Legacy JS client and I/O worker<br/>No Studio Rust controller yet"]
+        Host["Rust host<br/>Admit session, project and typed destination"]
+        API["Python API and PostgreSQL Store<br/>Durable jobs and ordered events"]
+        Worker["Packaging worker<br/>Lease and attempt guards<br/>Pinned static-web subtree"]
+        Preview["Separate-origin preview listener<br/>Signed immutable artifacts"]
+        Legacy <--> Host
+        Host <--> API
+        API <--> Worker
+        Worker --> Preview
+    end
+    IW <--> Host
+    IO --> Bytes["Native verified asset routes"]

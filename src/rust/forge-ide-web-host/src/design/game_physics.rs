@@ -4,8 +4,8 @@ pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Physics for the Forge Game Runtime")),
         element!(P;
-            element!(Strong; text("Design proposal.")),
-            text(" Give the Scout gravity, jumps and collision response while keeping fixed-tick replay and the existing v1 snapshot layout."),
+            element!(Strong; text("Implemented repository slice.")),
+            text(" Reviewed 18 November 2026. Traversal Yard has Q16 gravity, jumping, swept tile contacts, same-tick animation and collision queries. General rigid bodies and authored climbing remain future work."),
         ),
         element!(P; text("In the web playtest build, choose Traversal Yard to try the fixed-point controller. Room One is the four-direction puzzle.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Game physics design sections"];
@@ -30,19 +30,19 @@ pub(super) const BODY: &[Node] = &[
                     element!(Span [Class = "open-label"]; text("Open full-size fixed tick diagram")),
                 ),
                 element!(Ol [Class = "contract-steps"];
-                    element!(Li; text("InputApply turns an input edge into a velocity target or jump impulse.")),
-                    element!(Li; text("Move applies kinematic targets and integrates simulated motion in fixed-point tile units.")),
-                    element!(Li; text("Collide resolves axis-aligned contacts and records the tick’s grounded state, velocity and new contact events.")),
-                    element!(Li; text("Animate chooses a pose from those facts. Effects delivers queued events. Publication pairs the resolved root with the pose from the same tick.")),
+                    element!(Li; text("Room consumes ordered edges and held input. Character::step applies horizontal intent and a grounded jump edge.")),
+                    element!(Li; text("The character controller integrates fixed-point motion, sweeps X then Y, and applies a bounded step-up rule.")),
+                    element!(Li; text("MotionFrame retains the resolved root, velocity, grounded state and contacts. New landing, head and wall contacts feed the event ring.")),
+                    element!(Li; text("Animator selects Idle, Walk, Rise, Fall or Land from those facts. Publication pairs FGS1 world bytes with FGP1 pose bytes from the same epoch and tick.")),
                 ),
             ),
         ),
     ),
     element!(Section [Id = "collision-world", Class = "design-section", AriaLabelledby = "collision-world-title"];
         element!(H2 [Id = "collision-world-title"]; text("Collision world and diagnostics")),
-        element!(P; text("Build v1 terrain from closed solid tiles in the cooked level chunk. Resolve penetrations by pushing bodies out. A tile or body can reference a stable surface ID for friction and restitution. Validate referenced IDs before level activation. Characters start with fixed friction and zero restitution.")),
-        element!(P; text("A ray reports a hit for ground checks or aiming, a swept shape reports first time of impact for fast motion, and an overlap returns a bounded set of stable IDs for triggers and action boxes. Outside the step, queries read the last completed collision state. The solver can sweep during its own phase to resolve contacts and move bodies.")),
-        element!(P; text("Debug overlays can show body bounds, contact normals and depth, grounded and sleep state, and ray hits. The presentation layer consumes those diagnostics outside the simulation step without changing replay results.")),
+        element!(P; text("Cooked levels validate solid tiles, the named surface and foot-relative collider before activation. Character::spawn rejects an invalid or penetrating start; Character::step uses axis-separated sweeps against the tile grid. The character has zero restitution. This is a character controller, not a dynamic-body solver.")),
+        element!(P; text("The implemented APIs are sweep_tiles and cast_ray for terrain, plus Room::cast_ray, Room::collision_bodies and Room::phantom_overlap for filtered room entities. Ray ties use stable target order. Phantom overlap has bounded stable-ID results and counts dropped hits. Combat action boxes can use that query seam, but no combat controller is shipped.")),
+        element!(P; text("Debug tools draw body boxes, current contact normals and penetration, and the forward ray hit from FGC1 diagnostics. Grounded and motion phase appear in the pose and inspector. There is no sleeping-body system; drawing diagnostics does not mutate the simulation.")),
     ),
     element!(Section [Id = "animation", Class = "design-section", AriaLabelledby = "animation-title"];
         element!(H2 [Id = "animation-title"]; text("Animation and contacts")),
@@ -51,23 +51,23 @@ pub(super) const BODY: &[Node] = &[
             element!(Figure [Class = "wireframe"];
                 element!(Figcaption;
                     element!(H3; text("Landing and pose publication sequence")),
-                    element!(P; text("Follow a new landing contact through same-tick pose selection and the next rendered frame.")),
+                    element!(P; text("Follow a new landing contact through the implemented same-tick pose publication.")),
                 ),
                 element!(A [Class = "drawing", Href = "/design/game-physics/animation.svg"];
-                    element!(Img [Src = "/design/game-physics/animation.svg", Width = "1050", Height = "1387", Loading = "lazy", Alt = "Collision queues a landing event. The renderer pairs the snapshot position with the proposed same-tick pose payload."]),
+                    element!(Img [Src = "/design/game-physics/animation.svg", Width = "1050", Height = "1387", Loading = "lazy", Alt = "Character resolves a landing. Animator selects the pose and the renderer joins FGS1 world data with the implemented FGP1 payload."]),
                     element!(Span [Class = "open-label"]; text("Open full-size animation diagram")),
                 ),
             ),
         ),
-        element!(P; text("A persistent contact continues resolving across ticks. Its first-seen identity controls one-time delivery of Landed, HeadBump or WallContact through the event ring. Action boxes query overlap only on their active frames.")),
-        element!(P; text("Migrate the Scout’s jump first. Zero the preview’s airborne root offsets before export, preserve the limb poses, and validate the body box against the same logical pivot in each atlas. Ledge catches, ladders, ropes and barrel traversal need their own authored contact transitions before becoming playable.")),
+        element!(P; text("A persistent contact continues resolving across ticks. Contact-edge facts control delivery of Landed, HeadBump and WallContact through the event ring. The phantom overlap API is available for future action boxes; active combat-frame logic is not implemented.")),
+        element!(P; text("The cooker already zeros the illustrated jump's authored airborne root offsets in a temporary export recipe. Runtime physics supplies travel while the atlas supplies limb poses. Ledge catches, ladders, ropes, combat and barrel traversal remain animation assets or future contact-state work; they are not playable mechanics yet.")),
     ),
     element!(Section [Id = "authority", Class = "design-section", AriaLabelledby = "authority-title"];
         element!(H2 [Id = "authority-title"]; text("Transform ownership and units")),
         element!(Dl [Class = "storage"];
             element!(Div;
                 element!(Dt; text("Static terrain and body motion")),
-                element!(Dd; text("Terrain comes from level data. Gameplay supplies kinematic targets before the step. The solver owns dynamic transforms.")),
+                element!(Dd; text("Terrain and collider data come from the validated level. Character owns the platform player's resolved transform. Room One uses discrete puzzle movement; a general dynamic-body or moving-platform solver is not implemented.")),
             ),
             element!(Div;
                 element!(Dt; text("World placement and pose")),
@@ -75,14 +75,14 @@ pub(super) const BODY: &[Node] = &[
             ),
             element!(Div;
                 element!(Dt; text("Snapshot and atlas")),
-                    element!(Dd; text("Publication converts current and previous positions to the existing y-up Q8 snapshot. The v1 entity record has no pose field. A proposed companion payload pairs the discrete pose with the root by run epoch, tick and entity ID. Rendering interpolates the root, while atlas pixels select the artwork.")),
+                    element!(Dd; text("Publication converts current and previous positions to the y-up Q8 FGS1 snapshot. Its entity record stays unchanged. The implemented 32-byte FGP1 companion carries epoch, tick, entity ID, phase, frame, facing, grounded and contact facts. The renderer verifies that identity before combining root and artwork.")),
             ),
         ),
         element!(Div [Class = "gallery contract-sequences"];
             element!(Figure [Class = "wireframe"];
                 element!(Figcaption; element!(H3; text("Transform and data authority"))),
                 element!(A [Class = "drawing", Href = "/design/game-physics/authority.svg"];
-                    element!(Img [Src = "/design/game-physics/authority.svg", Width = "864", Height = "522", Loading = "lazy", Alt = "Physics owns the resolved root and animation owns the local pose. The renderer joins the snapshot and proposed pose payload."]),
+                    element!(Img [Src = "/design/game-physics/authority.svg", Width = "864", Height = "522", Loading = "lazy", Alt = "Character owns the resolved root and Animator selects PlayerPose. The renderer joins FGS1 and FGP1 by epoch, tick and player ID."]),
                     element!(Span [Class = "open-label"]; text("Open full-size authority diagram")),
                 ),
             ),
@@ -90,10 +90,10 @@ pub(super) const BODY: &[Node] = &[
     ),
     element!(Section [Id = "rollout", Class = "design-section", AriaLabelledby = "rollout-title"];
         element!(H2 [Id = "rollout-title"]; text("Rollout and acceptance")),
-        element!(P; text("Validate tile contacts and fixed-tick replay first, then drive the migrated Scout’s jump from the runtime. Check that grounded state and pose share the same tick, a persistent contact emits once, and high-speed moves stop at the expected contact plane.")),
+        element!(P; text("Implemented tests cover swept contacts, step-up bounds, room ray and phantom filtering, contact-edge events, same-tick pose identity and replay. The actual-WASM playtest checks the 29-tick jump and Traversal Yard completion. A fresh test run is recorded by the repository's QA gate.")),
         element!(P; text("A later milestone can evaluate a physics middleware adapter when the game needs joints, stacking or non-tile shapes. The step, event and snapshot contracts define that seam.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Related game designs"];
-            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-game-physics.md"]; text("Full physics proposal")),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-game-physics.md"]; text("Full physics implementation reference")),
             element!(A [Href = "/design/game-studio"]; text("Game engine design")),
             element!(A [Href = "/design/game-asset-pipeline"]; text("Game asset pipeline design")),
             element!(A [Href = "/playtest"]; text("Open Room One playtest")),

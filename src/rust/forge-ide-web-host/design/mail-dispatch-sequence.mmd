@@ -1,30 +1,36 @@
-%% `mmdr -t dark -i mail-dispatch-sequence.mmd -o mail-dispatch-sequence.svg`
-%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","actorTextColor":"#f1f4f8","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"}}}%%
+%% Implementation reviewed 2026-11-18; render with pinned mmdr.
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":40,"diagramMarginX":30,"diagramMarginY":25,"width":180,"wrap":false}}}%%
 sequenceDiagram
-    participant Mail as Forge Mail
-    participant MC as Mission Control
+    participant JS as Main JS Mail DOM
+    participant W as Rust/WASM worker
+    participant H as Native web host
+    participant MC as MC runner
     participant DB as PostgreSQL
-    participant GPU as Forge GPU
-
-    Mail->>MC: Send with idempotency key
-    MC->>DB: Check owner and context, queue run
-    DB-->>MC: Commit message and run
-    MC-->>Mail: 202 with thread and run IDs
-
-    Note over Mail,MC: Mail can close after 202
-    Note over Mail,MC: An oversized draft stays unsent in the composer
-    DB-->>GPU: Notify of new job
-    GPU->>DB: Scan and claim with attempt lease
-    DB-->>GPU: Exact completed pairs and new message
-    GPU->>GPU: GPT-OSS 120B with optional prefix cache
-    GPU->>DB: Renew lease during inference
-    GPU->>DB: Publish reply with attempt token
-
-    DB-->>MC: Notify of completed attempt
-    MC->>DB: Commit reply and archive decision
-    Note over MC,DB: Archive when context leaves too little room for a useful follow-up
-
-    Mail->>MC: Open Inbox or Archive thread
-    MC->>DB: Read owner’s message page
-    DB-->>MC: Saved page and status
-    MC-->>Mail: Archived thread opens read-only
+    participant GPU as GPU worker
+    participant Model as Local 120B adapter
+    JS->>W: Typed Send / Reply
+    W->>H: MailSend effect
+    Note over H: Session / origin / CSRF
+    H->>MC: Private Mail DTO
+    Note over MC: Count full Harmony prompt
+    Note over MC,DB: Reject oversized / stale input
+    MC->>DB: Commit message + run
+    MC-->>W: 202 via native host
+    W-->>JS: Queued view
+    Note over JS,DB: Accepted work survives page close
+    DB-->>GPU: Empty wake-up
+    GPU->>DB: Scan + claim ready model
+    DB-->>GPU: Replay + profile + lease
+    GPU->>Model: Check profile; generate
+    Note over GPU,Model: Prefix cache is in-memory
+    GPU->>DB: Renew current lease
+    Model-->>GPU: Reply / length / failure
+    GPU->>DB: Publish current attempt
+    DB-->>MC: Result wake-up
+    MC->>DB: Commit reply + recall state
+    Note over MC,DB: Archive below useful follow-up budget
+    W->>H: Scheduled Mail read
+    H->>MC: Authorized page request
+    MC->>DB: Read saved page
+    MC-->>W: Result via native host
+    W-->>JS: Reader / read-only archive

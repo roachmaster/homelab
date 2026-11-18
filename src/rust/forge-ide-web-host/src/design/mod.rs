@@ -53,6 +53,7 @@ enum Node {
     Text(&'static str),
     Element(Tag, &'static [(Attribute, &'static str)], &'static [Node]),
     GameEngineReport,
+    Markdown(&'static str),
     Icon(Icon),
 }
 
@@ -75,6 +76,7 @@ pub mod game_engine;
 mod game_physics;
 mod history;
 mod home;
+mod implementation;
 mod landing;
 mod mail;
 pub mod playtest;
@@ -93,6 +95,12 @@ fn render(nodes: &[Node], output: &mut String) {
                 render_element(*tag, attributes, output, |out| render(children, out));
             }
             Node::GameEngineReport => game_engine::render_report(output),
+            Node::Markdown(source) => render_element(
+                Tag::Article,
+                &[(Attribute::Class, "implementation-report")],
+                output,
+                |out| game_engine::render_prose(source, out),
+            ),
             Node::Icon(icon) => render_icon(*icon, output),
         }
     }
@@ -154,6 +162,7 @@ fn render_element(
 pub enum DesignPage {
     Home,
     Overview,
+    Implementation,
     PreviousChats,
     Wireframes,
     Workspace,
@@ -174,7 +183,8 @@ pub enum DesignPage {
 impl DesignPage {
     fn topic(&self) -> Option<&'static str> {
         match self {
-            Self::ForgeProviders
+            Self::Implementation
+            | Self::ForgeProviders
             | Self::ForgeWorkers
             | Self::ForgeWorkersPlaytest
             | Self::ForgeWorkersStudio => Some("forge-foundations"),
@@ -194,6 +204,12 @@ impl DesignPage {
         let (title, back_href, back_label, body) = match self {
             Self::Home => ("Forge portal · Forge IDE", "/", "Back to Forge", home::BODY),
             Self::Overview => ("Forge IDE design", "/", "Back to Forge", landing::BODY),
+            Self::Implementation => (
+                "Current implementation · Forge IDE",
+                "/design#forge-foundations",
+                "Back to Design",
+                implementation::BODY,
+            ),
             Self::PreviousChats => (
                 "Previous chats · Forge IDE",
                 "/design#chat-and-mail",

@@ -1,60 +1,33 @@
-# Portfolio documentation
+# Forge documentation
 
-## Forge: from experiments to a composable Rust framework
+Start with the [current implementation reference](design/implementation-status.md). It distinguishes implemented repository capabilities, configured live services, remaining work and historical proposals. The live portal exposes the same reference at `/design/implementation`.
 
-[Forge IDE components, pages and transitions](design/forge-ide-components/README.md) — implemented workbench composition, report-keyed local navigation and guarded lifecycle; links to concrete runtime APIs and verification.
+## Current architecture and operation
 
-[Forge IDE workbench wireframes](design/forge-ide-wireframes/README.md) — editable desktop, partial/Problems and narrow-window designs, with capability status and keyboard/state acceptance. These historical design images informed the [implemented workbench](../src/rust/forge-ide-web/WORKBENCH.md); they are not browser screenshots.
+- [Framework implementation inventory](architecture/forge-framework-blueprint.md#current-implementation): typed assembly, factories/providers, durable jobs, access and managed writes.
+- [Implementation roadmap](roadmap/forge-framework.md): current slices and remaining acceptance work.
+- [Service inventory](architecture/forge-ide-system-inventory.yaml): local deployment checkpoint with earlier remote observations dated separately.
+- [Generated UI boundary](architecture/proposals/forge-ide-ui.md), [component compositions](design/forge-ide-components/README.md), [transitions](design/forge-ide-components/transitions.md) and [current layout captures](design/forge-ide-wireframes/README.md).
+- [Native host](../src/rust/forge-ide-web-host/README.md), [source agent](../src/rust/forge-agent/README.md) and [Workbench](../src/rust/forge-ide-web/WORKBENCH.md): configuration and capability limits.
+- [Chat/Mail runner](../deploy/mission-control/agent-runner/README.md) and [PostgreSQL dispatch](architecture/forge-postgres-inference-dispatch.md): durable queue/events, saved conversations, recall and polling.
+- [Managed inline editing](architecture/proposals/forge-ide-inline-edit.md): staged review, revision fencing, receipts and reconciliation.
+- [Portal Home](architecture/proposals/forge-portal-landing.md): generated launchers and documentation navigation.
 
-**Observed:** 16 repositories were reviewed read-only for architecture, contracts, boundaries, and implementation evidence. This is not a fresh build/test certification.
+## Game and Studio
 
-**Implemented core slices:** [six std-only Rust core packages](../src/rust/README.md), synchronous typed in-process examples and focused tests, including prepared-request I/O clients, pure/client-using tasks and typed registrar/freeze helpers. Three optional-demo packages prove configuration-driven assembly and compile-time dependency omission. Optional [forge-kernel disk access](../src/rust/forge-kernel/README.md) now performs real native filesystem inspection and client-local navigation. It is separate from core and is not a bootable kernel. The [local application and terminal](../src/rust/forge-terminal/README.md) now add configured node observations, admitted discovery and optional disk sessions. This does not implement the full DSL, durable jobs, remote execution or managed host lifecycle.
+- [Game runtime and Studio](architecture/proposals/forge-game-engine.md).
+- [Snapshots](architecture/proposals/forge-game-snapshot.md), [debug/trace](architecture/proposals/forge-game-debug.md), [deterministic replay](architecture/proposals/forge-game-debug.md#full-replay-and-historical-assets).
+- [Physics](architecture/proposals/forge-game-physics.md), [assets](architecture/proposals/forge-game-asset-pipeline.md), [worker ownership](architecture/proposals/forge-worker-ownership.md).
+- [Studio service](../deploy/mission-control/studio/README.md): implemented static-web profile; a host relay must be configured before the portal can use it.
 
-**Optional rendering:** [`forge-template`](../src/rust/forge-template/README.md) now supplies a bounded, typed-schema renderer with method chains, 38 builtins and custom methods plus public typed config/factory/registrar integration and an independent consumer proof. An opt-in [template CLI](../src/rust/forge-template/CLI.md) now renders inline/native-file sources with typed scalar bindings through the shared bridge. Build-script compilation and source materialization remain outside this library.
+## Forge authoring and diagrams
 
-**First IDE capability:** [Forge IDE](../src/rust/forge-ide/README.md) now inspects
-bounded read-only project trees and Rust declaration syntax. Typed results become
-YAML only at its optional boundary; public registrar/factory and CLI use the same
-core contracts. [Implemented Mermaid flow](architecture/diagrams/mermaid/README.md#implemented-forge-ide).
+Begin capability work with [Wire Forge Providers](../.agents/skills/wire-forge-providers/SKILL.md). Use [bootstrap registrars](architecture/bootstrap-registrars.md), [provider/factory lifetimes](architecture/dependency-injection.md), [module authoring](architecture/module-authoring.md) and the [DSL reference](architecture/framework-dsl.md).
 
-**Proposed:** a small, Spring Boot-inspired Rust assembly model with explicit capability modules, thin ingress adapters, a shared header-routed bridge, and deliberate lifecycle ownership. The blueprint is a design, not a deployed or completed framework.
+The [Mermaid gallery](architecture/diagrams/mermaid/README.md) identifies current implementation views and retained historical diagrams. [C4/DOT diagrams](architecture/diagrams/README.md) preserve broader architecture context. Diagram/API sketches remain labeled where they are illustrative; a proposed name is not automatically a Rust export.
 
-- [Forge IDE UI proposal](architecture/proposals/forge-ide-ui.md) · [earlier PDF snapshot](architecture/proposals/forge-ide-ui.pdf) — proposed browser state, generated assets, same-origin admission and phased tests
-- [Forge portal landing page](architecture/proposals/forge-portal-landing.md) — one starting point for the IDE, Studio, the playtest, and every design doc
-- [Extending Homelab with a Rust game engine](architecture/proposals/forge-game-engine.md) — runtime packages, graphics and physics APIs, and a staged Forge Studio build and preview flow
-- [Simulation-to-presentation snapshot for the Forge game runtime](architecture/proposals/forge-game-snapshot.md) — one versioned, batched snapshot per frame replacing the scalar per-cell WASM interface
-- [Debug and trace layer for the Forge game runtime](architecture/proposals/forge-game-debug.md) — bounded trace ring, live state inspector, frame timing, and pause/step control for the playtest
-- [Entity model for the Forge game runtime](architecture/proposals/forge-game-entity-model.md) — typed, bounded entities with stable IDs, generational handles, update phases, and targeted events
-- [Physics for the Forge game runtime](architecture/proposals/forge-game-physics.md) — gravity, velocity, and tile collision in fixed point, with the animation bridge
-- [Asset pipeline for the Forge game runtime](architecture/proposals/forge-game-asset-pipeline.md) — stable asset IDs, a runtime loader, a cooking step, and the level chunk format
-- [Forge worker and main-thread ownership](architecture/proposals/forge-worker-ownership.md) — JavaScript rendering and worker I/O, Rust authority, level replay, and Studio builds
-- [Repository reviews — 16 reports](reviews/forge/README.md)
-- [Detailed future foundation modules and interfaces](architecture/foundation-interfaces.md) · [Rust contract sketches](architecture/foundation-contracts.md)
-- [Two-machine Forge IDE proposal](architecture/proposals/remote-ide.md) · [visual PDF](architecture/proposals/remote-ide-proposal.pdf) — next milestone, not deployed remote IDE
-- [Forge llama.cpp REST adapter](../src/rust/forge-llama/README.md)
-- [Architecture overview](architecture/README.md)
-- [Cross-repository reuse map](architecture/reuse-map.md)
-- [Framework blueprint](architecture/forge-framework-blueprint.md)
-- [Hosted kernel research and implementation plan](architecture/forge-kernel-plan.md) · [primary-source ledger](architecture/forge-kernel-sources.md)
-- [Mermaid UML-like contracts, sequences and kernel phases](architecture/diagrams/mermaid/README.md)
-- [C4 and supporting diagrams](architecture/diagrams/README.md)
-- [Architecture decisions](architecture/decisions.md)
-- [Module-authoring contract](architecture/module-authoring.md)
-- [Bootstrap, typed configuration and cohesive registrars](architecture/bootstrap-registrars.md)
-- [Provider/factory dependency injection](architecture/dependency-injection.md)
-- [Forge DSL semantic reference and framework skills](architecture/framework-dsl.md)
-- [Implementation roadmap and acceptance gates](roadmap/forge-framework.md)
+## Historical evidence
 
-Keep review evidence in `reviews/`, target designs in `architecture/`, delivery gates in `roadmap/`, and implementations in the existing language-oriented `src/` tree. Do not duplicate source projects under documentation.
+The [16 repository reviews](reviews/forge/README.md), original proposal PDFs and earlier light wireframes are retained provenance. They are not current operating instructions or fresh build/test certifications. Current source, configured capability gates and release evidence supersede outdated future-only labels.
 
-[Back to Homelab](../README.md)
-
-See the implemented [bounded local jobs guide](../src/rust/forge-local/JOBS.md) for
-manual counter stepping, owner-scoped receipts and volatile retention. Remote and
-production identity remain proposals.
-
-- [Implemented authenticated node-info boundary](architecture/remote-node-info.md): optional HTTPS loopback proof, public integration and limits.
-
-- [Configured remote Forge IDE agent](../src/rust/forge-agent/README.md): actual named-node CLI, alias policy and lifecycle; [M18 diagram](architecture/diagrams/mermaid/README.md#m18--implemented-configured-remote-ide-agent).
-
-- [Generated IDE UI implementation](../src/rust/forge-ide-web/README.md) · [build/runtime diagram](architecture/diagrams/mermaid/README.md#m25--generated-ui-implementation).
+[Homelab](../README.md) · [Architecture index](architecture/README.md)

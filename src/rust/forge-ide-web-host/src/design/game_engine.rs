@@ -1,5 +1,4 @@
 use super::{markup, render, render_element, text, Attribute, Node, Tag};
-use forge_ide_ui::render_markdown;
 use sha2::{Digest, Sha256};
 pub(super) const BODY: &[Node] = &[
     element!(Nav [Class = "section-nav", AriaLabel = "Game engine links"];
@@ -9,7 +8,7 @@ pub(super) const BODY: &[Node] = &[
         element!(A [Href = "/design/game-asset-pipeline"]; text("Game asset pipeline design")),
         element!(A [Href = "/design/forge-workers"]; text("Forge worker design")),
     ),
-    element!(P; text("The asset pipeline proposal connects Studio exports to runtime level chunks and sprite atlases. The physics proposal defines how the runtime uses level geometry, surface properties, and collision queries.")),
+    element!(P; text("Implementation reference, reviewed 18 November 2026. The browser playtest, fixed-point controller, cooked assets, replay, and optional Studio service exist in the repository. The report separates those capabilities from deployment configuration and remaining work.")),
     Node::GameEngineReport,
 ];
 
@@ -71,8 +70,9 @@ pub(super) fn render_report(output: &mut String) {
     );
 }
 
-fn render_prose(markdown: &str, output: &mut String) {
-    let html = render_markdown(markdown).expect("game engine report must render within its bounds");
+pub(super) fn render_prose(markdown: &str, output: &mut String) {
+    let html = markup::render_document_markdown(markdown)
+        .expect("trusted documentation must render within its bounds");
     // The Markdown renderer emits fixed table tags and escapes all source text.
     // Give wide tables a focusable local scroll region.
     for block in html.split_inclusive("</table>") {

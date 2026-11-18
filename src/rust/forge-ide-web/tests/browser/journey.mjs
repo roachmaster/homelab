@@ -477,6 +477,7 @@ async function projectOptionsJourney(page, traffic) {
     assert(bounds && bounds.x >= -1 && bounds.x + bounds.width <= viewport.width + 1
       && Math.abs(bounds.y + bounds.height - viewport.height) <= 2,
     'project options use a viewport-width bottom sheet on phones');
+    await screenshot(page, 'ide-workbench-project-options-phone.png');
   }
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
     'open project sheet does not overflow the viewport');
@@ -2173,6 +2174,7 @@ async function designJourney(page, traffic) {
   true, 'design index categories display side by side on desktop');
   await page.evaluate(() => scrollTo(0, 0));
   await screenshot(page, 'ide-design-index-desktop.png', { docs: true });
+  await implementationDesignJourney(page, designUrl);
   await wireframesDesignJourney(page, designUrl);
   await providerLink.focus();
   await check(providerLink).toBeFocused();
@@ -2208,6 +2210,51 @@ async function designJourney(page, traffic) {
   assert.equal(page.workers().length, 1, 'returning from Design starts one Forge worker');
 }
 
+async function implementationDesignJourney(page, designUrl) {
+  process.stderr.write('QA_CHECK design_implementation_reader\n');
+  const pages = page.context().pages();
+  const index = page.getByRole('navigation', { name: 'Design sections' });
+  const firstFoundation = index.locator('#forge-foundations li a').first();
+  await check(firstFoundation).toHaveAttribute('href', '/design/implementation');
+  await firstFoundation.focus();
+  await page.keyboard.press('Enter');
+  await check(page).toHaveURL(new URL('/design/implementation', designUrl).href);
+  assert.deepEqual(page.context().pages(), pages, 'the current implementation reader opens in the existing Design page');
+  const main = page.getByRole('main');
+  await check(main.getByRole('heading', { level: 1 })).toHaveText('Current Forge implementation');
+  await check(main.getByRole('table')).toHaveCount(3);
+  const mailBudget = main.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Mail token budget', exact: true }) });
+  await check(mailBudget).toContainText('4,096 context / 1,024 completion');
+  await check(main).toContainText('no Studio relay configured');
+  await check(main).toContainText('without managed-write opt-in');
+  await check(main).toContainText('revision/journal checks');
+  await check(page.locator('#previous-chat-menu, script')).toHaveCount(0);
+  for (const width of [375, 390, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      'the implementation reference keeps tables inside its reading viewport');
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => scrollTo(0, 0));
+  const navigationSequence = page.locator('img[src="/design/portal-navigation-sequence.svg"]');
+  await navigationSequence.scrollIntoViewIfNeeded();
+  await check.poll(() => navigationSequence.evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+  await page.evaluate(() => scrollTo(0, 0));
+  await screenshot(page, 'ide-design-implementation-phone.png', { docs: true });
+  const historyLink = main.getByRole('link', { name: 'Chat history', exact: true });
+  await check(historyLink).toHaveAttribute('href', '/design/chat-history');
+  await check(main.locator('a[target]')).toHaveCount(0);
+  await historyLink.focus();
+  await page.keyboard.press('Enter');
+  await check(page).toHaveURL(new URL('/design/chat-history', designUrl).href);
+  await check(main.getByRole('heading', { level: 1 })).toHaveText('Previous chats technical design');
+  assert.deepEqual(page.context().pages(), pages, 'trusted Markdown reader links use the existing Design page');
+  await page.goBack({ waitUntil: 'domcontentloaded' });
+  await check(page).toHaveURL(new URL('/design/implementation', designUrl).href);
+  await page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Back to Design', exact: true }).click();
+  await check(page).toHaveURL(`${designUrl}#forge-foundations`);
+}
+
 async function wireframesDesignJourney(page, designUrl) {
   process.stderr.write('QA_CHECK design_wireframes_reader\n');
   const context = page.context();
@@ -2216,7 +2263,9 @@ async function wireframesDesignJourney(page, designUrl) {
   await check(page).toHaveURL(new URL('/design/wireframes#phone', designUrl).href);
   await check(page.getByRole('heading', { level: 1 })).toHaveText('IDE wireframes');
   await check(page.locator('#previous-chat-menu')).toHaveCount(0);
-  const names = ['chat-phone', 'workbench-phone', 'workbench-project-options', 'chat-desktop', 'workbench-desktop'];
+  await check(page.locator('.wireframe-note')).toContainText('18 November 2026');
+  await check(page.locator('.wireframe-note')).toContainText('generated UI');
+  const names = ['chat-phone', 'chat-history-phone', 'workbench-phone', 'workbench-explorer-phone', 'workbench-project-options', 'mail-inbox-phone', 'mail-thread-phone', 'chat-desktop', 'workbench-desktop', 'mail-thread-desktop'];
   const images = page.locator('figure.wireframe img');
   await check(images).toHaveCount(names.length);
   for (const name of names) {
@@ -2232,7 +2281,7 @@ async function wireframesDesignJourney(page, designUrl) {
       if (!stage) return false;
       const style = getComputedStyle(stage);
       return style.backgroundColor !== 'rgba(0, 0, 0, 0)' && parseFloat(style.paddingTop) >= 8;
-    }), true, 'legacy light wireframe has a padded themed frame');
+    }), true, 'the current implementation capture has a padded themed frame');
   }
   for (const viewport of [{ width: 390, height: 664 }, { width: 375, height: 667 }]) {
     await page.setViewportSize(viewport);
@@ -2491,7 +2540,7 @@ async function previousChatsDesignJourney(design, designUrl) {
   await design.getByRole('link', { name: 'PostgreSQL dispatch', exact: true }).click();
   await check(design).toHaveURL(`${new URL(designUrl).origin}/design/chat-dispatch`);
   await check(design.getByRole('heading', { level: 1 })).toHaveText(/PostgreSQL.*dispatch/i);
-  await check(design.locator('.intro')).toContainText('Dispatch design.');
+  await check(design.locator('.intro')).toContainText('Implemented dispatch mode.');
   for (const section of ['sequence', 'data-access', 'contracts', 'rollout']) {
     await check(design.locator(`#${section} h2`)).toBeVisible();
   }

@@ -1,20 +1,23 @@
 ---
-title: Proposed Forge game - worker I/O and Rust tick handoff
+title: Implemented playtest I/O and replay handoff
 ---
 sequenceDiagram
-    participant M as Main JS thread
-    participant R as Rust main thread
+    participant M as Main JS page adapter
+    participant R as Page-hosted Rust WASM
     participant W as JS I/O worker
-    participant J as Replay journal
-    M->>R: Request level
-    R->>W: Request cooked assets with generation
-    W->>W: Fetch bounded response bytes
-    W-->>R: Return correlated bytes or failure
-    Note over R: Keep the active room if a required asset fails.
-    R->>R: Reject stale replies, verify digest and stage a validated level
-    M->>R: Send ordered input edges and frame timing
-    R->>R: Run bounded fixed ticks
-    R->>J: Retain old input segment and transition
-    R->>R: Activate ready candidate at tick boundary
-    R-->>M: Publish snapshot and pose for one epoch and tick
-    Note over M,R: Main JS draws the frame.<br/>The I/O worker may relay the committed view.
+    participant J as Rust replay Timeline
+    participant C as Canvas
+    Note over R: Keep active room on stale or required-data failure
+    Note over R,J: Complete replay is separate from the small debug ring.<br/>Historical imports need retained digest-addressed level bytes.
+    M->>R: Select level
+    R-->>M: Asset and generation
+    M->>W: read asset and request ID
+    W-->>M: Owned bytes or failure
+    M->>R: Accept bytes with generation
+    R->>R: Verify and prepare candidate
+    M->>R: Input edges and elapsed time
+    R->>R: Advance bounded fixed ticks
+    R->>J: Seal outgoing input segment
+    R->>R: Activate next room epoch
+    R-->>M: FGS1 world and matching FGP1 pose
+    M->>C: Draw committed view

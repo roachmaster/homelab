@@ -1,10 +1,19 @@
 # Forge agent: configured node and project inspection
 
-**Implemented, read-only, synchronous first slice.** Two real processes are tested
-on localhost with temporary credentials. The application can explicitly bind a
-non-loopback address, but no two-physical-machine deployment, trust provisioning,
-firewall change or production hardening is claimed. It is not a shell, editor,
-process runner, remote job manager or operating-system kernel.
+**Implemented configured service — reviewed 18 November 2026.** The synchronous
+agent serves typed node information, project inspection and digest-verified source
+reads. Unix managed-project writes are a separate opt-in capability: the project
+must enable `managed_writes`, the verified peer needs both read and write grants,
+and an unprivileged dedicated UID must own its private workspace. The ordinary
+project catalog stays read-only when those conditions are absent.
+
+The CLI exposes node-info and inspection commands; the web host uses the source
+and managed-write client contracts. The server can explicitly bind a non-loopback
+address, while automated process fixtures use localhost and temporary credentials.
+Repository support and those fixtures do not certify a particular physical-host
+deployment, trust provisioning or firewall setup; see the
+[operational inventory](../../../docs/architecture/forge-ide-system-inventory.yaml).
+The agent supplies no shell, arbitrary process runner or remote job manager.
 
 ## Run
 
@@ -87,8 +96,10 @@ An empty project list supports node-only serving with the same registry type.
   journals open during factory creation.
 - [`dispatch`](src/dispatch.rs) owns the finite `AgentCommand`/result sums. Verified
   transport context feeds its shared bridge. Target, expiry, header route/version,
-  operation permission and payload kind are checked; the inspect handler checks
-  project permission **before** invoking the existing `InspectTask<NativeFiles>`.
+  operation permission and payload kind are checked. Project read checks precede
+  inspection/source effects. Managed writes additionally require both configured
+  project grants; their owner key is namespaced by the verified transport subject
+  before invoking the retained writer.
 - [`forge_ide::remote`](../forge-ide/src/remote.rs) owns the optional typed
   `RemoteIdeClient`, `RemoteInspectTask`, `InspectCall`, `InspectReply` and report
   validator. The task prepares a typed call and validates the response. It receives
@@ -113,8 +124,9 @@ Both calls are **POST `/forge/v1/dispatch`**. Header destination chooses the
 registered operation, not a URL/controller per task. Existing bounded singleton
 `Forge-*` headers carry target/incarnation, contract version, request/correlation
 IDs and absolute expiry. They cannot override TLS identity. Strict payload DTOs
-are only `node.info` or `ide.inspect` with a validated alias; header/payload/version
-mismatch and unknown fields reject before effects. Unsupported methods return
+cover `node.info`, `ide.inspect`, `ide.source` and `ide.managed_write` with
+validated project aliases where required. Header/payload/version mismatch and
+unknown fields reject before effects. Unsupported methods return
 405 with `Allow: POST`; GET/PUT/PATCH/DELETE are not implemented.
 
 This is a command gateway over HTTPS, not resource-oriented REST. See the
@@ -163,7 +175,9 @@ output, not exact process-memory accounting. The independent 96-container wire-d
 tree/syntax-depth limits. Source inspection and report decode
 are synchronous trusted-project work, not hostile-source sandboxes. Reports can
 expose names, type spellings and diagnostics; they are not secret-redacted or an
-atomic filesystem snapshot. No remote filesystem mutation or shell execution.
+atomic filesystem snapshot. Mutation is limited to explicitly enabled managed
+projects under the separate write contract; shell execution and caller-selected
+absolute roots are not exposed.
 
 ## Verification and next boundary
 
@@ -200,9 +214,29 @@ must run under an unprivileged dedicated UID that owns the private `0700`
 workspace. Use a workspace whose writers are all fenced through the managed
 writer. The journal and target must be on the same filesystem.
 
-The native host holds the staged replacement and authorizes the browser action
-by proposal ID. The agent verifies the file digest and physical identity before
+The browser host exposes `ide.edit_write` for guarded Apply, Undo, bounded direct
+Save and status checks. Its native write service maps that application operation
+to the agent's `ide.managed_write`; these are distinct layers, not two public URLs.
+The host retains staged proposal content and binds direct saves to verified source
+and operation identity. The agent verifies the file digest and physical identity before
 publishing the staged replacement and recording its receipt. Undo rechecks the
 published revision and is available for 30 minutes. The private journal has a
 32-receipt cap and reserves its last slot for Undo. Reaching the cap blocks new
 operations until the workspace is taken offline and its journal is archived.
+
+
+## Implementation and evidence map
+
+- [Configuration](src/config.rs) validates the project/peer write-grant agreement.
+- [Host assembly](src/host.rs) stages managed-writer recipes with node, project and
+  gateway groups, freezes, then creates and retains per-project writers.
+- [Dispatch](src/dispatch.rs) owns typed request/result sums and independent
+  route/project checks; its focused tests reject a write missing either grant.
+- [Managed writer](../forge-ide/src/filesystem/managed_write.rs) owns no-follow
+  paths, revision fences, durable receipts, recovery and Undo limits.
+- [Process fixtures](tests/process.rs) cover the configured read path and startup/
+  shutdown behavior; they do not by themselves establish every managed-write
+  filesystem invariant or a live cross-host deployment.
+
+The [original remote-IDE proposal](../../../docs/architecture/proposals/remote-ide.md)
+is a dated design record. Use this guide and source for the implemented scope.

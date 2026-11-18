@@ -1,34 +1,47 @@
 ---
-title: Future Forge Studio milestone - durable build attempt
+title: Implemented optional Studio submission and lease
 ---
 sequenceDiagram
-    actor M as Main JS thread
-    participant R as Browser Rust
-    participant S as JS I/O worker
-    participant F as Forge host
-    participant D as Studio database
-    participant W as Native build worker
-    Note over M,W: Future Studio milestone
-    M->>R: Forward build action
-    R->>S: Emit typed dispatch effect
+    actor M as Studio JS client
+    participant S as Studio JS I/O worker
+    participant F as Rust web host
+    participant A as Python Studio API
+    participant D as PostgreSQL Store
+    participant W as Packaging worker
+    participant O as Digest artifact directory
+    participant P as Preview listener
+    Note over M,P: Repository implementation. Services require explicit configuration.<br/>There is no current Studio Browser Rust controller.
+    M->>S: Build pinned static-web intent
     S->>F: Dispatch game.build.submit
-    Note over F,D: Reject before storage effects if admission fails.
-    F->>F: Check session, project and typed request
-    F->>D: Enqueue build
-    D-->>F: Durable receipt
-    F-->>S: Return build ID and state
-    S-->>R: Relay correlated receipt
-    R-->>M: Publish build view
-    W->>D: Claim job with lease and attempt token
-    D-->>W: Pinned revision and approved profile
-    W->>W: Build in isolation and store verified artifact by digest
-    W->>D: Attach artifact and finish current attempt
-    Note over D,W: An expired or superseded attempt cannot attach its result.
-    M->>R: Reconnect or refresh build status
-    R->>S: Request admitted status
+    F->>F: Admit typed request
+    F->>A: Forward admitted request
+    A->>A: Validate source and profile
+    A->>D: Commit job and event
+    D-->>A: Durable receipt
+    A-->>F: Correlated receipt
+    F-->>S: Checked receipt
+    S-->>M: Build ID and state
+    W->>D: Claim lease and attempt
+    D-->>W: Pinned source recipe
+    W->>W: Package approved Git subtree
+    W->>O: Publish verified artifact
+    W->>D: Finish only current lease
+    Note over D,W: Cancellation clears attempt token.<br/>Expired claims retry up to three total attempts.
+    M->>S: Poll build ID and event cursor
     S->>F: Dispatch game.build.get
-    F->>D: Read authorized job and ordered events
-    D-->>F: Status and committed artifact metadata
-    F-->>S: Return typed status
-    S-->>R: Relay correlated status
-    R-->>M: Publish status and authorized preview
+    F->>A: Forward after admission
+    A->>D: Read scoped status and events
+    D-->>A: Status and ordered events
+    A-->>F: Correlated result
+    F-->>S: Admitted response
+    S-->>M: Render build state
+    M->>S: Request artifact access
+    S->>F: Dispatch artifact request
+    F->>A: Forward after admission
+    A-->>F: Metadata and signed URL
+    F-->>S: Checked artifact response
+    S-->>M: Authorized preview location
+    M->>P: Open signed preview
+    P->>O: Read and verify artifact
+    O-->>P: Immutable preview content
+    P-->>M: Preview on separate origin

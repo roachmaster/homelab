@@ -3,7 +3,7 @@ use super::{text, Attribute, Node, Tag};
 pub(super) const BODY: &[Node] = &[
     element!(Section [Id = "previous-chats", Class = "design-section", AriaLabelledby = "previous-chats-title"];
         element!(H1 [Id = "previous-chats-title"]; text("Previous chats")),
-        element!(P [Class = "previous-chat-intro"]; text("Try the proposed Chat menu with sample conversations. Drafts and changes stay inside this preview.")),
+        element!(P [Class = "previous-chat-intro"]; text("This earlier menu sandbox demonstrates retention and deletion with sample conversations. The implemented Chat screen uses the thread-title Conversations drawer. Drafts and changes here stay inside the preview.")),
         element!(Div [Class = "previous-chat-layout"];
             element!(Div [Class = "sandbox-stage"];
                 element!(Div [Class = "sandbox-toolbar"];

@@ -36,6 +36,7 @@ pub(super) const BODY: &[Node] = &[
         element!(Section [Id = "forge-foundations", Class = "index-panel", AriaLabelledby = "forge-foundations-title"];
             element!(H2 [Id = "forge-foundations-title"]; text("Forge foundations")),
             element!(Ul;
+                doc_row!("/design/implementation", "Current implementation", "Shipped capabilities, live configuration, and remaining work."),
                 doc_row!("/design/forge-providers", "Forge plug-and-play", "Typed ports, factories, provider scope, and wiring."),
                 doc_row!("/design/forge-workers", "Forge worker design", "Ownership across rendering, Rust, and I/O."),
                 doc_row!("/design/forge-workers/playtest", "Playtest worker flow", "Verified asset requests, room handoff, and replay."),
@@ -63,8 +64,8 @@ pub(super) const BODY: &[Node] = &[
         element!(Section [Id = "wireframes-and-workspace", Class = "index-panel", AriaLabelledby = "wireframes-and-workspace-title"];
             element!(H2 [Id = "wireframes-and-workspace-title"]; text("Wireframes and workspace")),
             element!(Ul;
-                doc_row!("/design/wireframes#phone", "Phone wireframes", "Chat, Workbench, and project layout references."),
-                doc_row!("/design/wireframes#desktop", "Desktop wireframes", "Conversation and file workspace layouts."),
+                doc_row!("/design/wireframes#phone", "Phone wireframes", "Current Chat, Mail, Workbench and sheet captures."),
+                doc_row!("/design/wireframes#desktop", "Desktop wireframes", "Current conversation, mail and source workspace captures."),
                 doc_row!("/design/workspace", "Workspace data flow", "Save, restore, and recovery across navigation."),
             ),
         ),

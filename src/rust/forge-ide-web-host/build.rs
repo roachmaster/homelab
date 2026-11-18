@@ -11,10 +11,12 @@ fn main() -> io::Result<()> {
         "cargo:rerun-if-changed={}",
         design::game_engine::SOURCE_PATH
     );
+    println!("cargo:rerun-if-changed=../../../docs/design/implementation-status.md");
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo build output directory"));
     for (name, page) in [
         ("home.html", DesignPage::Home),
         ("design.html", DesignPage::Overview),
+        ("implementation.html", DesignPage::Implementation),
         ("previous-chats.html", DesignPage::PreviousChats),
         ("wireframes.html", DesignPage::Wireframes),
         ("workspace.html", DesignPage::Workspace),

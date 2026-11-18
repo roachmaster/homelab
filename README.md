@@ -2,6 +2,10 @@
 
 A professional engineering portfolio: lessons from the Forge experiments, a growing composable Rust framework, and reusable design practices.
 
+## Current implementation
+
+[Current design and deployment status](docs/design/implementation-status.md) is the starting point: generated Chat/Mail/Workbench, saved PostgreSQL conversations and queued inference, optional managed editing, typed providers and durable jobs, game runtime/assets/replay and the static-web Studio service. The live portal publishes the same reference at [Design](https://portal.thedevex.com/design/implementation). Repository support and live enablement are recorded separately; the current host has no Studio relay and its source project is read-only.
+
 ## Forge framework portfolio
 
 Start Forge capability and adapter work with [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md).
@@ -16,7 +20,7 @@ Start Forge capability and adapter work with [Wire Forge Providers](.agents/skil
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
 - [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): implemented local node/status and bounded jobs, plus a narrow authenticated network proof; remote deployment remains future.
 
-The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. The larger framework and durable reference application remain proposals; earlier repository reviews are not fresh build/test certifications.
+The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. Broader federation and framework automation remain proposals; authenticated durable jobs and managed writes now have separate concrete implementations; earlier repository reviews are not fresh build/test certifications.
 
 ## Forge GPU inference
 
@@ -26,17 +30,17 @@ The [Mission Control runner](deploy/mission-control/agent-runner/README.md) reco
 
 ## Forge IDE read-only workbench
 
-[![Proposed read-only IDE workbench](docs/design/forge-ide-wireframes/forge-ide-workbench-desktop.svg)](docs/design/forge-ide-wireframes/README.md)
+[![Current generated Workbench fixture](src/rust/forge-ide-web-host/design/forge-ide-workbench-desktop.png)](docs/design/forge-ide-wireframes/README.md)
 
-The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) opens a single allowed project automatically and provides project-wide file/symbol search, Explorer, Outline and a read-only source viewer. Opening a file reads bounded source through the admitted host and agent; its SHA-256 must match the bytes used for inspection. Selecting a symbol reveals its numbered source lines, including on phones. Problems, metadata and source-shape analysis remain supporting tools. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above are design images, not screenshots. Editing, saving and Run/Debug remain future capabilities.
+The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) opens a single allowed project automatically and provides project-wide file/symbol search, Explorer, Outline and a read-only source viewer. Opening a file reads bounded source through the admitted host and agent; its SHA-256 must match the bytes used for inspection. Selecting a symbol reveals its numbered source lines, including on phones. Problems, metadata and source-shape analysis remain supporting tools. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above are design images, not screenshots. Managed editing/saving are implemented behind explicit project opt-in and revision checks; LSP and general Run/Debug remain future capabilities.
 
-[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe the earlier nine-composition workbench. The current [generated IDE](src/rust/forge-ide-web/README.md) opens to Chat and uses local WASM ABI 4. Rebuild its assets as a bundle. The native gateway admits `ide.source` separately and validates inspected-content digests, so deploy the host and agent together. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
+[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe current compositions and state ownership, including the current mobile controls. The current [generated IDE](src/rust/forge-ide-web/README.md) opens to Chat and uses local WASM ABI 4. Rebuild its assets as a bundle. The native gateway admits `ide.source` separately and validates inspected-content digests, so deploy the host and agent together. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
 
 ## Forge IDE generated browser boundary
 
 [![Generated UI build and runtime ownership](docs/architecture/diagrams/mermaid/images/m25-ui-implementation.svg)](src/rust/forge-ide-web/README.md)
 
-The [earlier UI report snapshot](docs/architecture/proposals/forge-ide-ui.pdf) uses Mission Control as a guide, not a source of truth: Rust-owned state, thin worker/DOM adapters, and an explicitly secured host bridge to the existing agent. The [new implementation](src/rust/forge-ide-web/README.md) adds a generated inspection UI and loopback-bound host. Explicit HTTPS-origin configuration supports an access-controlled proxy with Secure cookies and optional automatic sessions using the proxy's existing sign-in; see [deployment and rollback](src/rust/forge-ide-web-host/deploy/README.md). It remains a single-operator read-only workbench. The [current UI skill](.agents/skills/design-forge-ui/SKILL.md) and [updated proposal](docs/architecture/proposals/forge-ide-ui.md) supersede its manual-asset authoring advice: application HTML/CSS/JS must be generated from declarations.
+The [earlier UI report snapshot](docs/architecture/proposals/forge-ide-ui.pdf) uses Mission Control as a guide, not a source of truth: Rust-owned state, thin worker/DOM adapters, and an explicitly secured host bridge to the existing agent. The [new implementation](src/rust/forge-ide-web/README.md) adds a generated inspection UI and loopback-bound host. Explicit HTTPS-origin configuration supports an access-controlled proxy with Secure cookies and optional automatic sessions using the proxy's existing sign-in; see [deployment and rollback](src/rust/forge-ide-web-host/deploy/README.md). It remains single-operator; source is read-only by default and managed writes require explicit opt-in. The [current UI skill](.agents/skills/design-forge-ui/SKILL.md) and [updated proposal](docs/architecture/proposals/forge-ide-ui.md) supersede its manual-asset authoring advice: application HTML/CSS/JS must be generated from declarations.
 
 ## Run the local Forge system
 
@@ -72,7 +76,7 @@ acceptance. Each run gets fresh ignored output rather than reusing stale evidenc
 
 The terminal discovers its selected registered commands and sends typed requests through the shared bridge. A separate [command-description contract](src/rust/forge-command/README.md) supplies names, help, named argument types and required/optional/default declarations; `Task` remains an independent execution stereotype. `help COMMAND` or `COMMAND --help` describes an admitted catalog entry without running the business task/client. In a session, use `disk.pwd`, `disk.list`, `disk.cd PATH`, `disk.permissions PATH`, `node.info`, `node.status`, `help`, then `exit`. Directory changes persist only in that session, not the process or your parent shell. Paths in session input are literal remaining text—not shell quoting or expansion. [Usage, feature selection and exit codes](src/rust/forge-terminal/README.md) · [Application assembly](src/rust/forge-local/README.md).
 
-**Implemented:** local node observations, command discovery, optional native disk navigation and [bounded local counter jobs](src/rust/forge-local/JOBS.md). In one session use `jobs.submit KEY TOTAL`, copy its ID, then `jobs.inspect ID`, `jobs.step ID`, `jobs.cancel ID` and `jobs.list`. Only explicit stepping runs work; receipts are volatile and local owner labels are not authentication. Node status reports client-instance uptime/responding, not machine health. **Later:** durable jobs, remote execution and Raspberry Pi deployment.
+**Implemented:** local node observations, command discovery, optional native disk navigation and [bounded local counter jobs](src/rust/forge-local/JOBS.md). In one session use `jobs.submit KEY TOTAL`, copy its ID, then `jobs.inspect ID`, `jobs.step ID`, `jobs.cancel ID` and `jobs.list`. Only explicit stepping runs work; receipts are volatile and local owner labels are not authentication. Node status reports client-instance uptime/responding, not machine health. **Separate implemented slice:** authenticated durable jobs in `forge-jobs`. **Later:** generic remote execution and Raspberry Pi deployment.
 
 ## First authenticated network boundary
 
@@ -112,9 +116,7 @@ make agent ARGS='inspect --config /path/to/client.json --node lab --project work
 [Original visual proposal PDF](docs/architecture/proposals/remote-ide-proposal.pdf) ·
 [Milestone status](docs/architecture/proposals/remote-ide.md) ·
 [Mermaid source](docs/architecture/diagrams/mermaid/m18-agent-implementation.mmd).
-Two real processes are tested on localhost with ephemeral credentials. A real
-cross-machine deployment and production credential lifecycle remain untested;
-no host configuration or deployment is performed by this repository.
+Two real processes are tested on localhost with ephemeral credentials. The [service inventory](docs/architecture/forge-ide-system-inventory.yaml) records the separately configured operating setup. The original localhost proof does not qualify production credential rotation or broader remote execution.
 
 ## Optional template rendering
 

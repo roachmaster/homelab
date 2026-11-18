@@ -1,9 +1,22 @@
-# Rust source sets — first Forge core
+# Rust source sets — Forge implementations
 
-This directory contains **six execution core packages, one independent command-description contract, one optional hosted system package, one optional template renderer, one optional IDE inspector, a typed remote conversation plus optional HTTPS adapter, a local application/terminal pair, a configured remote agent and three
-clearly separated demo packages**, with original synchronous application contracts. The optional HTTPS adapter privately owns its I/O runtime. The core remains std-only; IDE parser/filesystem/YAML dependencies stay optional to consumers. Typed registration/freeze and
-optional-package assembly, local node observations, admitted command discovery, explicitly stepped local counter jobs and native disk inspection/navigation now work; the broader managed framework/durable reference
-application remains a target, not a completed product.
+**Implementation review: 18 November 2026.** The six execution core packages and
+independent command-description contract remain narrow. Optional source sets now
+include native tools, templates, remote adapters, verified access, durable jobs,
+IDE inspection and managed editing, generated browser assets, the portal host,
+model runtime and game runtime. The [workspace manifest](Cargo.toml) is the current
+package inventory; it is not a deployment manifest.
+
+Typed registrars/freeze and explicit factory/provider injection are implemented
+in normal consumer paths. The core remains std-only. Concrete capabilities own
+their optional parser, serialization, native filesystem, TLS/runtime or model
+process dependencies. A universal managed lifecycle framework, module parser and
+generic remote scheduler remain proposals; durable acceptance and browser support
+are no longer merely future targets.
+
+The table below lists the core contracts. Concrete consumer sections follow,
+with the [source-backed architecture inventory](../../docs/architecture/forge-framework-blueprint.md#current-implementation)
+keeping implemented slices distinct from broader sketches.
 
 | Package | Responsibility | Normal dependencies |
 | --- | --- | --- |
@@ -30,7 +43,7 @@ payload fallback, transport library in core, global enum, global registry or ser
 ## Runnable local system
 
 - [`forge-local`](forge-local/README.md) owns explicit node/disk/optional-jobs composition, per-application providers, typed command/result sums and registered command descriptors. It imports the six execution contracts, independent command-description contract and selected kernel modules; no core imports it.
-- [`forge-terminal`](forge-terminal/README.md) is the std-only terminal adapter and `forge` binary. It imports only the local application contract and I/O-client contract. Console I/O is an injected typed client, not business policy.
+- [`forge-terminal`](forge-terminal/README.md) supplies the ordinary `forge` binary using the local application and injected console I/O, with bootstrap/provider ownership. Its optional `durable-jobs` feature adds a separate Unix `forge-jobs` executable and the selected access/store/signal dependencies; those are not mandatory terminal or core dependencies.
 
 ```bash
 cargo run -p forge-terminal -- --help
@@ -40,6 +53,22 @@ cargo run -p forge-terminal --no-default-features -- node.status
 ```
 
 The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them at assembly. `--no-default-features` omits both modules; add `--features jobs` or `--features disk` to select one. The node module still requires the kernel package; the older pure demo below remains the proof of whole-package omission. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. [Local jobs](forge-local/JOBS.md) are volatile pure counters, not OS processes; only explicit step advances computation. No network or destructive file operations are added.
+
+## Optional verified access and durable jobs
+
+[`forge-access`](forge-access/src/lib.rs) supplies a configured `Verifier`, an
+`AuthenticatedBoundary` issuing private subject/deadline `Context` values, and
+`RoutePolicy` exact-route grants. It imports only the ingress contract. It does
+not implement identity federation, delegated actors or a credential service.
+
+[`forge-jobs`](forge-jobs/README.md) is a separate bounded durable sum-job
+capability. Its private locked file store commits receipts/results, survives
+reopen and fences leased attempts against cancellation, expiry and stale
+completion. Typed store/worker registrars stage recipes before freeze; the Unix
+terminal consumer chooses an operator verifier and private store, then injects
+the acquired store into the bridge or owned worker. Automatic receipt expiration,
+generic job programs and remote job delivery are outside this implementation.
+This is distinct from `forge-local`'s volatile manually stepped counter.
 
 ## Optional authenticated node-info boundary
 
@@ -60,8 +89,13 @@ an admitted node/project service, while `node.info` and `inspect` select a named
 remote node. Public batch project registration stages one homogeneous factory group;
 no runtime-length typed tuple or reverse capability-to-host dependency is needed.
 Default IDE and HTTPS consumers still omit the new optional conversation/codec.
-Actual two-process localhost tests cover identities, alias permission, limits and
-shutdown. No two-physical-machine validation or credential provisioning is claimed.
+The service also registers bounded `ide.source` and optional Unix
+`ide.managed_write` contracts. Managed writes require explicit project opt-in,
+both read/write grants and a private workspace; they retain revision fences and
+a durable operation journal. These are not arbitrary path or shell operations.
+Automated two-process fixtures cover identities, alias permission, limits and
+shutdown. Host-specific deployment evidence and credential provisioning remain
+operational concerns in the service inventory.
 
 ## Optional template renderer
 
@@ -85,7 +119,9 @@ subset and differences from the historical renderer.
 rooted native client, injected inspection task, real Rust parser and public
 config/factory/registrar. Its default library omits YAML/CLI; `cli` opts in to
 `forge-ide inspect ROOT`. Internal reports are typed. `make ide ARGS='inspect .'`
-emits YAML; no shell wrapper, editor or full compiler AST is implied.
+emits YAML. Source reads and managed mutation contracts are separate modules;
+Unix writer factories are explicitly selected by the agent. The local inspection
+command remains structural analysis, not a shell or full compiler AST.
 
 ## Optional consumer proof
 
@@ -328,16 +364,20 @@ tests its known route set. Metadata cannot prove arbitrary factory code follows
 its declarations. Registrar purity and construction/drop order are tested behavior,
 not a sandbox or automatic teardown guarantee. Runtime effects are never rolled back.
 
-**Not implemented:** a module/DSL parser, universal container, automatic dependency
-resolution, generic override/default engine, route-descriptor coverage validator,
-provider pools, async dispatch or `Send`/`Sync`
-handler hosting, general identity/delegation (the optional HTTPS node-info adapter has narrow mTLS peer authentication), generic header-level deadline/cancellation/idempotency
-metadata and enforcement (local jobs have their own capability semantics), durable acceptance, persistent content stores, general remote execution/deployment, workers or supervised
-startup/shutdown. The dependency guard checks the **compile-time crate graph**,
-and actual pure/messages/disk/combined consumer dependency trees; bootstrap separately checks
-its declared assembly order, not an auto-wired runtime service graph. Deferred
-features remain planned rather than silently stubbed.
+**Still outside the generic core:** a module/DSL parser, universal container,
+automatic dependency resolution, generic override/default engine, route-descriptor
+coverage validator, provider pools, async dispatch or `Send`/`Sync` handler
+hosting, broad federation/delegation and a universal supervised lifecycle.
+Header-level deadline/cancellation/idempotency enforcement is not silently added
+to every core request. Selected remote, access, jobs, model and host capabilities
+implement their own explicit wrappers, persistence and ownership contracts.
+Durable receipts, managed content writes and owned workers now exist in those
+concrete packages; their existence does not promise generic remote execution.
 
+The dependency guard checks the compile-time crate graph and resolved consumer
+profiles. Bootstrap separately validates declared assembly order rather than
+auto-wiring a runtime service graph. Source support, executed acceptance and live
+operational configuration remain distinct evidence.
 ## Continue without growing a catch-all core
 
 Keep each source set at `src/rust/<purpose>/`, public contracts narrow, and smaller
@@ -349,7 +389,7 @@ example into the durable jobs application or algorithm platform by default.
 See the [DSL semantic reference](../../docs/architecture/framework-dsl.md) for the
 larger proposed model and the [source-set guide](../README.md) for organization.
 
-## Generated inspection UI
+## Generated IDE and portal
 
 Three cohesive packages add the browser boundary without changing core contracts:
 [`forge-ide-ui`](forge-ide-ui/README.md) is the portable Rust event/view/effect model;
@@ -357,7 +397,12 @@ Three cohesive packages add the browser boundary without changing core contracts
 native typed-component/YAML generator; [`forge-ide-web-host`](forge-ide-web-host/README.md)
 is the loopback session/static/command application retaining mTLS credentials.
 The browser gets portable report metadata, never native paths as authority or keys.
-No hand-authored application HTML/CSS/JS or source-editing API is introduced.
+Application HTML/CSS/JS is generated from Rust/YAML declarations. Chat, Mail,
+Workbench and same-tab portal/design navigation are implemented. Workbench's
+verified source viewer remains separate from its bounded textarea editor:
+`OpenDocument`/`SetDocument`/`SaveDocument`/`CloseDocument` carry model-owned identity
+and drafts. Native saves require the managed-write authorization path. A general
+third-party editor-widget or LSP integration remains future work.
 
 Root `make ui-build` creates new deterministic assets under ignored target;
 `make ui ARGS='serve --config /absolute/ui-host.json'` runs the native host.

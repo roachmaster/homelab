@@ -1,40 +1,42 @@
 ---
-title: Proposed transform authority and publication
+title: Implemented transform and pose authority
 ---
 classDiagram
     direction TB
-    class Body {
-        <<proposed>>
-        +Motion motion
-        +Q16 resolvedRoot
+    class Character {
+        Q16 resolvedRoot
+        MotionFrame frame
     }
     class Collider {
-        <<proposed>>
-        +AABB shape
-        +Q8 pivotOffset
+        Q16 footRelativeEdges
     }
-    class AnimationPose {
-        <<proposed>>
-        +Frame selectedFrame
-        +LocalPose joints
+    class Animator {
+        MotionPhase phase
+        frameIndex
     }
-    class Snapshot {
-        +Tick tick
-        +Q8 previousRoot
-        +Q8 currentRoot
+    class Room {
+        epoch
+        tick
+        PlayerPose pose
     }
-    class PosePayload {
-        <<proposed>>
-        +Tick tick
-        +Frame selectedFrame
+    class FGS1 {
+        Q8 currentRoot
+        Q8 previousRoot
+    }
+    class FGP1 {
+        epoch
+        tick
+        playerId
+        phaseAndFrame
     }
     class Renderer {
-        +matchTick()
-        +interpolateRoot()
-        +drawSelectedFrame()
+        validateIdentity()
+        drawAtlasFrame()
     }
-    Body *-- Collider
-    Body --> Snapshot
-    AnimationPose --> PosePayload
-    Snapshot --> Renderer
-    PosePayload --> Renderer
+    Character *-- Collider
+    Room *-- Character
+    Room *-- Animator
+    Room --> FGS1 : publish
+    Room --> FGP1 : publish
+    FGS1 --> Renderer
+    FGP1 --> Renderer

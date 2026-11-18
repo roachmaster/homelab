@@ -13,12 +13,12 @@ entry method. A local host can require its one-use pairing code; a trusted proxy
 host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
 
 1. A catalog with exactly one allowed project opens it automatically after admission.
-   Otherwise open **Project options** beside **View options**, choose **Node** and
-   **Project**, then use the **Refresh project** symbol beside **Problems**. The header
-   beside **Forge IDE** shows the current selection. Changing context clears
+   Otherwise use the node/project breadcrumb in the header to open **Project options**,
+   choose **Node** and **Project**, then use the **Refresh project** symbol beside
+   **Problems**. The adjacent header menu opens **View options** in its own native sheet. Changing context clears
    previous report and source ownership. Refresh replaces the loaded report with
    a new inspection. **Inspection details** shows the report status and summary.
-2. **Find files or symbols** searches file paths and declaration names in the loaded
+2. **Search files or symbols** searches file paths and declaration names in the loaded
    report, case-insensitively. Results show their file context. Selecting a symbol
    opens its file and declaration directly. Clear the query to return to Explorer.
    A bounded report or partial inspection limits the search coverage; this is not
@@ -40,8 +40,10 @@ host uses the proxy's existing sign-in. Agent mTLS keys never enter the page.
    disclosures. Problems shows supplied inspection strings, without invented
    compiler severity, test success or source locations.
 
-The existing Explorer filename and Outline declaration filters remain literal,
-case-sensitive local filters. The global Find query is case-insensitive; all query
+Explorer uses one query input. Its inline mode toggle switches between case-insensitive
+file/symbol search and literal, case-sensitive entry-name filtering; the query survives
+a mode switch. The action carries the accepted report and search mode, so stale
+mode/report edits are ignored. Outline retains its file-local literal filter. Query
 inputs are limited to 256 UTF-8 bytes. No regular-expression evaluation is exposed.
 
 ## Source and request ownership
@@ -125,7 +127,7 @@ persistent report cache or cross-tab synchronization.
 | `generate/application.rs`, `ui/theme.yaml` | Typed component composition, transport declarations and bounded visual tokens |
 | Component/generator primitives | Semantic Source, Region and PaneLink components, safe DOM, focus, geometry and lifecycle |
 | `forge-ide-ui` model/projection | Context, report/search/selection, source acceptance, source windows and typed presentation |
-| Generated worker and `src/wasm.rs` | Real ABI 3, bounded codecs, declared effects and transport cleanup |
+| Generated worker and `src/wasm.rs` | Real ABI 4, bounded codecs, declared effects and transport cleanup |
 | Native host/agent | Session/Origin/CSRF, configured aliases, mTLS, independent admission and bounded source reads |
 
 Source is a reusable read-only display component, not a JavaScript editor widget.
@@ -136,9 +138,8 @@ runtimes. Non-IDE component fixtures exercise the same primitives.
 
 ## Compatibility and verification
 
-**Local ABI 3 requires an atomic generated asset/WASM deployment.** It adds guarded
-source events/effects, source-window bindings, global Find actions and pane reveal
-metadata. Older ABI 2 workers/WASM cannot be mixed with this bundle. Source callers
+**Local ABI 4 requires an atomic generated asset/WASM deployment.** It includes guarded source/edit events, source-window and editor bindings,
+Chat/Mail state, unified search actions and pane reveal metadata. Older ABI 2/3 workers/WASM cannot be mixed with this bundle. Source callers
 and serialized event producers must use the matching contracts.
 
 The browser/native protocol remains version 1 with a new typed source command on
@@ -173,5 +174,5 @@ convention. A successful save refreshes the verified source and offers Undo in
 a managed workspace. Conflicts keep the draft open for review or copying. An
 unknown outcome offers **Check status** for the existing operation.
 
-The [inline-edit proposal](../../../docs/architecture/proposals/forge-ide-inline-edit.md)
-designs a contextual prompt, a staged diff, and guarded Apply and Undo actions.
+The [inline-edit implementation reference](../../../docs/architecture/proposals/forge-ide-inline-edit.md)
+records the contextual prompt, staged diff, and guarded Apply and Undo path.

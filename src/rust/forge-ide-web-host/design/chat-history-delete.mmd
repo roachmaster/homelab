@@ -1,28 +1,24 @@
----
-title: Delete a previous chat
----
-%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":25,"diagramMarginX":30,"diagramMarginY":25,"width":140,"wrap":false}}}%%
+%% Implementation reviewed 2026-11-18; render with pinned mmdr.
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":40,"diagramMarginX":30,"diagramMarginY":25,"width":180,"wrap":false}}}%%
 sequenceDiagram
-    participant B as Browser
-    participant H as Web host
+    participant JS as Main JS DOM
+    participant W as Rust/WASM worker
+    participant H as Native web host
     participant R as Agent Runner
     participant P as PostgreSQL
-
-    B->>B: Prompt for explicit confirmation
-    opt User confirms Delete chat
-        B->>H: POST /forge/v1/dispatch<br/>Forge-Destination: ide.chat.history.delete<br/>Chat ID and expected revision
-        H->>H: Check session, origin and CSRF
-        H->>R: POST /v1/dispatch<br/>Bearer + same destination<br/>DeleteChatRequest
-        R->>P: ChatHistoryDao write transaction<br/>Lock chat and check revision
-        alt Current revision and chat exists
-            P->>P: Remove transcript<br/>and write tombstone atomically
-            P-->>R: Commit tombstone with new revision
-            R-->>H: chat_history_deleted
-            H-->>B: 200 · remove chat from the list
-        else Missing chat or revision changed
-            P-->>R: Leave history unchanged
-            R-->>H: 404 · unavailable / 409 · conflict
-            H-->>B: Refresh history before another edit
-        end
-    end
-    Note over R,P: The tombstone blocks delayed writes<br/>from recreating deleted history
+    JS->>W: Request Delete chat
+    W-->>JS: Named confirmation
+    Note over JS,W: No HTTP before confirmation
+    JS->>W: Confirm current chat
+    W->>H: Typed delete effect
+    Note over H: Session + origin + CSRF
+    H->>R: Private delete DTO
+    R->>P: Lock chat; check revision
+    Note over R,P: Missing / stale stops removal
+    R->>P: Remove + tombstone
+    P->>P: Scrub linked content
+    P-->>R: Commit new revision
+    R-->>H: Correlated result
+    H-->>W: Checked response
+    W-->>JS: Remove chat and draft
+    Note over R,P: Tombstone blocks late writes

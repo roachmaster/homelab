@@ -36,5 +36,7 @@ test('workflow explicitly allowlists each fixture screenshot without a broad PNG
   for (const item of VIEWPORTS) assert.ok(workflow.includes(`/browser/${item.screenshot}`));
   assert.ok(workflow.includes('/browser/ide-portal-home-desktop.png'));
   assert.ok(workflow.includes('/browser/ide-portal-home-phone.png'));
+  assert.ok(workflow.includes('/browser/ide-design-implementation-phone.png'));
+  assert.ok(workflow.includes('/browser/ide-workbench-project-options-phone.png'));
   assert.equal(workflow.includes('/browser/*.png'), false);
 });

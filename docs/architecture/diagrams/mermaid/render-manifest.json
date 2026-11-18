@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "fe47bed52d7885c7dbf583887bd4402f478c0e8f1e326d86d581ff4770e02388",
-    "validate.mjs": "e2852d4be299507bfd971937cdbb9aa1c189f99a7546edef323cbc759f5d009b"
+    "render.py": "e7f7e43276a60a0efffd3e99beddf0955d7916e098ab1825980829b3cdf3e88d",
+    "validate.mjs": "07d98218614896e1bea5abbba1dd644d6d53da82b1acf320e6a952e8d380d698"
   },
   "diagrams": [
     {
@@ -160,81 +160,87 @@
     },
     {
       "source": "m25-ui-implementation.mmd",
-      "source_sha256": "5856cbf5482ebe84ef21510d3a4f5bba81bca20cf2f24a85fa77d49f8f8d794b",
+      "source_sha256": "976cfed73a1d23c380613294fae7c4f48a8dca59bd67b28bf327e1a053833118",
       "svg": "images/m25-ui-implementation.svg",
-      "svg_sha256": "6724d3483a69d2c6bbbb6c3074446fd2ab84ce8309f0abe00c6a86c6c2c5a7eb"
+      "svg_sha256": "1253a3d7d5bf8b685d57f1013ab9c63071bad336661f252a606618d68bed42b0"
     },
     {
       "source": "m26-ui-components.mmd",
-      "source_sha256": "f9a6c4ea03116fe78e24c0116952d6b7876e544598419b6c282e78807328342c",
+      "source_sha256": "6c25b8ededc260fbb7adbcaf0090abdca8b2ab44a894bc2a9182e0e8d5307d31",
       "svg": "images/m26-ui-components.svg",
-      "svg_sha256": "389c7142e1c168adab298ad3c453af8157ecd111d4d2ca3176f76767d908b8ef"
+      "svg_sha256": "da0102029c5c9ae809f1badc40f3121d07079f82cb6c8dad95469c82ca0306d4"
     },
     {
       "source": "m27-ui-navigation.mmd",
-      "source_sha256": "59be36340bc4dbbd024a67e26f49e4e57fd33a54321fafbe6907587671d6dd76",
+      "source_sha256": "d915496ec3ef26d499a0edcd763d286244ad1e287bfbabd4684591432367a5ba",
       "svg": "images/m27-ui-navigation.svg",
-      "svg_sha256": "4bf763fbdf17445147aedf2662872843c7dd5a53673d44ef6d8d39eae9bdd809"
+      "svg_sha256": "0d04801c24de729321801f8c05c77af87b4ce3bac0c891c4936305aa06ea6e06"
     },
     {
       "source": "m28-ui-transitions.mmd",
-      "source_sha256": "dc9c8b6617619af16e63b7548fb612626e45b55a5fcc7eeb2139ac158f9339bb",
+      "source_sha256": "4268215b58b3d48adc5a170fdba36c6e0789009ade21346e58ac7d05f0182b2c",
       "svg": "images/m28-ui-transitions.svg",
-      "svg_sha256": "278dfddd083dd439240210ecf47fae2f0553025a1fc195f6572316ec47276977"
+      "svg_sha256": "fa10205cf135aacb9d7113c8254740e12f6098fd3421f21f231fa0eb237ecfe1"
+    },
+    {
+      "source": "m29-ui-docs-handoff.mmd",
+      "source_sha256": "8a9624fe70e19e5a3739b98e86e7e27e161682ad4628684ede47bff71e16e5b8",
+      "svg": "images/m29-ui-docs-handoff.svg",
+      "svg_sha256": "836af982e4e686c2441dda16206249ef03a4adba8bc26d730d70fbcebfde4a84"
     },
     {
       "source": "game-physics-tick.mmd",
-      "source_sha256": "6541e2aed215195f659685216e936175501b35959e08bb0be98bd071080cbaee",
+      "source_sha256": "998365102cb98caa8573e72a23a405c22babee7f3325a4bb6690633a7fc93813",
       "svg": "images/game-physics-tick.svg",
-      "svg_sha256": "f501f066261d02c866215e25eeac26d1f715a420500c2e1d997ca35e984c0d4a"
+      "svg_sha256": "9819fe20f5c211bc435c6aab9a2159eb1a76510edb3af250f12ad63fcad294d2"
     },
     {
       "source": "game-physics-animation.mmd",
-      "source_sha256": "a2d948eabe7ccb5ba8a737f854f7107297a412dd8311ebf96561602a3e7ad0e8",
+      "source_sha256": "f75d71855af241ba38b9f65fddfb04e17a5f751032e36f798701b4fb16f55de8",
       "svg": "images/game-physics-animation.svg",
-      "svg_sha256": "86ea184b741a92ebe9179ba004e80dbe9c85dc8d941a86043c2f06c635a06ea5"
+      "svg_sha256": "c5fdd7ba145cc1f7de040e8b3323f8ab1cffb4025f5b67cd26ead8aea09b5906"
     },
     {
       "source": "game-physics-authority.mmd",
-      "source_sha256": "3674cae0fa8b93678cca316d7856527c837b93c5b37e74da1f5bd1f6a1d1b379",
+      "source_sha256": "5e5dce2d95a657762463a439a283c8a091cd49e7962989e7084c224659e41c66",
       "svg": "images/game-physics-authority.svg",
-      "svg_sha256": "ae743169687e74282cb4ab5563d477f1adf325ccee935a9681d78f5236c84b8c"
+      "svg_sha256": "42150361dde191de25531bfca0a9c1c59ce601196773b0e4caf0dae8dc49443b"
     },
     {
       "source": "game-asset-pipeline-cook.mmd",
-      "source_sha256": "b482ea8c7d1770220579bc8b9c193c9659a492e447ea6d21c836f3b9e92e6efe",
+      "source_sha256": "d8d9306d5a8c72604e213a520b10bccb38d729322178b4f1e63adb83112d4184",
       "svg": "images/game-asset-pipeline-cook.svg",
-      "svg_sha256": "1adbbd1957629add717a19f1cd4e95b905f0bb249b9f92d812b4b9414cac7214"
+      "svg_sha256": "63111c85d5b21fcd1ffce2c89d16ae1836e7ef9faf350b18b11c0368db4d46b6"
     },
     {
       "source": "game-asset-pipeline-load.mmd",
-      "source_sha256": "4460e8e2c0db75a1ca0ae3aa48bd33ccb03f4a800fc3bad5fe9c060a3a53ec34",
+      "source_sha256": "f9d704900102bc663986c5366a5aa645cbc5017e5a7248408af8a0cb0ff66866",
       "svg": "images/game-asset-pipeline-load.svg",
-      "svg_sha256": "d180d6ce766bd318ea3a3325cda458983a40284170fe8afefd6ca0a08a1ab9e6"
+      "svg_sha256": "37512988ab3a3a8b69689343385d2ff0b24f9115ee059638a1e6460a768fb5b2"
     },
     {
       "source": "game-asset-pipeline-contract.mmd",
-      "source_sha256": "de2e349e7d1fbbb710ba9b0a615770395f5e5c4fb39c6cca7939dd8467b68343",
+      "source_sha256": "5ef72cebf60bcee6251f3f755761f17a1a293aaa8c6b4f1086e9e0916394366c",
       "svg": "images/game-asset-pipeline-contract.svg",
-      "svg_sha256": "fc8c8db62c89b222388b954173c7f3a93395ba9fbf4005154fbfea8e4106b02a"
+      "svg_sha256": "8d6150cbcc068daade211194627c22f2d75bdacc3fa7996e7679e8fc3956a9b9"
     },
     {
       "source": "forge-worker-ownership.mmd",
-      "source_sha256": "e46eb748f4c2f480461220c7458bf386b82800fb0f4f6b1bcc4977ccff6fc44b",
+      "source_sha256": "c522c74b67d8b3de096f90c87120424215f910986c37f136eb53e44f41555aa7",
       "svg": "images/forge-worker-ownership.svg",
-      "svg_sha256": "abe093f5826178fde2e86a455e69a0dd3c45e97e9cb7a9a1794acd562b760517"
+      "svg_sha256": "86a9475bb6bb2a868a670132a0462c5b6f010f74158dcc570e41c4337f02e919"
     },
     {
       "source": "forge-game-worker-handoff.mmd",
-      "source_sha256": "aec2b13cf035ebd07becb1ec5dc35cf48e2967a9d2473957ea03c41e2a7ca9d5",
+      "source_sha256": "a370eb5d3815378a335c3a873b0e6f74d4c81515033b1719bbc60aa8f3e878d1",
       "svg": "images/forge-game-worker-handoff.svg",
-      "svg_sha256": "e4cf60844d0f666ea0685869c50b959562daf11bb72b829a2d3522b9e7be209f"
+      "svg_sha256": "c8e89f061aabaf8341a4a39bdd1a1abb8e4deeec9c112f37d4ccc66d091e2482"
     },
     {
       "source": "forge-studio-worker-lease.mmd",
-      "source_sha256": "84c7dbfe4b9bc97fb6c3857a761b96ff3b96c566264be1eb3c30b6987ca8f88a",
+      "source_sha256": "023926bb29128d79e0d62e9ab3075384705ee95907a99fbed90b787152c59997",
       "svg": "images/forge-studio-worker-lease.svg",
-      "svg_sha256": "6d6a64b0e4c1267ebfb37dc3c4b617e9ff9cab03b0e77508e417740a65254e9c"
+      "svg_sha256": "980d583511ca897da75a749a8af9759a5afc75469597a750a35664bb044a668f"
     }
   ]
 }

@@ -1,25 +1,49 @@
 # Forge framework delivery roadmap
 
-**Status:** Proposed sequencing based on the complete repository synthesis. This is a plan, not completed implementation or authority to modify source repositories.
+**Status: current implementation checkpoints plus the original delivery sequence.**
+Reviewed against the repository on 18 November 2026. The table below replaces
+older blanket statements that durability, remote access or UI are future work.
+The original milestone exit criteria remain useful goals, not a claim that every
+generic lifecycle or production guarantee has been completed.
+
+## Delivery status now
+
+| Slice | Current repository state | Remaining scope |
+| --- | --- | --- |
+| Typed core and assembly | Implemented headers, admission/variant gates, frozen routes, typed registrar groups, declared dependency-order checks and singleton/transient providers | Automatic graph execution, generic pooled scopes and a general managed lifecycle engine |
+| Local terminal | Implemented node observations, admitted discovery, optional native disk sessions and a volatile manually stepped counter | Whole-machine health, a filesystem sandbox and arbitrary process execution |
+| Access and durable jobs | Implemented verified subject/deadline contexts, exact-route grants, a private locked file store, committed sum-job receipts/results, leased attempts and owned worker shutdown | Generic programs, automatic receipt retention, remote job delivery and broad identity/delegation |
+| Agent and managed editing | Implemented configured HTTPS/mTLS node/project/source calls and explicit managed-write grants with revision/journal guards | Enabling writes requires a provisioned private Unix workspace; arbitrary filesystem paths and shell execution remain outside the contract |
+| Generated portal | Implemented Chat/Mail/Workbench, compact mobile controls, Home, focused Design readers and same-tab workspace recovery; local WASM ABI 4 | General editor-widget integration and a universal replaceable navigation/module DSL remain separate designs |
+| Reuse and release | Concrete optional capability consumers and public registrar fixtures exist | Workspace crates remain `publish = false`; source availability, local tests, deployed configuration and a supported public SDK are different claims |
+
+Use the [source-backed blueprint inventory](../architecture/forge-framework-blueprint.md#current-implementation)
+for implementation entry points. Test definitions describe intended coverage;
+this documentation review does not certify a fresh test run or a new deployment.
 
 ## Generated IDE UI checkpoint
 
 The [initial implementation](../../src/rust/forge-ide-web/README.md) contains typed
 Rust component declarations, YAML style tokens, generated semantic assets, a real
 worker/WASM model and an explicitly admitted loopback host to the existing agent.
-File tree, declaration outline/details and partial/error/cancel/stale state are
-read-only; source editing, multi-user identity and public hosting are deferred.
+It includes file/source inspection, guarded editing for explicitly writable
+managed projects and distinct partial/error/cancel/stale states. The host supports
+an explicit HTTPS origin and trusted-proxy sessions; live enablement and access
+controls are recorded separately in the service inventory.
 Native checks, real WASM ABI tests and generated-worker fault tests are distinct
 from real-browser end-to-end acceptance; never promote one into the other.
 
 The [workbench follow-on](../../src/rust/forge-ide-web/WORKBENCH.md) adds the compact
-context toolbar, bounded report-local entry/symbol filters, Problems navigation,
-central declaration details, reusable pane geometry/narrow controls and protected
+header project/view sheets, a unified report-local entry/symbol query, Problems
+counts/navigation, reusable pane geometry/narrow controls and protected
 DOM teardown. Every local action carries accepted report context; stale integer
-IDs cannot select data from a new report. This changes the experimental UI event
-contract and raw WASM ABI to 2, not the existing native inspection protocol.
+IDs cannot select data from a new report. The current bundle uses local WASM
+ABI 4; older ABI 2 diagrams describe an earlier checkpoint. Native inspection
+protocol versioning remains separate.
 Main promotion requires same-head Rust and actual sandboxed desktop/narrow browser
-checks plus visual review. No editor, source-body API or new remote action is added.
+checks plus visual review. Bounded source and managed-edit operations now have
+separately admitted native paths. An external editor-widget lifecycle remains a
+proposal.
 
 ## Authenticated node-info boundary — implemented narrow proof
 
@@ -28,10 +52,10 @@ now exercise one read-only node.info call over mutual TLS on loopback. Configure
 certificate mapping and independent operation policy precede the existing bridge;
 wire DTOs/runtime remain in the adapter. Public config/factory/registrar and a
 separate consumer establish reusable integration and dependency omission. No
-production deployment, remote jobs/mutations, credential provisioning or Bitwave
-is included. The configured agent checkpoint below now adds read-only IDE aliases,
-not arbitrary file access. Physical-host operation and broader capabilities remain
-separate security/lifecycle gates.
+remote jobs, credential provisioning or Bitwave is included in that original
+node-only proof. The configured agent subsequently added project/source operations
+and explicit managed writes. Operational deployment is separately configured;
+the initial loopback example is not physical-host validation.
 
 ## Forge IDE initial capability — implemented
 
@@ -40,13 +64,20 @@ native filesystem client and inspection task through public config/registrar/fac
 exports. A feature-gated CLI uses typed shared ingress and emits YAML for the typed
 file tree, text line counts and Rust declaration hierarchy. Real syntax parsing is
 not macro expansion or semantic analysis. Symlinks are not followed; budgets and
-incomplete inspection statuses are explicit. Editor/LSP, watch mode, incremental
+incomplete inspection statuses are explicit. External editor-widget/LSP integration, watch mode, incremental
 analysis, cross-file resolution and untrusted-source process isolation are **not
 implemented** and are not automatically authorized next work.
 
 ## Current implementation checkpoint
 
-The [first Rust core](../../src/rust/README.md) establishes part of Stage 1: validated headers, generic typed request/response, explicit payload-kind agreement, frozen duplicate-safe routes and an injected admission seam. Separate factory/provider/lease primitives support singleton/transient injection. The in-process greeting example proves composition without a transport. Independent `IoClient` and `Task` contracts now also support prepared-request execution, pure computation and injected-client orchestration, initially proven with fake-only examples; the native disk follow-on is documented below. A synchronous `Task` is not the supervised/durable worker in Stage 4. It does **not** complete Stage 1 deadline/security requirements, the provider graph validator, or the durable jobs slice below. The workspace documents exact executed checks and deferred behavior. A sixth core crate now implements atomic typed group registration/freeze, and three optional-demo packages prove configured registrar assembly without adding production transports.
+The [Rust core](../../src/rust/README.md) establishes validated headers, typed
+request/response values, payload-kind agreement, frozen duplicate-safe routes and
+injected admission. Factory/provider/lease primitives support singleton/transient
+injection; a sixth core crate stages typed factory groups and validates declared
+construction order before freeze. Independent `IoClient` and `Task` contracts stay
+synchronous. Deadline/identity wrappers and durable jobs now exist in selected
+capability/adapter packages; they do not turn Task into a scheduler or the
+bootstrap registry into an automatic graph executor.
 
 ## Local runnable system checkpoint — implemented
 
@@ -103,9 +134,11 @@ The [module/interface design](../architecture/foundation-interfaces.md) and
 bounded job engine, independent verified-identity/resource-policy boundary and
 transport-neutral addressed call. The views distinguish proposed imports/ports/remote reads from the implemented
 local counter lifecycle. No extra source crate or cancellable Task is implied.
-The first private-module proof exists; choose remote transport only after identity
-and codec semantics are separately demonstrated. Exact public APIs remain
-provisional, including any coordinated migration of exhaustive application enums.
+The concrete `forge-access`, `forge-jobs`, `forge-remote` and HTTPS packages now
+implement narrower contracts with their own exact exports. The generic sketches
+remain proposals; do not import their illustrative names as if they were the
+implemented APIs. Coordinated changes to exhaustive application enums remain a
+source-compatibility concern.
 
 ## Next core slice: bootstrap and registrars
 
@@ -124,7 +157,7 @@ Original bootstrap checkpoint: 75 all-feature integration tests plus five doctes
 
 **Demonstrated:** a small consumer can choose implementation packages, pass typed startup config, run bootstrap and obtain a working typed in-process application—or a specific error with no partial publication. A client-using task prepares requests; injected clients execute them. A pure task remains independent of clients. This establishes the plug-and-play core, not a complete operational host.
 
-**Later, only when needed:** automatic graph ordering/diagnostics, runtime registration, pooled/request-scoped providers, async factories/cleanup, managed workers/readiness/shutdown, additional concrete remote/local clients and presentation/navigation adapters. A generic home can later expose explicit default/replace/extend contracts; do not implement a UI to prove factory registration. That original core checkpoint selected no transport. The later optional HTTPS agent and generated UI host now provide concrete adapters without making them mandatory core dependencies.
+**Later, only when needed:** automatic graph ordering/diagnostics, runtime registration, pooled/request-scoped providers, async factories/cleanup and a general managed lifecycle engine. Concrete owned workers, remote/local clients and presentation adapters already exist; their lifecycle remains application/capability-specific. A generic home can later expose explicit default/replace/extend contracts; do not implement a UI to prove factory registration. That original core checkpoint selected no transport. The later optional HTTPS agent and generated UI host now provide concrete adapters without making them mandatory core dependencies.
 
 ## Native disk access checkpoint
 
@@ -134,11 +167,11 @@ Native temporary-fixture tests cover deterministic listings, state isolation, fa
 
 ## Kernel planning sequence
 
-The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) now records the narrow implemented **local node/status/discovery and terminal checkpoint**, reusing typed bootstrap/bridge/provider contracts. The bounded local counter, optional authenticated HTTPS node/IDE agent and generated UI prototype now exist. The HTTPS adapter privately owns its runtime; synchronous core traits are unchanged. Durability, generic job hosting, automatic peer discovery, file mutation, public web hosting and a bootable Pi kernel remain deferred. UI browser acceptance is tracked separately from native/WASM tests.
+The [researched hosted-kernel plan](../architecture/forge-kernel-plan.md) now records the narrow implemented **local node/status/discovery and terminal checkpoint**, reusing typed bootstrap/bridge/provider contracts. The bounded local counter, optional authenticated HTTPS node/IDE agent and generated UI prototype now exist. The HTTPS adapter privately owns its runtime; synchronous core traits are unchanged. The durable sum-job store/worker, configured web host and explicitly granted managed writes are implemented. Generic job hosting, automatic peer discovery and a bootable Pi kernel remain deferred. UI browser acceptance is tracked separately from native/WASM tests.
 
 The small volatile job proof in that plan precedes—not satisfies—the durable acceptance gate below. The existing durable jobs example remains a separate later consumer, not a requirement to turn every local command into a stored job.
 
-## Later vertical slice: one useful workflow, not a new platform
+## Durable vertical slice — implemented bounded consumer
 
 The [durable jobs capability](../../src/rust/forge-jobs/README.md) implements
 typed submit, status and cancel over the shared bridge. It commits receipts
@@ -146,11 +179,16 @@ and results to a local store and runs one bounded sum job with leased attempts
 and restart recovery. Framework-wide identity and service lifecycle work
 remain separate milestones.
 
-After the bootstrap core is proven and a durable consumer is selected, build the illustrative `jobs.submit` → `jobs.status` workflow. The first route validates a bounded work request and returns a stable durable receipt; the second makes that acceptance observable. Use a trivial, explicitly documented job kind. Execution, network/broker integrations, scheduling, remote model calls, and deployment orchestration are not prerequisites for proving the first admission/storage seam.
+The original gate was the `jobs.submit` → `jobs.status` workflow, now implemented for the bounded sum consumer. The first route validates a bounded work request and returns a stable durable receipt; the second makes that acceptance observable. Use a trivial, explicitly documented job kind. Execution, network/broker integrations, scheduling, remote model calls, and deployment orchestration are not prerequisites for proving the first admission/storage seam.
 
-Start with an in-process contract driver, the shared bridge, one capability, and a real local durable-store adapter. No input transport is selected or required. A thin CLI or network adapter can be considered later for an actual consumer; neither is a prerequisite. A memory adapter is useful for unit tests but cannot satisfy the durability gate. This is intentionally more meaningful than a health endpoint and smaller than recreating Mission Control.
+Start with an in-process contract driver, the shared bridge, one capability, and a real local durable-store adapter. No input transport is selected or required. The optional Unix `forge-jobs` CLI now supplies one authenticated local consumer; remote delivery is a separate extension. A memory adapter is useful for unit tests but cannot satisfy the durability gate. This is intentionally more meaningful than a health endpoint and smaller than recreating Mission Control.
 
-## Milestones and exit evidence
+## Original milestones and exit criteria
+
+Stages 1/1b, the bounded Stage 2 store and Stage 4 sum worker have concrete
+implementations linked above. Stage 3 is implemented in specific host paths,
+not as a universal lifecycle framework. Later extension/release goals remain
+provisional; this table preserves their intended acceptance criteria.
 
 | Stage | Scope | Exit evidence | Do not add yet |
 | --- | --- | --- | --- |
@@ -208,6 +246,9 @@ public batch project registrar, named-node client config, one mTLS POST gateway,
 operation/project authorization, reused IDE task and typed bounded report to YAML.
 Actual tests run two localhost processes, including denied identity/alias, timeouts,
 limits and signal shutdown. [Current details](../../src/rust/forge-agent/README.md).
-The original proposal PDF remains a dated design record. The next operational
-validation is an explicitly authorized two-host trial and credential lifecycle
-review—not remote jobs, mutation or arbitrary filesystem paths by implication.
+The original proposal PDF remains a dated design record. Current source also
+supports bounded `ide.source` and explicitly granted `ide.managed_write`; read
+permission alone cannot enable mutation. Physical-host validation and credential
+lifecycle are operational evidence in the service inventory, not implied by a
+localhost fixture. Generic remote jobs and arbitrary filesystem paths remain
+outside this agent contract.

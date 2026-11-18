@@ -91,10 +91,13 @@ chats as soon as they are due.
 When the web host sets `chat.workspace_persistence`, it uses the configured
 runner credential to save and restore the workspace. PostgreSQL holds completed
 Chat history for the operator and personal checkpoints for each browser tab.
-A new tab loads committed Chat messages. The original tab also restores its
-unsent drafts, selected conversation, and Workbench bookmark. The browser stores
-only its random tab identifier. The Workbench still loads a fresh inspection and
-verifies its selected source again.
+A new tab can list and open committed Chat messages. The original tab also
+restores its Chat drafts, selected conversation, pending run, and Workbench
+bookmark. In addition to its random tab identifier, the browser keeps a bounded
+same-tab Home/Design handoff JSON cache of drafts and bookmarks; completed
+transcript bodies are excluded. The Workbench loads a fresh inspection and
+verifies its selected source again. Active history uses `ide_chats`; the legacy
+`ide_workspace_history` row records activation and migration metadata.
 
 Apply the migrations with `../setup-postgres.sh` before updating the runner and
 enabling persistence in the web host. Upgrade the runner before publishing a
@@ -146,7 +149,16 @@ deadline and the adapter allows up to 30 minutes for inference.
 PostgreSQL stores the ordered Mail transcript and job history. Each new request
 replays all completed exchanges followed by its new message. The transcript stays
 readable after the thread reaches its recall limit and moves to Archive. A reply
-that reached the generation limit is marked in the reader.
+that reached the generation limit is marked in the reader. Archive is automatic;
+manual archive, delete, and read/unread mutations are not current Mail routes.
+
+Current Rust UI requests optional bounded previews and per-message dates with
+`include_metadata`. Inbox rows show sender, date, subject, preview and generation
+status; Compose opens the new-message form and Reply to thread opens the inline
+follow-up. Five-second Rust-scheduled refresh runs while visible work is pending.
+Unsent Mail drafts are current-page state and same-tab navigation handoff data,
+not durable or cross-device saved drafts. Model switch or restart loses prefix
+KV cache; saved text is replayed instead.
 
 ### Monitor the Mail model on Forge
 

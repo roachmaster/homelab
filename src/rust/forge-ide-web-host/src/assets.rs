@@ -19,6 +19,9 @@ const NAMES: [(&str, &str); 5] = [
 const HOME_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/home.html"));
 const HOME_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/home.css"));
 const DESIGN_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design.html"));
+const PORTAL_NAVIGATION_SEQUENCE: &[u8] =
+    include_bytes!("../../../../docs/architecture/diagrams/mermaid/images/m29-ui-docs-handoff.svg");
+const IMPLEMENTATION_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/implementation.html"));
 const PREVIOUS_CHATS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/previous-chats.html"));
 const WIREFRAMES_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wireframes.html"));
 const WORKSPACE_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/workspace.html"));
@@ -82,7 +85,27 @@ const PLAYTEST_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.c
 const PLAYTEST_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.js"));
 const PLAYTEST_ASSETS_WORKER_JS: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/playtest-assets-worker.js"));
-const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
+const DESIGN_IMAGES: [(&str, &[u8]); 15] = [
+    (
+        "forge-ide-chat-history-phone.png",
+        include_bytes!("../design/forge-ide-chat-history-phone.png"),
+    ),
+    (
+        "forge-ide-workbench-explorer-phone.png",
+        include_bytes!("../design/forge-ide-workbench-explorer-phone.png"),
+    ),
+    (
+        "forge-ide-mail-inbox-phone.png",
+        include_bytes!("../design/forge-ide-mail-inbox-phone.png"),
+    ),
+    (
+        "forge-ide-mail-thread-phone.png",
+        include_bytes!("../design/forge-ide-mail-thread-phone.png"),
+    ),
+    (
+        "forge-ide-mail-thread-desktop.png",
+        include_bytes!("../design/forge-ide-mail-thread-desktop.png"),
+    ),
     (
         "forge-ide-chat-desktop.png",
         include_bytes!("../design/forge-ide-chat-desktop.png"),
@@ -130,6 +153,12 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/home" | "/home/" => Some(("text/html; charset=utf-8", HOME_HTML)),
         "/design/home.css" => Some(("text/css; charset=utf-8", HOME_CSS)),
         "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
+        "/design/portal-navigation-sequence.svg" => {
+            Some(("image/svg+xml", PORTAL_NAVIGATION_SEQUENCE))
+        }
+        "/design/implementation" | "/design/implementation/" => {
+            Some(("text/html; charset=utf-8", IMPLEMENTATION_HTML))
+        }
         "/design/previous-chats" | "/design/previous-chats/" => {
             Some(("text/html; charset=utf-8", PREVIOUS_CHATS_HTML))
         }

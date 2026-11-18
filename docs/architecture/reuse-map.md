@@ -2,6 +2,17 @@
 
 **Status:** Architecture synthesis from 16 finalized repository reports: the original reviews dated 30 October 2026, plus Pi Cluster Control reviewed on 31 October 2026. This is an architectural selection, not a claim that extracted code builds or is ready for public distribution.
 
+## Current implementation checkpoint — 18 November 2026
+
+The repository reviews below remain dated provenance, not fresh reviews of their
+retired source trees. The extracted design is now represented by concrete code in
+this repository: typed core/registrar/provider contracts, local node/disk tools,
+verified access contexts, durable sum jobs, configured HTTPS project/source and
+managed-write adapters, and the generated browser portal. The
+[source-backed blueprint inventory](forge-framework-blueprint.md#current-implementation)
+links their current entry points and limits. This update inspects those local
+implementations; it does not rerun or recertify the historical projects.
+
 ## Recommendation
 
 **Do not merge the repositories. Converge their best boundaries.** Use the small envelope/command seams in `forge-framework` as the primary contract candidate; use Mission Control as the strongest assembled example of one command port behind several transports; take consuming registration and resource-lifetime discipline from HPVS. Compare `forge`'s typed factories and versioned wire behavior when selecting the final handler model. Keep one canonical vocabulary, not four overlapping notions of task, command, event, registry, and runtime. [Framework review](../reviews/forge/forge-framework.md), [Mission Control review](../reviews/forge/mission-control.md), [HPVS review](../reviews/forge/forge-hpvs.md), [Forge runtime review](../reviews/forge/forge.md)
@@ -33,7 +44,7 @@
 
 Source reinspection confirms an important distinction. In the reviewed `forge-framework`, `crates/forge-core/src/envelope.rs` defines a `CommandPayload` enum with structured fields of custom `ForgeValue` or raw bytes; `crates/forge-command/src/api.rs` is generic over typed `Request`. Mission Control's `services/forge-core/src/envelope/mod.rs` has the same fields-or-bytes shape, while its command framework is generic over typed requests; the inspected database facade converts that envelope into its capability request. These are custom enum/value contracts, **not `serde_json::Value` as the universal envelope**, but neither inspected shared envelope is already `Envelope<P>` over a capability-owned business enum. [Framework report](../reviews/forge/forge-framework.md), [Mission Control report](../reviews/forge/mission-control.md)
 
-The target retains the typed-command intent and strengthens it: capability-owned Rust payload enums, a generic envelope/bridge, and explicit header/variant agreement before effects. A selected external codec may translate JSON into those enums; an in-process caller constructs them directly. Do not reproduce a generic fields map internally under another name. If one application combines several capability payload types, a finite sum may belong to its composition package—not to a central framework enum. This is a proposed adaptation, not a claim of drop-in compatibility with either snapshot.
+The target retains the typed-command intent and strengthens it: capability-owned Rust payload enums, a generic envelope/bridge, and explicit header/variant agreement before effects. A selected external codec may translate JSON into those enums; an in-process caller constructs them directly. Do not reproduce a generic fields map internally under another name. If one application combines several capability payload types, a finite sum may belong to its composition package—not to a central framework enum. This is now an implemented adaptation in the local core; it is not a claim of drop-in compatibility with either historical snapshot.
 
 ## Provider/factory lineage
 
@@ -45,7 +56,7 @@ The target adapts these into explicit constructor injection and narrow provider 
 
 Focused source reinspection on 31 October 2026 confirms continuity: Mission Control has domain-owned handler-list functions, injected effect ports, explicit registry-backed APIs and application bootstrap that shares one command-port instance across selected inbounds. Forge-framework has explicit handler/registry/dispatcher/API construction. These are the base patterns being refined, not evidence of a general discovered registrar/container already implemented. Mission Control's typed registry rejects duplicate bindings before mutation; its domain router and Forge-framework's handler registry instead replace before reporting duplicate errors. Preserve the former invariant, not accidental replacement behavior.
 
-Mission Control's named bootstrap helpers have specific jobs; its UI page/service catalog is hardcoded, not a modular default/replace/extend mechanism. The implemented small homelab slice puts a fake concrete client, typed startup configuration, factory groups and reusable registrars in optional demonstration packages; production implementation packages remain future consumers. Application bootstrap calls them explicitly, validates/finalizes the staged plan, then constructs through existing providers. No mandatory transport, runtime discovery, JSON configuration bag or global business enum follows from those sources. [Bootstrap design](bootstrap-registrars.md) · [Mission Control report](../reviews/forge/mission-control.md) · [Framework report](../reviews/forge/forge-framework.md)
+Mission Control's named bootstrap helpers have specific jobs; its UI page/service catalog is hardcoded, not a modular default/replace/extend mechanism. The original homelab proof put a fake concrete client, typed startup configuration, factory groups and reusable registrars in optional demonstration packages. Native disk, configured HTTPS, browser hosting, model runtime and durable jobs now supply concrete optional consumers of that pattern. Application bootstrap calls them explicitly, validates/finalizes the staged plan, then constructs through existing providers. No mandatory transport, runtime discovery, JSON configuration bag or global business enum follows from those sources. [Bootstrap design](bootstrap-registrars.md) · [Mission Control report](../reviews/forge/mission-control.md) · [Framework report](../reviews/forge/forge-framework.md)
 
 ## Why Mission Control grew difficult—and what it got right
 
@@ -85,4 +96,4 @@ This synthesis covers **14 Forge repositories, Mission Control and Pi Cluster Co
 
 No source code, build scripts, tests, generators, inference runs, or deployment scripts were executed as part of these architectural reviews. Most reviewed snapshots lacked observed current test-check evidence, but not all CI was absent: the Bitwave-system snapshot has an observed failed CI run whose cause was not established. The Python agent runtime has a historical successful run whose job contents were not audited as suite proof. This is **not** a blanket passing-build assessment. [Bitwave-system verification](../reviews/forge/forge-bitwave-system.md), [agent-runtime verification](../reviews/forge/forge-agent-runtime.md)
 
-The new framework remains a proposed synthesis. Historical transport implementations are evidence, not a requirement to install the same transports in the new framework; no broker or network API is selected. [Typed bootstrap and registrar assembly](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars) now has a small in-process implementation; broader lifecycle and the durable admission vertical slice follow only when selected, with explicit failure tests and no wholesale repository merge.
+The historical reuse selection remains an architectural synthesis. The current local implementation now includes typed bootstrap, optional HTTPS and browser adapters, verified contexts and a durable sum-job store/worker. Those concrete choices do not make a transport mandatory in core or complete the broader lifecycle design. Preserve explicit failure tests and capability boundaries; no wholesale repository merge is needed.

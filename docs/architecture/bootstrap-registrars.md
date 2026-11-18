@@ -1,6 +1,14 @@
 # Bootstrap and cohesive factory registrars
 
-**Status: small bootstrap subset implemented.** The five earlier [Rust crates](../../src/rust/README.md) retain their public contracts. A sixth core package, [`forge-bootstrap`](../../src/rust/forge-bootstrap/README.md), and three explicitly labeled demo packages now implement atomic typed group registration, consuming validation/freeze and optional in-process assembly. The optional native disk module is a subsequent concrete client; automatic graph execution, remote clients, UI and managed lifecycle remain deferred. This refines the explicit assembly found in Mission Control and Forge-framework; it is not a new transport, parser, dynamic plugin loader or universal DI container. [Canonical vocabulary](framework-dsl.md) · [DI ownership](dependency-injection.md) · [Implementation checkpoint](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars)
+**Status: typed bootstrap is implemented and used by concrete hosts.** Reviewed
+against the repository on 18 November 2026. [`forge-bootstrap`](../../src/rust/forge-bootstrap/README.md)
+provides atomic typed group registration, consuming validation/freeze and explicit
+assembly. Native disk, the HTTPS agent, generated browser host, model runtime and
+durable jobs now consume the pattern; they are not all future demos. Automatic
+graph execution, dynamic loading, pooled scopes and a universal managed lifecycle
+engine remain deferred. See the [current implementation inventory](forge-framework-blueprint.md#current-implementation),
+[canonical vocabulary](framework-dsl.md), [DI ownership](dependency-injection.md)
+and [original bootstrap checkpoint](../roadmap/forge-framework.md#next-core-slice-bootstrap-and-registrars).
 
 ## The developer-facing contract
 
@@ -74,7 +82,14 @@ An omitted required binding/configuration is an assembly error. The implemented 
 
 Select an explicit implementation before invoking its default registrar; an unused default factory must never run. Two explicit choices conflict. Replacement must name a documented extension point—not depend on insertion order or a duplicate-error side effect.
 
-A future generic home can be the default presentation provider. **Replace** selects another home implementation; **extend** contributes uniquely identified entries to an explicit extension surface rather than another competing home handler. Keep navigation entries, command routes and DI bindings distinct. Validate application-action targets against registered commands; menu visibility is not authorization. Home rendering and remote front ends are follow-on capabilities, not prerequisites for bootstrap core.
+A generic replaceable home remains a proposed extension surface. The current
+portal already renders Home and Design from typed Rust declarations, but that
+does not implement a generic default/replace/extend navigation registry.
+**Replace** would select another home implementation; **extend** would contribute
+uniquely identified entries rather than another competing home handler. Keep
+navigation entries, command routes and DI bindings distinct. Menu visibility is
+not authorization. Concrete remote front ends now exist as optional consumers;
+none is a prerequisite for bootstrap core.
 
 ## Continuity with the reviewed base
 

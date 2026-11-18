@@ -37,3 +37,27 @@ Use this lifecycle excerpt to distinguish stored state from the reply to a comma
 | Terminal | Owner cancels again | Same terminal state | `AlreadyTerminal` |
 
 To review a change, start with each goal or invariant in the table and locate the operation and acceptance evidence. Then start from each public operation and dependency in the design and find the requirement or existing contract that justifies it. This worked trace is documentation derived from the current contract and does not record a new execution.
+
+
+## Current second example — durable sum jobs
+
+The manually stepped volatile counter above and the separate durable jobs
+consumer have different contracts. The latter is implemented in
+[`forge-jobs`](../../src/rust/forge-jobs/README.md) and selected by the optional
+[Unix executable](../../src/rust/forge-terminal/src/bin/forge-jobs.rs).
+
+| Interaction | Actual owner and ordering |
+| --- | --- |
+| Bootstrap | Stage operator-verifier, private-store and worker recipes; freeze; create the verifier and store; bind the acquired store to the worker recipe only if worker mode was selected |
+| Authenticate and submit | The configured verifier issues an access `Context`; exact-route policy and payload-kind checks precede the binding; the store derives ownership from that verified subject |
+| Commit acceptance | The locked local file store validates owner/key/work, syncs its replacement snapshot and directory, then returns a stable receipt. A replay of the same owner/key/work returns the retained receipt |
+| Execute | The owned worker claims a leased attempt for the bounded sum. Store checks fence completion by work, attempt and unexpired lease; retry budget bounds reclaim |
+| Cancel and stop | Cancellation records the terminal cancelled state and invalidates the lease, preventing that attempt from publishing a result. Worker shutdown stops polling and joins the owned thread; this is distinct from the volatile counter's requested-cancellation step flow |
+
+The durable store currently has bounded capacity and no automatic completed-receipt
+expiration. It is not an arbitrary command runner, generic program API or remote
+job service. See [source and integration scenarios](../../src/rust/forge-jobs/tests/durable.rs)
+for the concrete acceptance, replay, restart and stale-attempt cases. This trace
+is a source review, not a new execution record. The
+[current blueprint inventory](forge-framework-blueprint.md#current-implementation)
+keeps implemented subsets distinct from the original generic foundation sketches.

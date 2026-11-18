@@ -1,6 +1,6 @@
 # Forge IDE inline edit
 
-**Design proposal.** This adds a Workbench prompt and a staged, single-file diff to Forge IDE. The UML diagrams specify intended behavior for implementation and verification. Chat remains the place for longer conversations. The [editable wireframe](../../design/forge-ide-wireframes/forge-ide-inline-edit-mobile.svg) shows the prompt and review states at a 390 px phone width.
+**Implemented repository slice — reviewed 18 November 2026.** The Workbench prompt, structured single-file diff, direct textarea editing and managed Apply/Undo/status path exist in the current Rust model, host and source agent. The live source project remains read-only unless explicitly opted in. The UML below records the implemented responsibility/recovery flow; conceptual role names in the data table are not a claim of exact exported Rust types. Chat remains the place for longer conversations. The [editable wireframe](../../design/forge-ide-wireframes/forge-ide-inline-edit-mobile.svg) preserves the earlier prompt/review sketch; current captures are in the [layout reference](../../design/forge-ide-wireframes/README.md).
 
 ![Proposed mobile Workbench prompt and diff review](../../design/forge-ide-wireframes/forge-ide-inline-edit-mobile.svg)
 
@@ -14,20 +14,20 @@
 | Base changed | Proposal remains reviewable with a conflict banner | **Refresh source** and **Discard**. Apply is unavailable. |
 | Applied | Freshly verified source after inspection and read complete | **Undo edit** while the applied revision is eligible for reversal |
 
-On desktop, dock the row under the central File pane and leave Explorer and secondary panes in place. On phones, put the dock below the scrollable source area. Reserve space for it and the safe-area inset so it never covers the last line. Use a roughly 48 px idle row and a 44 px minimum touch target. Measure visible lines on the same Makefile fixture at 390 × 844. The current 32-line measurement precedes this dock. Use 28 visible unwrapped lines as the initial target.
+On desktop, dock the row under the central File pane and leave Explorer and secondary panes in place. On phones, put the dock below the scrollable source area. Reserve space for it and the safe-area inset so it never covers the last line. Use a roughly 48 px idle row and a 44 px minimum touch target. Measure visible lines on the same Makefile fixture at 390 × 844. The earlier numeric line-count target was a design measurement, not a current guarantee. The acceptance fixture checks visible source, dock reachability and focus at the rendered viewport.
 
 Keep **Wrap**, the selected pane, and keyboard focus behavior. A named **Ask Forge** action can open the dock. An optional desktop shortcut should use the same action and remain configurable where it conflicts with a browser shortcut. Make the diff review accessible by keyboard. Announce proposal ready, conflict, and applied states without moving focus out of the user's current control. Use text markers and line numbers alongside diff colors. A preview may reuse the renderer's numbered text rows, but it needs distinct diff row types so a source highlight retains its current meaning.
 
-## Existing contracts and delivery order
+## Implemented delivery checkpoints
 
-1. **Contextual prompt.** Put the dock on the existing generated Workbench. WASM owns the active conversation and captures the selected file reference, accepted report identity, digest, line window, and bounded excerpt at submit time. Show the attached window in the UI. A change of file while a reply is pending must leave that reply in its originating Chat thread. In this phase, label the action **Ask Forge about Makefile…** and return a text reply. The edit label is for Phase 2.
-2. **Stage and apply a diff.** Add an independently versioned structured proposal contract and explicit write admission. Release preview and discard against a read-only fixture first. Enable Apply and Undo on a write-enabled project once the native revision, journal, and recovery checks pass.
+1. **Contextual prompt.** Put the dock on the existing generated Workbench. WASM owns the active conversation and captures the selected file reference, accepted report identity, digest, line window, and bounded excerpt at submit time. Show the attached window in the UI. A change of file while a reply is pending must leave that reply in its originating Chat thread. The implemented **Send** action returns a conversational answer; **Propose edit** requests a structured candidate. Neither action publishes a file change.
+2. **Stage and apply a diff.** Structured proposal/review and Discard operate without writes. Apply/Undo/status and direct textarea saves use the separate admitted managed-write capability, native revision fence and durable operation journal. Deployment must opt in to a managed project.
 
 Forge supports digest-checked source reads through `ide.source`, a bounded `PreparedChat` transcript through `ide.chat`, and a generated source viewer with line highlights. Chat and Workbench share the active conversation. When saved history is enabled, a contextual send uses the conversation ID and expected revision. The host separately verifies the excerpt for inference. Reopening a conversation shows the recorded file path, revision, and line range alongside the saved prompt. [Source behavior](../../../src/rust/forge-ide-web/WORKBENCH.md#source-and-request-ownership) · [Current wire protocol](../../../src/rust/forge-ide-ui/src/protocol.rs) · [Runner persistence](../../../deploy/mission-control/agent-runner/README.md)
 
 The implementation stages proposals in the native web host. The browser uses `ide.edit_write` for Apply, Undo, and status. The host forwards the authorized operation through `ide.managed_write@1`, and the agent owns publication and the durable journal. Browser reload recovery uses the current web host session's latest operation. [Managed workspace configuration](../../../src/rust/forge-agent/README.md#managed-inline-writes)
 
-## Proposed data and ownership
+## Design roles and implemented ownership
 
 | Contract | Contents and authority |
 | --- | --- |
@@ -120,10 +120,10 @@ Each inference request can carry the latest verified file window for that turn. 
 - Persist the operation ID, base and expected result digests, and a bounded before-image in the native write journal. Make the receipt recoverable across a lost response or process restart. A replay of the same request returns or reconciles the original operation. A reused ID with different input is rejected. Leave ambiguous recovery in **Reconciling**.
 - On Apply or Undo success, invalidate the original inspected revision and re-read via the verified source path. If the user has opened another file or project, retain its current view and attach the receipt to the original operation. A refresh failure can follow a successful write. Show that distinction and offer refresh recovery. An intervening edit blocks Undo. Expired before-images remove the Undo action.
 
-## Acceptance before enabling writes
+## Acceptance for configured managed writes
 
-- The Workbench prompt and Chat show the same in-session turn. File switching and late replies preserve the originating thread. Phase 1 sends no write effect.
+- The Workbench prompt and Chat show the same in-session turn. File switching and late replies preserve the originating thread. Send and proposal preparation send no file-write effect.
 - Apply a change that shifts line numbers, switch to Chat, and inspect the next inference request. It must carry the fresh verified revision and line range for a file-specific follow-up, with no superseded attachment. Repeat after Undo, after a lost receipt, and when refresh fails. Verify the conversation retains its historical turns and the proposal displays the receipt revision.
 - The diff accurately shows additions and deletions and preserves source text and Wrap. Discard performs no filesystem mutation. Mobile keyboard and touch checks cover the dock, focus, and bottom source visibility.
 - Apply rejects wrong session, project, file identity, CSRF, expired proposal, base drift, and operation-ID mismatch before publication. Test concurrent Apply, response loss, restart, refresh failure, and Undo after a later edit.
-- Run native contract tests, real-WASM tests, and the browser acceptance suite with owned fixtures. The diagrams and wireframe document proposed behavior.
+- Run native contract tests, real-WASM tests, and the browser acceptance suite with owned fixtures. The sequence/state diagrams describe the implemented contract; the linked schematic preserves the earlier layout proposal.

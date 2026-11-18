@@ -285,6 +285,8 @@ of all M08 delegation/resource-policy sketches. [Actual API and limits](../../re
 
 ## M18 — Implemented configured remote IDE agent
 
+This view records the initial configured read-only milestone. The current agent also supports separate `ide.source` reads and explicitly opted-in managed writes; see the [agent guide](../../../../src/rust/forge-agent/README.md) and current M25 view. The initial proof is not the full present capability inventory.
+
 ![Implemented agent composition and admitted request flow](images/m18-agent-implementation.svg)
 
 [Mermaid source](m18-agent-implementation.mmd) · [Actual API, config and limits](../../../../src/rust/forge-agent/README.md).
@@ -347,103 +349,64 @@ preempted. No remote jobs, mutations or additional verbs are implemented.
 
 ## M25 — Generated UI implementation
 
-![Generated UI build and runtime ownership](images/m25-ui-implementation.svg)
+![Current generated UI boundary](images/m25-ui-implementation.svg)
 
-[Mermaid source](m25-ui-implementation.mmd) · [Run/build instructions](../../../../src/rust/forge-ide-web/README.md).
-Blue is the new implemented code; teal is the existing agent. Arrows are build
-artifacts or runtime messages, not Cargo imports. The portable model has no native
-IDE/TLS/filesystem dependency. The optional native generator and separate native
-host depend inward; neither imports the other. The main thread never fetches a
-business API, and the worker never owns DOM. The same command path carries session
-bootstrap/resume and inspection; static asset GETs are not per-task endpoints.
-Native/WASM checks do not alone establish browser acceptance: see the implementation
-verification record. M19–M24 and the PDF remain labeled historical proposal views.
-
+[Source](m25-ui-implementation.mmd). Rust/YAML declarations build the verified ABI4 IDE bundle. Main JS owns DOM/focus/lifetime; Rust/WASM owns accepted domain state; generated worker I/O reaches the admitted native host. The source agent, PostgreSQL Chat/Mail runner and optional Studio relay are separate native targets. Managed writes and Studio require configuration; a diagram edge does not enable them. Static Home/Design routes are generated documents, not per-task API endpoints. M19–M24 and the PDF retain the original proposal snapshot.
 
 ## Forge IDE workbench decomposition
 
-[Design specification](../../../design/forge-ide-components/README.md) ·
-[Component contracts](../../../design/forge-ide-components/components.md) ·
-[Guarded transitions](../../../design/forge-ide-components/transitions.md).
-These now map the implemented read-only workbench. Composition names remain
-design vocabulary, not one public Rust type/crate per box. The original wireframes
-and earlier PDF remain historical; see the [workbench guide](../../../../src/rust/forge-ide-web/WORKBENCH.md) for concrete APIs and compatibility.
+[Current specification](../../../design/forge-ide-components/README.md) · [components](../../../design/forge-ide-components/components.md) · [transitions](../../../design/forge-ide-components/transitions.md) · [current layouts](../../../design/forge-ide-wireframes/README.md).
 
 ### M26 — Components and state ownership
 
-![Implemented UI compositions and model ownership](images/m26-ui-components.svg)
+![Current UI compositions](images/m26-ui-components.svg)
 
-[Source](m26-ui-components.mmd). UML-like compositions group C01–C09 for readability;
-the catalog specifies each component. Diamonds mean composition; other arrows
-show presentation/model dependencies, not HTTP traffic or authorization. These are
-compositions/modules, not nine crates or deployment services. Generated presentation owns DOM/focus/panes;
-WASM owns application selection, reports and request policy. Existing typed effects
-still cross worker glue to admitted native host/agent; M25 shows that runtime seam.
-No component becomes an authorization or service-locator boundary.
+[Source](m26-ui-components.mmd). Composition names are design roles, not a crate/type per box. Actual typed primitives provide sheets, unified query mode, verified source, optional editor/review and Chat/Mail screens. Rust retains report/mode/source/edit guards. Pure components do not become registries or authorization boundaries.
 
 ### M27 — Screens, panels and navigation
 
-![Screen and local view map](images/m27-ui-navigation.svg)
+![Current screens and document navigation](images/m27-ui-navigation.svg)
 
-[Source](m27-ui-navigation.mmd). Connection and Workbench are two compositions of
-one document at `/`. Overview/file details, Explorer, Outline and Problems are local
-views/panes; loading, partial and failure are states, not URLs. No new History API
-or deep-link behavior is proposed for the first slice. Browser leave/return or
-reload creates a fresh worker/session check, not automatic inspection. Generic
-Denied does not prove session expiry; recovery is explicit. Fatal worker recovery
-is outside the model's Phase enum.
+[Source](m27-ui-navigation.mmd). Chat/Mail/Workbench share `/`; Home/Design are same-tab documents reached through checkpoint/handoff. Returning resumes admission and restores supported state before a declared view entry. The entry fragment is consumed. Ordinary pane/tree navigation does not expose report IDs or create a global application history stack. Fatal recovery clears protected DOM and creates a fresh owned instance.
 
 ### M28 — Inspection lifecycle
 
-![Inspection phases with matching-result guards](images/m28-ui-transitions.svg)
+![Current inspection, source and write guards](images/m28-ui-transitions.svg)
 
-[Source](m28-ui-transitions.mmd). This focuses on existing request phases; Connection
-and Pairing entry are in M27 and the transition table. A result requires a matching
-token plus target/project/version/deadline/report validation. Cancel and context
-change invalidate local ownership, not remote computation. Repeated Inspect is
-rejected while busy; retries are explicit. The accepted-report key guard now covers local selection/toggle/filter/diagnostic
-and pagination actions; outline actions also check the selected entry. This is a
-local public event/ABI 2 change, not a native HTTP schema change. Read the table for invalid,
-stale, network failure and focus/lifecycle cases omitted from simplified arrows.
+[Source](m28-ui-transitions.mmd). Report tokens/expiry gate acceptance. Query mode, filtering and local paging issue no remote request; source activation can prepare a separate admitted digest-checked read. Optional writes add native revision fencing, a durable receipt and reconciliation. Cancellation stops local waiting, not proven remote execution. The current browser ABI is4 and HTTP protocol1.
 
-## Forge game physics proposal
+### M29 — Documentation handoff and view entry
 
-These views describe the [physics proposal](../../proposals/forge-game-physics.md).
-The sequences expand its fixed tick and landing path. The type sketch shows a
-body owning its collider and the renderer matching the published root and
-local pose by tick. The proposed pose payload is separate from the existing
-position snapshot. Its transport remains open.
+![Same-tab documentation handoff](images/m29-ui-docs-handoff.svg)
 
-| Proposed view | Source | Image |
+[Source](m29-ui-docs-handoff.mmd). Latest acknowledged drafts must correspond to the checkpoint before leaving. A bounded same-tab fallback differs from durable storage and from the separate Mail navigation snapshot. Return rechecks admission and source; it does not trust the local JSON as authority. The store is the configured runner/PostgreSQL path or documented in-memory fallback.
+
+## Forge game physics implementation
+
+The [physics reference](../../proposals/forge-game-physics.md) now describes the implemented Q16 movement/controller, collision queries, fixed-tick ordering, contact/animation bridge and same-tick published pose. General dynamic-body simulation and playable combat/climbing remain separate work.
+
+| Current view | Source | Image |
 | --- | --- | --- |
-| Fixed tick, collision, and publication | [Mermaid](game-physics-tick.mmd) | [SVG](images/game-physics-tick.svg) |
-| Landing contact and animation bridge | [Mermaid](game-physics-animation.mmd) | [SVG](images/game-physics-animation.svg) |
-| Transform authority and publication | [Mermaid](game-physics-authority.mmd) | [SVG](images/game-physics-authority.svg) |
+| Tick, collision and snapshot | [Mermaid](game-physics-tick.mmd) | [SVG](images/game-physics-tick.svg) |
+| Contact and animation bridge | [Mermaid](game-physics-animation.mmd) | [SVG](images/game-physics-animation.svg) |
+| Transform and pose authority | [Mermaid](game-physics-authority.mmd) | [SVG](images/game-physics-authority.svg) |
 
-## Forge game asset pipeline proposal
+## Forge game asset pipeline implementation
 
-The [asset pipeline proposal](../../proposals/forge-game-asset-pipeline.md)
-separates cooking and publication from runtime loading and activation. The
-contract view distinguishes persistent asset identity, a cooked manifest
-locator, the buffer retained by an asynchronous request, and the generation
-visible to gameplay at a tick boundary.
+The [asset reference](../../proposals/forge-game-asset-pipeline.md) separates offline cooking/publication, browser I/O, Rust digest/level verification and tick-boundary activation. Asset IDs, retained byte buffers and runtime generations have distinct meanings. Historical replay can require explicitly configured immutable archive bytes.
 
-| Proposed view | Source | Image |
+| Current view | Source | Image |
 | --- | --- | --- |
-| Validate, cook, and publish a build | [Mermaid](game-asset-pipeline-cook.mmd) | [SVG](images/game-asset-pipeline-cook.svg) |
-| Resolve, load, and activate a level | [Mermaid](game-asset-pipeline-load.mmd) | [SVG](images/game-asset-pipeline-load.svg) |
-| Identity, address, and readiness | [Mermaid](game-asset-pipeline-contract.mmd) | [SVG](images/game-asset-pipeline-contract.svg) |
+| Validate, cook and publish | [Mermaid](game-asset-pipeline-cook.mmd) | [SVG](images/game-asset-pipeline-cook.svg) |
+| Resolve, load and activate | [Mermaid](game-asset-pipeline-load.mmd) | [SVG](images/game-asset-pipeline-load.svg) |
+| Identity and readiness | [Mermaid](game-asset-pipeline-contract.mmd) | [SVG](images/game-asset-pipeline-contract.svg) |
 
-## Forge worker and main-thread ownership proposal
+## Forge worker and main-thread ownership implementation
 
-The [worker ownership proposal](../../proposals/forge-worker-ownership.md)
-separates browser rendering, authoritative Rust execution, and JavaScript
-I/O and message delivery. The IDE already uses a Web Worker. The current
-playtest instantiates its WASM runtime on the page thread. The Studio
-sequence shows a later milestone for durable native builds.
+The [worker reference](../../proposals/forge-worker-ownership.md) records actual placement. IDE Rust/WASM executes in its JS worker. Room One currently executes WASM on the page thread and delegates asset/replay I/O to JS workers. Studio has an implemented Python/PostgreSQL static-web service but its browser controller is generated JS; a Rust/WASM policy migration remains pending. The diagrams do not invent backend Rust workers or shared global registries.
 
-| Proposed view | Source | Image |
+| Current view | Source | Image |
 | --- | --- | --- |
-| Ownership and communication boundaries | [Mermaid](forge-worker-ownership.mmd) | [SVG](images/forge-worker-ownership.svg) |
-| Game tick, level activation, and replay handoff | [Mermaid](forge-game-worker-handoff.mmd) | [SVG](images/forge-game-worker-handoff.svg) |
-| Studio submission, lease, and status | [Mermaid](forge-studio-worker-lease.mmd) | [SVG](images/forge-studio-worker-lease.svg) |
+| Owners and communications | [Mermaid](forge-worker-ownership.mmd) | [SVG](images/forge-worker-ownership.svg) |
+| Game activation and replay handoff | [Mermaid](forge-game-worker-handoff.mmd) | [SVG](images/forge-game-worker-handoff.svg) |
+| Studio submission, lease and publication | [Mermaid](forge-studio-worker-lease.mmd) | [SVG](images/forge-studio-worker-lease.svg) |

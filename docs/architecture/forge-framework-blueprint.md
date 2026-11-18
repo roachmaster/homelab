@@ -1,12 +1,37 @@
 # Forge framework: small kernel, explicit starters, cohesive capabilities
 
-**Status:** Proposed target architecture, based on the complete 15-repository review set dated 30 October 2026. This remains the full target design, not a production-validated framework. A [first synchronous Rust core subset](../../src/rust/README.md) is now implemented and tested; the local guide explicitly distinguishes implemented primitives from planned assembly, transport and durability features.
+**Status: implementation reference plus broader target architecture.** Reviewed
+against the repository on 18 November 2026. The original architecture derives
+from the 30 October repository reviews; those reviews and the target diagrams
+remain historical design evidence. The checkpoint below describes current code,
+not a new deployment or test certification.
+
+## Current implementation
+
+| Area | Implemented repository contract | Boundary that remains separate |
+| --- | --- | --- |
+| Typed ingress | `Envelope<P>`, header/version lookup, injected admission, payload-kind checks and frozen route registration in the [core workspace](../../src/rust/README.md) | The bridge is synchronous; it is not a universal scheduler or authentication service |
+| Assembly | [`forge-bootstrap`](../../src/rust/forge-bootstrap/README.md) stages typed factory groups, rejects conflicts, validates declared dependency order and consumes the registry into a frozen plan; [`forge-provider`](../../src/rust/forge-provider/README.md) supplies singleton/transient leases | The host explicitly constructs and injects dependencies. Automatic graph execution, pooled scopes and a general managed lifecycle engine remain proposals |
+| Local tools | [`forge-kernel`](../../src/rust/forge-kernel/README.md), [`forge-local`](../../src/rust/forge-local/README.md) and [`forge-terminal`](../../src/rust/forge-terminal/README.md) provide node observations, admitted command discovery, optional native disk sessions and an explicitly stepped volatile counter | Node status is client-instance observation. Disk navigation does not become a filesystem sandbox or arbitrary command executor |
+| Durable jobs and access | [`forge-jobs`](../../src/rust/forge-jobs/README.md) commits bounded sum-job receipts/results to a locked local file store, recovers them on reopen, and fences leased attempts. [`forge-access`](../../src/rust/forge-access/src/lib.rs) issues verified subject/deadline contexts and exact-route policy decisions | The Unix jobs executable selects an operator verifier and private store. Generic programs, automatic receipt retention, identity federation/delegation and remote jobs are not supplied by that slice |
+| Remote agent | [`forge-remote`](../../src/rust/forge-remote/src/lib.rs) and optional HTTPS adapters carry typed calls with target/incarnation and expiry. The [agent composition](../../src/rust/forge-agent/src/host.rs) supplies project inspection, bounded source reads and explicitly granted managed writes through the admitted gateway | Managed writes require a separately provisioned private Unix workspace and project grants; a read grant does not enable editing. Deployment and credential provisioning are operational configuration |
+| Browser and reference pages | The [generated IDE](../../src/rust/forge-ide-web/README.md) and [native host](../../src/rust/forge-ide-web-host/README.md) implement Chat, Mail, Workbench, a portal hub and focused design readers from Rust/YAML declarations | Main-thread presentation, worker/WASM application decisions and admitted native I/O retain distinct owners. Repository support does not prove a capability is enabled on a particular live host |
+
+The real store, configured HTTPS boundary and browser are optional concrete
+consumers, not mandatory additions to the six core packages. Use their linked
+code and tests for exact exports. The broad contracts and C4 drawings below
+describe the original target where their captions say **proposed**; they do not
+replace this implementation inventory or the [delivery roadmap](../roadmap/forge-framework.md).
 
 ## The product decision
 
 Build **a Rust application-assembly framework**, not a new all-purpose application. Its promise is: select optional capability/implementation crates, give their registrars typed configuration through bootstrap, and receive predictable assembly, admission and test seams. Registrars stage cohesive factory groups; construction and provider ownership follow only after validation/freeze. Full managed lifecycle remains a later target. Keep business workflows out of the framework. Keep developer tools, model execution, client SDKs, and domain-specific engines outside its mandatory dependency graph.
 
-The framework is linked into a **reference application** that proves the developer experience. That application owns an illustrative jobs capability and proves the shared logical ingress with an in-process contract driver. No transport has been selected: a network API, broker, or CLI is added only for an actual consumer, not to satisfy the framework design. A separate deployment for every crate is neither required nor desirable.
+Concrete reference consumers now include the local terminal, the authenticated
+durable-jobs command, the configured HTTPS agent and the browser host. Each owns
+its selected capabilities and finite request/result sums. The framework core
+requires no transport: the selected HTTPS, CLI and browser adapters remain
+optional. A separate deployment for every crate is neither required nor desirable.
 
 “Spring Boot-like” means convenient starters, conditional defaults, explicit overrides, consistent configuration, and dependable application startup—not copying Java reflection or building a universal service locator. Spring Boot's own guidance describes packaged auto-configuration, conditional defaults that can yield to user configuration, and focused tests for those combinations. The Rust mechanism proposed here is explicit and statically linked. [Spring Boot auto-configuration](https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html)
 
@@ -79,13 +104,21 @@ The downstream action is optional. Neither the framework nor its crates appear a
 
 ![C4 containers of the proposed reference application](diagrams/02-containers.svg)
 
-One Rust host contains admission, dispatch, capability handlers, and any selected input adapters or supervised workers. The durable-store technology and external input interface are deliberately undecided. No broker or network server is required. Replicas and deployment topology are outside this container view.
+The original generic container view leaves its store and input technology open.
+Current concrete consumers have made narrower choices: `forge-jobs` uses a local
+file store, the agent selects HTTPS/mTLS, and the portal has configured relay and
+storage boundaries. These choices do not make a broker or network server mandatory
+in core. Replicas and deployment topology are outside this proposed container view.
 
 ### Components: where does responsibility live?
 
 ![C4 components inside the application host](diagrams/03-components.svg)
 
-Dashed arrows show construction/lifecycle control; solid arrows show runtime interactions. Registry and bridge are conceptual components and may be private modules within one crate. Workers are a later milestone; the first acceptance slice need not pretend to execute work.
+Dashed arrows show construction/lifecycle control; solid arrows show runtime
+interactions. Registry and bridge are conceptual components and may be private
+modules within one crate. This original drawing placed workers after admission;
+the bounded durable sum consumer now has an owned worker. The drawing does not
+describe a universal implemented scheduler.
 
 This component view focuses on admission and durable job state. The optional downstream effect shown in the context/container views is deliberately not expanded here; when introduced, its worker invokes a capability-owned effect port through a separate adapter, with the recovery guarantees below.
 
@@ -97,7 +130,7 @@ The application is the composition boundary. Handler bindings and small feature-
 
 ## 3. A deliberately small package surface
 
-The six current core packages are `forge-ingress-contract`, `forge-bridge`, `forge-provider`, `forge-io-client`, `forge-task` and `forge-bootstrap`. Optional `forge-kernel` groups hosted native system clients, starting with disk inspection/navigation; it is not a bootable OS kernel. Three separate demo packages prove optional selection; they are not mandatory framework dependencies. The broader runtime/capabilities below remain later roles.
+The six current core packages are `forge-ingress-contract`, `forge-bridge`, `forge-provider`, `forge-io-client`, `forge-task` and `forge-bootstrap`. Optional `forge-kernel` groups hosted native system clients; it is not a bootable OS kernel. Separate demo packages prove optional selection. The table below describes architectural roles, including the deferred general runtime; implemented capability/adaptor crates and their actual dependency edges are in the [workspace manifest](../../src/rust/Cargo.toml) and linked implementation checkpoint above.
 
 | Unit | Owns | May depend on | Must not depend on |
 | --- | --- | --- | --- |
@@ -109,7 +142,7 @@ The six current core packages are `forge-ingress-contract`, `forge-bridge`, `for
 | Optional implementation crate + registrar | Concrete client, dependencies, typed config, cohesive factories and reusable registrar | Implemented contracts and bootstrap helpers as needed | Mandatory core imports back into this implementation |
 | `forge-runtime` (deferred) | Managed startup/shutdown supervision and later lifecycle facilities | Focused runtime facilities | Domain policy or transport-specific mandatory dependencies |
 | Chosen ingress adapter, optional | Input framing, delegation to an injected codec over `P`, protocol lifecycle and outcome encoding | Generic ingress/codec contracts; runtime or transport library only as needed | Concrete business handlers or capability imports hidden in the generic adapter |
-| `jobs` | `JobsPayload` enum, invariants, use cases and owned persistence/effect ports | Domain values and stable policy dependencies | Framework bridge, transport DTOs, SQL client |
+| Jobs capability role | Typed job commands, invariants, use cases and persistence contracts | Its chosen contract/assembly dependencies; actual `forge-jobs` also owns typed bridge helpers and a local file-store implementation | Terminal/HTTP request parsing, arbitrary process execution or a framework-global business enum |
 | `reference-app` | Typed factory/provider selection and constructor injection, handler bindings, concrete edge-codec bindings and selected adapters | Selected framework packages and capability | Unrelated tools or domains merely because they exist |
 
 The ingress contract is justified by actual shared consumers, not a license for `common-core` growth. Keep domain and application logic together inside a cohesive capability until a real dependency or change driver warrants another boundary. The framework must build without optional starters. Adding a starter must not silently enable every available transport.

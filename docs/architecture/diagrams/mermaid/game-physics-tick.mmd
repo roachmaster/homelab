@@ -1,20 +1,21 @@
 ---
-title: Proposed Forge physics - one fixed tick
+title: Implemented Forge platform tick
 ---
 sequenceDiagram
-    participant T as Tick scheduler
-    participant P as Tile physics
-    participant A as Animation
-    participant S as Snapshot
-    Note over T,S: Proposed fixed-tick sequence
-    T->>T: InputApply - velocity targets and jump edge
-    T->>P: Move - apply targets
-    Note over P,A: Q16 integration advances velocity, then position.
-    T->>P: Collide - resolve X then Y
-    Note over P,A: Fast bodies sweep to first impact.
-    P-->>T: Resolved root and contact facts
-    T->>A: Animate from this tick
-    A-->>T: Frame and local pose
-    T->>T: Effects - deliver events
-    T->>S: Publish completed tick
-    Note over A,S: Publish Q8 y-up wire positions.<br/>Keep Q16 runtime state.
+    participant B as Generated page adapter
+    participant R as Room
+    participant C as Character
+    participant A as Animator
+    participant W as WASM publication
+    B->>R: Input edges and elapsed microseconds
+    R->>R: Consume EffectiveInput
+    R->>C: step with MotionInput
+    C->>C: Resolve Q16 motion
+    C-->>R: MotionFrame and contact edges
+    R->>R: Update objectives
+    R->>A: Select same-tick pose
+    A-->>R: Selected PlayerPose
+    R->>R: Deliver new events
+    R-->>W: Completed epoch and tick
+    W-->>B: FGS1 world, FGP1 pose, FGC1 diagnostics
+    Note over B,W: Q16 y-down simulation becomes Q8 y-up world positions.<br/>The page draws and does not simulate motion.

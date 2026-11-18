@@ -1,23 +1,17 @@
----
-title: Expire chat history inside the runner
----
-%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":25,"diagramMarginX":30,"diagramMarginY":25,"width":140,"wrap":false}}}%%
+%% Implementation reviewed 2026-11-18; render with pinned mmdr.
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":40,"diagramMarginX":30,"diagramMarginY":25,"width":180,"wrap":false}}}%%
 sequenceDiagram
-    participant T as Expiry task
-    participant R as Chat history service
+    participant T as Runner expiry thread
+    participant D as ChatHistoryDao
     participant P as PostgreSQL
-
-    Note over T,R: Both run inside the same Agent Runner<br/>One scheduled task and one in-process service
-    T->>R: Start scheduled expiry sweep
-    R->>P: ChatHistoryDao read transaction<br/>Find a bounded batch of due chats
-    P-->>R: Candidate chat IDs and revisions
-    loop For each candidate
-        R->>P: Same transaction used for Delete<br/>Lock chat and recheck policy and revision
-        alt Still due with matching revision
-            P->>P: Remove transcript<br/>and write tombstone atomically
-            P-->>R: Commit tombstone with new revision
-        else Long-term, no longer due, or changed
-            P-->>R: Skip chat and leave history unchanged
-        end
-    end
-    R-->>T: Sweep result · expired and skipped counts
+    Note over T,D: Same Python runner process
+    T->>D: Sweep every 60 seconds
+    D->>P: Check history activation
+    Note over D,P: Inactive history returns zero
+    D->>P: Select due chats under lock
+    Note over D,P: LIMIT 20 / SKIP LOCKED
+    D->>P: Apply removal to locked batch
+    P->>P: Scrub + purge + tombstone
+    P-->>D: Commit batch
+    D-->>T: Removed count
+    Note over D,P: Reads already omit due chats

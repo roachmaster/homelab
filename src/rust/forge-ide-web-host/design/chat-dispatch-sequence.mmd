@@ -1,29 +1,36 @@
-%% `mmdr -t dark -i chat-dispatch-sequence.mmd -o chat-dispatch-sequence.svg`
-%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","actorTextColor":"#f1f4f8","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"}}}%%
+%% Implementation reviewed 2026-11-18; render with pinned mmdr.
+%%{init: {"theme":"dark","themeVariables":{"fontFamily":"DejaVu Sans","background":"#15191f","actorBkg":"#242d38","actorBorder":"#6e849d","actorLine":"#526171","noteBkg":"#243952","noteBorderColor":"#6283aa","primaryTextColor":"#f1f4f8","textColor":"#f1f4f8","lineColor":"#9bc4ff","edgeLabelBackground":"#15191f","clusterBorder":"#647a90","actorTextColor":"#f1f4f8","actorLineColor":"#6e849d","signalColor":"#9bc4ff","signalTextColor":"#f1f4f8","labelBoxBkgColor":"#243952","labelBoxBorderColor":"#6283aa","labelTextColor":"#f1f4f8","loopTextColor":"#bec9d6","noteBkgColor":"#243952","noteTextColor":"#f1f4f8"},"sequence":{"mirrorActors":false,"useMaxWidth":false,"actorMargin":62,"boxMargin":12,"messageMargin":40,"diagramMarginX":30,"diagramMarginY":25,"width":180,"wrap":false}}}%%
 sequenceDiagram
-    participant IDE as Forge IDE
-    participant MC as Mission Control API
+    participant JS as Main JS DOM
+    participant W as Rust/WASM worker
+    participant H as Native web host
+    participant MC as MC runner
     participant DB as PostgreSQL
-    participant Forge as Forge GPU worker
-    participant Model as Local model adapter
-
-    IDE->>MC: Submit chat turn
-    MC->>DB: Save job and queued event
-    DB-->>MC: Commit confirmed
-    MC-->>IDE: 202 Accepted with run ID
-
-    Note over DB,Forge: Jobs stay queued while Forge is offline
-    Forge->>DB: Subscribe and claim work
-    DB-->>Forge: Job and attempt token
-    Forge->>Model: Run inference locally
-    Forge->>DB: Renew lease during inference
-    Model-->>Forge: Reply or failure
-
-    Forge->>DB: Publish result for this attempt
-    DB-->>MC: Wake completion consumer
-    MC->>DB: Save reply and terminal event
-
-    IDE->>MC: Request next event page
-    MC->>DB: Read authorized run and events
-    DB-->>MC: Status, events and saved reply
-    MC-->>IDE: Return events and saved reply
+    participant GPU as GPU worker
+    participant Model as Local adapter
+    JS->>W: Typed send intent
+    W->>H: Submit effect
+    Note over H: Session / origin / CSRF
+    H->>MC: Private typed dispatch
+    Note over MC: Validate route and DTO
+    Note over MC,DB: Reject before queue effects
+    MC->>DB: Commit input + run + event
+    MC-->>W: 202 via native host
+    W-->>JS: Queued view
+    Note over DB,GPU: Durable offline queue
+    GPU->>DB: Listen, scan, choose model
+    GPU->>Model: Load selected model
+    GPU->>DB: Claim ready-model job
+    DB-->>GPU: Input + token + lease
+    GPU->>Model: Generate locally
+    GPU->>DB: Renew current lease
+    Note over DB,GPU: Every 10 seconds while running
+    Model-->>GPU: Reply or failure
+    GPU->>DB: Publish current attempt
+    DB-->>MC: Result wake-up
+    MC->>DB: Finalize transcript + event
+    W->>H: Next event page
+    H->>MC: Authorized read
+    MC->>DB: Read saved result
+    MC-->>W: Result via native host
+    W-->>JS: Accepted reply view

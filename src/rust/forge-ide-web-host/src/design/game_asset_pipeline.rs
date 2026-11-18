@@ -4,8 +4,8 @@ pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Asset Pipeline for the Forge Game Runtime")),
         element!(P;
-            element!(Strong; text("Design proposal.")),
-            text(" Cook Room One’s level, Scout atlas, and collision data into validated assets. Load them by identity and activate the level at a fixed tick boundary."),
+            element!(Strong; text("Implemented repository slice.")),
+            text(" Reviewed 18 November 2026. The offline cooker, digest manifest, generated I/O worker, Rust validation, level activation and replay archive paths are implemented."),
         ),
         element!(P; text("The web playtest build now includes cooked Room One and Traversal Yard levels. It can switch between them after the requested level is ready.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Asset pipeline design sections"];
@@ -17,7 +17,7 @@ pub(super) const BODY: &[Node] = &[
     ),
     element!(Section [Id = "cooking", Class = "design-section", AriaLabelledby = "cooking-title"];
         element!(H2 [Id = "cooking-title"]; text("Cook a reproducible build")),
-        element!(P; text("The cook validates authored levels and sprite recipes, resolves their dependency IDs, and runs the exporters with recorded conversion settings. The resulting manifest indexes cooked bytes by ID and records their hashes and dependency graph.")),
+        element!(P; text("src/python/game-assets/cook.py validates both authored levels and the Scout recipe/skin, exports canonical level JSON and a 4x atlas, and builds the version-1 manifest. The manifest records stable IDs, relative paths, SHA-256, required dependencies and optional dependencies. cook-state.json records authoring fingerprints for incremental reuse.")),
         element!(Div [Class = "gallery contract-sequences"];
             element!(Figure [Class = "wireframe"];
                 element!(Figcaption;
@@ -30,23 +30,23 @@ pub(super) const BODY: &[Node] = &[
                 ),
             ),
         ),
-        element!(P; text("CI compares clean and incremental output bytes and runs the sprite tool tests. A validation error or digest mismatch stops publication.")),
+        element!(P; text("The cooker tests compare clean and incremental bytes under the same rendering toolchain. Publication verifies the complete generation and atomically changes its relative output symlink. make ui-build copies one resolved generation into the browser bundle. Test contracts are evidence, not a claim of an unobserved run.")),
     ),
     element!(Section [Id = "level-data", Class = "design-section", AriaLabelledby = "level-data-title"];
         element!(H2 [Id = "level-data-title"]; text("Level data and ownership")),
-        element!(P; text("The first cooked chunk describes the Room One grid, stable spawn descriptors, win target, and referenced asset IDs. The cook records the schema version and materializes defaults so older cooked levels retain their behavior.")),
+        element!(P; text("The two supported chunk IDs are Room One and Traversal Yard. Each records its tile/platform mode, grid, stable spawns, surface, collider, atlas identity and idle/walk/jump/crouch timing. The cooker materializes validated defaults; Rust checks version, bounds and references again before constructing a Room.")),
         element!(Dl [Class = "storage"];
             element!(Div;
                 element!(Dt; text("Identity")),
-                element!(Dd; text("Chunks, saves, traces, and the registry use a stable asset ID.")),
+                element!(Dd; text("The manifest and loader use fixed supported IDs for both levels, the Scout atlas and its PNG. Replay segments also record the exact manifest digest. A general game-save system is not implemented.")),
             ),
             element!(Div;
                 element!(Dt; text("Address")),
-                element!(Dd; text("The manifest locates bytes in the active cooked build. A loaded buffer owns the memory referenced by the runtime object.")),
+                element!(Dd; text("The native host resolves the active cooked directory once at startup and verifies its bytes. The generated worker reads fixed same-origin routes; Rust-owned bounded upload buffers hold bytes for digest and format validation.")),
             ),
             element!(Div;
                 element!(Dt; text("Readiness")),
-                element!(Dd; text("A resolved asset becomes available to the simulation when initialization finishes and its generation is published at a tick boundary.")),
+                element!(Dd; text("Assets verifies the manifest and dependency bindings. Loader retains the newest prepared Room and publishes it only at an activation boundary. Identity, verification and active-room readiness are separate facts.")),
             ),
         ),
         element!(Div [Class = "gallery contract-sequences"];
@@ -58,11 +58,11 @@ pub(super) const BODY: &[Node] = &[
                 ),
             ),
         ),
-        element!(P; text("Level-owned assets are released together on unload. Shared resident assets stay for the session. Runtime handles check the owning generation before use.")),
+        element!(P; text("Loader replaces the active Room and keeps bounded verified level copies for replay. Assets retains the verified atlas for the page-scoped session. This slice does not implement a general streaming arena or arbitrary asset registry.")),
     ),
     element!(Section [Id = "loading", Class = "design-section", AriaLabelledby = "loading-title"];
         element!(H2 [Id = "loading-title"]; text("Load and activate at a tick boundary")),
-        element!(P; text("Resolve IDs through a recorded search order. Use the active cooked output directory first and an optional configured alternate location second. Verify fetched bytes against the active manifest digest. Changed development assets require a separate manifest. Asynchronous work initializes the candidate outside the simulation step.")),
+        element!(P; text("The native host serves a verified primary cooked generation and can fill missing approved paths from a configured alternate. A configured replay archive exposes historical manifests and level chunks by digest. The worker performs bounded I/O; Rust checks manifest bindings, SHA-256, request generation and chunk format before staging a candidate outside the fixed step.")),
         element!(Div [Class = "gallery contract-sequences"];
             element!(Figure [Class = "wireframe"];
                 element!(Figcaption;
@@ -83,10 +83,10 @@ pub(super) const BODY: &[Node] = &[
     ),
     element!(Section [Id = "acceptance", Class = "design-section", AriaLabelledby = "acceptance-title"];
         element!(H2 [Id = "acceptance-title"]; text("Rollout and acceptance")),
-        element!(P; text("Start with cooked loose files, one active level, and one request in flight. Check reproducible cooking, required dependency failures, late completion after unload, and replay across a level activation.")),
+        element!(P; text("Implemented checks cover reproducible cooking, host path/hash admission, stale request generations, required-asset rejection, optional-art fallback, level replacement and replay across both levels. A deployment must separately configure any alternate source or retained replay archive it intends to use.")),
         element!(P; text("Load the atlas using its manifest and logical pivot. Physics consumes validated tile geometry, body collider mappings, and surface IDs. The 4× atlas scale changes the rendered artwork while collision stays in logical units.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Related game designs"];
-            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-game-asset-pipeline.md"]; text("Full asset pipeline proposal")),
+            element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-game-asset-pipeline.md"]; text("Full asset pipeline implementation reference")),
             element!(A [Href = "/design/game-studio"]; text("Game engine design")),
             element!(A [Href = "/design/game-physics"]; text("Game physics design")),
             element!(A [Href = "/design/forge-workers/playtest"]; text("Playtest worker flow")),

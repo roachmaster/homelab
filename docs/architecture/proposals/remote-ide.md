@@ -1,13 +1,25 @@
 # Proposal: Forge IDE across two machines
 
-**Status update: the first configured agent milestone is implemented and tested
-with two real localhost processes.** See the [actual application/API/configuration](../../../src/rust/forge-agent/README.md)
-and [implementation diagram](../diagrams/mermaid/images/m18-agent-implementation.svg).
-Cross-physical-machine deployment, production credential operations, remote jobs
-and mutation remain future work. The text and PDF below preserve the **original
-pre-implementation design record**, reviewed against public baseline
-`a11d327a3fd1aadec232a47f1c7cc8d086a7ef0f`; their “proposed” labels are historical,
-not a claim the corresponding current source is still missing.
+**Current implementation — reviewed 18 November 2026.** The configured
+[agent](../../../src/rust/forge-agent/README.md) now serves node information,
+project inspection, bounded digest-verified source reads and explicitly granted
+Unix managed-project writes over one HTTPS/mTLS command gateway. Managed writes
+require project opt-in, both peer grants and a private workspace owned by a
+service UID; a read-only project is not implicitly writable. The browser host
+maps its `ide.edit_write` operation to the agent's `ide.managed_write` contract.
+
+Automated process fixtures use real localhost processes and temporary credentials.
+Operational deployment and credential lifecycle belong to the
+[service inventory](../forge-ide-system-inventory.yaml), not to a proposal diagram.
+Generic remote jobs, delegation and arbitrary process execution remain outside
+this agent. See the [current implementation diagram](../diagrams/mermaid/images/m18-agent-implementation.svg)
+for the initial configured inspection slice and source for its later extensions.
+
+**Original pre-implementation record below.** The numbered sections, Mermaid
+proposal views and PDF preserve the design reviewed against baseline
+`a11d327a3fd1aadec232a47f1c7cc8d086a7ef0f`. Their proposed labels and milestone
+exclusions describe that earlier slice. They are not an outstanding-work list or
+a claim that the current source/browser/managed-write implementation is missing.
 
 Actual naming refinements: `ProjectAlias` replaces the sketch `InspectProject`;
 `ProjectFactories` is the batch group; `GatewayCodec` fixes request/response types
