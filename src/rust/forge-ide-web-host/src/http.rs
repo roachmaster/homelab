@@ -316,11 +316,16 @@ fn command(
     if stop.load(Ordering::Acquire) || Instant::now() >= deadline {
         return Err(Rejection::Unavailable);
     }
-    if history::is_destination(destination)
+    if crate::studio::is_destination(destination)
+        || history::is_destination(destination)
         || ChatRunRequest::is_destination(destination)
         || MailRequest::is_destination(destination)
     {
-        let (status, body) = host.postgres_dispatch(&header, &r.body, &context)?;
+        let (status, body) = if crate::studio::is_destination(destination) {
+            host.studio_dispatch(&header, &r.body, &context)?
+        } else {
+            host.postgres_dispatch(&header, &r.body, &context)?
+        };
         if body.len() > host.config.limits.response_bytes {
             return Err(Rejection::Limit);
         }
@@ -415,7 +420,16 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
     if !r.body.is_empty() {
         return Response::error(400, "unexpected_body");
     }
-    if let Some((mime, body)) = host.assets.get(&r.path) {
+    let asset = host
+        .assets
+        .get(&r.path)
+        .map(|(mime, body)| (mime, body.to_vec()))
+        .or_else(|| {
+            host.assets
+                .archived_level(&r.path)
+                .map(|body| ("application/json", body))
+        });
+    if let Some((mime, body)) = asset {
         if r.method != "GET" && r.method != "HEAD" {
             let mut p = Response::error(405, "method_not_allowed");
             p.allow = Some("GET, HEAD");
@@ -424,7 +438,7 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
         Response {
             status: 200,
             mime,
-            body: body.to_vec(),
+            body,
             cookie: None,
             allow: None,
             location: None,

@@ -152,6 +152,7 @@ impl UiModel {
         }
         self.source = None;
         self.edit_review = None;
+        self.editor = None;
         self.source_message.clear();
     }
     pub(super) fn navigate_entry(

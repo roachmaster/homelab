@@ -65,7 +65,12 @@ pub struct HostConfig {
     pub public_origin: Option<String>,
     pub session_auth: SessionAuth,
     pub assets: PathBuf,
+    /// Pinned cooked directory with optional copies of the active build's assets.
+    pub alternate_cooked_assets: Option<PathBuf>,
+    /// Historical manifests and levels retained by the cooker.
+    pub cooked_replay_archive: Option<PathBuf>,
     pub chat: Option<crate::ChatConfig>,
+    pub studio: Option<crate::StudioConfig>,
     pub nodes: Vec<NodeConfig>,
     pub limits: HostLimits,
 }
@@ -74,21 +79,41 @@ impl HostConfig {
         if let Some(origin) = &self.public_origin {
             https_authority(origin)?;
         }
+        if let Some(studio) = &self.studio {
+            studio.validate()?;
+            if self.public_origin.as_ref() == Some(&studio.preview_origin) {
+                return Err(HostError::Configuration(
+                    "Studio previews require a separate origin",
+                ));
+            }
+        }
         if self.session_auth == SessionAuth::TrustedProxy && self.public_origin.is_none() {
             return Err(HostError::Configuration(
                 "trusted proxy sessions require an explicit HTTPS public origin",
             ));
         }
         let l = self.limits;
-        if !self.bind.ip().is_loopback()
-            || !self.assets.is_absolute()
-            || self
-                .assets
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-        {
+        if !self.bind.ip().is_loopback() || !absolute_asset_path(&self.assets) {
             return Err(HostError::Configuration(
                 "loopback bind and absolute asset directory required",
+            ));
+        }
+        if self
+            .alternate_cooked_assets
+            .as_deref()
+            .is_some_and(|path| !absolute_asset_path(path))
+        {
+            return Err(HostError::Configuration(
+                "absolute alternate cooked asset directory required",
+            ));
+        }
+        if self
+            .cooked_replay_archive
+            .as_deref()
+            .is_some_and(|path| !absolute_asset_path(path))
+        {
+            return Err(HostError::Configuration(
+                "absolute cooked replay archive directory required",
             ));
         }
         if self.nodes.is_empty()
@@ -153,6 +178,13 @@ impl HostConfig {
         }
         Ok(())
     }
+}
+
+fn absolute_asset_path(path: &Path) -> bool {
+    path.is_absolute()
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
 }
 
 /// A deliberately narrow canonical HTTPS origin: ASCII DNS name, optionally a
@@ -229,7 +261,13 @@ struct FileConfig {
     session_auth: SessionAuth,
     assets: PathBuf,
     #[serde(default)]
+    alternate_cooked_assets: Option<PathBuf>,
+    #[serde(default)]
+    cooked_replay_archive: Option<PathBuf>,
+    #[serde(default)]
     chat: Option<crate::ChatConfig>,
+    #[serde(default)]
+    studio: Option<crate::StudioConfig>,
     credentials: CredentialFiles,
     nodes: Vec<NodeFile>,
     #[serde(default = "timeout_default")]
@@ -333,9 +371,15 @@ pub fn load_config(path: &Path) -> Result<HostConfig, HostError> {
         public_origin: f.public_origin,
         session_auth: f.session_auth,
         assets: resolve(base, &f.assets),
+        alternate_cooked_assets: f.alternate_cooked_assets.map(|path| resolve(base, &path)),
+        cooked_replay_archive: f.cooked_replay_archive.map(|path| resolve(base, &path)),
         chat: f.chat.map(|mut chat| {
             chat.token_file = resolve(base, &chat.token_file);
             chat
+        }),
+        studio: f.studio.map(|mut studio| {
+            studio.token_file = resolve(base, &studio.token_file);
+            studio
         }),
         nodes,
         limits: HostLimits {

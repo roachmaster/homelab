@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Build generated assets from Rust/YAML; check reproducibility and actual WASM.
-No authored/generated files are overwritten. All output stays in ignored target.
+"""Build generated assets from Rust/YAML, and check reproducibility and actual WASM.
+Build output stays in ignored target. An explicitly configured replay archive
+also retains cooked manifests and levels for future builds.
 """
 import hashlib
 import os
@@ -21,7 +22,7 @@ def run(command):
     print("+ " + shlex.join(map(str, command)), file=sys.stderr)
     subprocess.run(command, check=True)
 
-def build():
+def build(archive=None):
     run(cargo("build", "-p", "forge-ide-web", "--lib", "--release", "--no-default-features", "--target", "wasm32-unknown-unknown"))
     # Explicit path prevents caller's CARGO_TARGET_DIR override from hiding bytes.
     base = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve()
@@ -32,7 +33,10 @@ def build():
     output = workspace / "assets"
     run(cargo("run", "-p", "forge-ide-web", "--features", "build-assets", "--bin", "forge-ui-assets", "--", "--wasm", str(wasm), "--output", str(output)))
     cooked = workspace / "cooked-game"
-    run([sys.executable, "-B", str(GAME_COOKER), "--out", str(cooked)])
+    cook = [sys.executable, "-B", str(GAME_COOKER), "--out", str(cooked)]
+    if archive:
+        cook.extend(("--archive", archive))
+    run(cook)
     # Each UI release pins its own cooker generation before copying bytes.
     shutil.copytree(
         cooked.resolve(strict=True), output / "game-assets",
@@ -52,7 +56,8 @@ def main():
     if sys.argv[1] == "serve":
         run(cargo("run", "-p", "forge-ide-web-host", "--", *shlex.split(os.environ.get("ARGS", "--help"))))
         return
-    assets, wasm = build()
+    archive = os.environ.get("FORGE_COOKED_REPLAY_ARCHIVE") if sys.argv[1] == "build" else None
+    assets, wasm = build(archive)
     if sys.argv[1] == "check":
         second, _ = build()
         if inventory(assets) != inventory(second):

@@ -84,11 +84,12 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let durable = match args.as_slice() {
-        [_, _] => None,
-        [_, _, mode] if mode == "--faults" || mode == "--single-project" || mode == "--managed-writes" => None,
-        [_, _, mode, bind, relay, token] if mode == "--durable" => Some((bind, relay, token)),
-        _ => return Err("usage: loopback_fixture ASSETS AGENT [--faults|--single-project|--managed-writes|--durable BIND RELAY TOKEN_FILE]".into()),
+    let (durable, studio) = match args.as_slice() {
+        [_, _] => (None, None),
+        [_, _, mode] if mode == "--faults" || mode == "--single-project" || mode == "--managed-writes" => (None, None),
+        [_, _, mode, bind, relay, token] if mode == "--durable" => (Some((bind, relay, token)), None),
+        [_, _, mode, relay, token, preview] if mode == "--studio" => (None, Some((relay, token, preview))),
+        _ => return Err("usage: loopback_fixture ASSETS AGENT [--faults|--single-project|--managed-writes|--durable BIND RELAY TOKEN_FILE|--studio RELAY TOKEN_FILE PREVIEW_ORIGIN]".into()),
     };
     let faults = args.get(2).is_some_and(|value| value == "--faults");
     let managed = args.get(2).is_some_and(|value| value == "--managed-writes");
@@ -198,6 +199,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+    if let Some((relay, token, preview)) = studio {
+        host_config["studio"] = json!({
+            "endpoint": relay.to_str().ok_or("invalid Studio relay address")?,
+            "token_file": PathBuf::from(token),
+            "preview_origin": preview.to_str().ok_or("invalid Studio preview origin")?,
+        });
+    }
     let config_path = fixture.root.join("host.json");
     fs::write(&config_path, serde_json::to_vec(&host_config)?)?;
     let group = register_host("web", load_config(&config_path)?)?;

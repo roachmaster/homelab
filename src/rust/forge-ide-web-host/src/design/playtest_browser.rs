@@ -9,6 +9,8 @@ use serde::Serialize;
 mod assets;
 #[path = "playtest_debug_browser.rs"]
 mod debug;
+#[path = "playtest_replay_browser.rs"]
+mod replay;
 #[path = "playtest_snapshot_browser.rs"]
 mod snapshot;
 
@@ -26,7 +28,6 @@ enum Paint {
 
 #[derive(Serialize)]
 struct Wasm {
-    path: &'static str,
     prefix: &'static str,
 }
 
@@ -56,22 +57,12 @@ struct LevelChoice {
 }
 
 #[derive(Serialize)]
-struct AssetEntry {
-    kind: &'static str,
-    path: &'static str,
-}
-
-#[derive(Serialize)]
 struct Assets {
-    base: &'static str,
-    entries: &'static [(&'static str, AssetEntry)],
     levels: &'static [LevelChoice],
     atlas_id: &'static str,
     image_id: &'static str,
     pose_clips: &'static [&'static str],
-    level_limit: usize,
-    metadata_limit: usize,
-    image_limit: usize,
+    startup_timeout_ms: u32,
     request_timeout_ms: u32,
 }
 
@@ -102,6 +93,7 @@ struct Debugger {
     pause: &'static str,
     step: &'static str,
     download: &'static str,
+    replay_download: &'static str,
     overlay: &'static str,
     channels: &'static str,
     channel_attribute: &'static str,
@@ -124,8 +116,10 @@ struct Debugger {
     pause_first: &'static str,
     command_help: &'static str,
     trace_filename: &'static str,
+    replay_filename: &'static str,
     timing_filename: &'static str,
     trace_saved: &'static str,
+    replay_saved: &'static str,
     timing_saved: &'static str,
     unavailable: &'static str,
     sample_capacity: usize,
@@ -155,7 +149,6 @@ const OPEN_STROKE: &str = "#79e1ad";
 
 const PLAYTEST: CanvasAdapter = CanvasAdapter {
     wasm: Wasm {
-        path: "/app.wasm",
         prefix: "forge_playtest_",
     },
     controls: Controls {
@@ -184,37 +177,6 @@ const PLAYTEST: CanvasAdapter = CanvasAdapter {
         ],
     },
     assets: Assets {
-        base: "/playtest/assets/",
-        entries: &[
-            (
-                "room-one",
-                AssetEntry {
-                    kind: "level",
-                    path: "levels/room-one.json",
-                },
-            ),
-            (
-                "traversal-yard",
-                AssetEntry {
-                    kind: "level",
-                    path: "levels/traversal-yard.json",
-                },
-            ),
-            (
-                "scout-atlas",
-                AssetEntry {
-                    kind: "atlas",
-                    path: "atlas/manifest.json",
-                },
-            ),
-            (
-                "scout-atlas-image",
-                AssetEntry {
-                    kind: "image",
-                    path: "atlas/sheet.png",
-                },
-            ),
-        ],
         levels: &[
             LevelChoice {
                 selector: "#playtest-room-one",
@@ -232,9 +194,7 @@ const PLAYTEST: CanvasAdapter = CanvasAdapter {
         atlas_id: "scout-atlas",
         image_id: "scout-atlas-image",
         pose_clips: &["idle", "walk", "jump", "jump", "crouch"],
-        level_limit: 16 * 1024,
-        metadata_limit: 256 * 1024,
-        image_limit: 8 * 1024 * 1024,
+        startup_timeout_ms: 15_000,
         request_timeout_ms: 3500,
     },
     presentation: Presentation {
@@ -302,6 +262,7 @@ const PLAYTEST: CanvasAdapter = CanvasAdapter {
         pause: "#playtest-pause",
         step: "#playtest-step",
         download: "#playtest-export",
+        replay_download: "#playtest-export-replay",
         overlay: "#playtest-overlay",
         channels: "[data-playtest-trace-channel]",
         channel_attribute: "data-playtest-trace-channel",
@@ -328,10 +289,13 @@ const PLAYTEST: CanvasAdapter = CanvasAdapter {
         pause_key: "p",
         step_key: ".",
         pause_first: "Pause before stepping.",
-        command_help: "Commands: pause, resume, step, restart, trace, channels <mask>, timing.",
+        command_help:
+            "Commands: pause, resume, step, restart, trace, replay, channels <mask>, timing.",
         trace_filename: "room-one-trace.json",
+        replay_filename: "forge-playtest-replay.json",
         timing_filename: "room-one-timing.json",
         trace_saved: "Trace JSON downloaded.",
+        replay_saved: "Session replay downloaded.",
         timing_saved: "Timing JSON downloaded.",
         unavailable: "Debugging needs the current playtest bundle.",
         sample_capacity: 120,
@@ -355,7 +319,8 @@ pub fn javascript() -> String {
     let readers = snapshot::SNAPSHOT_READERS;
     let debugger = debug::DEBUG_ADAPTER;
     let assets = assets::ASSET_ADAPTER;
-    format!("'use strict';\n(config => {{\n  const {{ wasm, controls, assets: assetSpec, presentation, debugger: debugSpec }} = config;\n{readers}{debugger}{assets}{CANVAS_ADAPTER}\n}})({config});\n")
+    let replay = replay::REPLAY_ADAPTER;
+    format!("'use strict';\n(config => {{\n  const {{ wasm, controls, assets: assetSpec, presentation, debugger: debugSpec }} = config;\n{readers}{debugger}{assets}{replay}{CANVAS_ADAPTER}\n}})({config});\n")
 }
 
 const CANVAS_ADAPTER: &str = r#"
@@ -374,6 +339,7 @@ const CANVAS_ADAPTER: &str = r#"
   const keyActions = new Map(controls.keys);
   const turn = 2 * Math.PI;
   let failed = false;
+  let io;
 
   function disableDebug(message) {
     const drawer = document.querySelector(debugSpec.drawer);
@@ -385,6 +351,7 @@ const CANVAS_ADAPTER: &str = r#"
   function fail() {
     if (failed) return;
     failed = true;
+    io?.close();
     if (status) status.textContent = presentation.failure_message;
     if (restart) restart.disabled = true;
     for (const { button } of choices) if (button) button.disabled = true;
@@ -469,7 +436,7 @@ const CANVAS_ADAPTER: &str = r#"
     ctx.restore();
   }
 
-  function drawOverlay(ctx, width, height, events, contact, body) {
+  function drawOverlay(ctx, width, height, events, contact, body, collision) {
     ctx.save();
     ctx.font = '10px monospace';
     ctx.fillStyle = debugSpec.coordinate_color;
@@ -485,19 +452,38 @@ const CANVAS_ADAPTER: &str = r#"
       const top = (height - 1 - event.y) * tile;
       ctx.strokeRect(left + 3, top + 3, tile - 6, tile - 6);
     }
-    if (body) {
+    if (collision) {
+      const q16 = value => value * tile / 65536;
+      ctx.strokeStyle = debugSpec.coordinate_color;
+      for (const [left, top, right, bottom] of collision.bodies) {
+        ctx.strokeRect(q16(left), q16(top), q16(right - left), q16(bottom - top));
+      }
+      if (collision.ray) {
+        const [x, y] = collision.ray.point.map(q16);
+        ctx.strokeStyle = debugSpec.event_color;
+        ctx.beginPath();
+        ctx.moveTo(...collision.ray.origin.map(q16));
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        ctx.strokeRect(x - 3, y - 3, 6, 6);
+      }
+    } else if (body) {
       ctx.strokeStyle = debugSpec.coordinate_color;
       ctx.strokeRect(...body);
     }
-    if (contact && contact.x >= 0 && contact.x < width && contact.y >= 0 && contact.y < height) {
-      const [dx, dy] = [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]][contact.normal];
-      const x = (contact.x + 0.5) * tile, y = (height - 0.5 - contact.y) * tile;
+    const contacts = collision?.contacts ?? (contact ? [{ ...contact, y: height - 1 - contact.y }] : []);
+    for (const hit of contacts) {
+      const normal = [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]][hit.normal];
+      if (!normal || hit.x < 0 || hit.x >= width || hit.y < 0 || hit.y >= height) continue;
+      const [dx, dy] = normal;
+      const x = (hit.x + 0.5) * tile, y = (hit.y + 0.5) * tile;
       ctx.strokeStyle = debugSpec.coordinate_color;
       ctx.beginPath();
       ctx.moveTo(x, y);
       ctx.lineTo(x + dx * tile * 0.38, y + dy * tile * 0.38);
       ctx.stroke();
       ctx.strokeRect(x - 2, y - 2, 4, 4);
+      if (hit.depth > 0) ctx.fillText(`${hit.depth} Q16`, x + 4, y + 12);
     }
     ctx.restore();
   }
@@ -536,13 +522,32 @@ const CANVAS_ADAPTER: &str = r#"
     const activationOffset = get('level_snapshot'), activationLength = get('level_snapshot_len');
     const activationView = typeof activationOffset === 'function' && typeof activationLength === 'function'
       ? memoryView(exports.memory, activationOffset, activationLength, activationBytes, 'Activation') : null;
+    const replayOffset = get('replay'), replayLength = get('replay_len');
+    const activeLevel = get('level');
+    const setPaused = get('set_paused');
+    const collisionOffset = get('collision_snapshot'), collisionLength = get('collision_snapshot_len');
+    const collisionView = typeof collisionOffset === 'function' && typeof collisionLength === 'function'
+      ? memoryView(exports.memory, collisionOffset, collisionLength, collisionBytes, 'Collision') : null;
     return {
       input, advance, resetInput, resetGame, step, traceChannels,
       read: () => readSnapshot(snapshotView()),
       trace: epoch => readTrace(traceView(), epoch),
-      level: levelAdmission(get),
+      assets: assetAdmission(get, exports.memory),
+      activeLevel: typeof activeLevel === 'function' ? activeLevel : null,
+      setPaused: typeof setPaused === 'function' ? setPaused : null,
       pose: poseView && (snapshot => readPose(poseView(), snapshot)),
       activation: activationView && (snapshot => readActivation(activationView(), snapshot)),
+      collision: collisionView && (snapshot => readCollision(collisionView(), snapshot)),
+      replayPlayback: replayControls(get, exports.memory),
+      replay: typeof replayOffset === 'function' && typeof replayLength === 'function' ? () => {
+        const offset = replayOffset() >>> 0;
+        const length = replayLength() >>> 0;
+        const memory = exports.memory.buffer;
+        if (!offset || !length || length > 2 * 1024 * 1024 || offset + length > memory.byteLength) {
+          throw new Error('Invalid replay export');
+        }
+        return new Uint8Array(memory, offset, length).slice();
+      } : null,
       memoryBytes: () => exports.memory.buffer.byteLength,
     };
   }
@@ -550,11 +555,12 @@ const CANVAS_ADAPTER: &str = r#"
   async function start() {
     const ctx = board?.getContext('2d', { alpha: false });
     if (!ctx || !status || !restart) throw new Error('Canvas controls unavailable');
-    const response = await fetch(wasm.path, {
-      mode: 'same-origin', credentials: 'same-origin', redirect: 'error',
-    });
-    if (!response.ok) throw new Error('Canvas WASM asset unavailable');
-    const { instance } = await WebAssembly.instantiateStreaming(response, {});
+    io = workerAssetIo();
+    const startup = new AbortController();
+    const timeout = setTimeout(() => startup.abort(), assetSpec.startup_timeout_ms);
+    const bytes = await io.read('wasm', startup.signal).finally(() => clearTimeout(timeout));
+    const { instance } = await WebAssembly.instantiate(bytes, {});
+    if (failed) return;
     const runtime = playback(instance.exports);
     const { input, advance, resetInput, resetGame } = runtime;
 
@@ -569,8 +575,10 @@ const CANVAS_ADAPTER: &str = r#"
     let selectedLevel;
     let pending;
     let activeCollider;
-    const loader = runtime.level && levelGroup && levelStatus && choices.every(choice => choice.button)
-      ? cookedAssets(assetSpec) : null;
+    let handoff = null;
+    let audio;
+    const loader = runtime.assets && runtime.activeLevel && levelGroup && levelStatus && choices.every(choice => choice.button)
+      ? cookedAssets(runtime.assets, assetSpec, io) : null;
     const buttons = directions.map(button => ({
       button, action: Number(button.getAttribute(controls.action_attribute)),
     }));
@@ -600,19 +608,55 @@ const CANVAS_ADAPTER: &str = r#"
       if (debuggerPanel?.paused()) refresh();
     }
 
-    function clearInput() {
+    function clearDeviceInput() {
       previousFrame = null;
       keys.clear();
       pointers.clear();
       held.fill(0);
-      resetInput();
       for (const { button } of buttons) button.removeAttribute(controls.held_attribute);
+    }
+
+    function clearInput() {
+      clearDeviceInput();
+      resetInput();
+    }
+
+    function setPaused(paused) {
+      clearDeviceInput();
+      if (runtime.setPaused) runtime.setPaused(Number(paused));
+      else resetInput();
     }
 
     function levelMessage(message) {
       if (!levelStatus) return;
       levelStatus.textContent = message;
       levelStatus.hidden = !message;
+    }
+
+    function armEntryCue() {
+      try {
+        audio ??= new AudioContext();
+        if (audio.state === 'suspended') void audio.resume().catch(() => {});
+      } catch (_) {
+        // The text cue remains available on browsers without audio support.
+      }
+    }
+
+    function entryCue() {
+      if (audio?.state !== 'running') return;
+      try {
+        const tone = audio.createOscillator();
+        const gain = audio.createGain();
+        const start = audio.currentTime;
+        tone.frequency.value = 660;
+        gain.gain.setValueAtTime(0.04, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.08);
+        tone.connect(gain).connect(audio.destination);
+        tone.start(start);
+        tone.stop(start + 0.08);
+      } catch (_) {
+        // A device change can invalidate the audio route during activation.
+      }
     }
 
     function syncChoices() {
@@ -627,10 +671,11 @@ const CANVAS_ADAPTER: &str = r#"
     }
 
     function syncLevel() {
-      const active = runtime.level?.active() ?? 0;
+      const active = runtime.activeLevel?.() ?? 0;
       if (active !== selectedLevel) {
         if (selectedLevel !== undefined) clearInput();
         selectedLevel = active;
+        activeCollider = active && runtime.assets ? runtime.assets.collider() : null;
         const label = choices.find(choice => choice.level === active)?.label ?? choices[0].label;
         if (title) title.textContent = label;
         board.setAttribute('aria-label', `${label} game board`);
@@ -649,29 +694,32 @@ const CANVAS_ADAPTER: &str = r#"
       }
       if (pending?.staged && pending.choice.level === active) {
         const focusBoard = document.activeElement === pending.choice.button;
-        activeCollider = pending.collider;
+        const { choice, user, startBytes, stagedBytes } = pending;
+        if (runtime.memoryBytes) {
+          handoff = { level: choice.label, startBytes, peakBytes: Math.max(startBytes, stagedBytes, runtime.memoryBytes()) };
+        }
         pending = null;
-        levelMessage('');
+        levelMessage(user ? `Entered ${choice.label}.` : '');
+        if (user) entryCue();
         syncChoices();
         if (focusBoard) board.focus({ preventScroll: true });
       }
     }
 
-    async function requestLevel(choice) {
-      if (!loader || pending || runtime.level.active() === choice.level) return;
+    async function requestLevel(choice, user = false) {
+      if (!loader || pending || runtime.activeLevel() === choice.level) return;
+      if (user) armEntryCue();
       const controller = new AbortController();
-      const load = { choice, controller, staged: false };
+      const load = { choice, controller, user, staged: false, startBytes: runtime.memoryBytes?.() };
       pending = load;
       syncChoices();
       levelMessage(`Loading ${choice.label}…`);
       const timeout = setTimeout(() => controller.abort(), assetSpec.request_timeout_ms);
       try {
-        const cooked = await loader.loadLevel(choice.asset, controller.signal);
+        await loader.loadLevel(choice, controller.signal);
         if (failed || pending !== load) return;
-        controller.signal.throwIfAborted();
-        runtime.level.stage(cooked);
-        load.collider = cooked.collider;
         load.staged = true;
+        load.stagedBytes = runtime.memoryBytes?.();
         if (debuggerPanel?.paused()) levelMessage(`${choice.label} is ready. Resume or step to open it.`);
       } catch (_) {
         if (pending === load && !failed) {
@@ -719,7 +767,7 @@ const CANVAS_ADAPTER: &str = r#"
       ctx.restore();
     }
 
-    function paint({ width, height, cells, status: currentStatus }, overlay, events, player, contact) {
+    function paint({ width, height, cells, status: currentStatus }, overlay, events, player, contact, collision) {
       if (currentStatus < 0 || currentStatus >= presentation.status_messages.length ||
           cells.some(cell => cell >= presentation.cells.length)) throw new Error('Invalid playtest cell or status');
       if (!paintedCells || board.width !== width * tile || board.height !== height * tile) {
@@ -751,7 +799,7 @@ const CANVAS_ADAPTER: &str = r#"
           const [left, top, right, bottom] = activeCollider.map(edge => edge / 65536 * tile);
           body = [player.x + left, player.y + top, right - left, bottom - top];
         }
-        drawOverlay(ctx, width, height, events, contact, body);
+        drawOverlay(ctx, width, height, events, contact, body, collision);
       }
       wasOverlay = overlay;
       if (currentStatus !== visibleStatus) {
@@ -764,7 +812,8 @@ const CANVAS_ADAPTER: &str = r#"
       const overlay = Boolean(debuggerPanel?.overlay());
       const events = overlay ? snapshotEvents(snapshot).slice(-12) : [];
       const pose = runtime.pose?.(snapshot);
-      paint(snapshot, overlay, events, drawing(snapshot, pose), pose?.contact);
+      paint(snapshot, overlay, events, drawing(snapshot, pose), pose?.contact,
+        overlay ? runtime.collision?.(snapshot) : null);
     }
 
     const refresh = guard(() => {
@@ -811,8 +860,9 @@ const CANVAS_ADAPTER: &str = r#"
 
     if (runtime.trace) {
       debuggerPanel = attachDebugger(debugSpec, {
-        ...runtime, snapshot: runtime.read, clearInput, refresh, restart: restartRoom, guard,
+        ...runtime, snapshot: runtime.read, handoff: () => handoff, setPaused, refresh, restart: restartRoom, guard,
       });
+      attachReplay(runtime.replayPlayback, io, guard);
     } else {
       disableDebug(debugSpec.unavailable);
     }
@@ -821,7 +871,7 @@ const CANVAS_ADAPTER: &str = r#"
       const key = event.key.toLowerCase();
       const action = keyActions.get(key);
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-      if (event.target instanceof Element && event.target.closest('input, select, textarea, [contenteditable]')) return;
+      if (event.target instanceof Element && event.target.closest('input, select, textarea, [contenteditable], #playtest-replay')) return;
       if (document.hidden || !focused) return;
       if (debuggerPanel?.shortcut(event, key)) {
         event.preventDefault();
@@ -886,12 +936,16 @@ const CANVAS_ADAPTER: &str = r#"
       clearInput();
     }));
     document.addEventListener('visibilitychange', guard(clearInput));
-    window.addEventListener('pagehide', guard(clearInput));
+    window.addEventListener('pagehide', guard(event => {
+      clearInput();
+      if (!event.persisted) io.close();
+      if (!event.persisted && audio) void audio.close().catch(() => {});
+    }));
     window.addEventListener('pageshow', guard(clearInput));
     if (loader) {
       levelGroup.hidden = false;
       for (const choice of choices) {
-        choice.button.addEventListener('click', guard(() => { void requestLevel(choice); }));
+        choice.button.addEventListener('click', guard(() => { void requestLevel(choice, true); }));
       }
       await requestLevel(choices[0]);
       if (runtime.pose) {

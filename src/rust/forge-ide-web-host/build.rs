@@ -27,6 +27,7 @@ fn main() -> io::Result<()> {
         ),
         ("forge-workers-studio.html", DesignPage::ForgeWorkersStudio),
         ("playtest.html", DesignPage::Playtest),
+        ("studio.html", DesignPage::Studio),
     ] {
         fs::write(output.join(name), page.render())?;
     }
@@ -35,6 +36,13 @@ fn main() -> io::Result<()> {
         design::game_engine::stylesheet(),
     )?;
     fs::write(output.join("playtest.css"), design::playtest::stylesheet())?;
+    fs::write(output.join("studio.css"), design::studio::stylesheet())?;
+    fs::write(output.join("studio.js"), design::studio::MAIN)?;
+    fs::write(output.join("studio-worker.js"), design::studio::WORKER)?;
+    fs::write(
+        output.join("playtest-assets-worker.js"),
+        design::playtest_asset_worker::render(),
+    )?;
     fs::write(
         output.join("playtest.js"),
         design::playtest_browser::javascript(),

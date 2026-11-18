@@ -5,6 +5,7 @@ pub(super) const SNAPSHOT_READERS: &str = r#"
   const traceBytes = 8216;
   const poseBytes = 32;
   const activationBytes = 48;
+  const collisionBytes = 5216;
 
   function memoryView(memory, getOffset, getLength, length, label) {
     let view;
@@ -78,6 +79,29 @@ pub(super) const SNAPSHOT_READERS: &str = r#"
       return readEntity(view, offset);
     }
     return null;
+  }
+
+  function readCollision(view, snapshot) {
+    const count = view.getUint16(12, true);
+    const contactCount = view.getUint8(15);
+    if (view.getUint32(0, true) !== 0x31434746 || view.getUint32(4, true) !== snapshot.epoch ||
+        view.getUint32(8, true) !== snapshot.tick || count > 256 || contactCount > 3) return null;
+    const fixed = offset => view.getInt32(offset, true);
+    const bodies = Array.from({ length: count }, (_, index) => {
+      const at = 96 + index * 20;
+      return [fixed(at + 4), fixed(at + 8), fixed(at + 12), fixed(at + 16)];
+    });
+    const contacts = Array.from({ length: contactCount }, (_, index) => {
+      const at = 48 + index * 16;
+      return { x: fixed(at), y: fixed(at + 4), depth: fixed(at + 8), normal: view.getUint8(at + 12) };
+    });
+    const target = view.getUint8(37);
+    const ray = target ? {
+      origin: [fixed(16), fixed(20)], point: [fixed(24), fixed(28)], distance: fixed(32),
+      normal: view.getUint8(36), tile: target === 1 ? [fixed(40), fixed(44)] : null,
+      entity: target === 2 ? view.getUint16(38, true) : null,
+    } : null;
+    return { bodies, contacts, ray };
   }
 
   function readPose(view, snapshot) {

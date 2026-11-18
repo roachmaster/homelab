@@ -22,12 +22,12 @@ html_names!(Tag {
     Dl => "dl", Dt => "dt", Figcaption => "figcaption", Figure => "figure",
     Form => "form", H1 => "h1", H2 => "h2", H3 => "h3", H4 => "h4",
     Img => "img", Input => "input", Label => "label", Li => "li", Nav => "nav",
-    Ol => "ol", P => "p", Pre => "pre", Section => "section", Small => "small",
+    Ol => "ol", P => "p", Pre => "pre", Section => "section", Select => "select", Small => "small",
     Span => "span", Strong => "strong", Summary => "summary", Table => "table", Textarea => "textarea",
 });
 
 html_names!(Attribute {
-    Alt => "alt", AriaAtomic => "aria-atomic", AriaCurrent => "aria-current",
+    Accept => "accept", Alt => "alt", AriaAtomic => "aria-atomic", AriaCurrent => "aria-current",
     AriaDescribedby => "aria-describedby", AriaHidden => "aria-hidden", AriaLabel => "aria-label",
     AriaLabelledby => "aria-labelledby", AriaLive => "aria-live", AriaPressed => "aria-pressed",
     Autocomplete => "autocomplete", Autofocus => "autofocus",
@@ -66,7 +66,9 @@ mod history;
 mod landing;
 mod mail;
 pub mod playtest;
+pub mod playtest_asset_worker;
 pub mod playtest_browser;
+pub mod studio;
 
 fn render(nodes: &[Node], output: &mut String) {
     for node in nodes {
@@ -110,6 +112,7 @@ pub enum DesignPage {
     ForgeWorkersPlaytest,
     ForgeWorkersStudio,
     Playtest,
+    Studio,
 }
 
 impl DesignPage {
@@ -177,6 +180,7 @@ impl DesignPage {
                 "Back to game engine design",
                 playtest::BODY,
             ),
+            Self::Studio => ("Forge Studio", "/", "Back to Forge", studio::BODY),
         };
         let mut output = String::from(
             "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
@@ -193,6 +197,10 @@ impl DesignPage {
             Self::Playtest => concat!(
                 "<link rel=\"stylesheet\" href=\"/playtest/style.css\">",
                 "<script src=\"/playtest/main.js\" defer></script>",
+            ),
+            Self::Studio => concat!(
+                "<link rel=\"stylesheet\" href=\"/studio/style.css\">",
+                "<script src=\"/studio/main.js\" defer></script>",
             ),
             _ => "<link rel=\"stylesheet\" href=\"/design/chat-history.css\">",
         });

@@ -140,6 +140,12 @@ The small volatile job proof in that plan precedes—not satisfies—the durable
 
 ## Later vertical slice: one useful workflow, not a new platform
 
+The [durable jobs capability](../../src/rust/forge-jobs/README.md) implements
+typed submit, status and cancel over the shared bridge. It commits receipts
+and results to a local store and runs one bounded sum job with leased attempts
+and restart recovery. Framework-wide identity and service lifecycle work
+remain separate milestones.
+
 After the bootstrap core is proven and a durable consumer is selected, build the illustrative `jobs.submit` → `jobs.status` workflow. The first route validates a bounded work request and returns a stable durable receipt; the second makes that acceptance observable. Use a trivial, explicitly documented job kind. Execution, network/broker integrations, scheduling, remote model calls, and deployment orchestration are not prerequisites for proving the first admission/storage seam.
 
 Start with an in-process contract driver, the shared bridge, one capability, and a real local durable-store adapter. No input transport is selected or required. A thin CLI or network adapter can be considered later for an actual consumer; neither is a prerequisite. A memory adapter is useful for unit tests but cannot satisfy the durability gate. This is intentionally more meaningful than a health endpoint and smaller than recreating Mission Control.

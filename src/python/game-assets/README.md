@@ -53,6 +53,11 @@ relative symlink. Resolve the symlink once when opening or copying a build
 so every file belongs to the same generation. Prior generation directories
 remain available to readers that already resolved them.
 
+Pass `--archive /path/to/replay-archive` to retain the exact manifest and level
+files under the manifest SHA-256. `FORGE_COOKED_REPLAY_ARCHIVE` enables the same
+option for `make ui-build`. Use a shared archive directory across releases and
+point the web host's `cooked_replay_archive` setting to it for browser replay.
+
 The authoring-only `cook-state.json` records source, tool, and conversion
 fingerprints. A normal cook reuses an atlas only when its fingerprint and
 both recorded output digests match. `--clean` always renders it again.

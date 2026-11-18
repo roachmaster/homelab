@@ -80,7 +80,12 @@ At 60 Hz a tick represents about 16.67 ms of simulation. Use an accumulator that
 
 ## Forge project and build APIs
 
-Keep control operations behind the existing `POST /forge/v1/dispatch` gateway, using the existing header-routed command protocol. New `Forge-Destination` values below are proposals. Carry the existing envelope and contract version and request ID headers, with the authenticated session and CSRF token. A typed `ProjectRef` names the configured node and project aliases. The binding checks that the typed body matches the destination and admits that project before effects. The current browser header allowlist gives inspection-specific headers special handling, so any expansion of those headers must be explicit. [Request contract](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/README.md#request-contract) · [HTTP adapter](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/src/http.rs)
+The [Studio service](../../../deploy/mission-control/studio/README.md)
+implements a PostgreSQL build queue and signed artifact previews for an
+approved static web subtree at a pinned Git revision. The worker assembles
+that subtree without executing its project build scripts.
+
+Keep control operations behind the existing `POST /forge/v1/dispatch` gateway, using the existing header-routed command protocol. The `Forge-Destination` values below identify Studio commands. Carry the existing envelope and contract version and request ID headers, with the authenticated session and CSRF token. A typed `ProjectRef` names the configured node and project aliases. The binding checks that the typed body matches the destination and admits that project before effects. The current browser header allowlist gives inspection-specific headers special handling, so any expansion of those headers must be explicit. [Request contract](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/README.md#request-contract) · [HTTP adapter](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/src/http.rs)
 
 | Destination | Request DTO | Response and effect |
 | --- | --- | --- |
@@ -125,10 +130,9 @@ sequenceDiagram
 
 The [worker ownership proposal](forge-worker-ownership.md) specifies the
 messages for a playtest with main-thread rendering, Rust authority, and
-JavaScript I/O workers. It also traces admission and status for Studio's
-later native build milestone.
+JavaScript I/O workers. It also traces Studio's build admission and status.
 
-Add a generated `/design/game-studio` page to the existing Design index if this proposal should be visible on the portal. Follow the Rust design renderer and its fixed asset routes. The operational Studio view can later live beside Chat, Mail and Workbench. Let it reuse the authorized project selector and keep the selected project, revision and build ID in the existing Rust-owned workspace model. Scope those fields to Studio so returning from a preview can restore the tools the user was working with. [Design renderer](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/src/design/mod.rs) · [Design asset routing](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web-host/src/assets.rs) · [Portal UI declarations](https://github.com/roachmaster/homelab/blob/01b6bf7e2c355c63cf008d198a5c1cca4d4a0c9a/src/rust/forge-ide-web/src/generate/application.rs)
+The generated `/design/game-studio` page links to the operational Studio view at `/studio`. The host filters Studio's project list using its configured grants. Studio saves the selected project, revision, and build ID in the current browser tab and revalidates the selection when it reconnects. A future shared navigation and workspace model can keep Studio beside Chat, Mail, and Workbench. [Design renderer](../../../src/rust/forge-ide-web-host/src/design/mod.rs) · [Studio page](../../../src/rust/forge-ide-web-host/src/design/studio.rs)
 
 Serve executable game previews from a separate origin with its own access policy. Navigate in the same tab with a return path to Studio. Preserve the portal's session and browser state, and keep its credentials on the portal origin. Use immutable preview builds and a digest-bearing manifest so a user can tell exactly what is running. Desktop and narrow-browser tests should exercise leaving, returning, and recovering the selected build.
 

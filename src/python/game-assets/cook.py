@@ -254,6 +254,29 @@ def publish(output, generations, workspace, artifacts):
     os.replace(pointer, output)
 
 
+def archive_levels(root, artifacts):
+    root.mkdir(parents=True, exist_ok=True)
+    if root.is_symlink():
+        raise CookError(f"{root}: expected a real archive directory")
+    manifest = artifacts["manifest.json"]
+    destination = root / digest(manifest)
+    levels = {name: data for name, data in artifacts.items() if name.startswith("levels/")}
+    retained = {"manifest.json": manifest, **levels}
+    with TemporaryDirectory(prefix=".archive-", dir=root) as temporary:
+        bundle = Path(temporary) / "generation"
+        for name, data in retained.items():
+            path = bundle / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        try:
+            bundle.rename(destination)
+        except OSError as error:
+            if destination.is_symlink() or not destination.is_dir():
+                raise
+            if any((destination / name).read_bytes() != data for name, data in retained.items()):
+                raise CookError(f"{destination}: archived generation bytes differ") from error
+
+
 def cook(args):
     output = args.out.absolute()
     generations = output.parent / f".{output.name}-generations"
@@ -292,6 +315,8 @@ def cook(args):
             artifacts[path] = data
         artifacts["manifest.json"] = json_bytes({"version": 1, "entries": entries})
         artifacts["cook-state.json"] = json_bytes({"version": 1, "levels": level_sources, "atlas": settings})
+        if args.archive is not None:
+            archive_levels(args.archive, artifacts)
         publish(output, generations, workspace, artifacts)
     return len(entries)
 
@@ -299,6 +324,7 @@ def cook(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True, help="directory or symlink for cooked assets")
+    parser.add_argument("--archive", type=Path, help="retain manifests and levels by manifest SHA-256")
     parser.add_argument("--levels", type=Path, default=ROOT / "examples/levels", help="authored level directory")
     parser.add_argument("--recipe", type=Path, default=SCOUT_RECIPE)
     parser.add_argument("--skin", type=Path, default=SCOUT_SKIN)

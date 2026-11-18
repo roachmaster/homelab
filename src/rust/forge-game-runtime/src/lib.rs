@@ -9,6 +9,7 @@ mod entity;
 mod input;
 mod level;
 pub mod physics;
+mod queries;
 mod ring;
 
 use animation::Animator;
@@ -19,7 +20,8 @@ use input::InputBuffer;
 pub use level::{
     Level, LevelError, LevelId, LevelMode, LevelSpec, PatrolSpec, SpawnKind, SpawnSpec, SurfaceSpec,
 };
-use physics::{Character, Collider, Contact, Horizontal, MotionFrame, TileGrid, Vector, TILE};
+use physics::{Character, Contact, Horizontal, MotionFrame, MotionInput, TileGrid, Vector, TILE};
+pub use queries::{CollisionFilter, CollisionTargets, PhantomHits};
 use ring::Ring;
 use std::sync::Arc;
 
@@ -88,6 +90,15 @@ pub enum Action {
     Left,
     Right,
     Jump,
+}
+
+/// Input actually applied by the simulation at a tick, after resolving edges
+/// and held directions. A replay does not need the original browser timing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EffectiveInput {
+    Completed,
+    Tile(Option<Action>),
+    Platform(MotionInput),
 }
 
 /// Stable values for the room's presentation adapter.
@@ -384,6 +395,15 @@ impl Room {
     /// Runs up to four 60 Hz ticks and drops any remaining whole-tick debt,
     /// preserving fractional time. Each tick can move the player one tile.
     pub fn advance(&mut self, elapsed_micros: u32) {
+        self.advance_observed(elapsed_micros, |_, _| {});
+    }
+
+    /// Advance the fixed clock and report each tick's effective input in order.
+    pub fn advance_observed(
+        &mut self,
+        elapsed_micros: u32,
+        mut observe: impl FnMut(u32, EffectiveInput),
+    ) {
         self.ticks_run = 0;
         self.ticks_dropped = 0;
         if self.status == Status::Completed {
@@ -395,7 +415,9 @@ impl Room {
         self.ticks_dropped = (due - ticks) as u32;
         self.tick_fraction = time % MICROS_PER_SECOND;
         for _ in 0..ticks {
-            self.run_tick();
+            if let Some(input) = self.run_tick() {
+                observe(self.tick, input);
+            }
             if self.status == Status::Completed || self.tick == u32::MAX {
                 break;
             }
@@ -407,9 +429,39 @@ impl Room {
 
     /// Advance exactly one simulation tick outside the wall-clock accumulator.
     pub fn step_one_tick(&mut self) {
+        self.step_observed(|_, _| {});
+    }
+
+    /// Step exactly once and report the effective input, if the clock advanced.
+    pub fn step_observed(&mut self, observe: impl FnOnce(u32, EffectiveInput)) {
         self.ticks_run = 0;
         self.ticks_dropped = 0;
-        self.run_tick();
+        if let Some(input) = self.run_tick() {
+            observe(self.tick, input);
+        }
+    }
+
+    /// Apply one recorded tick without interpreting device edges or elapsed time.
+    /// Reject records that do not match the room's state or simulation mode.
+    pub fn replay_tick(&mut self, input: EffectiveInput) -> bool {
+        let valid = match input {
+            EffectiveInput::Completed => self.status == Status::Completed,
+            EffectiveInput::Tile(action) => {
+                self.status != Status::Completed
+                    && self.character.is_none()
+                    && action != Some(Action::Jump)
+            }
+            EffectiveInput::Platform(_) => {
+                self.status != Status::Completed && self.character.is_some()
+            }
+        };
+        let Some(tick) = self.tick.checked_add(1).filter(|_| valid) else {
+            return false;
+        };
+        self.ticks_run = 0;
+        self.ticks_dropped = 0;
+        self.apply_tick(tick, input);
+        true
     }
 
     /// Drops pending input, held directions, and fractional clock time on focus loss.
@@ -426,23 +478,30 @@ impl Room {
         }
     }
 
-    fn run_tick(&mut self) {
-        let Some(tick) = self.tick.checked_add(1) else {
-            return;
+    fn run_tick(&mut self) -> Option<EffectiveInput> {
+        let tick = self.tick.checked_add(1)?;
+        let input = match (self.status, self.character.is_some()) {
+            (Status::Completed, _) => EffectiveInput::Completed,
+            (_, true) => EffectiveInput::Platform(self.input.next_motion()),
+            (_, false) => EffectiveInput::Tile(self.input.next_step()),
         };
+        self.apply_tick(tick, input);
+        Some(input)
+    }
+
+    fn apply_tick(&mut self, tick: u32, input: EffectiveInput) {
         self.tick = tick;
         self.ticks_run += 1;
         self.table.begin_tick();
-        if self.status == Status::Completed {
-            return;
+        match input {
+            EffectiveInput::Completed => (),
+            EffectiveInput::Tile(action) => self.run_tile_tick(action),
+            EffectiveInput::Platform(motion) => self.run_platform_tick(motion),
         }
+    }
 
-        if self.character.is_some() {
-            self.run_platform_tick();
-            return;
-        }
+    fn run_tile_tick(&mut self, action: Option<Action>) {
         // Input, movement, collisions, animation, then event effects.
-        let action = self.input.next_step();
         if let Some(action) = action {
             self.replay_complete &= self.trace_mask & (1 << INPUT_CHANNEL) != 0;
             self.record_trace(
@@ -470,8 +529,7 @@ impl Room {
         }
     }
 
-    fn run_platform_tick(&mut self) {
-        let input = self.input.next_motion();
+    fn run_platform_tick(&mut self, input: MotionInput) {
         let horizontal = match input.horizontal {
             Horizontal::Left => Some(Action::Left),
             Horizontal::Right => Some(Action::Right),
@@ -636,14 +694,10 @@ impl Room {
     fn overlaps_objective(&self, target: Position) -> bool {
         match self.motion() {
             None => self.entity(self.player).position == target,
-            Some(motion) => self.level.collider.overlaps(
-                motion.position,
-                Collider::new(TILE / 2, TILE).expect("tile-sized trigger"),
-                Vector {
-                    x: target.x as i32 * TILE + TILE / 2,
-                    y: (target.y as i32 + 1) * TILE,
-                },
-            ),
+            Some(motion) => {
+                let (shape, anchor) = queries::tile_collider(target);
+                self.level.collider.overlaps(motion.position, shape, anchor)
+            }
         }
     }
 
@@ -893,11 +947,13 @@ mod tests {
             .peekable();
         let mut replay = Room::new();
         for tick in 1..=room.tick() {
-            if actions.peek().is_some_and(|record| record.tick == tick) {
+            let action = if actions.peek().is_some_and(|record| record.tick == tick) {
                 let record = actions.next().unwrap();
-                tap(&mut replay, b"UDLR"[record.data as usize]);
-            }
-            replay.step_one_tick();
+                Some([Action::Up, Action::Down, Action::Left, Action::Right][record.data as usize])
+            } else {
+                None
+            };
+            assert!(replay.replay_tick(EffectiveInput::Tile(action)));
         }
         assert_eq!(replay.status(), room.status());
         assert_eq!(

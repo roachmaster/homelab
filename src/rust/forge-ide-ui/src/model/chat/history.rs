@@ -429,14 +429,22 @@ impl Chats {
     fn accept_open(&mut self, chat: ChatHistoryDto, manage: bool) -> Result<(), UiError> {
         let summary = chat.summary;
         if chat.messages.len() > 26
-            || chat
-                .messages
-                .iter()
-                .enumerate()
-                .any(|(index, message)| message.position != index + 1)
+            || chat.messages.iter().enumerate().any(|(index, message)| {
+                message.position != index + 1
+                    || message
+                        .attachment
+                        .as_ref()
+                        .is_some_and(|file| message.role != ChatRole::User || !file.is_valid())
+            })
         {
             return Err(UiError::InvalidAction);
         }
+        let attachments = chat
+            .messages
+            .iter()
+            .enumerate()
+            .filter_map(|(index, message)| message.attachment.clone().map(|file| (index, file)))
+            .collect();
         let messages: Vec<_> = chat
             .messages
             .into_iter()
@@ -483,6 +491,7 @@ impl Chats {
             return Err(UiError::InvalidAction);
         }
         conversation.messages = messages;
+        conversation.attachments = attachments;
         conversation.chat_id = Some(summary.chat_id.clone());
         conversation.revision = Some(summary.revision);
         conversation.summary = Some(summary);

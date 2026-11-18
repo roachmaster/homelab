@@ -1,6 +1,6 @@
 """Authenticated loopback ingress and durable Forge run completion."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,9 +17,11 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
 import psycopg2
+import agent_tools
 import chat_history_api as history_api
 import chat_history_store as history_store
 import chat_run_api as run_api
+from file_context import parse_attachment
 import mail_api
 from model_adapter import MAX_BODY, ModelAdapter
 import queue_store as store
@@ -28,6 +30,7 @@ from queue_store import Message, Rejected, Submit
 PORT = 18083
 DEFAULT_MODEL = "gpt-oss-20b"
 WORKSPACE_PATH = "/v1/workspace"
+TOOL_RUN_PATH = "/v1/agent/runs"
 MAX_WORKSPACE_BODY = 2 * 1024 * 1024
 HISTORY_EXPIRY_INTERVAL_SECONDS = 60
 RESULT_SCAN_SECONDS = 2
@@ -150,7 +153,7 @@ def workspace_json_safe(body):
 def submission(body, key, *, allow_partial=False):
     fields = {"model", "messages", "max_tokens", "temperature", "stream", "conversation_id"}
     if allow_partial:
-        fields.update(("chat_id", "expected_revision"))
+        fields.update(("chat_id", "expected_revision", "attachment"))
     if not isinstance(body, dict) or body.keys() - fields or body.get("stream", False) is not False:
         raise Rejected(400, "invalid_chat")
     messages = body.get("messages")
@@ -186,9 +189,14 @@ def submission(body, key, *, allow_partial=False):
         expected_revision = history_api.parse_revision(body["expected_revision"])
     if linked_chat is not None and conversation is not None:
         raise Rejected(400, "invalid_chat_id")
+    attachment = None
+    if "attachment" in body:
+        if linked_chat is None:
+            raise Rejected(400, "invalid_chat_id")
+        attachment = parse_attachment(body["attachment"])
     return Submit(model, tuple(Message(**m) for m in messages), max_tokens, float(temperature),
                   conversation, key or str(uuid4()), allow_partial=allow_partial,
-                  chat_id=linked_chat, expected_revision=expected_revision)
+                  chat_id=linked_chat, expected_revision=expected_revision, attachment=attachment)
 
 
 class Inference(ModelAdapter):
@@ -205,24 +213,53 @@ class Inference(ModelAdapter):
         return model if model in store.MODELS else DEFAULT_MODEL
 
 
-def worker(inference, ready):
+def tool_submission(body, key, repositories):
+    if not isinstance(body, dict) or not {"repository", "revision"} <= body.keys():
+        raise Rejected(400, "invalid_tool_run")
+    repository, revision = body["repository"], body["revision"]
+    if not isinstance(repository, str) or repository not in repositories:
+        raise Rejected(404, "repository_not_found")
+    if not isinstance(revision, str) or not agent_tools.OBJECT_ID.fullmatch(revision):
+        raise Rejected(400, "invalid_revision")
+    settings = {field: value for field, value in body.items() if field not in {"repository", "revision"}}
+    if "conversation_id" in settings or key is None:
+        raise Rejected(400, "invalid_tool_run")
+    return replace(submission(settings, key), tool_repository=repository, tool_revision=revision)
+
+
+def complete_run(inference, run_id, command, repositories):
+    if command.tool_repository is None:
+        return inference.complete(command)
+    root = repositories.get(command.tool_repository)
+    if root is None:
+        raise Rejected(404, "repository_not_found")
+    snapshot = agent_tools.Snapshot(root, command.tool_revision)
+    return agent_tools.complete(
+        lambda request: inference.generate(command.model, request), command.payload(), snapshot,
+        lambda call: store.tool_started(run_id, call),
+        lambda call, result: store.tool_finished(run_id, call, result),
+    )
+
+
+def worker(inference, ready, repositories=None, *, tools_only=False):
+    repositories = {} if repositories is None else repositories
     while True:
         try:
             with store.listen("forge_agent_jobs") as listener, listener.cursor() as cursor:
                 cursor.execute("SELECT pg_try_advisory_lock(20261112, 1)")
                 if not cursor.fetchone()[0]:
                     raise RuntimeError("another runner owns the worker lease")
-                store.recover()
+                store.recover(tools_only=tools_only)
                 ready.set()
                 while True:
-                    job = store.claim()
+                    job = store.claim(tools_only=tools_only)
                     if job is None:
                         store.wait_for_signal(listener, 15)
                         continue
                     run_id, command = job
                     try:
-                        answer, usage, finish_reason = inference.complete(command)
-                    except Rejected as error:
+                        answer, usage, finish_reason = complete_run(inference, run_id, command, repositories)
+                    except (Rejected, agent_tools.ToolError) as error:
                         store.finish(run_id, error=error.code)
                     except (KeyError, IndexError, TypeError, ValueError, AttributeError):
                         store.finish(run_id, error="invalid_forge_reply")
@@ -315,7 +352,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             authorization = self.headers.get("Authorization", "").encode("latin1")
             if (not secrets.compare_digest(authorization, self.server.authorization)
-                    or (self.path in (WORKSPACE_PATH, history_api.PATH)
+                    or (self.path in (WORKSPACE_PATH, history_api.PATH, TOOL_RUN_PATH)
                         and len(self.headers.get_all("Authorization", [])) != 1)):
                 raise Rejected(401, "unauthorized")
             status, result = self.route()
@@ -342,6 +379,19 @@ class Handler(BaseHTTPRequestHandler):
             return HTTPStatus.OK, dispatch(Route.WORKSPACE, command)
         if self.command == "POST" and self.path == history_api.PATH:
             return self.versioned_request()
+        if self.command == "POST" and self.path == TOOL_RUN_PATH:
+            if not self.server.tool_repositories:
+                raise Rejected(404, "route_not_found")
+            body = self.read_json_body(MAX_BODY, "invalid_tool_run")
+            keys = self.headers.get_all("Idempotency-Key", [])
+            if len(keys) != 1:
+                raise Rejected(400, "invalid_request_id")
+            if isinstance(body, dict):
+                body.setdefault("model", self.server.pinned_model)
+            command = tool_submission(body, keys[0], self.server.tool_repositories)
+            if command.model not in self.server.configured_models:
+                raise Rejected(400, "invalid_model")
+            return HTTPStatus.ACCEPTED, dispatch(Route.SUBMIT, command)
         if self.command == "POST" and parsed.path in ("/v1/runs", "/v1/chat/completions") and not parsed.query:
             if self.headers.get_content_type() != "application/json":
                 raise Rejected(415, "json_required")
@@ -461,13 +511,14 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     def __init__(self, token, ready, inference, *, distributed=False, pinned_model=DEFAULT_MODEL,
-                 configured_models=None):
+                 configured_models=None, tool_repositories=None):
         self.authorization = f"Bearer {token}".encode()
         self.ready = ready
         self.inference = inference
         self.distributed = distributed
         self.pinned_model = pinned_model
         self.configured_models = (pinned_model,) if configured_models is None else configured_models
+        self.tool_repositories = {} if tool_repositories is None else tool_repositories
         self.slots = threading.BoundedSemaphore(24)
         super().__init__(("127.0.0.1", PORT), Handler)
 
@@ -502,23 +553,27 @@ def main():
     if mode not in {"legacy", "dispatch"} or model not in store.MODELS:
         raise ValueError("Invalid configured runner mode or model")
     models = configured_models(model, os.environ.get("FORGE_RUNNER_MODELS"))
+    repositories = agent_tools.repository_catalog(os.environ.get("FORGE_RUNNER_TOOL_REPOSITORIES"))
     credentials = Path(os.environ["CREDENTIALS_DIRECTORY"])
     inbound = (credentials / "runner.token").read_text().strip()
     if not re.fullmatch(r"[a-fA-F0-9]{32,128}", inbound):
         raise ValueError("Expected a hexadecimal runner bearer credential")
     inference = None
-    if mode == "legacy":
+    if mode == "legacy" or repositories:
         outbound = (credentials / "forge.token").read_text().strip()
         if not re.fullmatch(r"[a-fA-F0-9]{32,128}", outbound):
             raise ValueError("Expected a hexadecimal Forge bearer credential")
         inference = Inference(outbound)
     ready = threading.Event()
     with Server(inbound, ready, inference, distributed=mode == "dispatch", pinned_model=model,
-                configured_models=models) as server:
+                configured_models=models, tool_repositories=repositories) as server:
         if mode == "dispatch":
             threading.Thread(target=complete_dispatched_runs, args=(ready,), daemon=True).start()
+            if repositories:
+                threading.Thread(target=worker, args=(inference, threading.Event(), repositories),
+                                 kwargs={"tools_only": True}, daemon=True).start()
         else:
-            threading.Thread(target=worker, args=(inference, ready), daemon=True).start()
+            threading.Thread(target=worker, args=(inference, ready, repositories), daemon=True).start()
         threading.Thread(target=expire_chat_history, daemon=True).start()
         LOG.info("Listening on loopback port %d", PORT)
         server.serve_forever()

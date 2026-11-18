@@ -185,7 +185,9 @@ impl State {
                 .operations
                 .retain(|_, operation| operation.owner == owner);
             let limit = match request.intent {
-                EditWriteIntent::Apply { .. } => MAX_OPERATIONS - 1,
+                EditWriteIntent::Apply { .. } | EditWriteIntent::SaveDocument { .. } => {
+                    MAX_OPERATIONS - 1
+                }
                 _ => MAX_OPERATIONS,
             };
             if writes.operations.len() >= limit {
@@ -234,6 +236,14 @@ impl State {
                             applied_operation: applied.native_id.clone(),
                         },
                     )
+                }
+                EditWriteIntent::SaveDocument { file, text } => {
+                    match self.prepare_document_write(file, text, request, deadline, expires) {
+                        Ok((path, intent)) => {
+                            (file.node_key.clone(), file.project.clone(), path, intent)
+                        }
+                        Err(outcome) => return Ok(outcome),
+                    }
                 }
                 EditWriteIntent::Status {} => return Ok(EditWriteOutcome::Rejected),
             };
@@ -343,6 +353,80 @@ impl State {
             }
         }
         Ok(outcome)
+    }
+
+    fn prepare_document_write(
+        &self,
+        file: &ChatFileContext,
+        text: &str,
+        request: &PreparedEditWrite,
+        deadline: Instant,
+        expires: u64,
+    ) -> Result<(Vec<String>, WriteIntent), EditWriteOutcome> {
+        if file.byte_start != 0
+            || file.byte_end == 0
+            || file.byte_end as usize > MAX_EDITOR_BYTES
+            || text.len() > MAX_EDITOR_BYTES
+            || text.contains(['\r', '\0'])
+        {
+            return Err(EditWriteOutcome::Rejected);
+        }
+        let verified = self
+            .verify_file_context(file, &request.request_id, deadline)
+            .map_err(|kind| match kind {
+                FailureKind::Denied => EditWriteOutcome::Conflict,
+                _ => EditWriteOutcome::Rejected,
+            })?;
+        let original = &verified.source;
+        let canonical = original.replace("\r\n", "\n");
+        let crlf = original.contains('\r');
+        if original.len() != file.byte_end as usize
+            || canonical.contains('\r')
+            || (crlf && original.len() - canonical.len() != canonical.matches('\n').count())
+            || canonical == text
+            || (!text.is_empty() && text.ends_with('\n') != canonical.ends_with('\n'))
+        {
+            return Err(EditWriteOutcome::Rejected);
+        }
+        let replacement = if crlf {
+            text.replace('\n', "\r\n")
+        } else {
+            text.to_owned()
+        };
+        if replacement.len() > MAX_EDITOR_BYTES {
+            return Err(EditWriteOutcome::Rejected);
+        }
+        let path = verified.path.to_str().ok_or(EditWriteOutcome::Rejected)?;
+        let Ok(ManagedResponse::BaseRevision { revision }) = self.write_call(
+            &file.node_key,
+            &file.project,
+            &request.request_id,
+            expires,
+            ManagedCommand::BaseRevision {
+                path: path.into(),
+                digest: verified.digest,
+            },
+        ) else {
+            return Err(EditWriteOutcome::Rejected);
+        };
+        if revision.digest() != verified.digest {
+            return Err(EditWriteOutcome::Conflict);
+        }
+        Ok((
+            verified
+                .path
+                .iter()
+                .map(|part| part.to_string_lossy().into_owned())
+                .collect(),
+            WriteIntent::Apply {
+                proposal: request.operation.clone(),
+                path: path.into(),
+                expected: revision,
+                byte_start: 0,
+                byte_end: file.byte_end,
+                replacement,
+            },
+        ))
     }
 
     fn write_call(

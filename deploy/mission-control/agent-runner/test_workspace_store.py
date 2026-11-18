@@ -11,8 +11,10 @@ from uuid import uuid4
 import psycopg2
 from psycopg2.extras import Json, execute_values
 
+from agent_tools import ToolCall
 import queue_store as store
 from chat_history_store import dao
+from file_context import FileAttachment
 
 
 POSTGRES_BIN = Path("/usr/lib/postgresql/16/bin")
@@ -75,6 +77,31 @@ class WorkspaceStoreTest(unittest.TestCase):
             cursor.execute("SELECT forge_agent_worker_api." + call, parameters)
             return cursor.fetchone()[0]
 
+    def test_verified_file_attachment_is_historical_in_saved_chat(self):
+        model, chat_id = "gpt-oss-20b", uuid4()
+        metadata = {"node": "local", "project": "workspace", "path": "Makefile",
+                    "sha256": "a" * 64, "first_line": 3, "last_line": 4, "first_column": 0}
+        command = store.Submit(
+            model, (store.Message("user", "Explain this file"),), 256, 0.0, None, "source-turn",
+            allow_partial=True, chat_id=chat_id, attachment=FileAttachment(metadata, "actual old source"),
+        )
+        run_id = store.admit(command, distributed=True)["run_id"]
+        self.worker("advertise(%s, %s)", model, True)
+        job = self.worker("claim(%s)", model)
+        self.assertIn("actual old source", job["messages"][-1]["content"])
+        self.assertTrue(self.worker("publish(%s, %s, %s)", run_id, job["attempt_token"],
+                                    Json({"answer": "Explained", "finish_reason": "stop", "usage": {}})))
+        self.assertEqual(store.finalize_ready(), 1)
+        saved = dao.open_chat(chat_id)
+        self.assertEqual(saved["messages"][0], {"role": "user", "position": 1,
+                                                "content": "Explain this file", "attachment": metadata})
+        self.assertNotIn("actual old source", repr(saved))
+        store.admit_chat_turn(model, chat_id, saved["summary"]["revision"], "Follow-up", "followup")
+        job = self.worker("claim(%s)", model)
+        self.assertEqual(job["messages"], transcript("Explain this file", "Explained") + [
+            {"role": "user", "content": "Follow-up"},
+        ])
+
     def _mail_page(self, thread_id, limit=20, after=0):
         with store.transaction() as cursor:
             return store.mail_store.open_thread(cursor, store.OWNER, thread_id, limit, after)
@@ -84,6 +111,25 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.worker("advertise(%s, %s)", model, True)
         self.assertEqual(self.worker("next_model(%s)", [model]), model)
         return self.worker("claim(%s)", model)
+
+    def test_repository_tool_progress_and_results_are_durable(self):
+        command = store.Submit("gpt-oss-20b", (store.Message("user", "Inspect the readme"),),
+                               256, 0.0, None, "tool-test", tool_repository="fixture",
+                               tool_revision="a" * 40)
+        run_id = store.admit(command)["run_id"]
+        claimed_id, claimed = store.claim()
+        self.assertEqual((claimed_id, claimed.tool_repository, claimed.tool_revision),
+                         (run_id, "fixture", "a" * 40))
+        call = ToolCall("call-1", "read_file", {"path": "README.md"})
+        store.tool_started(run_id, call)
+        store.tool_finished(run_id, call, {"text": "fixed revision", "truncated": False})
+        store.finish(run_id, answer="The readme describes the project.", finish_reason="stop")
+        record = store.get_events(run_id, 0)
+        self.assertEqual([event["type"] for event in record["events"]],
+                         ["queued", "model_started", "tool_started", "tool_finished", "completed"])
+        with store.transaction() as cursor:
+            cursor.execute("SELECT stdout FROM forge_agent.tool_results WHERE run_id = %s", (run_id,))
+            self.assertEqual(cursor.fetchone()["stdout"], "fixed revision")
 
     @patch.object(store, "prompt_tokens", side_effect=fixture_prompt_tokens)
     def test_mail_replays_exact_pairs_and_archives_when_context_runs_low(self, _tokens):

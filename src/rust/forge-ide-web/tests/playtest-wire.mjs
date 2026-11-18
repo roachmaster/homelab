@@ -193,6 +193,60 @@ function prepareLevel(exports, request, level) {
   return exports.forge_playtest_level_prepare(request);
 }
 
+const cookedLevelBytes = new Map([
+  [1, Buffer.from(JSON.stringify(roomOne))], [2, Buffer.from(JSON.stringify(traversal))],
+]);
+const cookedManifest = Buffer.from(JSON.stringify({
+  version: 1,
+  entries: Object.fromEntries([[1, 'room-one'], [2, 'traversal-yard']].map(([slot, id]) => [id, {
+    kind: 'level', path: `levels/${id}.json`, dependencies: [], optional_dependencies: ['scout-atlas'],
+    sha256: createHash('sha256').update(cookedLevelBytes.get(slot)).digest('hex'),
+  }])),
+}));
+const cookedManifestDigest = createHash('sha256').update(cookedManifest).digest();
+
+function uploadAsset(exports, asset, request, bytes) {
+  const pointer = exports.forge_playtest_asset_reserve(asset, bytes.byteLength) >>> 0;
+  assert.ok(pointer, 'Rust allocates a bounded ingress buffer');
+  new Uint8Array(exports.memory.buffer, pointer, bytes.byteLength).set(bytes);
+  return exports.forge_playtest_asset_accept(asset, request);
+}
+
+function acceptVerifiedManifest(exports, bytes = cookedManifest) {
+  return uploadAsset(exports, 0, 0, bytes);
+}
+
+function prepareVerifiedLevel(exports, slot, bytes = cookedLevelBytes.get(slot)) {
+  const request = exports.forge_playtest_level_request(slot);
+  assert.ok(request, 'Rust issues the request generation');
+  return uploadAsset(exports, slot, request, bytes);
+}
+
+const verified = game();
+assert.equal(verified.forge_playtest_asset_reserve(2, 16 * 1024 + 1), 0);
+assert.equal(acceptVerifiedManifest(verified, Buffer.from('{')), 0);
+assert.equal(prepareVerifiedLevel(verified, 2), 0, 'a level needs an admitted manifest');
+assert.equal(acceptVerifiedManifest(verified), 1);
+assert.equal(acceptVerifiedManifest(verified, Buffer.concat([cookedManifest, Buffer.from(' ')])), 0);
+assert.equal(prepareVerifiedLevel(verified, 2, Buffer.concat([cookedLevelBytes.get(2), Buffer.from(' ')])), 0,
+  'Rust rejects valid level JSON whose bytes do not match the manifest digest');
+const stale = verified.forge_playtest_level_request(2);
+const newest = verified.forge_playtest_level_request(1);
+assert.equal(uploadAsset(verified, 2, stale, cookedLevelBytes.get(2)), 0);
+assert.equal(uploadAsset(verified, 2, newest, cookedLevelBytes.get(2)), 0,
+  'a newer request cannot admit another level');
+assert.equal(uploadAsset(verified, 1, newest, cookedLevelBytes.get(1)), 1);
+verified.forge_playtest_step();
+assert.equal(verified.forge_playtest_level(), 1);
+assert.deepEqual(copyBytes(levelSnapshot(verified)).slice(16), Uint8Array.from(cookedManifestDigest));
+assert.deepEqual([0, 1, 2, 3].map(index => verified.forge_playtest_level_collider(index)),
+  Object.values(collider));
+const cancelled = verified.forge_playtest_level_request(2);
+verified.forge_playtest_level_fail(cancelled);
+assert.equal(uploadAsset(verified, 2, cancelled, cookedLevelBytes.get(2)), 0,
+  'an I/O failure invalidates a later result for that request');
+console.log('Playtest WASM: Rust verifies raw asset digests, request generations and active collider.');
+
 function playerPose(exports) {
   const published = snapshot(exports);
   const pose = poseSnapshot(exports);
@@ -346,3 +400,169 @@ assert.equal(tick(snapshot(authored)), 1);
 assert.equal(levelSnapshot(authored).getUint32(8, true), 0);
 assert.equal(authored.forge_playtest_level_prepare(7), 0);
 console.log('Playtest WASM: cooked admission, generation changes, pose identity, 29-tick jump and Traversal Yard win pass.');
+
+function sessionBytes(exports) {
+  const pointer = exports.forge_playtest_replay() >>> 0;
+  const length = exports.forge_playtest_replay_len();
+  assert.ok(pointer && length);
+  return Uint8Array.from(new Uint8Array(exports.memory.buffer, pointer, length));
+}
+
+function readSession(exports) {
+  return JSON.parse(new TextDecoder().decode(sessionBytes(exports)));
+}
+
+const recordedGame = game();
+assert.equal(acceptVerifiedManifest(recordedGame), 1);
+recordedGame.forge_playtest_trace_channels(0);
+recordedGame.forge_playtest_step();
+const builtInState = copyBytes(snapshot(recordedGame));
+assert.equal(prepareVerifiedLevel(recordedGame, 1), 1);
+recordedGame.forge_playtest_step();
+tap(recordedGame, 3);
+recordedGame.forge_playtest_step();
+recordedGame.forge_playtest_input(3, 1);
+recordedGame.forge_playtest_set_paused(1);
+recordedGame.forge_playtest_advance(250_000);
+assert.equal(tick(snapshot(recordedGame)), 1, 'paused time advances no ticks');
+assert.equal(snapshot(recordedGame).getUint16(14, true), 0, 'pausing clears pending input');
+recordedGame.forge_playtest_step();
+assert.equal(tick(snapshot(recordedGame)), 2, 'manual step remains available while paused');
+recordedGame.forge_playtest_set_paused(0);
+const roomOneState = copyBytes(snapshot(recordedGame));
+assert.equal(prepareVerifiedLevel(recordedGame, 2), 1);
+recordedGame.forge_playtest_step();
+recordedGame.forge_playtest_input(3, 1);
+stepTicks(recordedGame, 60);
+tap(recordedGame, 4);
+stepTicks(recordedGame, 30);
+recordedGame.forge_playtest_input(3, 0);
+recordedGame.forge_playtest_step();
+const traversalState = copyBytes(snapshot(recordedGame));
+const traversalPose = copyBytes(poseSnapshot(recordedGame));
+
+const journal = readSession(recordedGame);
+assert.equal(journal.version, 1);
+assert.equal(journal.complete, true, 'the session recorder is independent of the trace mask');
+assert.deepEqual(journal.segments.map(segment => ({
+  epoch: segment.epoch, slot: segment.level_slot, manifest: segment.manifest_sha256,
+  tick: segment.final_tick, transition: segment.transition,
+})), [
+  { epoch: 1, slot: 0, manifest: null, tick: 1,
+    transition: { kind: 'level', boundary_tick: 2, incoming_epoch: 2 } },
+  { epoch: 2, slot: 1, manifest: cookedManifestDigest.toString('hex'), tick: 2,
+    transition: { kind: 'level', boundary_tick: 3, incoming_epoch: 3 } },
+  { epoch: 3, slot: 2, manifest: cookedManifestDigest.toString('hex'), tick: 91, transition: null },
+]);
+assert.deepEqual(journal.segments[2].inputs, [
+  { input: 'platform-right', ticks: 60 }, { input: 'jump-right', ticks: 1 },
+  { input: 'platform-right', ticks: 29 }, { input: 'platform-idle', ticks: 1 },
+]);
+
+const playback = game();
+const active = copyBytes(snapshot(playback));
+const importedBytes = sessionBytes(recordedGame);
+const importReplay = (bytes) => {
+  const address = playback.forge_playtest_replay_reserve(bytes.length) >>> 0;
+  assert.ok(address, 'the replay has a Rust-owned input buffer');
+  new Uint8Array(playback.memory.buffer, address, bytes.length).set(bytes);
+  return playback.forge_playtest_replay_finish();
+};
+const importJournal = (data) => importReplay(Buffer.from(JSON.stringify(data)));
+const replayView = (type, length) => Uint8Array.from(new Uint8Array(
+  playback.memory.buffer, playback[`forge_playtest_replay_${type}`]() >>> 0, length,
+));
+assert.equal(importReplay(importedBytes), 0, 'unavailable cooked generations reject playback');
+assert.equal(playback.forge_playtest_replay_snapshot(), 0);
+assert.equal(acceptVerifiedManifest(playback), 1);
+assert.equal(prepareVerifiedLevel(playback, 1), 1);
+assert.equal(prepareVerifiedLevel(playback, 2), 1);
+for (const [index, expected] of [builtInState, roomOneState].entries()) {
+  const prefix = structuredClone(journal);
+  prefix.segments.length = index + 1;
+  prefix.segments.at(-1).transition = null;
+  assert.equal(importJournal(prefix), 1);
+  assert.deepEqual(replayView('snapshot', expected.length), expected);
+}
+assert.equal(importReplay(importedBytes), 1, 'Rust runs the complete exported replay');
+assert.deepEqual(replayView('snapshot', traversalState.length), traversalState);
+assert.deepEqual(replayView('pose', traversalPose.length), traversalPose);
+assert.equal(playback.forge_playtest_replay_finish(), 0, 'finishing consumes the uploaded replay');
+assert.equal(playback.forge_playtest_replay_reserve(2 * 1024 * 1024 + 1), 0);
+
+for (const mutate of [
+  data => { data.complete = false; },
+  data => { data.segments[1].manifest_sha256 = '0'.repeat(64); },
+  data => { data.segments[2].level_slot = 9; },
+  data => { data.segments[0].transition.boundary_tick++; },
+  data => { data.segments[0].transition.incoming_epoch++; },
+  data => { data.segments[1].inputs[0].input = 'platform-right'; },
+  data => { data.segments[1].inputs[0].ticks = 36_001; },
+  data => { data.segments[1].final_tick++; },
+  data => { delete data.segments[2].transition; },
+]) {
+  const invalid = structuredClone(journal);
+  mutate(invalid);
+  assert.equal(importJournal(invalid), 0, 'invalid replay fails without replacing results');
+  assert.deepEqual(replayView('snapshot', traversalState.length), traversalState);
+}
+recordedGame.forge_playtest_restart();
+recordedGame.forge_playtest_step();
+assert.equal(importReplay(sessionBytes(recordedGame)), 1, 'Rust replays an authored restart');
+assert.deepEqual(replayView('snapshot', traversalState.length), copyBytes(snapshot(recordedGame)));
+assert.deepEqual(copyBytes(snapshot(playback)), active, 'playback preserves the active live room');
+
+const beforeCollision = copyBytes(snapshot(recordedGame));
+const collision = wire(recordedGame, 'collision_snapshot', 5216, 'FGC1', false);
+assert.equal(collision.getUint32(4, true), epoch(snapshot(recordedGame)));
+assert.equal(collision.getUint32(8, true), tick(snapshot(recordedGame)));
+assert.equal(collision.getUint16(12, true), snapshot(recordedGame).getUint16(10, true));
+assert.equal(collision.getUint8(36), 3, 'the downward probe sees the upward floor normal');
+assert.deepEqual(copyBytes(snapshot(recordedGame)), beforeCollision, 'overlay queries do not advance the world');
+
+const historical = game();
+const liveBeforeArchive = copyBytes(snapshot(historical));
+const journalInput = historical.forge_playtest_replay_reserve(importedBytes.length) >>> 0;
+new Uint8Array(historical.memory.buffer, journalInput, importedBytes.length).set(importedBytes);
+assert.equal(historical.forge_playtest_replay_prepare(), 1);
+assert.equal(historical.forge_playtest_replay_need_count(), 2);
+function acceptArchive(index, asset, bytes) {
+  const pointer = historical.forge_playtest_asset_reserve(asset, bytes.length) >>> 0;
+  new Uint8Array(historical.memory.buffer, pointer, bytes.length).set(bytes);
+  return historical.forge_playtest_replay_asset_accept(index, asset);
+}
+for (const [index, slot] of [1, 2].entries()) {
+  assert.equal(historical.forge_playtest_replay_need_slot(index), slot);
+  for (let word = 0; word < 8; word++) {
+    assert.equal(historical.forge_playtest_replay_need_digest(index, word) >>> 0,
+      cookedManifestDigest.readUInt32LE(word * 4));
+  }
+  assert.equal(acceptArchive(index, 0, Buffer.concat([cookedManifest, Buffer.from(' ')])), 0);
+  assert.equal(acceptArchive(index, 0, cookedManifest), 1);
+  const level = cookedLevelBytes.get(slot);
+  assert.equal(acceptArchive(index, slot, Buffer.concat([level, Buffer.from(' ')])), 0);
+  assert.equal(acceptArchive(index, slot, level), 1);
+}
+assert.equal(historical.forge_playtest_replay_finish(), 1);
+assert.equal(historical.forge_playtest_replay_restart(), 1);
+for (let step = 0; step < 100 && !historical.forge_playtest_replay_done(); step++) {
+  assert.equal(historical.forge_playtest_replay_step(1), 1);
+}
+assert.equal(historical.forge_playtest_replay_done(), 1);
+const archivedFrame = new Uint8Array(historical.memory.buffer,
+  historical.forge_playtest_replay_snapshot() >>> 0, traversalState.length);
+assert.deepEqual(archivedFrame, traversalState);
+assert.deepEqual(copyBytes(snapshot(historical)), liveBeforeArchive);
+
+const unverifiedGame = game();
+assert.equal(prepareLevel(unverifiedGame, 1, roomOne), 1);
+unverifiedGame.forge_playtest_step();
+assert.equal(readSession(unverifiedGame).complete, false, 'legacy unverified assets cannot claim a replayable session');
+
+const fullJournal = game();
+for (let index = 0; index < 128; index++) fullJournal.forge_playtest_restart();
+assert.equal(readSession(fullJournal).complete, false, 'segment budget exhaustion is explicit');
+assert.equal(readSession(fullJournal).segments.length, 128);
+fullJournal.forge_playtest_step();
+assert.equal(tick(snapshot(fullJournal)), 1, 'simulation continues after the recorder reaches capacity');
+console.log('Playtest WASM: pause gate, bounded session recorder, and two authored room replay pass.');

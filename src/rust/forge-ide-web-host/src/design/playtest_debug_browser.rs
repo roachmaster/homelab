@@ -6,6 +6,7 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
     const pause = document.querySelector(spec.pause);
     const step = document.querySelector(spec.step);
     const download = document.querySelector(spec.download);
+    const replayDownload = document.querySelector(spec.replay_download);
     const overlay = document.querySelector(spec.overlay);
     const inspector = document.querySelector(spec.inspector);
     const tracePanel = document.querySelector(spec.trace);
@@ -18,7 +19,7 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
     const channels = [...document.querySelectorAll(spec.channels)].map(control => [
       control, Number(control.getAttribute(spec.channel_attribute)),
     ]).filter(([, channel]) => Number.isInteger(channel) && channel >= 0 && channel < spec.channel_names.length);
-    const buttons = [pause, step, download, overlay, commandInput, commandRun, ...channels.map(([control]) => control)];
+    const buttons = [pause, step, download, replayDownload, overlay, commandInput, commandRun, ...channels.map(([control]) => control)];
     const samples = [];
     let paused = false;
     let lastRefresh = -Infinity;
@@ -101,6 +102,18 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
           lines.push(`Contact tile: (${x}, ${y}) · normal: ${side} · impact: ${speedQ16} Q16/tick`);
         }
       }
+      const collision = player.collision?.(snapshot);
+      if (collision) {
+        lines.push(`Collision bodies: ${collision.bodies.length} · Persistent contacts: ${collision.contacts.length}`);
+        for (const contact of collision.contacts) {
+          lines.push(`Contact depth: ${contact.depth} Q16 · Tile ${contact.x}, ${contact.y} (y down)`);
+        }
+        if (collision.ray) {
+          const { point, distance, entity, tile } = collision.ray;
+          const target = tile ? `tile ${tile.join(', ')}` : `entity ${entity}`;
+          lines.push(`Downward ray: ${target} · Point ${point.join(', ')} · Distance ${distance} Q16`);
+        }
+      }
       for (const event of eventViews.slice(-4)) {
         lines.push(`${spec.event_names[event.kind] ?? event.kind} · target ${event.target} · (${event.x}, ${event.y})`);
       }
@@ -119,18 +132,27 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
         timing.textContent = [`${samples.length} frames · ${spec.budget_ms.toFixed(2)} ms budget`, ...timingSummary().map(value =>
           `${spec.scopes[value.scope]} · p50 ${showMs(value.p50)} · p95 ${showMs(value.p95)} · worst ${showMs(value.worst)}`,
         )].join('\n');
+        const handoff = player.handoff?.();
+        if (handoff) timing.textContent += `\n${handoff.level} handoff · WASM linear memory ${handoff.startBytes} → ${handoff.peakBytes} bytes (peak)`;
       }
       drawTiming();
       lastRefresh = now;
     }
 
     function save(kind) {
+      if (kind === 'replay') {
+        const bytes = player.replay?.();
+        if (!bytes) return show(spec.unavailable);
+        return saveJson(bytes, spec.replay_filename, spec.replay_saved);
+      }
       const snapshot = player.snapshot();
       const { view, ...trace } = player.trace(snapshot.epoch);
       const exportData = {
         version: 1, epoch: snapshot.epoch, tick: snapshot.tick,
         timing: { budgetMs: spec.budget_ms, samples, summary: timingSummary() },
       };
+      const handoff = player.handoff?.();
+      if (handoff) exportData.timing.handoffWasmLinearMemory = handoff;
       if (kind === 'trace') {
         const activation = player.activation?.(snapshot);
         Object.assign(exportData, {
@@ -142,10 +164,16 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
         });
         if (activation) exportData.activation = activation;
       }
-      const url = URL.createObjectURL(new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' }));
+      saveJson(JSON.stringify(exportData, null, 2),
+        kind === 'trace' ? spec.trace_filename : spec.timing_filename,
+        kind === 'trace' ? spec.trace_saved : spec.timing_saved);
+    }
+
+    function saveJson(data, filename, message) {
+      const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = kind === 'trace' ? spec.trace_filename : spec.timing_filename;
+      anchor.download = filename;
       anchor.hidden = true;
       document.body.append(anchor);
       try {
@@ -154,13 +182,13 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
         anchor.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
-      show(kind === 'trace' ? spec.trace_saved : spec.timing_saved);
+      show(message);
     }
 
     function setPaused(next) {
       if (next === paused) return;
       paused = next;
-      player.clearInput();
+      player.setPaused(paused);
       const snapshot = player.snapshot();
       syncControls(player.trace(snapshot.epoch).mask);
       player.refresh();
@@ -190,6 +218,7 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
           case 'step': stepOnce(); return;
           case 'restart': player.restart(); return;
           case 'trace': save('trace'); return;
+          case 'replay': save('replay'); return;
           case 'timing': save('timing'); return;
         }
       }
@@ -204,11 +233,13 @@ pub(super) const DEBUG_ADAPTER: &str = r#"
     }
 
     for (const control of buttons) if (control) control.disabled = false;
+    if (replayDownload) replayDownload.hidden = !player.replay;
     syncControls(player.trace(player.snapshot().epoch).mask);
     drawer?.addEventListener('toggle', player.refresh);
     pause?.addEventListener('click', player.guard(() => setPaused(!paused)));
     step?.addEventListener('click', player.guard(stepOnce));
     download?.addEventListener('click', player.guard(() => save('trace')));
+    replayDownload?.addEventListener('click', player.guard(() => save('replay')));
     overlay?.addEventListener('change', player.refresh);
     for (const [control] of channels) control.addEventListener('change', player.guard(() => {
       changeMask(channels.reduce((mask, [box, channel]) => mask | (box.checked ? 1 << channel : 0), 0));

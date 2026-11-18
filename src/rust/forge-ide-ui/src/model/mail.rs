@@ -764,9 +764,9 @@ impl Mail {
                     .map(|message| TranscriptMessage {
                         role: message.role,
                         content: message.content.clone(),
-                        notice: message
-                            .finish_reason
-                            .map(|MailFinishReason::Length| "The reply reached its output limit."),
+                        notice: message.finish_reason.map(|MailFinishReason::Length| {
+                            "The reply reached its output limit.".into()
+                        }),
                         rendered_html: if message.role == ChatRole::Assistant {
                             render_markdown(&message.content)
                         } else {

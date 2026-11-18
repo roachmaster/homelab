@@ -46,6 +46,7 @@ pub struct UiModel {
     chats: chat::Chats,
     pending_edit: Option<edit::PendingEdit>,
     edit_review: Option<edit::EditReview>,
+    editor: Option<edit::Editor>,
     write: edit::WriteState,
     mail: mail::Mail,
     workbench_seen: bool,
@@ -86,6 +87,7 @@ impl Default for UiModel {
             chats: chat::Chats::default(),
             pending_edit: None,
             edit_review: None,
+            editor: None,
             write: edit::WriteState::default(),
             mail: mail::Mail::default(),
             workbench_seen: false,
@@ -187,7 +189,9 @@ impl UiModel {
             return Err(UiError::InvalidClock);
         }
         let mut effects = Vec::new();
-        let proposing = matches!(&input.event, UiEvent::ProposeEdit { .. });
+        if self.editor_blocks(&input.event) {
+            return Ok(self.output(None));
+        }
         match input.event {
             UiEvent::OpenChat {}
             | UiEvent::OpenWorkbench {}
@@ -200,6 +204,10 @@ impl UiModel {
             | UiEvent::SendChatWithFile { .. }
             | UiEvent::ProposeEdit { .. }
             | UiEvent::DiscardEdit {}
+            | UiEvent::OpenDocument { .. }
+            | UiEvent::SetDocument { .. }
+            | UiEvent::SaveDocument { .. }
+            | UiEvent::CloseDocument { .. }
             | UiEvent::ApplyEdit { .. }
             | UiEvent::UndoEdit { .. }
             | UiEvent::CheckEditWrite {}
@@ -319,9 +327,11 @@ impl UiModel {
                 entry,
                 byte_start,
                 conversation,
+                chat_id,
             } => {
                 self.send_chat_with_file(
                     (report, entry, byte_start, conversation),
+                    chat_id,
                     input.now_ms,
                     &mut effects,
                 )?;
@@ -331,8 +341,17 @@ impl UiModel {
                 entry,
                 byte_start,
                 conversation,
+                chat_id,
+            } => {
+                self.send_workbench(
+                    input.now_ms,
+                    (report, entry, byte_start, conversation),
+                    false,
+                    chat_id,
+                    &mut effects,
+                )?;
             }
-            | UiEvent::ProposeEdit {
+            UiEvent::ProposeEdit {
                 report,
                 entry,
                 byte_start,
@@ -341,7 +360,8 @@ impl UiModel {
                 self.send_workbench(
                     input.now_ms,
                     (report, entry, byte_start, conversation),
-                    proposing,
+                    true,
+                    None,
                     &mut effects,
                 )?;
             }
@@ -349,6 +369,14 @@ impl UiModel {
                 self.edit_review = None
             }
             UiEvent::DiscardEdit {} => {}
+            UiEvent::OpenDocument { report, entry } => {
+                self.open_document(report, entry, input.now_ms)?;
+            }
+            UiEvent::SetDocument { editor_id, value } => self.set_document(&editor_id, value),
+            UiEvent::SaveDocument { editor_id } => {
+                self.save_document(&editor_id, input.now_ms, &mut effects)?;
+            }
+            UiEvent::CloseDocument { editor_id } => self.close_document(&editor_id),
             UiEvent::EditResult {
                 request_id,
                 outcome,

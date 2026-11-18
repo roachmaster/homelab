@@ -94,6 +94,9 @@ fn config(f: &Files) -> HostConfig {
         public_origin: None,
         session_auth: SessionAuth::Pairing,
         assets: f.0.clone(),
+        alternate_cooked_assets: None,
+        cooked_replay_archive: None,
+        studio: None,
         limits: HostLimits::default(),
         nodes: vec![NodeConfig {
             key: "lab".into(),
@@ -579,17 +582,19 @@ fn startup_file_loads_explicit_https_origin_and_old_config_remains_local() {
             "address":"127.0.0.1:7443","server_name":"localhost","node":"node","incarnation":"host"}]
     });
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-    assert!(forge_ide_web_host::load_config(&path)
-        .unwrap()
-        .public_origin
-        .is_none());
+    let old_config = forge_ide_web_host::load_config(&path).unwrap();
+    assert!(old_config.public_origin.is_none());
+    assert!(old_config.alternate_cooked_assets.is_none());
     value["public_origin"] = json!("https://portal.example.com");
+    value["alternate_cooked_assets"] = json!("pinned-cooked-assets");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    let configured = forge_ide_web_host::load_config(&path).unwrap();
     assert_eq!(
-        forge_ide_web_host::load_config(&path)
-            .unwrap()
-            .public_origin
-            .as_deref(),
+        configured.alternate_cooked_assets,
+        Some(f.0.join("pinned-cooked-assets"))
+    );
+    assert_eq!(
+        configured.public_origin.as_deref(),
         Some("https://portal.example.com")
     );
     assert_eq!(
@@ -1267,6 +1272,13 @@ fn browser_playtest_serves_generated_assets_on_fixed_paths() {
     let script = request("GET", "/playtest/main.js");
     assert!(script.contains("Content-Type: text/javascript; charset=utf-8"));
     assert!(script.contains("requestAnimationFrame"));
+    assert!(script.contains("/playtest/assets-worker.js"));
+    assert!(!script.contains("await fetch("));
+    let worker = request("GET", "/playtest/assets-worker.js");
+    assert!(worker.contains("Content-Type: text/javascript; charset=utf-8"));
+    assert!(worker.contains("await fetch("));
+    assert!(!worker.contains("crypto.subtle"));
+    assert!(request("POST", "/playtest/assets-worker.js").starts_with("HTTP/1.1 405"));
     assert!(request("POST", "/playtest").starts_with("HTTP/1.1 405"));
     assert!(request("GET", "/playtest/unknown.js").starts_with("HTTP/1.1 404"));
 }
@@ -2001,6 +2013,99 @@ fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
         let (_, body) = result.split_once("\r\n\r\n").unwrap();
         assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
     }
+    worker.join().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn studio_catalog_uses_the_private_relay_and_filters_project_grants() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let token = "0123456789abcdef".repeat(4);
+    let token_file = files.0.join("studio.token");
+    fs::write(&token_file, &token).unwrap();
+    fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut settings = config(&files);
+    settings.studio = Some(forge_ide_web_host::StudioConfig {
+        endpoint: upstream.local_addr().unwrap(),
+        token_file,
+        preview_origin: "https://preview.example.invalid".into(),
+    });
+    let (host, _) = host_with_config(settings);
+    let (cookie, csrf, _) = paired(&host);
+    let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    let list = json!({"kind":"game_project_list","request_id":"request-1"});
+    assert!(
+        exchange(&host, post(&host, "game.project.list", list.clone(), ""))
+            .starts_with("HTTP/1.1 401")
+    );
+    let denied = json!({"kind":"game_project_get","request_id":"request-1",
+                        "project":{"node":"lab","project":"unapproved"}});
+    assert!(
+        exchange(&host, post(&host, "game.project.get", denied, &auth)).starts_with("HTTP/1.1 401")
+    );
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = upstream.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = BufReader::new(&mut stream);
+        let mut line = String::new();
+        request.read_line(&mut line).unwrap();
+        assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
+        let mut headers = BTreeMap::new();
+        loop {
+            line.clear();
+            assert_ne!(request.read_line(&mut line).unwrap(), 0);
+            if line == "\r\n" {
+                break;
+            }
+            let (name, value) = line.trim_end().split_once(": ").unwrap();
+            headers.insert(name.to_ascii_lowercase(), value.to_owned());
+        }
+        assert_eq!(headers["authorization"], format!("Bearer {token}"));
+        assert_eq!(headers["forge-destination"], "game.project.list");
+        assert_eq!(headers["forge-request-id"], "request-1");
+        assert!(!headers.contains_key("cookie"));
+        let mut body = vec![0; headers["content-length"].parse().unwrap()];
+        request.read_exact(&mut body).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["kind"],
+            "game_project_list"
+        );
+        let revision = "a".repeat(40);
+        let reply = json!({"kind":"game_projects_listed","request_id":"request-1","projects":[
+            {"node":"lab","project":"workspace","revision":revision,"profiles":["static-web"]},
+            {"node":"lab","project":"unapproved","revision":revision,"profiles":["static-web"]}
+        ]})
+        .to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{reply}",
+            reply.len()
+        )
+        .unwrap();
+    });
+    let response = exchange(&host, post(&host, "game.project.list", list, &auth));
+    assert!(response.starts_with("HTTP/1.1 200 "), "{response}");
+    let (_, body) = response.split_once("\r\n\r\n").unwrap();
+    let catalog: Value = serde_json::from_str(body).unwrap();
+    let projects = catalog["projects"].as_array().unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["project"], "workspace");
+    let page = exchange(
+        &host,
+        format!(
+            "GET /studio HTTP/1.1\r\nHost: {}\r\n\r\n",
+            host.local_addr().unwrap()
+        ),
+    );
+    assert!(page.contains("id=\"studio-controls\""));
+    assert!(page.contains("/studio/main.js"));
     worker.join().unwrap();
 }
 

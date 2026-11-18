@@ -54,13 +54,14 @@ class CookTest(unittest.TestCase):
         shutil.copytree(LEVELS, source)
         output = self.root / "bundle"
         clean = self.root / "clean"
+        archive = self.root / "archive"
         output.mkdir()
 
-        first = self._run(output, "--levels", source)
+        first = self._run(output, "--levels", source, "--archive", archive)
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertTrue(output.is_symlink())
         original_generation = output.resolve()
-        self.assertEqual(self._run(output, "--levels", source).returncode, 0)
+        self.assertEqual(self._run(output, "--levels", source, "--archive", archive).returncode, 0)
         self.assertEqual(output.resolve(), original_generation)
         self.assertEqual(self._run(clean, "--clean", "--levels", source).returncode, 0)
 
@@ -102,12 +103,20 @@ class CookTest(unittest.TestCase):
         authored_yard["surface"] = "stone"
         authored_yard["surfaces"][0]["friction_q16"] = 32768
         level_path.write_text(json.dumps(authored_yard), encoding="utf-8")
-        self.assertEqual(self._run(output, "--levels", source).returncode, 0)
+        self.assertEqual(self._run(output, "--levels", source, "--archive", archive).returncode, 0)
         self.assertNotEqual(output.resolve(), original_generation)
         self.assertEqual((original_generation / "manifest.json").read_bytes(), manifest_bytes)
         updated = json.loads((output / "manifest.json").read_bytes())["entries"]
         self.assertEqual(updated["scout-atlas-image"], entries["scout-atlas-image"])
         self.assertNotEqual(updated["traversal-yard"], entries["traversal-yard"])
+
+        old = archive / hashlib.sha256(manifest_bytes).hexdigest()
+        current = archive / hashlib.sha256((output / "manifest.json").read_bytes()).hexdigest()
+        self.assertEqual((old / "manifest.json").read_bytes(), manifest_bytes)
+        relative = entries["traversal-yard"]["path"]
+        self.assertEqual((old / relative).read_bytes(), (original_generation / relative).read_bytes())
+        self.assertEqual((current / relative).read_bytes(), (output / relative).read_bytes())
+        self.assertNotEqual((old / relative).read_bytes(), (current / relative).read_bytes())
 
 
 if __name__ == "__main__":

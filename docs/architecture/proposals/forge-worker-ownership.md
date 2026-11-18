@@ -1,11 +1,19 @@
 # Forge worker and main-thread ownership
 
-**Proposal** based on Homelab `634f005`. The Forge IDE already exchanges
-typed input and view messages through a dedicated browser worker. The current
-Room One page instantiates WASM directly. The first playtest design gives
-JavaScript workers I/O and message delivery. Studio builds are a later milestone.
+The Forge IDE exchanges typed input and view messages through a dedicated
+browser worker. The playtest hosts WASM on the page and uses a JavaScript I/O
+worker. Studio uses a separate worker to send control requests to the Forge host.
 [Existing IDE worker](../../../src/rust/forge-ide-web/src/generate/javascript.rs) ·
 [Current playtest adapter](../../../src/rust/forge-ide-web-host/src/design/playtest_browser.rs)
+
+The playtest implementation hosts Rust on the page and uses a generated
+worker to fetch WASM and cooked assets. The I/O worker returns bounded bytes
+and the Rust runtime verifies them before staging a level. Rust also records
+effective inputs across room transitions for **Export replay** in Debug tools.
+The WASM playback API verifies exported JSON against the retained cooked
+levels and publishes a separate replay view.
+[I/O worker](../../../src/rust/forge-ide-web-host/src/design/playtest_asset_worker.rs) ·
+[Replay journal](../../../src/rust/forge-ide-web/src/playtest_replay.rs)
 
 ## Who owns what
 
@@ -34,8 +42,8 @@ with the assembly that created it.
 
 Across the worker boundary, callers exchange asset IDs, request generations,
 and owned byte buffers. The startup configuration selects the I/O adapter.
-For the later Studio milestone, the Forge runtime command header selects an
-admitted operation and its typed payload. [Bootstrap registrars](../bootstrap-registrars.md) ·
+For Studio, the Forge runtime command header selects an admitted operation
+and its typed payload. [Bootstrap registrars](../bootstrap-registrars.md) ·
 [Provider lifetime](../dependency-injection.md)
 
 Playtest actions enter through the local Rust adapter. The simulation and
@@ -111,28 +119,28 @@ when the replay transitions.
 [Cooked asset lifecycle](forge-game-asset-pipeline.md#tick-boundary-activation-and-replay) ·
 [Current room replacement](../../../src/rust/forge-ide-web/src/playtest_level.rs)
 
-## Later milestone · Submit and report a Studio build
+## Submit and report a Studio build
 
-The browser worker carries Studio requests and replies using the same I/O
-boundary. The Forge host owns admission and job submission. A future native
+The Studio browser worker carries requests and replies. The Rust web host
+owns admission and forwards admitted requests to the private Studio API. The
 Studio executor owns the durable build attempt, with a store scoped to claim,
 renew, and finish operations.
 
-1. Main JavaScript forwards the build action to Rust. The IDE worker's
-   transport sends the resulting typed effect through `/forge/v1/dispatch`.
-   The Forge host admits `game.build.submit` for the authenticated project
-   and configured profile.
+1. Main JavaScript passes the build action to the I/O worker. The worker
+   carries the request to `/forge/v1/dispatch`. The Rust host admits
+   `game.build.submit` for the authenticated project and forwards it to Studio
+   for profile and source validation.
 2. Studio commits the job with its pinned revision and its first event in one
    PostgreSQL transaction and returns a build receipt. Matching retries get
    the same build ID. A reused key with different input gets a conflict.
-3. The separate Studio worker claims a lease, builds the pinned revision in
-   its isolated workspace, and verifies the output. Completion attaches the
-   immutable artifact only while the attempt token is current. The durable
-   store carries the job and receipt across page closure or worker restart.
-4. The IDE transport requests status by build ID and event cursor through
-   the admitted host route. Rust projects that status for main JavaScript
-   to render. An authorized artifact link opens the preview on its separate
-   origin.
+3. The Studio worker claims a lease, reads the pinned Git subtree, and
+   verifies the output. Completion attaches the immutable artifact only
+   while the attempt token is current. The durable store carries the job and
+   receipt across page closure or worker restart.
+4. The browser I/O worker requests status by build ID through the admitted
+   host route. Rust validates and projects status for main JavaScript to
+   render. An authorized artifact link opens the preview on its separate
+   origin. The Studio page remembers the build ID in the current tab.
 
 [Studio worker sequence](../diagrams/mermaid/images/forge-studio-worker-lease.svg) ·
 [Editable Mermaid](../diagrams/mermaid/forge-studio-worker-lease.mmd) ·
@@ -149,7 +157,7 @@ renew, and finish operations.
 - Replay two rooms from one export using their exact cooked digests and
   transition tick. Exercise an exhausted recorder and verify the incomplete
   flag. Keep debug drawing and image decode outside the simulation tick.
-- For the future Studio milestone, deny an unauthorized project before
+- For Studio, deny an unauthorized project before
   enqueue. Retry a submit idempotently, expire a worker lease, and verify
   that the stale attempt cannot attach an artifact. Reconnect Studio and
   read the same build receipt.

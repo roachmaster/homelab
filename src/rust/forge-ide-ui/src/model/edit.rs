@@ -21,6 +21,44 @@ pub(super) struct EditReview {
     message: usize,
 }
 
+#[derive(Debug)]
+pub(super) struct Editor {
+    id: String,
+    file: ChatFileContext,
+    original: String,
+    text: String,
+    crlf: bool,
+    conflict: bool,
+    rejected: bool,
+    navigation_blocked: bool,
+}
+
+impl Editor {
+    fn dirty(&self) -> bool {
+        self.text != self.original
+    }
+
+    fn preserves_final_newline(&self) -> bool {
+        self.text.is_empty() || self.text.ends_with('\n') == self.original.ends_with('\n')
+    }
+
+    fn replacement_within_limit(&self) -> bool {
+        let added = if self.crlf {
+            self.text.matches('\n').count()
+        } else {
+            0
+        };
+        self.text.len() + added <= MAX_EDITOR_BYTES
+    }
+
+    fn can_save(&self) -> bool {
+        self.dirty()
+            && !self.conflict
+            && self.preserves_final_newline()
+            && self.replacement_within_limit()
+    }
+}
+
 impl UiModel {
     pub(super) fn workbench_file(&self) -> Option<ChatFileContext> {
         let source = self.source.as_ref()?;
@@ -48,16 +86,214 @@ impl UiModel {
             .filter(|review| self.edit_context_matches(&review.context))
     }
 
+    pub(super) fn document_action(&self) -> Option<RowAction> {
+        let text = &self.source.as_ref()?.document.text;
+        if !self.chats.workbench
+            || self.editor.is_some()
+            || self.write_pending()
+            || self.pending_edit.is_some()
+            || self.current_edit().is_some()
+            || text.is_empty()
+            || text.len() > MAX_EDITOR_BYTES
+        {
+            return None;
+        }
+        let uniform = text
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .all(|(i, &byte)| byte != b'\r' || text.as_bytes().get(i + 1) == Some(&b'\n'))
+            && (!text.contains('\r') || text.matches("\r\n").count() == text.matches('\n').count());
+        if !uniform {
+            return None;
+        }
+        Some(RowAction::OpenDocument {
+            report: self.accepted_report.clone()?,
+            entry: self.selected_entry?,
+        })
+    }
+
+    pub(super) fn open_document(
+        &mut self,
+        report: RequestToken,
+        entry: u32,
+        now: u64,
+    ) -> Result<(), UiError> {
+        if self.document_action() != Some(RowAction::OpenDocument { report, entry }) {
+            return Ok(());
+        }
+        let mut file = self.workbench_file().expect("editable source context");
+        let source = &self.source.as_ref().expect("editable source").document.text;
+        let text = source.replace("\r\n", "\n");
+        let crlf = source.contains('\r');
+        file.byte_start = 0;
+        file.byte_end = source.len() as u32;
+        self.editor = Some(Editor {
+            id: self.next_id(now)?,
+            file,
+            original: text.clone(),
+            text,
+            crlf,
+            conflict: false,
+            rejected: false,
+            navigation_blocked: false,
+        });
+        Ok(())
+    }
+
+    pub(super) fn set_document(&mut self, id: &str, text: String) {
+        if !self.chats.workbench
+            || self.write_pending()
+            || text.len() > MAX_EDITOR_BYTES
+            || text.contains(['\r', '\0'])
+        {
+            return;
+        }
+        if let Some(editor) = self.editor.as_mut().filter(|editor| editor.id == id) {
+            editor.text = text;
+            editor.navigation_blocked = false;
+            editor.rejected = false;
+        }
+    }
+
+    pub(super) fn close_document(&mut self, id: &str) {
+        if self.chats.workbench
+            && !self.write_pending()
+            && self.editor.as_ref().is_some_and(|editor| editor.id == id)
+        {
+            self.editor = None;
+        }
+    }
+
+    pub(super) fn save_document(
+        &mut self,
+        id: &str,
+        now: u64,
+        effects: &mut Vec<UiEffect>,
+    ) -> Result<(), UiError> {
+        if !self.chats.workbench || self.write_pending() {
+            return Ok(());
+        }
+        let Some(editor) = self.editor.as_ref().filter(|editor| {
+            editor.id == id
+                && editor.can_save()
+                && self.accepted_report.as_ref() == Some(&editor.file.report)
+                && self.selected_entry == Some(editor.file.entry)
+        }) else {
+            return Ok(());
+        };
+        let file = self.write_file().expect("editable write file");
+        let intent = EditWriteIntent::SaveDocument {
+            file: editor.file.clone(),
+            text: editor.text.clone(),
+        };
+        self.begin_write(file, self.chats.selected(), None, intent, now, effects)
+    }
+
+    pub(super) fn editor_blocks(&mut self, event: &UiEvent) -> bool {
+        let pending = self.write_pending();
+        let Some(editor) = self
+            .editor
+            .as_mut()
+            .filter(|editor| editor.dirty() || pending)
+        else {
+            return false;
+        };
+        if matches!(
+            event,
+            UiEvent::SelectNode { .. }
+                | UiEvent::SelectProject { .. }
+                | UiEvent::Inspect {}
+                | UiEvent::SelectEntry { .. }
+                | UiEvent::SelectSearchResult { .. }
+                | UiEvent::SelectProblem { .. }
+                | UiEvent::SelectDeclaration { .. }
+        ) {
+            editor.navigation_blocked = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(super) fn project_editor(&self, view: &mut ViewModel) {
+        let editor = self.editor.as_ref();
+        let action = self.document_action();
+        let pending = self.write_pending();
+        let id = editor.map(|editor| editor.id.clone());
+        let status = match editor {
+            Some(_) if pending => self.write.status.clone(),
+            Some(editor) if editor.conflict => "The verified revision is no longer current. Copy your draft or discard it before refreshing.".into(),
+            Some(editor) if editor.navigation_blocked => "Save or discard this draft before selecting another file.".into(),
+            Some(editor) if editor.rejected => "The managed workspace declined the save. Your draft is still open.".into(),
+            Some(editor) if !editor.preserves_final_newline() => "Keep the file’s existing final newline convention.".into(),
+            Some(editor) if !editor.replacement_within_limit() => "Keep the file within 4 KiB with its original line endings.".into(),
+            Some(editor) if editor.dirty() => "Unsaved changes".into(),
+            Some(editor) => format!("Editing rev {}", &editor.file.sha256[..8]),
+            None => String::new(),
+        };
+        view.document_dirty = editor.is_some_and(Editor::dirty);
+        view.visibility.extend([
+            VisibilityBinding {
+                id: "open-document",
+                visible: action.is_some(),
+            },
+            VisibilityBinding {
+                id: "workbench-editor",
+                visible: editor.is_some(),
+            },
+            VisibilityBinding {
+                id: "source-wrap",
+                visible: editor.is_none(),
+            },
+        ]);
+        view.inputs.push(InputBinding {
+            id: "document-text",
+            value: editor.map(|editor| editor.text.clone()).unwrap_or_default(),
+            disabled: editor.is_none() || pending,
+            max_bytes: MAX_EDITOR_BYTES,
+            action: id
+                .clone()
+                .map(|editor_id| FilterAction::SetDocument { editor_id }),
+        });
+        view.buttons.extend([
+            ButtonBinding {
+                id: "open-document",
+                disabled: action.is_none(),
+                action,
+            },
+            ButtonBinding {
+                id: "save-document",
+                disabled: pending || !editor.is_some_and(Editor::can_save),
+                action: id
+                    .clone()
+                    .map(|editor_id| RowAction::SaveDocument { editor_id }),
+            },
+            ButtonBinding {
+                id: "close-document",
+                disabled: pending || editor.is_none(),
+                action: id.map(|editor_id| RowAction::CloseDocument { editor_id }),
+            },
+        ]);
+        view.texts.push(TextBinding {
+            id: "document-status",
+            text: status,
+            tone: Tone::Neutral,
+        });
+    }
+
     pub(super) fn send_workbench(
         &mut self,
         now: u64,
         context: (RequestToken, u32, u32, usize),
         proposal: bool,
+        chat_id: Option<String>,
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
         let (report, entry, byte_start, conversation) = context;
         if !self.chats.workbench
             || self.chats.selected() != conversation
+            || self.editor.is_some()
             || self.current_edit().is_some()
             || self.write_pending()
         {
@@ -72,10 +308,14 @@ impl UiModel {
             return Ok(());
         }
         let request_id = self.next_id(now)?;
-        if let Some(request) = self
-            .chats
-            .send_with_context(request_id.clone(), file.clone())?
-        {
+        let request = if proposal {
+            self.chats
+                .send_with_context(request_id.clone(), file.clone())?
+        } else {
+            self.chats
+                .send_saved_with_context(request_id.clone(), file.clone(), chat_id)?
+        };
+        if let Some(request) = request {
             if proposal {
                 self.pending_edit = Some(PendingEdit {
                     request_id,
@@ -178,6 +418,7 @@ struct Mutation {
     conversation: usize,
     message: Option<usize>,
     undo: bool,
+    document: bool,
 }
 #[derive(Debug, Default)]
 pub(super) struct WriteState {
@@ -206,7 +447,7 @@ impl UiModel {
         now: u64,
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
-        if !self.chats.workbench || self.write.pending.is_some() {
+        if !self.chats.workbench || self.write.pending.is_some() || self.editor.is_some() {
             return Ok(());
         }
         let Some(review) = self
@@ -235,7 +476,7 @@ impl UiModel {
         now: u64,
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
-        if !self.chats.workbench || self.write.pending.is_some() {
+        if !self.chats.workbench || self.write.pending.is_some() || self.editor.is_some() {
             return Ok(());
         }
         let Some(applied) = self.write.applied.clone().filter(|applied| {
@@ -267,7 +508,9 @@ impl UiModel {
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
         let id = self.next_id(now)?;
-        self.write.status = if matches!(intent, EditWriteIntent::Undo { .. }) {
+        self.write.status = if matches!(intent, EditWriteIntent::SaveDocument { .. }) {
+            "Saving file…"
+        } else if matches!(intent, EditWriteIntent::Undo { .. }) {
             "Undoing edit…"
         } else {
             "Applying edit…"
@@ -281,6 +524,7 @@ impl UiModel {
             conversation,
             message,
             undo: matches!(intent, EditWriteIntent::Undo { .. }),
+            document: matches!(intent, EditWriteIntent::SaveDocument { .. }),
         });
         effects.push(UiEffect::EditWrite {
             request: PreparedEditWrite {
@@ -377,7 +621,11 @@ impl UiModel {
                 },
                 Some(digest),
             ) => {
-                self.write.status = format!("Applied · rev {}", &digest[..8]);
+                self.write.status = format!(
+                    "{} · rev {}",
+                    if pending.document { "Saved" } else { "Applied" },
+                    &digest[..8]
+                );
                 if let Some(message) = pending.message {
                     self.chats.mark_proposal(
                         pending.conversation,
@@ -395,6 +643,9 @@ impl UiModel {
                     undo_until,
                 });
                 if same_file {
+                    if pending.document {
+                        self.editor = None;
+                    }
                     self.refresh_written_file(pending.file, now, effects);
                 }
             }
@@ -420,11 +671,21 @@ impl UiModel {
                 if let Some(review) = self.edit_review.as_mut() {
                     review.preview.proposal_id = None;
                 }
+                if pending.document {
+                    if let Some(editor) = &mut self.editor {
+                        editor.conflict = true;
+                    }
+                }
             }
             _ => {
                 self.write.status = "The native workspace declined the write.".into();
                 if let Some(review) = self.edit_review.as_mut() {
                     review.preview.proposal_id = None;
+                }
+                if pending.document {
+                    if let Some(editor) = &mut self.editor {
+                        editor.rejected = true;
+                    }
                 }
             }
         }
@@ -525,6 +786,7 @@ impl UiModel {
                     conversation,
                     message: None,
                     undo: false,
+                    document: false,
                 });
             }
         }
@@ -666,6 +928,7 @@ impl UiModel {
     pub(super) fn send_chat_with_file(
         &mut self,
         context: (RequestToken, u32, u32, usize),
+        chat_id: Option<String>,
         now: u64,
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
@@ -679,7 +942,10 @@ impl UiModel {
             return Ok(());
         };
         let request_id = self.next_id(now)?;
-        if let Some(request) = self.chats.send_with_context(request_id, file)? {
+        if let Some(request) = self
+            .chats
+            .send_saved_with_context(request_id, file, chat_id)?
+        {
             effects.push(UiEffect::Chat { request });
         }
         Ok(())

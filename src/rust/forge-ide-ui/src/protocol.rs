@@ -286,6 +286,7 @@ pub struct ChatFileContext {
 }
 
 pub const MAX_EDIT_PREVIEW_ROWS: usize = 24;
+pub const MAX_EDITOR_BYTES: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -323,6 +324,7 @@ pub struct PreparedEditWrite {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EditWriteIntent {
     Apply { proposal_id: String },
+    SaveDocument { file: ChatFileContext, text: String },
     Undo { applied_operation: String },
     Status {},
 }
@@ -398,6 +400,35 @@ pub struct ChatMessageDto {
     pub position: usize,
     pub role: ChatRole,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachment: Option<ChatAttachmentDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChatAttachmentDto {
+    pub node: String,
+    pub project: String,
+    pub path: String,
+    pub sha256: String,
+    pub first_line: u32,
+    pub last_line: u32,
+    pub first_column: u32,
+}
+
+impl ChatAttachmentDto {
+    pub fn is_valid(&self) -> bool {
+        [&self.node, &self.project, &self.path].iter().all(|value| {
+            !value.is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control)
+        }) && self.sha256.len() == 64
+            && self
+                .sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            && (1..=1_048_577).contains(&self.first_line)
+            && (self.first_line..=1_048_577).contains(&self.last_line)
+            && self.first_column <= 1_048_576
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -646,12 +677,16 @@ pub enum UiEvent {
         entry: u32,
         byte_start: u32,
         conversation: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chat_id: Option<String>,
     },
     SendChatWithFile {
         report: RequestToken,
         entry: u32,
         byte_start: u32,
         conversation: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chat_id: Option<String>,
     },
     ProposeEdit {
         report: RequestToken,
@@ -660,6 +695,20 @@ pub enum UiEvent {
         conversation: usize,
     },
     DiscardEdit {},
+    OpenDocument {
+        report: RequestToken,
+        entry: u32,
+    },
+    SetDocument {
+        editor_id: String,
+        value: String,
+    },
+    SaveDocument {
+        editor_id: String,
+    },
+    CloseDocument {
+        editor_id: String,
+    },
     EditResult {
         request_id: String,
         outcome: EditOutcome,

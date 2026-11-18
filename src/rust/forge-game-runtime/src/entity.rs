@@ -242,10 +242,12 @@ impl Table {
         }
     }
 
+    pub(super) fn live(&self) -> impl Iterator<Item = &Entity> {
+        self.slots.iter().filter_map(|slot| slot.entity.as_ref())
+    }
+
     pub(super) fn views(&self, height: u32) -> impl Iterator<Item = EntityView> + '_ {
-        self.slots
-            .iter()
-            .filter_map(move |slot| slot.entity.map(|entity| entity.view(height)))
+        self.live().map(move |entity| entity.view(height))
     }
 }
 

@@ -75,6 +75,27 @@ checks its operation/project grants. Effective access is their intersection.
 No browser-controlled URL, root path, arbitrary header identity or redirect relay
 exists. Configuration is trusted startup input, not a browser API.
 
+Set `"alternate_cooked_assets": "pinned-cook-directory"` to supply copies of
+cooked game files missing from `assets/game-assets`. Point to the resolved
+cooked generation directory containing `levels/` and `atlas/`. The host uses
+the primary cooked manifest and verifies alternate bytes against its digests.
+An unavailable alternate leaves primary assets usable.
+
+Grant the host read access to the cooker's archive directory and set
+`cooked_replay_archive` to that path.
+Build releases with `FORGE_COOKED_REPLAY_ARCHIVE` set to that directory to retain
+each manifest and its levels by manifest SHA-256. Replay import can then
+retrieve the exact level bytes across releases. The active cook is served by
+its digest even when an archive directory is unset.
+
+### Studio
+
+Configure the optional `studio` block with the private Studio API `endpoint`,
+its `token_file`, and the separate HTTPS `preview_origin`. The web host checks
+the browser session, CSRF token, and configured project grants before dispatch.
+Open **Forge Studio** from the Game Engine design page or go to `/studio`.
+[Studio service setup](../../../deploy/mission-control/studio/README.md)
+
 ### Disposable real-agent fixture
 
 ```sh

@@ -23,6 +23,10 @@ const MAIL_WIREFRAME: &[u8] = include_bytes!("../design/forge-ide-mail-wireframe
 const MAIL_SEQUENCE: &[u8] = include_bytes!("../design/mail-dispatch-sequence.svg");
 const GAME_STUDIO_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/game-studio.html"));
 const GAME_STUDIO_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/game-studio.css"));
+const STUDIO_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/studio.html"));
+const STUDIO_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/studio.css"));
+const STUDIO_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/studio.js"));
+const STUDIO_WORKER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/studio-worker.js"));
 const GAME_ENGINE_ARCHITECTURE: &[u8] = include_bytes!("../design/game-engine-architecture.svg");
 const GAME_ENGINE_BUILD: &[u8] = include_bytes!("../design/game-engine-build-sequence.svg");
 const GAME_PHYSICS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/game-physics.html"));
@@ -62,6 +66,8 @@ const FORGE_WORKERS_STUDIO: &[u8] = include_bytes!(
 const PLAYTEST_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.html"));
 const PLAYTEST_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.css"));
 const PLAYTEST_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.js"));
+const PLAYTEST_ASSETS_WORKER_JS: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/playtest-assets-worker.js"));
 const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
     (
         "forge-ide-chat-desktop.png",
@@ -125,6 +131,10 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
             Some(("text/html; charset=utf-8", GAME_STUDIO_HTML))
         }
         "/design/game-studio.css" => Some(("text/css; charset=utf-8", GAME_STUDIO_CSS)),
+        "/studio" | "/studio/" => Some(("text/html; charset=utf-8", STUDIO_HTML)),
+        "/studio/style.css" => Some(("text/css; charset=utf-8", STUDIO_CSS)),
+        "/studio/main.js" => Some(("text/javascript; charset=utf-8", STUDIO_JS)),
+        "/studio/worker.js" => Some(("text/javascript; charset=utf-8", STUDIO_WORKER)),
         "/design/game-engine-architecture.svg" => Some(("image/svg+xml", GAME_ENGINE_ARCHITECTURE)),
         "/design/game-engine-build-sequence.svg" => Some(("image/svg+xml", GAME_ENGINE_BUILD)),
         "/design/game-physics" | "/design/game-physics/" => {
@@ -156,6 +166,9 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/playtest" | "/playtest/" => Some(("text/html; charset=utf-8", PLAYTEST_HTML)),
         "/playtest/style.css" => Some(("text/css; charset=utf-8", PLAYTEST_CSS)),
         "/playtest/main.js" => Some(("text/javascript; charset=utf-8", PLAYTEST_JS)),
+        "/playtest/assets-worker.js" => {
+            Some(("text/javascript; charset=utf-8", PLAYTEST_ASSETS_WORKER_JS))
+        }
         _ => {
             let name = path.strip_prefix("/design/")?;
             DESIGN_IMAGES
@@ -240,9 +253,18 @@ impl CookedAsset {
         Ok(())
     }
 
-    fn load(&self, files: &NativeFiles, limit: usize) -> Result<Vec<u8>, HostError> {
-        let bytes = read_file(files, &format!("game-assets/{}", self.path), limit)?
-            .ok_or(HostError::Configuration("cooked asset missing"))?;
+    fn load(
+        &self,
+        files: &NativeFiles,
+        alternate: Option<&NativeFiles>,
+        limit: usize,
+    ) -> Result<Vec<u8>, HostError> {
+        let primary = read_file(files, &format!("game-assets/{}", self.path), limit)?;
+        let bytes = match (primary, alternate) {
+            (None, Some(files)) => read_file(files, &self.path, limit)?,
+            (primary, _) => primary,
+        }
+        .ok_or(HostError::Configuration("cooked asset missing"))?;
         if !matches_digest(&bytes, &self.sha256) {
             return Err(HostError::Configuration("cooked asset hash"));
         }
@@ -269,13 +291,17 @@ fn matches_digest(bytes: &[u8], expected: &str) -> bool {
 const JSON_MIME: &str = "application/json";
 const GAME_MANIFEST: &str = "game-assets/manifest.json";
 const GAME_ROUTE: &str = "playtest/assets/";
+const REPLAY_ROUTE: &str = "/playtest/assets/archive/";
 const MAX_LEVEL_BYTES: usize = 16 * 1024;
 const MAX_ATLAS_BYTES: usize = 1024 * 1024;
 const MAX_PNG_BYTES: usize = 8 * 1024 * 1024;
 
-pub(crate) struct Assets(BTreeMap<String, (&'static str, Vec<u8>)>);
+pub(crate) struct Assets {
+    files: BTreeMap<String, (&'static str, Vec<u8>)>,
+    replay_archive: Option<NativeFiles>,
+}
 impl Assets {
-    pub fn load(root: &Path) -> Result<Self, HostError> {
+    pub fn load(root: &Path, alternate_cooked: Option<&Path>) -> Result<Self, HostError> {
         let files = NativeFiles::open(root).map_err(|_| HostError::Configuration("asset root"))?;
         let read = |name: &str, limit| {
             read_file(&files, name, limit)?.ok_or(HostError::Configuration("asset regular file"))
@@ -298,14 +324,20 @@ impl Assets {
         }
         // A game bundle is independent of the required Forge UI assets.
         // A bad sidecar cannot prevent the host's other capabilities starting.
-        if let Ok(game) = Self::load_game(&files) {
-            loaded.extend(game.0);
+        if let Ok(game) = Self::load_game(&files, alternate_cooked) {
+            loaded.extend(game.files);
         }
-        Ok(Self(loaded))
+        Ok(Self {
+            files: loaded,
+            replay_archive: None,
+        })
     }
 
-    fn load_game(files: &NativeFiles) -> Result<Self, HostError> {
-        let mut game = Self(BTreeMap::new());
+    fn load_game(files: &NativeFiles, alternate: Option<&Path>) -> Result<Self, HostError> {
+        let mut game = Self {
+            files: BTreeMap::new(),
+            replay_archive: None,
+        };
         let Some(bytes) = read_file(files, GAME_MANIFEST, 16_384)? else {
             return Ok(game);
         };
@@ -323,13 +355,14 @@ impl Assets {
         if room_one.is_none() && traversal_yard.is_none() {
             return Err(HostError::Configuration("cooked asset levels"));
         }
+        let alternate = alternate.and_then(|root| NativeFiles::open(root).ok());
         for (level, path) in [
             (room_one, "levels/room-one.json"),
             (traversal_yard, "levels/traversal-yard.json"),
         ] {
             if let Some(level) = level {
                 level.validate(path, CookedKind::Level, &[], &["scout-atlas"])?;
-                if let Ok(bytes) = level.load(files, MAX_LEVEL_BYTES) {
+                if let Ok(bytes) = level.load(files, alternate.as_ref(), MAX_LEVEL_BYTES) {
                     game.add_game(path, JSON_MIME, bytes);
                 }
             }
@@ -348,8 +381,8 @@ impl Assets {
         if let (Some(atlas), Some(image)) = (atlas, image) {
             // Expose the visual dependency only as a verified pair. A missing
             // or damaged optional file leaves the primitive renderer usable.
-            let atlas_bytes = atlas.load(files, MAX_ATLAS_BYTES);
-            let image_bytes = image.load(files, MAX_PNG_BYTES);
+            let atlas_bytes = atlas.load(files, alternate.as_ref(), MAX_ATLAS_BYTES);
+            let image_bytes = image.load(files, alternate.as_ref(), MAX_PNG_BYTES);
             if let (Ok(atlas_bytes), Ok(image_bytes)) = (atlas_bytes, image_bytes) {
                 game.add_game(&atlas.path, JSON_MIME, atlas_bytes);
                 game.add_game(&image.path, "image/png", image_bytes);
@@ -360,7 +393,8 @@ impl Assets {
     }
 
     fn add_game(&mut self, path: &str, mime: &'static str, bytes: Vec<u8>) {
-        self.0.insert(format!("{GAME_ROUTE}{path}"), (mime, bytes));
+        self.files
+            .insert(format!("{GAME_ROUTE}{path}"), (mime, bytes));
     }
     pub fn get(&self, path: &str) -> Option<(&'static str, &[u8])> {
         let name = if path == "/" {
@@ -368,10 +402,62 @@ impl Assets {
         } else {
             path.strip_prefix('/')?
         };
-        self.0
+        self.files
             .get(name)
             .map(|(mime, b)| (*mime, b.as_slice()))
             .or_else(|| embedded_asset(path))
+    }
+
+    pub fn with_replay_archive(mut self, root: Option<&Path>) -> Result<Self, HostError> {
+        self.replay_archive = root
+            .map(NativeFiles::open)
+            .transpose()
+            .map_err(|_| HostError::Configuration("cooked replay archive root"))?;
+        Ok(self)
+    }
+
+    pub fn archived_level(&self, path: &str) -> Option<Vec<u8>> {
+        let (digest, name) = path.strip_prefix(REPLAY_ROUTE)?.split_once('/')?;
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return None;
+        }
+        if !matches!(
+            name,
+            "manifest.json" | "levels/room-one.json" | "levels/traversal-yard.json"
+        ) {
+            return None;
+        }
+        if let Some((_, manifest)) = self.files.get(&format!("{GAME_ROUTE}manifest.json")) {
+            if matches_digest(manifest, digest) {
+                if let Some((_, data)) = self.files.get(&format!("{GAME_ROUTE}{name}")) {
+                    return Some(data.clone());
+                }
+            }
+        }
+        let root = self.replay_archive.as_ref()?;
+        let data = read_file(root, &format!("{digest}/manifest.json"), 16_384).ok()??;
+        if !matches_digest(&data, digest) {
+            return None;
+        }
+        let manifest: CookedManifest = serde_json::from_slice(&data).ok()?;
+        if manifest.version != 1 {
+            return None;
+        }
+        let entry = match name {
+            "manifest.json" => return Some(data),
+            "levels/room-one.json" => manifest.entries.room_one?,
+            "levels/traversal-yard.json" => manifest.entries.traversal_yard?,
+            _ => return None,
+        };
+        entry
+            .validate(name, CookedKind::Level, &[], &["scout-atlas"])
+            .ok()?;
+        let level = read_file(root, &format!("{digest}/{name}"), MAX_LEVEL_BYTES).ok()??;
+        matches_digest(&level, &entry.sha256).then_some(level)
     }
 }
 
@@ -459,7 +545,7 @@ mod tests {
         }
 
         fn load(&self) -> Result<Assets, HostError> {
-            Assets::load(&self.0)
+            Assets::load(&self.0, None)
         }
     }
 
@@ -507,6 +593,49 @@ mod tests {
     }
 
     #[test]
+    fn replay_archive_requires_matching_manifest_and_level_digests() {
+        let bundle = Bundle::new();
+        let mut current = bundle.populate();
+        let archive = bundle.0.join("archive");
+        let previous = serde_json::to_vec(&current).unwrap();
+        let digest = format!("{:x}", Sha256::digest(&previous));
+        let old = archive.join(&digest);
+        fs::create_dir_all(old.join("levels")).unwrap();
+        fs::write(old.join("manifest.json"), &previous).unwrap();
+        fs::write(old.join("levels/room-one.json"), b"room one").unwrap();
+        current["entries"]["room-one"] = bundle.entry(
+            "levels/room-one.json",
+            "level",
+            b"updated room",
+            &[],
+            &["scout-atlas"],
+        );
+        bundle.write("manifest.json", &serde_json::to_vec(&current).unwrap());
+        let assets = bundle
+            .load()
+            .unwrap()
+            .with_replay_archive(Some(&archive))
+            .unwrap();
+        let route = |name| format!("{REPLAY_ROUTE}{digest}/{name}");
+        assert_eq!(
+            assets.archived_level(&route("manifest.json")),
+            Some(previous)
+        );
+        let level = route("levels/room-one.json");
+        assert_eq!(
+            assets.archived_level(&level).as_deref(),
+            Some(b"room one".as_slice())
+        );
+        assert!(assets
+            .archived_level(&route("levels/../manifest.json"))
+            .is_none());
+        fs::write(old.join("levels/room-one.json"), b"corrupt").unwrap();
+        assert!(assets.archived_level(&level).is_none());
+        fs::write(old.join("manifest.json"), b"{}").unwrap();
+        assert!(assets.archived_level(&route("manifest.json")).is_none());
+    }
+
+    #[test]
     fn invalid_optional_art_is_hidden_and_bad_manifests_omit_only_game_routes() {
         let bundle = Bundle::new();
         let mut manifest = bundle.populate();
@@ -529,5 +658,69 @@ mod tests {
         assert!(fallback
             .get("/playtest/assets/levels/traversal-yard.json")
             .is_none());
+    }
+
+    #[test]
+    fn alternate_cooked_assets_fill_only_verified_missing_files() {
+        let primary = Bundle::new();
+        let alternate = Bundle::new();
+        let manifest = primary.populate();
+        let alternate_root = alternate.0.join("game-assets");
+        let load = || Assets::load(&primary.0, Some(&alternate_root)).unwrap();
+        alternate.write("manifest.json", b"ignore the alternate manifest");
+        alternate.write("levels/room-one.json", b"room one");
+        alternate.write("levels/traversal-yard.json", b"different yard");
+        alternate.write("atlas/sheet.png", b"image bytes");
+        fs::remove_file(primary.0.join("game-assets/levels/room-one.json")).unwrap();
+        fs::remove_file(primary.0.join("game-assets/atlas/sheet.png")).unwrap();
+
+        let assets = load();
+        assert_eq!(
+            assets.get("/playtest/assets/manifest.json"),
+            Some((JSON_MIME, serde_json::to_vec(&manifest).unwrap().as_slice()))
+        );
+        assert_eq!(
+            assets.get("/playtest/assets/levels/room-one.json"),
+            Some((JSON_MIME, b"room one".as_slice()))
+        );
+        assert_eq!(
+            assets.get("/playtest/assets/levels/traversal-yard.json"),
+            Some((JSON_MIME, b"yard".as_slice()))
+        );
+        assert_eq!(
+            assets.get("/playtest/assets/atlas/sheet.png"),
+            Some(("image/png", b"image bytes".as_slice()))
+        );
+
+        primary.write("levels/room-one.json", b"damaged primary");
+        alternate.write("atlas/sheet.png", b"wrong alternate digest");
+        let assets = load();
+        assert!(assets
+            .get("/playtest/assets/levels/room-one.json")
+            .is_none());
+        assert!(assets.get("/playtest/assets/atlas/manifest.json").is_none());
+        assert!(assets.get("/playtest/assets/atlas/sheet.png").is_none());
+
+        let alternate_manifest = alternate.populate();
+        fs::remove_file(primary.0.join("game-assets/manifest.json")).unwrap();
+        assert_eq!(alternate_manifest, manifest);
+        let assets = load();
+        assert!(assets.get("/").is_some());
+        assert!(assets.get("/playtest/assets/manifest.json").is_none());
+        assert!(assets
+            .get("/playtest/assets/levels/room-one.json")
+            .is_none());
+    }
+
+    #[test]
+    fn unavailable_alternate_preserves_primary_routes() {
+        let primary = Bundle::new();
+        primary.populate();
+        let alternate_root = primary.0.join("no-alternate");
+        let assets = Assets::load(&primary.0, Some(&alternate_root)).unwrap();
+        assert!(assets.get("/").is_some());
+        assert!(assets
+            .get("/playtest/assets/levels/room-one.json")
+            .is_some());
     }
 }

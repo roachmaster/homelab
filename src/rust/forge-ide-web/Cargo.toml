@@ -23,6 +23,7 @@ sha2 = { version = "0.10", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 forge-game-runtime = { path = "../forge-game-runtime" }
+sha2 = "0.10"
 
 [[bin]]
 name = "forge-ui-assets"

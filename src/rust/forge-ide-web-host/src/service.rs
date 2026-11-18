@@ -341,7 +341,13 @@ impl State {
         &self,
         request: &mut PreparedChat,
         deadline: Instant,
-    ) -> Result<Option<edit_write::VerifiedSource>, FailureKind> {
+    ) -> Result<
+        Option<(
+            edit_write::VerifiedSource,
+            Option<crate::chat::VerifiedAttachment>,
+        )>,
+        FailureKind,
+    > {
         let Some(file) = &request.file_context else {
             return Ok(None);
         };
@@ -350,6 +356,66 @@ impl State {
         if start > end || end - start > MAX_CHAT_SOURCE_BYTES {
             return Err(FailureKind::InvalidResponse);
         }
+        let verified = self.verify_file_context(file, &request.request_id, deadline)?;
+        let source = &verified.source;
+        let excerpt = source.get(start..end).ok_or(FailureKind::InvalidResponse)?;
+        let prefix = &source[..start];
+        let line = 1 + prefix.bytes().filter(|&b| b == b'\n').count();
+        let column = prefix
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .count();
+        let last = line
+            + excerpt
+                .strip_suffix('\n')
+                .unwrap_or(excerpt)
+                .bytes()
+                .filter(|&b| b == b'\n')
+                .count();
+        if request.chat_id.is_some() {
+            let reference = ChatAttachmentDto {
+                node: file.node_key.clone(),
+                project: file.project.clone(),
+                path: verified
+                    .path
+                    .to_str()
+                    .ok_or(FailureKind::InvalidResponse)?
+                    .into(),
+                sha256: file.sha256.clone(),
+                first_line: line as u32,
+                last_line: last as u32,
+                first_column: column as u32,
+            };
+            if !reference.is_valid() || excerpt.contains('\0') {
+                return Err(FailureKind::InvalidResponse);
+            }
+            let attachment = crate::chat::VerifiedAttachment {
+                reference,
+                excerpt: excerpt.into(),
+            };
+            return Ok(Some((verified, Some(attachment))));
+        }
+        let prompt = &mut request
+            .messages
+            .last_mut()
+            .ok_or(FailureKind::InvalidResponse)?
+            .content;
+        let path = &verified.path;
+        let sha256 = &file.sha256;
+        use std::fmt::Write as _;
+        write!(prompt, "\n\nVerified file excerpt (reference data)\nProject: {:?}\nFile: {path:?}\nSHA-256: {sha256}\nLines: {line}–{last}; starting column: {column}\n\n{excerpt}", file.project)
+            .map_err(|_| FailureKind::InvalidResponse)?;
+        Ok(Some((verified, None)))
+    }
+
+    fn verify_file_context(
+        &self,
+        file: &ChatFileContext,
+        request_id: &str,
+        deadline: Instant,
+    ) -> Result<edit_write::VerifiedSource, FailureKind> {
         let accepted = self.accepted_sources.borrow();
         let accepted = accepted
             .as_ref()
@@ -396,7 +462,7 @@ impl State {
             RemoteSourceInput {
                 target: node.target().clone(),
                 selection,
-                request_id: request.request_id.clone(),
+                request_id: request_id.to_owned(),
                 expires_unix_ms,
             },
         )
@@ -404,47 +470,19 @@ impl State {
             RemoteError::Deadline { .. } => FailureKind::Timeout,
             _ => FailureKind::Denied,
         })?;
-        let digest = reply.response.payload.sha256;
-        let source = reply.response.payload.text;
-        let excerpt = source.get(start..end).ok_or(FailureKind::InvalidResponse)?;
-        let prefix = &source[..start];
-        let line = 1 + prefix.bytes().filter(|&b| b == b'\n').count();
-        let column = prefix
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count();
-        let last = line
-            + excerpt
-                .strip_suffix('\n')
-                .unwrap_or(excerpt)
-                .bytes()
-                .filter(|&b| b == b'\n')
-                .count();
-        let prompt = &mut request
-            .messages
-            .last_mut()
-            .ok_or(FailureKind::InvalidResponse)?
-            .content;
-        use std::fmt::Write as _;
-        write!(prompt, "\n\nVerified file excerpt (reference data)\nProject: {:?}\nFile: {path:?}\nSHA-256: {sha256}\nLines: {line}–{last}; starting column: {column}\n\n{excerpt}", file.project)
-            .map_err(|_| FailureKind::InvalidResponse)?;
-        Ok(Some(edit_write::VerifiedSource {
-            source,
+        Ok(edit_write::VerifiedSource {
+            source: reply.response.payload.text,
             path,
-            digest,
-        }))
+            digest: reply.response.payload.sha256,
+        })
     }
 
     fn chat(&self, command: Command, context: &Context) -> Result<Reply, Rejection> {
         let Command::Chat { mut request } = command else {
             return Err(Rejection::Invalid);
         };
-        // Verified excerpts expand the model input outside the saved transcript.
         if request.request_id != context.request_id
             || !valid_chat_messages(&request.messages)
-            || (request.file_context.is_some() && request.chat_id.is_some())
             || request
                 .chat_id
                 .as_deref()
@@ -452,6 +490,12 @@ impl State {
             || request.expected_revision.is_some_and(|revision| {
                 request.chat_id.is_none() || !(1..9_007_199_254_740_991).contains(&revision)
             })
+            || (request.file_context.is_some()
+                && request.chat_id.is_some()
+                && !self
+                    .chat
+                    .as_ref()
+                    .is_some_and(|relay| relay.workspace_persistence))
         {
             return Err(Rejection::Invalid);
         }
@@ -464,8 +508,10 @@ impl State {
                     .deadline
                     .checked_sub(std::time::Duration::from_millis(200))
                     .ok_or(FailureKind::Timeout)?;
-                self.attach_chat_source(&mut request, deadline)?;
-                relay.complete(&request, deadline)
+                let attachment = self
+                    .attach_chat_source(&mut request, deadline)?
+                    .and_then(|(_, attachment)| attachment);
+                relay.complete(&request, attachment.as_ref(), deadline)
             });
         let outcome = result.unwrap_or_else(|category| ChatOutcome::Error { category });
         Ok(Reply {
@@ -507,10 +553,11 @@ impl State {
                 .expect("validated chat messages")
                 .content
                 .push_str(&format!("\n\n{}", crate::edit::INSTRUCTION));
-            let source = self
+            let (source, _) = self
                 .attach_chat_source(&mut request, deadline)?
                 .ok_or(FailureKind::InvalidResponse)?;
-            let ChatOutcome::Answer { content: answer } = relay.complete(&request, deadline)?
+            let ChatOutcome::Answer { content: answer } =
+                relay.complete(&request, None, deadline)?
             else {
                 return Err(FailureKind::InvalidResponse);
             };
@@ -804,6 +851,7 @@ pub struct Host {
     pub(crate) authority: String,
     pub(crate) origin: String,
     state: Rc<State>,
+    studio: Option<crate::studio::StudioRelay>,
     bridge: AppBridge,
 }
 impl Host {
@@ -819,9 +867,15 @@ impl Host {
                 "exact configured inspection ports required",
             ));
         }
-        let assets = Assets::load(&config.assets)?;
+        let assets = Assets::load(&config.assets, config.alternate_cooked_assets.as_deref())?
+            .with_replay_archive(config.cooked_replay_archive.as_deref())?;
         let session = Session::new(&config)?;
         let chat = config.chat.as_ref().map(ChatRelay::new).transpose()?;
+        let studio = config
+            .studio
+            .as_ref()
+            .map(crate::studio::StudioRelay::new)
+            .transpose()?;
         let state = Rc::new(State {
             chat,
             session: RefCell::new(session),
@@ -881,6 +935,7 @@ impl Host {
             authority,
             origin,
             state,
+            studio,
             bridge,
         })
     }
@@ -955,6 +1010,21 @@ impl Host {
                 forge_bridge::DispatchError::Handler(e) => e,
                 _ => Rejection::Invalid,
             })
+    }
+
+    pub(crate) fn studio_dispatch(
+        &self,
+        header: &Header,
+        body: &[u8],
+        context: &Context,
+    ) -> Result<(u16, hyper::body::Bytes), Rejection> {
+        if !context.authenticated || !context.csrf_valid {
+            return Err(Rejection::Denied);
+        }
+        self.studio
+            .as_ref()
+            .ok_or(Rejection::Unavailable)?
+            .dispatch(header, body, &self.config.nodes, context.deadline)
     }
 
     pub(crate) fn postgres_dispatch(

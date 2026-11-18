@@ -1605,6 +1605,22 @@ async function managedWriteJourney(page, context, respondToLeaveWarning) {
   await check(source.locator('[data-line="2"]')).toContainText('old line');
   await check(source.locator('[data-line="3"]')).toContainText('omega');
   await check(dock.locator('#workbench-write-status')).toContainText(/Reverted · rev [0-9a-f]{8}/);
+
+  await page.getByRole('button', { name: 'Edit file', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'File contents' });
+  const original = await editor.inputValue();
+  assert.match(original, /old line/);
+  const edited = original.replace('old line', 'saved with direct editor');
+  await editor.fill(edited);
+  await check(page.locator('#document-status')).toHaveText('Unsaved changes');
+  await page.locator('#open-chat').click();
+  await page.locator('#open-workbench').click();
+  await check(editor).toHaveValue(edited);
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await check(source).toContainText('saved with direct editor');
+  await check(dock.locator('#workbench-write-status')).toContainText(/Saved · rev [0-9a-f]{8}/);
+  await page.getByRole('button', { name: 'Undo edit', exact: true }).click();
+  await check(source.locator('[data-line="2"]')).toContainText('old line');
 }
 
 async function designJourney(page, traffic) {
@@ -1965,6 +1981,7 @@ async function gameEngineDesignJourney(page, designUrl) {
   await page.setViewportSize({ width: 320, height: 720 });
   const context = page.context();
   const wasmUrl = new URL('/app.wasm', designUrl).href;
+  const workerUrl = new URL('/playtest/assets-worker.js', designUrl).href;
   const cookieName = 'forge_fixture_playtest_asset';
   // Model an access proxy's same-origin cookie without touching the Forge session.
   await context.addCookies([{
@@ -1973,6 +1990,7 @@ async function gameEngineDesignJourney(page, designUrl) {
   try {
     const [wasm] = await Promise.all([
       page.waitForResponse(response => response.url() === wasmUrl),
+      page.waitForEvent('worker', worker => worker.url() === workerUrl),
       playtest.click(),
     ]);
     assert.equal(wasm.status(), 200);
@@ -2095,6 +2113,10 @@ async function gameEngineDesignJourney(page, designUrl) {
     await check(page.getByRole('heading', { level: 1 })).toHaveText('Room One');
     await step.click();
     await check(page.getByRole('heading', { level: 1 })).toHaveText('Traversal Yard');
+    await check(loadStatus).toHaveText('Entered Traversal Yard.');
+    await check(debug.locator('#playtest-timing')).toContainText(/Traversal Yard handoff · WASM linear memory \d+ → \d+ bytes \(peak\)/);
+    await check(inspector).toContainText('Collision bodies:');
+    await check(inspector).toContainText('Downward ray:');
     await check(traversal).toHaveAttribute('aria-pressed', 'true');
     await check(jump).toBeEnabled();
     await check(page.getByRole('button', { name: 'Move up', exact: true })).toBeHidden();
@@ -2126,6 +2148,25 @@ async function gameEngineDesignJourney(page, designUrl) {
     assert(Number.isInteger(activation.priorWorldTick));
     await levelTrace.delete();
 
+    const [sessionReplay] = await Promise.all([
+      page.waitForEvent('download'),
+      debug.getByRole('button', { name: 'Export replay', exact: true }).click(),
+    ]);
+    assert.equal(sessionReplay.suggestedFilename(), 'forge-playtest-replay.json');
+    const replayBytes = await readFile(await sessionReplay.path());
+    const replay = JSON.parse(replayBytes);
+    assert.equal(replay.version, 1);
+    assert.equal(replay.complete, true, 'the session journal is independent of the debug trace mask');
+    const [outgoing, incoming] = replay.segments.slice(-2);
+    assert.equal(outgoing.level_slot, 1);
+    assert.equal(incoming.level_slot, 2);
+    assert.equal(outgoing.transition.kind, 'level');
+    assert.equal(outgoing.transition.boundary_tick, activation.priorWorldTick);
+    assert.equal(outgoing.transition.incoming_epoch, incoming.epoch);
+    assert.equal(incoming.manifest_sha256, activation.manifestSha256);
+    assert(incoming.inputs.some(run => run.input === 'jump'));
+    await sessionReplay.delete();
+
     await roomOne.click();
     await check(loadStatus).toContainText('Resume or step to open it.');
     await step.click();
@@ -2148,6 +2189,29 @@ async function gameEngineDesignJourney(page, designUrl) {
     } finally {
       await page.unroute(imageUrl, missingAtlas);
     }
+
+    await debug.locator('summary').click();
+    const archiveUrl = new URL(`archive/${incoming.manifest_sha256}/levels/traversal-yard.json`, assetsUrl).href;
+    const [restored] = await Promise.all([
+      page.waitForResponse(response => response.url() === archiveUrl),
+      debug.getByLabel('Import replay').setInputFiles({ name: 'replay.json', mimeType: 'application/json', buffer: replayBytes }),
+    ]);
+    assert.equal(restored.status(), 200);
+    await check(debug.locator('#playtest-replay-status')).toHaveText('Replay ready.');
+    const position = debug.locator('#playtest-replay-position');
+    await check(position).toHaveText('Segment 1 · Tick 0');
+    await check(debug.getByRole('img', { name: 'Replay game board' })).toBeVisible();
+    await debug.getByRole('button', { name: 'Step replay' }).click();
+    await check(position).not.toHaveText('Segment 1 · Tick 0');
+    await debug.getByRole('button', { name: 'Restart replay' }).click();
+    await check(position).toHaveText('Segment 1 · Tick 0');
+    await debug.getByRole('button', { name: 'Play replay' }).click();
+    await check(position).not.toHaveText('Segment 1 · Tick 0');
+    await check(page.getByRole('heading', { level: 1 })).toHaveText('Room One');
+    await debug.getByRole('button', { name: 'Restart replay' }).click();
+    await debug.getByLabel('Import replay').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{}') });
+    await check(debug.locator('#playtest-replay-status')).toHaveText('This replay file is invalid or incomplete.');
+    await check(position).toHaveText('Segment 1 · Tick 0');
   }
 
   await page.getByRole('link', { name: 'Back to game engine design', exact: true }).click();
@@ -2299,7 +2363,7 @@ async function realJourney() {
   await projectOptionsJourney(page, traffic);
   await chatJourney(page, context);
   await inspect(page, 'workspace');
-  await check(page.locator('#workspace-panel .fg-pane-body textarea, #workbench [contenteditable="true"]')).toHaveCount(0);
+  await check(page.locator('#workspace-panel .fg-pane-body textarea:visible, #workbench [contenteditable="true"]:visible')).toHaveCount(0);
   await check(page.locator('#workbench-chat')).toBeHidden();
   await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
   await check(page.locator('#source-shape-panel')).toHaveJSProperty('open', false);

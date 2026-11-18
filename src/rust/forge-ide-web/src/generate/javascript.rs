@@ -14,6 +14,8 @@ let transcriptViews=new WeakMap();
 let presentationSequence=0;
 let pendingActionOrigin=null;
 let workspaceWork=false;
+let documentDirty=false;
+const activeEditor=document.getElementById('document-text');
 let leaveWarning=false;
 let leaving=false;
 let finishReload=null;
@@ -21,7 +23,7 @@ let navigation=null;
 let navigationId=0;
 const NAVIGATION_CACHE_KEY='forge-workspace-navigation';
 const initialText=new Map([...document.querySelectorAll('[data-bind-text]')].map(n=>[n,n.textContent]));
-const draftFields=[...document.querySelectorAll('textarea[data-action],[data-workspace-draft]')];
+const draftFields=[...document.querySelectorAll('textarea[data-action],[data-workspace-draft]')].filter(n=>n!==activeEditor);
 const leaveDialog=document.getElementById('leave-confirmation');
 const dialogs=new Map([...document.querySelectorAll('[data-modal]')].map(n=>[n.id,n]));
 const panelToggles=new Map([...document.querySelectorAll('button[data-action][aria-expanded][aria-controls]')].map(n=>[n.getAttribute('aria-controls'),n]));
@@ -45,7 +47,7 @@ function tabKey(){
   }catch(_){return '';}
 }
 function warnBeforeUnload(event){event.preventDefault();event.returnValue=true;}
-function hasWork(){return workspaceWork||draftFields.some(n=>n.value.trim().length>0);}
+function hasWork(){return workspaceWork||documentDirty||Boolean(inputDrafts.get(activeEditor))||draftFields.some(n=>n.value.trim().length>0);}
 function syncLeaveWarning(){
   const enabled=!leaving&&hasWork();
   if(enabled===leaveWarning)return;
@@ -92,6 +94,9 @@ for(const link of document.querySelectorAll('a[data-workspace-navigation]'))link
   if(url.origin!==location.origin)return;
   event.preventDefault();
   if(leaving||navigation)return;
+  if(documentDirty||inputDrafts.get(activeEditor)){
+    navigationStatus('Save or discard your file draft before opening Design.');return;
+  }
   if(draftFields.some(n=>inputDrafts.get(n)?.invalid)){
     navigationStatus('Shorten the draft to the message limit before opening Design.');return;
   }
@@ -191,6 +196,7 @@ function clearProtected(){
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();diffViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
   workspaceWork=false;
+  documentDirty=false;
   syncLeaveWarning();
 }
 function stop(){const old=worker;worker=null;if(old)old.terminate();clearProtected();}
@@ -216,6 +222,7 @@ function focusRow(row){
 function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(!view||typeof view!=='object')throw new Error('Invalid view');
   const focus=document.activeElement;
+  const enteringEditor=focus?.id==='open-document'&&activeEditor?.disabled;
   const focusKey=focusKeyByElement.get(focus);
   const priorTree=focus?.closest?.('[role="tree"]');
   const priorPane=focus?.closest?.('[data-pane]');
@@ -241,11 +248,12 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     const sameContext=draft&&draft.context===context&&!b.disabled;
     // Browser drafts are presentation, never an accepted filter. Only the view
     // acknowledging this edit (or a later edit) can replace its same-context text.
-    const pending=sameContext&&(draft.invalid||!Number.isSafeInteger(acknowledgedSequence)||acknowledgedSequence<draft.sequence);
+    const pending=sameContext&&(draft.composing||draft.invalid||!Number.isSafeInteger(acknowledgedSequence)||acknowledgedSequence<draft.sequence);
     if(!pending){if(n.value!==b.value)n.value=b.value;inputDrafts.delete(n);n.setCustomValidity('');n.removeAttribute('aria-invalid');}
     n.disabled=b.disabled;actionByElement.set(n,b.action);n.dataset.maxBytes=String(b.max_bytes);
   }
   workspaceWork=hasWorkspaceWork===true;
+  documentDirty=view.document_dirty===true;
   syncLeaveWarning();
   for(const b of view.choices||[]){
     const n=element(b.id);if(!n)continue;
@@ -445,6 +453,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     return;
   }
   if(focusedDialog&&!focusedDialog.open&&document.activeElement!==document.body&&visible(document.activeElement))return;
+  if(enteringEditor&&!activeEditor.disabled&&visible(activeEditor)){activeEditor.focus({preventScroll:true});return;}
   if(visible(sourceFocus)){sourceFocus.focus({preventScroll:true});return;}
   if(visible(invalidatedFocus)){invalidatedFocus.focus();return;}
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
@@ -499,16 +508,28 @@ for(const n of document.querySelectorAll('button[data-action]'))n.addEventListen
   const check=n.dataset.checkInput;
   if(!check||element(check)?.reportValidity())sendAction(n);
 });
-for(const n of document.querySelectorAll('input[data-action],textarea[data-action]'))n.addEventListener('input',()=>{
-  // The declared byte cap is a codec bound, not a second query/filter implementation.
-  if(!visible(n)||n.disabled||!actionByElement.get(n))return;
-  if(draftFields.includes(n))syncLeaveWarning();
-  const context=JSON.stringify(actionByElement.get(n));const max=Number(n.dataset.maxBytes)||256;
-  if(new TextEncoder().encode(n.value).length>max){inputDrafts.set(n,{context,invalid:true});n.setCustomValidity('Use at most '+max+' UTF-8 bytes. This draft has not been applied.');n.setAttribute('aria-invalid','true');n.reportValidity();return;}
-  if(presentationSequence>=2147483647){fatal('The presentation message limit was reached. Reload to retry.');return;}
-  const sequence=++presentationSequence;inputDrafts.set(n,{context,sequence,invalid:false});
-  n.setCustomValidity('');n.removeAttribute('aria-invalid');sendAction(n,n.value,sequence);
-});
+for(const n of document.querySelectorAll('input[data-action],textarea[data-action]')){
+  function updateInput(){
+    if(!visible(n)||n.disabled||!actionByElement.get(n))return;
+    const context=JSON.stringify(actionByElement.get(n));
+    const max=Number(n.dataset.maxBytes)||256;
+    if(new TextEncoder().encode(n.value).length>max){
+      inputDrafts.set(n,{context,invalid:true});
+      n.setCustomValidity('Use at most '+max+' UTF-8 bytes. This draft has not been applied.');
+      n.setAttribute('aria-invalid','true');n.reportValidity();syncLeaveWarning();return;
+    }
+    if(presentationSequence>=2147483647){fatal('The presentation message limit was reached. Reload to retry.');return;}
+    const sequence=++presentationSequence;inputDrafts.set(n,{context,sequence,invalid:false});
+    n.setCustomValidity('');n.removeAttribute('aria-invalid');sendAction(n,n.value,sequence);
+    syncLeaveWarning();
+  }
+  n.addEventListener('input',event=>{if(!event?.isComposing&&!inputDrafts.get(n)?.composing)updateInput();});
+  n.addEventListener('compositionstart',()=>{
+    const action=actionByElement.get(n);
+    if(action&&visible(n)&&!n.disabled)inputDrafts.set(n,{context:JSON.stringify(action),composing:true});
+  });
+  n.addEventListener('compositionend',()=>{if(inputDrafts.get(n)?.composing){inputDrafts.delete(n);updateInput();}});
+}
 for(const n of dialogs.values())n.addEventListener('cancel',event=>{event.preventDefault();tell({kind:n.dataset.modal});});
 for(const n of document.querySelectorAll('form[data-action]'))n.addEventListener('submit',e=>{e.preventDefault();const input=n.querySelector('input[name="value"]');if(!input||n.querySelector('button')?.disabled)return;const value=input.value;input.value='';sendAction(n,value);});
 for(const n of document.querySelectorAll('[data-reload]'))n.addEventListener('click',()=>{

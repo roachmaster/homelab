@@ -6,6 +6,7 @@ mod run;
 use history::History;
 use models::ModelSelection;
 use run::AsyncRun;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Default)]
 pub(super) struct Chats {
@@ -24,6 +25,7 @@ struct Conversation {
     revision: Option<u64>,
     summary: Option<ChatSummaryDto>,
     messages: Vec<ChatMessage>,
+    attachments: BTreeMap<usize, ChatAttachmentDto>,
     draft: String,
     status: String,
     workbench_reply: bool,
@@ -109,6 +111,7 @@ impl Chats {
             .conversations
             .into_iter()
             .map(|conversation| Conversation {
+                attachments: BTreeMap::new(),
                 messages: conversation.messages,
                 draft: conversation.draft,
                 chat_id: conversation.chat_id,
@@ -258,7 +261,16 @@ impl Chats {
         request_id: String,
         file_context: ChatFileContext,
     ) -> Result<Option<PreparedChat>, UiError> {
-        self.prepare_chat(request_id, None, Some(file_context))
+        self.send_saved_with_context(request_id, file_context, None)
+    }
+
+    pub fn send_saved_with_context(
+        &mut self,
+        request_id: String,
+        file_context: ChatFileContext,
+        supplied_id: Option<String>,
+    ) -> Result<Option<PreparedChat>, UiError> {
+        self.prepare_chat(request_id, supplied_id, Some(file_context))
     }
 
     fn prepare_chat(
@@ -288,7 +300,7 @@ impl Chats {
                 "This conversation reached its context limit. Start a new chat to continue.".into();
             return Ok(None);
         }
-        let chat_id = if self.history.enabled && file_context.is_none() {
+        let chat_id = if self.history.enabled && (file_context.is_none() || supplied_id.is_some()) {
             if chat.chat_id.is_none() {
                 chat.chat_id = Some(
                     supplied_id
@@ -378,17 +390,19 @@ impl Chats {
                 ]);
                 chat.draft.clear();
                 chat.workbench_reply = pending.contextual;
-                if pending.contextual {
+                if pending.contextual && pending.chat_id.is_none() {
                     // Source-attached turns are local. Keep the saved transcript
                     // available via history without reusing its revision for this copy.
                     chat.chat_id = None;
                     chat.revision = None;
                     chat.summary = None;
+                    chat.attachments.clear();
                 }
                 String::new()
             }
             Err(ChatOutcome::SavedChatUnavailable) => {
                 chat.messages.clear();
+                chat.attachments.clear();
                 chat.chat_id = None;
                 chat.revision = None;
                 chat.summary = None;
@@ -429,11 +443,24 @@ impl Chats {
             conversation: self.selected,
             messages: current
                 .into_iter()
-                .flat_map(|chat| &chat.messages)
-                .map(|message| TranscriptMessage {
+                .flat_map(|chat| {
+                    chat.messages
+                        .iter()
+                        .enumerate()
+                        .map(|(index, message)| (message, chat.attachments.get(&index)))
+                })
+                .map(|(message, attachment)| TranscriptMessage {
                     role: message.role,
                     content: message.content.clone(),
-                    notice: None,
+                    notice: attachment.map(|file| {
+                        format!(
+                            "File at send · {} · lines {}–{} · rev {}",
+                            file.path.chars().take(256).collect::<String>(),
+                            file.first_line,
+                            file.last_line,
+                            &file.sha256[..8],
+                        )
+                    }),
                     rendered_html: if message.role == ChatRole::Assistant {
                         render_markdown(&message.content)
                     } else {

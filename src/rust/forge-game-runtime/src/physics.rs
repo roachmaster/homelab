@@ -368,6 +368,21 @@ pub struct RayHit {
     pub contact: Contact,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum RayTarget {
+    Tile { x: i32, y: i32 },
+    Entity(u16),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RoomRayHit {
+    pub point: Vector,
+    /// Q16 Euclidean distance from the start to the reported hit.
+    pub distance: i32,
+    pub normal: Normal,
+    pub target: RayTarget,
+}
+
 /// Cast a bounded AABB over a full motion, even when both endpoints are clear.
 /// Ties choose row then column, and X before Y within a tile.
 pub fn sweep_tiles(
@@ -388,13 +403,55 @@ pub fn cast_ray(grid: &impl TileGrid, origin: Vector, delta: Vector) -> Option<R
     } else {
         origin
     };
-    let x = i64::from(point.x - origin.x);
-    let y = i64::from(point.y - origin.y);
     Some(RayHit {
         point,
-        distance: ((x * x + y * y) as u64).isqrt() as i32,
+        distance: ray_distance(origin, point),
         contact: hit.contact,
     })
+}
+
+pub(super) fn cast_room_ray(
+    grid: &impl TileGrid,
+    origin: Vector,
+    delta: Vector,
+    bodies: impl Iterator<Item = (u16, Collider, Vector)>,
+) -> Option<RoomRayHit> {
+    let size = Dimensions::read(grid)?;
+    let point = Bounds::default().at(origin)?;
+    let swept = bounded_sweep(size, point, delta)?;
+    let tile = sweep_tiles_in(grid, size, point, swept, delta, true).map(|hit| {
+        (
+            hit.plane,
+            RayTarget::Tile {
+                x: hit.tile_x,
+                y: hit.tile_y,
+            },
+        )
+    });
+    let (plane, target) = tile
+        .into_iter()
+        .chain(bodies.filter_map(|(id, collider, root)| {
+            let plane = PlaneHit::against(point, collider.bounds.at(root)?, delta, true)?;
+            Some((plane, RayTarget::Entity(id)))
+        }))
+        .min_by(|(a, target_a), (b, target_b)| {
+            a.fraction
+                .compare(b.fraction)
+                .then_with(|| target_a.cmp(target_b))
+        })?;
+    let point = plane.position(origin, delta);
+    Some(RoomRayHit {
+        point,
+        distance: ray_distance(origin, point),
+        normal: plane.normal,
+        target,
+    })
+}
+
+fn ray_distance(origin: Vector, point: Vector) -> i32 {
+    let x = i64::from(point.x - origin.x);
+    let y = i64::from(point.y - origin.y);
+    ((x * x + y * y) as u64).isqrt() as i32
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -545,13 +602,13 @@ impl PlaneHit {
         ))
     }
 
-    fn tile(bounds: Bounds, tile: Bounds, delta: Vector, point: bool) -> Option<Self> {
-        if bounds.overlaps(tile) {
+    fn against(bounds: Bounds, obstacle: Bounds, delta: Vector, point: bool) -> Option<Self> {
+        if bounds.overlaps(obstacle) {
             let candidates = [
-                (bounds.right - tile.left, Normal::Left),
-                (tile.right - bounds.left, Normal::Right),
-                (bounds.bottom - tile.top, Normal::Up),
-                (tile.bottom - bounds.top, Normal::Down),
+                (bounds.right - obstacle.left, Normal::Left),
+                (obstacle.right - bounds.left, Normal::Right),
+                (bounds.bottom - obstacle.top, Normal::Up),
+                (obstacle.bottom - bounds.top, Normal::Down),
             ];
             let (penetration, normal) = candidates.into_iter().min_by_key(|&(depth, _)| depth)?;
             return Some(Self {
@@ -563,8 +620,8 @@ impl PlaneHit {
         let (x, x_exit) = Self::axis(
             bounds.left,
             bounds.right,
-            tile.left,
-            tile.right,
+            obstacle.left,
+            obstacle.right,
             delta.x,
             point,
             [Normal::Left, Normal::Right],
@@ -572,8 +629,8 @@ impl PlaneHit {
         let (y, y_exit) = Self::axis(
             bounds.top,
             bounds.bottom,
-            tile.top,
-            tile.bottom,
+            obstacle.top,
+            obstacle.bottom,
             delta.y,
             point,
             [Normal::Up, Normal::Down],
@@ -589,6 +646,13 @@ impl PlaneHit {
             && entry.fraction.compare(y_exit).is_le())
         .then_some(entry)
     }
+
+    fn position(self, origin: Vector, delta: Vector) -> Vector {
+        Vector {
+            x: origin.x + self.fraction.scale(delta.x),
+            y: origin.y + self.fraction.scale(delta.y),
+        }
+    }
 }
 
 struct TileHit {
@@ -600,10 +664,7 @@ struct TileHit {
 impl TileHit {
     fn public(self, origin: Vector, delta: Vector) -> SweepHit {
         let plane = self.plane;
-        let mut position = Vector {
-            x: origin.x + plane.fraction.scale(delta.x),
-            y: origin.y + plane.fraction.scale(delta.y),
-        };
+        let mut position = plane.position(origin, delta);
         let impact_speed = match plane.normal {
             Normal::Left => {
                 position.x -= plane.penetration;
@@ -646,6 +707,11 @@ fn sweep(
 ) -> Option<TileHit> {
     let size = Dimensions::read(grid)?;
     let bounds = shape.at(origin)?;
+    let swept = bounded_sweep(size, bounds, delta)?;
+    sweep_tiles_in(grid, size, bounds, swept, delta, point)
+}
+
+fn bounded_sweep(size: Dimensions, bounds: Bounds, delta: Vector) -> Option<Bounds> {
     if delta == Vector::default()
         || ![
             -MAX_DISPLACEMENT..=MAX_DISPLACEMENT,
@@ -661,16 +727,26 @@ fn sweep(
     {
         return None;
     }
-    let swept = Bounds {
+    Some(Bounds {
         left: bounds.left + delta.x.min(0),
         top: bounds.top + delta.y.min(0),
         right: bounds.right + delta.x.max(0),
         bottom: bounds.bottom + delta.y.max(0),
-    };
+    })
+}
+
+fn sweep_tiles_in(
+    grid: &impl TileGrid,
+    size: Dimensions,
+    bounds: Bounds,
+    swept: Bounds,
+    delta: Vector,
+    point: bool,
+) -> Option<TileHit> {
     size.tiles(swept)
         .filter(|&(x, y)| size.solid(grid, x, y))
         .filter_map(|(x, y)| {
-            PlaneHit::tile(bounds, Bounds::tile(x, y), delta, point).map(|plane| TileHit {
+            PlaneHit::against(bounds, Bounds::tile(x, y), delta, point).map(|plane| TileHit {
                 plane,
                 tile_x: x,
                 tile_y: y,

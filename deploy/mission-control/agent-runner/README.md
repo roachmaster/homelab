@@ -186,6 +186,23 @@ The terminal status, assistant reply, and terminal event commit together.
 `run_events` is the replay source. Event payloads carry status and operational
 metadata. Prompts and replies are stored in `messages`.
 
+## Repository tool runs
+
+The private runner can process read-only repository questions against a pinned
+Git commit. Configure `FORGE_RUNNER_TOOL_REPOSITORIES` as a JSON map of approved
+aliases to absolute paths of locally maintained Git mirrors. Grant the runner
+read access to the mirrors and load the existing `forge.token` connector
+credential if repository tools are enabled alongside PostgreSQL dispatch.
+
+Submit an authenticated `POST /v1/agent/runs` with an `Idempotency-Key` and a
+JSON body containing `repository`, `revision`, and the usual `messages`.
+The revision must be the full commit ID and available in the configured mirror.
+Read the result and the ordered `tool_started` and `tool_finished` events
+through the existing `/v1/runs` status and event routes. The model can list
+regular tracked files and read bounded excerpts. Each call and its matching
+result are stored with the run. Recovery marks an unfinished tool call as
+having an unknown outcome. The operator maintains the mirrors.
+
 ## PostgreSQL dispatch mode
 
 Apply the dispatch migration before installing

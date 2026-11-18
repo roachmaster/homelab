@@ -158,27 +158,20 @@ line paging, changed-source errors and lifecycle clearing. The suite's real-agen
 path and controlled fault probes retain distinct evidence. A screenshot alone does
 not establish keyboard, screen-reader or admission correctness.
 
-## Proposed, unimplemented editor-host lifecycle
+## Direct file editing
 
-An actual JavaScript editor can fit the same ownership boundary, but the current
-source component is read-only. Editing and saving require separate contracts:
+**Edit file** opens a verified, nonempty text file up to 4 KiB with consistent LF
+or CRLF line endings. The main thread presents the textarea, caret and composition
+events. WASM owns the draft and identifies the editor instance. It blocks a dirty
+file change until the user saves or discards the draft. Switching between
+Workbench and Chat keeps the draft open.
 
-- WASM would own document/base revision, dirty/conflict/save policy and sequenced
-  edit acknowledgments. It would issue typed display/update/close requests and
-  validate callbacks from the current editor instance.
-- A reusable generated main-thread host would mount/update/dispose the widget and
-  own DOM, caret, focus, composition and a bounded presentation buffer. It would
-  neither fetch source nor decide when a document is saved. Programmatic updates
-  must not echo back as new user edits.
-- WASM would prepare the editor's write effect. Host and agent would independently
-  authorize it and enforce the expected source revision. A widget callback or
-  optimistic label cannot prove successful publication.
-- Context loss would dispose editor content/listeners, reject late callbacks and
-  restore focus appropriately. Hiding a pane alone must not discard unsaved work.
-  Pagehide and fatal recovery would clear protected editor content synchronously.
-
-An editor widget and its dirty buffer, composition and save lifecycle remain
-future work. The current workflow applies only staged inline proposals.
+**Save file** submits the current inspected revision through `ide.edit_write`.
+The host verifies the source and the write agent applies the change using its
+revision fence and durable operation journal. Saves preserve the file's newline
+convention. A successful save refreshes the verified source and offers Undo in
+a managed workspace. Conflicts keep the draft open for review or copying. An
+unknown outcome offers **Check status** for the existing operation.
 
 The [inline-edit proposal](../../../docs/architecture/proposals/forge-ide-inline-edit.md)
 designs a contextual prompt, a staged diff, and guarded Apply and Undo actions.

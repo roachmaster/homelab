@@ -77,7 +77,7 @@ pub fn ide_document() -> Document {
                             component!(select "chat-model", "Model", "select_chat_model"),
                         ]),
                         component!(uuid_button "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id"),
-                        component!(checked_button "send-chat-with-file", "Send with file", "send_chat_with_file", "chat-draft"),
+                        component!(uuid_button "send-chat-with-file", "Send with file", "send_chat_with_file", "chat-draft", "chat_id"),
                         component!(button "chat-run-cancel", "Cancel run", "cancel_chat_run"),
                         component!(button "chat-run-retry", "Retry send", "retry_chat_submit"),
                     ]),
@@ -168,7 +168,8 @@ pub fn ide_document() -> Document {
                         component!(pane_header_link "back-to-files", "Back to files", "explorer-panel", '←'),
                         component!(heading "selection-title", "Select a file to read its source"),
                         component!(caption "workspace-summary", "Find a file or symbol in Explorer."),
-                        component!(panel "source-panel", "Source · Read only"; [
+                        component!(panel "source-panel", "Source"; [
+                            component!(button "open-document", "Edit file", "open_document"),
                             component!(source_wrap "source-wrap", "Wrap", "source-view"),
                             component!(status "source-status", ""),
                             component!(region "workbench-source-content"; [
@@ -179,6 +180,14 @@ pub fn ide_document() -> Document {
                                     component!(region "source-pagination"; [
                                         component!(row [component!(button "source-previous", "Previous lines", "previous_source"), component!(button "source-more", "Next lines", "more_source")]),
                                     ]),
+                                ]),
+                            ]),
+                            component!(region "workbench-editor"; [
+                                component!(status "document-status", ""),
+                                component!(textarea "document-text", "File contents", "set_document"),
+                                component!(row [
+                                    component!(checked_button "save-document", "Save file", "save_document", "document-text"),
+                                    component!(button "close-document", "Discard draft", "close_document"),
                                 ]),
                             ]),
                             component!(diff "workbench-edit-diff", "Proposed diff"),
@@ -205,7 +214,7 @@ pub fn ide_document() -> Document {
                             component!(status "workbench-chat-status", ""),
                             component!(region "workbench-chat-compose"; [
                                 component!(textarea "workbench-chat-draft", "Ask Forge about this file", "set_chat_draft", "Ask Forge…"),
-                                component!(checked_button "send-workbench-chat", "Send", "send_workbench_chat", "workbench-chat-draft"),
+                                component!(uuid_button "send-workbench-chat", "Send", "send_workbench_chat", "workbench-chat-draft", "chat_id"),
                                 component!(checked_button "propose-workbench-edit", "Propose edit", "propose_edit", "workbench-chat-draft"),
                             ]),
                             component!(region "workbench-edit-review"; [

@@ -190,8 +190,21 @@ class ChatHistoryDao:
             row = cursor.fetchone()
             if row is None:
                 raise queue.Rejected(404, "chat_not_found")
-            return {"summary": _summary(row),
-                    "messages": [{"position": pos, **message} for pos, message in enumerate(row["messages"], 1)]}
+            messages = [{"position": pos, **message} for pos, message in enumerate(row["messages"], 1)]
+            cursor.execute("""
+                SELECT (queued.data->>'source_message_position')::int AS position,
+                       queued.data->'source_attachment' AS attachment
+                FROM forge_agent.runs r
+                JOIN forge_agent.run_events queued ON queued.run_id = r.id AND queued.sequence = 1
+                WHERE r.ide_chat_owner_id = %s AND r.ide_chat_id = %s AND r.status = 'completed'
+                    AND r.ide_chat_revision <= %s AND queued.data ? 'source_attachment'
+                ORDER BY r.ide_chat_revision
+            """, (self.owner, chat_id, row["revision"]))
+            for item in cursor.fetchall():
+                pos = item["position"]
+                if 1 <= pos <= len(messages) and messages[pos - 1]["role"] == "user":
+                    messages[pos - 1]["attachment"] = item["attachment"]
+            return {"summary": _summary(row), "messages": messages}
 
     def _check_revision(self, row, expected_revision):
         if row is None or row["title"] is None or row["removed_at"] is not None or row["due"]:

@@ -751,6 +751,7 @@ impl UiModel {
             (self.navigation_revision > 0 && key.is_some()).then_some(self.navigation_revision);
 
         let mut view = ViewModel {
+            document_dirty: false,
             panes: vec![PaneBinding {
                 id: "workspace-panel", context: context.clone(), reveal: if entry.is_some_and(|e| e.kind == EntryKind::File) { navigation } else { None },
             }, PaneBinding { id: "explorer-panel", context, reveal: if entry.is_some_and(|e| e.kind != EntryKind::File) { navigation } else { None } }],
@@ -811,7 +812,9 @@ impl UiModel {
         };
         self.chats.project(&mut view, connected);
         let (workbench_chat, propose, attachment) = match (key, entry, &self.source) {
-            (Some(report), Some(entry), Some(source)) if connected && self.chats.workbench => {
+            (Some(report), Some(entry), Some(source))
+                if connected && self.chats.workbench && self.editor.is_none() =>
+            {
                 let (byte_start, _, first, last, clipped) = source.chat_window();
                 let location = if source.document.text.is_empty() {
                     "Empty file".into()
@@ -844,7 +847,10 @@ impl UiModel {
         };
         view.visibility.extend([
             visible("workbench-edit-diff", review.is_some()),
-            visible("workbench-source-content", review.is_none()),
+            visible(
+                "workbench-source-content",
+                review.is_none() && self.editor.is_none(),
+            ),
         ]);
         view.diffs.push(DiffBinding {
             id: "workbench-edit-diff",
@@ -875,6 +881,7 @@ impl UiModel {
             &mut view,
             review.and_then(|review| review.preview.proposal_id.as_deref()),
         );
+        self.project_editor(&mut view);
         self.mail.project(
             &mut view,
             connected,

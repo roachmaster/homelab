@@ -1,0 +1,18 @@
+[package]
+name = "forge-jobs"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+rust-version = "1.89"
+
+[dependencies]
+forge-access = { path = "../forge-access" }
+forge-bootstrap.workspace = true
+forge-bridge.workspace = true
+forge-ingress-contract.workspace = true
+forge-provider.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

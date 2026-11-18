@@ -4,6 +4,7 @@ use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct ViewModel {
+    pub document_dirty: bool,
     pub texts: Vec<TextBinding>,
     pub choices: Vec<SelectBinding>,
     pub buttons: Vec<ButtonBinding>,
@@ -38,7 +39,7 @@ pub struct TranscriptMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rendered_html: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub notice: Option<&'static str>,
+    pub notice: Option<String>,
 }
 
 /// Exact, bounded UTF-8 window of the accepted read-only source document.
@@ -125,6 +126,7 @@ pub struct InputBinding {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FilterAction {
     SetChatDraft { conversation: usize },
+    SetDocument { editor_id: String },
     SetChatExpiry {},
     SetMailSubject {},
     SetMailDraft {},
@@ -171,6 +173,16 @@ pub struct RowView {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    OpenDocument {
+        report: RequestToken,
+        entry: u32,
+    },
+    SaveDocument {
+        editor_id: String,
+    },
+    CloseDocument {
+        editor_id: String,
+    },
     SendChatWithFile {
         report: RequestToken,
         entry: u32,

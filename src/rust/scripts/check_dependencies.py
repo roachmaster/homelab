@@ -12,6 +12,8 @@ ALLOWED = {
     "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-bootstrap","forge-provider","forge-template","forge-game-runtime")},
     "forge-ide-web-host": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")} | {("forge-ide-ui", "build")},
     "forge-game-runtime": set(),
+    "forge-jobs": {(name, "normal") for name in ("forge-access", "forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider")},
+    "forge-access": {("forge-ingress-contract", "normal")},
     "forge-agent": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-command","forge-kernel","forge-ide","forge-remote","forge-remote-https")},
     "forge-remote": {(name, "normal") for name in ("forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task")},
     "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-bootstrap", "forge-provider", "forge-io-client", "forge-ingress-contract", "forge-ide")} | {(name, "dev") for name in ("forge-kernel", "forge-task")},
@@ -45,6 +47,7 @@ EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
     "forge-llama": {"ctrlc", "nix", "http-body-util", "hyper", "hyper-util", "serde", "serde_json", "subtle", "tokio"},
     "forge-ide-ui": {"serde"},
+    "forge-jobs": {"serde", "serde_json"},
     "forge-ide-web": {"serde", "serde_json", "serde_yaml_ng", "sha2"},
     "forge-ide-web-host": {"serde", "serde_json", "httparse", "getrandom", "subtle", "sha2", "ctrlc",
                            "hyper", "hyper-util", "http-body-util", "tokio"},
@@ -60,6 +63,10 @@ PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forg
 OPTIONAL = {"forge-demo-messages", "forge-demo-memory-client", "forge-provider", "forge-kernel", "forge-io-client"}
 MESSAGES_PROFILE = PURE_PROFILE | {"forge-demo-messages", "forge-demo-memory-client", "forge-provider", "forge-io-client"}
 DISK_PROFILE = PURE_PROFILE | {"forge-kernel", "forge-provider", "forge-io-client"}
+WASM_PLAYTEST_PROFILE = {
+    "forge-game-runtime", "sha2", "cfg-if", "digest", "block-buffer", "generic-array",
+    "typenum", "crypto-common",
+}
 
 
 def cargo(*args):
@@ -100,6 +107,8 @@ def validate_packages(packages):
     if web["features"].get("default", []) != []:
         raise SystemExit("WASM facade must not enable native generation by default")
     for dep in web["dependencies"]:
+        if dep["name"] == "sha2" and dep["target"] == 'cfg(target_arch = "wasm32")':
+            continue  # Playtest runtime verifies cooked bytes on this target.
         if dep["name"] in {"forge-bootstrap","forge-provider","forge-template","serde_yaml_ng","sha2"} and not dep["optional"]:
             raise SystemExit("Asset build dependency leaked into WASM default")
         if dep["name"] == "forge-game-runtime" and dep["target"] != 'cfg(target_arch = "wasm32")':
@@ -208,6 +217,9 @@ def negative_fixtures(packages):
     bad = copy.deepcopy(packages)
     next(d for d in bad["forge-ide-web"]["dependencies"] if d["name"] == "forge-game-runtime")["target"] = None
     fixtures.append(("game runtime in native UI tooling", bad))
+    bad = copy.deepcopy(packages)
+    next(d for d in bad["forge-ide-web"]["dependencies"] if d["name"] == "sha2" and not d["optional"])["target"] = None
+    fixtures.append(("cooked asset digest in default native UI tooling", bad))
     for label, fixture in fixtures:
         try:
             validate_packages(fixture)
@@ -261,11 +273,11 @@ def main():
     portable=consumer_tree(package="forge-ide-ui")
     web_native = consumer_tree(package="forge-ide-web")
     wasm = consumer_tree("--target", "wasm32-unknown-unknown", package="forge-ide-web")
-    if "forge-game-runtime" in web_native or wasm != web_native | {"forge-game-runtime"}:
-        raise SystemExit("Game runtime must load only in the default WASM profile")
+    if {"forge-game-runtime", "sha2"} & web_native or wasm != web_native | WASM_PLAYTEST_PROFILE:
+        raise SystemExit("Only the playtest runtime and digest verifier may expand the default WASM profile")
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime"})
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-access"})
     for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")

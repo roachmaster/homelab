@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 pub(super) const BODY: &[Node] = &[
     element!(Nav [Class = "section-nav", AriaLabel = "Game engine links"];
         element!(A [Href = "/playtest"]; text("Open browser playtest")),
+        element!(A [Href = "/studio"]; text("Open Forge Studio")),
         element!(A [Href = "/design/game-physics"]; text("Game physics design")),
         element!(A [Href = "/design/game-asset-pipeline"]; text("Game asset pipeline design")),
         element!(A [Href = "/design/forge-workers"]; text("Forge worker design")),

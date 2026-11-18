@@ -41,12 +41,26 @@ pub(super) const BODY: &[Node] = &[element!(Article [Class = "playtest"];
             element!(Button [Id = "playtest-pause", Type = "button", Disabled = "", AriaPressed = "false"]; text("Pause")),
             element!(Button [Id = "playtest-step", Type = "button", Disabled = ""]; text("Step")),
             element!(Button [Id = "playtest-export", Type = "button", Disabled = ""]; text("Export trace")),
+            element!(Button [Id = "playtest-export-replay", Type = "button", Disabled = "", Hidden = ""]; text("Export replay")),
             element!(Label;
                 element!(Input [Id = "playtest-overlay", Type = "checkbox", Disabled = ""]),
                 text("Show board overlay"),
             ),
         ),
         element!(P [Id = "playtest-debug-status", Role = "status"]),
+        element!(Section [Id = "playtest-replay", AriaLabelledby = "playtest-replay-title", Hidden = ""];
+            element!(H2 [Id = "playtest-replay-title"]; text("Replay playback")),
+            element!(Label [For = "playtest-replay-file"]; text("Import replay")),
+            element!(Input [Id = "playtest-replay-file", Type = "file", Accept = ".json,application/json", Disabled = ""]),
+            element!(P [Id = "playtest-replay-status", Role = "status"]),
+            element!(Div [Class = "playtest-debug-actions", Id = "playtest-replay-actions", Role = "group", AriaLabel = "Replay controls", Hidden = ""];
+                element!(Button [Id = "playtest-replay-play", Type = "button"]; text("Play replay")),
+                element!(Button [Id = "playtest-replay-step", Type = "button"]; text("Step replay")),
+                element!(Button [Id = "playtest-replay-reset", Type = "button"]; text("Restart replay")),
+            ),
+            element!(P [Id = "playtest-replay-position", Hidden = ""]),
+            element!(Canvas [Id = "playtest-replay-board", Width = "624", Height = "432", Role = "img", AriaLabel = "Replay game board", Hidden = ""]),
+        ),
         element!(Div [Class = "playtest-debug-grid"];
             element!(Section [AriaLabelledby = "playtest-inspector-title"];
                 element!(H2 [Id = "playtest-inspector-title"]; text("State")),
@@ -126,7 +140,7 @@ const STYLES: markup::Styles = &[
     ),
     (".playtest-stage", &[("flex", "4 1 34rem")]),
     (
-        "#playtest-board",
+        "#playtest-board, #playtest-replay-board:not([hidden])",
         &[
             ("display", "block"),
             ("inline-size", "100%"),
@@ -215,6 +229,9 @@ const STYLES: markup::Styles = &[
     ("[data-playtest-action='4']", &[("grid-column", "1 / -1")]),
     ("#playtest-restart", &[("padding-inline", "13px")]),
     ("#playtest-debug", &[("margin-block-start", "14px"), ("padding", "14px")]),
+    ("#playtest-replay", &[("margin-block", "1rem")]),
+    ("#playtest-replay-file", &[("max-inline-size", "100%"), ("margin-block", "6px")]),
+    ("#playtest-replay-actions[hidden]", &[("display", "none")]),
     (
         "#playtest-debug > summary",
         &[

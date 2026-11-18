@@ -1,7 +1,7 @@
 use crate::{service::Rejection, workspace, HostError};
 use forge_ide_ui::protocol::{
-    valid_chat_text, ChatMessage, ChatOutcome, ChatRole, FailureKind, PreparedChat,
-    MAX_CHAT_REPLY_BYTES,
+    valid_chat_text, ChatAttachmentDto, ChatMessage, ChatOutcome, ChatRole, FailureKind,
+    PreparedChat, MAX_CHAT_REPLY_BYTES,
 };
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{body::Bytes, client::conn::http1, Request, StatusCode};
@@ -42,6 +42,14 @@ struct CompletionRequest<'a> {
     chat_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expected_revision: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachment: Option<&'a VerifiedAttachment>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct VerifiedAttachment {
+    pub reference: ChatAttachmentDto,
+    pub excerpt: String,
 }
 
 #[derive(Deserialize)]
@@ -103,6 +111,7 @@ impl ChatRelay {
     pub fn complete(
         &self,
         chat: &PreparedChat,
+        attachment: Option<&VerifiedAttachment>,
         deadline: Instant,
     ) -> Result<ChatOutcome, FailureKind> {
         let chat_id = chat.chat_id.as_deref();
@@ -115,9 +124,13 @@ impl ChatRelay {
             stream: false,
             chat_id,
             expected_revision: chat.expected_revision,
+            attachment,
         })
         .map_err(|_| FailureKind::InvalidResponse)?;
-        let request = self.request("/v1/chat/completions");
+        let mut request = self.request("/v1/chat/completions");
+        if chat_id.is_some() {
+            request = request.header("Idempotency-Key", &chat.request_id);
+        }
         let (status, body) = self.post(request, body, 128 * 1024, false, deadline)?;
         match status {
             StatusCode::OK => {}
