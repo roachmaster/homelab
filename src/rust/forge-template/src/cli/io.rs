@@ -1,12 +1,34 @@
 //! Native boundary operations only: no schema or business payload assembly.
+use forge_bootstrap::{PreparedGroup, RegistrationError};
 use forge_io_client::IoClient;
+use forge_provider::Factory;
 use std::{
+    convert::Infallible,
     error::Error,
     fmt,
     fs::File,
     io::{self, Read, Write},
     path::PathBuf,
 };
+
+pub(super) struct NativeIoFactory;
+
+impl Factory<(NativeSourceClient, NativeConsoleClient)> for NativeIoFactory {
+    type Error = Infallible;
+
+    fn create(&self) -> Result<(NativeSourceClient, NativeConsoleClient), Self::Error> {
+        Ok((NativeSourceClient, NativeConsoleClient))
+    }
+}
+
+pub(super) fn register_native_io() -> Result<PreparedGroup<NativeIoFactory>, RegistrationError> {
+    PreparedGroup::new(
+        "template.native-io",
+        &["template.source", "template.console"],
+        &[],
+        NativeIoFactory,
+    )
+}
 
 #[derive(Debug)]
 pub(super) struct ReadSource {

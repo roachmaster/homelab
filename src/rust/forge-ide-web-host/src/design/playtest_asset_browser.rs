@@ -1,8 +1,8 @@
 //! Generated playtest I/O bridge and presentation-only atlas decoding.
 
 pub(super) const ASSET_ADAPTER: &str = r#"
-  function workerAssetIo() {
-    const worker = new Worker('/playtest/assets-worker.js');
+  function workerAssetIo(url) {
+    const worker = new Worker(url);
     const pending = new Map();
     let latest = 0;
     let closed = false;
@@ -60,14 +60,16 @@ pub(super) const ASSET_ADAPTER: &str = r#"
 
   function assetAdmission(get, memory) {
     const operations = [
-      'level_request', 'asset_reserve', 'asset_accept', 'atlas_view', 'atlas_view_len',
+      'level_request', 'level_read', 'atlas_read', 'asset_reserve', 'asset_accept', 'atlas_view', 'atlas_view_len',
       'level_collider', 'level_fail',
     ].map(get);
     if (operations.some(operation => typeof operation !== 'function')) return null;
-    const [request, reserve, accept, atlasPtr, atlasLen, collider, fail] = operations;
+    const [request, levelRead, atlasRead, reserve, accept, atlasPtr, atlasLen, collider, fail] = operations;
     const decoder = new TextDecoder('utf-8', { fatal: true });
     return {
       request,
+      levelRead,
+      atlasRead,
       fail,
       accept(asset, generation, bytes) {
         const length = bytes.byteLength;
@@ -91,23 +93,24 @@ pub(super) const ASSET_ADAPTER: &str = r#"
   }
 
   function cookedAssets(admission, spec, io) {
-    let manifestReady = false;
-    async function ensureManifest(signal) {
-      if (manifestReady) return;
-      const bytes = await io.read('manifest', signal);
-      signal.throwIfAborted();
-      admission.accept(0, 0, bytes);
-      manifestReady = true;
+    async function relayReads(next, generation, signal, keep) {
+      let kept;
+      for (let code = next(); code; code = next()) {
+        const asset = code - 1;
+        const name = spec.wire_names[asset];
+        const bytes = await io.read(name, signal);
+        signal.throwIfAborted();
+        admission.accept(asset, generation, bytes);
+        if (name === keep) kept = bytes;
+      }
+      return kept;
     }
 
     async function loadLevel(choice, signal) {
       const request = admission.request(choice.level) >>> 0;
       if (!request) throw new Error('Playtest level request rejected');
       try {
-        await ensureManifest(signal);
-        const bytes = await io.read(choice.asset, signal);
-        signal.throwIfAborted();
-        admission.accept(choice.level, request, bytes);
+        await relayReads(() => admission.levelRead(request), request, signal);
       } catch (error) {
         admission.fail(request);
         throw error;
@@ -115,13 +118,8 @@ pub(super) const ASSET_ADAPTER: &str = r#"
     }
 
     async function loadAtlas(signal) {
-      await ensureManifest(signal);
-      const [atlasBytes, imageBytes] = await Promise.all([
-        io.read(spec.atlas_id, signal), io.read(spec.image_id, signal),
-      ]);
-      signal.throwIfAborted();
-      admission.accept(3, 0, atlasBytes);
-      admission.accept(4, 0, imageBytes);
+      const imageBytes = await relayReads(admission.atlasRead, 0, signal, spec.image_id);
+      if (!imageBytes) throw new Error('Playtest atlas image unavailable');
       const view = admission.atlas();
       const image = await createImageBitmap(new Blob([imageBytes], { type: 'image/png' }));
       if (signal.aborted || image.width !== view.dimensions[0] || image.height !== view.dimensions[1]) {

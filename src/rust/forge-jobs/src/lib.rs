@@ -6,8 +6,10 @@
 mod store;
 mod worker;
 
+#[cfg(unix)]
+pub use store::register_private_store;
 pub use store::{register_store, FileStore, StoreConfig, StoreFactory};
-pub use worker::{Worker, WorkerConfig};
+pub use worker::{register_worker, Worker, WorkerConfig, WorkerFactory, WorkerRecipe};
 
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_ingress_contract::{AdmissionPolicy, Payload, RouteKey};
@@ -130,6 +132,8 @@ pub enum JobError {
     NotFound,
     Capacity,
     StaleAttempt,
+    StoreBusy,
+    PrivateDirectoryRequired,
     StoreUnavailable,
     WorkerPanicked,
 }
@@ -143,6 +147,10 @@ impl fmt::Display for JobError {
             Self::NotFound => "job is not visible",
             Self::Capacity => "job store capacity exhausted",
             Self::StaleAttempt => "job attempt is no longer current",
+            Self::StoreBusy => "durable job store is busy",
+            Self::PrivateDirectoryRequired => {
+                "job directory must be private and owned by the current Unix account"
+            }
             Self::StoreUnavailable => "durable job store unavailable",
             Self::WorkerPanicked => "job worker panicked",
         })

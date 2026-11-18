@@ -5,8 +5,8 @@ use forge_ide::{
     remote::{InspectReply, RemoteInspectInput},
 };
 use forge_ide_web_host::{
-    register_host, Host, HostConfig, HostLimits, InspectionPort, NodeConfig, ServeOutcome,
-    SessionAuth,
+    register_host, Host, HostConfig, HostError, HostLimits, InspectionPort, NodeConfig,
+    ServeOutcome, SessionAuth,
 };
 use forge_ingress_contract::{Header, Response, RouteKey};
 use forge_remote::{RemoteError, Target};
@@ -396,6 +396,59 @@ fn public_registrar_is_effect_free_and_must_freeze() {
         .unwrap()
         .into_factories();
     assert!(factory.create_with_ports(BTreeMap::new()).is_err());
+}
+
+#[test]
+fn configured_host_resources_open_only_at_factory_creation() {
+    let files = Files::new();
+    for (config, error) in [
+        (
+            HostConfig {
+                cooked_replay_archive: Some(files.0.join("absent-archive")),
+                ..config(&files)
+            },
+            "cooked replay archive root",
+        ),
+        (
+            HostConfig {
+                chat: Some(forge_ide_web_host::ChatConfig {
+                    endpoint: "127.0.0.1:1".parse().unwrap(),
+                    token_file: files.0.join("absent-chat-token"),
+                    workspace_persistence: false,
+                    async_dispatch: false,
+                    mail_enabled: false,
+                }),
+                ..config(&files)
+            },
+            "invalid chat token file",
+        ),
+        (
+            HostConfig {
+                studio: Some(forge_ide_web_host::StudioConfig {
+                    endpoint: "127.0.0.1:1".parse().unwrap(),
+                    token_file: files.0.join("absent-studio-token"),
+                    preview_origin: "https://preview.example.test".into(),
+                }),
+                ..config(&files)
+            },
+            "invalid chat token file",
+        ),
+    ] {
+        let (_, factory) = Registry::new()
+            .register(register_host("ui", config).unwrap())
+            .unwrap()
+            .freeze()
+            .unwrap()
+            .into_factories();
+        let ports = BTreeMap::from([(
+            "lab".into(),
+            Box::new(Fake(Rc::new(Cell::new(0)))) as Box<dyn InspectionPort>,
+        )]);
+        assert!(matches!(
+            factory.create_with_ports(ports),
+            Err(HostError::Configuration(actual)) if actual == error
+        ));
+    }
 }
 #[test]
 fn public_origin_requires_canonical_https_and_keeps_loopback_binding() {

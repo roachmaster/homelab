@@ -6,6 +6,7 @@ publish.workspace = true
 rust-version = "1.89"
 
 [dependencies]
+cap-std = "=4.0.3"
 forge-access = { path = "../forge-access" }
 forge-bootstrap.workspace = true
 forge-bridge.workspace = true

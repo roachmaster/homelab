@@ -79,6 +79,9 @@ impl HostConfig {
         if let Some(origin) = &self.public_origin {
             https_authority(origin)?;
         }
+        if let Some(chat) = &self.chat {
+            chat.validate()?;
+        }
         if let Some(studio) = &self.studio {
             studio.validate()?;
             if self.public_origin.as_ref() == Some(&studio.preview_origin) {

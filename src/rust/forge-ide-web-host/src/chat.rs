@@ -3,6 +3,7 @@ use forge_ide_ui::protocol::{
     valid_chat_text, ChatAttachmentDto, ChatMessage, ChatOutcome, ChatRole, FailureKind,
     PreparedChat, MAX_CHAT_REPLY_BYTES,
 };
+use forge_provider::Factory;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{body::Bytes, client::conn::http1, Request, StatusCode};
 use hyper_util::rt::TokioIo;
@@ -25,12 +26,37 @@ pub struct ChatConfig {
     pub mail_enabled: bool,
 }
 
+impl ChatConfig {
+    pub(crate) fn validate(&self) -> Result<(), HostError> {
+        if !self.endpoint.ip().is_loopback()
+            || self.endpoint.port() == 0
+            || !self.token_file.is_absolute()
+        {
+            return Err(HostError::Configuration(
+                "chat requires loopback endpoint and absolute token path",
+            ));
+        }
+        Ok(())
+    }
+}
+
 pub(crate) struct ChatRelay {
     endpoint: SocketAddr,
     token: String,
     pub workspace_persistence: bool,
     pub async_dispatch: bool,
     pub mail_enabled: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct ChatRelayFactory(pub ChatConfig);
+
+impl Factory<ChatRelay> for ChatRelayFactory {
+    type Error = HostError;
+
+    fn create(&self) -> Result<ChatRelay, HostError> {
+        ChatRelay::new(&self.0)
+    }
 }
 
 #[derive(Serialize)]
@@ -71,15 +97,8 @@ struct Answer {
 }
 
 impl ChatRelay {
-    pub fn new(config: &ChatConfig) -> Result<Self, HostError> {
-        if !config.endpoint.ip().is_loopback()
-            || config.endpoint.port() == 0
-            || !config.token_file.is_absolute()
-        {
-            return Err(HostError::Configuration(
-                "chat requires loopback endpoint and absolute token path",
-            ));
-        }
+    fn new(config: &ChatConfig) -> Result<Self, HostError> {
+        config.validate()?;
         let bad_token = |_| HostError::Configuration("invalid chat token file");
         let file = File::open(&config.token_file).map_err(bad_token)?;
         let metadata = file.metadata().map_err(bad_token)?;

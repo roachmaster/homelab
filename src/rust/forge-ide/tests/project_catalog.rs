@@ -155,3 +155,45 @@ fn alias_catalog_limits_and_explicit_empty_catalog() {
         .into_factories();
     assert!(empty.factories().is_empty());
 }
+
+#[cfg(all(unix, feature = "managed-writes"))]
+#[test]
+fn managed_writer_catalog_stages_without_opening_a_journal() {
+    use forge_ide::{
+        assembly::{register_managed_writers, ManagedWriterConfig},
+        filesystem::managed_write::WriteError,
+    };
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = Temp::new();
+    std::fs::set_permissions(&temp.0, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let journal = temp.0.join(".forge-write-journal");
+    let name = alias("workspace");
+    let group = register_managed_writers(
+        "writers",
+        [(
+            name.clone(),
+            ManagedWriterConfig {
+                root: temp.0.clone(),
+            },
+        )]
+        .into(),
+    )
+    .unwrap();
+    let registry = Registry::new().register(group).unwrap();
+    assert!(!journal.exists());
+    let ((), factories) = registry.freeze().unwrap().into_factories();
+    assert!(!journal.exists());
+
+    let result = factories[&name].create();
+    if nix::unistd::geteuid().is_root() {
+        assert!(matches!(result, Err(WriteError::Unmanaged)));
+        assert!(!journal.exists());
+    } else {
+        let provider = Singleton::new(result.unwrap());
+        let writer = provider.acquire().unwrap();
+        assert!(std::ptr::eq(writer, provider.acquire().unwrap()));
+        assert!(journal.is_dir());
+        assert!(writer.status("owner", "unknown").unwrap().is_none());
+    }
+}

@@ -1,17 +1,17 @@
 use crate::{
-    backend_address, Chat, Completion, Config, Error, Message, Model, Models, Prompt, PromptTokens,
-    Reply, Request, Role, RuntimeStatus, MAIL_MODEL_ID,
+    backend_address,
+    model_runtime::{ModelProcess, ModelRuntimeLease, ModelRuntimeProvider},
+    Chat, Completion, Config, Error, Message, Model, Models, Prompt, PromptTokens, Reply, Request,
+    Role, RuntimeStatus, MAIL_MODEL_ID,
 };
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{body::Bytes, client::conn::http1, Request as HttpRequest, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{File, OpenOptions, TryLockError},
+    fs::File,
     io::Read,
-    net::TcpListener,
     os::unix::fs::PermissionsExt,
-    process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -29,60 +29,19 @@ const COUNT_PATH: &str = "/v1/chat/completions/input_tokens";
 const COUNT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct Driver {
-    config: Config,
+    running: Option<Running>,
+    model_runtime: Box<dyn ModelRuntimeProvider>,
+    config: Arc<Config>,
     token: String,
     stop: Arc<AtomicBool>,
     http: Runtime,
-    running: Option<Running>,
 }
 
-/// The guard owns only the child it spawned, plus its GPU lease.
 struct Running {
-    child: Child,
+    // Drop the child before releasing the last reference to the GPU reservation.
+    child: Box<dyn ModelProcess>,
     model: String,
-    _gpu_lease: File,
-}
-
-impl Running {
-    fn terminate(&mut self) -> std::io::Result<()> {
-        if self.child.try_wait()?.is_some() {
-            return Ok(());
-        }
-        let pid = i32::try_from(self.child.id()).map_err(std::io::Error::other)?;
-        use nix::{
-            sys::signal::{kill, Signal},
-            unistd::Pid,
-        };
-        if let Err(error) = kill(Pid::from_raw(pid), Signal::SIGTERM) {
-            if self.child.try_wait()?.is_some() {
-                return Ok(());
-            }
-            return Err(std::io::Error::from_raw_os_error(error as i32));
-        }
-        let deadline = Instant::now() + Duration::from_secs(8);
-        loop {
-            if self.child.try_wait()?.is_some() {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                self.child.kill()?;
-                self.child.wait()?;
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "llama-server forced to exit",
-                ));
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-    }
-}
-
-impl Drop for Running {
-    fn drop(&mut self) {
-        if let Err(error) = self.terminate() {
-            eprintln!("llama-server cleanup: {error}");
-        }
-    }
+    lease: Arc<dyn ModelRuntimeLease>,
 }
 
 #[derive(Serialize)]
@@ -101,7 +60,11 @@ struct Health {
 }
 
 impl Driver {
-    pub(crate) fn new(config: Config, stop: Arc<AtomicBool>) -> Result<Self, Error> {
+    pub(crate) fn new(
+        config: Arc<Config>,
+        stop: Arc<AtomicBool>,
+        model_runtime: impl ModelRuntimeProvider + 'static,
+    ) -> Result<Self, Error> {
         let file = File::open(&config.token_file).map_err(|_| Error::InvalidConfig)?;
         let metadata = file.metadata().map_err(|_| Error::InvalidConfig)?;
         if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 {
@@ -124,6 +87,7 @@ impl Driver {
             .map_err(|_| Error::InvalidConfig)?;
         Ok(Self {
             config,
+            model_runtime: Box::new(model_runtime),
             token: token.to_string(),
             stop,
             http,
@@ -166,12 +130,7 @@ impl Driver {
 
     fn status(&mut self) -> Result<RuntimeStatus, Error> {
         if let Some(process) = &mut self.running {
-            if process
-                .child
-                .try_wait()
-                .map_err(|_| Error::Backend)?
-                .is_some()
-            {
+            if process.child.exited().map_err(|_| Error::Backend)? {
                 self.running.take();
             }
         }
@@ -187,7 +146,7 @@ impl Driver {
 
     fn stop_child(&mut self) -> Result<(), Error> {
         if let Some(process) = &mut self.running {
-            process.terminate().map_err(|error| {
+            process.child.terminate().map_err(|error| {
                 eprintln!("llama-server shutdown failed: {error}");
                 Error::Backend
             })?;
@@ -203,166 +162,29 @@ impl Driver {
             .get(model)
             .ok_or(Error::UnknownModel)?
             .clone();
-        let mut magic = [0; 4];
-        if !path.is_file()
-            || File::open(&path)
-                .and_then(|mut file| file.read_exact(&mut magic))
-                .is_err()
-            || &magic != b"GGUF"
-        {
-            return Err(Error::ModelUnavailable);
-        }
-        if let Some(device) = &self.config.gpu_device {
-            let render_node_present =
-                std::fs::read_dir(device.join("drm"))
-                    .ok()
-                    .is_some_and(|entries| {
-                        entries
-                            .filter_map(Result::ok)
-                            .any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
-                    });
-            if !device.join("driver").is_dir() || !render_node_present {
-                return Err(Error::GpuUnavailable);
-            }
-        }
+        self.model_runtime.validate(&path)?;
         let status = self.status()?;
         if status.model.as_deref() == Some(model) {
             return Ok(status);
         }
 
-        // Keep the same lease across a switch, so no cooperating process can
-        // acquire the GPU between stopping the old model and loading the new one.
-        let lease = if let Some(process) = &self.running {
-            process
-                ._gpu_lease
-                .try_clone()
-                .map_err(|_| Error::StartFailed)?
-        } else {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(&self.config.gpu_lock)
-                .map_err(|_| Error::StartFailed)?;
-            file.try_lock().map_err(|err| match err {
-                TryLockError::WouldBlock => Error::Busy,
-                TryLockError::Error(_) => Error::StartFailed,
-            })?;
-            file
+        // Retain the reservation while reaping the old child and constructing its replacement.
+        let lease = match &self.running {
+            Some(process) => process.lease.clone(),
+            None => self.model_runtime.acquire()?,
         };
         self.stop_child()?;
-        drop(
-            TcpListener::bind(backend_address(self.config.backend_port))
-                .map_err(|_| Error::Busy)?,
-        );
-        let mut command = Command::new(&self.config.server);
-        command
-            .env_clear()
-            .env("PATH", "/usr/bin:/bin")
-            .env("LC_ALL", "C");
-        if let Some(paths) = &self.config.library_path {
-            command.env("LD_LIBRARY_PATH", paths);
-        }
-        if self.config.device.starts_with("SYCL") {
-            command
-                .env("ONEAPI_DEVICE_SELECTOR", "level_zero:0")
-                .env("GGML_SYCL_ENABLE_GRAPH", "0")
-                .env("GGML_SYCL_FA_ONEDNN_MAX_KV", "32768");
-        }
-        let mail = self
-            .config
-            .mail_expert_paging
-            .as_ref()
-            .filter(|_| model == MAIL_MODEL_ID);
-        let context_size = mail.map_or(self.config.context_size, |profile| profile.context_size);
-        command
-            .arg("--model")
-            .arg(path)
-            .args(["--alias", model, "--host", "127.0.0.1", "--port"])
-            .arg(self.config.backend_port.to_string())
-            .args([
-                "--device",
-                &self.config.device,
-                "--gpu-layers",
-                "all",
-                "--fit",
-                "off",
-                "--ctx-size",
-            ])
-            .arg(context_size.to_string())
-            .args([
-                "--parallel",
-                "1",
-                "--threads",
-                "8",
-                "--offline",
-                "--jinja",
-                "--no-ui",
-                "--no-warmup",
-                "--reasoning-format",
-                "deepseek",
-                "--api-key-file",
-            ])
-            .arg(&self.config.token_file);
-        if mail.is_some() {
-            command
-                .env("ZES_ENABLE_SYSMAN", "1")
-                .env_remove("GGML_SYCL_FA_ONEDNN_MAX_KV");
-            command.args([
-                "--cpu-moe",
-                "--moe-cache-mib",
-                "4096",
-                "--load-mode",
-                "mmap",
-                "--no-repack",
-                "--batch-size",
-                "8",
-                "--ubatch-size",
-                "1",
-                "--reasoning-effort",
-                "low",
-                "--no-context-shift",
-                "--cache-ram",
-                "0",
-                "--no-cache-idle-slots",
-            ]);
-        } else {
-            command.args([
-                "--batch-size",
-                "128",
-                "--ubatch-size",
-                "128",
-                "--flash-attn",
-                "on",
-                "--verbosity",
-                "4",
-                "--cache-type-k",
-                "f16",
-                "--cache-type-v",
-                "f16",
-            ]);
-        }
-        let child = command.stdin(Stdio::null()).spawn().map_err(|err| {
-            eprintln!("llama-server spawn failed: {err}");
-            Error::StartFailed
-        })?;
         let mut process = Running {
-            child,
+            child: lease.spawn(model, &path)?,
             model: model.to_string(),
-            _gpu_lease: lease,
+            lease,
         };
         let deadline = Instant::now() + Duration::from_secs(self.config.startup_seconds);
         loop {
             if self.stop.load(Ordering::Acquire) {
                 return Err(Error::Shutdown);
             }
-            if process
-                .child
-                .try_wait()
-                .map_err(|_| Error::StartFailed)?
-                .is_some()
-            {
+            if process.child.exited().map_err(|_| Error::StartFailed)? {
                 return Err(Error::StartFailed);
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
@@ -377,11 +199,7 @@ impl Driver {
             );
             if let Ok(body) = response {
                 if serde_json::from_slice::<Health>(&body).is_ok_and(|health| health.status == "ok")
-                    && process
-                        .child
-                        .try_wait()
-                        .map_err(|_| Error::StartFailed)?
-                        .is_none()
+                    && !process.child.exited().map_err(|_| Error::StartFailed)?
                 {
                     self.running = Some(process);
                     return self.status();

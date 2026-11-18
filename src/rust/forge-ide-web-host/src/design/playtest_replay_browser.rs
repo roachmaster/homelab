@@ -3,12 +3,12 @@
 pub(super) const REPLAY_ADAPTER: &str = r#"
   function replayControls(get, memory) {
     const operations = [
-      'replay_reserve', 'replay_prepare', 'replay_need_count', 'replay_need_slot',
-      'replay_need_digest', 'asset_reserve', 'replay_asset_accept', 'replay_finish',
+      'replay_reserve', 'replay_prepare', 'replay_archive_read', 'replay_archive_cancel',
+      'asset_reserve', 'replay_archive_accept', 'replay_finish',
       'replay_snapshot', 'replay_pose', 'replay_restart', 'replay_step', 'replay_done',
     ].map(get);
     if (operations.some(operation => typeof operation !== 'function')) return null;
-    const [reserve, prepare, count, slot, word, reserveAsset, accept, finish,
+    const [reserve, prepare, read, cancel, reserveAsset, accept, finish,
       snapshotOffset, poseOffset, restart, step, done] = operations;
     const snapshotView = memoryView(memory, snapshotOffset, () => snapshotBytes, snapshotBytes, 'Replay');
     const poseView = memoryView(memory, poseOffset, () => poseBytes, poseBytes, 'Replay pose');
@@ -24,22 +24,21 @@ pub(super) const REPLAY_ADAPTER: &str = r#"
       prepare(bytes) {
         return copy(reserve(bytes.byteLength), bytes) && prepare() === 1;
       },
-      missing() {
-        const needs = [];
-        for (let index = 0; index < count(); index++) {
-          const level = slot(index);
-          if (!level) continue;
-          const bytes = new DataView(new ArrayBuffer(32));
-          for (let part = 0; part < 8; part++) bytes.setUint32(part * 4, word(index, part), true);
-          const digest = Array.from(new Uint8Array(bytes.buffer), byte => byte.toString(16).padStart(2, '0')).join('');
-          needs.push({ index, level, digest });
-        }
-        return needs;
+      read() {
+        const offset = read() >>> 0;
+        if (!offset) return null;
+        const view = new DataView(memory.buffer, offset, 44);
+        if (view.getUint32(0, true) !== 0x31524746) throw new Error('Unknown replay read schema');
+        const generation = view.getUint32(4, true);
+        const asset = view.getUint32(8, true);
+        const digest = Array.from(new Uint8Array(memory.buffer, offset + 12, 32),
+          byte => byte.toString(16).padStart(2, '0')).join('');
+        return { generation, asset, digest };
       },
-      accept(index, asset, bytes) {
-        return copy(reserveAsset(asset, bytes.byteLength), bytes) && accept(index, asset) === 1;
+      accept({ generation, asset }, bytes) {
+        return copy(reserveAsset(asset, bytes.byteLength), bytes) && accept(generation) === 1;
       },
-      finish, restart, step, done,
+      cancel, finish, restart, step, done,
       frame() {
         const snapshot = readSnapshot(snapshotView());
         return [snapshot, readPose(poseView(), snapshot)];
@@ -60,7 +59,6 @@ pub(super) const REPLAY_ADAPTER: &str = r#"
     const canvas = document.getElementById('playtest-replay-board');
     const ctx = canvas?.getContext('2d', { alpha: false });
     if (!panel || !file || !notice || !controls || !play || !step || !reset || !position || !ctx) return;
-    const archiveAssets = ['manifest', 'room-one', 'traversal-yard'];
     const journalLimit = 2 * 1024 * 1024;
     const tickMs = 1000 / 60;
     let running = false;
@@ -117,19 +115,14 @@ pub(super) const REPLAY_ADAPTER: &str = r#"
       if (running) scheduled = requestAnimationFrame(frame);
     });
 
-    async function loadArchive(needs) {
-      const manifests = new Map();
+    async function loadArchive() {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), assetSpec.startup_timeout_ms);
       try {
-        for (const { index, level, digest } of needs) {
-          let manifest = manifests.get(digest);
-          if (!manifest) {
-            manifest = await io.read('manifest', controller.signal, digest);
-            manifests.set(digest, manifest);
-          }
-          if (!replay.accept(index, 0, manifest) ||
-              !replay.accept(index, level, await io.read(archiveAssets[level], controller.signal, digest))) {
+        for (let request = replay.read(); request; request = replay.read()) {
+          const bytes = await io.read(assetSpec.wire_names[request.asset], controller.signal, request.digest);
+          controller.signal.throwIfAborted();
+          if (!replay.accept(request, bytes)) {
             throw new Error('Replay archive verification failed');
           }
         }
@@ -155,7 +148,7 @@ pub(super) const REPLAY_ADAPTER: &str = r#"
           notice.textContent = 'This replay file is invalid or incomplete.';
           return;
         }
-        await loadArchive(replay.missing());
+        await loadArchive();
         if (replay.finish() !== 1 || replay.restart() !== 1) {
           notice.textContent = 'This replay could not be played.';
           return;
@@ -164,6 +157,7 @@ pub(super) const REPLAY_ADAPTER: &str = r#"
         notice.textContent = 'Replay ready.';
         draw();
       } catch (_) {
+        replay.cancel();
         notice.textContent = 'The replay’s recorded levels are unavailable or could not be verified.';
       } finally {
         file.disabled = false;

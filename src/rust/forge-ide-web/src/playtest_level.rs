@@ -235,7 +235,11 @@ impl Loader {
     }
 
     pub(super) fn awaiting(&self, request: u32, slot: u32) -> bool {
-        self.latest == request && self.requested_slot == Some(slot)
+        self.requested_slot(request) == Some(slot)
+    }
+
+    pub(super) fn requested_slot(&self, request: u32) -> Option<u32> {
+        self.requested_slot.filter(|_| self.latest == request)
     }
 
     pub(super) fn fail(&mut self, request: u32) {

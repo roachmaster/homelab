@@ -9,7 +9,7 @@ use forge_game_runtime::{
     Action, EffectiveInput, Level, Room,
 };
 use serde::{Deserialize, Deserializer, Serialize};
-use std::fmt::Write;
+use std::{collections::BTreeMap, fmt::Write};
 
 const MAX_TICKS: u32 = 36_000;
 const MAX_SEGMENTS: usize = 128;
@@ -81,13 +81,85 @@ enum Input {
 pub(super) struct Import {
     session: Session,
     needs: Vec<Need>,
+    manifests: BTreeMap<[u32; 8], VerifiedManifest>,
 }
 
 struct Need {
     slot: u32,
     digest: [u32; 8],
-    manifest: Option<VerifiedManifest>,
     level: Option<Level>,
+}
+
+pub(super) const ARCHIVE_READ_SIZE: usize = 44;
+
+/// The WASM instance owns one outstanding archive read. The browser has a
+/// borrowed view of its typed request and returns bytes with its generation.
+pub(super) struct ArchivePort {
+    generation: u32,
+    pending: Option<ArchiveRead>,
+    wire: [u8; ARCHIVE_READ_SIZE],
+}
+
+#[derive(Clone, Copy)]
+struct ArchiveRead {
+    index: usize,
+    asset: Asset,
+    digest: [u32; 8],
+}
+
+impl ArchivePort {
+    pub(super) fn new() -> Self {
+        Self {
+            generation: 0,
+            pending: None,
+            wire: [0; ARCHIVE_READ_SIZE],
+        }
+    }
+
+    pub(super) fn read(&mut self, import: &Import) -> u32 {
+        if self.pending.is_none() {
+            let Some(request) = import.next_read() else {
+                return 0;
+            };
+            let Some(generation) = self.generation.checked_add(1) else {
+                return 0;
+            };
+            self.generation = generation;
+            self.pending = Some(request);
+            self.wire[..4].copy_from_slice(b"FGR1");
+            self.wire[4..8].copy_from_slice(&generation.to_le_bytes());
+            self.wire[8..12].copy_from_slice(&(request.asset as u32).to_le_bytes());
+            for (bytes, word) in self.wire[12..].chunks_exact_mut(4).zip(request.digest) {
+                bytes.copy_from_slice(&word.to_le_bytes());
+            }
+        }
+        self.wire.as_ptr() as u32
+    }
+
+    pub(super) fn accept(
+        &mut self,
+        generation: u32,
+        import: &mut Import,
+        assets: &mut super::asset::Assets,
+    ) -> bool {
+        if generation != self.generation {
+            return false;
+        }
+        let Some(request) = self.pending.take() else {
+            return false;
+        };
+        assets
+            .take(request.asset)
+            .is_some_and(|bytes| import.accept_asset(request.index, request.asset, &bytes))
+    }
+
+    pub(super) fn clear(&mut self) {
+        self.pending = None;
+    }
+
+    pub(super) fn pending(&self) -> bool {
+        self.pending.is_some()
+    }
 }
 
 pub(super) struct Timeline {
@@ -219,7 +291,6 @@ impl Import {
                                 needs.push(Need {
                                     slot,
                                     digest,
-                                    manifest: None,
                                     level: loader.replay_level(slot, digest),
                                 });
                             }
@@ -238,7 +309,11 @@ impl Import {
                 _ => return None,
             }
         }
-        Some(Self { session, needs })
+        Some(Self {
+            session,
+            needs,
+            manifests: BTreeMap::new(),
+        })
     }
 
     pub(super) fn need_count(&self) -> u32 {
@@ -260,6 +335,24 @@ impl Import {
             .unwrap_or(0)
     }
 
+    fn next_read(&self) -> Option<ArchiveRead> {
+        let (index, need) = self
+            .needs
+            .iter()
+            .enumerate()
+            .find(|(_, need)| need.level.is_none())?;
+        let asset = if self.manifests.contains_key(&need.digest) {
+            Asset::from_wire(need.slot)?
+        } else {
+            Asset::Manifest
+        };
+        Some(ArchiveRead {
+            index,
+            asset,
+            digest: need.digest,
+        })
+    }
+
     pub(super) fn accept_asset(&mut self, index: usize, asset: Asset, bytes: &[u8]) -> bool {
         let Some(need) = self
             .needs
@@ -269,22 +362,23 @@ impl Import {
             return false;
         };
         if asset == Asset::Manifest {
-            need.manifest =
-                VerifiedManifest::decode(bytes).filter(|item| item.words() == need.digest);
-            return need.manifest.is_some();
+            let Some(manifest) =
+                VerifiedManifest::decode(bytes).filter(|item| item.words() == need.digest)
+            else {
+                return false;
+            };
+            self.manifests.insert(need.digest, manifest);
+            return true;
         }
         if asset.slot() != Some(need.slot)
-            || !need
-                .manifest
-                .as_ref()
+            || !self
+                .manifests
+                .get(&need.digest)
                 .is_some_and(|manifest| manifest.contains(asset, bytes))
         {
             return false;
         }
         need.level = decode_replay_level(bytes, need.slot);
-        if need.level.is_some() {
-            need.manifest = None;
-        }
         need.level.is_some()
     }
 

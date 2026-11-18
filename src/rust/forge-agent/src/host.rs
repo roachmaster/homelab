@@ -8,17 +8,18 @@ use crate::{
 };
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
+#[cfg(unix)]
+use forge_ide::{
+    assembly::{register_managed_writers, ManagedWriterConfig},
+    filesystem::managed_write::{ManagedWriter, WriteError},
+    managed_edit::{ManagedCommand, ManagedResponse, ManagedWriteRequest},
+};
 use forge_ide::{
     assembly::{register_projects, ProjectAlias},
     filesystem::NativeFiles,
     model::ProjectReport,
     remote::{RemoteInspectInput, RemoteInspectTask, ReportLimits, IDE_INSPECT},
     task::{InspectRequest, InspectTask},
-};
-#[cfg(unix)]
-use forge_ide::{
-    filesystem::managed_write::{ManagedWriter, WriteError},
-    managed_edit::{ManagedCommand, ManagedResponse, ManagedWriteRequest},
 };
 use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
 use forge_io_client::IoClient;
@@ -119,30 +120,12 @@ where
         managed_roots,
         grants,
     } = config::server(path)?;
-    #[cfg(unix)]
-    let write = {
-        let writers = managed_roots
-            .into_iter()
-            .map(|(alias, root)| {
-                let writer = ManagedWriter::open(&root).map_err(|_| {
-                    AppError::Configuration(
-                        "managed project needs a private workspace owned by the agent",
-                    )
-                })?;
-                Ok((alias, writer))
-            })
-            .collect::<Result<BTreeMap<_, _>, AppError>>()?;
-        move |command| managed_write(&writers, command)
-    };
     #[cfg(not(unix))]
-    let write = {
-        if !managed_roots.is_empty() {
-            return Err(AppError::Configuration(
-                "managed project writes require Unix",
-            ));
-        }
-        |_| Err(RemoteError::Forbidden)
-    };
+    if !managed_roots.is_empty() {
+        return Err(AppError::Configuration(
+            "managed project writes require Unix",
+        ));
+    }
     let staged = Registry::new()
         .register(
             node::register(NodeConfig::Local {
@@ -152,10 +135,30 @@ where
         )
         .map_err(assembly)?
         .register(register_projects("agent.projects", projects).map_err(assembly)?)
-        .map_err(assembly)?
-        .register(register_gateway_server("agent.https", gateway).map_err(assembly)?)
         .map_err(assembly)?;
-    let ((((), node), projects), server) = staged.freeze().map_err(assembly)?.into_factories();
+    #[cfg(unix)]
+    let staged = staged
+        .register(
+            register_managed_writers(
+                "agent.project-writers",
+                managed_roots
+                    .into_iter()
+                    .map(|(alias, root)| (alias, ManagedWriterConfig { root }))
+                    .collect(),
+            )
+            .map_err(assembly)?,
+        )
+        .map_err(assembly)?;
+    let (clients, server) = staged
+        .register(register_gateway_server("agent.https", gateway).map_err(assembly)?)
+        .map_err(assembly)?
+        .freeze()
+        .map_err(assembly)?
+        .into_factories();
+    #[cfg(unix)]
+    let ((((), node), projects), writer_factories) = clients;
+    #[cfg(not(unix))]
+    let (((), node), projects) = clients;
     let observation = Observation(Singleton::new(NodeTask::new(
         node.client.create().map_err(assembly)?,
     )));
@@ -168,6 +171,23 @@ where
         );
         handles.insert(alias, Singleton::new(factory.create().map_err(assembly)?));
     }
+    #[cfg(unix)]
+    let write = {
+        let writers = writer_factories
+            .into_iter()
+            .map(|(alias, factory)| {
+                let writer = factory.create().map_err(|_| {
+                    AppError::Configuration(
+                        "managed project needs a private workspace owned by the agent",
+                    )
+                })?;
+                Ok((alias, Singleton::new(writer)))
+            })
+            .collect::<Result<BTreeMap<_, _>, AppError>>()?;
+        move |command| managed_write(&writers, command)
+    };
+    #[cfg(not(unix))]
+    let write = |_| Err(RemoteError::Forbidden);
     let service = Service::new_with_write(
         target,
         observation,
@@ -209,11 +229,15 @@ where
 
 #[cfg(unix)]
 fn managed_write(
-    writers: &BTreeMap<ProjectAlias, ManagedWriter>,
+    writers: &BTreeMap<ProjectAlias, Singleton<ManagedWriter>>,
     command: ManagedWriteRequest,
 ) -> Result<ManagedResponse, RemoteError> {
     let alias = ProjectAlias::new(command.project).map_err(|_| RemoteError::InvalidRequest)?;
-    let writer = writers.get(&alias).ok_or(RemoteError::Forbidden)?;
+    let writer = writers
+        .get(&alias)
+        .ok_or(RemoteError::Forbidden)?
+        .acquire()
+        .unwrap_or_else(|n| match n {});
     let result = match command.command {
         ManagedCommand::BaseRevision { path, digest } => writer
             .base_revision(&path, digest)

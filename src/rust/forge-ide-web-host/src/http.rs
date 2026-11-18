@@ -421,11 +421,11 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
         return Response::error(400, "unexpected_body");
     }
     let asset = host
-        .assets
+        .assets()
         .get(&r.path)
         .map(|(mime, body)| (mime, body.to_vec()))
         .or_else(|| {
-            host.assets
+            host.assets()
                 .archived_level(&r.path)
                 .map(|body| ("application/json", body))
         });

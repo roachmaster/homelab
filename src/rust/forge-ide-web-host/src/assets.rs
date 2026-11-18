@@ -1,9 +1,14 @@
 use crate::HostError;
 use forge_ide::filesystem::{FsError, FsRequest, FsResponse, NativeFiles};
 use forge_io_client::IoClient;
+use forge_provider::Factory;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, io, path::Path};
+use std::{
+    collections::BTreeMap,
+    io,
+    path::{Path, PathBuf},
+};
 const NAMES: [(&str, &str); 5] = [
     ("index.html", "text/html; charset=utf-8"),
     ("style.css", "text/css; charset=utf-8"),
@@ -300,6 +305,23 @@ pub(crate) struct Assets {
     files: BTreeMap<String, (&'static str, Vec<u8>)>,
     replay_archive: Option<NativeFiles>,
 }
+
+#[derive(Clone)]
+pub(crate) struct AssetFactory {
+    pub root: PathBuf,
+    pub alternate_cooked: Option<PathBuf>,
+    pub replay_archive: Option<PathBuf>,
+}
+
+impl Factory<Assets> for AssetFactory {
+    type Error = HostError;
+
+    fn create(&self) -> Result<Assets, HostError> {
+        Assets::load(&self.root, self.alternate_cooked.as_deref())?
+            .with_replay_archive(self.replay_archive.as_deref())
+    }
+}
+
 impl Assets {
     pub fn load(root: &Path, alternate_cooked: Option<&Path>) -> Result<Self, HostError> {
         let files = NativeFiles::open(root).map_err(|_| HostError::Configuration("asset root"))?;

@@ -3,22 +3,35 @@ name = "forge-terminal"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+default-run = "forge"
 
 [features]
 default = ["disk", "jobs"]
 disk = ["forge-local/disk"]
 jobs = ["forge-local/jobs"]
+durable-jobs = ["dep:forge-access", "dep:forge-ingress-contract", "dep:forge-jobs", "dep:ctrlc", "dep:nix"]
 
 [dependencies]
 forge-local = { workspace = true, default-features = false }
 forge-io-client.workspace = true
-
-[dev-dependencies]
 forge-bootstrap.workspace = true
+forge-provider.workspace = true
+forge-access = { path = "../forge-access", optional = true }
+forge-ingress-contract = { workspace = true, optional = true }
+forge-jobs = { path = "../forge-jobs", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+ctrlc = { version = "=3.5.2", features = ["termination"], optional = true }
+nix = { version = "0.31", features = ["user"], optional = true }
 
 [[bin]]
 name = "forge"
 path = "src/main.rs"
+
+[[bin]]
+name = "forge-jobs"
+path = "src/bin/forge-jobs.rs"
+required-features = ["durable-jobs"]
 
 [lints]
 workspace = true

@@ -1,7 +1,10 @@
 //! Synchronous terminal I/O boundary. Requests contain already prepared text.
+use forge_bootstrap::PreparedGroup;
 use forge_io_client::IoClient;
+use forge_provider::Factory;
 use std::{
     cell::RefCell,
+    convert::Infallible,
     io::{self, BufRead, Write},
 };
 
@@ -38,6 +41,27 @@ struct Streams<R, W, E> {
 /// the next command starts at a defined boundary. Reading may block until then.
 pub struct StreamConsole<R, W, E> {
     streams: RefCell<Streams<R, W, E>>,
+}
+
+pub type StdioConsole =
+    StreamConsole<io::StdinLock<'static>, io::StdoutLock<'static>, io::StderrLock<'static>>;
+
+pub struct StdioFactory;
+
+impl Factory<StdioConsole> for StdioFactory {
+    type Error = Infallible;
+
+    fn create(&self) -> Result<StdioConsole, Self::Error> {
+        Ok(StreamConsole::new(
+            io::stdin().lock(),
+            io::stdout().lock(),
+            io::stderr().lock(),
+        ))
+    }
+}
+
+pub fn register_stdio() -> Result<PreparedGroup<StdioFactory>, forge_bootstrap::RegistrationError> {
+    PreparedGroup::new("terminal.stdio", &["terminal.console"], &[], StdioFactory)
 }
 impl<R, W, E> StreamConsole<R, W, E> {
     pub fn new(input: R, output: W, errors: E) -> Self {

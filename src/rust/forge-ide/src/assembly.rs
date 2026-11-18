@@ -8,6 +8,11 @@ use forge_bootstrap::{PreparedGroup, RegistrationError};
 use forge_provider::Factory;
 use std::{error::Error, ffi::OsString, fmt, path::PathBuf};
 
+#[cfg(all(unix, feature = "managed-writes"))]
+use crate::filesystem::managed_write::{ManagedWriter, WriteError};
+#[cfg(all(unix, feature = "managed-writes"))]
+use std::collections::BTreeMap;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IdeConfig {
     Native {
@@ -95,6 +100,18 @@ fn configured_factory(config: IdeConfig) -> Result<InspectFactory, AssemblyError
         limits,
         excluded_names,
     } = config;
+    validate_root(&root)?;
+    // Validate the same task policy without constructing a filesystem client.
+    InspectTask::new((), limits.clone(), excluded_names.clone())
+        .map_err(AssemblyError::Configuration)?;
+    Ok(InspectFactory {
+        root,
+        limits,
+        excluded_names,
+    })
+}
+
+fn validate_root(root: &std::path::Path) -> Result<(), AssemblyError> {
     if !root.is_absolute()
         || root
             .components()
@@ -104,14 +121,7 @@ fn configured_factory(config: IdeConfig) -> Result<InspectFactory, AssemblyError
             "root must be absolute without parent traversal",
         )));
     }
-    // Validate the same task policy without constructing a filesystem client.
-    InspectTask::new((), limits.clone(), excluded_names.clone())
-        .map_err(AssemblyError::Configuration)?;
-    Ok(InspectFactory {
-        root,
-        limits,
-        excluded_names,
-    })
+    Ok(())
 }
 
 /// Logical catalog key, never a path or an authenticated identity.
@@ -186,4 +196,46 @@ pub fn register_projects(
     let id = id.into();
     PreparedGroup::new(id.clone(), &[&id], &[], ProjectFactories { factories })
         .map_err(AssemblyError::Registration)
+}
+
+#[cfg(all(unix, feature = "managed-writes"))]
+#[derive(Clone, Debug)]
+pub struct ManagedWriterConfig {
+    pub root: PathBuf,
+}
+
+#[cfg(all(unix, feature = "managed-writes"))]
+#[derive(Clone, Debug)]
+pub struct ManagedWriterFactory(ManagedWriterConfig);
+
+#[cfg(all(unix, feature = "managed-writes"))]
+impl Factory<ManagedWriter> for ManagedWriterFactory {
+    type Error = WriteError;
+
+    fn create(&self) -> Result<ManagedWriter, Self::Error> {
+        ManagedWriter::open(&self.0.root)
+    }
+}
+
+/// Stage the selected writable projects without opening roots or journals.
+/// The host creates and retains one writer per configured project after freeze.
+#[cfg(all(unix, feature = "managed-writes"))]
+pub fn register_managed_writers(
+    id: impl Into<String>,
+    configs: BTreeMap<ProjectAlias, ManagedWriterConfig>,
+) -> Result<PreparedGroup<BTreeMap<ProjectAlias, ManagedWriterFactory>>, AssemblyError> {
+    if configs.len() > 128 {
+        return Err(AssemblyError::Configuration(InspectError::Configuration(
+            "managed writer catalog supports at most 128 aliases",
+        )));
+    }
+    for config in configs.values() {
+        validate_root(&config.root)?;
+    }
+    let id = id.into();
+    let factories = configs
+        .into_iter()
+        .map(|(alias, config)| (alias, ManagedWriterFactory(config)))
+        .collect();
+    PreparedGroup::new(id.clone(), &[&id], &[], factories).map_err(AssemblyError::Registration)
 }

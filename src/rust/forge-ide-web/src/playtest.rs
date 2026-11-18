@@ -32,6 +32,7 @@ struct Playtest {
     replay_bytes: Vec<u8>,
     replay_input: Vec<u8>,
     replay_import: Option<replay::Import>,
+    replay_archive: replay::ArchivePort,
     replay_result: Option<ReplayView>,
     collision_view: Box<[u8; collision::SIZE]>,
     paused: bool,
@@ -66,6 +67,7 @@ impl Playtest {
             replay_bytes: Vec::new(),
             replay_input: Vec::new(),
             replay_import: None,
+            replay_archive: replay::ArchivePort::new(),
             replay_result: None,
             collision_view: Box::new([0; collision::SIZE]),
             paused: false,
@@ -79,7 +81,8 @@ impl Playtest {
             return false;
         };
         if asset == asset::Asset::Manifest {
-            return request == 0 && self.assets.install_manifest(&bytes);
+            return (request == 0 || self.loader.requested_slot(request).is_some())
+                && self.assets.install_manifest(&bytes);
         }
         if let Some(slot) = asset.slot() {
             return self.loader.awaiting(request, slot)
@@ -161,6 +164,7 @@ impl Playtest {
     fn reserve_replay(&mut self, length: usize) -> u32 {
         self.replay_input.clear();
         self.replay_import = None;
+        self.replay_archive.clear();
         if !(1..=replay::MAX_BYTES).contains(&length)
             || self.replay_input.try_reserve(length).is_err()
         {
@@ -172,6 +176,7 @@ impl Playtest {
 
     fn prepare_replay(&mut self) -> bool {
         let bytes = std::mem::take(&mut self.replay_input);
+        self.replay_archive.clear();
         self.replay_import = replay::Import::parse(&bytes, &self.loader);
         self.replay_import.is_some()
     }
@@ -180,6 +185,7 @@ impl Playtest {
         if self.replay_import.is_none() && !self.prepare_replay() {
             return false;
         }
+        self.replay_archive.clear();
         let import = self.replay_import.take().expect("prepared replay");
         let Some(timeline) = import.validate() else {
             return false;
@@ -439,6 +445,9 @@ pub extern "C" fn forge_playtest_replay_need_digest(index: u32, word: u32) -> u3
 #[no_mangle]
 pub extern "C" fn forge_playtest_replay_asset_accept(index: u32, asset: u32) -> u32 {
     deliver(|state| {
+        if state.replay_archive.pending() {
+            return false;
+        }
         let Some(asset) = asset::Asset::from_wire(asset) else {
             return false;
         };
@@ -450,6 +459,47 @@ pub extern "C" fn forge_playtest_replay_asset_accept(index: u32, asset: u32) -> 
             .as_mut()
             .is_some_and(|import| import.accept_asset(index as usize, asset, &bytes))
     })
+}
+
+/// Publish the next typed archive read with the generation of its completion.
+#[allow(unsafe_code)]
+#[no_mangle]
+pub extern "C" fn forge_playtest_replay_archive_read() -> u32 {
+    PLAYTEST.with(|playtest| {
+        playtest.try_borrow_mut().map_or(0, |mut state| {
+            let Playtest {
+                replay_import,
+                replay_archive,
+                ..
+            } = &mut *state;
+            replay_import
+                .as_ref()
+                .map_or(0, |import| replay_archive.read(import))
+        })
+    })
+}
+
+/// Deliver bytes for the one currently issued archive read.
+#[allow(unsafe_code)]
+#[no_mangle]
+pub extern "C" fn forge_playtest_replay_archive_accept(generation: u32) -> u32 {
+    deliver(|state| {
+        state.replay_import.as_mut().is_some_and(|import| {
+            state
+                .replay_archive
+                .accept(generation, import, &mut state.assets)
+        })
+    })
+}
+
+/// Discard a failed/cancelled import without replacing the previous replay.
+#[allow(unsafe_code)]
+#[no_mangle]
+pub extern "C" fn forge_playtest_replay_archive_cancel() {
+    update_playtest(|state| {
+        state.replay_archive.clear();
+        state.replay_import = None;
+    });
 }
 
 /// Consume the input and publish the replay view only if it validates fully.
@@ -594,6 +644,26 @@ pub extern "C" fn forge_playtest_level_request(slot: u32) -> u32 {
             .try_borrow_mut()
             .map_or(0, |mut state| state.loader.request(slot))
     })
+}
+
+/// Publish the next cooked asset requested by a staged level generation.
+#[allow(unsafe_code)]
+#[no_mangle]
+pub extern "C" fn forge_playtest_level_read(request: u32) -> u32 {
+    read(|state| {
+        state
+            .loader
+            .requested_slot(request)
+            .and_then(|slot| state.assets.level_read(slot))
+            .map_or(0, asset::Asset::read_code)
+    })
+}
+
+/// Publish the next asset needed for the startup atlas.
+#[allow(unsafe_code)]
+#[no_mangle]
+pub extern "C" fn forge_playtest_atlas_read() -> u32 {
+    read(|state| state.assets.atlas_read().map_or(0, asset::Asset::read_code))
 }
 
 #[allow(unsafe_code)]

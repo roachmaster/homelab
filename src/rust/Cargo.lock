@@ -447,6 +447,7 @@ version = "0.1.0"
 name = "forge-jobs"
 version = "0.1.0"
 dependencies = [
+ "cap-std",
  "forge-access",
  "forge-bootstrap",
  "forge-bridge",
@@ -562,9 +563,15 @@ dependencies = [
 name = "forge-terminal"
 version = "0.1.0"
 dependencies = [
+ "ctrlc",
+ "forge-access",
  "forge-bootstrap",
+ "forge-ingress-contract",
  "forge-io-client",
+ "forge-jobs",
  "forge-local",
+ "forge-provider",
+ "nix",
 ]
 
 [[package]]

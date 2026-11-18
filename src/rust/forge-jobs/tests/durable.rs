@@ -62,6 +62,27 @@ fn request(route: &str, payload: Command) -> Envelope<Command> {
 
 const WORK: Work = Work::Sum { through: 10 };
 
+#[cfg(unix)]
+#[test]
+fn open_store_keeps_the_bound_directory_after_path_replacement() {
+    let root = Directory::new();
+    let bound = root.0.join("bound");
+    let relocated = root.0.join("relocated");
+    fs::create_dir(&bound).unwrap();
+    let store = FileStore::open(StoreConfig {
+        directory: bound.clone(),
+        max_jobs: 32,
+    })
+    .unwrap();
+    fs::rename(&bound, &relocated).unwrap();
+    fs::create_dir(&bound).unwrap();
+    store
+        .submit(&Owner::new("alice").unwrap(), "intent", WORK)
+        .unwrap();
+    assert!(relocated.join("jobs.json").is_file());
+    assert!(fs::read_dir(bound).unwrap().next().is_none());
+}
+
 #[test]
 fn authenticated_dispatch_checks_exact_routes_deadlines_and_job_ownership() {
     struct FixtureVerifier;

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise lifecycle against a test child without requiring a GPU."""
 import argparse
+from fcntl import LOCK_EX, LOCK_NB, flock
 from http.client import HTTPConnection
 import json
 from pathlib import Path
@@ -13,13 +14,23 @@ import urllib.request
 
 BACKEND = '''#!/usr/bin/python3
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, os, pathlib, signal, sys, time
+import fcntl, json, os, pathlib, signal, sys, time
 
 def value(flag):
     return sys.argv[sys.argv.index(flag) + 1]
 
 model = pathlib.Path(value("--model"))
 alias = value("--alias")
+
+def assert_gpu_reserved():
+    with model.with_name("gpu.lock").open("r+b") as contender:
+        try:
+            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return
+    raise AssertionError("GPU reservation released while child was active")
+
+assert_gpu_reserved()
 if alias == "bad":
     sys.exit(3)
 if alias == "gpt-oss-120b":
@@ -34,6 +45,7 @@ else:
     assert "--cpu-moe" not in sys.argv
 
 def stop(_signal, _frame):
+    assert_gpu_reserved()
     model.with_suffix(".stopped").write_text("SIGTERM")
     sys.exit(0)
 
@@ -82,6 +94,7 @@ def main():
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
+        gpu_lock = directory / "gpu.lock"
         backend = directory / "test-llama"
         backend.write_text(BACKEND)
         backend.chmod(0o700)
@@ -100,7 +113,7 @@ def main():
         config = directory / "config.json"
         config.write_text(json.dumps({
             "server": str(backend), "backend_port": backend_port, "device": "SYCL0",
-            "gpu_lock": str(directory / "gpu.lock"), "token_file": str(secret),
+            "gpu_lock": str(gpu_lock), "token_file": str(secret),
             "models": {name: str(path) for name, path in models.items()},
             "context_size": 4096, "startup_seconds": 3, "prompt_seconds": 3,
             "mail_expert_paging": {"profile_id": profile, "context_size": 4096,
@@ -135,6 +148,11 @@ def main():
                         if service.poll() is not None or attempt == 59:
                             raise
                         time.sleep(0.05)
+                assert not gpu_lock.exists()
+                with gpu_lock.open("a") as other_process:
+                    flock(other_process, LOCK_EX | LOCK_NB)
+                    assert request("PUT", runtime, {"model": "a"}, 409)["error"] == "runtime_busy"
+                    assert request("GET", runtime)["state"] == "stopped"
                 assert request("PUT", runtime, {"model": "a"})["model"] == "a"
                 reply = request("POST", "/v1/chat/completions",
                                 {"messages": [{"role": "user", "content": "6 times 7"}]})
@@ -144,6 +162,8 @@ def main():
                 assert request("PUT", runtime, {"model": "bad"}, 502)["error"] == "startup_failed"
                 assert models["b"].with_suffix(".stopped").read_text() == "SIGTERM"
                 assert request("GET", runtime)["state"] == "stopped"
+                with gpu_lock.open("r+b") as other_process:
+                    flock(other_process, LOCK_EX | LOCK_NB)
                 assert request("PUT", runtime, {"model": mail_model})["model"] == mail_model
                 completion_path = "/v1/chat/completions"
                 messages = [{"role": "user", "content": "Remember my first question"},
@@ -193,7 +213,7 @@ def main():
                     service.wait()
                     raise
             assert models["a"].with_suffix(".stopped").read_text() == "SIGTERM"
-    print("PASS: chat, model switch, Mail token budget, disconnect cancellation, and child shutdown")
+    print("PASS: GPU reservation, chat, model switch, Mail token budget, disconnect cancellation, and child shutdown")
 
 
 if __name__ == "__main__":

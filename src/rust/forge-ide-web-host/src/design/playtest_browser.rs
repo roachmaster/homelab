@@ -52,14 +52,14 @@ struct Controls {
 struct LevelChoice {
     selector: &'static str,
     label: &'static str,
-    asset: &'static str,
     level: u8,
 }
 
 #[derive(Serialize)]
 struct Assets {
     levels: &'static [LevelChoice],
-    atlas_id: &'static str,
+    worker_url: &'static str,
+    wire_names: [&'static str; 5],
     image_id: &'static str,
     pose_clips: &'static [&'static str],
     startup_timeout_ms: u32,
@@ -181,17 +181,22 @@ const PLAYTEST: CanvasAdapter = CanvasAdapter {
             LevelChoice {
                 selector: "#playtest-room-one",
                 label: "Room One",
-                asset: "room-one",
                 level: 1,
             },
             LevelChoice {
                 selector: "#playtest-traversal",
                 label: "Traversal Yard",
-                asset: "traversal-yard",
                 level: 2,
             },
         ],
-        atlas_id: "scout-atlas",
+        worker_url: "/playtest/assets-worker.js",
+        wire_names: [
+            "manifest",
+            "room-one",
+            "traversal-yard",
+            "scout-atlas",
+            "scout-atlas-image",
+        ],
         image_id: "scout-atlas-image",
         pose_clips: &["idle", "walk", "jump", "jump", "crouch"],
         startup_timeout_ms: 15_000,
@@ -555,7 +560,7 @@ const CANVAS_ADAPTER: &str = r#"
   async function start() {
     const ctx = board?.getContext('2d', { alpha: false });
     if (!ctx || !status || !restart) throw new Error('Canvas controls unavailable');
-    io = workerAssetIo();
+    io = workerAssetIo(assetSpec.worker_url);
     const startup = new AbortController();
     const timeout = setTimeout(() => startup.abort(), assetSpec.startup_timeout_ms);
     const bytes = await io.read('wasm', startup.signal).finally(() => clearTimeout(timeout));

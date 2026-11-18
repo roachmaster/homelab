@@ -226,7 +226,14 @@ const verified = game();
 assert.equal(verified.forge_playtest_asset_reserve(2, 16 * 1024 + 1), 0);
 assert.equal(acceptVerifiedManifest(verified, Buffer.from('{')), 0);
 assert.equal(prepareVerifiedLevel(verified, 2), 0, 'a level needs an admitted manifest');
-assert.equal(acceptVerifiedManifest(verified), 1);
+const supersededManifest = verified.forge_playtest_level_request(1);
+const manifestRequest = verified.forge_playtest_level_request(2);
+assert.equal(verified.forge_playtest_level_read(supersededManifest), 0);
+assert.equal(verified.forge_playtest_level_read(manifestRequest), 1, 'Rust requests the manifest first');
+assert.equal(uploadAsset(verified, 0, supersededManifest, cookedManifest), 0);
+assert.equal(uploadAsset(verified, 0, manifestRequest, cookedManifest), 1);
+assert.equal(verified.forge_playtest_level_read(manifestRequest), 3, 'Rust now requests Traversal Yard');
+assert.equal(verified.forge_playtest_atlas_read(), 4, 'the atlas reuses the verified manifest');
 assert.equal(acceptVerifiedManifest(verified, Buffer.concat([cookedManifest, Buffer.from(' ')])), 0);
 assert.equal(prepareVerifiedLevel(verified, 2, Buffer.concat([cookedLevelBytes.get(2), Buffer.from(' ')])), 0,
   'Rust rejects valid level JSON whose bytes do not match the manifest digest');
@@ -526,23 +533,35 @@ const journalInput = historical.forge_playtest_replay_reserve(importedBytes.leng
 new Uint8Array(historical.memory.buffer, journalInput, importedBytes.length).set(importedBytes);
 assert.equal(historical.forge_playtest_replay_prepare(), 1);
 assert.equal(historical.forge_playtest_replay_need_count(), 2);
-function acceptArchive(index, asset, bytes) {
-  const pointer = historical.forge_playtest_asset_reserve(asset, bytes.length) >>> 0;
+function archiveRequest() {
+  const address = historical.forge_playtest_replay_archive_read() >>> 0;
+  if (!address) return null;
+  const view = new DataView(historical.memory.buffer, address, 44);
+  assert.equal(view.getUint32(0, true), 0x31524746);
+  const digest = Buffer.from(new Uint8Array(view.buffer, address + 12, 32));
+  assert.deepEqual(digest, cookedManifestDigest);
+  return { generation: view.getUint32(4, true), asset: view.getUint32(8, true) };
+}
+function acceptArchive(request, bytes, generation = request.generation) {
+  const pointer = historical.forge_playtest_asset_reserve(request.asset, bytes.length) >>> 0;
   new Uint8Array(historical.memory.buffer, pointer, bytes.length).set(bytes);
-  return historical.forge_playtest_replay_asset_accept(index, asset);
+  return historical.forge_playtest_replay_archive_accept(generation);
 }
-for (const [index, slot] of [1, 2].entries()) {
-  assert.equal(historical.forge_playtest_replay_need_slot(index), slot);
-  for (let word = 0; word < 8; word++) {
-    assert.equal(historical.forge_playtest_replay_need_digest(index, word) >>> 0,
-      cookedManifestDigest.readUInt32LE(word * 4));
-  }
-  assert.equal(acceptArchive(index, 0, Buffer.concat([cookedManifest, Buffer.from(' ')])), 0);
-  assert.equal(acceptArchive(index, 0, cookedManifest), 1);
-  const level = cookedLevelBytes.get(slot);
-  assert.equal(acceptArchive(index, slot, Buffer.concat([level, Buffer.from(' ')])), 0);
-  assert.equal(acceptArchive(index, slot, level), 1);
+let previous = 0;
+for (const asset of [0, 1, 2]) {
+  const bytes = asset === 0 ? cookedManifest : cookedLevelBytes.get(asset);
+  const request = archiveRequest();
+  assert.equal(request.asset, asset, 'Rust requests the shared manifest only once');
+  assert.deepEqual(archiveRequest(), request, 'an outstanding read can be inspected again');
+  assert.equal(acceptArchive(request, bytes, previous), 0, 'stale responses cannot consume a read');
+  assert.equal(acceptArchive(request, Buffer.concat([bytes, Buffer.from(' ')])), 0);
+  const retry = archiveRequest();
+  assert.equal(retry.asset, asset);
+  assert.ok(retry.generation > request.generation);
+  assert.equal(acceptArchive(retry, bytes), 1);
+  previous = retry.generation;
 }
+assert.equal(archiveRequest(), null);
 assert.equal(historical.forge_playtest_replay_finish(), 1);
 assert.equal(historical.forge_playtest_replay_restart(), 1);
 for (let step = 0; step < 100 && !historical.forge_playtest_replay_done(); step++) {

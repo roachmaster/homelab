@@ -33,7 +33,9 @@ ALLOWED = {
     "forge-local": {(name, "normal") for name in
                     ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider",
                      "forge-io-client", "forge-task", "forge-kernel", "forge-command")},
-    "forge-terminal": {("forge-local", "normal"), ("forge-io-client", "normal"), ("forge-bootstrap", "dev")},
+    "forge-terminal": {(name, "normal") for name in
+                       ("forge-local", "forge-io-client", "forge-bootstrap", "forge-provider",
+                        "forge-access", "forge-ingress-contract", "forge-jobs")},
     "forge-demo-messages": {(name, "normal") for name in
                             ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task")},
     "forge-demo-memory-client": {(name, "normal") for name in
@@ -47,7 +49,8 @@ EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
     "forge-llama": {"ctrlc", "nix", "http-body-util", "hyper", "hyper-util", "serde", "serde_json", "subtle", "tokio"},
     "forge-ide-ui": {"serde"},
-    "forge-jobs": {"serde", "serde_json"},
+    "forge-terminal": {"ctrlc", "nix"},
+    "forge-jobs": {"cap-std", "serde", "serde_json"},
     "forge-ide-web": {"serde", "serde_json", "serde_yaml_ng", "sha2"},
     "forge-ide-web-host": {"serde", "serde_json", "httparse", "getrandom", "subtle", "sha2", "ctrlc",
                            "hyper", "hyper-util", "http-body-util", "tokio"},
@@ -278,9 +281,19 @@ def main():
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
     local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-access"})
-    for args in [(), ("--features", "disk"), ("--features", "jobs"), ("--all-features",)]:
+    for args in [(), ("--features", "disk"), ("--features", "jobs")]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
+    if packages["forge-terminal"]["features"].get("durable-jobs") != [
+        "dep:forge-access", "dep:forge-ingress-contract", "dep:forge-jobs", "dep:ctrlc", "dep:nix"
+    ]:
+        raise SystemExit("Durable jobs must remain a separate explicit terminal feature")
+    for selection in [("--features", "durable-jobs"), ("--all-features",)]:
+        tree = consumer_tree(*selection, package="forge-terminal")
+        if {name for name in tree if name.startswith("forge-")} != local_expected | {"forge-jobs", "forge-access"}:
+            raise SystemExit("Durable jobs terminal consumer has unexpected Forge dependencies")
+        if not {"ctrlc", "nix"} <= tree:
+            raise SystemExit("Durable terminal must select native operator and worker shutdown adapters")
     features = cargo("tree", "-p", "forge-terminal", "--no-default-features", "--edges", "features", "--prefix", "none")
     if 'forge-kernel feature "disk"' in features or 'forge-kernel feature "default"' in features:
         raise SystemExit("Node-only terminal unexpectedly includes native disk module")

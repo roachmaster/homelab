@@ -1,7 +1,11 @@
 use crate::{
-    chat::ChatRelay, config::https_authority, service::Rejection, ChatConfig, HostError, NodeConfig,
+    chat::{ChatRelay, ChatRelayFactory},
+    config::https_authority,
+    service::Rejection,
+    ChatConfig, HostError, NodeConfig,
 };
 use forge_ingress_contract::Header;
+use forge_provider::Factory;
 use hyper::body::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf, time::Instant};
@@ -32,6 +36,38 @@ impl StudioConfig {
 pub(crate) struct StudioRelay {
     relay: ChatRelay,
     preview_origin: String,
+}
+
+#[derive(Clone)]
+pub(crate) struct StudioRelayFactory {
+    transport: ChatRelayFactory,
+    preview_origin: String,
+}
+
+impl StudioRelayFactory {
+    pub(crate) fn from_config(config: StudioConfig) -> Self {
+        Self {
+            transport: ChatRelayFactory(ChatConfig {
+                endpoint: config.endpoint,
+                token_file: config.token_file,
+                workspace_persistence: false,
+                async_dispatch: false,
+                mail_enabled: false,
+            }),
+            preview_origin: config.preview_origin,
+        }
+    }
+}
+
+impl Factory<StudioRelay> for StudioRelayFactory {
+    type Error = HostError;
+
+    fn create(&self) -> Result<StudioRelay, HostError> {
+        Ok(StudioRelay {
+            relay: self.transport.create()?,
+            preview_origin: self.preview_origin.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -304,19 +340,6 @@ pub(crate) fn is_destination(destination: &str) -> bool {
 }
 
 impl StudioRelay {
-    pub(crate) fn new(config: &StudioConfig) -> Result<Self, HostError> {
-        Ok(Self {
-            relay: ChatRelay::new(&ChatConfig {
-                endpoint: config.endpoint,
-                token_file: config.token_file.clone(),
-                workspace_persistence: false,
-                async_dispatch: false,
-                mail_enabled: false,
-            })?,
-            preview_origin: config.preview_origin.clone(),
-        })
-    }
-
     fn valid_artifact(&self, artifact: &Artifact) -> bool {
         artifact.sha256.len() == 64
             && is_digest(&artifact.sha256)

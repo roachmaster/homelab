@@ -1,6 +1,8 @@
-use crate::chat::ChatRelay;
+use crate::assets::{AssetFactory, Assets};
+use crate::chat::{ChatRelay, ChatRelayFactory};
+use crate::studio::{StudioRelay, StudioRelayFactory};
 use crate::workspace::{WorkspaceReply, WorkspaceRequest};
-use crate::{assets::Assets, history, http, session::Session, HostConfig, HostError, SessionAuth};
+use crate::{history, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_ide::remote::{
@@ -87,10 +89,22 @@ impl<C: IoClient<Request = InspectCall, Response = InspectReply, Error = RemoteE
 #[derive(Clone)]
 pub struct HostFactory {
     config: HostConfig,
+    assets: AssetFactory,
+    chat: Option<ChatRelayFactory>,
+    studio: Option<StudioRelayFactory>,
 }
 impl HostFactory {
     pub(crate) fn new(config: HostConfig) -> Self {
-        Self { config }
+        Self {
+            assets: AssetFactory {
+                root: config.assets.clone(),
+                alternate_cooked: config.alternate_cooked_assets.clone(),
+                replay_archive: config.cooked_replay_archive.clone(),
+            },
+            chat: config.chat.clone().map(ChatRelayFactory),
+            studio: config.studio.clone().map(StudioRelayFactory::from_config),
+            config,
+        }
     }
     /// Substitute prepared inspection ports explicitly. Keys must exactly match
     /// configuration; no network discovery, runtime lookup or hidden defaults.
@@ -98,7 +112,32 @@ impl HostFactory {
         &self,
         ports: BTreeMap<String, Box<dyn InspectionPort>>,
     ) -> Result<Host, HostError> {
-        Host::assemble(self.config.clone(), ports)
+        self.config.validate()?;
+        if ports.len() != self.config.nodes.len()
+            || self
+                .config
+                .nodes
+                .iter()
+                .any(|n| !ports.contains_key(&n.key))
+        {
+            return Err(HostError::Configuration(
+                "exact configured inspection ports required",
+            ));
+        }
+        let assets = Singleton::new(self.assets.create()?);
+        let chat = self
+            .chat
+            .as_ref()
+            .map(Factory::create)
+            .transpose()?
+            .map(Singleton::new);
+        let studio = self
+            .studio
+            .as_ref()
+            .map(Factory::create)
+            .transpose()?
+            .map(Singleton::new);
+        Host::assemble(self.config.clone(), ports, assets, chat, studio)
     }
 }
 impl Factory<Host> for HostFactory {
@@ -309,7 +348,7 @@ fn source_selections(
     Ok(entries)
 }
 struct State {
-    chat: Option<ChatRelay>,
+    chat: Option<Singleton<ChatRelay>>,
     session: RefCell<Session>,
     accepted_sources: RefCell<Option<AcceptedSources>>,
     config: HostConfig,
@@ -337,6 +376,10 @@ fn checked_source(
 }
 
 impl State {
+    fn chat_relay(&self) -> Option<&ChatRelay> {
+        self.chat.as_ref().map(shared::<ChatRelay>)
+    }
+
     fn attach_chat_source(
         &self,
         request: &mut PreparedChat,
@@ -493,15 +536,13 @@ impl State {
             || (request.file_context.is_some()
                 && request.chat_id.is_some()
                 && !self
-                    .chat
-                    .as_ref()
+                    .chat_relay()
                     .is_some_and(|relay| relay.workspace_persistence))
         {
             return Err(Rejection::Invalid);
         }
         let result = self
-            .chat
-            .as_ref()
+            .chat_relay()
             .ok_or(FailureKind::Unavailable)
             .and_then(|relay| {
                 let deadline = context
@@ -537,7 +578,7 @@ impl State {
             return Err(Rejection::Invalid);
         }
         let result = (|| {
-            let relay = self.chat.as_ref().ok_or(FailureKind::Unavailable)?;
+            let relay = self.chat_relay().ok_or(FailureKind::Unavailable)?;
             let file = request
                 .file_context
                 .clone()
@@ -846,36 +887,23 @@ impl State {
 /// Session credentials are memory-only and invalidated by shutdown/restart.
 pub struct Host {
     pub(crate) listener: TcpListener,
-    pub(crate) assets: Assets,
+    assets: Singleton<Assets>,
     pub(crate) config: HostConfig,
     pub(crate) authority: String,
     pub(crate) origin: String,
     state: Rc<State>,
-    studio: Option<crate::studio::StudioRelay>,
+    studio: Option<Singleton<StudioRelay>>,
     bridge: AppBridge,
 }
 impl Host {
     fn assemble(
         config: HostConfig,
         ports: BTreeMap<String, Box<dyn InspectionPort>>,
+        assets: Singleton<Assets>,
+        chat: Option<Singleton<ChatRelay>>,
+        studio: Option<Singleton<StudioRelay>>,
     ) -> Result<Self, HostError> {
-        config.validate()?;
-        if ports.len() != config.nodes.len()
-            || config.nodes.iter().any(|n| !ports.contains_key(&n.key))
-        {
-            return Err(HostError::Configuration(
-                "exact configured inspection ports required",
-            ));
-        }
-        let assets = Assets::load(&config.assets, config.alternate_cooked_assets.as_deref())?
-            .with_replay_archive(config.cooked_replay_archive.as_deref())?;
         let session = Session::new(&config)?;
-        let chat = config.chat.as_ref().map(ChatRelay::new).transpose()?;
-        let studio = config
-            .studio
-            .as_ref()
-            .map(crate::studio::StudioRelay::new)
-            .transpose()?;
         let state = Rc::new(State {
             chat,
             session: RefCell::new(session),
@@ -968,8 +996,7 @@ impl Host {
     ) -> Result<WorkspaceReply, Rejection> {
         if let Some(relay) = self
             .state
-            .chat
-            .as_ref()
+            .chat_relay()
             .filter(|relay| relay.workspace_persistence)
         {
             return relay.workspace(request, deadline);
@@ -1023,6 +1050,7 @@ impl Host {
         }
         self.studio
             .as_ref()
+            .map(shared::<StudioRelay>)
             .ok_or(Rejection::Unavailable)?
             .dispatch(header, body, &self.config.nodes, context.deadline)
     }
@@ -1036,8 +1064,7 @@ impl Host {
         admit(header, context).map_err(|_| Rejection::Denied)?;
         let relay = self
             .state
-            .chat
-            .as_ref()
+            .chat_relay()
             .filter(|relay| relay.workspace_persistence)
             .ok_or(Rejection::Unavailable)?;
         if ChatRunRequest::is_destination(header.route().destination()) {
@@ -1054,4 +1081,12 @@ impl Host {
         }
         history::dispatch(relay, header, body, context.deadline)
     }
+
+    pub(crate) fn assets(&self) -> &Assets {
+        shared(&self.assets)
+    }
+}
+
+fn shared<T>(provider: &Singleton<T>) -> &T {
+    provider.acquire().unwrap_or_else(|never| match never {})
 }

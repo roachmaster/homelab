@@ -247,6 +247,28 @@ fn duplicate_project_configuration_does_not_publish_readiness() {
 
 #[cfg(unix)]
 #[test]
+fn rejected_gateway_registration_leaves_managed_workspace_unopened() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    fs::set_permissions(&fixture.project, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut config = fixture.server_config();
+    config["projects"][0]["managed_writes"] = json!(true);
+    config["bind"] = json!("192.0.2.1:0");
+    let path = fixture.config("invalid-listener.json", &config);
+    let mut command = binary();
+    command.arg("serve").arg("--config").arg(path);
+    let output = run(command, Duration::from_secs(5));
+    let error = failure(&output);
+    assert!(
+        error.contains("invalid HTTPS adapter configuration"),
+        "{error}"
+    );
+    assert!(!fixture.project.join(".forge-write-journal").exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn sigterm_and_sigint_stop_idle_agents_and_release_their_listeners() {
     use nix::sys::signal::Signal;
     let fixture = Fixture::new();

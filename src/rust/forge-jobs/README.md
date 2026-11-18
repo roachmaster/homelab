@@ -18,7 +18,9 @@ commit syncs a fresh snapshot, renames it into place, and syncs the
 directory before acknowledging the request. Reopening that directory
 recovers receipts, work and committed results.
 
-`Worker::start` begins the owned worker for that store. The first job sums
+`register_worker` stages a worker recipe that requires the store binding.
+After freeze, bind the acquired store to that recipe and create the owned
+worker. The first job sums
 the integers from one through a bounded input. Claiming assigns an attempt
 and a lease. An expired attempt can be claimed again within the configured
 retry budget. A cancelled or expired attempt cannot publish a result.
@@ -27,6 +29,23 @@ retry budget. A cancelled or expired attempt cannot publish a result.
 The store accepts a configured maximum of 4,096 records. Receipts remain
 available over restarts. The first implementation does not perform
 automatic retention or expiration of completed receipts.
+
+The Unix `forge-jobs` command is available through `forge-terminal`'s
+optional `durable-jobs` feature. Use an existing private directory owned by
+the current effective Unix user. The operator verifier derives the subject
+from that account, and the bridge checks the subject on every command. The
+store validates privacy on the directory handle it uses for job files.
+Run the foreground worker under the same account and point it at the same
+directory. A contested store returns a busy error to CLI requests after a
+short wait. The worker retries contention and joins on `SIGINT` or `SIGTERM`.
+
+```sh
+cargo build --manifest-path src/rust/Cargo.toml -p forge-terminal --features durable-jobs --bin forge-jobs
+src/rust/target/debug/forge-jobs JOB_DIRECTORY submit first 10
+src/rust/target/debug/forge-jobs JOB_DIRECTORY worker
+# From another terminal while the worker is running
+src/rust/target/debug/forge-jobs JOB_DIRECTORY status 1
+```
 
 Run the integration tests with a Rust toolchain that supports the
 standard library file locks.

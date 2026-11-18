@@ -1,4 +1,6 @@
 use crate::{JobError, JobStore};
+use forge_bootstrap::PreparedGroup;
+use forge_provider::Factory;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -15,6 +17,54 @@ pub struct WorkerConfig {
     pub retries: u32,
 }
 
+impl WorkerConfig {
+    fn validate(self) -> Result<(), JobError> {
+        if self.poll_interval.is_zero()
+            || self.poll_interval > Duration::from_secs(5)
+            || !(1000..=300_000).contains(&self.lease.as_millis())
+            || self.retries > 10
+        {
+            return Err(JobError::InvalidConfiguration);
+        }
+        Ok(())
+    }
+}
+
+pub struct WorkerRecipe(WorkerConfig);
+
+impl WorkerRecipe {
+    pub fn bind<S: JobStore>(self, store: Arc<S>) -> WorkerFactory<S> {
+        WorkerFactory {
+            store,
+            config: self.0,
+        }
+    }
+}
+
+pub struct WorkerFactory<S> {
+    store: Arc<S>,
+    config: WorkerConfig,
+}
+
+impl<S: JobStore> Factory<Worker> for WorkerFactory<S> {
+    type Error = JobError;
+
+    fn create(&self) -> Result<Worker, Self::Error> {
+        Worker::start(Arc::clone(&self.store), self.config)
+    }
+}
+
+pub fn register_worker(config: WorkerConfig) -> Result<PreparedGroup<WorkerRecipe>, JobError> {
+    config.validate()?;
+    Ok(PreparedGroup::new(
+        "durable.jobs.execution",
+        &["durable.jobs.worker"],
+        &["durable.jobs.store"],
+        WorkerRecipe(config),
+    )
+    .expect("fixed job worker group"))
+}
+
 /// Owns the worker thread and joins it before releasing its store.
 pub struct Worker {
     stop: Arc<AtomicBool>,
@@ -23,28 +73,37 @@ pub struct Worker {
 
 impl Worker {
     pub fn start<S: JobStore>(store: Arc<S>, config: WorkerConfig) -> Result<Self, JobError> {
-        if config.poll_interval.is_zero()
-            || config.poll_interval > Duration::from_secs(5)
-            || !(1000..=300_000).contains(&config.lease.as_millis())
-            || config.retries > 10
-        {
-            return Err(JobError::InvalidConfiguration);
-        }
+        config.validate()?;
         let stop = Arc::new(AtomicBool::new(false));
         let stopping = Arc::clone(&stop);
         let thread = thread::Builder::new()
             .name("forge-jobs".into())
             .spawn(move || {
                 while !stopping.load(Ordering::Acquire) {
-                    let Some(claim) =
-                        store.claim(now()?, config.lease.as_millis() as u64, config.retries)?
-                    else {
-                        thread::park_timeout(config.poll_interval);
-                        continue;
-                    };
-                    match store.finish(claim, now()?, claim.work.execute()) {
-                        Ok(()) | Err(JobError::StaleAttempt) => (),
+                    let claim = match store.claim(
+                        now()?,
+                        config.lease.as_millis() as u64,
+                        config.retries,
+                    ) {
+                        Ok(Some(claim)) => claim,
+                        Ok(None) | Err(JobError::StoreBusy) => {
+                            thread::park_timeout(config.poll_interval);
+                            continue;
+                        }
                         Err(error) => return Err(error),
+                    };
+                    let result = claim.work.execute();
+                    loop {
+                        match store.finish(claim, now()?, result) {
+                            Ok(()) | Err(JobError::StaleAttempt) => break,
+                            Err(JobError::StoreBusy) => {
+                                if stopping.load(Ordering::Acquire) {
+                                    break;
+                                }
+                                thread::park_timeout(config.poll_interval);
+                            }
+                            Err(error) => return Err(error),
+                        }
                     }
                 }
                 Ok(())

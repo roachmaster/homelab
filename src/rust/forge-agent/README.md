@@ -78,12 +78,13 @@ An empty project list supports node-only serving with the same registry type.
   a whole runtime-length alias catalog and stages **one `ProjectFactories` group**.
   It does not loop a type-growing `Registry<G>` at runtime, read roots or construct
   instances. `register_ide` is unchanged for individual consumers.
-- [`host`](src/host.rs) registers node, project and gateway factory groups, consumes
-  `freeze`, explicitly constructs instances, wraps them in `Singleton`, wires policy
-  and bridge routes, then opens/publishes the listener. A startup failure drops
-  previously created owned handles and publishes no `READY`/partial host.
-  Startup config/certificate reads are boundary I/O before registration; configured
-  roots are opened during factory creation, not during unauthorized requests.
+- [`host`](src/host.rs) registers node, project, Unix managed writer, and gateway
+  factory groups in one registry. After freeze, it constructs instances, retains
+  each writable project's writer in a `Singleton`, and wires policy and bridge
+  routes before publishing the listener. A startup failure drops previously
+  created handles without publishing `READY`. Startup config and certificate
+  reads happen at the configuration boundary. Configured roots and managed
+  journals open during factory creation.
 - [`dispatch`](src/dispatch.rs) owns the finite `AgentCommand`/result sums. Verified
   transport context feeds its shared bridge. Target, expiry, header route/version,
   operation permission and payload kind are checked; the inspect handler checks

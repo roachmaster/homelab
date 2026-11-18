@@ -1,15 +1,24 @@
 use crate::{check_token, Claim, JobError, JobId, JobStore, Owner, Receipt, State, Status, Work};
+use cap_std::{
+    ambient_authority,
+    fs::{Dir, OpenOptions},
+};
 use forge_bootstrap::PreparedGroup;
 use forge_provider::Factory;
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::TryLockError,
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::PathBuf,
+    thread,
+    time::{Duration, Instant},
 };
 
 const STORE_VERSION: u8 = 1;
 const SNAPSHOT_LIMIT: u64 = 4 * 1024 * 1024;
+const REQUEST_LOCK_WAIT: Duration = Duration::from_secs(1);
+const SNAPSHOT: &str = "jobs.json";
+const PENDING: &str = "jobs.pending";
 
 #[derive(Debug, Clone)]
 pub struct StoreConfig {
@@ -28,30 +37,64 @@ impl StoreConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct StoreFactory(StoreConfig);
+pub struct StoreFactory {
+    config: StoreConfig,
+    #[cfg(unix)]
+    owner: Option<u32>,
+}
 
 impl Factory<FileStore> for StoreFactory {
     type Error = JobError;
 
     fn create(&self) -> Result<FileStore, JobError> {
-        FileStore::open(self.0.clone())
+        #[cfg(unix)]
+        if let Some(owner) = self.owner {
+            return FileStore::open_checked(self.config.clone(), |directory| {
+                use cap_std::fs::MetadataExt;
+                let metadata = directory
+                    .dir_metadata()
+                    .map_err(|_| JobError::StoreUnavailable)?;
+                if metadata.uid() != owner || metadata.mode() & 0o077 != 0 {
+                    return Err(JobError::PrivateDirectoryRequired);
+                }
+                Ok(())
+            });
+        }
+        FileStore::open(self.config.clone())
     }
 }
 
 pub fn register_store(config: StoreConfig) -> Result<PreparedGroup<StoreFactory>, JobError> {
-    config.validate()?;
-    Ok(PreparedGroup::new(
-        "durable.jobs",
-        &["durable.jobs.store"],
-        &[],
-        StoreFactory(config),
+    prepare(StoreFactory {
+        config,
+        #[cfg(unix)]
+        owner: None,
+    })
+}
+
+/// Verify ownership and privacy on the same directory handle the store uses.
+#[cfg(unix)]
+pub fn register_private_store(
+    config: StoreConfig,
+    owner: u32,
+) -> Result<PreparedGroup<StoreFactory>, JobError> {
+    prepare(StoreFactory {
+        config,
+        owner: Some(owner),
+    })
+}
+
+fn prepare(factory: StoreFactory) -> Result<PreparedGroup<StoreFactory>, JobError> {
+    factory.config.validate()?;
+    Ok(
+        PreparedGroup::new("durable.jobs", &["durable.jobs.store"], &[], factory)
+            .expect("fixed job store group"),
     )
-    .expect("fixed job store group"))
 }
 
 #[derive(Debug)]
 pub struct FileStore {
-    directory: PathBuf,
+    directory: Dir,
     max_jobs: usize,
 }
 
@@ -74,70 +117,84 @@ struct Record {
 
 impl FileStore {
     pub fn open(config: StoreConfig) -> Result<Self, JobError> {
+        Self::open_checked(config, |_| Ok(()))
+    }
+
+    fn open_checked(
+        config: StoreConfig,
+        check: impl FnOnce(&Dir) -> Result<(), JobError>,
+    ) -> Result<Self, JobError> {
         config.validate()?;
-        let directory = config
-            .directory
-            .canonicalize()
+        let directory = Dir::open_ambient_dir(config.directory, ambient_authority())
             .map_err(|_| JobError::StoreUnavailable)?;
-        if !directory.is_dir() {
-            return Err(JobError::StoreUnavailable);
-        }
+        check(&directory)?;
         let store = Self {
             directory,
             max_jobs: config.max_jobs,
         };
-        store.access(|_| Ok(((), false)))?;
+        store.access(REQUEST_LOCK_WAIT, |_| Ok(((), false)))?;
         Ok(store)
     }
 
     fn access<T>(
         &self,
+        wait: Duration,
         apply: impl FnOnce(&mut Data) -> Result<(T, bool), JobError>,
     ) -> Result<T, JobError> {
-        let lock = OpenOptions::new()
+        let options = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .truncate(false)
-            .open(self.directory.join("jobs.lock"))
-            .map_err(|_| JobError::StoreUnavailable)?;
-        lock.lock().map_err(|_| JobError::StoreUnavailable)?;
-        let snapshot = self.directory.join("jobs.json");
-        let mut data = load(&snapshot)?;
+            .clone();
+        let lock = self
+            .directory
+            .open_with("jobs.lock", &options)
+            .map_err(|_| JobError::StoreUnavailable)?
+            .into_std();
+        let start = Instant::now();
+        loop {
+            match lock.try_lock() {
+                Ok(()) => break,
+                Err(TryLockError::WouldBlock) if start.elapsed() < wait => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(TryLockError::WouldBlock) => return Err(JobError::StoreBusy),
+                Err(_) => return Err(JobError::StoreUnavailable),
+            }
+        }
+        let mut data = load(&self.directory)?;
         let (result, changed) = apply(&mut data)?;
         if changed {
-            self.publish(&snapshot, &data)?;
+            self.publish(&data)?;
         }
         Ok(result)
     }
 
-    fn publish(&self, snapshot: &Path, data: &Data) -> Result<(), JobError> {
+    fn publish(&self, data: &Data) -> Result<(), JobError> {
         let encoded = serde_json::to_vec(data).map_err(|_| JobError::StoreUnavailable)?;
         if encoded.len() as u64 > SNAPSHOT_LIMIT {
             return Err(JobError::Capacity);
         }
-        let pending = self.directory.join("jobs.pending");
-        if let Err(error) = fs::remove_file(&pending) {
+        if let Err(error) = self.directory.remove_file(PENDING) {
             if error.kind() != io::ErrorKind::NotFound {
                 return Err(JobError::StoreUnavailable);
             }
         }
         let commit = || -> io::Result<()> {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&pending)?;
+            let mut file = self
+                .directory
+                .open_with(PENDING, OpenOptions::new().write(true).create_new(true))?;
             file.write_all(&encoded)?;
             file.sync_all()?;
-            fs::rename(&pending, snapshot)?;
-            File::open(&self.directory)?.sync_all()
+            self.directory.rename(PENDING, &self.directory, SNAPSHOT)?;
+            self.directory.open(".")?.sync_all()
         };
         commit().map_err(|_| JobError::StoreUnavailable)
     }
 }
 
-fn load(path: &Path) -> Result<Data, JobError> {
-    let file = match File::open(path) {
+fn load(directory: &Dir) -> Result<Data, JobError> {
+    let file = match directory.open(SNAPSHOT) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Ok(Data {
@@ -203,7 +260,7 @@ impl JobStore for FileStore {
         check_token(&owner.0)?;
         check_token(key)?;
         work.validate()?;
-        self.access(|data| {
+        self.access(REQUEST_LOCK_WAIT, |data| {
             if let Some(record) = data
                 .jobs
                 .iter()
@@ -239,11 +296,13 @@ impl JobStore for FileStore {
     }
 
     fn status(&self, owner: &Owner, id: JobId) -> Result<Status, JobError> {
-        self.access(|data| Ok((record(data, owner, id)?.status, false)))
+        self.access(REQUEST_LOCK_WAIT, |data| {
+            Ok((record(data, owner, id)?.status, false))
+        })
     }
 
     fn cancel(&self, owner: &Owner, id: JobId) -> Result<Status, JobError> {
-        self.access(|data| {
+        self.access(REQUEST_LOCK_WAIT, |data| {
             let record = record(data, owner, id)?;
             let changed = matches!(record.status.state, State::Queued | State::Running);
             if changed {
@@ -259,7 +318,7 @@ impl JobStore for FileStore {
         let max_attempts = retries
             .checked_add(1)
             .ok_or(JobError::InvalidConfiguration)?;
-        self.access(|data| {
+        self.access(Duration::ZERO, |data| {
             let mut changed = false;
             for record in &mut data.jobs {
                 if record.lease_until.is_some_and(|until| until <= now) {
@@ -295,14 +354,14 @@ impl JobStore for FileStore {
 
     fn renew(&self, claim: Claim, now: u64, lease: u64) -> Result<(), JobError> {
         let until = deadline(now, lease)?;
-        self.access(|data| {
+        self.access(Duration::ZERO, |data| {
             current(data, claim, now)?.lease_until = Some(until);
             Ok(((), true))
         })
     }
 
     fn finish(&self, claim: Claim, now: u64, result: u64) -> Result<(), JobError> {
-        self.access(|data| {
+        self.access(Duration::ZERO, |data| {
             let record = current(data, claim, now)?;
             record.status.state = State::Succeeded { result };
             record.lease_until = None;

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Ord, PartialOrd)]
 #[serde(rename_all = "kebab-case")]
+#[repr(u32)]
 pub(super) enum Asset {
     Manifest,
     RoomOne,
@@ -32,6 +33,10 @@ impl Asset {
             Self::TraversalYard => Some(2),
             _ => None,
         }
+    }
+
+    pub(super) fn read_code(self) -> u32 {
+        self as u32 + 1
     }
 
     fn limit(self) -> usize {
@@ -225,6 +230,26 @@ pub(super) struct Assets {
 }
 
 impl Assets {
+    pub(super) fn level_read(&self, slot: u32) -> Option<Asset> {
+        Some(if self.manifest.is_none() {
+            Asset::Manifest
+        } else {
+            Asset::from_wire(slot)?
+        })
+    }
+
+    pub(super) fn atlas_read(&self) -> Option<Asset> {
+        if self.manifest.is_none() {
+            Some(Asset::Manifest)
+        } else if !self.atlas_view.is_empty() {
+            None
+        } else if self.atlas.is_some() {
+            Some(Asset::ScoutAtlasImage)
+        } else {
+            Some(Asset::ScoutAtlas)
+        }
+    }
+
     pub(super) fn reserve(&mut self, asset: Asset, length: usize) -> u32 {
         self.upload = None;
         if !(1..=asset.limit()).contains(&length) {

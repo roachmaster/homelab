@@ -1,7 +1,9 @@
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
 use forge_ingress_contract::{AdmissionDenied, Envelope, Header};
-use forge_llama::{register_llama, register_routes, Config, Error, Operation, Reply, Request};
+use forge_llama::{
+    register_llama, register_routes, Config, Error, LlamaFactory, Operation, Reply, Request,
+};
 use forge_provider::{Factory, InstanceProvider, Singleton};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
@@ -202,28 +204,14 @@ impl Http {
 }
 
 fn worker(
-    config: Config,
-    stop: Arc<AtomicBool>,
+    factory: LlamaFactory,
     mut jobs: mpsc::Receiver<Job>,
     ready: std::sync::mpsc::SyncSender<Result<String, String>>,
 ) {
-    let setup = || -> Result<_, String> {
-        let group = register_llama("llama", config, stop).map_err(|error| format!("{error:?}"))?;
-        let frozen = Registry::new()
-            .register(group)
-            .map_err(|error| format!("{:?}", error.reason()))?
-            .freeze()
-            .map_err(|error| format!("{:?}", error.reason()))?;
-        frozen
-            .into_factories()
-            .1
-            .create()
-            .map_err(|error| error.to_string())
-    };
-    let provider = match setup() {
+    let provider = match factory.create() {
         Ok(driver) => Singleton::new(RefCell::new(driver)),
         Err(error) => {
-            let _ = ready.send(Err(error));
+            let _ = ready.send(Err(error.to_string()));
             return;
         }
     };
@@ -291,9 +279,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if port == 0 || port == config.backend_port {
         return Err("invalid listener port".into());
     }
+    let stop = Arc::new(AtomicBool::new(false));
+    let group =
+        register_llama("llama", config, stop.clone()).map_err(|error| format!("{error:?}"))?;
+    let ((), factory) = Registry::new()
+        .register(group)
+        .map_err(|error| format!("{:?}", error.reason()))?
+        .freeze()
+        .map_err(|error| format!("{:?}", error.reason()))?
+        .into_factories();
+
     let listener = std::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port))?;
     listener.set_nonblocking(true)?;
-    let stop = Arc::new(AtomicBool::new(false));
     let shutdown = Arc::new(Notify::new());
     ctrlc::set_handler({
         let stop = stop.clone();
@@ -308,10 +305,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
     let (send, receive) = mpsc::channel(1);
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
-    let worker = thread::spawn({
-        let stop = stop.clone();
-        move || worker(config, stop, receive, ready_tx)
-    });
+    let worker = thread::spawn(move || worker(factory, receive, ready_tx));
     let token = ready_rx.recv()??;
     let state = Arc::new(Http {
         jobs: send,

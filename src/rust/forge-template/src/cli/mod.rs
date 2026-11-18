@@ -6,8 +6,10 @@ mod input;
 mod io;
 mod task;
 
-use self::io::{ConsoleRequest, NativeConsoleClient, NativeSourceClient, ReadSource, SourceError};
+use self::io::{register_native_io, ConsoleRequest, ReadSource, SourceError};
+use forge_bootstrap::Registry;
 use forge_io_client::IoClient;
+use forge_provider::{Factory, InstanceProvider, Singleton};
 use std::{error::Error, ffi::OsString, fmt};
 
 #[derive(Debug)]
@@ -61,7 +63,30 @@ impl Error for CliError {
 /// write failure can still follow partial byte delivery. No task/client executes
 /// for help beyond the console operation that presents it.
 pub fn run(args: impl IntoIterator<Item = OsString>) -> u8 {
-    run_with(args, NativeSourceClient, &NativeConsoleClient)
+    let result = register_native_io()
+        .map_err(CliError::Registration)
+        .and_then(|group| {
+            Registry::new()
+                .register(group)
+                .map_err(|error| CliError::Registration(error.into_parts().2))?
+                .freeze()
+                .map_err(|error| CliError::Validation(error.into_parts().1))
+        });
+    let frozen = match result {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!("I/O setup failed: {error}");
+            return 1;
+        }
+    };
+    let ((), factory) = frozen.into_factories();
+    let (source, console) = factory.create().unwrap_or_else(|never| match never {});
+    let console = Singleton::new(console);
+    run_with(
+        args,
+        source,
+        console.acquire().unwrap_or_else(|never| match never {}),
+    )
 }
 fn run_with<C, O>(args: impl IntoIterator<Item = OsString>, source: C, console: &O) -> u8
 where

@@ -1,10 +1,12 @@
 //! Local llama.cpp lifecycle and typed Forge command bindings.
 mod driver;
+mod model_runtime;
 
 use forge_bootstrap::{PreparedGroup, RegistrationError};
 use forge_bridge::{DuplicateRoute, RegistryBuilder};
 use forge_ingress_contract::{Payload, RouteKey};
 use forge_provider::Factory;
+use model_runtime::NativeModelProvider;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -259,14 +261,15 @@ pub enum Reply {
 
 /// Staging is pure. Construction opens no listener and starts no process.
 pub struct LlamaFactory {
-    config: Config,
+    config: Arc<Config>,
     stop: Arc<AtomicBool>,
 }
 
 impl Factory<Driver> for LlamaFactory {
     type Error = Error;
     fn create(&self) -> Result<Driver, Error> {
-        Driver::new(self.config.clone(), self.stop.clone())
+        let runtime = NativeModelProvider::new(self.config.clone());
+        Driver::new(self.config.clone(), self.stop.clone(), runtime)
     }
 }
 
@@ -317,7 +320,11 @@ pub fn register_llama(
     {
         return Err(Registration::Config(Error::InvalidConfig));
     }
-    PreparedGroup::new(id, &[id], &[], LlamaFactory { config, stop }).map_err(Registration::Group)
+    let factory = LlamaFactory {
+        config: Arc::new(config),
+        stop,
+    };
+    PreparedGroup::new(id, &[id], &[], factory).map_err(Registration::Group)
 }
 
 fn valid_model(id: &str) -> bool {

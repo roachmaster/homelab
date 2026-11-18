@@ -209,6 +209,13 @@ and the existing local CLI retain their previous behavior. Remote acceptance
 depth is an independent policy (root 0 includes file leaves); a structurally valid
 local report may still exceed its remote policy/budget.
 
+On Unix, the `managed-writes` feature adds
+`assembly::register_managed_writers`. It accepts a map of `ProjectAlias` to
+`ManagedWriterConfig` and stages one typed catalog of `ManagedWriterFactory`
+values. The host creates writers after freeze. Factory creation checks workspace
+ownership and opens the journal. The agent keeps one writer per writable project
+for the life of the host.
+
 ## Revision-checked source reads
 
 Text and Rust-analysis-unavailable report entries now retain the SHA-256 of the
