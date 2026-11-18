@@ -1111,6 +1111,8 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Content-Type: text/html; charset=utf-8"));
         assert!(response.contains("Content-Security-Policy:"));
         assert!(response.contains("Forge IDE design"));
+        assert!(response.contains("href=\"/design/index.css\""));
+        assert!(response.contains("href=\"/design/forge-providers\">Forge plug-and-play</a>"));
         assert!(response.contains("href=\"/design/chat-dispatch\""));
         assert!(response.contains("href=\"/design/mail\""));
         assert!(response.contains("href=\"/design/game-studio\""));
@@ -1121,6 +1123,17 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("href=\"/playtest\">Room One playtest</a>"));
     }
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
+    assert!(request("GET", "/design/index.css").contains("Content-Type: text/css; charset=utf-8"));
+    for path in ["/design/forge-providers", "/design/forge-providers/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("Content-Security-Policy:"));
+        assert!(response.contains("<h1>Forge plug-and-play</h1>"));
+        assert!(response.contains("href=\"/design#forge-foundations\""));
+        assert!(!response.contains("<script"));
+    }
+    assert!(request("GET", "/design/forge-providers/unknown").starts_with("HTTP/1.1 404"));
     assert!(request("GET", "/design/previous-chats.js")
         .contains("Content-Type: text/javascript; charset=utf-8"));
     assert!(

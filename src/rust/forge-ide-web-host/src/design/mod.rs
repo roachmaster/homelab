@@ -23,7 +23,7 @@ html_names!(Tag {
     Form => "form", H1 => "h1", H2 => "h2", H3 => "h3", H4 => "h4",
     Img => "img", Input => "input", Label => "label", Li => "li", Nav => "nav",
     Ol => "ol", P => "p", Pre => "pre", Section => "section", Select => "select", Small => "small",
-    Span => "span", Strong => "strong", Summary => "summary", Table => "table", Textarea => "textarea",
+    Span => "span", Strong => "strong", Summary => "summary", Table => "table", Textarea => "textarea", Ul => "ul",
 });
 
 html_names!(Attribute {
@@ -58,6 +58,7 @@ macro_rules! element {
 }
 
 mod dispatch;
+mod forge_providers;
 mod forge_workers;
 mod game_asset_pipeline;
 pub mod game_engine;
@@ -102,6 +103,7 @@ fn render_element(
 
 pub enum DesignPage {
     Overview,
+    ForgeProviders,
     ChatHistory,
     ChatDispatch,
     Mail,
@@ -120,6 +122,12 @@ impl DesignPage {
     pub fn render(self) -> String {
         let (title, back_href, back_label, body) = match self {
             Self::Overview => ("Forge IDE design", "/", "Back to Forge", landing::BODY),
+            Self::ForgeProviders => (
+                "Forge plug-and-play · Forge IDE",
+                "/design#forge-foundations",
+                "Back to Design",
+                forge_providers::BODY,
+            ),
             Self::ChatHistory => (
                 "Previous chats technical design · Forge IDE",
                 "/design#previous-chats",
@@ -192,7 +200,10 @@ impl DesignPage {
             escape(title),
         );
         output.push_str(match self {
-            Self::Overview => "<script src=\"/design/previous-chats.js\" defer></script>",
+            Self::Overview => concat!(
+                "<link rel=\"stylesheet\" href=\"/design/index.css\">",
+                "<script src=\"/design/previous-chats.js\" defer></script>",
+            ),
             Self::GameStudio => "<link rel=\"stylesheet\" href=\"/design/game-studio.css\">",
             Self::Playtest => concat!(
                 "<link rel=\"stylesheet\" href=\"/playtest/style.css\">",
@@ -223,4 +234,8 @@ impl DesignPage {
         output.push_str("</main></body></html>\n");
         output
     }
+}
+
+pub fn index_stylesheet() -> String {
+    landing::stylesheet()
 }

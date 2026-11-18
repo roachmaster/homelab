@@ -5,9 +5,10 @@ description: Implement or review a reusable Forge capability's public typed conf
 
 # Expose a Forge capability
 
-Deliver an **importable capability**, not merely an example of how a consumer could
-reimplement its assembly. Read the [shared DSL](../../../docs/architecture/framework-dsl.md)
-for vocabulary and [provider wiring](../wire-forge-providers/SKILL.md) for scopes.
+Start with [Wire Forge Providers](../wire-forge-providers/SKILL.md) to establish
+the port, provider scope, and composition root. Use this skill to deliver the
+importable capability and prove it from an independent consumer. The
+[shared DSL](../../../docs/architecture/framework-dsl.md) defines the vocabulary.
 
 ## Workflow
 

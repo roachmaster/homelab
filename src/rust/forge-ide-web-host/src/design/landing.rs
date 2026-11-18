@@ -1,21 +1,135 @@
-use super::{text, Attribute, Node, Tag};
+use super::{markup, text, Attribute, Node, Tag};
+
+macro_rules! design_link {
+    ($path:literal, $title:literal, $description:literal) => {
+        element!(Li;
+            element!(A [Href = $path]; text($title)),
+            element!(P; text($description)),
+        )
+    };
+}
+
+const INDEX_STYLES: markup::Styles = &[
+    (
+        ".design-index",
+        &[
+            ("display", "grid"),
+            (
+                "grid-template-columns",
+                "repeat(auto-fit, minmax(min(100%, 27rem), 1fr))",
+            ),
+            ("align-items", "start"),
+            ("gap", "14px"),
+            ("margin-block-end", "clamp(1.8rem, 4vw, 3rem)"),
+        ],
+    ),
+    (
+        ".index-panel",
+        &[
+            ("min-inline-size", "0"),
+            ("scroll-margin-block-start", "16px"),
+            ("padding", "clamp(14px, 3vw, 22px)"),
+            ("border", "1px solid var(--border)"),
+            ("border-radius", "8px"),
+            ("background", "var(--surface)"),
+        ],
+    ),
+    (".index-panel h2", &[("font-size", "1.2rem")]),
+    (
+        ".index-panel ul",
+        &[
+            ("list-style", "none"),
+            ("margin", "6px 0 0"),
+            ("padding", "0"),
+        ],
+    ),
+    (".index-panel li", &[("padding-block-end", "10px")]),
+    (
+        ".index-panel li + li",
+        &[("border-block-start", "1px solid var(--border)")],
+    ),
+    (".index-panel li:last-child", &[("padding-block-end", "0")]),
+    (
+        ".index-panel li a",
+        &[
+            ("display", "inline-flex"),
+            ("align-items", "center"),
+            ("min-block-size", "44px"),
+            ("font-weight", "650"),
+            ("text-decoration", "none"),
+            ("text-underline-offset", "3px"),
+        ],
+    ),
+    (
+        ".index-panel li a:hover",
+        &[("text-decoration", "underline")],
+    ),
+    (
+        ".index-panel li p",
+        &[("color", "var(--muted)"), ("font-size", ".875rem")],
+    ),
+    (
+        ".index-foundation li:first-child",
+        &[
+            ("margin-block", "8px"),
+            ("padding-inline", "12px"),
+            ("border-inline-start", "2px solid var(--accent)"),
+            ("border-radius", "4px"),
+            ("background", "var(--raised)"),
+        ],
+    ),
+];
+
+pub(super) fn stylesheet() -> String {
+    markup::stylesheet(INDEX_STYLES)
+}
 
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Forge IDE design")),
-        element!(P; text("Chat and read-only Workbench wireframes, workspace recovery, inference dispatch, and proposals for Mail and the game runtime.")),
-        element!(Nav [Class = "section-nav", AriaLabel = "Design sections"];
-            element!(A [Href = "#previous-chats"]; text("Previous chats")),
-            element!(A [Href = "#phone"]; text("Phone")),
-            element!(A [Href = "#desktop"]; text("Desktop")),
-            element!(A [Href = "#data"]; text("Data flow")),
-            element!(A [Href = "/design/chat-dispatch"]; text("PostgreSQL dispatch")),
-            element!(A [Href = "/design/mail"]; text("Mail design")),
-            element!(A [Href = "/design/game-studio"]; text("Game engine design")),
-            element!(A [Href = "/design/game-physics"]; text("Game physics design")),
-            element!(A [Href = "/design/game-asset-pipeline"]; text("Game asset pipeline design")),
-            element!(A [Href = "/design/forge-workers"]; text("Forge worker design")),
-            element!(A [Href = "/playtest"]; text("Room One playtest")),
+        element!(P; text("Browse the architecture, feature designs, and interactive previews.")),
+        element!(Nav [Class = "section-nav", AriaLabel = "Jump to design topic"];
+            element!(A [Href = "#forge-foundations"]; text("Forge foundations")),
+            element!(A [Href = "#chat-and-mail"]; text("Chat and Mail")),
+            element!(A [Href = "#game-development"]; text("Game development")),
+            element!(A [Href = "#wireframes-and-workspace"]; text("Wireframes and workspace")),
+        ),
+    ),
+    element!(Nav [Class = "design-index", AriaLabel = "Design sections"];
+        element!(Section [Id = "forge-foundations", Class = "index-panel index-foundation", AriaLabelledby = "forge-foundations-title"];
+            element!(H2 [Id = "forge-foundations-title"]; text("Forge foundations")),
+            element!(Ul;
+                design_link!("/design/forge-providers", "Forge plug-and-play", "Start with typed ports, factory registration, provider scope, and substitution."),
+                design_link!("/design/forge-workers", "Forge worker design", "Main-thread rendering, Rust ownership, and JavaScript I/O."),
+                design_link!("/design/forge-workers/playtest", "Playtest worker flow", "Cooked asset requests, room handoff, and replay."),
+                design_link!("/design/forge-workers/studio", "Studio build worker flow", "Durable build attempts and preview publication."),
+            ),
+        ),
+        element!(Section [Id = "chat-and-mail", Class = "index-panel", AriaLabelledby = "chat-and-mail-title"];
+            element!(H2 [Id = "chat-and-mail-title"]; text("Chat and Mail")),
+            element!(Ul;
+                design_link!("#previous-chats", "Previous chats", "Try the saved chats menu, retention controls, and archive preview."),
+                design_link!("/design/chat-history", "Chat history data design", "Conversation storage, retention, and deletion contracts."),
+                design_link!("/design/chat-dispatch", "PostgreSQL dispatch", "Event-driven inference between Mission Control and Forge GPU."),
+                design_link!("/design/mail", "Mail design", "Background model replies and archived threads."),
+            ),
+        ),
+        element!(Section [Id = "game-development", Class = "index-panel", AriaLabelledby = "game-development-title"];
+            element!(H2 [Id = "game-development-title"]; text("Game development")),
+            element!(Ul;
+                design_link!("/design/game-studio", "Game engine design", "Runtime architecture, Studio builds, and previews."),
+                design_link!("/design/game-physics", "Game physics design", "Fixed ticks, collision, and animation ownership."),
+                design_link!("/design/game-asset-pipeline", "Game asset pipeline design", "Cooking, verified manifests, and asset handoff."),
+                design_link!("/playtest", "Room One playtest", "Play the browser demo and try the replay tools."),
+            ),
+        ),
+        element!(Section [Id = "wireframes-and-workspace", Class = "index-panel", AriaLabelledby = "wireframes-and-workspace-title"];
+            element!(H2 [Id = "wireframes-and-workspace-title"]; text("Wireframes and workspace")),
+            element!(Ul;
+                design_link!("#phone", "Phone wireframes", "Chat, Workbench, and Project options."),
+                design_link!("#desktop", "Desktop wireframes", "Chat and the Workbench file layout."),
+                design_link!("#data", "Workspace data flow", "Inspection admission and recovery across navigation."),
+            ),
         ),
     ),
     element!(Section [Id = "previous-chats", Class = "design-section", AriaLabelledby = "previous-chats-title"];

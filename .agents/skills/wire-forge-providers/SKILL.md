@@ -1,42 +1,73 @@
 ---
 name: wire-forge-providers
-description: Model or review Forge factory/provider dependency wiring, constructor injection, scopes, leases, typed registrars and bootstrap ownership. Keep provisioning separate from command routing; use for substitution, pooled resources and assembly failure questions.
+description: Start here for Forge plug-and-play. Use before designing, implementing, or reviewing a Forge capability, module, service, adapter, worker, or runtime dependency. Select implementations through typed registrars, wire factories and scoped providers into the normal host, and verify substitution and lifecycle.
 ---
 
 # Wire Forge providers
 
-**Provisional starter.** Read the [canonical DSL reference](../../../docs/architecture/framework-dsl.md); consult the [DI design](../../../docs/architecture/dependency-injection.md) for scope/Rust details. These repository-local documents distinguish existing source lessons from proposed APIs; report missing context rather than inventing syntax.
+Use this skill first for Forge plug-and-play work. Start at the actual executable,
+host factory, or browser bootstrap. Trace the dependency to its consumer before
+changing the wiring. A host should be able to select another implementation of
+the same typed port without changing business logic or request routing.
 
-## Workflow
+## Wire the normal application path
 
-1. Start with the consumer-owned port and actual requirement. Inspect supplied constructors/providers; names, fresh wrappers and one-call tests do not prove lifetime behavior.
-2. Separate factory creation, provider acquisition/reuse, lease ownership and bootstrap wiring. Prefer injecting a ready port, including typed `IoClient` interfaces into tasks; tasks must not resolve concrete I/O implementations from a registry. Inject a narrow factory/provider only for genuine runtime creation or acquisition; no handler service locator.
-3. Specify typed config/dependencies, default/override, scope, error and ownership transfer/borrowing. Host-shared is per assembly; transient may share captured state and is not request scope; OS-thread locality is not async request locality.
-4. Validate missing dependencies, duplicates, cycles and lifetime compatibility before factory effects/freeze. Construct in order, inject ports, finalize routing and establish actual readiness; never publish a partial host or silently fall back after construction failure.
-5. Assign cleanup: factory owns partial resources until transfer; host closes resources it owns after users stop. Preserve cleanup failures, handle outstanding leases and state whether admitted work finishes acquisition or is canceled. Grace exhaustion is not success.
+1. **Choose the port and scope.** Use the consumer-owned contract and record who
+   configures, constructs, acquires, and releases the dependency. Prefer an
+   existing typed port such as `IoClient`. Keep pure computation, domain values,
+   and contract-only crates free of provisioning. `Singleton` shares an instance
+   within one owner. `Transient` creates on acquisition and may share captured
+   dependencies. Define request or worker ownership explicitly when needed.
+2. **Stage the selected factory.** Bootstrap reads configuration and chooses
+   the implementation or explicit override. A registrar stages a cohesive
+   group of typed config and factory recipes. Registration may validate values
+   and identity metadata. File access, network binds, process starts, and worker
+   starts happen only after the startup plan validates and freezes. Choose the
+   override before construction so an unused default has zero effects.
+3. **Create and inject.** Call the selected factories in dependency order and
+   inject ready ports into consumers. Bind ready collaborators before creating
+   factories that need them. Pass a narrow factory or provider when the consumer
+   genuinely creates or acquires resources at runtime. Each worker gets its
+   owned dependencies or an explicit message port. Keep registries in bootstrap.
+4. **Own the lifetime.** A factory cleans up partial acquisition until it
+   transfers ownership. Establish readiness before opening admission. On
+   shutdown, stop admission and quiesce users before releasing their resources.
+   Define how outstanding leases, cancellation, and cleanup errors are handled.
+   Preserve typed request admission and routing when replacing a dependency.
 
-For registrar assembly, use the [implemented narrow protocol](../../../docs/architecture/bootstrap-registrars.md): bootstrap passes package-owned typed config and calls registrars; each stages one complete factory group without creating clients. The registry owns heterogeneous groups in a typed nested tuple with its metadata; a rejected registration returns the original builder and incoming group. Do not revive separately owned mutable slots or use `Any`, a global enum or dyn GAT provider lookup. Validate/freeze before construction; dependent task recipes bind ready client handles before yielding the existing zero-argument factory. Singleton creates once; transient retains its factory until acquisition. Verify group failure atomicity, unused-default zero calls and no partial publication. Full automatic graph execution and async lifecycle remain deferred.
+Use the [implemented registrar APIs](../../../docs/architecture/bootstrap-registrars.md)
+for typed registration, duplicate and required binding checks, and consuming
+freeze. Composition owns the explicit construction order and lifetime checks.
+Use the [DI reference](../../../docs/architecture/dependency-injection.md) for
+pooling, request scope, lease constraints, and failure recovery. The
+[DSL reference](../../../docs/architecture/framework-dsl.md) defines Forge terms.
 
-For pools, define capacity/exhaustion, exclusive/shared access, cancellation, retained/reset state, quarantine and close policy. Do not copy HPVS's `RefCell` pool into a concurrent async host. `Arc` does not fix that; borrowed generic leases are not automatically dyn-compatible; ordinary `Drop` cannot await reset/rollback. Use the detailed DI reference when these constraints matter.
+## Follow a working example
 
-For task/client wiring, choose a generic `IoClient` bound or a trait object with its request/response/error types fixed. Composition supplies concrete clients through constructors, optionally built by existing factories/providers; the task still owns business payload preparation. Substitute an in-memory client without changing the task and verify typed failures and call counts. Do not add a normal/library dependency between the `forge-task` and `forge-io-client` contract crates or make pure tasks acquire an I/O provider.
+- **Per-project instance** follows the [Agent assembly](../../../src/rust/forge-agent/src/host.rs).
+  It creates one managed writer per writable project after freeze.
+- **Host-scoped dependency** follows the [Portal host factory](../../../src/rust/forge-ide-web-host/src/service.rs).
+  It owns the selected asset source and relay instances.
+- **Runtime lease** follows the [model runtime provider](../../../src/rust/forge-llama/src/model_runtime.rs).
+  It holds a GPU reservation across model replacement and creates the selected child.
+- **Shared store and owned worker** follow the [durable jobs executable](../../../src/rust/forge-terminal/src/bin/forge-jobs.rs).
+  It selects the verifier, store, and worker recipe through explicit startup wiring.
+- **Browser I/O** follows the [Playtest wiring](../../../src/rust/forge-ide-web-host/README.md).
+  Rust issues and verifies typed resource requests. The page-scoped JavaScript
+  worker executes I/O and returns correlated results.
 
-Deliver **port → factory inputs → provider scope/lease → owner; assembly order/overrides; failures/cleanup; checks and gaps**. Keep roles as modules unless a real boundary justifies another crate.
+## Verify the wiring
 
-For the implemented [disk client](../../../src/rust/forge-kernel/README.md), registration validates explicit startup config without filesystem access; its factory validates the directory after freeze. Every creation owns a separate cwd. Singleton shares navigation deliberately; transient acquisition restarts at the configured path. Never use process-wide cwd as session state or claim the starting directory is a sandbox.
+Follow the normal entry point through registration, freeze, creation, and use.
+Prove the selected instance is used and that rejection occurs before the
+relevant effect. Where substitution or scope matters, exercise a second
+implementation or acquisition and check identity, reuse, and cleanup at the
+observable boundary. Use `make check-deps` when changing package or feature
+edges and a focused test for runtime behavior. Report the port, factory inputs,
+scope, owner, normal entry point, and checks actually run.
 
-For delivery of a reusable capability, use [Expose Forge Capability](../expose-forge-capability/SKILL.md): verify public library config/factory/registrar exports and a separate consumer import proof. Example-local assembly alone is not that deliverable.
-
-## Make lifetime and ownership reviewable
-
-For each selected dependency, record who configures it, who constructs the instance, who owns it, how long callers may use it and who releases it. Draw a construction sequence when order matters and a separate usage sequence when acquisition is part of a request. Use a class view only where the distinction among factory, provider, lease and client clarifies ownership or validity.
-
-Check a failed assembly or acquisition where the design depends on that guarantee. Specify whether the failure releases earlier resources, leaves the builder reusable, or prevents the application from being published. Use [Forge UML](../document-forge-uml/SKILL.md) for notation and evidence conventions.
-
-## Small example
-
-For explicitly requested pooled rendering sessions, decide whether pooling stays private to the rendering adapter or a use case needs a session port. A failed render can contaminate retained state: require reset/validation or quarantine and explicit async cleanup ownership if needed. Test exhaustion, reuse state, cancellation and close—not just successful acquisition.
-
-For a concrete local substitution, inspect `Application::bootstrap_with_node_registrar`: the application supplies typed node config to one selected registrar, freezes its `NodeFactories<F>` group, creates a client, owns it in a singleton and injects the unchanged `NodeTask`. A fake status provider is a substitution test, not proof of real remote health.
-
-Older Forge factories and HPVS operation freeze are source patterns, not a general DI container or service-graph validator. Keep typed payload/header routing unchanged by provider substitution. No runtime implementation or remote action is authorized by this skill alone.
+Use [Expose Forge Capability](../expose-forge-capability/SKILL.md) when shipping
+public config, factory, and registrar exports. Use [Model Forge Modules](../model-forge-module/SKILL.md)
+for capability design, [Trace Forge Commands](../trace-forge-command/SKILL.md)
+for admitted request flow, and [Forge UML](../document-forge-uml/SKILL.md) when
+the task calls for an ownership or construction diagram.

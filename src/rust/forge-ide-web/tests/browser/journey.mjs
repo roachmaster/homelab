@@ -1660,6 +1660,14 @@ async function designJourney(page, traffic) {
   await check(page.getByRole('heading', { level: 1, name: 'Forge IDE design', exact: true })).toBeVisible();
   await check(page.getByRole('heading', { name: 'Workspace recovery', exact: true })).toBeVisible();
   await check(page.getByRole('link', { name: 'Back to Forge', exact: true })).toHaveAttribute('href', '/');
+  const designIndex = page.getByRole('navigation', { name: 'Design sections' });
+  await check(designIndex.getByRole('heading', { level: 2 })).toHaveText([
+    'Forge foundations', 'Chat and Mail', 'Game development', 'Wireframes and workspace',
+  ]);
+  const providerLink = designIndex.getByRole('link').first();
+  await check(providerLink).toHaveText('Forge plug-and-play');
+  await check(providerLink).toHaveAttribute('href', '/design/forge-providers');
+  await check(providerLink).not.toHaveAttribute('target', /.+/);
   await check(page.locator('#phone figure.wireframe')).toHaveCount(3);
   await check(page.locator('#desktop figure.wireframe')).toHaveCount(2);
 
@@ -1682,6 +1690,10 @@ async function designJourney(page, traffic) {
     await page.setViewportSize(viewport);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
       'Design fits the phone viewport');
+    assert.equal(await designIndex.getByRole('region').evaluateAll(panels => {
+      const boxes = panels.map(panel => panel.getBoundingClientRect());
+      return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
+    }), true, 'design index categories stack on phones');
     assert.equal(await images.evaluateAll(nodes => nodes.every(node => {
       const image = node.getBoundingClientRect();
       return image.width > 0 && image.height > 0 && image.left >= -1 && image.right <= innerWidth + 1;
@@ -1698,6 +1710,28 @@ async function designJourney(page, traffic) {
     const right = second.getBoundingClientRect();
     return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
   }), true, 'desktop wireframe cards display side by side');
+  assert.equal(await designIndex.getByRole('region').evaluateAll(([first, second]) =>
+    first.offsetTop === second.offsetTop && first.offsetLeft < second.offsetLeft),
+  true, 'design index categories display side by side on desktop');
+  await providerLink.focus();
+  await check(providerLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  const providerUrl = new URL('/design/forge-providers', designUrl).href;
+  await check(page).toHaveURL(providerUrl);
+  assert.deepEqual(context.pages(), pages, 'the provider guide opens in the same tab');
+  await check(page.getByRole('heading', { level: 1 })).toHaveText('Forge plug-and-play');
+  await page.setViewportSize({ width: 375, height: 667 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+    'the provider guide fits the phone viewport');
+  const contents = page.getByRole('navigation', { name: 'On this page' });
+  await check(contents.getByRole('link')).toHaveText([
+    'Wiring sequence', 'Factory and provider roles', 'Working implementations', 'Verify a change',
+  ]);
+  await contents.getByRole('link', { name: 'Verify a change' }).click();
+  await check(page).toHaveURL(`${providerUrl}#verification`);
+  await check(page.locator('#verification')).toHaveText('Verify a change');
+  await page.getByRole('link', { name: 'Back to Design', exact: true }).click();
+  await check(page).toHaveURL(`${designUrl}#forge-foundations`);
   await previousChatsDesignJourney(page, designUrl);
   await gameEngineDesignJourney(page, designUrl);
   assert.deepEqual(counts(), before, 'Design does not send requests through the Forge gateway');

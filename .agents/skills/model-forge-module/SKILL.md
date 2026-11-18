@@ -7,6 +7,9 @@ description: Explain the evolving Forge composition DSL or model a capability/mo
 
 **Provisional starter.** Read the [canonical DSL reference](../../../docs/architecture/framework-dsl.md) for shared vocabulary and status labels. Keep this repository-local skill with that reference; if it is missing, report the gap rather than inventing a DSL.
 
+Start with [Wire Forge Providers](../wire-forge-providers/SKILL.md) when the
+module adds or changes a runtime dependency.
+
 ## Implemented task/client pattern
 
 [Task](../../../src/rust/forge-task/src/lib.rs) has associated `Input`, `Output`, `Error` and `run(&self, input)`. [IoClient](../../../src/rust/forge-io-client/src/lib.rs) has `Request`, `Response`, `Error` and `execute(&self, request)`. These synchronous contracts exist; the full composition DSL remains proposed. The contract crates have no normal dependency on each other. A consumer capability imports both only when its task uses clients; a pure task requires no I/O contract or envelope.

@@ -18,6 +18,9 @@ const NAMES: [(&str, &str); 5] = [
 ];
 const DESIGN_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design.html"));
 const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
+const DESIGN_INDEX_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design-index.css"));
+const FORGE_PROVIDERS_HTML: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/forge-providers.html"));
 const PREVIOUS_CHATS_JS: &[u8] = include_bytes!("../design/previous-chats.js");
 const CHAT_HISTORY_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/chat-history.html"));
 const CHAT_HISTORY_CSS: &[u8] = include_bytes!("../design/chat-history.css");
@@ -120,6 +123,10 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     match path {
         "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
         "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
+        "/design/index.css" => Some(("text/css; charset=utf-8", DESIGN_INDEX_CSS)),
+        "/design/forge-providers" | "/design/forge-providers/" => {
+            Some(("text/html; charset=utf-8", FORGE_PROVIDERS_HTML))
+        }
         "/design/previous-chats.js" => Some(("text/javascript; charset=utf-8", PREVIOUS_CHATS_JS)),
         "/design/chat-history" | "/design/chat-history/" => {
             Some(("text/html; charset=utf-8", CHAT_HISTORY_HTML))

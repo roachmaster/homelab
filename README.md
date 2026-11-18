@@ -4,6 +4,8 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 
 ## Forge framework portfolio
 
+Start Forge capability and adapter work with [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md).
+
 - [Documentation index](docs/README.md): observed repository findings versus proposed architecture.
 - [16 repository reviews](docs/reviews/forge/README.md): reusable ideas, risks, and boundaries.
 - [Framework blueprint and assembly model](docs/architecture/forge-framework-blueprint.md).
@@ -195,6 +197,14 @@ M07 describes the implemented local counter lifecycle. The generic module/interf
 
 Repository skills live separately from application code in `.agents/skills/`.
 
+### Start here for Forge plug-and-play
+
+Use [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md) first
+when adding, changing, or reviewing a Forge capability or runtime dependency.
+It connects typed ports, factories, provider scopes, and startup wiring, with
+working examples from the Agent, Portal, model runtime, and durable jobs.
+
+`Use $wire-forge-providers to add this capability and prove that the normal host selects and injects its provider.`
 
 ### Explicit workflow skills
 
@@ -215,7 +225,6 @@ license and pinned reconstruction provenance.
 - [Test Forge UI](.agents/skills/test-forge-ui/SKILL.md): reuse the existing real-browser QA harness, inspect rendered and keyboard behavior, and distinguish real-agent evidence from controlled probes.
 - [Design Forge Front Door](.agents/skills/design-forge-front-door/SKILL.md): preserve one HTTP gateway and header-selected destinations, with current versus future method semantics.
 - [Trace Forge Commands](.agents/skills/trace-forge-command/SKILL.md): follow typed header-directed admission, handlers and effects.
-- [Wire Forge Providers](.agents/skills/wire-forge-providers/SKILL.md): specify typed factories, acquisition scopes, leases and lifecycle wiring.
 - [Expose Forge Capability](.agents/skills/expose-forge-capability/SKILL.md): deliver public config/factory/registrar exports with an independent consumer proof, not example-only integration.
 
 The framework-specific skills share one [DSL semantic reference](docs/architecture/framework-dsl.md). Keep these repository-local skills with their linked documentation; the broader DSL is an evolving Rust-embedded composition model, not an implemented parser; the linked core documents its real public API subset.
@@ -232,7 +241,5 @@ Examples: `Use $model-forge-module to explain the DSL and model a notifications 
 `Use $design-forge-front-door to review a new destination or input adapter without adding per-task endpoints.`
 
 `Use $trace-forge-command to trace this request and identify rejection before effects.`
-
-`Use $wire-forge-providers to specify the provider scope and cleanup for this dependency.`
 
 `Use $design-package-boundaries to review this feature and propose cohesive packages, dependency rules, and a safe migration plan.`
