@@ -28,6 +28,7 @@ class ListThreads:
     archived: bool
     limit: int
     cursor: str | None
+    include_metadata: bool = False
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class OpenThread:
     thread_id: UUID
     limit: int
     after_sequence: int
+    include_metadata: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,24 +85,32 @@ def _limit(value, maximum):
     raise Rejected(400, "invalid_request")
 
 
+def _include_metadata(body):
+    value = body.get("include_metadata", False)
+    if type(value) is not bool:
+        raise Rejected(400, "invalid_request")
+    return value
+
+
 def decode(route, correlation, body):
     if not isinstance(body, dict) or body.get("request_id") != correlation:
         raise Rejected(400, "invalid_request")
     base = {"kind", "request_id"}
     kind = body.get("kind")
-    if route is Destination.LIST and kind == "mail_list" and body.keys() <= base | {"archived", "limit", "cursor"}:
+    if route is Destination.LIST and kind == "mail_list" and body.keys() <= base | {"archived", "limit", "cursor", "include_metadata"}:
         archived, cursor = body.get("archived", False), body.get("cursor")
         if (type(archived) is not bool
                 or (cursor is not None and (not isinstance(cursor, str) or not 1 <= len(cursor) <= 128))):
             raise Rejected(400, "invalid_request")
-        return ListThreads(archived, _limit(body.get("limit", 20), 50), cursor)
+        return ListThreads(archived, _limit(body.get("limit", 20), 50), cursor, _include_metadata(body))
     if route is Destination.OPEN and kind == "mail_open":
         required = base | {"thread_id"}
-        if required <= body.keys() <= required | {"limit", "after_sequence"}:
+        if required <= body.keys() <= required | {"limit", "after_sequence", "include_metadata"}:
             after = body.get("after_sequence", 0)
             if type(after) is not int or not 0 <= after <= common.MAX_REVISION:
                 raise Rejected(400, "invalid_request")
-            return OpenThread(common.parse_chat_id(body["thread_id"]), _limit(body.get("limit", 10), 20), after)
+            return OpenThread(common.parse_chat_id(body["thread_id"]), _limit(body.get("limit", 10), 20),
+                              after, _include_metadata(body))
     if route is Destination.SEND and kind == "mail_send":
         required = base | {"thread_id", "content", "idempotency_key"}
         if body.keys() in (required | {"subject"}, required | {"expected_revision"}):
@@ -131,6 +141,9 @@ def dispatch(route, correlation, command):
     if route is Destination.LIST and isinstance(command, ListThreads):
         with queue.transaction() as cursor:
             page = mail_store.list_threads(cursor, queue.OWNER, command.limit, command.cursor, command.archived)
+        if not command.include_metadata:
+            page = {**page, "items": [{key: value for key, value in item.items() if key != "preview"}
+                                      for item in page["items"]]}
         return HTTPStatus.OK, common.envelope("mail_listed", correlation, **page)
     if route is Destination.OPEN and isinstance(command, OpenThread):
         with queue.transaction() as cursor:
@@ -138,6 +151,11 @@ def dispatch(route, correlation, command):
             page = mail_store.open_thread(cursor, queue.OWNER, command.thread_id, command.limit, command.after_sequence)
         if page is None:
             raise Rejected(404, "not_found")
+        if not command.include_metadata:
+            page = {**page,
+                    "thread": {key: value for key, value in page["thread"].items() if key != "preview"},
+                    "messages": [{key: value for key, value in item.items() if key != "created_at"}
+                                 for item in page["messages"]]}
         return HTTPStatus.OK, common.envelope("mail_opened", correlation, **page)
     try:
         if route is Destination.SEND and isinstance(command, Send):

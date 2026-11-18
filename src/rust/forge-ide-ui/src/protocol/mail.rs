@@ -4,12 +4,17 @@ use serde::{Deserialize, Serialize};
 pub const MAX_MAIL_SUBJECT_BYTES: usize = 120;
 pub const MAX_MAIL_DRAFT_BYTES: usize = 4096;
 const MAX_MAIL_REPLY_BYTES: usize = 32 * 1024;
+const MAX_MAIL_PREVIEW_BYTES: usize = 1024;
 const MAX_MAIL_CURSOR_BYTES: usize = 128;
 const MAX_MAIL_SEQUENCE: u64 = 9_007_199_254_740_991;
 const DEFAULT_MAIL_THREADS: usize = 20;
 const MAX_MAIL_THREADS: usize = 50;
 const DEFAULT_MAIL_MESSAGES: usize = 10;
 const MAX_MAIL_MESSAGES: usize = 20;
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -22,6 +27,8 @@ pub enum MailRequest {
         limit: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        include_metadata: bool,
     },
     MailOpen {
         request_id: String,
@@ -30,6 +37,8 @@ pub enum MailRequest {
         limit: Option<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         after_sequence: Option<u64>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        include_metadata: bool,
     },
     MailSend {
         request_id: String,
@@ -162,6 +171,9 @@ pub struct MailThreadSummary {
     pub revision: u64,
     pub latest_run_id: String,
     pub archive_reason: Option<MailArchiveReason>,
+    /// Bounded plain-text excerpt supplied by the store; older relays omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 impl MailThreadSummary {
@@ -173,6 +185,9 @@ impl MailThreadSummary {
             && self.turn_count <= MAX_MAIL_SEQUENCE
             && (1..=MAX_MAIL_SEQUENCE).contains(&self.revision)
             && (self.status == MailStatus::Archived) == self.archive_reason.is_some()
+            && self.preview.as_ref().is_none_or(|preview| {
+                preview.len() <= MAX_MAIL_PREVIEW_BYTES && !preview.chars().any(char::is_control)
+            })
     }
 }
 
@@ -219,6 +234,9 @@ pub struct MailMessage {
     pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<MailFinishReason>,
+    /// Actual admission/completion timestamp; absent when the source has no date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -318,6 +336,9 @@ impl MailResponse {
                         }
                         previous = message.sequence;
                         (message.finish_reason.is_none() || message.role == ChatRole::Assistant)
+                            && message.created_at.as_ref().is_none_or(|stamp| {
+                                valid_chat_text(stamp, 80) && !stamp.chars().any(char::is_control)
+                            })
                             && valid_chat_text(
                                 &message.content,
                                 match message.role {
@@ -378,5 +399,133 @@ impl MailNavigationSnapshot {
                 .draft
                 .chars()
                 .all(|c| !c.is_control() || matches!(c, '\r' | '\n' | '\t'))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const THREAD: &str = "8452b258-df30-4985-bfa1-cd98245b2a06";
+    const RUN: &str = "b9b570aa-775d-4c25-b4ac-c122e292e2c3";
+
+    fn summary() -> serde_json::Value {
+        json!({
+            "thread_id": THREAD, "subject": "Mail fixture", "status": "ready",
+            "updated_at": "2026-11-18T12:00:00Z", "turn_count": 1, "revision": 2,
+            "latest_run_id": RUN, "archive_reason": null
+        })
+    }
+
+    #[test]
+    fn previews_are_optional_bounded_plain_text() {
+        let request = MailRequest::MailList {
+            request_id: "list".into(),
+            archived: false,
+            limit: None,
+            cursor: None,
+            include_metadata: true,
+        };
+        let mut item = summary();
+        for preview in [
+            None,
+            Some("A real excerpt".to_owned()),
+            Some("🚀".repeat(256)),
+        ] {
+            if let Some(preview) = preview {
+                item["preview"] = preview.into();
+            } else {
+                item.as_object_mut().unwrap().remove("preview");
+            }
+            let response: MailResponse = serde_json::from_value(json!({
+                "kind": "mail_listed", "request_id": "list", "items": [item.clone()], "next_cursor": null
+            })).unwrap();
+            assert!(response.is_valid_for(&request));
+        }
+        for preview in ["🚀".repeat(257), "Not\na plain preview".into()] {
+            item["preview"] = preview.into();
+            let response: MailResponse = serde_json::from_value(json!({
+                "kind": "mail_listed", "request_id": "list", "items": [item.clone()], "next_cursor": null
+            })).unwrap();
+            assert!(!response.is_valid_for(&request));
+        }
+    }
+
+    #[test]
+    fn message_dates_accept_older_relays_and_reject_oversized_or_control_text() {
+        let request = MailRequest::MailOpen {
+            request_id: "open".into(),
+            thread_id: THREAD.into(),
+            limit: None,
+            after_sequence: None,
+            include_metadata: true,
+        };
+        let mut message = json!({"sequence": 1, "role": "user", "content": "Mail question"});
+        for stamp in [
+            None,
+            Some("2026-11-18T12:00:00Z".to_owned()),
+            Some("x".repeat(81)),
+            Some("date\nline".into()),
+        ] {
+            let valid = stamp
+                .as_ref()
+                .is_none_or(|value| value.len() <= 80 && !value.contains('\n'));
+            if let Some(stamp) = stamp {
+                message["created_at"] = stamp.into();
+            } else {
+                message.as_object_mut().unwrap().remove("created_at");
+            }
+            let mut thread = summary();
+            thread["context_remaining_tokens"] = 1024.into();
+            let response: MailResponse = serde_json::from_value(json!({
+                "kind": "mail_opened", "request_id": "open", "thread": thread,
+                "messages": [message.clone()], "next_sequence": null
+            }))
+            .unwrap();
+            assert_eq!(response.is_valid_for(&request), valid);
+        }
+    }
+
+    #[test]
+    fn metadata_negotiation_is_optional_and_typed() {
+        for (kind, mut value) in [
+            (
+                "mail_list",
+                json!({"kind": "mail_list", "request_id": "request"}),
+            ),
+            (
+                "mail_open",
+                json!({"kind": "mail_open", "request_id": "request", "thread_id": THREAD}),
+            ),
+        ] {
+            let request: MailRequest = serde_json::from_value(value.clone()).unwrap();
+            assert!(request.is_valid());
+            assert_eq!(
+                serde_json::to_value(request)
+                    .unwrap()
+                    .get("include_metadata"),
+                None,
+                "{kind}"
+            );
+            value["include_metadata"] = true.into();
+            let request: MailRequest = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(
+                serde_json::to_value(request).unwrap()["include_metadata"],
+                true
+            );
+            value["include_metadata"] = false.into();
+            let request: MailRequest = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(
+                serde_json::to_value(request)
+                    .unwrap()
+                    .get("include_metadata"),
+                None
+            );
+            for invalid in [json!(1), json!("true"), json!(null)] {
+                value["include_metadata"] = invalid;
+                assert!(serde_json::from_value::<MailRequest>(value.clone()).is_err());
+            }
+        }
     }
 }

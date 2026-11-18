@@ -95,14 +95,15 @@ pub fn ide_document() -> Document {
             ]),
             component!(screen "mail", "Mail", true; [
                 component!(reading_column [
-                    component!(toolbar [
-                        component!(navigation "mail-folders", "Mail folders"; [
-                            component!(button "mail-inbox", "Inbox", "mail_inbox"),
-                            component!(button "mail-archive", "Archive", "mail_archive"),
+                    component!(region "mail-toolbar"; [
+                        component!(toolbar [
+                            component!(navigation "mail-folders", "Mail folders"; [
+                                component!(button "mail-inbox", "Inbox", "mail_inbox"),
+                                component!(button "mail-archive", "Archive", "mail_archive"),
+                            ]),
+                            component!(primary_icon "mail-back", "Back to threads", "mail_back", '←'),
+                            component!(primary_icon "mail-refresh", "Refresh Mail", "mail_refresh", '↻'),
                         ]),
-                        component!(button "mail-back", "← Back to threads", "mail_back"),
-                        component!(primary_icon "mail-refresh", "Refresh Mail", "mail_refresh", '↻'),
-                        component!(primary "mail-new", "New message", "mail_new_message"),
                     ]),
                     component!(status "mail-status", ""),
                     component!(reader_layout [
@@ -118,8 +119,8 @@ pub fn ide_document() -> Document {
                                 component!(transcript "mail-transcript", "Mail messages", "You", "Forge",
                                     "Send a message to start this conversation."),
                                 component!(caption "mail-context", ""),
-                                component!(row [
-                                    component!(primary "mail-follow-up", "Follow up", "mail_follow_up"),
+                                component!(region "mail-reply-bar"; [
+                                    component!(toggle_panel "mail-follow-up", "Reply to thread…", "mail_follow_up", "mail-composer"),
                                     component!(uuid_button "mail-retry", "Retry saved message", "retry_mail", "mail-draft", "idempotency_key"),
                                 ]),
                             ]),
@@ -129,7 +130,7 @@ pub fn ide_document() -> Document {
                                     component!(caption "mail-recipient", "To · GPT-OSS 120B"),
                                     component!(text_field "mail-subject", "Subject", "set_mail_subject"),
                                 ]),
-                                component!(textarea "mail-draft", "Message", "set_mail_draft"),
+                                component!(textarea "mail-draft", "Message", "set_mail_draft", "Write your message…"),
                                 component!(row [
                                     component!(uuid_button "mail-send", "Send", "send_mail", "mail-draft", "idempotency_key"),
                                     component!(button "mail-discard", "Discard draft", "mail_discard_draft"),
@@ -143,6 +144,7 @@ pub fn ide_document() -> Document {
                             component!(button "mail-next", "Next page", "mail_next"),
                         ]),
                     ]),
+                    component!(toggle_panel "mail-new", "Compose", "mail_new_message", "mail-composer"),
                 ]),
             ]),
             component!(screen "workbench", "Read-only workbench", true; [

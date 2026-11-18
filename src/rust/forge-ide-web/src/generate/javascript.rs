@@ -285,8 +285,29 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       select.setAttribute('aria-level',String(row.depth+1));select.setAttribute('aria-selected',String(row.selected));
       if(row.expanded===null)select.removeAttribute('aria-expanded');else select.setAttribute('aria-expanded',String(row.expanded));
       select.children[0].textContent=row.glyph||'';select.children[1].textContent=row.label;select.children[2].textContent=row.secondary;
+      const correspondence=row.correspondence;
+      let metadata=select.querySelector(':scope > .fg-correspondence-meta');
+      let preview=select.querySelector(':scope > .fg-correspondence-preview');
+      if(correspondence){
+        item.dataset.correspondence='true';select.dataset.correspondence='true';select.dataset.ready=String(correspondence.ready===true);
+        if(!metadata){
+          metadata=document.createElement('span');metadata.className='fg-correspondence-meta';
+          const dot=document.createElement('span');dot.className='fg-correspondence-dot';dot.setAttribute('aria-hidden','true');
+          const sender=document.createElement('span');sender.className='fg-correspondence-sender';
+          const time=document.createElement('span');time.className='fg-correspondence-time';
+          metadata.append(dot,sender,time);select.append(metadata);
+        }
+        metadata.children[0].title=correspondence.status;
+        metadata.children[1].textContent=correspondence.sender;metadata.children[2].textContent=correspondence.timestamp;
+        if(!preview){preview=document.createElement('span');preview.className='fg-correspondence-preview';select.append(preview);}
+        preview.textContent=correspondence.preview;
+      }else{
+        delete item.dataset.correspondence;delete select.dataset.correspondence;delete select.dataset.ready;
+        metadata?.remove();preview?.remove();
+      }
       const description=n.classList?.contains('fg-stacked-tree')?row.secondary:row.kind_label;
-      select.setAttribute('aria-label',description?row.label+', '+description:row.label);select.title=row.label;
+      const accessible=correspondence?[row.label,correspondence.sender,correspondence.status,correspondence.timestamp].filter(Boolean).join(', '):description?row.label+', '+description:row.label;
+      select.setAttribute('aria-label',accessible);select.title=row.label;
       // Preserve stable rows and their scroll anchor; moving every existing node
       // would transiently reorder the list even when its accepted order is unchanged.
       const at=n.children[rowIndex++];if(at!==item)n.insertBefore(item,at||null);
@@ -324,9 +345,36 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       const role=message.role==='user'?'user':'assistant';
       node.dataset.role=role;
       const label=role==='user'?n.dataset.transcriptUser:b.assistant_label??n.dataset.transcriptAssistant;
-      node.children[0].textContent=label??'';
+      const heading=node.children[0];
+      const header=message.header;
+      let recipient=node.querySelector(':scope > .fg-message-recipient');
+      if(header){
+        node.dataset.correspondence='true';heading.className='fg-correspondence-header';
+        if(!heading.querySelector('.fg-correspondence-avatar')){
+          const avatar=document.createElement('span');avatar.className='fg-correspondence-avatar';avatar.setAttribute('aria-hidden','true');
+          const sender=document.createElement('span');sender.className='fg-correspondence-sender';
+          const time=document.createElement('span');time.className='fg-correspondence-time';
+          heading.replaceChildren(avatar,sender,time);
+        }
+        heading.children[0].textContent=header.monogram;heading.children[1].textContent=header.sender;
+        heading.children[2].textContent=header.timestamp??'';heading.children[2].hidden=!header.timestamp;
+        if(!recipient){
+          recipient=document.createElement('details');recipient.className='fg-message-recipient';
+          const summary=document.createElement('summary');
+          const addresses=document.createElement('dl');
+          const from=document.createElement('dt');from.textContent='From';
+          const sender=document.createElement('dd');
+          const to=document.createElement('dt');to.textContent='To';
+          const destination=document.createElement('dd');
+          addresses.append(from,sender,to,destination);recipient.append(summary,addresses);node.append(recipient);
+        }
+        recipient.children[0].textContent='To '+header.recipient;
+        recipient.children[1].children[1].textContent=header.sender;recipient.children[1].children[3].textContent=header.recipient;
+      }else{
+        delete node.dataset.correspondence;heading.className='';heading.textContent=label??'';recipient?.remove();
+      }
       const previous=node.children[1];
-      const existingNotice=node.children[2];
+      const existingNotice=node.querySelector(':scope > .fg-message-notice');
       if(typeof message.notice==='string'){
         const notice=existingNotice||document.createElement('p');
         notice.className='fg-message-notice';
@@ -344,6 +392,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       }else{
         transcriptViews.delete(node);
         const body=previous.tagName==='P'?previous:document.createElement('p');
+        body.className='fg-message-body';
         if(body.textContent!==message.content)body.textContent=message.content;
         if(body!==previous)previous.replaceWith(body);
       }
@@ -459,6 +508,9 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){
+    const controlled=element(focus.getAttribute?.('aria-controls'));
+    const revealedInput=visible(controlled)&&[...controlled.querySelectorAll('textarea,input,select')].find(n=>!n.disabled&&visible(n));
+    if(revealedInput){revealedInput.focus({preventScroll:true});return;}
     const footerControl=priorFooter&&[...priorFooter.querySelectorAll(':is(textarea,input,button):not(:disabled)')].find(visible);
     let target=footerControl||(visible(priorTree)?priorTree.querySelector('.fg-row-select[tabindex="0"]')||priorTree:visible(priorPane)?element(priorPane.id+'-heading'):null);
     if(!target){

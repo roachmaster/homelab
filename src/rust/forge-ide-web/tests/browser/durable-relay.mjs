@@ -9,8 +9,9 @@ import { join } from 'node:path';
 
 const maxBytes = 2 * 1024 * 1024;
 export const mailSubject = 'Review ' + 'unbrokenSubject'.repeat(7);
+export const mailPreview = 'Subject: Fixture review. The mail reader preserves a useful preview, clear sender details, and the original message order. Please review the workspace and reply with your findings.';
 
-function mailThread(archived) {
+function mailThread(archived, includeMetadata = false) {
   return {
     thread_id: archived ? '56ad75f0-8cae-4766-b271-57620606c92d' : '8452b258-df30-4985-bfa1-cd98245b2a06',
     subject: archived ? 'Archived fixture thread' : mailSubject,
@@ -20,6 +21,7 @@ function mailThread(archived) {
     revision: 2,
     latest_run_id: 'b9b570aa-775d-4c25-b4ac-c122e292e2c3',
     archive_reason: archived ? 'context_limit' : null,
+    ...(includeMetadata ? { preview: mailPreview } : {}),
   };
 }
 
@@ -87,11 +89,11 @@ export async function startDurableRelay(prompt, reply) {
           return;
         }
         if (destination === 'ide.mail.list' && body.kind === 'mail_list') {
-          replyTo(200, { kind: 'mail_listed', items: [mailThread(body.archived === true)], next_cursor: null });
+          replyTo(200, { kind: 'mail_listed', items: [mailThread(body.archived === true, body.include_metadata === true)], next_cursor: null });
           return;
         }
         if (destination === 'ide.mail.open' && body.kind === 'mail_open') {
-          const thread = [mailThread(false), mailThread(true)].find(item => item.thread_id === body.thread_id);
+          const thread = [mailThread(false, body.include_metadata === true), mailThread(true, body.include_metadata === true)].find(item => item.thread_id === body.thread_id);
           if (!thread) {
             replyTo(404, { kind: 'mail_failed', code: 'not_found' });
             return;
@@ -99,8 +101,10 @@ export async function startDurableRelay(prompt, reply) {
           replyTo(200, { kind: 'mail_opened',
             thread: { ...thread, context_remaining_tokens: thread.status === 'archived' ? null : 1024 },
             messages: [
-              { sequence: 1, role: 'user', content: 'Review the fixture' },
-              { sequence: 2, role: 'assistant', content: '## Fixture review' },
+              { sequence: 1, role: 'user', content: 'Review the fixture',
+                ...(body.include_metadata === true ? { created_at: thread.status === 'archived' ? '2026-11-17T01:22:32Z' : '2026-11-16T22:10:32Z' } : {}) },
+              { sequence: 2, role: 'assistant', content: '## Fixture review\n\n' + mailPreview,
+                ...(body.include_metadata === true ? { created_at: thread.status === 'archived' ? '2026-11-17T01:23:54Z' : '2026-11-16T22:11:59Z' } : {}) },
             ],
             next_sequence: null,
           });

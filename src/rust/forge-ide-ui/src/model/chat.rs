@@ -483,6 +483,7 @@ impl Chats {
                         .map(|(index, message)| (message, chat.attachments.get(&index)))
                 })
                 .map(|(message, attachment)| TranscriptMessage {
+                    header: None,
                     role: message.role,
                     content: message.content.clone(),
                     notice: attachment.map(|file| {
@@ -509,6 +510,7 @@ impl Chats {
             });
             if !committed {
                 messages.messages.push(TranscriptMessage {
+                    header: None,
                     role: ChatRole::User,
                     content: waiting.prompt.clone(),
                     notice: None,

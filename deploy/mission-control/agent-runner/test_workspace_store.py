@@ -26,6 +26,10 @@ def transcript(prompt, reply):
     return [{"role": "user", "content": prompt}, {"role": "assistant", "content": reply}]
 
 
+def mail_contents(messages):
+    return [{key: value for key, value in message.items() if key != "created_at"} for message in messages]
+
+
 def fixture_prompt_tokens(messages):
     return 32 + sum(8 + len(item["content"].encode()) for item in messages)
 
@@ -112,6 +116,50 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.assertEqual(self.worker("next_model(%s)", [model]), model)
         return self.worker("claim(%s)", model)
 
+    @patch.object(store, "prompt_tokens", side_effect=fixture_prompt_tokens)
+    def test_mail_previews_and_message_dates_use_owned_message_sources(self, _tokens):
+        thread_id, second_id = uuid4(), uuid4()
+        receipt = store.admit_mail(thread_id, None, "Dated thread", "  First\n question  ", "first")
+        with store.transaction() as cursor:
+            cursor.execute("UPDATE forge_agent.runs SET created_at = %s WHERE id = %s",
+                           (datetime(2026, 11, 16, 22, 10, tzinfo=UTC), receipt["run_id"]))
+            initial = store.mail_store.list_threads(cursor, store.OWNER, 1, None, False)
+        self.assertEqual(initial["items"][0]["preview"], "First question")
+        self.assertEqual(self._mail_page(thread_id)["messages"][0]["created_at"], "2026-11-16T22:10:00Z")
+
+        job = self._claim_mail()
+        answer = "  Reply\n\n" + "🚀" * 300
+        self.assertTrue(self.worker("publish(%s, %s, %s)", job["run_id"], job["attempt_token"],
+                                    Json({"answer": answer, "finish_reason": "stop", "usage": {}})))
+        self.assertEqual(store.finalize_ready(), 1)
+        with store.transaction() as cursor:
+            cursor.execute("""UPDATE forge_agent.run_events SET recorded_at = %s
+                              WHERE run_id = %s AND event_type = 'completed'""",
+                           (datetime(2026, 11, 16, 22, 11, tzinfo=UTC), job["run_id"]))
+            cursor.execute("UPDATE forge_agent.mail_threads SET updated_at = %s WHERE id = %s",
+                           (datetime(2026, 11, 17, tzinfo=UTC), thread_id))
+        saved = self._mail_page(thread_id, limit=1)
+        self.assertEqual(saved["messages"][0]["created_at"], "2026-11-16T22:10:00Z")
+        self.assertEqual(saved["next_sequence"], 1)
+        reply = self._mail_page(thread_id, after=1)["messages"][0]
+        self.assertEqual(reply["created_at"], "2026-11-16T22:11:00Z")
+        self.assertNotEqual(reply["created_at"], saved["thread"]["updated_at"])
+        expected = " ".join(answer[:store.mail_store.MAX_PREVIEW_CHARS].split())
+        self.assertEqual(saved["thread"]["preview"], expected)
+        self.assertLessEqual(len(expected.encode()), 1024)
+
+        store.admit_mail(second_id, None, "Newest thread", "Unanswered request", "second")
+        with store.transaction() as cursor:
+            first_page = store.mail_store.list_threads(cursor, store.OWNER, 1, None, False)
+            second_page = store.mail_store.list_threads(cursor, store.OWNER, 1, first_page["next_cursor"], False)
+            self.assertEqual(first_page["items"][0]["thread_id"], second_id)
+            self.assertEqual(first_page["items"][0]["preview"], "Unanswered request")
+            self.assertEqual(second_page["items"][0]["thread_id"], thread_id)
+            self.assertEqual(second_page["items"][0]["preview"], expected)
+            self.assertIsNone(second_page["next_cursor"])
+            self.assertEqual(store.mail_store.list_threads(cursor, "other-owner", 20, None, False)["items"], [])
+            self.assertIsNone(store.mail_store.open_thread(cursor, "other-owner", thread_id, 20, 0))
+
     def test_repository_tool_progress_and_results_are_durable(self):
         command = store.Submit("gpt-oss-20b", (store.Message("user", "Inspect the readme"),),
                                256, 0.0, None, "tool-test", tool_repository="fixture",
@@ -168,7 +216,7 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.assertEqual(store.finalize_ready(), 1)
         self.assertEqual(store.finalize_ready(), 0)
         page = self._mail_page(thread_id, limit=1)
-        self.assertEqual(page["messages"], [{"sequence": 1, "role": "user", "content": first}])
+        self.assertEqual(mail_contents(page["messages"]), [{"sequence": 1, "role": "user", "content": first}])
         self.assertEqual(page["next_sequence"], 1)
         self.assertEqual(self._mail_page(thread_id, after=1)["messages"][0]["content"], answer["answer"])
         self.assertEqual(page["thread"]["status"], "ready")
@@ -235,10 +283,18 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.assertEqual(store.retry_mail(first["run_id"], "retry"), retry)
         page = self._mail_page(thread_id)
         self.assertEqual(page["thread"]["turn_count"], 1)
-        self.assertEqual(page["messages"], [
+        self.assertEqual(mail_contents(page["messages"]), [
             {"sequence": 1, "role": "user", "content": "Retry the original draft"},
             {"sequence": 2, "role": "assistant", "content": reply["answer"], "finish_reason": "length"},
         ])
+        with store.transaction() as cursor:
+            cursor.execute("SELECT created_at FROM forge_agent.runs WHERE id = %s", (first["run_id"],))
+            admitted = cursor.fetchone()["created_at"]
+            cursor.execute("""SELECT recorded_at FROM forge_agent.run_events
+                              WHERE run_id = %s AND event_type = 'completed'""", (retry["run_id"],))
+            completed = cursor.fetchone()["recorded_at"]
+        self.assertEqual(page["messages"][0]["created_at"], store.mail_store.history._timestamp(admitted))
+        self.assertEqual(page["messages"][1]["created_at"], store.mail_store.history._timestamp(completed))
         self.assertNotIn("failure_reason", page["thread"])
 
         store.admit_mail(thread_id, page["thread"]["revision"], None, "Abandoned failed draft", "failure")
@@ -269,7 +325,7 @@ class WorkspaceStoreTest(unittest.TestCase):
         self.assertEqual(page["thread"]["status"], "failed")
         self.assertEqual(page["thread"]["failure_reason"], "run_deadline_exceeded")
         self.assertEqual(page["thread"]["revision"], 2)
-        self.assertEqual(page["messages"], [
+        self.assertEqual(mail_contents(page["messages"]), [
             {"sequence": 1, "role": "user", "content": "Remain queued while Forge sleeps"},
         ])
 

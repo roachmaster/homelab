@@ -72,6 +72,37 @@ controls progressively so the user can read before managing the workspace.
 Verify this budget in the rendered phone view with the ordinary drawer closed;
 loading and actionable errors must still remain available.
 
+## Email view pattern
+
+Present Mail as correspondence with an inbox, a thread reader, and an explicit
+compose state. Use the existing Rust model and generated component contracts.
+
+- Use full-width inbox rows separated by hairline dividers. Show sender or
+  model identity and a compact date first, the subject next, then a bounded
+  one- or two-line body preview. Keep the entire row one keyboard-accessible
+  action. Wrap long subjects and clamp previews without causing page overflow.
+- Give Inbox and Archive a quiet underline treatment and an adjacent refresh
+  icon. Put Compose in a clearly labeled floating pill within the list view;
+  keep it out of the active thread's action bar.
+- Give thread reading a contextual Back control and only implemented actions.
+  Separate messages with dividers and show a sender monogram, sender name,
+  actual message date when available, and a native recipient disclosure.
+  Render the message body on the open canvas, preserving safe Markdown.
+- Dock a named Reply to thread action beneath the reader. Expand the existing
+  composer when selected, preserving draft, revision and submission identity.
+  Archived or busy threads must keep their actual capability limits.
+- Label status truthfully. A Reply ready dot is a generation status, not an
+  unread flag. Do not fabricate read tracking, inbox totals, message dates, or
+  previews from a subject line. Omit unavailable metadata. Forge's Archive
+  folder currently contains threads archived at the recall limit; a manual
+  Archive control requires an implemented mutation contract.
+
+Keep the compact global header and view navigation visible. Let the inbox or
+thread body own scrolling so long content does not cut off the tabs or hide
+the reply action. Preserve the desktop list-and-reader split and the phone's
+single active pane. Check real generated states on both before accepting the
+layout.
+
 ## Control the layout rhythm
 
 Use a centered responsive container around 960–1120px for portal launchers.

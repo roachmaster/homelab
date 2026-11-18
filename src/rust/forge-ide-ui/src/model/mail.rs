@@ -186,6 +186,7 @@ impl Mail {
                 self.list_page
                     .cursor_for(direction)
                     .map(|cursor| MailRequest::MailList {
+                        include_metadata: true,
                         request_id: id,
                         archived: self.archived,
                         limit: None,
@@ -197,6 +198,7 @@ impl Mail {
                 .page
                 .cursor_for(direction)
                 .map(|after_sequence| MailRequest::MailOpen {
+                    include_metadata: true,
                     request_id: id,
                     thread_id: self.reader.thread_id.clone(),
                     limit: None,
@@ -575,7 +577,14 @@ impl Mail {
                             })),
                 ),
                 ("mail-refresh", active && !composing),
-                ("mail-new", active && !composing),
+                ("mail-new", active && self.pane == Pane::List),
+                (
+                    "mail-reply-bar",
+                    active
+                        && reading
+                        && !self.follow_up
+                        && (self.can_follow_up() || failure.is_some()),
+                ),
                 ("mail-discard", active && composer),
                 (
                     "mail-status",
@@ -729,6 +738,17 @@ impl Mail {
                     .summaries
                     .iter()
                     .map(|summary| RowView {
+                        correspondence: Some(CorrespondenceRow {
+                            sender: "GPT-OSS 120B".into(),
+                            timestamp: format_updated_at(&summary.updated_at)
+                                .and_then(|value| {
+                                    value.split_once(',').map(|(date, _)| date.to_owned())
+                                })
+                                .unwrap_or_default(),
+                            preview: summary.preview.clone().unwrap_or_default(),
+                            status: status_text(summary.status).into(),
+                            ready: summary.status == MailStatus::Ready,
+                        }),
                         id: summary.thread_id.clone(),
                         label: summary.subject.clone(),
                         glyph: String::new(),
@@ -762,6 +782,27 @@ impl Mail {
                     .messages
                     .iter()
                     .map(|message| TranscriptMessage {
+                        header: Some(MessageHeader {
+                            sender: if message.role == ChatRole::User {
+                                "You"
+                            } else {
+                                "GPT-OSS 120B"
+                            }
+                            .into(),
+                            recipient: if message.role == ChatRole::User {
+                                "GPT-OSS 120B"
+                            } else {
+                                "You"
+                            }
+                            .into(),
+                            timestamp: message.created_at.as_deref().and_then(format_updated_at),
+                            monogram: if message.role == ChatRole::User {
+                                "Y"
+                            } else {
+                                "G"
+                            }
+                            .into(),
+                        }),
                         role: message.role,
                         content: message.content.clone(),
                         notice: message.finish_reason.map(|MailFinishReason::Length| {
@@ -820,4 +861,130 @@ fn format_updated_at(timestamp: &str) -> Option<String> {
     let day = day.parse::<u8>().ok()?.to_string();
     let clock = time.get(..5)?;
     Some(format!("{month} {day}, {year} · {clock} UTC"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mail() -> Mail {
+        let thread: MailThread = serde_json::from_value(serde_json::json!({
+            "thread_id": "8452b258-df30-4985-bfa1-cd98245b2a06",
+            "subject": "A saved Mail thread", "status": "ready",
+            "updated_at": "2026-11-16T22:11:59Z", "turn_count": 1, "revision": 2,
+            "latest_run_id": "b9b570aa-775d-4c25-b4ac-c122e292e2c3",
+            "archive_reason": null, "context_remaining_tokens": 1024,
+            "preview": "A real saved reply preview"
+        }))
+        .unwrap();
+        let messages = serde_json::from_value(serde_json::json!([
+            {"sequence": 1, "role": "user", "content": "Review this", "created_at": "2026-11-16T22:10:00Z"},
+            {"sequence": 2, "role": "assistant", "content": "## Review", "created_at": "2026-11-16T22:11:59Z"}
+        ])).unwrap();
+        Mail {
+            active: true,
+            pane: Pane::Reader,
+            summaries: vec![thread.summary.clone()],
+            reader: Reader {
+                thread_id: thread.summary.thread_id.clone(),
+                thread: Some(thread),
+                messages,
+                ..Reader::default()
+            },
+            ..Mail::default()
+        }
+    }
+
+    fn view(mail: &Mail) -> ViewModel {
+        let mut view = ViewModel::default();
+        mail.project(&mut view, true, true);
+        view
+    }
+
+    fn visible(view: &ViewModel, id: &str) -> bool {
+        view.visibility
+            .iter()
+            .any(|binding| binding.id == id && binding.visible)
+    }
+
+    #[test]
+    fn mail_headers_use_each_messages_date_and_real_preview() {
+        let mail = mail();
+        let view = view(&mail);
+        let row = view.lists[0].rows[0].correspondence.as_ref().unwrap();
+        assert_eq!(row.sender, "GPT-OSS 120B");
+        assert_eq!(row.timestamp, "Nov 16");
+        assert_eq!(row.preview, "A real saved reply preview");
+        assert_eq!(row.status, "Reply ready");
+        assert!(row.ready);
+        let messages = &view.transcripts[0].messages;
+        let from_user = messages[0].header.as_ref().unwrap();
+        let from_model = messages[1].header.as_ref().unwrap();
+        assert_eq!(
+            (&*from_user.sender, &*from_user.recipient),
+            ("You", "GPT-OSS 120B")
+        );
+        assert_eq!(
+            (&*from_model.sender, &*from_model.recipient),
+            ("GPT-OSS 120B", "You")
+        );
+        assert_eq!(
+            from_user.timestamp.as_deref(),
+            Some("Nov 16, 2026 · 22:10 UTC")
+        );
+        assert_eq!(
+            from_model.timestamp.as_deref(),
+            Some("Nov 16, 2026 · 22:11 UTC")
+        );
+    }
+
+    #[test]
+    fn mail_does_not_invent_metadata_for_legacy_responses() {
+        let mut mail = mail();
+        mail.summaries[0].preview = None;
+        for message in &mut mail.reader.messages {
+            message.created_at = None;
+        }
+        let view = view(&mail);
+        assert!(view.lists[0].rows[0]
+            .correspondence
+            .as_ref()
+            .unwrap()
+            .preview
+            .is_empty());
+        assert!(view.transcripts[0].messages.iter().all(|message| message
+            .header
+            .as_ref()
+            .unwrap()
+            .timestamp
+            .is_none()));
+    }
+
+    #[test]
+    fn mail_reply_dock_expands_and_preserves_the_draft_until_discard() {
+        let mut mail = mail();
+        assert!(!visible(&view(&mail), "mail-new"));
+        assert!(visible(&view(&mail), "mail-reply-bar"));
+        let mut effects = Vec::new();
+        mail.dispatch(UiEvent::MailFollowUp {}, "follow".into(), &mut effects)
+            .unwrap();
+        assert!(visible(&view(&mail), "mail-composer"));
+        assert!(!visible(&view(&mail), "mail-reply-bar"));
+        mail.dispatch(
+            UiEvent::SetMailDraft {
+                value: "Unsent reply".into(),
+            },
+            "draft".into(),
+            &mut effects,
+        )
+        .unwrap();
+        mail.close();
+        assert_eq!(mail.navigation_snapshot().unwrap().draft, "Unsent reply");
+        mail.active = true;
+        mail.dispatch(UiEvent::MailDiscardDraft {}, "discard".into(), &mut effects)
+            .unwrap();
+        assert!(mail.draft.is_empty());
+        assert!(visible(&view(&mail), "mail-reply-bar"));
+        assert!(effects.is_empty());
+    }
 }

@@ -6,6 +6,7 @@ MODEL_ID = "gpt-oss-120b"
 MAX_DRAFT_BYTES = 4096
 MAX_SUBJECT_BYTES = 120
 MAX_REPLY_BYTES = 32768
+MAX_PREVIEW_CHARS = 240
 ACTIVE = {"queued", "running", "waiting_for_tool", "result_ready"}
 
 
@@ -74,12 +75,16 @@ def public_status(row):
 
 
 def summary(row):
-    return {
+    result = {
         "thread_id": row["id"], "subject": row["subject"], "status": public_status(row),
         "updated_at": history._timestamp(row["updated_at"]), "turn_count": row["turn_count"],
         "revision": row["revision"], "latest_run_id": row["latest_run_id"],
         "archive_reason": "context_limit" if row["archived"] else None,
     }
+    preview = " ".join((row.get("preview") or "").split())[:MAX_PREVIEW_CHARS]
+    if preview:
+        result["preview"] = preview
+    return result
 
 
 THREAD_SELECT = """
@@ -88,7 +93,10 @@ THREAD_SELECT = """
            EXISTS (SELECT 1 FROM forge_agent.gpu_worker_readiness
                    WHERE seen_at > statement_timestamp() - interval '30 seconds') AS worker_available,
            (SELECT count(*) FROM forge_agent.mail_messages m WHERE
-               (m.owner_id, m.thread_id) = (t.owner_id, t.id) AND m.role = 'assistant') AS turn_count
+               (m.owner_id, m.thread_id) = (t.owner_id, t.id) AND m.role = 'assistant') AS turn_count,
+           (SELECT left(m.content, 240) FROM forge_agent.mail_messages m
+            WHERE (m.owner_id, m.thread_id) = (t.owner_id, t.id)
+            ORDER BY (m.role = 'assistant') DESC, m.sequence DESC LIMIT 1) AS preview
     FROM forge_agent.mail_threads t JOIN forge_agent.runs r ON r.id = t.latest_run_id
 """
 
@@ -140,7 +148,18 @@ def open_thread(cursor, owner, thread_id, limit, after_sequence):
             WHERE (owner_id, thread_id) = (%s, %s) AND sequence > %s
             ORDER BY sequence LIMIT %s
         )
-        SELECT p.sequence, p.role, p.content, CASE WHEN p.role = 'assistant' THEN (
+        SELECT p.sequence, p.role, p.content,
+               CASE WHEN p.role = 'user' THEN (
+                   SELECT r.created_at FROM forge_agent.runs r
+                   WHERE (r.mail_owner_id, r.mail_thread_id, r.id) = (%s, %s, p.run_id)
+               ) ELSE (
+                   SELECT e.recorded_at FROM forge_agent.runs r
+                   JOIN forge_agent.run_events e ON e.run_id = r.id AND e.event_type = 'completed'
+                   WHERE (r.mail_owner_id, r.mail_thread_id) = (%s, %s)
+                     AND (r.id = p.run_id OR r.mail_source_run_id = p.run_id)
+                   ORDER BY e.recorded_at DESC, r.id DESC, e.sequence DESC LIMIT 1
+               ) END AS created_at,
+               CASE WHEN p.role = 'assistant' THEN (
             SELECT 'length' FROM forge_agent.runs r
             JOIN forge_agent.run_events e ON e.run_id = r.id AND e.event_type = 'completed'
             WHERE (r.mail_owner_id, r.mail_thread_id) = (%s, %s)
@@ -149,11 +168,12 @@ def open_thread(cursor, owner, thread_id, limit, after_sequence):
             LIMIT 1
         ) END AS finish_reason
         FROM page p ORDER BY p.sequence
-    """, (owner, thread_id, after_sequence, limit + 1, owner, thread_id))
+    """, (owner, thread_id, after_sequence, limit + 1, owner, thread_id, owner, thread_id, owner, thread_id))
     messages = cursor.fetchall()
     return {
         "thread": thread,
-        "messages": [{key: value for key, value in message.items() if value is not None}
+        "messages": [{key: history._timestamp(value) if key == "created_at" else value
+                      for key, value in message.items() if value is not None}
                      for message in messages[:limit]],
         "next_sequence": messages[limit - 1]["sequence"] if len(messages) > limit else None,
     }

@@ -40,6 +40,17 @@ pub struct TranscriptMessage {
     pub rendered_html: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+    /// Optional correspondence presentation prepared by the application model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header: Option<MessageHeader>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MessageHeader {
+    pub sender: String,
+    pub recipient: String,
+    pub timestamp: Option<String>,
+    pub monogram: String,
 }
 
 /// Exact, bounded UTF-8 window of the accepted read-only source document.
@@ -170,6 +181,18 @@ pub struct RowView {
     pub expanded: Option<bool>,
     pub action: RowAction,
     pub toggle: Option<RowAction>,
+    /// Optional inbox anatomy, with all status and date policy owned by Rust.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correspondence: Option<CorrespondenceRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CorrespondenceRow {
+    pub sender: String,
+    pub timestamp: String,
+    pub preview: String,
+    pub status: String,
+    pub ready: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]

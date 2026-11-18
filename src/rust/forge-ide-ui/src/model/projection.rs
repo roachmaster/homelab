@@ -157,6 +157,7 @@ impl UiModel {
             }
             let directory = e.kind == EntryKind::Directory;
             rows.push(RowView {
+                correspondence: None,
                 id: format!("entry-{}", e.id),
                 parent: e.parent.map(|p| format!("entry-{p}")),
                 label: self.entry_name(e),
@@ -227,6 +228,7 @@ impl UiModel {
                 path
             };
             RowView {
+                correspondence: None,
                 id: format!(
                     "search-{entry}-{}",
                     declaration
@@ -276,6 +278,7 @@ impl UiModel {
                 continue;
             }
             rows.push(RowView {
+                correspondence: None,
                 id: format!("declaration-{}-{}", e.id, d.id),
                 parent: d.parent.map(|p| format!("declaration-{}-{p}", e.id)),
                 label: d.name.clone(),
@@ -317,6 +320,7 @@ impl UiModel {
                 .iter()
                 .enumerate()
                 .map(move |(index, text)| RowView {
+                    correspondence: None,
                     id: format!("problem-{}-{index}", e.id),
                     parent: None,
                     label: text.clone(),
@@ -908,6 +912,7 @@ fn shape_row(
     selected: Option<u32>,
 ) -> RowView {
     RowView {
+        correspondence: None,
         id,
         parent,
         depth,
@@ -1177,6 +1182,7 @@ mod tests {
         };
         let name = name_label(&NativeName::Utf8("\u{1f}".repeat(MAX_TEXT_BYTES)));
         let row = RowView {
+            correspondence: None,
             id: "declaration-4294967295-4294967295".into(),
             parent: Some("declaration-4294967295-4294967295".into()),
             label: "\u{1f}".repeat(MAX_TEXT_BYTES),

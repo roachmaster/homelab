@@ -1,6 +1,6 @@
 ---
 name: design-forge-ide-ux
-description: Design or review Forge IDE Chat and Workbench UX, including responsive conversation layouts, file navigation, information hierarchy and keyboard/touch flows. Apply to Forge IDE wireframes, UI implementation and review.
+description: Design or review Forge IDE Chat, Mail and Workbench UX, including responsive conversations, email reading, file navigation, information hierarchy and keyboard/touch flows. Apply to Forge IDE wireframes, UI implementation and review.
 ---
 
 # Design Forge IDE UX
@@ -58,6 +58,28 @@ viewport and overflow rules to active Chat so Workbench keeps its own scrolling.
 
 Use the [Chat layout checks](../test-forge-ui/SKILL.md#chat-layout-checks) to
 verify the generated screen.
+
+## Shape a Mail client
+
+Follow the [Email view pattern](../design-modern-ui/SKILL.md#email-view-pattern).
+The inbox should read as a scannable list: sender and date, subject, then a
+bounded body preview, separated by hairline dividers. Keep status distinct from
+read/unread state. Use a labeled floating Compose action in the list, and give
+the active thread a focused Back/action bar.
+
+Use open email bodies with sender monograms, sender/date headers and a native
+recipient disclosure. Preserve rendered Markdown and make long messages scroll
+within the reader while the reply action stays reachable. On phones, display
+the selected thread as one pane; on wider screens, retain its inbox beside it.
+Keep global identity and navigation compact and visible in both cases.
+
+Move to the existing composer through Reply to thread. Preserve generation,
+archive, draft, revision and retry semantics rather than adding decorative
+controls that promise unsupported actions. Show only actual preview and date
+data; the absence of metadata is preferable to a made-up email cue.
+
+Use the [Mail layout checks](../test-forge-ui/SKILL.md#mail-layout-checks) to
+verify the generated states and their keyboard/touch interactions.
 
 ## Workbench guardrails
 

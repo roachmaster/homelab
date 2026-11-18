@@ -1,10 +1,12 @@
 """Header routing and typed Mail requests through the private runner."""
 
+from contextlib import nullcontext
 import unittest
 from unittest.mock import Mock, patch
 from uuid import UUID
 
 import runner
+import mail_api
 from queue_store import Rejected, TokenizerUnavailable
 from test_chat_run_api import REQUEST_ID, dispatch_post, reply
 from test_workspace_api import server
@@ -18,6 +20,62 @@ RECEIPT = {"thread_id": THREAD, "run_id": RUN, "status": "queued"}
 
 
 class MailApiTest(unittest.TestCase):
+    def test_metadata_is_opt_in_without_changing_owner_or_paging(self):
+        thread = {"thread_id": str(THREAD), "subject": "Mail fixture", "status": "ready",
+                  "updated_at": "2026-11-18T12:00:00Z", "turn_count": 1, "revision": 2,
+                  "latest_run_id": str(RUN), "archive_reason": None, "preview": "A stored reply"}
+        message = {"sequence": 1, "role": "assistant", "content": "A stored reply",
+                   "created_at": "2026-11-18T12:00:00Z"}
+        listed = {"items": [thread], "next_cursor": "next-page"}
+        opened = {"thread": {**thread, "context_remaining_tokens": 1024},
+                  "messages": [message], "next_sequence": 1}
+        legacy_thread = {key: value for key, value in thread.items() if key != "preview"}
+        cursor = Mock()
+        with (server(distributed=True) as port,
+              patch.object(mail_api.queue, "transaction", return_value=nullcontext(cursor)),
+              patch.object(mail_api.mail_store, "list_threads", return_value=listed) as list_threads,
+              patch.object(mail_api.mail_store, "open_thread", return_value=opened) as open_thread):
+            for metadata in [{}, {"include_metadata": False}, {"include_metadata": True}]:
+                enabled = metadata.get("include_metadata", False)
+                body = {"request_id": REQUEST_ID, "kind": "mail_list", "archived": False,
+                        "limit": 2, "cursor": "page-before", **metadata}
+                self.assertEqual(dispatch_post(port, "ide.mail.list", body), (
+                    200, reply("mail_listed", items=[thread if enabled else legacy_thread], next_cursor="next-page"),
+                    "no-store",
+                ))
+                list_threads.assert_called_with(cursor, mail_api.queue.OWNER, 2, "page-before", False)
+                body = {"request_id": REQUEST_ID, "kind": "mail_open", "thread_id": str(THREAD),
+                        "limit": 1, "after_sequence": 0, **metadata}
+                expected = opened if enabled else {
+                    "thread": {**legacy_thread, "context_remaining_tokens": 1024},
+                    "messages": [{key: value for key, value in message.items() if key != "created_at"}],
+                    "next_sequence": 1,
+                }
+                self.assertEqual(dispatch_post(port, "ide.mail.open", body),
+                                 (200, reply("mail_opened", **expected), "no-store"))
+                open_thread.assert_called_with(cursor, mail_api.queue.OWNER, THREAD, 1, 0)
+            self.assertIn("preview", listed["items"][0], "legacy projection must not mutate the DAO result")
+            self.assertIn("created_at", opened["messages"][0])
+            calls = list_threads.call_count
+            body = {"request_id": REQUEST_ID, "kind": "mail_list", "include_metadata": True}
+            self.assertEqual(dispatch_post(port, "ide.mail.list", body, Authorization="Bearer other")[0], 401)
+            self.assertEqual(list_threads.call_count, calls)
+            self.assertEqual(dispatch_post(port, "ide.mail.list", {**body, "owner": "other"})[0], 400)
+            self.assertEqual(list_threads.call_count, calls)
+
+    def test_metadata_flag_rejects_non_boolean_values_before_store_access(self):
+        with (server(distributed=True) as port,
+              patch.object(mail_api.queue, "transaction") as transaction):
+            for destination, base in [
+                ("ide.mail.list", {"kind": "mail_list"}),
+                ("ide.mail.open", {"kind": "mail_open", "thread_id": str(THREAD)}),
+            ]:
+                for value in [None, 0, 1, "true", [], {}]:
+                    body = {"request_id": REQUEST_ID, **base, "include_metadata": value}
+                    self.assertEqual(dispatch_post(port, destination, body),
+                                     (400, reply("mail_failed", code="invalid_request"), "no-store"))
+            transaction.assert_not_called()
+
     def test_mail_send_and_retry_acknowledge_without_inference(self):
         inference = Mock()
         with (server(distributed=True, inference=inference) as port,

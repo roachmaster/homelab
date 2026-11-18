@@ -680,6 +680,7 @@ impl Chats {
             .filter(|_| history.list_open)
             .filter(|item| item.title.to_lowercase().contains(&query))
             .map(|item| RowView {
+                correspondence: None,
                 id: item.chat_id.clone(),
                 label: item.title.clone(),
                 glyph: String::new(),

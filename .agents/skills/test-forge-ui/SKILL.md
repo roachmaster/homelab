@@ -101,6 +101,30 @@ measuring layout and scroll behavior. Record it as controlled fixture evidence.
 Report viewport sizes and which checks ran. Treat conversation recovery after
 reload as a separate behavior that requires its own test.
 
+## Mail layout checks
+
+Use the [Email view pattern](../design-modern-ui/SKILL.md#email-view-pattern)
+with test-owned inbox, active thread, archived thread and compose states.
+
+- Compare phone and desktop inbox screenshots with a long subject and a real
+  bounded preview. Check edge-to-edge divider rows, sender/date hierarchy,
+  preview clamping, a named Reply ready status, and no horizontal overflow.
+  Check every rendered action's keyboard focus and 44px touch target.
+- Keep global navigation visible. Verify the list has Inbox/Archive filters,
+  Refresh and a floating Compose action, while an open thread has Back and
+  the actions supported by its actual state. Check the desktop sidebar and
+  the phone's single-pane reader independently.
+- Inspect a populated thread before leaving it. Verify distinct email headers,
+  actual per-message dates where supplied, expandable recipient details,
+  safe Markdown bodies and hairline message dividers. Check metadata clears
+  with protected content on teardown. Missing date/preview fields must retain
+  a usable view without invented values.
+- Open Reply to thread with the keyboard and touch. Verify the composer is
+  reachable, draft and submission identity survive recovery, and pending or
+  archived states preserve their existing guards. Exercise paging, refresh,
+  retry, back navigation and draft-discard behavior. A visual Archive folder
+  does not prove a manual archive mutation or unread persistence exists.
+
 ## Workbench acceptance checklist
 
 Use [Design Forge IDE UX](../design-forge-ide-ux/SKILL.md) for the product hierarchy
