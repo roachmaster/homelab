@@ -114,7 +114,11 @@ project again. No file writes, editing, process commands or remote jobs are expo
 
 Open **Design** beside **Workbench** for the wireframes and workspace recovery
 diagram. Forge saves the current workspace before opening `/design` in the same
-tab. Use **Back to Forge** or the browser’s Back button to restore the workspace.
+tab. Use the docs' **Chat**, **Mail**, or **Workbench** navigation, or the browser's
+Back button, to restore the workspace. Declarative transport `entry_actions`
+map bounded URL fragments to existing Rust events after session admission and
+workspace restoration. The generated adapter consumes the fragment after dispatch,
+so later browser returns retain the saved view.
 The tab keeps a temporary JSON copy of its drafts and Workbench bookmark as a
 fallback for an unavailable checkpoint service. The server supplies saved chat
 replies and queued runs, and Forge verifies Workbench source again when you return.

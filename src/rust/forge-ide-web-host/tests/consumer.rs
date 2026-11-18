@@ -1162,7 +1162,7 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
     assert!(stylesheet.contains("Content-Type: text/css; charset=utf-8"));
     assert!(stylesheet.contains(".home-primary"));
     assert!(request("GET", "/home/unknown").starts_with("HTTP/1.1 404 Not Found"));
-    assert!(request("GET", "/design").contains("href=\"/home\">portal home page</a>"));
+    assert!(request("GET", "/design").contains("href=\"/home\""));
     for path in [
         "/home",
         "/design",
@@ -1205,18 +1205,82 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Content-Security-Policy:"));
         assert!(response.contains("Forge IDE design"));
         assert!(response.contains("href=\"/design/index.css\""));
-        assert!(response.contains("href=\"/design/forge-providers\">Forge plug-and-play</a>"));
+        assert!(response.contains("href=\"/design/forge-providers\""));
         assert!(response.contains("href=\"/design/chat-dispatch\""));
         assert!(response.contains("href=\"/design/mail\""));
         assert!(response.contains("href=\"/design/game-studio\""));
-        assert!(response.contains("href=\"/design/game-physics\">Game physics design</a>"));
-        assert!(response
-            .contains("href=\"/design/game-asset-pipeline\">Game asset pipeline design</a>"));
-        assert!(response.contains("href=\"/design/forge-workers\">Forge worker design</a>"));
-        assert!(response.contains("href=\"/playtest\">Room One playtest</a>"));
+        assert!(response.contains("href=\"/design/game-physics\""));
+        assert!(response.contains("href=\"/design/game-asset-pipeline\""));
+        assert!(response.contains("href=\"/design/forge-workers\""));
+        assert!(response.contains("href=\"/playtest\""));
+        for href in [
+            "/design/previous-chats",
+            "/design/wireframes#phone",
+            "/design/wireframes#desktop",
+            "/design/workspace",
+        ] {
+            assert!(response.contains(&format!("href=\"{href}\"")));
+        }
+        assert!(response.contains("aria-label=\"Forge views\""));
+        assert!(response.contains("aria-label=\"Design topics\""));
+        assert!(response.contains("href=\"/design/docs.css\""));
+        assert!(!response.contains("id=\"previous-chat-menu\""));
+        assert!(!response.contains("<img"));
+        assert!(!response.contains("<script"));
+        assert!(!response.contains("target=\"_blank\""));
     }
     assert!(request("GET", "/design/style.css").contains("Content-Type: text/css; charset=utf-8"));
     assert!(request("GET", "/design/index.css").contains("Content-Type: text/css; charset=utf-8"));
+    assert!(request("GET", "/design/docs.css").contains("Content-Type: text/css; charset=utf-8"));
+    for (path, heading, marker) in [
+        (
+            "/design/previous-chats",
+            "Previous chats",
+            "id=\"previous-chat-menu\"",
+        ),
+        (
+            "/design/wireframes",
+            "IDE wireframes",
+            "class=\"wireframe-stage\"",
+        ),
+        (
+            "/design/workspace",
+            "Workspace data flow",
+            "Workspace recovery",
+        ),
+    ] {
+        for target in [path.to_owned(), format!("{path}/")] {
+            let response = request("GET", &target);
+            assert!(response.starts_with("HTTP/1.1 200 OK"));
+            assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+            assert!(response.contains("Content-Security-Policy:"));
+            assert!(response.contains("<h1") && response.contains(&format!(">{heading}</h1>")));
+            assert!(response.contains(marker));
+            assert!(response.contains("aria-label=\"Forge views\""));
+            assert!(response.contains("aria-label=\"Design topics\""));
+            assert!(response.contains("href=\"/design/docs.css\""));
+            assert!(!response.contains("target=\"_blank\""));
+            for href in ["/#chat", "/#mail", "/#workbench", "/home", "/design"] {
+                assert!(response.contains(&format!("href=\"{href}\"")));
+            }
+            assert_eq!(
+                response.contains("src=\"/design/previous-chats.js\""),
+                path == "/design/previous-chats"
+            );
+            let head = request("HEAD", &target);
+            assert!(head.starts_with("HTTP/1.1 200 OK"));
+            assert!(head.ends_with("\r\n\r\n"));
+            assert!(request("POST", &target).starts_with("HTTP/1.1 405"));
+        }
+        assert!(request("GET", &format!("{path}/unknown")).starts_with("HTTP/1.1 404"));
+    }
+    let preview = request("GET", "/design/previous-chats");
+    assert!(preview.contains("Interactive preview"));
+    assert!(preview.contains("aria-label=\"Reset preview\""));
+    assert!(preview.contains("class=\"state-table\""));
+    assert!(preview.contains("<th>State</th>"));
+    let history = request("GET", "/design/chat-history");
+    assert!(history.contains("href=\"/design/previous-chats\""));
     for path in ["/design/forge-providers", "/design/forge-providers/"] {
         let response = request("GET", path);
         assert!(response.starts_with("HTTP/1.1 200 OK"));
@@ -1341,7 +1405,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
             assert!(response.starts_with("HTTP/1.1 200 OK"));
             assert!(response.contains("Content-Type: text/html; charset=utf-8"));
             assert!(response.contains("Content-Security-Policy:"));
-            assert!(response.contains(&format!("<h1>{heading}</h1>")));
+            assert!(response.contains("<h1") && response.contains(&format!(">{heading}</h1>")));
             assert!(response.contains("<strong>Design proposal.</strong>"));
             assert!(response.contains(detail));
             assert!(response.contains(&format!("href=\"/design/forge-workers/{diagram}\"")));

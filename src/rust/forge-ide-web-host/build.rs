@@ -15,6 +15,9 @@ fn main() -> io::Result<()> {
     for (name, page) in [
         ("home.html", DesignPage::Home),
         ("design.html", DesignPage::Overview),
+        ("previous-chats.html", DesignPage::PreviousChats),
+        ("wireframes.html", DesignPage::Wireframes),
+        ("workspace.html", DesignPage::Workspace),
         ("forge-providers.html", DesignPage::ForgeProviders),
         ("chat-history.html", DesignPage::ChatHistory),
         ("chat-dispatch.html", DesignPage::ChatDispatch),
@@ -34,6 +37,7 @@ fn main() -> io::Result<()> {
         fs::write(output.join(name), page.render())?;
     }
     fs::write(output.join("home.css"), design::home_stylesheet())?;
+    fs::write(output.join("docs.css"), design::docs_stylesheet())?;
     fs::write(output.join("design-index.css"), design::index_stylesheet())?;
     fs::write(
         output.join("game-studio.css"),

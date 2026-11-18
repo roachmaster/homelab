@@ -131,6 +131,16 @@ fn rejects_collisions_action_code_and_unsafe_transport_before_factory() {
     c.transport.bindings[0].policy.wait_for_slot_ms = Some(30_001);
     assert!(register_assets("assets", c).is_err());
     let mut c = config();
+    c.transport
+        .entry_actions
+        .insert("mail".into(), "open_mail();".into());
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    c.transport.entry_actions = (0..17)
+        .map(|n| (format!("screen{n}"), "open_chat".into()))
+        .collect();
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
     c.wasm[0] = 1;
     assert!(register_assets("assets", c).is_err());
 }
@@ -286,6 +296,7 @@ fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
     // A distinct consumer supplies its own typed transport declarations too.
     c.transport = Transport {
         initial_event: "mount_collection".into(),
+        entry_actions: Default::default(),
         bindings: vec![RequestBinding {
             kind: "load_collection".into(),
             request_id: "request_id".into(),

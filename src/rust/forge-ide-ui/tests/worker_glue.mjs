@@ -143,15 +143,44 @@ console.log('Generated worker rejects legacy ABI 1 before session or inspection 
       'asynchronous effect result must not acknowledge an input draft');
     const reportKey = h.requests.find(r => r.body.kind === 'inspect').body.request.token;
     const before = h.requests.length;
-    await h.send({ event: { kind: 'set_file_filter', report: reportKey, value: 'text' }, presentation_sequence: 6 });
-    const accepted = h.messages.filter(m => m.kind === 'view').at(-1);
+    const current = () => h.messages.filter(m => m.kind === 'view').at(-1);
+    const query = () => current().view.inputs.find(i => i.id === 'project-query');
+    await h.send({ event: { kind: 'set_explorer_query', report: reportKey, entry_names: false, value: 'text' }, presentation_sequence: 6 });
+    const accepted = current();
     assert.equal(accepted.presentation_sequence, 6);
-    assert.equal(accepted.view.inputs.find(i => i.id === 'file-filter').value, 'text');
-    assert.equal(h.requests.length, before, 'local filter adds no transport effect');
+    assert.equal(query().value, 'text');
+    assert.equal(query().action.kind, 'set_explorer_query');
+    assert.equal(query().action.entry_names, false);
+    assert.deepEqual(query().action.report, reportKey);
+    assert.equal(accepted.view.inputs.some(i => i.id === 'file-filter'), false, 'the unified input replaces the separate entry filter');
+    await h.send({ event: { kind: 'toggle_explorer_filter', report: reportKey }, presentation_sequence: 7 });
+    assert.equal(current().presentation_sequence, 7);
+    assert.equal(query().value, 'text', 'switching to entry filtering preserves the query');
+    assert.equal(query().action.entry_names, true);
+    assert.equal(current().view.buttons.find(button => button.id === 'explorer-filter-mode').pressed, true);
+    const entryView = copy(current().view);
+    await h.send({ event: { kind: 'set_explorer_query', report: reportKey, entry_names: false, value: 'late edit' }, presentation_sequence: 8 });
+    assert.equal(current().presentation_sequence, 8);
+    assert.deepEqual(current().view, entryView, 'an old search-mode edit cannot alter the current filter');
+    await h.send({ event: { kind: 'set_explorer_query', report: reportKey, entry_names: true, value: 'script' }, presentation_sequence: 9 });
+    assert.equal(current().presentation_sequence, 9);
+    assert.equal(query().value, 'script');
+    assert.equal(h.requests.length, before, 'query edits and mode changes add no transport effect');
+
+    await h.send({ event: { kind: 'inspect' }, presentation_sequence: 10 });
+    await until(() => JSON.stringify(query()?.action?.report) !== JSON.stringify(reportKey)
+      && /Project ready/.test(h.status()), 'refresh accepts a new report context');
+    const refreshed = copy(current().view);
+    const afterRefresh = h.requests.length;
+    assert.equal(afterRefresh, before + 1, 'explicit refresh sends one inspection request');
+    await h.send({ event: { kind: 'set_explorer_query', report: reportKey, entry_names: query().action.entry_names, value: 'stale report edit' }, presentation_sequence: 11 });
+    assert.equal(current().presentation_sequence, 11);
+    assert.deepEqual(current().view, refreshed, 'an old report edit cannot alter the refreshed view');
+    assert.equal(h.requests.length, afterRefresh, 'stale filter events cannot start transport effects');
     await h.send({ event: { kind: 'inspect' }, presentation_sequence: 0 });
     await until(() => h.messages.some(m => m.kind === 'fatal'), 'invalid presentation sequence fails closed');
     await h.send({ kind: 'inspect' });
-    assert.equal(h.requests.length, before, 'invalid envelope cannot start or resume effects');
+    assert.equal(h.requests.length, afterRefresh, 'invalid envelope cannot start or resume effects');
   } finally { h.close(); }
 }
 console.log('Generated worker strips bounded presentation envelopes before actual WASM; only the matching synchronous view acknowledges them.');

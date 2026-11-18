@@ -125,6 +125,27 @@ the reply action. Preserve the desktop list-and-reader split and the phone's
 single active pane. Check real generated states on both before accepting the
 layout.
 
+## Documentation and spec page rule
+
+Separate a documentation index from focused article readers. The index uses
+compact title, one-line summary and arrow rows grouped by topic; it must not
+continue into full articles, live demos and wireframe galleries below the list.
+Readers keep the shared Forge navigation, a clear Design breadcrumb and an
+accessible route back to the relevant category. Keep a horizontally scrollable
+topic strip available while reading, without adding more management bars.
+
+Put interactive examples in a single sandbox stage with a compact preview label
+and a working Reset action. Explain when the stage is a local prototype. Avoid
+wrapping its controls and transcript in repeated bordered panels. Use compact
+state tables when they make behavior easier to scan than repeated paragraphs.
+
+Never place raw stark-white wireframes directly on the dark page canvas.
+Theme-match them where the source supports it; otherwise frame legacy light
+snapshots in a padded dark-slate surface near `#161b22` with rounded edges and
+clear snapshot labels. Keep full-size diagrams reachable without forcing the
+index to load them. Check the sticky navigation, deep links, browser Back,
+keyboard focus and phone overflow in the actual generated pages.
+
 ## Control the layout rhythm
 
 Use a centered responsive container around 960–1120px for portal launchers.

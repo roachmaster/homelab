@@ -252,9 +252,12 @@ The host build renders the portal home and Design reference from typed Rust
 declarations in `forge-ide-web-host/src/design`. Open **Home** in the IDE or
 visit `/home` for links to the IDE, Studio, the Room One playtest, and Design.
 The host embeds these documents with their styles and diagrams. The Design
-overview includes its sample Previous chats prototype and links to the chat
-history contracts and sequence diagrams at
-`/design/chat-history`. The PostgreSQL inference dispatch design and
+overview is a compact index with sticky topics and focused readers. The sample
+Previous chats sandbox is at `/design/previous-chats`, layout snapshots are at
+`/design/wireframes`, and recovery notes are at `/design/workspace`. The chat
+history contracts and sequence diagrams are at `/design/chat-history`.
+The shared docs navigation returns to Chat, Mail, or Workbench in the same tab;
+the admitted worker applies the declared entry action after restoring the workspace. The PostgreSQL inference dispatch design and
 sequence diagram are at `/design/chat-dispatch`. The design pages use fixed
 asset paths.
 The configured startup directory and generated content remain trusted; hashing

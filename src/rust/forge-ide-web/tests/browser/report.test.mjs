@@ -330,6 +330,27 @@ test('Home screenshot evidence requires explicit selection and an owned clean UR
   }
 });
 
+test('Docs screenshots require an explicitly selected fixed reader and retain privacy checks', async () => {
+  for (const path of ['/design', '/design/previous-chats', '/design/wireframes#phone', '/design/wireframes#desktop']) {
+    const candidate = screenshotFixture({ url: `http://127.0.0.1:1234${path}` });
+    assert.equal(await screenshotEligibility(candidate.page, candidate.fixtures, { docs: true }), 'safe');
+    assert.equal(await screenshotEligibility(candidate.page, candidate.fixtures), 'skipped_unsafe_page');
+  }
+  for (const options of [
+    { url: 'http://127.0.0.1:1234/design?draft=value' },
+    { url: 'http://127.0.0.1:1234/design#unknown' },
+    { url: 'http://127.0.0.1:1234/design/wireframes#unknown' },
+    { url: 'http://127.0.0.1:1234/design/mail' },
+    { url: 'https://example.com/design' },
+    { url: 'http://127.0.0.1:1234/design', markers: 0 },
+  ]) {
+    const candidate = screenshotFixture(options);
+    assert.equal(await screenshotEligibility(candidate.page, candidate.fixtures, { docs: true }), 'skipped_unsafe_page');
+  }
+  const candidate = screenshotFixture({ url: 'http://127.0.0.1:1234/design', text: SECRET });
+  assert.equal(await screenshotEligibility(candidate.page, candidate.fixtures, { docs: true }), 'skipped_credential_pattern');
+});
+
 test('cleanup callback rejection after three successful records cannot be discarded as overflow', async t => {
   const output = join(await workspace(t), 'browser');
   assert.equal(await runHarness(defaults(output, {

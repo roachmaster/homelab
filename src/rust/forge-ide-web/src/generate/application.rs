@@ -480,6 +480,12 @@ pub fn ide_transport() -> Transport {
     }
     Transport {
         initial_event: "resume".into(),
+        entry_actions: [
+            ("chat".into(), "open_chat".into()),
+            ("mail".into(), "open_mail".into()),
+            ("workbench".into(), "open_workbench".into()),
+        ]
+        .into(),
         bindings,
         timers: vec![TimerBinding {
             effect_kind: "mail_watch".into(),

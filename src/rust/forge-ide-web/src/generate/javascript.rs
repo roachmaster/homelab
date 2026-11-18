@@ -539,6 +539,7 @@ function start(){
   clearProtected();
   try{
     const owned=new Worker('/worker.js',{name:tabKey()});worker=owned;
+    const entryFragment=location.hash.length>1&&location.hash.length<=129?location.hash.slice(1):null;
     owned.onmessage=({data})=>{
       if(worker!==owned||fatalState)return;
       try{
@@ -547,11 +548,13 @@ function start(){
         else if(data.kind==='workspace_flushed')finishReload?.();
         else if(data.kind==='workspace_navigation_flushed')finishNavigation(data);
         else if(data.kind==='clear_navigation_cache')writeNavigationCache(null);
+        else if(data.kind==='entry_applied'&&data.fragment===entryFragment&&location.hash==='#'+entryFragment)history.replaceState(history.state,'',location.pathname+location.search);
       }catch(_){fatal('Could not display the checked view. Reload to retry.');}
     };
     owned.onerror=()=>{if(worker===owned)fatal('The Rust worker could not start. Reload to retry.');};
     const cache=readNavigationCache();
     if(cache)owned.postMessage({workspace_navigation_cache:cache});
+    if(entryFragment)owned.postMessage({entry_fragment:entryFragment});
   }catch(_){fatal('This browser cannot start the required worker. Reload to retry.');}
 }
 for(const group of document.querySelectorAll('[data-source-formats]')){
@@ -776,6 +779,15 @@ let mailNavigation=null;
 let mailNavigationLocked=false;
 let workspaceEpoch=null;
 let navigationCache=null;
+let pendingEntryAction=null;
+let entryReceived=false;
+let sessionRestored=false;
+function applyEntryAction(){
+  if(!sessionRestored||!pendingEntryAction)return;
+  const {kind,fragment}=pendingEntryAction;pendingEntryAction=null;
+  dispatch({kind});
+  postMessage({kind:'entry_applied',fragment});
+}
 const pending=new Map();
 const timers=new Map();
 function valueAt(value,path){
@@ -1000,6 +1012,7 @@ async function run(effect){
       dispatch(decoded.event,null,saved!==null||savedMail!==null);
       if(saved!==null)dispatch({kind:'restore_workspace',snapshot:saved});
       if(savedMail!==null)dispatch({kind:'restore_mail_navigation',snapshot:savedMail});
+      if(decoded.csrf!==undefined&&decoded.csrf!==null){sessionRestored=true;applyEntryAction();}
     }catch(_){fatal('Invalid application ABI result. Reload to retry.');}
   }catch(e){failed(id,timedOut?'timeout':controller.signal.aborted?'cancelled':e instanceof TypeError?'unavailable':'invalid_response');}
   finally{clearTimeout(timer);pending.delete(id);}
@@ -1017,6 +1030,16 @@ onmessage=async({data})=>{if(closed)return;try{
     const text=data.workspace_navigation_cache;
     if(text.length<=NAVIGATION_CACHE_MAX&&encoder.encode(text).length<=NAVIGATION_CACHE_MAX){
       try{navigationCache=safeJson(text);}catch(_){}
+    }
+    return;
+  }
+  if(typeof data?.entry_fragment==='string'){
+    if(!entryReceived){
+      entryReceived=true;
+      const fragment=data.entry_fragment;
+      if(fragment.length<=64&&Object.hasOwn(CONFIG.entry_actions,fragment))pendingEntryAction={kind:CONFIG.entry_actions[fragment],fragment};
+      await ready;
+      applyEntryAction();
     }
     return;
   }

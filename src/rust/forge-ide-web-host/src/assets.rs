@@ -19,6 +19,10 @@ const NAMES: [(&str, &str); 5] = [
 const HOME_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/home.html"));
 const HOME_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/home.css"));
 const DESIGN_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design.html"));
+const PREVIOUS_CHATS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/previous-chats.html"));
+const WIREFRAMES_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wireframes.html"));
+const WORKSPACE_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/workspace.html"));
+const DOCS_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/docs.css"));
 const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
 const DESIGN_INDEX_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design-index.css"));
 const FORGE_PROVIDERS_HTML: &[u8] =
@@ -126,6 +130,16 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/home" | "/home/" => Some(("text/html; charset=utf-8", HOME_HTML)),
         "/design/home.css" => Some(("text/css; charset=utf-8", HOME_CSS)),
         "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
+        "/design/previous-chats" | "/design/previous-chats/" => {
+            Some(("text/html; charset=utf-8", PREVIOUS_CHATS_HTML))
+        }
+        "/design/wireframes" | "/design/wireframes/" => {
+            Some(("text/html; charset=utf-8", WIREFRAMES_HTML))
+        }
+        "/design/workspace" | "/design/workspace/" => {
+            Some(("text/html; charset=utf-8", WORKSPACE_HTML))
+        }
+        "/design/docs.css" => Some(("text/css; charset=utf-8", DOCS_CSS)),
         "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
         "/design/index.css" => Some(("text/css; charset=utf-8", DESIGN_INDEX_CSS)),
         "/design/forge-providers" | "/design/forge-providers/" => {

@@ -270,9 +270,9 @@ async function noReport(page) {
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
   await check(page.locator('#source-view')).toHaveText('');
 }
-async function screenshot(page, name, { home = false } = {}) {
-  assert.equal(await screenshotEligibility(page, [...active], { home }), 'safe', 'Only sanitized owned fixture pages may be captured');
-  if (!home) await check(page.locator('#pair-code')).toHaveValue('');
+async function screenshot(page, name, { home = false, docs = false } = {}) {
+  assert.equal(await screenshotEligibility(page, [...active], { home, docs }), 'safe', 'Only sanitized owned fixture pages may be captured');
+  if (!home && !docs) await check(page.locator('#pair-code')).toHaveValue('');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'no page-level horizontal clipping');
   await page.screenshot({ path: join(output, name), fullPage: true, mask: [page.locator(SCREENSHOT_MASK)], maskColor: '#1b2a3b' });
 }
@@ -2066,7 +2066,7 @@ async function homeJourney(page, traffic) {
       await check(page.locator('#workspace-panel')).toBeVisible();
       await open('/home', () => homeLink.click());
     } else if (href === '/design') {
-      const designHome = page.locator('main .intro').getByRole('link', { name: 'portal home page' });
+      const designHome = page.getByRole('navigation', { name: 'Forge views' }).getByRole('link', { name: 'Home', exact: true });
       await check(designHome).toHaveAttribute('href', '/home');
       const documentBrand = page.locator('header a.wordmark');
       await check(documentBrand).toHaveAccessibleName('Forge IDE');
@@ -2104,6 +2104,7 @@ async function designJourney(page, traffic) {
   const pages = context.pages();
   const tabKey = () => page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
   const originalTab = await tabKey();
+  const originalDraft = await page.locator('#chat-draft').inputValue();
   assert.match(originalTab, /^[a-f0-9]{32}$/);
   const designUrl = new URL('/design', originalUrl).href;
   const styleUrl = new URL('/design/style.css', originalUrl).href;
@@ -2130,61 +2131,49 @@ async function designJourney(page, traffic) {
   assert.deepEqual(context.pages(), pages, 'Design opens without creating a second page');
   assert.equal(await tabKey(), originalTab, 'Design uses the same per-tab workspace key');
   await check(page.getByRole('heading', { level: 1, name: 'Forge IDE design', exact: true })).toBeVisible();
-  await check(page.getByRole('heading', { name: 'Workspace recovery', exact: true })).toBeVisible();
-  await check(page.getByRole('link', { name: 'Back to Forge', exact: true })).toHaveAttribute('href', '/');
+  const views = page.getByRole('navigation', { name: 'Forge views' });
+  const topics = page.getByRole('navigation', { name: 'Design topics' });
+  await check(views.getByRole('link')).toHaveText(['Chat', 'Mail', 'Workbench', 'Home', 'Design']);
+  await check(views.getByRole('link', { name: 'Design', exact: true })).toHaveAttribute('aria-current', 'page');
+  for (const [name, href] of [['Chat', '/#chat'], ['Mail', '/#mail'], ['Workbench', '/#workbench']]) {
+    await check(views.getByRole('link', { name, exact: true })).toHaveAttribute('href', href);
+  }
+  await check(topics.getByRole('link')).toHaveCount(4);
   const designIndex = page.getByRole('navigation', { name: 'Design sections' });
   await check(designIndex.getByRole('heading', { level: 2 })).toHaveText([
     'Forge foundations', 'Chat and Mail', 'Game development', 'Wireframes and workspace',
   ]);
-  const providerLink = designIndex.getByRole('link').first();
-  await check(providerLink).toHaveText('Forge plug-and-play');
-  await check(providerLink).toHaveAttribute('href', '/design/forge-providers');
+  const providerLink = designIndex.locator('a[href="/design/forge-providers"]');
+  await check(providerLink).toContainText('Forge plug-and-play');
   await check(providerLink).not.toHaveAttribute('target', /.+/);
-  await check(page.locator('#phone figure.wireframe')).toHaveCount(3);
-  await check(page.locator('#desktop figure.wireframe')).toHaveCount(2);
-
-  process.stderr.write('QA_CHECK design_wireframes\n');
-  const names = ['chat-phone', 'workbench-phone', 'workbench-project-options', 'chat-desktop', 'workbench-desktop'];
-  const images = page.locator('figure.wireframe img');
-  await check(images).toHaveCount(names.length);
-  for (const name of names) {
-    const path = `/design/forge-ide-${name}.png`;
-    const image = page.locator(`figure.wireframe img[src="${path}"]`);
-    await check(image).toHaveAttribute('alt', /\S/);
-    await check(page.locator(`figure.wireframe a[href="${path}"]`).filter({ has: page.locator('img') }))
-      .toHaveAttribute('target', '_blank');
-    await image.scrollIntoViewIfNeeded();
-    await check.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0)).toBe(true);
-  }
+  await check(page.locator('#previous-chat-menu, figure.wireframe, script')).toHaveCount(0);
 
   process.stderr.write('QA_CHECK design_phone_layout\n');
   for (const viewport of [{ width: 390, height: 664 }, { width: 375, height: 667 }]) {
     await page.setViewportSize(viewport);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
-      'Design fits the phone viewport');
+      'Design index fits the phone viewport');
     assert.equal(await designIndex.getByRole('region').evaluateAll(panels => {
       const boxes = panels.map(panel => panel.getBoundingClientRect());
       return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
     }), true, 'design index categories stack on phones');
-    assert.equal(await images.evaluateAll(nodes => nodes.every(node => {
-      const image = node.getBoundingClientRect();
-      return image.width > 0 && image.height > 0 && image.left >= -1 && image.right <= innerWidth + 1;
-    })), true, 'each wireframe fits horizontally');
-    assert.equal(await page.locator('#phone figure.wireframe').evaluateAll(figures => {
-      const boxes = figures.map(figure => figure.getBoundingClientRect());
-      return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
-    }), true, 'phone wireframe cards stack vertically');
   }
+  await page.evaluate(() => scrollTo(0, 0));
+  await screenshot(page, 'ide-design-index-phone.png', { docs: true });
+  await designIndex.locator('a[href="/design/workspace"]').scrollIntoViewIfNeeded();
+  assert.equal(await topics.evaluate(nav => {
+    const box = nav.getBoundingClientRect();
+    return getComputedStyle(nav).position === 'sticky' && box.top >= -1 && box.bottom <= innerHeight;
+  }), true, 'topic navigation remains available while the index scrolls');
+
   process.stderr.write('QA_CHECK design_desktop_layout\n');
   await page.setViewportSize({ width: 1440, height: 1000 });
-  assert.equal(await page.locator('#desktop figure.wireframe').evaluateAll(([first, second]) => {
-    const left = first.getBoundingClientRect();
-    const right = second.getBoundingClientRect();
-    return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
-  }), true, 'desktop wireframe cards display side by side');
   assert.equal(await designIndex.getByRole('region').evaluateAll(([first, second]) =>
     first.offsetTop === second.offsetTop && first.offsetLeft < second.offsetLeft),
   true, 'design index categories display side by side on desktop');
+  await page.evaluate(() => scrollTo(0, 0));
+  await screenshot(page, 'ide-design-index-desktop.png', { docs: true });
+  await wireframesDesignJourney(page, designUrl);
   await providerLink.focus();
   await check(providerLink).toBeFocused();
   await page.keyboard.press('Enter');
@@ -2208,12 +2197,72 @@ async function designJourney(page, traffic) {
   await gameEngineDesignJourney(page, designUrl);
   assert.deepEqual(counts(), before, 'Design does not send requests through the Forge gateway');
   if (originalViewport) await page.setViewportSize(originalViewport);
-  await page.getByRole('link', { name: 'Back to Forge', exact: true }).click();
-  await check(page).toHaveURL(originalUrl);
+  await page.getByRole('navigation', { name: 'Forge views' }).getByRole('link', { name: 'Chat', exact: true }).click();
+  await check(page).toHaveURL(new URL('/', originalUrl).href);
+  await check(page.locator('#chat-draft')).toBeVisible();
+  await check(page.locator('#chat-draft')).toHaveValue(originalDraft);
+  await page.locator('#open-workbench').click();
   assert.equal(await tabKey(), originalTab, 'the IDE returns to the same tab workspace');
   assert.deepEqual(context.pages(), pages, 'returning from Design uses the existing page');
   await check(page.locator('#workspace-panel')).toBeVisible();
   assert.equal(page.workers().length, 1, 'returning from Design starts one Forge worker');
+}
+
+async function wireframesDesignJourney(page, designUrl) {
+  process.stderr.write('QA_CHECK design_wireframes_reader\n');
+  const context = page.context();
+  const pages = context.pages();
+  await page.getByRole('navigation', { name: 'Design sections' }).locator('a[href="/design/wireframes#phone"]').click();
+  await check(page).toHaveURL(new URL('/design/wireframes#phone', designUrl).href);
+  await check(page.getByRole('heading', { level: 1 })).toHaveText('IDE wireframes');
+  await check(page.locator('#previous-chat-menu')).toHaveCount(0);
+  const names = ['chat-phone', 'workbench-phone', 'workbench-project-options', 'chat-desktop', 'workbench-desktop'];
+  const images = page.locator('figure.wireframe img');
+  await check(images).toHaveCount(names.length);
+  for (const name of names) {
+    const path = `/design/forge-ide-${name}.png`;
+    const image = page.locator(`figure.wireframe img[src="${path}"]`);
+    await check(image).toHaveAttribute('alt', /\S/);
+    await check(page.locator(`figure.wireframe a[href="${path}"]`).filter({ has: page.locator('img') }))
+      .not.toHaveAttribute('target', /.+/);
+    await image.scrollIntoViewIfNeeded();
+    await check.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0)).toBe(true);
+    assert.equal(await image.evaluate(node => {
+      const stage = node.closest('.wireframe-stage');
+      if (!stage) return false;
+      const style = getComputedStyle(stage);
+      return style.backgroundColor !== 'rgba(0, 0, 0, 0)' && parseFloat(style.paddingTop) >= 8;
+    }), true, 'legacy light wireframe has a padded themed frame');
+  }
+  for (const viewport of [{ width: 390, height: 664 }, { width: 375, height: 667 }]) {
+    await page.setViewportSize(viewport);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      'wireframe reader fits the phone viewport');
+    assert.equal(await images.evaluateAll(nodes => nodes.every(node => {
+      const image = node.getBoundingClientRect();
+      return image.width > 0 && image.height > 0 && image.left >= -1 && image.right <= innerWidth + 1;
+    })), true, 'each framed wireframe fits horizontally');
+    assert.equal(await page.locator('#phone figure.wireframe').evaluateAll(figures => {
+      const boxes = figures.map(figure => figure.getBoundingClientRect());
+      return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
+    }), true, 'phone wireframe previews stack vertically');
+  }
+  await page.evaluate(() => scrollTo(0, 0));
+  await screenshot(page, 'ide-design-wireframes-phone.png', { docs: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  assert.equal(await page.locator('#desktop figure.wireframe').evaluateAll(([first, second]) => {
+    const left = first.getBoundingClientRect();
+    const right = second.getBoundingClientRect();
+    return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
+  }), true, 'desktop wireframe previews display side by side');
+  await page.getByRole('link', { name: 'Back to Design', exact: true }).click();
+  await check(page).toHaveURL(/\/design(?:#wireframes-and-workspace)?$/);
+  await page.getByRole('navigation', { name: 'Design sections' }).locator('a[href="/design/workspace"]').click();
+  await check(page).toHaveURL(new URL('/design/workspace', designUrl).href);
+  await check(page.getByRole('heading', { level: 1 })).toHaveText('Workspace data flow');
+  await check(page.getByRole('heading', { name: 'Workspace recovery', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Back to Design', exact: true }).click();
+  assert.deepEqual(context.pages(), pages, 'all documentation readers use the existing page');
 }
 
 async function designLocalRestoreJourney(page) {
@@ -2284,8 +2333,8 @@ async function designLocalRestoreJourney(page) {
 
 async function previousChatsDesignJourney(design, designUrl) {
   process.stderr.write('QA_CHECK design_previous_chats\n');
-  await design.getByRole('navigation', { name: 'Design sections' }).getByRole('link', { name: 'Previous chats', exact: true }).click();
-  await check(design).toHaveURL(`${designUrl}#previous-chats`);
+  await design.getByRole('navigation', { name: 'Design sections' }).locator('a[href="/design/previous-chats"]').click();
+  await check(design).toHaveURL(new URL('/design/previous-chats', designUrl).href);
   const proposal = design.locator('#previous-chats');
   const menu = proposal.locator('#previous-chat-menu');
   const summary = menu.locator('summary');
@@ -2306,7 +2355,9 @@ async function previousChatsDesignJourney(design, designUrl) {
     await check(transcript).toContainText(/\S/);
   }
 
-  await check(proposal.getByRole('heading', { name: 'Previous chats', exact: true })).toBeVisible();
+  await check(design.getByRole('heading', { level: 1, name: 'Previous chats', exact: true })).toBeVisible();
+  await check(proposal.locator('.sandbox-toolbar')).toContainText(/interactive preview/i);
+  await check(proposal.getByRole('table').locator('thead').getByRole('columnheader')).toHaveText(['State', 'Behavior']);
   await check(menu).toHaveJSProperty('open', true);
   await check(summary).toHaveText('Previous chats');
   await check(row('workbench')).toHaveAttribute('aria-current', 'true');
@@ -2408,6 +2459,21 @@ async function previousChatsDesignJourney(design, designUrl) {
   await check(draft).toHaveValue(savedDraft);
   await check(summary).toBeFocused();
 
+  const reset = design.getByRole('link', { name: 'Reset preview', exact: true });
+  await reset.focus();
+  await check(reset).toBeFocused();
+  const [resetResponse] = await Promise.all([
+    design.waitForResponse(response => response.request().isNavigationRequest() && response.url() === new URL('/design/previous-chats', designUrl).href),
+    design.keyboard.press('Enter'),
+  ]);
+  assert.equal(resetResponse.status(), 200, 'Reset reloads the owned preview document');
+  await check(row('workbench')).toHaveCount(1);
+  await check(title).toHaveText('Summarize Workbench');
+  await check(draft).toHaveValue('Add a note about Explorer.');
+  await check(menu).toHaveJSProperty('open', true);
+  await design.evaluate(() => scrollTo(0, 0));
+  await screenshot(design, 'ide-design-preview-phone.png', { docs: true });
+
   process.stderr.write('QA_CHECK design_chat_history_contract\n');
   await proposal.locator('a[href="/design/chat-history"]').click();
   await check(design).toHaveURL(`${new URL(designUrl).origin}/design/chat-history`);
@@ -2440,14 +2506,14 @@ async function previousChatsDesignJourney(design, designUrl) {
       true, 'dispatch design fits the viewport with a separately scrollable diagram');
   }
   await design.getByRole('link', { name: /back to design/i }).click();
-  const landingLink = design.getByRole('link', { name: 'PostgreSQL dispatch', exact: true });
+  const landingLink = design.getByRole('navigation', { name: 'Design sections' }).locator('a[href="/design/chat-dispatch"]');
   await check(landingLink).toHaveAttribute('href', '/design/chat-dispatch');
 }
 
 async function gameEngineDesignJourney(page, designUrl) {
   const pages = page.context().pages();
-  const link = page.getByRole('link', { name: 'Game engine design', exact: true });
-  await check(page.getByRole('link', { name: 'Room One playtest', exact: true }))
+  const link = page.getByRole('navigation', { name: 'Design sections' }).locator('a[href="/design/game-studio"]');
+  await check(page.getByRole('navigation', { name: 'Design sections' }).locator('a[href="/playtest"]'))
     .toHaveAttribute('href', '/playtest');
   await check(link).toHaveAttribute('href', '/design/game-studio');
   await link.click();

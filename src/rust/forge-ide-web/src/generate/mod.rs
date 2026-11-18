@@ -86,6 +86,9 @@ pub struct TimerBinding {
 #[derive(Clone, Debug, Serialize)]
 pub struct Transport {
     pub initial_event: String,
+    /// Bounded URL fragments mapped to existing typed application events.
+    /// Applied once, after admitted session and workspace restoration.
+    pub entry_actions: BTreeMap<String, String>,
     pub bindings: Vec<RequestBinding>,
     pub timers: Vec<TimerBinding>,
 }
@@ -98,6 +101,11 @@ impl Transport {
             || self.bindings.is_empty()
             || self.bindings.len() > 24
             || self.timers.len() > 8
+            || self.entry_actions.len() > 16
+            || self
+                .entry_actions
+                .iter()
+                .any(|(fragment, event)| !component::key(fragment) || !component::key(event))
         {
             return Err("invalid transport declarations");
         }

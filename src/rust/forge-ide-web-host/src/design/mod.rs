@@ -23,7 +23,7 @@ html_names!(Tag {
     Footer => "footer", Form => "form", H1 => "h1", H2 => "h2", H3 => "h3", H4 => "h4",
     Img => "img", Input => "input", Label => "label", Li => "li", Nav => "nav",
     Ol => "ol", P => "p", Path => "path", Pre => "pre", Section => "section", Select => "select", Small => "small", Svg => "svg",
-    Span => "span", Strong => "strong", Summary => "summary", Table => "table", Textarea => "textarea", Ul => "ul",
+    Span => "span", Strong => "strong", Summary => "summary", Table => "table", Tbody => "tbody", Td => "td", Th => "th", Thead => "thead", Tr => "tr", Textarea => "textarea", Ul => "ul",
 });
 
 html_names!(Attribute {
@@ -37,9 +37,9 @@ html_names!(Attribute {
     DataPlaytestTraceChannel => "data-playtest-trace-channel", Disabled => "disabled",
     D => "d", Fill => "fill", Focusable => "focusable", For => "for", Height => "height", Hidden => "hidden", Href => "href",
     Id => "id", Loading => "loading", Maxlength => "maxlength", Method => "method", Open => "open",
-    Rel => "rel", Required => "required", Role => "role", Rows => "rows",
+    Required => "required", Role => "role", Rows => "rows",
     Src => "src", Stroke => "stroke", StrokeLinecap => "stroke-linecap", StrokeLinejoin => "stroke-linejoin", StrokeWidth => "stroke-width",
-    Tabindex => "tabindex", Target => "target", Type => "type", ViewBox => "viewBox", Width => "width",
+    Tabindex => "tabindex", Type => "type", ViewBox => "viewBox", Width => "width",
 });
 
 #[derive(Clone, Copy)]
@@ -66,16 +66,8 @@ macro_rules! element {
     };
 }
 
-macro_rules! design_link {
-    ($path:literal, $title:literal, $description:literal) => {
-        element!(Li;
-            element!(A [Href = $path]; text($title)),
-            element!(P; text($description)),
-        )
-    };
-}
-
 mod dispatch;
+mod docs;
 mod forge_providers;
 mod forge_workers;
 mod game_asset_pipeline;
@@ -88,7 +80,10 @@ mod mail;
 pub mod playtest;
 pub mod playtest_asset_worker;
 pub mod playtest_browser;
+mod previous_chats;
 pub mod studio;
+mod wireframes;
+mod workspace;
 
 fn render(nodes: &[Node], output: &mut String) {
     for node in nodes {
@@ -159,6 +154,9 @@ fn render_element(
 pub enum DesignPage {
     Home,
     Overview,
+    PreviousChats,
+    Wireframes,
+    Workspace,
     ForgeProviders,
     ChatHistory,
     ChatDispatch,
@@ -174,11 +172,46 @@ pub enum DesignPage {
 }
 
 impl DesignPage {
+    fn topic(&self) -> Option<&'static str> {
+        match self {
+            Self::ForgeProviders
+            | Self::ForgeWorkers
+            | Self::ForgeWorkersPlaytest
+            | Self::ForgeWorkersStudio => Some("forge-foundations"),
+            Self::PreviousChats | Self::ChatHistory | Self::ChatDispatch | Self::Mail => {
+                Some("chat-and-mail")
+            }
+            Self::GameStudio | Self::GamePhysics | Self::GameAssetPipeline => {
+                Some("game-development")
+            }
+            Self::Wireframes | Self::Workspace => Some("wireframes-and-workspace"),
+            _ => None,
+        }
+    }
+
     /// Render a complete document using the shared portal design shell.
     pub fn render(self) -> String {
         let (title, back_href, back_label, body) = match self {
             Self::Home => ("Forge portal · Forge IDE", "/", "Back to Forge", home::BODY),
             Self::Overview => ("Forge IDE design", "/", "Back to Forge", landing::BODY),
+            Self::PreviousChats => (
+                "Previous chats · Forge IDE",
+                "/design#chat-and-mail",
+                "Back to Design",
+                previous_chats::BODY,
+            ),
+            Self::Wireframes => (
+                "Wireframes · Forge IDE",
+                "/design#wireframes-and-workspace",
+                "Back to Design",
+                wireframes::BODY,
+            ),
+            Self::Workspace => (
+                "Workspace data flow · Forge IDE",
+                "/design#wireframes-and-workspace",
+                "Back to Design",
+                workspace::BODY,
+            ),
             Self::ForgeProviders => (
                 "Forge plug-and-play · Forge IDE",
                 "/design#forge-foundations",
@@ -187,7 +220,7 @@ impl DesignPage {
             ),
             Self::ChatHistory => (
                 "Previous chats technical design · Forge IDE",
-                "/design#previous-chats",
+                "/design/previous-chats",
                 "Back to Previous chats",
                 history::BODY,
             ),
@@ -258,10 +291,8 @@ impl DesignPage {
         );
         output.push_str(match self {
             Self::Home => "<link rel=\"stylesheet\" href=\"/design/home.css\">",
-            Self::Overview => concat!(
-                "<link rel=\"stylesheet\" href=\"/design/index.css\">",
-                "<script src=\"/design/previous-chats.js\" defer></script>",
-            ),
+            Self::Overview => "<link rel=\"stylesheet\" href=\"/design/index.css\">",
+            Self::PreviousChats => "<script src=\"/design/previous-chats.js\" defer></script>",
             Self::GameStudio => "<link rel=\"stylesheet\" href=\"/design/game-studio.css\">",
             Self::Playtest => concat!(
                 "<link rel=\"stylesheet\" href=\"/playtest/style.css\">",
@@ -273,13 +304,23 @@ impl DesignPage {
             ),
             _ => "<link rel=\"stylesheet\" href=\"/design/chat-history.css\">",
         });
-        let main = if matches!(self, Self::Home | Self::Overview | Self::Playtest) {
+        let is_docs = !matches!(self, Self::Home | Self::Playtest | Self::Studio);
+        if is_docs {
+            output.push_str("<link rel=\"stylesheet\" href=\"/design/docs.css\">");
+        }
+        let main = if matches!(self, Self::Overview) {
+            "page-width docs-index"
+        } else if is_docs {
+            "page-width history-contract docs-reader"
+        } else if matches!(self, Self::Home | Self::Playtest) {
             "page-width"
         } else {
             "page-width history-contract"
         };
         let body_class = if matches!(self, Self::Home) {
             "home-page"
+        } else if is_docs {
+            "docs-page"
         } else {
             ""
         };
@@ -305,7 +346,7 @@ impl DesignPage {
                     });
                 },
             );
-        } else {
+        } else if !is_docs {
             let _ = write!(
                 output,
                 "<a class=\"return-link\" href=\"{}\"><span aria-hidden=\"true\">←</span> {}</a>",
@@ -313,7 +354,33 @@ impl DesignPage {
                 escape(back_label)
             );
         }
-        let _ = write!(output, "</div></header><main id=\"main\" class=\"{main}\">");
+        output.push_str("</div>");
+        if is_docs {
+            render(DOCS_GLOBAL_NAV, &mut output);
+        }
+        output.push_str("</header>");
+        if is_docs {
+            render_topics(self.topic(), &mut output);
+        }
+        let _ = write!(output, "<main id=\"main\" class=\"{main}\">");
+        if is_docs && !matches!(self, Self::Overview) {
+            render_element(
+                Tag::Nav,
+                &[
+                    (Attribute::Class, "docs-breadcrumb"),
+                    (Attribute::AriaLabel, "Breadcrumb"),
+                ],
+                &mut output,
+                |out| {
+                    render_element(Tag::A, &[(Attribute::Href, back_href)], out, |out| {
+                        render_element(Tag::Span, &[(Attribute::AriaHidden, "true")], out, |out| {
+                            out.push_str("← ")
+                        });
+                        out.push_str(&escape(back_label));
+                    });
+                },
+            );
+        }
         render(body, &mut output);
         output.push_str("</main></body></html>\n");
         output
@@ -326,4 +393,44 @@ pub fn index_stylesheet() -> String {
 
 pub fn home_stylesheet() -> String {
     home::stylesheet()
+}
+
+const DOCS_GLOBAL_NAV: &[Node] = &[
+    element!(Nav [Class = "page-width docs-global-nav", AriaLabel = "Forge views"];
+        element!(A [Href = "/#chat"]; text("Chat")),
+        element!(A [Href = "/#mail"]; text("Mail")),
+        element!(A [Href = "/#workbench"]; text("Workbench")),
+        element!(A [Href = "/home"]; text("Home")),
+        element!(A [Href = "/design", AriaCurrent = "page"]; text("Design")),
+    ),
+];
+
+fn render_topics(active: Option<&str>, output: &mut String) {
+    render_element(
+        Tag::Nav,
+        &[
+            (Attribute::Class, "docs-topics"),
+            (Attribute::AriaLabel, "Design topics"),
+        ],
+        output,
+        |out| {
+            for (id, label) in [
+                ("forge-foundations", "Foundations"),
+                ("chat-and-mail", "Chat & Mail"),
+                ("game-development", "Game Dev"),
+                ("wireframes-and-workspace", "Wireframes"),
+            ] {
+                let href = format!("/design#{id}");
+                let mut attrs = vec![(Attribute::Href, href.as_str())];
+                if active == Some(id) {
+                    attrs.push((Attribute::AriaCurrent, "location"));
+                }
+                render_element(Tag::A, &attrs, out, |out| out.push_str(&escape(label)));
+            }
+        },
+    );
+}
+
+pub fn docs_stylesheet() -> String {
+    docs::stylesheet()
 }

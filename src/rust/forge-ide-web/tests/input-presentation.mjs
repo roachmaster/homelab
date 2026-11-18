@@ -27,7 +27,8 @@ const status = { id: 'collection-status', textContent: 'Starting', dataset: {} }
 // Existing row fixture rejects unnecessary moves. Real selection/filter/page
 // changes remain covered by the actual-browser suite, not this minimal DOM.
 const attributes = () => ({ setAttribute() {}, removeAttribute() {} });
-const select = { ...attributes(), children: [{}, {}, {}], getAttribute() { return 'false'; }, tabIndex: 0 };
+const select = { ...attributes(), children: [{}, {}, {}], dataset: {},
+  querySelector() { return null; }, getAttribute() { return 'false'; }, tabIndex: 0 };
 const toggle = attributes();
 const item = { dataset: { rowId: 'record-1' }, children: [toggle, select] };
 const tree = {
@@ -68,7 +69,7 @@ const document = {
   getElementById(id) { return id === input.id ? input : id === status.id ? status : id === tree.id ? tree : extraElements.get(id) ?? null; },
 };
 const context = vm.createContext({
-  document, TextEncoder,
+  document, TextEncoder, location: { hash: '' },
   window: {
     addEventListener(name, fn) { lifecycle.set(name, fn); },
     removeEventListener(name) { lifecycle.delete(name); },
