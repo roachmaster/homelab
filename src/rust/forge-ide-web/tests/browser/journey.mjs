@@ -298,14 +298,59 @@ async function replayAction(page, slot) {
 
 async function disclosure(page, id, open) {
   const details = page.locator(`#${id}`);
-  if (await details.evaluate(node => node.open) !== open) {
-    const summary = page.locator(`#${id} > summary`);
-    await summary.focus();
-    await page.keyboard.press('Enter');
-    await check(summary).toBeFocused();
+  const caller = Number(new Error().stack.split('\n').slice(2)
+    .map(line => line.match(/journey\.mjs:(\d+):\d+/)?.[1]).find(Boolean) ?? 0);
+  let stage = 'read';
+  try {
+    if (await details.evaluate(node => node.open) !== open) {
+      const summary = page.locator(`#${id} > summary`);
+      stage = 'focus';
+      await summary.focus();
+      await check(summary).toBeFocused();
+      stage = 'toggle';
+      await page.keyboard.press('Enter');
+      await check(summary).toBeFocused();
+    }
+    stage = 'state';
+    await check(details).toHaveJSProperty('open', open);
+  } catch (error) {
+    const allowed = ['chat-options', 'file-metadata-panel', 'inspection-details', 'project-options',
+      'source-shape-caveats', 'source-shape-counts', 'source-shape-panel', 'workspace-options'];
+    const sample = await page.evaluate(ids => {
+      const active = document.activeElement;
+      const summary = active?.matches('summary') ? active.parentElement?.id : null;
+      const controls = ['chat-draft', 'chat-model', 'send-chat', 'open-chat', 'open-mail',
+        'open-workbench', 'chat-history-toggle', 'chat-conversation', 'chat-run-cancel', 'chat-run-retry'];
+      return active === document.body ? 'body' : ids.includes(summary) ? summary + '-summary'
+        : controls.includes(active?.id) ? active.id : 'other';
+    }, allowed).catch(() => 'unavailable');
+    process.stderr.write('QA_CHECK disclosure_failure=' + JSON.stringify({
+      disclosure: allowed.includes(id) ? id : 'other', stage, active: sample,
+      caller: Number.isInteger(caller) && caller >= 0 && caller <= 100000 ? caller : 0,
+    }) + '\n');
+    throw error;
   }
-  await check(details).toHaveJSProperty('open', open);
 }
+async function openChatHistory(page) {
+  const drawer = page.locator('#chat-history-panel');
+  if (!await drawer.evaluate(node => node.open)) {
+    await page.locator('#chat-history-toggle').click();
+  }
+  await check(drawer).toBeVisible();
+  await check(drawer).toHaveJSProperty('open', true);
+  return drawer;
+}
+async function selectChat(page, value) {
+  await openChatHistory(page);
+  await page.locator('#chat-conversation').selectOption(value);
+  await check(page.locator('#chat-history-panel')).toBeHidden();
+}
+async function openChatOptions(page) {
+  await check(page.locator('#chat')).toBeVisible();
+  await check(page.locator('#chat-options > summary')).toBeVisible();
+  await disclosure(page, 'chat-options', true);
+}
+
 async function checkRefreshPlacement(page) {
   const problems = page.locator('#problems-panel-switch');
   const refresh = page.getByRole('button', { name: 'Refresh project', exact: true });
@@ -918,6 +963,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
       hidden: document.getElementById('workbench').hidden,
       contextHidden: document.getElementById('workbench-context').hidden,
       contextText: document.getElementById('workbench-context').textContent,
+      threadTitleCleared: document.getElementById('chat-history-toggle').textContent === 'Previous chats',
       source: document.getElementById('source-view').textContent,
       markdown: document.getElementById('source-preview').textContent,
       transcript: document.getElementById('chat-transcript').textContent,
@@ -933,6 +979,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   assert.equal(cleared.hidden, true, 'teardown hides protected composition before resume');
   assert.equal(cleared.contextHidden, true, 'teardown hides project context before resume');
   assert.equal(cleared.contextText, '', 'teardown clears project context before resume');
+  assert.equal(cleared.threadTitleCleared, true, 'teardown clears the protected active thread title before resume');
   assert.equal(cleared.source, '', 'teardown clears verified source before resume');
   assert.equal(cleared.markdown, '', 'teardown clears displayed Markdown before resume');
   assert.equal(cleared.transcript, '', 'teardown clears the transcript before resume');
@@ -965,7 +1012,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   const conversations = page.locator('#chat-conversation');
   await check(conversations).toHaveValue('1');
   await check(page.locator('#chat-draft')).toHaveValue(retainedChatDraft);
-  await conversations.selectOption('0');
+  await selectChat(page, '0');
   await check(page.locator('#chat-transcript')).toContainText('Original conversation');
   await check(page.locator('#chat-transcript [data-role="assistant"]')).toHaveCount(2);
   await page.locator('#open-workbench').click();
@@ -1132,6 +1179,7 @@ async function durableHostRestartJourney() {
       const leave = page.waitForEvent('dialog', { predicate: dialog => dialog.type() === 'beforeunload', timeout: 5000 })
         .then(dialog => dialog.accept());
       await Promise.all([leave, page.reload({ waitUntil: 'domcontentloaded' })]);
+      await openChatOptions(page);
       await check(page.locator('#chat-run-cancel')).toBeVisible();
       await check(page.locator('#chat-status')).toHaveText('Waiting for Forge…');
     }
@@ -1150,7 +1198,8 @@ async function durableHostRestartJourney() {
     await pair(page);
     await mailLayoutJourney(page, viewport);
     await check(page.locator('#chat')).toBeVisible();
-    const model = page.getByRole('combobox', { name: 'Model', exact: true });
+    const model = page.locator('#chat-model');
+    await openChatOptions(page);
     await check(model).toHaveValue('gpt-oss-20b');
     await check(model.locator('option[value="qwen2.5-coder-7b"]')).toHaveText(/Qwen2.5-Coder 7B.*loads on request$/);
     await model.selectOption('qwen2.5-coder-7b');
@@ -1203,7 +1252,7 @@ async function durableHostRestartJourney() {
     await page.locator('#open-chat').click();
     await check(page.locator('#chat-conversation')).toHaveValue('1');
     await check(draft).toHaveValue(privateDraft);
-    await page.locator('#chat-conversation').selectOption('0');
+    await selectChat(page, '0');
     await checkTranscript(page);
 
     process.stderr.write('QA_CHECK durable_chat_new_context\n');
@@ -1225,15 +1274,25 @@ async function durableHostRestartJourney() {
     const freshPage = fresh.page;
     await freshPage.setViewportSize({ width: 390, height: 664 });
     const previousChats = freshPage.getByRole('button', { name: 'Previous chats' });
-    const manage = freshPage.getByRole('button', { name: 'Manage', exact: true });
+    const manage = freshPage.getByRole('button', { name: 'Manage current chat', exact: true });
     const savedChats = freshPage.getByRole('tree', { name: 'Saved chats' });
     await previousChats.click();
     const savedChat = savedChats.getByRole('treeitem', { name: prompt });
     await check(savedChat).toBeVisible();
     await check(savedChat).toContainText('Kept through 2026-12-16 (UTC)');
+    const search = freshPage.getByRole('searchbox', { name: 'Search saved chats on this page', exact: true });
+    const beforeSearch = fresh.traffic.count('other');
+    await search.fill('No matching saved conversation');
+    await check(savedChats.getByRole('treeitem')).toHaveCount(0);
+    await search.fill('KEEP THIS');
+    await check(savedChat).toBeVisible();
+    assert.equal(fresh.traffic.count('other'), beforeSearch, 'filtering the current history page stays local to WASM');
+    await search.fill('');
+    await screenshot(freshPage, 'ide-chat-history-phone.png');
     await savedChat.click();
     await check(previousChats).toHaveAttribute('aria-expanded', 'false');
     await checkTranscript(freshPage);
+    await openChatHistory(freshPage);
     await manage.click();
     await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept through 2026-12-16 (UTC)');
     assert.equal(fresh.traffic.count('chat_history_retention_set'), 0, 'the default date needs no browser mutation');
@@ -1254,20 +1313,25 @@ async function durableHostRestartJourney() {
     await deletion.getByRole('button', { name: 'Cancel' }).click();
     await check(deletion).toBeHidden();
     await checkTranscript(freshPage);
+    await check(freshPage.locator('#chat-history-panel')).toBeVisible();
     await deleteButton.click();
     await deletion.getByRole('button', { name: 'Delete chat', exact: true }).click();
     await check(deletion).toBeHidden();
     await check(freshPage.locator('#chat-history-status')).toHaveText('Chat deleted.');
-    await previousChats.click();
+    await check(freshPage.locator('#chat-history-panel')).toBeHidden();
+    await openChatHistory(freshPage);
     await check(savedChats).toHaveText('No saved chats yet.');
     await check(freshPage.locator('#chat-transcript [data-role]')).toHaveCount(0);
     assert.equal(await freshPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.equal(relay.completions(), 1, 'retention and deletion do not call inference');
+    await freshPage.locator('#chat-history-close').click();
+    await check(freshPage.locator('#chat-history-panel')).toBeHidden();
     await freshPage.locator('#new-chat').click();
     await check(freshPage.locator('#chat-conversation')).toHaveValue('1');
     const cancelled = freshPage.locator('#chat-draft');
     await cancelled.fill(cancelledDraft);
     await freshPage.locator('#send-chat').click();
+    await openChatOptions(freshPage);
     await check(freshPage.locator('#chat-run-cancel')).toBeVisible();
     await freshPage.locator('#chat-run-cancel').click();
     await check(freshPage.locator('#chat-status')).toContainText('Run cancelled');
@@ -1585,6 +1649,7 @@ async function managedWriteJourney(page, context, respondToLeaveWarning) {
   await page.locator('#open-chat').click();
   await check(page.locator('#chat-transcript')).toContainText(/Applied · rev [0-9a-f]{8}/);
   await page.locator('#chat-draft').fill('What changed in the file?');
+  await openChatOptions(page);
   await page.getByRole('button', { name: 'Send with file', exact: true }).click();
   await check(page.locator('#chat-transcript')).toContainText('The verified excerpt contains the updated and extra lines.');
   await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
@@ -2462,11 +2527,66 @@ async function chatJourney(page, context) {
   const send = page.locator('#send-chat');
   const replyMarkdown = '## Reply\n\nReply `<img src=x onerror=alert(1)>` with [the guide](https://example.com/guide).\n\n| Topic | Key |\n|---|---|\n| **What** | Virus |';
   async function assertChatShell() {
-    await check(transcript).toHaveCSS('background-color', await themeColor(page, 'surface'));
-    await check(transcript).toHaveCSS('border-top-width', '1px');
-    const [draftBox, sendBox] = await Promise.all([draft.boundingBox(), send.boundingBox()]);
-    assert(draftBox && sendBox && sendBox.y >= draftBox.y + draftBox.height,
-      'the Send button is below the composer');
+    await check(transcript).toHaveCSS('border-top-width', '0px');
+    await check(transcript).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await check(draft).toHaveAttribute('placeholder', 'Message Forge…');
+    await check(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
+    await check(send).toHaveAttribute('aria-label', 'Send');
+    const [draftBox, sendBox, transcriptBox, headerBox, tabsBox] = await Promise.all([
+      draft.boundingBox(), send.boundingBox(), transcript.boundingBox(),
+      page.locator('.fg-header').boundingBox(), page.locator('#ide-navigation').boundingBox(),
+    ]);
+    const viewport = page.viewportSize();
+    assert(draftBox && sendBox && sendBox.x >= draftBox.x && sendBox.x + sendBox.width <= draftBox.x + draftBox.width + 1
+      && sendBox.y >= draftBox.y && sendBox.y + sendBox.height <= draftBox.y + draftBox.height + 1,
+    'Send is inside the trailing edge of the composer');
+    assert(sendBox.width >= 44 && sendBox.height >= 44, 'the inline Send target remains usable by touch');
+    assert(draftBox.y + draftBox.height <= viewport.height + 1, 'the composer remains inside the viewport');
+    assert(transcriptBox && transcriptBox.height >= viewport.height * .4,
+      'the open message stream receives the remaining viewport height');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      'the active Chat shell has no horizontal overflow');
+    if (viewport.width < 640) {
+      assert(headerBox && tabsBox && headerBox.height <= 56 && tabsBox.height <= 48
+        && tabsBox.y + tabsBox.height <= 110,
+      'mobile Chat has only two compact header/navigation bars');
+      assert(transcriptBox.y >= tabsBox.y + tabsBox.height - 1
+        && transcriptBox.y <= tabsBox.y + tabsBox.height + 20,
+      'the conversation begins immediately below the two-bar chrome');
+      for (const id of ['forge-home', 'chat-history-toggle', 'new-chat']) {
+        const control = page.locator('#' + id);
+        await check(control).toBeVisible();
+        const box = await control.boundingBox();
+        assert(box && box.width >= 44 && box.height >= 44, id + ' retains its mobile touch target');
+      }
+      for (const id of ['open-chat', 'open-workbench', 'open-home', 'open-design']) {
+        await check(page.locator('#' + id)).toBeVisible();
+      }
+      const visibleTabs = page.locator('#ide-navigation > :is(button,a):visible');
+      const tabCount = await visibleTabs.count();
+      assert(tabCount >= 4 && tabCount <= 5, 'the admitted catalog exposes the four core tabs and optional Mail');
+      for (const control of await visibleTabs.all()) {
+        const box = await control.boundingBox();
+        assert(box && box.width >= 44 && box.height >= 44,
+          (await control.getAttribute('id')) + ' retains its mobile touch target');
+      }
+    }
+    assert.equal(await draft.evaluate(node => {
+      const channels = color => color.match(/[\d.]+/g).map(Number);
+      const luminance = values => values.slice(0, 3).map(channel => {
+        const value = channel / 255;
+        return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+      }).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+      const style = getComputedStyle(node);
+      let surrounding = node.parentElement;
+      while (surrounding && getComputedStyle(surrounding).backgroundColor === 'rgba(0, 0, 0, 0)') surrounding = surrounding.parentElement;
+      const colors = [style.borderTopColor, style.backgroundColor,
+        surrounding ? getComputedStyle(surrounding).backgroundColor : 'rgb(0, 0, 0)'];
+      return colors.slice(1).every(background => {
+        const lights = [luminance(channels(colors[0])), luminance(channels(background))].sort((a, b) => b - a);
+        return (lights[0] + .05) / (lights[1] + .05) >= 3;
+      });
+    }), true, 'the idle composer boundary has at least 3:1 contrast against its adjacent fills');
   }
   const sent = [];
   let release;
@@ -2480,7 +2600,7 @@ async function chatJourney(page, context) {
       protocol_version: 1,
       event: {
         kind: 'chat_result', request_id: body.request.request_id,
-        outcome: { kind: 'answer', content: replyMarkdown },
+        outcome: { kind: 'answer', content: sent.length === 1 ? replyMarkdown : replyMarkdown + '\n\n' + 'A longer controlled reply keeps the message stream scrolling while the composer stays reachable.\n\n'.repeat(40) },
       },
     } });
   };
@@ -2488,6 +2608,14 @@ async function chatJourney(page, context) {
   await check(page.locator('#chat')).toBeVisible();
   await check(page.locator('#ide-navigation').getByRole('link', { name: 'Design', exact: true })).toBeVisible();
   await check(page.locator('#workbench-context')).toBeHidden();
+  const historyTrigger = page.getByRole('button', { name: 'Previous chats', exact: true });
+  await historyTrigger.focus();
+  await page.keyboard.press('Enter');
+  await check(page.getByRole('dialog', { name: 'Conversations', exact: true })).toBeVisible();
+  await check(select).toBeFocused();
+  await page.keyboard.press('Escape');
+  await check(page.locator('#chat-history-panel')).toBeHidden();
+  await check(historyTrigger).toBeFocused();
   await draft.fill('Retry this draft');
   await send.click();
   await check(page.locator('#chat-status')).toContainText('inference is unavailable');
@@ -2504,7 +2632,8 @@ async function chatJourney(page, context) {
     release();
     await check(send).toBeEnabled();
     await check(transcript).not.toContainText('Reply');
-    await select.selectOption('0');
+    await selectChat(page, '0');
+    await check(historyTrigger).toContainText('Original conversation');
     await check(transcript).toContainText('Reply <img src=x onerror=alert(1)>');
     await check(transcript.locator('img,script')).toHaveCount(0);
     const heading = transcript.getByRole('heading', { name: 'Reply', exact: true });
@@ -2529,6 +2658,10 @@ async function chatJourney(page, context) {
     await check(table.getByRole('cell')).toHaveText(['What', 'Virus']);
     await assertChatShell();
     await screenshot(page, 'ide-chat-rendered-phone.png');
+    await page.setViewportSize({ width: 375, height: 667 });
+    await assertChatShell();
+    await page.setViewportSize({ width: 844, height: 390 });
+    await assertChatShell();
     await page.setViewportSize({ width: 1440, height: 1000 });
     await draft.fill('Follow-up');
     await send.click();
@@ -2536,8 +2669,19 @@ async function chatJourney(page, context) {
     assert.deepEqual(sent[1].map(message => message.content), [
       'Original conversation', replyMarkdown, 'Follow-up',
     ]);
-    await select.selectOption('1');
+    await page.setViewportSize({ width: 390, height: 664 });
+    await assertChatShell();
+    assert.equal(await transcript.evaluate(node => node.scrollHeight > node.clientHeight + 100), true,
+      'a long reply scrolls within the open message stream');
+    await check(draft).toBeInViewport();
+    await check(send).toBeInViewport();
+    await selectChat(page, '1');
     await check(draft).toHaveValue(retainedChatDraft);
+    await draft.focus();
+    await page.keyboard.press('Tab');
+    await check(send).toBeFocused();
+    await assertVisibleFocus(page);
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await screenshot(page, 'ide-chat-desktop.png');
     await page.setViewportSize({ width: 390, height: 664 });
     await check(page.locator('#new-chat')).toBeInViewport();

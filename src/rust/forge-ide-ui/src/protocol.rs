@@ -731,6 +731,9 @@ pub enum UiEvent {
     CancelChatRun {},
     RetryChatSubmit {},
     ShowChatHistory {},
+    SetChatHistoryQuery {
+        value: String,
+    },
     MoreChatHistory {},
     NewerChatHistory {},
     OpenSavedChat {

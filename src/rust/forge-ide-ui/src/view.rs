@@ -128,6 +128,7 @@ pub enum FilterAction {
     SetChatDraft { conversation: usize },
     SetDocument { editor_id: String },
     SetChatExpiry {},
+    SetChatHistoryQuery {},
     SetMailSubject {},
     SetMailDraft {},
     SetFileFilter { report: RequestToken },

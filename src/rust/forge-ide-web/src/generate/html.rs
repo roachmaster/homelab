@@ -47,6 +47,18 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::BrandContext { id } => {
             let _ = write!(out, "<span id=\"{}\" class=\"fg-brand-context\" data-bind-text data-protected hidden></span>", escape(id));
         }
+        Component::HeaderActions {
+            id,
+            children: items,
+        } => {
+            let _ = write!(
+                out,
+                "<div id=\"{}\" class=\"fg-header-actions\" data-protected hidden>",
+                escape(id)
+            );
+            children(items, out);
+            out.push_str("</div>");
+        }
         Component::Screen {
             id,
             title,
@@ -314,7 +326,11 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 format!(" data-check-input=\"{}\"", escape(id))
             });
             let controls = controls.as_ref().map_or_else(String::new, |id| {
-                format!(" aria-controls=\"{}\" aria-expanded=\"false\"", escape(id))
+                format!(
+                    " data-bind-text aria-controls=\"{}\" aria-expanded=\"false\" aria-label=\"{}\"",
+                    escape(id),
+                    escape(label)
+                )
             });
             let uuid = uuid_field.as_ref().map_or_else(String::new, |field| {
                 format!(" data-uuid-field=\"{}\"", escape(field))
@@ -333,16 +349,24 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             action,
             emphasis,
             glyph,
+            check_input,
+            uuid_field,
         } => {
             let primary = if *emphasis == ButtonEmphasis::Primary {
                 " fg-button-primary"
             } else {
                 ""
             };
+            let check = check_input.as_ref().map_or_else(String::new, |id| {
+                format!(" data-check-input=\"{}\"", escape(id))
+            });
+            let uuid = uuid_field.as_ref().map_or_else(String::new, |field| {
+                format!(" data-uuid-field=\"{}\"", escape(field))
+            });
             let label = escape(label);
             let _ = write!(
                 out,
-                "<button type=\"button\" class=\"fg-button{primary} fg-button-icon\" id=\"{}\" data-action=\"{}\" aria-label=\"{label}\" title=\"{label}\" disabled><span aria-hidden=\"true\" data-glyph=\"{}\"></span></button>",
+                "<button type=\"button\" class=\"fg-button{primary} fg-button-icon\" id=\"{}\" data-action=\"{}\"{check}{uuid} aria-label=\"{label}\" title=\"{label}\" disabled><span aria-hidden=\"true\" data-glyph=\"{}\"></span></button>",
                 escape(id),
                 escape(action),
                 escape(&glyph.to_string())
@@ -521,7 +545,56 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::generate::application::ide_document;
+    use crate::generate::{application::ide_document, Document};
+
+    #[test]
+    fn header_controls_cannot_escape_the_single_document_header() {
+        let header = crate::component!(header_actions "controls"; [
+            crate::component!(primary_icon "new", "New", "new_item", '+'),
+        ]);
+        let mut document = Document {
+            title: "Fixture".into(),
+            subtitle: String::new(),
+            children: vec![header.clone()],
+        };
+        document.validate().unwrap();
+        document
+            .children
+            .push(crate::component!(header_actions "extra"; []));
+        assert_eq!(
+            document.validate(),
+            Err("document allows one header actions group")
+        );
+        document.children = vec![crate::component!(region "content"; [header])];
+        assert_eq!(
+            document.validate(),
+            Err("header actions must be a document child")
+        );
+    }
+
+    #[test]
+    fn icon_submission_keeps_input_uuid_and_accessible_label_contracts() {
+        let mut control = crate::component!(uuid_icon "submit", "Send & keep", "submit", "draft", "request_id", '↑');
+        let mut document = Document {
+            title: "Fixture".into(),
+            subtitle: String::new(),
+            children: vec![control.clone()],
+        };
+        document.validate().unwrap();
+        let mut output = String::new();
+        emit(&control, &mut output);
+        assert!(output.contains("data-check-input=\"draft\" data-uuid-field=\"request_id\""));
+        assert!(output.contains("aria-label=\"Send &amp; keep\""));
+        assert!(output.contains("aria-hidden=\"true\" data-glyph=\"↑\""));
+        if let Component::IconButton { uuid_field, .. } = &mut control {
+            *uuid_field = Some("invalid field".into());
+        }
+        document.children = vec![control];
+        assert_eq!(
+            document.validate(),
+            Err("invalid button reference or UUID field")
+        );
+    }
 
     #[test]
     fn presentation_copy_is_escaped_for_browser_bindings() {

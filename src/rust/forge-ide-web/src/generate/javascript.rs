@@ -236,9 +236,9 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   const dialogBindings=[];
   for(const b of view.visibility||[]){
     const n=element(b.id);if(!n)continue;
+    panelToggles.get(b.id)?.setAttribute('aria-expanded',String(b.visible));
     if(dialogs.has(b.id)){dialogBindings.push([n,b.visible]);continue;}
     n.hidden=!b.visible;
-    panelToggles.get(b.id)?.setAttribute('aria-expanded',String(b.visible));
   }
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}

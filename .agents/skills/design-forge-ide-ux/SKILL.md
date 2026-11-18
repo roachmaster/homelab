@@ -42,14 +42,19 @@ viewport and overflow rules to active Chat so Workbench keeps its own scrolling.
   transcript scroll within a flexible middle track and dock Message and Send
   below it. Use a shorter composer and tighter spacing on short viewports while
   preserving touch targets.
-- **Align the reading column.** Give Conversation the remaining toolbar width
-  beside New chat. Align that row, transcript and composer to the same edges.
-  Let Forge replies use the full readable width of the open transcript. Keep
-  user prompts in bounded right-aligned bubbles and wrap long content.
-- **Keep controls recognizable.** Place Send beside Message and give the disabled
-  state a visible fill and boundary. Check the Message border against the
-  actual adjacent colors and use a visible keyboard focus indicator. Preserve
-  accessible names and tab order when moving controls with layout rules.
+- **Budget mobile chrome.** Use at most two header/navigation bars below 640px:
+  identity, a current-conversation trigger and New chat share the first; the
+  view tabs occupy the second. Put history selection and retention management
+  inside one accessible drawer. Preserve keyboard dismissal and focus return.
+- **Align the reading column.** Align the open transcript and composer to the
+  same edges. Let Forge replies use the full readable width without an outer
+  bordered box. Keep user prompts in bounded right-aligned, borderless bubbles
+  and wrap long content. Conversation management must not shrink the idle feed.
+- **Keep controls recognizable.** Place the Send icon inside the composer's
+  trailing edge with a visible disabled shape. Use a placeholder instead of a
+  visible Message label while retaining its accessible name. Disclose model,
+  file and run controls through Chat options. Check the composer boundary
+  against adjacent colors and preserve visible keyboard focus and tab order.
 
 Use the [Chat layout checks](../test-forge-ui/SKILL.md#chat-layout-checks) to
 verify the generated screen.
@@ -79,10 +84,10 @@ interaction tests cannot excuse the wrong primary product shape.
 
 ## Make source the main work area on phones
 
-- **Keep three compact rows above the source controls.** Share the first row
-  between the brand and the Chat/Workbench mode switch. Put pane tabs and
-  Project controls on the next row, with View options and project selectors
-  inside the disclosure while a file is active. Put Back to files beside the
+- **Keep at most two header/navigation bars.** Share identity and current
+  context in the first bar and put view navigation in the second. Keep pane,
+  Project and View controls local to the work area, with project selectors
+  inside a disclosure while a file is active. Put Back to files beside the
   filename. Keep actionable warnings visible and use one short source status.
 - **Give each control a recognizable role.** Use a recessed segmented track
   with a solid raised selected segment, an underline for the active mobile

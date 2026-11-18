@@ -5,8 +5,10 @@ const PAGE_SIZE: usize = 20;
 #[derive(Debug, Default)]
 pub(in crate::model) struct History {
     pub enabled: bool,
+    drawer_open: bool,
     list_open: bool,
     manage_open: bool,
+    query: String,
     items: Vec<ChatSummaryDto>,
     next_cursor: Option<String>,
     previous_cursors: Vec<Option<String>>,
@@ -81,6 +83,7 @@ impl History {
 
 impl Chats {
     pub(in crate::model) fn close_history(&mut self) {
+        self.history.drawer_open = false;
         self.history.list_open = false;
         self.history.manage_open = false;
         if !self.history.mutation_pending() {
@@ -94,13 +97,15 @@ impl Chats {
         &mut self,
         request_id: String,
     ) -> Result<Option<ChatHistoryRequest>, UiError> {
-        if !self.history.enabled || self.history.mutation_pending() || self.history.dialog_open() {
+        if self.history.mutation_pending() || self.history.dialog_open() {
             return Err(UiError::InvalidAction);
         }
-        let open = !self.history.list_open;
+        let open = !self.history.drawer_open;
         self.close_history();
-        self.history.list_open = open;
-        if open {
+        self.history.drawer_open = open;
+        self.history.list_open = open && self.history.enabled;
+        if self.history.list_open {
+            self.history.query.clear();
             self.history.cursor = None;
             self.history.next_cursor = None;
             self.history.previous_cursors.clear();
@@ -108,6 +113,17 @@ impl Chats {
             return Ok(self.history.list(request_id));
         }
         Ok(None)
+    }
+
+    pub(in crate::model) fn search_history(&mut self, value: String) -> Result<(), UiError> {
+        if !self.history.drawer_open || !self.history.enabled {
+            return Err(UiError::InvalidAction);
+        }
+        if value.len() > MAX_FILTER_BYTES {
+            return Err(UiError::Limit);
+        }
+        self.history.query = value;
+        Ok(())
     }
 
     pub(in crate::model) fn page_history(
@@ -182,7 +198,7 @@ impl Chats {
     ) -> Result<Option<ChatHistoryRequest>, UiError> {
         if !self.history.enabled
             || self.pending.is_some()
-            || self.history.mutation_pending()
+            || self.history.waiting()
             || self.history.dialog_open()
         {
             return Err(UiError::InvalidAction);
@@ -197,7 +213,7 @@ impl Chats {
             .filter(|_| chat.revision.is_some())
             .ok_or(UiError::InvalidAction)?;
         let open = !self.history.manage_open;
-        self.close_history();
+        self.history.drawer_open = true;
         self.history.manage_open = open;
         if open {
             let request = ChatHistoryRequest::ChatHistoryOpen {
@@ -497,7 +513,9 @@ impl Chats {
         conversation.summary = Some(summary);
         conversation.status.clear();
         self.selected = index;
-        self.history.list_open = false;
+        if !manage {
+            self.close_history();
+        }
         Ok(())
     }
 
@@ -554,8 +572,12 @@ impl Chats {
         };
         let delete = matches!(history.dialog, Some(Dialog::Delete));
         for (id, visible) in [
-            ("chat-history-toggle", enabled),
-            ("chat-history-panel", enabled && history.list_open),
+            ("chat-history-toggle", connected),
+            (
+                "chat-history-panel",
+                connected && !self.workbench && history.drawer_open,
+            ),
+            ("chat-history-content", enabled && history.list_open),
             ("chat-history-newer", !history.previous_cursors.is_empty()),
             ("chat-history-older", history.next_cursor.is_some()),
             ("chat-manage-toggle", enabled && saved.is_some()),
@@ -575,13 +597,14 @@ impl Chats {
         for (id, disabled) in [
             (
                 "chat-history-toggle",
-                !enabled || history.mutation_pending(),
+                !connected || history.mutation_pending(),
             ),
+            ("chat-history-close", history.mutation_pending()),
             ("chat-history-newer", waiting),
             ("chat-history-older", waiting),
             (
                 "chat-manage-toggle",
-                !enabled || saved.is_none() || self.pending.is_some() || history.mutation_pending(),
+                !enabled || saved.is_none() || self.pending.is_some() || waiting,
             ),
             ("chat-show-expiry", busy),
             ("chat-long-term", busy),
@@ -633,6 +656,14 @@ impl Chats {
             });
         }
         view.inputs.push(InputBinding {
+            id: "chat-history-query",
+            value: history.query.clone(),
+            disabled: !enabled || !history.drawer_open,
+            max_bytes: MAX_FILTER_BYTES,
+            action: (enabled && history.drawer_open)
+                .then_some(FilterAction::SetChatHistoryQuery {}),
+        });
+        view.inputs.push(InputBinding {
             id: "chat-expiry-date",
             value: expiry.cloned().unwrap_or_default(),
             disabled: expiry.is_none() || waiting,
@@ -642,10 +673,12 @@ impl Chats {
         if !enabled {
             return;
         }
+        let query = history.query.trim().to_lowercase();
         let rows = history
             .items
             .iter()
             .filter(|_| history.list_open)
+            .filter(|item| item.title.to_lowercase().contains(&query))
             .map(|item| RowView {
                 id: item.chat_id.clone(),
                 label: item.title.clone(),
@@ -668,6 +701,8 @@ impl Chats {
             rows,
             empty_message: if waiting || !history.status.is_empty() {
                 ""
+            } else if !query.is_empty() {
+                "No matching saved chats on this page."
             } else {
                 "No saved chats yet."
             }
@@ -729,6 +764,151 @@ mod tests {
     use super::*;
 
     const CHAT_ID: &str = "2d81d267-ddfb-4417-b866-a900b6aa6c29";
+
+    fn summary() -> ChatSummaryDto {
+        ChatSummaryDto {
+            chat_id: CHAT_ID.into(),
+            title: "Saved fixture chat".into(),
+            updated_at: "2026-11-18T12:00:00Z".into(),
+            revision: 1,
+            retention: RetentionPolicyDto::LongTerm,
+        }
+    }
+
+    fn saved_chat() -> ChatHistoryDto {
+        ChatHistoryDto {
+            summary: summary(),
+            messages: vec![
+                ChatMessageDto {
+                    position: 1,
+                    role: ChatRole::User,
+                    content: "First prompt".into(),
+                    attachment: None,
+                },
+                ChatMessageDto {
+                    position: 2,
+                    role: ChatRole::Assistant,
+                    content: "First reply".into(),
+                    attachment: None,
+                },
+            ],
+        }
+    }
+
+    fn visible(chats: &Chats, id: &str) -> bool {
+        let mut view = ViewModel::default();
+        chats.project(&mut view, true);
+        view.visibility
+            .iter()
+            .any(|binding| binding.id == id && binding.visible)
+    }
+
+    #[test]
+    fn local_conversation_drawer_does_not_require_durable_history() {
+        let mut chats = Chats::default();
+        chats.open();
+        chats.draft(0, "Keep this draft".into()).unwrap();
+        assert!(chats.toggle_history("local".into()).unwrap().is_none());
+        assert!(visible(&chats, "chat-history-panel"));
+        assert!(!visible(&chats, "chat-history-content"));
+        assert!(visible(&chats, "chat-header-actions"));
+        chats.toggle_history("close".into()).unwrap();
+        assert!(!visible(&chats, "chat-history-panel"));
+        assert_eq!(chats.conversations[0].draft, "Keep this draft");
+    }
+
+    #[test]
+    fn closing_drawer_rejects_the_late_list_and_preserves_work() {
+        let mut chats = Chats::default();
+        chats.history.enabled = true;
+        chats.open();
+        chats.draft(0, "Unsent follow-up".into()).unwrap();
+        chats.toggle_history("list".into()).unwrap();
+        chats.toggle_history("close".into()).unwrap();
+        chats.accept_history(ChatHistoryResponse::ChatHistoryListed {
+            request_id: "list".into(),
+            items: vec![summary()],
+            next_cursor: None,
+        });
+        assert!(!visible(&chats, "chat-history-panel"));
+        assert!(chats.history.items.is_empty());
+        assert_eq!(chats.conversations[0].draft, "Unsent follow-up");
+    }
+
+    #[test]
+    fn management_and_retention_stay_inside_the_open_drawer() {
+        let mut chats = Chats::default();
+        chats.history.enabled = true;
+        chats.open();
+        chats.accept_open(saved_chat(), false).unwrap();
+        chats.toggle_history("list".into()).unwrap();
+        chats.accept_history(ChatHistoryResponse::ChatHistoryListed {
+            request_id: "list".into(),
+            items: vec![summary()],
+            next_cursor: None,
+        });
+        chats.manage_saved("manage".into()).unwrap();
+        chats.accept_history(ChatHistoryResponse::ChatHistoryOpened {
+            request_id: "manage".into(),
+            chat: saved_chat(),
+        });
+        assert!(visible(&chats, "chat-history-panel"));
+        assert!(visible(&chats, "chat-history-content"));
+        assert!(visible(&chats, "chat-manage-panel"));
+        chats.show_history_dialog(false).unwrap();
+        chats.close_history_dialog();
+        assert!(visible(&chats, "chat-history-panel"));
+        chats.set_retention("keep".into(), true).unwrap();
+        assert_eq!(
+            chats.toggle_history("close".into()),
+            Err(UiError::InvalidAction)
+        );
+        chats.accept_history(ChatHistoryResponse::ChatHistoryRetentionSet {
+            request_id: "keep".into(),
+            chat_id: CHAT_ID.into(),
+            revision: 2,
+            retention: RetentionPolicyDto::LongTerm,
+        });
+        assert!(visible(&chats, "chat-history-panel"));
+        assert_eq!(chats.conversations[0].revision, Some(2));
+    }
+
+    #[test]
+    fn saved_page_search_is_bounded_local_and_case_insensitive() {
+        let mut chats = Chats::default();
+        chats.history.enabled = true;
+        chats.open();
+        chats.toggle_history("list".into()).unwrap();
+        chats.accept_history(ChatHistoryResponse::ChatHistoryListed {
+            request_id: "list".into(),
+            items: vec![summary()],
+            next_cursor: None,
+        });
+        for (query, count) in [("FIXTURE", 1), ("no match", 0), ("", 1)] {
+            chats.search_history(query.into()).unwrap();
+            let mut view = ViewModel::default();
+            chats.project(&mut view, true);
+            assert_eq!(
+                view.lists
+                    .iter()
+                    .find(|list| list.id == "chat-history-list")
+                    .unwrap()
+                    .rows
+                    .len(),
+                count
+            );
+            assert!(chats.history.pending.is_none());
+        }
+        assert_eq!(
+            chats.search_history("x".repeat(MAX_FILTER_BYTES + 1)),
+            Err(UiError::Limit)
+        );
+        chats.close_history();
+        assert_eq!(
+            chats.search_history("fixture".into()),
+            Err(UiError::InvalidAction)
+        );
+    }
 
     #[test]
     fn failed_open_preserves_the_active_transcript_and_draft() {

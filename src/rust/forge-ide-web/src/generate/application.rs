@@ -13,6 +13,10 @@ pub fn ide_document() -> Document {
         children: vec![
             component!(brand_link "forge-home", "Forge IDE", Home),
             component!(brand_context "workbench-context"),
+            component!(header_actions "chat-header-actions"; [
+                component!(toggle_panel "chat-history-toggle", "Previous chats", "show_chat_history", "chat-history-panel"),
+                component!(primary_icon "new-chat", "New chat", "new_chat", '+'),
+            ]),
             component!(status "status", "Starting the Rust worker…"),
             component!(screen "connection", "Connection", false; [
                 component!(panel "pair-panel", "Connect to your Forge host"; [
@@ -29,30 +33,30 @@ pub fn ide_document() -> Document {
             ]),
             component!(screen "chat", "Chat", true; [
                 component!(reading_column [
-                    component!(toolbar [
+                    component!(dialog "chat-history-panel", "Conversations", "show_chat_history", "chat-conversation"; [
+                        component!(primary_icon "chat-history-close", "Close conversations", "show_chat_history", '×'),
                         component!(select "chat-conversation", "Conversation", "select_chat"),
-                        component!(toggle_panel "chat-history-toggle", "Previous chats", "show_chat_history", "chat-history-panel"),
-                        component!(toggle_panel "chat-manage-toggle", "Manage", "manage_saved_chat", "chat-manage-panel"),
-                        component!(button "new-chat", "New chat", "new_chat"),
-                    ]),
-                    component!(panel "chat-history-panel", "Saved chats"; [
-                        component!(tree "chat-history-list", "Saved chats"),
-                        component!(row [
-                            component!(button "chat-history-newer", "Newer chats", "newer_chat_history"),
-                            component!(button "chat-history-older", "Older chats", "more_chat_history"),
-                        ]),
-                    ]),
-                    component!(panel "chat-manage-panel", "Chat retention"; [
-                        component!(caption "chat-retention-label", ""),
-                        component!(region "chat-retention-actions"; [
+                        component!(status "chat-history-status", ""),
+                        component!(region "chat-history-content"; [
+                            component!(filter "chat-history-query", "Search saved chats on this page", "set_chat_history_query"),
+                            component!(tree "chat-history-list", "Saved chats"),
                             component!(row [
-                                component!(button "chat-show-expiry", "Set expiration", "show_chat_expiry"),
-                                component!(button "chat-long-term", "Keep long term", "keep_chat_long_term"),
-                                component!(button "chat-show-delete", "Delete chat", "show_chat_delete"),
+                                component!(button "chat-history-newer", "Newer chats", "newer_chat_history"),
+                                component!(button "chat-history-older", "Older chats", "more_chat_history"),
+                            ]),
+                        ]),
+                        component!(toggle_panel "chat-manage-toggle", "Manage current chat", "manage_saved_chat", "chat-manage-panel"),
+                        component!(panel "chat-manage-panel", "Chat retention"; [
+                            component!(caption "chat-retention-label", ""),
+                            component!(region "chat-retention-actions"; [
+                                component!(row [
+                                    component!(button "chat-show-expiry", "Set expiration", "show_chat_expiry"),
+                                    component!(button "chat-long-term", "Keep long term", "keep_chat_long_term"),
+                                    component!(button "chat-show-delete", "Delete chat", "show_chat_delete"),
+                                ]),
                             ]),
                         ]),
                     ]),
-                    component!(status "chat-history-status", ""),
                     component!(dialog "chat-expiry-dialog", "Set expiration", "close_chat_dialog", "chat-expiry-date"; [
                         component!(text "chat-expiry-help", "The chat will be kept through the selected date in UTC."),
                         component!(date_input "chat-expiry-date", "Keep through", "set_chat_expiry"),
@@ -73,15 +77,19 @@ pub fn ide_document() -> Document {
                     component!(transcript "chat-transcript", "Chat messages", "You", "Forge",
                         "Send a message to start this conversation."),
                     component!(status "chat-status", ""),
-                    component!(textarea "chat-draft", "Message", "set_chat_draft"),
-                    component!(row [
-                        component!(region "chat-model-choice"; [
-                            component!(select "chat-model", "Model", "select_chat_model"),
+                    component!(region "chat-composer"; [
+                        component!(textarea "chat-draft", "Message", "set_chat_draft", "Message Forge…"),
+                        component!(uuid_icon "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id", '↑'),
+                        component!(disclosure "chat-options", "Chat options"; [
+                            component!(region "chat-model-choice"; [
+                                component!(select "chat-model", "Model", "select_chat_model"),
+                            ]),
+                            component!(row [
+                                component!(uuid_button "send-chat-with-file", "Send with file", "send_chat_with_file", "chat-draft", "chat_id"),
+                                component!(button "chat-run-cancel", "Cancel run", "cancel_chat_run"),
+                                component!(button "chat-run-retry", "Retry send", "retry_chat_submit"),
+                            ]),
                         ]),
-                        component!(uuid_button "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id"),
-                        component!(uuid_button "send-chat-with-file", "Send with file", "send_chat_with_file", "chat-draft", "chat_id"),
-                        component!(button "chat-run-cancel", "Cancel run", "cancel_chat_run"),
-                        component!(button "chat-run-retry", "Retry send", "retry_chat_submit"),
                     ]),
                 ]),
             ]),

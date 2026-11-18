@@ -56,6 +56,22 @@ Keep keyboard focus clearly visible. Suppress nonessential transitions and
 movement for `prefers-reduced-motion`. Keep interactive hit areas at least
 44px high and wide where the control shape permits.
 
+## Mobile chrome budget
+
+On mobile viewports narrower than 640px, never stack more than two header or
+navigation bars above the primary content. Combine identity and the active
+context in one compact header, followed by one compact navigation strip. Move
+secondary actions such as Manage, History, and Settings into a drawer, overflow
+menu, or title dropdown. Keep touch targets and meaningful accessible names
+when using icons. Put contextual editing controls with their content rather
+than adding another global navigation tier.
+
+Avoid wrapping scrollable feeds inside bordered containers. Give the main
+conversation or feed the remaining viewport height and disclose management
+controls progressively so the user can read before managing the workspace.
+Verify this budget in the rendered phone view with the ordinary drawer closed;
+loading and actionable errors must still remain available.
+
 ## Control the layout rhythm
 
 Use a centered responsive container around 960–1120px for portal launchers.

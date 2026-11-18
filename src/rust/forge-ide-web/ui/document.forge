@@ -13,6 +13,7 @@
         {{{brand}}}
         {{{brand_context}}}
       </div>
+      {{{header_actions}}}
       <p>{{subtitle}}</p>
     </header>
     <section id="runtime-recovery" class="fg-recovery" hidden>

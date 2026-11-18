@@ -80,12 +80,18 @@ inspection of the generated page. Use the [Chat layout guidance](../design-forge
 and reuse test-owned loopback fixtures. A controlled reply is sufficient for
 measuring layout and scroll behavior. Record it as controlled fixture evidence.
 
-- Compare desktop and phone screenshots with a short prompt and reply. Check
-  the toolbar edges against the transcript and composer, including the width
-  of Conversation and the position of New chat. Check a narrow portrait and
-  a short landscape viewport when the change affects width or height.
-- Exercise empty and populated drafts. Check that Send has a visible button
-  shape when disabled and that Tab moves from Message to the enabled Send.
+- Compare desktop and phone screenshots with a short prompt and reply. Below
+  640px, verify no more than two header/navigation bars, a readable active
+  title trigger, and a reachable New chat icon. Check a narrow portrait and
+  short landscape viewport when the change affects width or height.
+- Open Conversations from the title with keyboard and touch. Exercise local
+  and saved selection, retention management, Escape, the close control and
+  focus return. Confirm management stays in the drawer and changing threads
+  closes it while preserving drafts. Keep search coverage honest about scope.
+- Exercise empty and populated drafts. Check that the inline Send icon has a
+  visible disabled shape, an accessible name and a 44px touch target. Verify
+  Tab moves from Message to enabled Send, the placeholder is visible, and the
+  accessible input label remains available without a separate visible row.
   Measure the idle composer border against its adjacent rendered colors and
   verify at least 3:1 contrast.
 - Use a long reply to check that the transcript scrolls with Message and Send

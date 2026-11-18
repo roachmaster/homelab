@@ -1676,3 +1676,475 @@
     - selector: ".fg-source-wrap::before"
       declarations:
         - ["transition", "background-color 120ms ease"]
+
+# Chat reserves the viewport for reading; secondary controls live in a drawer.
+- rules:
+    - selector: "body:has(#chat:not([hidden]))"
+      declarations:
+        - ["--bg", "#0b0e14"]
+        - ["--surface", "#121721"]
+        - ["--raised", "#181f2c"]
+        - ["--accent", "#92baff"]
+        - ["height", "100dvh"]
+        - ["min-height", "0"]
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["overflow", "hidden"]
+    - selector: "body:has(#chat:not([hidden])) .fg-header"
+      declarations:
+        - ["flex", "none"]
+        - ["height", "48px"]
+        - ["min-height", "48px"]
+        - ["padding", "2px 12px"]
+        - ["gap", "8px"]
+        - ["border-color", "rgba(255,255,255,.08)"]
+    - selector: "body:has(#chat:not([hidden])) .fg-header>p,body:has(#chat:not([hidden])) .fg-brand-context"
+      declarations:
+        - ["display", "none"]
+    - selector: "body:has(#chat:not([hidden])) .fg-brand"
+      declarations:
+        - ["flex", "none"]
+    - selector: "body:has(#chat:not([hidden])) .fg-brand-link"
+      declarations:
+        - ["min-height", "44px"]
+    - selector: "body:has(#chat:not([hidden])) .fg-brand h1"
+      declarations:
+        - ["font-size", "15px"]
+    - selector: "#chat-header-actions"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "flex-end"]
+        - ["gap", "4px"]
+        - ["flex", "1"]
+        - ["min-width", "0"]
+    - selector: "#chat-history-toggle"
+      declarations:
+        - ["position", "relative"]
+        - ["flex", "1"]
+        - ["min-width", "44px"]
+        - ["min-height", "44px"]
+        - ["max-width", "28rem"]
+        - ["padding", "8px 24px 8px 8px"]
+        - ["border", "0"]
+        - ["border-radius", "8px"]
+        - ["background", "transparent"]
+        - ["color", "var(--text)"]
+        - ["font-size", "13px"]
+        - ["font-weight", "500"]
+        - ["text-align", "center"]
+        - ["text-overflow", "ellipsis"]
+        - ["white-space", "nowrap"]
+        - ["overflow", "hidden"]
+        - ["transition", "background-color 150ms ease,color 150ms ease"]
+    - selector: "#chat-history-toggle::after"
+      declarations:
+        - ["content", "''"]
+        - ["position", "absolute"]
+        - ["inset-inline-end", "10px"]
+        - ["top", "calc(50% - 4px)"]
+        - ["width", "6px"]
+        - ["height", "6px"]
+        - ["border", "solid var(--muted)"]
+        - ["border-width", "0 1.5px 1.5px 0"]
+        - ["transform", "rotate(45deg)"]
+    - selector: "#chat-header-actions #new-chat"
+      declarations:
+        - ["flex", "none"]
+        - ["width", "44px"]
+        - ["height", "44px"]
+        - ["border", "0"]
+        - ["border-radius", "50%"]
+        - ["background", "transparent"]
+        - ["color", "var(--text)"]
+        - ["font-size", "25px"]
+        - ["transition", "background-color 150ms ease,color 150ms ease"]
+    - selector: "#chat-header-actions :is(#chat-history-toggle,#new-chat):hover:enabled"
+      declarations:
+        - ["background", "var(--raised)"]
+    - selector: "#chat-header-actions :is(#chat-history-toggle,#new-chat):focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-2px"]
+    - selector: "body:has(#chat:not([hidden])) .fg-app"
+      declarations:
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["flex", "1"]
+        - ["min-height", "0"]
+        - ["overflow", "hidden"]
+    - selector: "body:has(#chat:not([hidden])) #status[data-tone=neutral]"
+      declarations:
+        - ["display", "none"]
+    - selector: "body:has(#chat:not([hidden])) #ide-navigation"
+      declarations:
+        - ["display", "flex"]
+        - ["flex", "none"]
+        - ["flex-wrap", "nowrap"]
+        - ["align-items", "stretch"]
+        - ["gap", "4px"]
+        - ["min-height", "44px"]
+        - ["padding", "0 12px"]
+        - ["background", "var(--bg)"]
+        - ["border-color", "rgba(255,255,255,.08)"]
+        - ["overflow-x", "auto"]
+        - ["scrollbar-width", "none"]
+    - selector: "body:has(#chat:not([hidden])) #ide-navigation>:is(button,.fg-navigation-link)"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "center"]
+        - ["flex", "0 0 auto"]
+        - ["min-height", "44px"]
+        - ["min-width", "44px"]
+        - ["padding", "4px 8px"]
+        - ["border", "0"]
+        - ["border-bottom", "2px solid transparent"]
+        - ["border-radius", "0"]
+        - ["background", "transparent"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "13px"]
+        - ["font-weight", "600"]
+        - ["white-space", "nowrap"]
+        - ["transition", "color 150ms ease,background-color 150ms ease"]
+    - selector: "body:has(#chat:not([hidden])) #ide-navigation>button[aria-current=page]"
+      declarations:
+        - ["border-bottom-color", "var(--accent)"]
+        - ["color", "var(--text)"]
+        - ["font-weight", "700"]
+    - selector: "body:has(#chat:not([hidden])) #ide-navigation>:is(button,.fg-navigation-link):hover"
+      declarations:
+        - ["background", "var(--surface)"]
+        - ["color", "var(--text)"]
+    - selector: "body:has(#chat:not([hidden])) #ide-navigation>:is(button,.fg-navigation-link):focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-4px"]
+    - selector: "#chat:not([hidden])"
+      declarations:
+        - ["display", "flex"]
+        - ["flex", "1"]
+        - ["min-height", "0"]
+        - ["overflow", "hidden"]
+    - selector: "#chat>.fg-reading-column"
+      declarations:
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["width", "min(100%,56rem)"]
+        - ["min-height", "0"]
+        - ["padding", "0 20px max(12px,env(safe-area-inset-bottom))"]
+        - ["gap", "0"]
+    - selector: "#chat-transcript"
+      declarations:
+        - ["flex", "1"]
+        - ["min-height", "0"]
+        - ["max-height", "none"]
+        - ["padding", "24px 0"]
+        - ["gap", "24px"]
+        - ["border", "0"]
+        - ["border-radius", "0"]
+        - ["background", "transparent"]
+        - ["font-size", "16px"]
+        - ["overscroll-behavior", "contain"]
+        - ["scrollbar-color", "#3d4759 transparent"]
+        - ["scrollbar-gutter", "stable"]
+    - selector: "#chat-transcript .fg-message"
+      declarations:
+        - ["max-width", "100%"]
+        - ["padding", "0"]
+        - ["border", "0"]
+        - ["border-radius", "0"]
+        - ["background", "transparent"]
+    - selector: "#chat-transcript .fg-message[data-role=user]"
+      declarations:
+        - ["max-width", "min(88%,60ch)"]
+        - ["padding", "10px 16px"]
+        - ["border-radius", "20px 20px 5px 20px"]
+        - ["background", "#1d2b44"]
+    - selector: "#chat-transcript .fg-message[data-role=user]>strong"
+      declarations:
+        - ["position", "absolute"]
+        - ["width", "1px"]
+        - ["height", "1px"]
+        - ["padding", "0"]
+        - ["margin", "-1px"]
+        - ["overflow", "hidden"]
+        - ["clip-path", "inset(50%)"]
+        - ["white-space", "nowrap"]
+    - selector: "#chat-transcript .fg-message[data-role=assistant]>strong"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "7px"]
+        - ["margin-bottom", "8px"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["font-weight", "600"]
+    - selector: "#chat-transcript .fg-message[data-role=assistant]>strong::before"
+      declarations:
+        - ["content", "''"]
+        - ["width", "7px"]
+        - ["height", "7px"]
+        - ["border-radius", "50%"]
+        - ["background", "var(--accent)"]
+    - selector: "#chat-transcript .fg-message-body p,#chat-transcript .fg-message>p"
+      declarations:
+        - ["color", "var(--text)"]
+    - selector: "#chat-status"
+      declarations:
+        - ["flex", "none"]
+        - ["padding", "0 2px 8px"]
+        - ["border", "0"]
+        - ["font-size", "12px"]
+    - selector: "#chat-composer"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(0,1fr)"]
+        - ["align-items", "end"]
+        - ["flex", "none"]
+        - ["min-width", "0"]
+        - ["gap", "4px"]
+    - selector: "#chat-composer>.fg-textarea"
+      declarations:
+        - ["grid-area", "1/1"]
+        - ["min-width", "0"]
+    - selector: "#chat-composer>.fg-textarea>span"
+      declarations:
+        - ["position", "absolute"]
+        - ["width", "1px"]
+        - ["height", "1px"]
+        - ["padding", "0"]
+        - ["margin", "-1px"]
+        - ["overflow", "hidden"]
+        - ["clip-path", "inset(50%)"]
+        - ["white-space", "nowrap"]
+    - selector: "#chat-composer #chat-draft"
+      declarations:
+        - ["display", "block"]
+        - ["height", "60px"]
+        - ["min-height", "60px"]
+        - ["max-height", "24dvh"]
+        - ["padding", "17px 64px 15px 16px"]
+        - ["resize", "vertical"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "22px"]
+        - ["background", "var(--surface)"]
+        - ["line-height", "1.5"]
+    - selector: "#chat-composer #chat-draft::placeholder"
+      declarations:
+        - ["color", "var(--muted)"]
+        - ["opacity", "1"]
+    - selector: "#chat-composer #send-chat"
+      declarations:
+        - ["grid-area", "1/1"]
+        - ["align-self", "end"]
+        - ["justify-self", "end"]
+        - ["z-index", "1"]
+        - ["width", "44px"]
+        - ["height", "44px"]
+        - ["min-height", "44px"]
+        - ["margin", "0 8px 8px 0"]
+        - ["border", "1px solid var(--border)"]
+        - ["border-radius", "50%"]
+        - ["background", "var(--raised)"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "23px"]
+        - ["font-weight", "700"]
+        - ["transition", "background-color 150ms ease,color 150ms ease"]
+    - selector: "#chat-composer #send-chat:enabled"
+      declarations:
+        - ["background", "var(--accent)"]
+        - ["color", "#0b0e14"]
+        - ["border-color", "var(--accent)"]
+    - selector: "#chat-composer #send-chat:hover:enabled"
+      declarations:
+        - ["filter", "brightness(1.08)"]
+    - selector: "#chat-composer #send-chat:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--text)"]
+        - ["outline-offset", "2px"]
+    - selector: "#chat-options"
+      declarations:
+        - ["grid-row", "2"]
+        - ["position", "relative"]
+        - ["border", "0"]
+        - ["min-width", "0"]
+    - selector: "#chat-options>summary"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["width", "fit-content"]
+        - ["min-height", "44px"]
+        - ["padding", "0 8px"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["cursor", "pointer"]
+        - ["border-radius", "8px"]
+        - ["list-style", "none"]
+    - selector: "#chat-options>summary::-webkit-details-marker"
+      declarations:
+        - ["display", "none"]
+    - selector: "#chat-options>summary::before"
+      declarations:
+        - ["content", "'•••'"]
+        - ["margin-inline-end", "7px"]
+        - ["font-size", "15px"]
+        - ["letter-spacing", "1px"]
+    - selector: "#chat-options>summary:hover,#chat-options>summary:focus-visible"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["color", "var(--text)"]
+    - selector: "#chat-options>summary:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-2px"]
+    - selector: "#chat-options>.fg-disclosure-body"
+      declarations:
+        - ["padding", "8px"]
+        - ["max-height", "30dvh"]
+        - ["overflow-y", "auto"]
+        - ["background", "var(--surface)"]
+        - ["border", "1px solid rgba(255,255,255,.08)"]
+        - ["border-radius", "12px"]
+    - selector: "#chat-options .fg-row"
+      declarations:
+        - ["margin", "4px 0 0"]
+        - ["gap", "8px"]
+    - selector: "#chat-options :is(button,select)"
+      declarations:
+        - ["min-height", "44px"]
+    - selector: "#chat-history-panel"
+      declarations:
+        - ["position", "fixed"]
+        - ["inset", "0 auto 0 0"]
+        - ["margin", "0"]
+        - ["width", "min(24rem,calc(100% - 24px))"]
+        - ["max-width", "none"]
+        - ["height", "100dvh"]
+        - ["max-height", "100dvh"]
+        - ["padding", "20px 16px max(20px,env(safe-area-inset-bottom))"]
+        - ["border", "0"]
+        - ["border-inline-end", "1px solid rgba(255,255,255,.08)"]
+        - ["border-radius", "0"]
+        - ["background", "var(--surface)"]
+        - ["box-shadow", "8px 0 32px #0005"]
+        - ["overscroll-behavior", "contain"]
+    - selector: "#chat-history-panel[open]"
+      declarations:
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["gap", "16px"]
+    - selector: "#chat-history-panel::backdrop"
+      declarations:
+        - ["background", "rgba(0,0,0,.55)"]
+    - selector: "#chat-history-panel>h2"
+      declarations:
+        - ["min-height", "28px"]
+        - ["margin", "4px 48px 4px 0"]
+        - ["font-size", "18px"]
+    - selector: "#chat-history-close"
+      declarations:
+        - ["position", "absolute"]
+        - ["top", "12px"]
+        - ["inset-inline-end", "12px"]
+        - ["width", "44px"]
+        - ["height", "44px"]
+        - ["border", "0"]
+        - ["border-radius", "50%"]
+        - ["background", "transparent"]
+        - ["color", "var(--text)"]
+        - ["font-size", "22px"]
+    - selector: "#chat-history-close:hover:enabled"
+      declarations:
+        - ["background", "var(--raised)"]
+    - selector: "#chat-history-panel .fg-field"
+      declarations:
+        - ["gap", "6px"]
+    - selector: "#chat-history-panel :is(select,input)"
+      declarations:
+        - ["width", "100%"]
+        - ["max-width", "none"]
+        - ["min-height", "44px"]
+    - selector: "#chat-history-content"
+      declarations:
+        - ["flex", "1"]
+        - ["min-height", "80px"]
+        - ["overflow-y", "auto"]
+        - ["overscroll-behavior", "contain"]
+    - selector: "#chat-history-content>.fg-filter"
+      declarations:
+        - ["margin", "0 0 12px"]
+    - selector: "#chat-history-content>.fg-tree"
+      declarations:
+        - ["max-height", "none"]
+        - ["overflow", "visible"]
+    - selector: "#chat-history-list .fg-row-select"
+      declarations:
+        - ["padding", "8px"]
+        - ["min-height", "44px"]
+        - ["border-radius", "8px"]
+    - selector: "#chat-history-list .fg-row-secondary"
+      declarations:
+        - ["max-width", "42%"]
+    - selector: "#chat-manage-toggle"
+      declarations:
+        - ["min-height", "44px"]
+        - ["text-align", "left"]
+        - ["padding", "8px 12px"]
+        - ["border", "0"]
+        - ["background", "var(--raised)"]
+        - ["border-radius", "10px"]
+    - selector: "#chat-manage-panel"
+      declarations:
+        - ["padding", "12px 0 0"]
+        - ["border", "0"]
+        - ["border-top", "1px solid rgba(255,255,255,.08)"]
+        - ["border-radius", "0"]
+        - ["background", "transparent"]
+    - selector: "#chat-manage-panel button"
+      declarations:
+        - ["min-height", "44px"]
+    - selector: "#chat-history-status"
+      declarations:
+        - ["margin", "0"]
+        - ["border", "0"]
+        - ["padding", "0"]
+        - ["min-height", "0"]
+    - selector: "#chat-history-status:empty"
+      declarations:
+        - ["display", "none"]
+
+- media: "(max-width:639px)"
+  rules:
+    - selector: "#chat>.fg-reading-column"
+      declarations:
+        - ["padding-inline", "16px"]
+        - ["padding-bottom", "max(6px,env(safe-area-inset-bottom))"]
+    - selector: "#chat-transcript"
+      declarations:
+        - ["padding-block", "20px"]
+        - ["gap", "20px"]
+    - selector: "#chat-history-content"
+      declarations:
+        - ["min-height", "48px"]
+
+- media: "(max-height:500px)"
+  rules:
+    - selector: "#chat-transcript"
+      declarations:
+        - ["padding-block", "12px"]
+        - ["gap", "12px"]
+    - selector: "#chat-composer #chat-draft"
+      declarations:
+        - ["height", "52px"]
+        - ["min-height", "52px"]
+        - ["padding-block", "13px 11px"]
+    - selector: "#chat-composer #send-chat"
+      declarations:
+        - ["margin", "0 4px 4px 0"]
+
+- media: "(prefers-reduced-motion:reduce)"
+  rules:
+    - selector: "#chat-header-actions button,body:has(#chat:not([hidden])) #ide-navigation>:is(button,.fg-navigation-link),#chat-composer #send-chat"
+      declarations:
+        - ["transition", "none"]

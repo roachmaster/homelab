@@ -260,27 +260,36 @@ impl Factory<AssetBundle> for AssetFactory {
     type Error = AssetError;
     fn create(&self) -> Result<AssetBundle, AssetError> {
         let schema = Schema::Object {
-            fields: ["title", "subtitle", "brand", "brand_context", "content"]
-                .into_iter()
-                .map(|k| {
-                    (
-                        k.into(),
-                        Field {
-                            schema: Schema::Text,
-                            required: true,
-                        },
-                    )
-                })
-                .collect(),
+            fields: [
+                "title",
+                "subtitle",
+                "brand",
+                "brand_context",
+                "header_actions",
+                "content",
+            ]
+            .into_iter()
+            .map(|k| {
+                (
+                    k.into(),
+                    Field {
+                        schema: Schema::Text,
+                        required: true,
+                    },
+                )
+            })
+            .collect(),
             allow_unknown: false,
         };
         let mut brand = String::new();
         let mut brand_context = String::new();
+        let mut header_actions = String::new();
         let mut content = String::new();
         for c in &self.config.document.children {
             let target = match c {
                 Component::BrandLink { .. } => &mut brand,
                 Component::BrandContext { .. } => &mut brand_context,
+                Component::HeaderActions { .. } => &mut header_actions,
                 _ => &mut content,
             };
             html::emit(c, target);
@@ -304,6 +313,7 @@ impl Factory<AssetBundle> for AssetFactory {
             ),
             ("brand".into(), Value::Text(brand)),
             ("brand_context".into(), Value::Text(brand_context)),
+            ("header_actions".into(), Value::Text(header_actions)),
             ("content".into(), Value::Text(content)),
         ]));
         let html = render_asset("web.document", html::SHELL, schema, &context)?;

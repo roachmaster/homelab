@@ -59,6 +59,11 @@ pub enum Component {
     BrandContext {
         id: String,
     },
+    /// Protected application controls projected into the document header.
+    HeaderActions {
+        id: String,
+        children: Vec<Component>,
+    },
     /// Native keyboard-accessible progressive disclosure; presentation only.
     Disclosure {
         id: String,
@@ -176,6 +181,8 @@ pub enum Component {
         action: String,
         emphasis: ButtonEmphasis,
         glyph: char,
+        check_input: Option<String>,
+        uuid_field: Option<String>,
     },
     DateInput {
         id: String,
@@ -246,6 +253,7 @@ pub enum Component {
 #[macro_export]
 macro_rules! component {
     (brand_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::BrandLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
+    (header_actions $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::HeaderActions { id:$id.into(),children:vec![$($child),*] } };
     (brand_context $id:expr) => { $crate::generate::Component::BrandContext { id:$id.into() } };
     (screen $id:expr, $title:expr, $protected:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Screen { id:$id.into(),title:$title.into(),protected:$protected,children:vec![$($child),*] } };
     (disclosure $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Disclosure { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
@@ -289,7 +297,8 @@ macro_rules! component {
     (select $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Select{id:$id.into(),label:$label.into(),action:$action.into()} };
     (button $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:None,uuid_field:None} };
     (primary $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:None,controls:None,uuid_field:None} };
-    (primary_icon $id:expr, $label:expr, $action:expr, $glyph:expr) => { $crate::generate::Component::IconButton{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,glyph:$glyph} };
+    (primary_icon $id:expr, $label:expr, $action:expr, $glyph:expr) => { $crate::generate::Component::IconButton{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,glyph:$glyph,check_input:None,uuid_field:None} };
+    (uuid_icon $id:expr, $label:expr, $action:expr, $input:expr, $uuid_field:expr, $glyph:expr) => { $crate::generate::Component::IconButton{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,glyph:$glyph,check_input:Some($input.into()),uuid_field:Some($uuid_field.into())} };
     (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:None} };
     (uuid_button $id:expr, $label:expr, $action:expr, $input:expr, $uuid_field:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:Some($uuid_field.into())} };
     (toggle_panel $id:expr, $label:expr, $action:expr, $controls:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:Some($controls.into()),uuid_field:None} };
@@ -374,7 +383,8 @@ impl Document {
                 | Component::PaneAction(_)
                 | Component::SourceFormats { .. }
                 | Component::Workspace(_) => (None, None, None),
-                Component::PaneLayout { id, .. }
+                Component::HeaderActions { id, .. }
+                | Component::PaneLayout { id, .. }
                 | Component::Region { id, .. }
                 | Component::PaneFooter { id, .. } => (Some(id), None, None),
                 Component::Text { id, text, .. } => (Some(id), Some(text), None),
@@ -462,6 +472,17 @@ impl Document {
                 {
                     return Err("invalid button reference or UUID field");
                 }
+                Component::IconButton {
+                    check_input,
+                    uuid_field,
+                    ..
+                } if [check_input, uuid_field]
+                    .into_iter()
+                    .flatten()
+                    .any(|id| !key(id)) =>
+                {
+                    return Err("invalid button reference or UUID field");
+                }
                 Component::Dialog {
                     id,
                     close_action,
@@ -478,6 +499,9 @@ impl Document {
                     if label.trim().is_empty() || glyph.is_control() || glyph.is_whitespace() =>
                 {
                     return Err("icon button needs a nonempty label and visible glyph");
+                }
+                Component::HeaderActions { .. } if depth != 0 => {
+                    return Err("header actions must be a document child");
                 }
                 Component::BrandContext { .. } if depth != 0 => {
                     return Err("brand context must be a document child");
@@ -603,7 +627,8 @@ impl Document {
                 _ => {}
             }
             let children = match c {
-                Component::Navigation { children, .. }
+                Component::HeaderActions { children, .. }
+                | Component::Navigation { children, .. }
                 | Component::CompactToolbar { children, .. }
                 | Component::Screen { children, .. }
                 | Component::Panel { children, .. }
@@ -642,7 +667,14 @@ impl Document {
         let mut count = 0;
         let mut has_brand_link = false;
         let mut has_brand_context = false;
+        let mut has_header_actions = false;
         for c in &self.children {
+            if matches!(c, Component::HeaderActions { .. }) {
+                if has_header_actions {
+                    return Err("document allows one header actions group");
+                }
+                has_header_actions = true;
+            }
             if matches!(c, Component::BrandLink { .. }) {
                 if has_brand_link {
                     return Err("document allows one brand link");

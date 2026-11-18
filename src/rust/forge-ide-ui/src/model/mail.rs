@@ -535,7 +535,7 @@ impl Mail {
         let archived_thread = thread.is_some_and(|thread| thread.status == MailStatus::Archived);
         if active {
             for visibility in &mut view.visibility {
-                if visibility.id == "chat" {
+                if matches!(visibility.id, "chat" | "chat-header-actions") {
                     visibility.visible = false;
                 }
             }

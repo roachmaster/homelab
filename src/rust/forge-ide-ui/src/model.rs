@@ -215,6 +215,7 @@ impl UiModel {
             | UiEvent::CancelChatRun {}
             | UiEvent::RetryChatSubmit {}
             | UiEvent::ShowChatHistory {}
+            | UiEvent::SetChatHistoryQuery { .. }
             | UiEvent::MoreChatHistory {}
             | UiEvent::NewerChatHistory {}
             | UiEvent::OpenSavedChat { .. }
@@ -445,6 +446,7 @@ impl UiModel {
             UiEvent::ShowChatExpiry {} => self.chats.show_history_dialog(false)?,
             UiEvent::ShowChatDelete {} => self.chats.show_history_dialog(true)?,
             UiEvent::SetChatExpiry { value } => self.chats.set_expiry_date(value)?,
+            UiEvent::SetChatHistoryQuery { value } => self.chats.search_history(value)?,
             UiEvent::CloseChatDialog {} => self.chats.close_history_dialog(),
             UiEvent::ChatHistory(response) => self.chats.accept_history(response),
             UiEvent::ChatRun(response) => {

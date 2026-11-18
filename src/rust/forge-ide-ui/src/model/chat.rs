@@ -31,6 +31,35 @@ struct Conversation {
     workbench_reply: bool,
 }
 
+impl Conversation {
+    fn title(&self, index: usize) -> String {
+        let title = self
+            .summary
+            .as_ref()
+            .map(|summary| summary.title.clone())
+            .or_else(|| {
+                self.messages.first().map(|message| {
+                    message
+                        .content
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+            });
+        title.map_or_else(
+            || format!("Chat {}", index + 1),
+            |title| {
+                let mut chars = title.chars();
+                let mut label: String = chars.by_ref().take(42).collect();
+                if chars.next().is_some() {
+                    label.push('…');
+                }
+                label
+            },
+        )
+    }
+}
+
 #[derive(Debug)]
 struct Pending {
     conversation: usize,
@@ -431,6 +460,10 @@ impl Chats {
                 id: "chat",
                 visible: connected && !self.workbench,
             },
+            VisibilityBinding {
+                id: "chat-header-actions",
+                visible: connected && !self.workbench,
+            },
         ]);
         let current = self.conversations.get(self.selected);
         let waiting = self
@@ -483,6 +516,11 @@ impl Chats {
                 });
             }
         }
+        view.texts.push(TextBinding {
+            id: "chat-history-toggle",
+            text: current.map_or_else(|| "New chat".into(), |chat| chat.title(self.selected)),
+            tone: Tone::Neutral,
+        });
         view.texts.extend([TextBinding {
             id: "chat-status",
             text: if let Some(waiting) = waiting {
@@ -507,25 +545,9 @@ impl Chats {
                 .conversations
                 .iter()
                 .enumerate()
-                .map(|(i, c)| {
-                    let label = c
-                        .messages
-                        .first()
-                        .map(|m| m.content.split_whitespace().collect::<Vec<_>>().join(" "));
-                    let label = label
-                        .map(|s| {
-                            let mut chars = s.chars();
-                            let mut label: String = chars.by_ref().take(42).collect();
-                            if chars.next().is_some() {
-                                label.push('…');
-                            }
-                            label
-                        })
-                        .unwrap_or_else(|| format!("Chat {}", i + 1));
-                    OptionView {
-                        value: i.to_string(),
-                        label,
-                    }
+                .map(|(i, c)| OptionView {
+                    value: i.to_string(),
+                    label: c.title(i),
                 })
                 .collect(),
         });
