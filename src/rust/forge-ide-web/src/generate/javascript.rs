@@ -82,7 +82,7 @@ function finishNavigation(result){
   const {url,sequence,timer}=navigation;
   clearTimeout(timer);navigation=null;
   if(!result.saved||sequence!==presentationSequence||draftFields.some(n=>inputDrafts.get(n)?.invalid)){
-    navigationStatus('Your latest workspace changes are still open here. Try Design again.');
+    navigationStatus('Your latest workspace changes are still open here. Try opening the page again.');
     return;
   }
   writeNavigationCache(result.cache);
@@ -95,15 +95,15 @@ for(const link of document.querySelectorAll('a[data-workspace-navigation]'))link
   event.preventDefault();
   if(leaving||navigation)return;
   if(documentDirty||inputDrafts.get(activeEditor)){
-    navigationStatus('Save or discard your file draft before opening Design.');return;
+    navigationStatus('Save or discard your file draft before leaving the workspace.');return;
   }
   if(draftFields.some(n=>inputDrafts.get(n)?.invalid)){
-    navigationStatus('Shorten the draft to the message limit before opening Design.');return;
+    navigationStatus('Shorten the draft to the message limit before leaving the workspace.');return;
   }
   if(!hasWork()){
     leaving=true;syncLeaveWarning();location.assign(url.href);return;
   }
-  if(!worker){navigationStatus('Your workspace is unavailable. Reload and try Design again.');return;}
+  if(!worker){navigationStatus('Your workspace is unavailable. Reload and try opening the page again.');return;}
   const id=++navigationId;
   navigation={id,url:url.href,sequence:presentationSequence,timer:setTimeout(()=>finishNavigation({id,saved:false}),11000)};
   navigationStatus('Saving workspace…');

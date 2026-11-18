@@ -16,6 +16,8 @@ const NAMES: [(&str, &str); 5] = [
     ("worker.js", "text/javascript; charset=utf-8"),
     ("app.wasm", "application/wasm"),
 ];
+const HOME_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/home.html"));
+const HOME_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/home.css"));
 const DESIGN_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design.html"));
 const DESIGN_CSS: &[u8] = include_bytes!("../design/style.css");
 const DESIGN_INDEX_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design-index.css"));
@@ -121,6 +123,8 @@ const DESIGN_IMAGES: [(&str, &[u8]); 10] = [
 
 fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     match path {
+        "/home" | "/home/" => Some(("text/html; charset=utf-8", HOME_HTML)),
+        "/design/home.css" => Some(("text/css; charset=utf-8", HOME_CSS)),
         "/design" | "/design/" => Some(("text/html; charset=utf-8", DESIGN_HTML)),
         "/design/style.css" => Some(("text/css; charset=utf-8", DESIGN_CSS)),
         "/design/index.css" => Some(("text/css; charset=utf-8", DESIGN_INDEX_CSS)),

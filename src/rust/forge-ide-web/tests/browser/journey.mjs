@@ -256,9 +256,9 @@ async function noReport(page) {
   await check(page.locator('#declaration-details')).not.toContainText('inspect_me');
   await check(page.locator('#source-view')).toHaveText('');
 }
-async function screenshot(page, name) {
-  assert.equal(await screenshotEligibility(page, [...active]), 'safe', 'Only sanitized owned fixture pages may be captured');
-  await check(page.locator('#pair-code')).toHaveValue('');
+async function screenshot(page, name, { home = false } = {}) {
+  assert.equal(await screenshotEligibility(page, [...active], { home }), 'safe', 'Only sanitized owned fixture pages may be captured');
+  if (!home) await check(page.locator('#pair-code')).toHaveValue('');
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'no page-level horizontal clipping');
   await page.screenshot({ path: join(output, name), fullPage: true, mask: [page.locator(SCREENSHOT_MASK)], maskColor: '#1b2a3b' });
 }
@@ -1516,6 +1516,8 @@ async function sourceSearchJourney() {
     await page.locator('#open-chat').click();
     await page.locator('#chat-draft').fill(designDraft);
     await page.locator('#open-workbench').click();
+    await homeJourney(page, traffic);
+    await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     const beforeDesign = ['resume', 'inspect', 'source'].map(traffic.count);
     await designJourney(page, traffic);
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
@@ -1621,6 +1623,126 @@ async function managedWriteJourney(page, context, respondToLeaveWarning) {
   await check(dock.locator('#workbench-write-status')).toContainText(/Saved · rev [0-9a-f]{8}/);
   await page.getByRole('button', { name: 'Undo edit', exact: true }).click();
   await check(source.locator('[data-line="2"]')).toContainText('old line');
+}
+
+async function homeJourney(page, traffic) {
+  process.stderr.write('QA_CHECK portal_home_open\n');
+  const context = page.context();
+  const pages = context.pages();
+  const ideUrl = page.url();
+  const originalViewport = page.viewportSize();
+  const homeUrl = new URL('/home', ideUrl).href;
+  const tabKey = () => page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
+  const originalTab = await tabKey();
+  assert.match(originalTab, /^[a-f0-9]{32}$/);
+  const counts = () => ['resume', 'pair', 'inspect', 'source', 'other'].map(traffic.count);
+  const before = counts();
+  const homeLink = page.locator('#ide-navigation').getByRole('link', { name: 'Home', exact: true });
+  await check(homeLink).toBeVisible();
+  await check(homeLink).toHaveAttribute('href', '/home');
+  await check(homeLink).toHaveAttribute('data-workspace-navigation', '');
+  await check(homeLink).not.toHaveAttribute('target', /.+/);
+  const bounds = await homeLink.boundingBox();
+  assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, 'the IDE Home link has a phone-sized touch target');
+  await homeLink.focus();
+  await check(homeLink).toBeFocused();
+
+  async function open(href, activate) {
+    const target = new URL(href, homeUrl);
+    const documentUrl = new URL(target);
+    documentUrl.hash = '';
+    const [response] = await Promise.all([
+      page.waitForResponse(response => response.url() === documentUrl.href && response.request().isNavigationRequest(), { timeout: 5_000 }),
+      activate(),
+    ]);
+    assert.equal(response.status(), 200);
+    await check(page).toHaveURL(target.href);
+    assert.deepEqual(context.pages(), pages, 'portal navigation uses the current tab');
+    if (target.hash) {
+      await check(page.locator(target.hash)).toBeVisible();
+    }
+  }
+
+  await open('/home', () => page.keyboard.press('Enter'));
+  assert.equal(await tabKey(), originalTab, 'Home keeps the same workspace key');
+  await check(page.getByRole('heading', { level: 1, name: 'Forge portal', exact: true })).toBeVisible();
+  await check(page.locator('main').getByRole('heading', { level: 2 })).toHaveText([
+    'Tools', 'Design documentation', 'Inside the IDE', 'About',
+  ]);
+  await check(page.locator('script')).toHaveCount(0);
+  assert.deepEqual(counts(), before, 'Home performs no Forge gateway dispatches');
+
+  process.stderr.write('QA_CHECK portal_home_layout\n');
+  const panels = page.locator('main .design-index > .index-panel');
+  for (const width of [375, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+      true, 'Home fits the phone viewport');
+    assert.equal(await panels.evaluateAll(nodes => {
+      const boxes = nodes.map(node => node.getBoundingClientRect());
+      return boxes.slice(1).every((box, index) => box.top >= boxes[index].bottom - 1);
+    }), true, 'Home panels stack on phones');
+    assert.equal(await page.locator('main a, header .return-link').evaluateAll(links =>
+      links.every(link => {
+        const bounds = link.getBoundingClientRect();
+        return bounds.width >= 44 && bounds.height >= 44;
+      })), true, 'Home links have phone-sized touch targets');
+  }
+  await screenshot(page, 'ide-portal-home-phone.png', { home: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  assert.equal(await panels.evaluateAll(([first, second]) => {
+    const left = first.getBoundingClientRect();
+    const right = second.getBoundingClientRect();
+    return Math.abs(left.top - right.top) <= 1 && left.right <= right.left + 1 && right.right <= innerWidth + 1;
+  }), true, 'Home panels display side by side on desktop');
+  await screenshot(page, 'ide-portal-home-desktop.png', { home: true });
+
+  process.stderr.write('QA_CHECK portal_home_destinations\n');
+  const homeMain = page.locator('main');
+  const destinations = [
+    ['Open Forge IDE', '/'],
+    ['Browse the design docs', '/design'],
+    ['Forge IDE', '/'],
+    ['Forge Studio', '/studio'],
+    ['Room One playtest', '/playtest'],
+    ['Forge plug-and-play', '/design/forge-providers'],
+    ['Forge foundations', '/design#forge-foundations'],
+    ['Chat and Mail', '/design#chat-and-mail'],
+    ['Game development', '/design#game-development'],
+    ['Wireframes and workspace', '/design#wireframes-and-workspace'],
+    ['Forge IDE screens', '/'],
+  ];
+  await check(homeMain.getByRole('link')).toHaveText([
+    ...destinations.map(([label]) => label), 'Homelab on GitHub',
+  ]);
+  for (const [label, href] of destinations) {
+    const destination = homeMain.getByRole('link', { name: label, exact: true });
+    await check(destination).toHaveAttribute('href', href);
+    await check(destination).not.toHaveAttribute('target', /.+/);
+    await open(href, () => destination.click());
+    if (href === '/') {
+      await check(page.locator('#workspace-panel')).toBeVisible();
+      await open('/home', () => homeLink.click());
+    } else if (href === '/design') {
+      const designHome = page.locator('main .intro').getByRole('link', { name: 'portal home page' });
+      await check(designHome).toHaveAttribute('href', '/home');
+      await open('/home', () => designHome.click());
+    } else {
+      await page.goBack({ waitUntil: 'domcontentloaded' });
+      await check(page).toHaveURL(homeUrl);
+    }
+  }
+  await check(homeMain.getByRole('link', { name: 'Homelab on GitHub' }))
+    .toHaveAttribute('href', 'https://github.com/roachmaster/homelab');
+
+  if (originalViewport) await page.setViewportSize(originalViewport);
+  const back = page.getByRole('link', { name: 'Back to Forge', exact: true });
+  await check(back).toHaveAttribute('href', '/');
+  await open('/', () => back.click());
+  await check(page).toHaveURL(ideUrl);
+  await check(page.locator('#workspace-panel')).toBeVisible();
+  assert.equal(await tabKey(), originalTab, 'returning from Home restores the same tab workspace');
+  assert.equal(page.workers().length, 1, 'returning from Home starts one Forge worker');
 }
 
 async function designJourney(page, traffic) {

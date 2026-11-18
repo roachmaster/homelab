@@ -34,5 +34,7 @@ test('profile verification fails closed on missing or changed pinned registry di
 test('workflow explicitly allowlists each fixture screenshot without a broad PNG glob', async () => {
   const workflow = await readFile(new URL('../../../../../.github/workflows/ide-ui-browser.yml', import.meta.url), 'utf8');
   for (const item of VIEWPORTS) assert.ok(workflow.includes(`/browser/${item.screenshot}`));
+  assert.ok(workflow.includes('/browser/ide-portal-home-desktop.png'));
+  assert.ok(workflow.includes('/browser/ide-portal-home-phone.png'));
   assert.equal(workflow.includes('/browser/*.png'), false);
 });

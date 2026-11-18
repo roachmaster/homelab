@@ -36,11 +36,13 @@ pub enum ButtonEmphasis {
 /// A document served by the same portal origin.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PortalDocument {
+    Home,
     Design,
 }
 impl PortalDocument {
     pub(crate) fn href(self) -> &'static str {
         match self {
+            Self::Home => "/home",
             Self::Design => "/design",
         }
     }

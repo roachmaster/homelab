@@ -1,6 +1,6 @@
 # Forge portal landing page
 
-**Status:** Proposal.
+**Status** Implemented v1 at `/home`.
 **Planning baseline:** GitHub `main` at `c57ef4b`.
 
 ## The problem
@@ -273,8 +273,7 @@ the chat journey keeps `ide-chat-rendered.png`.
 - Forge worker and main-thread ownership — `forge-worker-ownership.md`
   (Rust authority, I/O workers, replay, Studio builds)
 - Extending Homelab with a Rust game engine — `forge-game-engine.md`
-  (Studio build and preview flow; the game-engine page is `/studio`'s only
-  current inbound link)
+  (Studio build and preview flow and a link to `/studio`)
 - Wire Forge Providers skill — `.agents/skills/wire-forge-providers/SKILL.md`
   (the primary guide; surfaced directly from the landing page)
 - Portal host factory — `src/rust/forge-ide-web-host/src/service.rs` (the

@@ -13,6 +13,7 @@ fn main() -> io::Result<()> {
     );
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo build output directory"));
     for (name, page) in [
+        ("home.html", DesignPage::Home),
         ("design.html", DesignPage::Overview),
         ("forge-providers.html", DesignPage::ForgeProviders),
         ("chat-history.html", DesignPage::ChatHistory),
@@ -32,6 +33,7 @@ fn main() -> io::Result<()> {
     ] {
         fs::write(output.join(name), page.render())?;
     }
+    fs::write(output.join("home.css"), design::home_stylesheet())?;
     fs::write(output.join("design-index.css"), design::index_stylesheet())?;
     fs::write(
         output.join("game-studio.css"),

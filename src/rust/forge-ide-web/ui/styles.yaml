@@ -939,6 +939,13 @@
         - ["min-width", "var(--touch)"]
         - ["min-height", "var(--touch)"]
 
+- media: "(max-width:440px)"
+  rules:
+    - selector: "#ide-navigation > :is(button,.fg-navigation-link)"
+      declarations:
+        - ["min-width", "var(--touch)"]
+        - ["padding-inline", "4px"]
+
 - rules:
     - selector: ".fg-reading-column"
       declarations:

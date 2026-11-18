@@ -1,14 +1,5 @@
 use super::{markup, text, Attribute, Node, Tag};
 
-macro_rules! design_link {
-    ($path:literal, $title:literal, $description:literal) => {
-        element!(Li;
-            element!(A [Href = $path]; text($title)),
-            element!(P; text($description)),
-        )
-    };
-}
-
 const INDEX_STYLES: markup::Styles = &[
     (
         ".design-index",
@@ -87,7 +78,11 @@ pub(super) fn stylesheet() -> String {
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Forge IDE design")),
-        element!(P; text("Browse the architecture, feature designs, and interactive previews.")),
+        element!(P;
+            text("Browse the architecture, feature designs, and interactive previews. New here? Start at the "),
+            element!(A [Href = "/home"]; text("portal home page")),
+            text("."),
+        ),
         element!(Nav [Class = "section-nav", AriaLabel = "Jump to design topic"];
             element!(A [Href = "#forge-foundations"]; text("Forge foundations")),
             element!(A [Href = "#chat-and-mail"]; text("Chat and Mail")),

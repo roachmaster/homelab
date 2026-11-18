@@ -57,6 +57,15 @@ macro_rules! element {
     };
 }
 
+macro_rules! design_link {
+    ($path:literal, $title:literal, $description:literal) => {
+        element!(Li;
+            element!(A [Href = $path]; text($title)),
+            element!(P; text($description)),
+        )
+    };
+}
+
 mod dispatch;
 mod forge_providers;
 mod forge_workers;
@@ -64,6 +73,7 @@ mod game_asset_pipeline;
 pub mod game_engine;
 mod game_physics;
 mod history;
+mod home;
 mod landing;
 mod mail;
 pub mod playtest;
@@ -102,6 +112,7 @@ fn render_element(
 }
 
 pub enum DesignPage {
+    Home,
     Overview,
     ForgeProviders,
     ChatHistory,
@@ -121,6 +132,7 @@ impl DesignPage {
     /// Render a complete document using the shared portal design shell.
     pub fn render(self) -> String {
         let (title, back_href, back_label, body) = match self {
+            Self::Home => ("Forge portal · Forge IDE", "/", "Back to Forge", home::BODY),
             Self::Overview => ("Forge IDE design", "/", "Back to Forge", landing::BODY),
             Self::ForgeProviders => (
                 "Forge plug-and-play · Forge IDE",
@@ -200,6 +212,10 @@ impl DesignPage {
             escape(title),
         );
         output.push_str(match self {
+            Self::Home => concat!(
+                "<link rel=\"stylesheet\" href=\"/design/index.css\">",
+                "<link rel=\"stylesheet\" href=\"/design/home.css\">",
+            ),
             Self::Overview => concat!(
                 "<link rel=\"stylesheet\" href=\"/design/index.css\">",
                 "<script src=\"/design/previous-chats.js\" defer></script>",
@@ -215,7 +231,7 @@ impl DesignPage {
             ),
             _ => "<link rel=\"stylesheet\" href=\"/design/chat-history.css\">",
         });
-        let main = if matches!(self, Self::Overview | Self::Playtest) {
+        let main = if matches!(self, Self::Home | Self::Overview | Self::Playtest) {
             "page-width"
         } else {
             "page-width history-contract"
@@ -238,4 +254,8 @@ impl DesignPage {
 
 pub fn index_stylesheet() -> String {
     landing::stylesheet()
+}
+
+pub fn home_stylesheet() -> String {
+    home::stylesheet()
 }

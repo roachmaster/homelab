@@ -1093,6 +1093,70 @@ fn static_assets_are_whitelisted_hashed_and_have_security_headers() {
 }
 
 #[test]
+fn portal_home_serves_the_fixed_script_free_landing_page() {
+    let files = Files::new();
+    let (host, _) = host(&files);
+    let address = host.local_addr().unwrap();
+    let request = |method: &str, target: &str| {
+        exchange(
+            &host,
+            format!("{method} {target} HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        )
+    };
+
+    for path in ["/home", "/home/"] {
+        let response = request("GET", path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"));
+        assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("Content-Security-Policy:"));
+        assert!(!response.contains("Set-Cookie:"));
+        assert!(response.contains("<h1>Forge portal</h1>"));
+        assert!(response.contains("href=\"/design/index.css\""));
+        assert!(response.contains("href=\"/design/home.css\""));
+        assert!(response.contains("class=\"return-link\" href=\"/\""));
+        for (destination, label) in [
+            ("/", "Open Forge IDE"),
+            ("/design", "Browse the design docs"),
+            ("/", "Forge IDE"),
+            ("/studio", "Forge Studio"),
+            ("/playtest", "Room One playtest"),
+            ("/design/forge-providers", "Forge plug-and-play"),
+            ("/design#forge-foundations", "Forge foundations"),
+            ("/design#chat-and-mail", "Chat and Mail"),
+            ("/design#game-development", "Game development"),
+            (
+                "/design#wireframes-and-workspace",
+                "Wireframes and workspace",
+            ),
+            ("/", "Forge IDE screens"),
+            (
+                "https://github.com/roachmaster/homelab",
+                "Homelab on GitHub",
+            ),
+        ] {
+            assert!(response.contains(&format!("href=\"{destination}\">{label}</a>")));
+        }
+        assert!(!response.contains("<script"));
+        assert!(!response.contains("target=\"_blank\""));
+
+        let head = request("HEAD", path);
+        assert!(head.starts_with("HTTP/1.1 200 OK"));
+        assert!(head.ends_with("\r\n\r\n"));
+
+        let post = request("POST", path);
+        assert!(post.starts_with("HTTP/1.1 405 Method Not Allowed"));
+        assert!(post.contains("\r\nAllow: GET, HEAD\r\n"));
+    }
+
+    let stylesheet = request("GET", "/design/home.css");
+    assert!(stylesheet.starts_with("HTTP/1.1 200 OK"));
+    assert!(stylesheet.contains("Content-Type: text/css; charset=utf-8"));
+    assert!(stylesheet.contains(".home-actions .home-primary"));
+    assert!(request("GET", "/home/unknown").starts_with("HTTP/1.1 404 Not Found"));
+    assert!(request("GET", "/design").contains("href=\"/home\">portal home page</a>"));
+}
+
+#[test]
 fn design_reference_serves_only_the_fixed_documents_and_images() {
     let f = Files::new();
     let (h, _) = host(&f);

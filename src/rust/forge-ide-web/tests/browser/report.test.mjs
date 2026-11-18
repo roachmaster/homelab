@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { EventEmitter, once } from 'node:events';
 import { spawn } from 'node:child_process';
 import { SCENARIOS } from './catalog.mjs';
-import { captureFailureScreenshot, SCREENSHOT_MASK } from './diagnostics.mjs';
+import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from './diagnostics.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
 import { Report, acquireOwned, cleanupResources, runHarness } from './report.mjs';
 
@@ -310,6 +310,23 @@ test('failure screenshots skip rendered credential patterns without retaining th
     assert.equal(captures.length, 0);
     assert.equal(report.data.failure_screenshot, 'skipped_credential_pattern');
     assert.equal(JSON.stringify(report.data).includes(text), false);
+  }
+});
+
+test('Home screenshot evidence requires explicit selection and an owned clean URL', async () => {
+  const url = 'http://127.0.0.1:1234/home';
+  const { page, fixtures, captures } = screenshotFixture({ url });
+  assert.equal(await screenshotEligibility(page, fixtures, { home: true }), 'safe');
+  const report = new Report();
+  await captureFailureScreenshot(report, '/unused-test-path', fixtures, true);
+  assert.equal(captures.length, 0);
+  assert.equal(report.data.failure_screenshot, 'skipped_unsafe_page');
+  for (const options of [
+    { url: 'https://example.com/home' }, { url: url + '?x=1' }, { url: url + '#fragment' },
+    { url, markers: 0 },
+  ]) {
+    const candidate = screenshotFixture(options);
+    assert.equal(await screenshotEligibility(candidate.page, candidate.fixtures, { home: true }), 'skipped_unsafe_page');
   }
 });
 

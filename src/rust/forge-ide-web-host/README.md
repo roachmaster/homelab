@@ -248,10 +248,12 @@ chunking, upgrades, `Expect`, duplicate headers and buffered pipelining. This na
 adapter is intentionally not a general-purpose HTTP server. Asset manifest count
 is exactly five; each asset is capped at16 MiB, hash verified and loaded via the
 existing rooted native file client (no symlink traversal or shell wrappers).
-The host build renders the Design reference from typed Rust declarations in
-`forge-ide-web-host/src/design`. It embeds the generated documents with the design
-styles and diagrams. The Design overview includes its sample Previous chats
-prototype and links to the chat history contracts and sequence diagrams at
+The host build renders the portal home and Design reference from typed Rust
+declarations in `forge-ide-web-host/src/design`. Open **Home** in the IDE or
+visit `/home` for links to the IDE, Studio, the Room One playtest, and Design.
+The host embeds these documents with their styles and diagrams. The Design
+overview includes its sample Previous chats prototype and links to the chat
+history contracts and sequence diagrams at
 `/design/chat-history`. The PostgreSQL inference dispatch design and
 sequence diagram are at `/design/chat-dispatch`. The design pages use fixed
 asset paths.
