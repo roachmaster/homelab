@@ -33,19 +33,20 @@ portal contains and links to it, following the portal's own design system.
 
 ## Decisions
 
-### 1. Route: `/start`, a new `DesignPage` variant
+### 1. Route: `/home`, a new `DesignPage` variant
 
 | Route | Verdict | Reason |
 |---|---|---|
 | `/` | Rejected | The IDE lives there. Moving it churns the stale-navigation redirect (`http.rs` sends unknown document navigations to `/`), bookmarks, the workspace tab key, and the journey's return assertions. |
 | `/design` (extend it) | Rejected | `/design` is scoped to design documents; its panels, heading order, and journey assertions are all design-scoped. Mixing live tools into it muddles both purposes. |
 | `/portal` | Rejected | The codebase already calls `/` "the portal" (`Response::return_to_portal`, `http.rs`). A `/portal` route that is not the portal would collide in meaning. |
-| `/start` | Chosen | A new top-level route. Short, task-shaped ("start here"), and free — no route, asset, or test uses it. `/home` is the fallback name if `/start` reads wrong in review. |
+| `/home` | Chosen | A new top-level route. Short, and the name every user already understands — home is where you start. Free — no route, asset, or test uses it. |
+| `/start` | Superseded | The earlier proposal; Leonardo chose `/home` instead. |
 
-The page is built the established way: a new module `design/start.rs` with
-`pub(super) const BODY: &[Node]`, a `DesignPage::Start` variant, a `build.rs`
-entry, an `assets.rs` `embedded_asset()` arm serving both `/start` and
-`/start/`, and consumer + journey tests. It is a content page: script-free,
+The page is built the established way: a new module `design/home.rs` with
+`pub(super) const BODY: &[Node]`, a `DesignPage::Home` variant, a `build.rs`
+entry, an `assets.rs` `embedded_asset()` arm serving both `/home` and
+`/home/`, and consumer + journey tests. It is a content page: script-free,
 typed `element!` markup only, portal-shell palette.
 
 ### 2. Information architecture
@@ -83,15 +84,15 @@ layout system.
   treatment the index uses for its first foundation item (accent left border
   + raised background), at 44px minimum height.
 - Sections: the `.design-index` grid from `/design/index.css` (auto-fit
-  panels, 27rem minimum, stacking on phones). The Start variant's stylesheet
-  arm links both `/design/index.css` and a small `/design/start.css`
+  panels, 27rem minimum, stacking on phones). The Home variant's stylesheet
+  arm links both `/design/index.css` and a small `/design/home.css`
   carrying only the hero-action rules — the shell's arm already returns
   multiple tags via `concat!` (Overview links a stylesheet and a script), so
   no shell change is needed. Do not restyle the grid; do not duplicate its
   rules.
 - Panels: `.index-panel` with `h2` + `design_link!` list, exactly as
   `/design` does. The `main` element takes the `page-width` class (add
-  `Start` to the Overview|Playtest arm), not `history-contract`.
+  `Home` to the Overview|Playtest arm), not `history-contract`.
 - No imagery in v1. CSP allows only same-origin images, and there is no
   served brand asset; the wordmark in the shell header is the only brand
   mark. A served illustration or logo is a later addition, not a v1
@@ -104,10 +105,10 @@ layout system.
 
 | From | To | Mechanism |
 |---|---|---|
-| IDE shell | `/start` | New `PortalDocument::Start` variant (`generate/component.rs`) + a `navigation_link "open-start", "Start"` in the navigation component (`generate/application.rs`), placed before Design. Same `data-workspace-navigation` leave-warning behavior as the Design link. |
-| `/design` intro | `/start` | One sentence in the intro paragraph: "New here? Start at the portal landing page." with a link. Not a section-nav entry — that nav is in-page anchors with a "Jump to design topic" label, and an off-page link would break its meaning. |
-| `/start` | everything | The sections in §2. |
-| `/start` | `/` | The shell back link ("Back to Forge"). |
+| IDE shell | `/home` | New `PortalDocument::Home` variant (`generate/component.rs`) + a `navigation_link "open-home", "Home"` in the navigation component (`generate/application.rs`), placed before Design. Same `data-workspace-navigation` leave-warning behavior as the Design link. |
+| `/design` intro | `/home` | One sentence in the intro paragraph: "New here? Start at the portal home page." with a link. Not a section-nav entry — that nav is in-page anchors with a "Jump to design topic" label, and an off-page link would break its meaning. |
+| `/home` | everything | The sections in §2. |
+| `/home` | `/` | The shell back link ("Back to Forge"). |
 
 Nothing else moves in v1. The other twelve pages keep their back links;
 `/design` keeps its four panels and their order. The landing page ADDS a hub;
@@ -155,51 +156,51 @@ it does not rewire the existing graph.
 
 ```mermaid
 flowchart TD
-    Start["/start — portal landing"]
+    Home["/home — portal landing"]
     IDE["/ — Forge IDE"]
     Design["/design — design index"]
     Studio["/studio — Forge Studio"]
     Playtest["/playtest — Room One"]
     Docs["/design/* — design pages"]
-    IDE -->|"Start"| Start
+    IDE -->|"Home"| Home
     IDE -->|"Design"| Design
-    Start -->|"Open Forge IDE"| IDE
-    Start -->|"Studio"| Studio
-    Start -->|"Playtest"| Playtest
-    Start -->|"Design docs"| Design
-    Design -->|"Start here"| Start
+    Home -->|"Open Forge IDE"| IDE
+    Home -->|"Studio"| Studio
+    Home -->|"Playtest"| Playtest
+    Home -->|"Design docs"| Design
+    Design -->|"Home"| Home
     Design --> Docs
     Design -->|"Playtest"| Playtest
     Studio -->|"Back to Forge"| IDE
     Playtest -->|"Back to game engine design"| Docs
 ```
 
-The map shows the change: `/start` becomes the hub, `/studio` gains a
+The map shows the change: `/home` becomes the hub, `/studio` gains a
 discoverable path, and the IDE shell gains a second outbound link. No
 existing edge is removed.
 
 ## Implementation
 
-1. `src/rust/forge-ide-web-host/src/design/start.rs` — `BODY` (hero, Tools,
+1. `src/rust/forge-ide-web-host/src/design/home.rs` — `BODY` (hero, Tools,
    Design documentation, Inside the IDE, About) + `stylesheet()` for the
    hero-action rules only.
-2. `src/rust/forge-ide-web-host/src/design/mod.rs` — `mod start;`,
-   `DesignPage::Start`, the render arm (`"Forge portal · Forge IDE"`, `/`,
-   `"Back to Forge"`, `start::BODY`), the stylesheet arm (link
-   `/design/index.css` and `/design/start.css`), and `Start` in the
+2. `src/rust/forge-ide-web-host/src/design/mod.rs` — `mod home;`,
+   `DesignPage::Home`, the render arm (`"Forge portal · Forge IDE"`, `/`,
+   `"Back to Forge"`, `home::BODY`), the stylesheet arm (link
+   `/design/index.css` and `/design/home.css`), and `Home` in the
    `page-width` arm.
-3. `src/rust/forge-ide-web-host/build.rs` — `("start.html",
-   DesignPage::Start)` + write `start.css`.
+3. `src/rust/forge-ide-web-host/build.rs` — `("home.html",
+   DesignPage::Home)` + write `home.css`.
 4. `src/rust/forge-ide-web-host/src/assets.rs` — `include_bytes!` for
-   `start.html` and `start.css`, `embedded_asset()` arms for `/start` and
-   `/start/`.
+   `home.html` and `home.css`, `embedded_asset()` arms for `/home` and
+   `/home/`.
 5. `src/rust/forge-ide-web/src/generate/component.rs` —
-   `PortalDocument::Start => "/start"`.
+   `PortalDocument::Home => "/home"`.
 6. `src/rust/forge-ide-web/src/generate/application.rs` —
-   `navigation_link "open-start", "Start"` before Design; update the
-   `html.rs` navigation assertion and add one for the Start link.
+   `navigation_link "open-home", "Home"` before Design; update the
+   `html.rs` navigation assertion and add one for the Home link.
 7. `src/rust/forge-ide-web-host/src/design/landing.rs` — the intro sentence
-   linking to `/start`.
+   linking to `/home`.
 8. Tests (below). `docs/README.md` — this proposal is already linked; no
    portal publication step in v1 (the landing page itself is the published
    artifact, not a rendering of this doc).
@@ -211,16 +212,16 @@ its links, their destinations, and its layout — not just that the markup
 exists.
 
 Consumer tests (`forge-ide-web-host/tests/consumer.rs`, following the
-design-reference pattern): both `/start` and `/start/` return 200 with
+design-reference pattern): both `/home` and `/home/` return 200 with
 `text/html` and the CSP header; the exact `<h1>Forge portal</h1>`; every
 entry href from §2 present; the back link `href="/"`; no `<script` and no
 `target="_blank"`; HEAD returns 200 with an empty body; POST returns 405;
-`/start/unknown` returns 404. The IDE-shell assertion in `generate/html.rs`
-covers the new Start link's href and `data-workspace-navigation` attribute.
+`/home/unknown` returns 404. The IDE-shell assertion in `generate/html.rs`
+covers the new Home link's href and `data-workspace-navigation` attribute.
 
 Journey tests (`forge-ide-web/tests/browser/journey.mjs`, extending the
-design journey): from the IDE, the Start link is visible, has
-`href="/start"`, no `target`, a bounding box of at least 44×44, and keyboard
+design journey): from the IDE, the Home link is visible, has
+`href="/home"`, no `target`, a bounding box of at least 44×44, and keyboard
 Enter navigates in the same tab with the same workspace key; on the landing
 page, the h1 and the section h2s appear in the §2 order; the primary action
 navigates to `/`; every Tools and Docs link navigates to a page that returns
@@ -243,20 +244,21 @@ the chat journey keeps `ide-chat-rendered.png`.
 - The IDE screens entry links to `/` and says so. Do not dress it up as
   three links — three identical destinations are worse than one honest one.
 - The route name is the one decision that is hard to change later
-  (bookmarks, links, tests). `/start` is the proposal; if it reads wrong,
-  change it before implementation, not after.
+  (bookmarks, links, tests). `/home` is the decision — `/start` was the
+  earlier proposal. Changing it after implementation means updating every
+  link and test.
 - The `/design` intro link is one sentence. Resist growing it into a fifth
   panel — that would make `/design` a second hub and split the graph again.
 
 ## Open decisions
 
-1. **Route name.** `/start` is proposed; `/home` is the fallback. Decide
-   before implementation.
+1. **Route name — decided.** `/home`. `/start` was the proposal; Leonardo
+   chose `/home`.
 2. **Deep links into IDE screens.** Hash routing (`/#chat`) needs app-shell
    work and a session-restore decision. Until then, the landing page links
    to `/` and names the screens.
 3. **Clickable wordmark.** The shell's wordmark is a span on all pages.
-   Making it link to `/start` (or `/`) is a shell-wide change to consider on
+   Making it link to `/home` (or `/`) is a shell-wide change to consider on
    its own, not inside this design.
 4. **Palette reconciliation.** The portal shell and the IDE theme differ. The
    landing page accepts the portal palette; unifying the two is a separate
