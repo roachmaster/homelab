@@ -1190,6 +1190,9 @@ impl UiModel {
             self.catalog
                 .as_ref()
                 .is_some_and(|catalog| catalog.mail_enabled),
+            self.catalog
+                .as_ref()
+                .is_some_and(|catalog| catalog.mail_archive_enabled),
         );
         view
     }

@@ -76,6 +76,20 @@ class MailApiTest(unittest.TestCase):
                                      (400, reply("mail_failed", code="invalid_request"), "no-store"))
             transaction.assert_not_called()
 
+    def test_mail_archive_thread_acknowledges_without_inference(self):
+        with (server(distributed=True) as port,
+              patch.object(runner.store, "archive_mail", return_value={"base_revision": 1, "result_revision": 2}) as archive):
+            body = {"request_id": REQUEST_ID, "kind": "mail_archive_thread", "thread_id": str(THREAD),
+                    "expected_revision": 1}
+            expected = (200, reply("mail_archived", thread_id=str(THREAD), base_revision=1, result_revision=2), "no-store")
+            self.assertEqual(dispatch_post(port, "ide.mail.archive", body), expected)
+            archive.assert_called_once_with(THREAD, 1)
+
+            for bad in [dict(body, expected_revision=True), dict(body, expected_revision=0),
+                        dict(body, owner="other"), dict(body, extra="field")]:
+                self.assertEqual(dispatch_post(port, "ide.mail.archive", bad),
+                                 (400, reply("mail_failed", code="invalid_request"), "no-store"))
+
     def test_mail_send_and_retry_acknowledge_without_inference(self):
         inference = Mock()
         with (server(distributed=True, inference=inference) as port,

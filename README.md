@@ -34,7 +34,7 @@ The [Mission Control runner](deploy/mission-control/agent-runner/README.md) reco
 
 The [generated workbench](src/rust/forge-ide-web/WORKBENCH.md) opens a single allowed project automatically and provides project-wide file/symbol search, Explorer, Outline and a read-only source viewer. Opening a file reads bounded source through the admitted host and agent; its SHA-256 must match the bytes used for inspection. Selecting a symbol reveals its numbered source lines, including on phones. Problems, metadata and source-shape analysis remain supporting tools. The [original wireframes](docs/design/forge-ide-wireframes/README.md) above are design images, not screenshots. Managed editing/saving are implemented behind explicit project opt-in and revision checks; LSP and general Run/Debug remain future capabilities.
 
-[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe current compositions and state ownership, including the current mobile controls. The current [generated IDE](src/rust/forge-ide-web/README.md) opens to Chat and uses local WASM ABI 4. Rebuild its assets as a bundle. The native gateway admits `ide.source` separately and validates inspected-content digests, so deploy the host and agent together. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
+[Component, page and transition contracts](docs/design/forge-ide-components/README.md) describe current compositions and state ownership, including the current mobile controls. The current [generated IDE](src/rust/forge-ide-web/README.md) opens to Chat and uses local WASM ABI 5. Rebuild its assets as a bundle. The native gateway admits `ide.source` separately and validates inspected-content digests, so deploy the host and agent together. Native/WASM checks and real-browser desktop/narrow acceptance remain distinct gates.
 
 ## Forge IDE generated browser boundary
 
@@ -246,3 +246,5 @@ Examples: `Use $model-forge-module to explain the DSL and model a notifications 
 `Use $trace-forge-command to trace this request and identify rejection before effects.`
 
 `Use $design-package-boundaries to review this feature and propose cohesive packages, dependency rules, and a safe migration plan.`
+
+Manual Mail archiving is implemented behind the native `mail_archive_enabled` opt-in (false by default). It requires the matching runner, registered schema migration 0008, native host, and ABI 5 asset bundle. Existing live-portal settings are unchanged by this repository work.

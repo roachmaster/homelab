@@ -42,7 +42,7 @@ function tap(exports, action) {
   exports.forge_playtest_input(action, 0);
 }
 
-assert.equal(w.abi_version(), 4, 'the existing host ABI remains compatible');
+assert.equal(w.abi_version(), 5, 'the existing host ABI remains compatible');
 const initial = snapshot();
 const snapshotAddress = initial.byteOffset;
 const traceAddress = trace().byteOffset;

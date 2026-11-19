@@ -53,6 +53,7 @@ impl StudioRelayFactory {
                 workspace_persistence: false,
                 async_dispatch: false,
                 mail_enabled: false,
+                mail_archive_enabled: false,
             }),
             preview_origin: config.preview_origin,
         }

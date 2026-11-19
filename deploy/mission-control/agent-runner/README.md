@@ -133,8 +133,8 @@ scope.
 
 ## Mail
 
-Mail uses `ide.mail.list`, `ide.mail.open`, `ide.mail.send` and `ide.mail.retry`
-on the same versioned dispatch endpoint. Apply migration `0007` and install the
+Mail uses `ide.mail.list`, `ide.mail.open`, `ide.mail.send`, `ide.mail.retry`,
+and the opt-in `ide.mail.archive` operation on the same versioned dispatch endpoint. Apply migration `0007` and install the
 packages in `requirements-mail-tokenizer.txt` from its hashed wheel set in the
 runner's Python environment. Install the matching Forge adapter and worker,
 configure `gpt-oss-120b` with its Mail profile, then enable `chat.mail_enabled`
@@ -149,8 +149,20 @@ deadline and the adapter allows up to 30 minutes for inference.
 PostgreSQL stores the ordered Mail transcript and job history. Each new request
 replays all completed exchanges followed by its new message. The transcript stays
 readable after the thread reaches its recall limit and moves to Archive. A reply
-that reached the generation limit is marked in the reader. Archive is automatic;
-manual archive, delete, and read/unread mutations are not current Mail routes.
+that reached the generation limit is marked in the reader. Recall exhaustion
+archives a thread automatically. Manual archive is an opt-in terminal operation
+stopping future follow-ups while retaining the transcript; delete and read/unread
+mutations are not current Mail routes.
+
+`ide.mail.archive` accepts `mail_archive_thread` with thread_id and expected_revision,
+then returns `mail_archived` with the base_revision and result_revision after commit.
+The same owner/thread/base retry returns the original receipt without changing
+revision or timestamps. Manual and context_limit reasons remain distinct. The
+native `chat.mail_archive_enabled` flag defaults to false. Registered migration
+0008, matching runner/host and ABI 5 assets require a coordinated rollout with
+session rotation; once Manual records exist, rollback needs a compatible reader.
+See [host compatibility](../../../src/rust/forge-ide-web-host/README.md#workbench-asset-compatibility).
+No running configuration or schema is changed by this repository work.
 
 Current Rust UI requests optional bounded previews and per-message dates with
 `include_metadata`. Inbox rows show sender, date, subject, preview and generation

@@ -260,6 +260,94 @@ class WorkspaceStoreTest(unittest.TestCase):
             self.assertIsNone(next_page["next_cursor"])
 
     @patch.object(store, "prompt_tokens", side_effect=fixture_prompt_tokens)
+    def test_mail_manual_archive_is_idempotent_and_aborts_active_runs(self, _tokens):
+        thread_id = uuid4()
+        store.admit_mail(thread_id, None, "Archive test", "Text", "first")
+        job = self._claim_mail()
+        self.assertTrue(self.worker("publish(%s, %s, %s)", job["run_id"], job["attempt_token"],
+                                    Json({"answer": "Reply", "finish_reason": "stop", "usage": {}})))
+        self.assertEqual(store.finalize_ready(), 1)
+        page = self._mail_page(thread_id)
+        self.assertEqual(page["thread"]["revision"], 2)
+
+        receipt = store.archive_mail(thread_id, 2)
+        self.assertEqual(receipt, {"base_revision": 2, "result_revision": 3})
+        self.assertEqual(store.archive_mail(thread_id, 2), receipt)
+
+        with self.assertRaises(store.Rejected) as conflict:
+            store.archive_mail(thread_id, 3)
+        self.assertEqual(conflict.exception.code, "revision_conflict")
+
+        second = uuid4()
+        store.admit_mail(second, None, "Context limit", "Text", "second")
+        job2 = self._claim_mail()
+        self.assertTrue(self.worker("publish(%s, %s, %s)", job2["run_id"], job2["attempt_token"],
+                                    Json({"answer": "a" * store.model_profile.context_tokens, "finish_reason": "length", "usage": {}})))
+        self.assertEqual(store.finalize_ready(), 1)
+        with self.assertRaises(store.Rejected) as archived:
+            store.archive_mail(second, 2)
+        self.assertEqual(archived.exception.code, "thread_archived")
+
+        third = uuid4()
+        third_receipt = store.admit_mail(third, None, "Active test", "Text", "third")
+        with self.assertRaises(store.Rejected) as active:
+            store.archive_mail(third, 1)
+        self.assertEqual(active.exception.code, "thread_busy")
+        queued_job = self._claim_mail()
+        self.assertEqual(str(queued_job["run_id"]), str(third_receipt["run_id"]))
+        self.assertTrue(self.worker("publish(%s, %s, %s)", queued_job["run_id"], queued_job["attempt_token"],
+                                    Json({"answer": "Reply", "finish_reason": "stop", "usage": {}})))
+        self.assertEqual(store.finalize_ready(), 1)
+
+        with self.assertRaises(store.Rejected) as not_found:
+            store.archive_mail(uuid4(), 1)
+        self.assertEqual(not_found.exception.status, 404)
+
+        archived_page = self._mail_page(thread_id)
+        self.assertEqual(archived_page["thread"]["archive_reason"], "manual")
+        self.assertEqual(archived_page["thread"]["status"], "archived")
+
+        from concurrent.futures import ThreadPoolExecutor
+        fourth = uuid4()
+        store.admit_mail(fourth, None, "Race test", "Text", "fourth")
+        job_race = self._claim_mail()
+        self.assertTrue(self.worker("publish(%s, %s, %s)", job_race["run_id"], job_race["attempt_token"],
+                                    Json({"answer": "Reply", "finish_reason": "stop", "usage": {}})))
+        self.assertEqual(store.finalize_ready(), 1)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(store.archive_mail, fourth, 2),
+                pool.submit(store.admit_mail, fourth, 2, None, "New message", "fifth")
+            ]
+            results = [f.exception(timeout=10) or f.result(timeout=10) for f in futures]
+
+        receipts = [r for r in results if isinstance(r, dict)]
+        rejections = [r for r in results if isinstance(r, store.Rejected)]
+        self.assertEqual(len(receipts), 1)
+        self.assertEqual(len(rejections), 1)
+        if "base_revision" in receipts[0]:
+            self.assertEqual(rejections[0].code, "thread_archived")
+        else:
+            self.assertEqual(rejections[0].code, "revision_conflict")
+
+    @patch.object(store, "prompt_tokens", side_effect=fixture_prompt_tokens)
+    def test_mail_archive_constraint_and_missing_run_rejection(self, _tokens):
+        with self.assertRaises(psycopg2.IntegrityError):
+            with store.transaction() as cursor:
+                cursor.execute("""
+                    INSERT INTO forge_agent.mail_threads (owner_id, id, subject, profile_id, context_remaining_tokens, archived_at)
+                    VALUES ('owner', %s, 'sub', 'prof', 100, clock_timestamp())
+                """, (uuid4(),))
+        thread_id = uuid4()
+        store.admit_mail(thread_id, None, "Subject", "Text", "msg")
+        with store.transaction() as cursor:
+            cursor.execute("UPDATE forge_agent.mail_threads SET latest_run_id = NULL WHERE id = %s", (thread_id,))
+        with self.assertRaises(store.Rejected) as err:
+            store.archive_mail(thread_id, 1)
+        self.assertEqual(err.exception.code, "thread_busy")
+
+    @patch.object(store, "prompt_tokens", side_effect=fixture_prompt_tokens)
     def test_mail_retry_reuses_failed_input_and_keeps_one_saved_exchange(self, _tokens):
         thread_id = uuid4()
         first = store.admit_mail(thread_id, None, "Subject", "Retry the original draft", "first")

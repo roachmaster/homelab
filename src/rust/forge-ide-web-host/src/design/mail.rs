@@ -3,8 +3,8 @@ use super::{text, Attribute, Node, Tag};
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Forge Mail design")),
-        element!(P; text("Implemented correspondence for GPT-OSS 120B: queue a request, return for its reply, and read the complete thread after automatic recall-limit archiving.")),
-        element!(P [Class = "contract-note"]; text("Implementation reviewed 18 November 2026. This page describes the committed Rust UI, Python runner, PostgreSQL migrations, and Forge adapter. Operational model settings must match on both hosts.")),
+        element!(P; text("Implemented correspondence for GPT-OSS 120B: queue a request, return for its reply, and retain its complete thread after automatic recall-limit or optional manual archiving.")),
+        element!(P [Class = "contract-note"]; text("Repository archive contract updated 19 November 2026. This page describes Rust UI, Python runner, PostgreSQL migrations, and Forge adapter support; live enablement is separate. Operational model settings must match on both hosts.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Mail design sections"];
             element!(A [Href = "#wireframe"]; text("Wireframe")),
             element!(A [Href = "#recall"]; text("Recall and archive")),
@@ -44,7 +44,7 @@ pub(super) const BODY: &[Node] = &[
             element!(Li; text("Open Mail from the shared IDE navigation. Inbox and Archive are compact folder tabs with Refresh. Inbox rows show the GPT-OSS 120B sender, available date, subject, status, and a bounded preview; Compose is a floating action. Desktop keeps a list and reader together. A phone shows one pane with Back to threads.")),
             element!(Li; text("Choose Compose, enter a subject and message, and select Send. The recipient is fixed to GPT-OSS 120B. After the runner commits the message and run, the saved thread shows Queued, Waiting for Forge, Running, Reply ready, or Failed. Closing the browser after acceptance does not cancel the queued job.")),
             element!(Li; text("Read email-style sender and recipient headers, per-message dates when supplied, and safe rendered Markdown. Reply to thread opens the inline follow-up composer. One run can be active per thread. Retry saved message reuses the failed inference input. Automatic five-second refresh is scheduled by Rust while a visible list or thread contains processing work.")),
-            element!(Li; text("Archive retains the ordered transcript and the recall-limit reason, with message paging. Archived threads are read-only. Compose starts a separate thread. There is no manual archive/delete operation or persisted read/unread flag; Reply ready is the generation status.")),
+            element!(Li; text("Archive retains the ordered transcript and its archive reason, with message paging. Archived threads are read-only. Compose starts a separate thread. Manual archive is implemented as an opt-in terminal state for Ready/Failed threads stopping follow-ups; there is no unarchive/delete operation or persisted read/unread flag; Reply ready is the generation status.")),
         ),
     ),
     element!(Section [Id = "recall", Class = "design-section", AriaLabelledby = "recall-title"];
@@ -102,6 +102,10 @@ pub(super) const BODY: &[Node] = &[
             element!(Div;
                 element!(Dt; element!(Code; text("ide.mail.retry"))),
                 element!(Dd; text("Failed run ID and idempotency key in. Return the new run receipt using the saved inference input, after validating that the thread is still eligible.")),
+            ),
+            element!(Div;
+                element!(Dt; element!(Code; text("ide.mail.archive"))),
+                element!(Dd; text("Thread ID and expected_revision in. Manual archive stops future follow-ups but retains messages. Returns mail_archived with result_revision. The same owner, thread, and base revision returns the original receipt without changing timestamps or revision again.")),
             ),
         ),
         element!(P; text("mail_store owns ordered mail_threads and mail_messages reads and writes. queue_store owns turn admission, idempotency, saved inference input, and finalization transactions. The MailRequest / MailResponse Rust DTOs and Python command dataclasses enforce the same four operations. The runner uses its configured mission-control owner; callers cannot supply an owner. The GPU worker receives only the bounded inference payload through the restricted claim API.")),

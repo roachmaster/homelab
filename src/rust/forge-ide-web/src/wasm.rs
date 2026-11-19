@@ -42,7 +42,7 @@ impl Write for BoundedBytes {
 #[allow(unsafe_code)]
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    4
+    5
 }
 
 /// Returns zero on invalid size/reentry. Reserving invalidates previous input.

@@ -133,7 +133,9 @@ impl Mail {
         self.pending.as_ref().is_some_and(|pending| {
             matches!(
                 pending.request,
-                MailRequest::MailSend { .. } | MailRequest::MailRetry { .. }
+                MailRequest::MailSend { .. }
+                    | MailRequest::MailRetry { .. }
+                    | MailRequest::MailArchiveThread { .. }
             )
         })
     }
@@ -317,12 +319,46 @@ impl Mail {
             UiEvent::SetMailDraft { value }
                 if self.composer_visible()
                     && !self.locked()
+                    && !(self.pane == Pane::Reader
+                        && self
+                            .thread()
+                            .is_some_and(|t| t.status == MailStatus::Archived))
                     && value.len() <= MAX_MAIL_DRAFT_BYTES
                     && value
                         .chars()
                         .all(|c| !c.is_control() || matches!(c, '\t' | '\r' | '\n')) =>
             {
                 self.draft = value;
+            }
+            UiEvent::MailArchiveThread {
+                thread_id,
+                expected_revision,
+            } if self.pane == Pane::Reader
+                && self.reader.thread_id == thread_id
+                && self.pending.is_none()
+                && self.subject.is_empty()
+                && self.draft.is_empty()
+                && match &self.retry_intent {
+                    None => self.thread().is_some_and(|thread| {
+                        thread.revision == expected_revision
+                            && matches!(thread.status, MailStatus::Ready | MailStatus::Failed)
+                    }),
+                    Some(MailRequest::MailArchiveThread {
+                        thread_id: intent_thread,
+                        expected_revision: intent_revision,
+                        ..
+                    }) => intent_thread == &thread_id && intent_revision == &expected_revision,
+                    _ => false,
+                } =>
+            {
+                self.submit(
+                    MailRequest::MailArchiveThread {
+                        request_id: id,
+                        thread_id,
+                        expected_revision,
+                    },
+                    effects,
+                )?;
             }
             ref action @ (UiEvent::SendMail {
                 ref idempotency_key,
@@ -333,7 +369,8 @@ impl Mail {
                 if let Some(mut request) = self.retry_intent.clone() {
                     match &mut request {
                         MailRequest::MailSend { request_id, .. }
-                        | MailRequest::MailRetry { request_id, .. } => *request_id = id,
+                        | MailRequest::MailRetry { request_id, .. }
+                        | MailRequest::MailArchiveThread { request_id, .. } => *request_id = id,
                         _ => unreachable!("Only mutations can retain a Mail retry"),
                     }
                     self.submit(request, effects)?;
@@ -385,7 +422,11 @@ impl Mail {
         if !request.is_valid() {
             return Err(UiError::InvalidAction);
         }
-        self.status = "Saving message…";
+        self.status = if matches!(request, MailRequest::MailArchiveThread { .. }) {
+            "Archiving thread…"
+        } else {
+            "Saving message…"
+        };
         self.warning = false;
         self.start(request, Direction::Current, effects);
         Ok(())
@@ -422,6 +463,21 @@ impl Mail {
                 },
                 MailRequest::MailOpen { after_sequence, .. },
             ) => {
+                if let Some(MailRequest::MailArchiveThread {
+                    thread_id,
+                    expected_revision,
+                    ..
+                }) = &self.retry_intent
+                {
+                    if thread_id == &thread.summary.thread_id
+                        && (thread.summary.status == MailStatus::Archived
+                            || thread.summary.revision > *expected_revision)
+                    {
+                        self.retry_intent = None;
+                        self.status = "";
+                        self.warning = false;
+                    }
+                }
                 if self.reader.page.cursor != after_sequence {
                     self.reader.transcript_revision += 1;
                 }
@@ -431,6 +487,12 @@ impl Mail {
                     .find(|summary| summary.thread_id == thread.summary.thread_id)
                 {
                     *summary = thread.summary.clone();
+                }
+                if thread.summary.status == MailStatus::Archived
+                    && self.subject.is_empty()
+                    && self.draft.is_empty()
+                {
+                    self.follow_up = false;
                 }
                 self.reader.thread = Some(thread);
                 self.reader.messages = messages;
@@ -456,8 +518,53 @@ impl Mail {
                 self.seek_latest = true;
                 return;
             }
-            (MailResponse::MailFailed { code, .. }, _) => {
+            (
+                MailResponse::MailArchived {
+                    thread_id,
+                    result_revision,
+                    ..
+                },
+                _,
+            ) => {
                 self.retry_intent = None;
+                self.status = "Thread archived.";
+                self.warning = false;
+                if let Some(summary) = self
+                    .summaries
+                    .iter_mut()
+                    .find(|summary| summary.thread_id == thread_id)
+                {
+                    summary.status = MailStatus::Archived;
+                    summary.archive_reason = Some(MailArchiveReason::Manual);
+                    summary.revision = result_revision;
+                }
+                if self.reader.thread_id == thread_id {
+                    if let Some(thread) = &mut self.reader.thread {
+                        thread.summary.status = MailStatus::Archived;
+                        thread.summary.archive_reason = Some(MailArchiveReason::Manual);
+                        thread.summary.revision = result_revision;
+                        thread.context_remaining_tokens = None;
+                    }
+                    if self.subject.is_empty() && self.draft.is_empty() {
+                        self.follow_up = false;
+                    }
+                }
+                self.refresh(id, Direction::Current, effects);
+                return;
+            }
+            (MailResponse::MailFailed { code, .. }, request) => {
+                let uncertain_archive = matches!(code, MailFailure::Unavailable)
+                    && matches!(request, MailRequest::MailArchiveThread { .. });
+                if !matches!(
+                    request,
+                    MailRequest::MailList { .. } | MailRequest::MailOpen { .. }
+                ) && !uncertain_archive
+                {
+                    self.retry_intent = None;
+                }
+                if uncertain_archive {
+                    self.retry_intent = Some(request);
+                }
                 self.warning = true;
                 self.status = match code {
                     MailFailure::ContextLimit => "This message exceeds the remaining context. Shorten it or start a new message.",
@@ -466,7 +573,11 @@ impl Mail {
                     MailFailure::RevisionConflict => "This thread changed in another tab. Review it before sending again.",
                     MailFailure::IdempotencyConflict => "This submission conflicts with an earlier message.",
                     MailFailure::QueueFull => "The queue is full. Try again shortly.",
-                    MailFailure::Unavailable => "Mail is temporarily unavailable.",
+                    MailFailure::Unavailable => if uncertain_archive {
+                        "Mail could not confirm the request. Retry the same action to check."
+                    } else {
+                        "Mail is temporarily unavailable."
+                    },
                     MailFailure::NotFound => "This thread is unavailable.",
                     MailFailure::InvalidRequest => "Mail could not accept this request.",
                 };
@@ -497,10 +608,17 @@ impl Mail {
         self.warning = true;
         if matches!(
             pending.request,
-            MailRequest::MailSend { .. } | MailRequest::MailRetry { .. }
+            MailRequest::MailSend { .. }
+                | MailRequest::MailRetry { .. }
+                | MailRequest::MailArchiveThread { .. }
         ) {
+            let is_archive = matches!(pending.request, MailRequest::MailArchiveThread { .. });
             self.retry_intent = Some(pending.request);
-            self.status = "Mail could not confirm delivery. Retry the same submission to check.";
+            self.status = if is_archive {
+                "Mail could not confirm the request. Retry the same action to check."
+            } else {
+                "Mail could not confirm delivery. Retry the same submission to check."
+            };
         } else {
             self.status = "Mail could not refresh. Try again.";
             self.schedule_watch(watch, effects);
@@ -521,7 +639,13 @@ impl Mail {
         self.pane == Pane::Compose || self.pane == Pane::Reader && self.follow_up
     }
 
-    pub fn project(&self, view: &mut ViewModel, connected: bool, enabled: bool) {
+    pub fn project(
+        &self,
+        view: &mut ViewModel,
+        connected: bool,
+        enabled: bool,
+        archive_enabled: bool,
+    ) {
         let active = connected && enabled && self.active;
         let composing = self.pane == Pane::Compose;
         let reading = self.pane == Pane::Reader;
@@ -543,7 +667,7 @@ impl Mail {
             }
             for button in &mut view.buttons {
                 if matches!(button.id, "open-chat" | "open-workbench") {
-                    button.disabled = false;
+                    button.disabled = locked;
                 }
             }
         }
@@ -559,6 +683,10 @@ impl Mail {
                 ("mail-composer", active && composer),
                 ("mail-subject-panel", active && composing),
                 ("mail-archive-reason", active && reading && archived_thread),
+                (
+                    "mail-archive-thread",
+                    active && archive_enabled && reading && !archived_thread,
+                ),
                 (
                     "mail-follow-up",
                     active
@@ -631,6 +759,18 @@ impl Mail {
             || draft_valid
                 && (composing && valid_mail_subject(self.subject.trim())
                     || reading && self.can_follow_up());
+        let can_archive = reading
+            && archive_enabled
+            && !loading
+            && self.subject.is_empty()
+            && self.draft.is_empty()
+            && if let Some(MailRequest::MailArchiveThread { .. }) = self.retry_intent {
+                true
+            } else {
+                !locked
+                    && thread
+                        .is_some_and(|t| matches!(t.status, MailStatus::Ready | MailStatus::Failed))
+            };
         view.buttons.extend(
             [
                 ("open-mail", !enabled || active || !connected),
@@ -652,12 +792,35 @@ impl Mail {
                 ),
                 ("mail-discard", locked),
                 ("mail-send", loading || !can_send),
+                ("mail-archive-thread", !can_archive),
             ]
             .map(|(id, disabled)| ButtonBinding {
                 pressed: None,
                 id,
                 disabled,
-                action: None,
+                action: if id == "mail-archive-thread" && !disabled {
+                    self.retry_intent
+                        .as_ref()
+                        .and_then(|r| match r {
+                            MailRequest::MailArchiveThread {
+                                thread_id,
+                                expected_revision,
+                                ..
+                            } => Some(RowAction::MailArchiveThread {
+                                thread_id: thread_id.clone(),
+                                expected_revision: *expected_revision,
+                            }),
+                            _ => None,
+                        })
+                        .or_else(|| {
+                            thread.map(|t| RowAction::MailArchiveThread {
+                                thread_id: t.thread_id.clone(),
+                                expected_revision: t.revision,
+                            })
+                        })
+                } else {
+                    None
+                },
             }),
         );
 
@@ -685,6 +848,18 @@ impl Mail {
                     "mail-run-failure",
                     failure.map(failure_text).unwrap_or_default().into(),
                     Tone::Warning,
+                ),
+                (
+                    "mail-archive-reason",
+                    thread
+                        .and_then(|t| t.archive_reason)
+                        .map(|reason| match reason {
+                            MailArchiveReason::ContextLimit => "Recall limit reached. There is too little room for another exchange in this thread.",
+                            MailArchiveReason::Manual => "This thread was archived manually.",
+                        })
+                        .unwrap_or_default()
+                        .into(),
+                    Tone::Neutral,
                 ),
                 (
                     "mail-thread-status",
@@ -719,7 +894,7 @@ impl Mail {
             InputBinding {
                 id: "mail-draft",
                 value: self.draft.clone(),
-                disabled: !active || !composer || locked,
+                disabled: !active || !composer || locked || (reading && archived_thread),
                 max_bytes: MAX_MAIL_DRAFT_BYTES,
                 action: Some(FilterAction::SetMailDraft {}),
             },
@@ -898,7 +1073,7 @@ mod tests {
 
     fn view(mail: &Mail) -> ViewModel {
         let mut view = ViewModel::default();
-        mail.project(&mut view, true, true);
+        mail.project(&mut view, true, true, false);
         view
     }
 
@@ -987,5 +1162,194 @@ mod tests {
         assert!(mail.draft.is_empty());
         assert!(visible(&view(&mail), "mail-reply-bar"));
         assert!(effects.is_empty());
+    }
+
+    // Independent contract probes added during review; these are expected to
+    // expose policy gaps in the first Gemini proposal, not bless its behavior.
+    fn archive_action(thread_id: &str, expected_revision: u64) -> UiEvent {
+        UiEvent::MailArchiveThread {
+            thread_id: thread_id.into(),
+            expected_revision,
+        }
+    }
+
+    fn archive_uncertain() -> Mail {
+        let mut mail = mail();
+        let mut effects = Vec::new();
+        mail.dispatch(
+            archive_action("8452b258-df30-4985-bfa1-cd98245b2a06", 2),
+            "archive-request".into(),
+            &mut effects,
+        )
+        .unwrap();
+        mail.network_failed("archive-request", "watch".into(), &mut effects);
+        assert!(mail.retry_intent.is_some());
+        mail
+    }
+
+    #[test]
+    fn archive_contract_rejects_stale_thread() {
+        let mut mail = mail();
+        let mut effects = Vec::new();
+        let _ = mail.dispatch(
+            archive_action("56ad75f0-8cae-4766-b271-57620606c92d", 2),
+            "stale-thread".into(),
+            &mut effects,
+        );
+        assert!(
+            effects.is_empty(),
+            "a stale contextual action must not archive another thread"
+        );
+    }
+
+    #[test]
+    fn archive_contract_rejects_stale_revision() {
+        let mut mail = mail();
+        let mut effects = Vec::new();
+        let _ = mail.dispatch(
+            archive_action("8452b258-df30-4985-bfa1-cd98245b2a06", 1),
+            "stale-revision".into(),
+            &mut effects,
+        );
+        assert!(
+            effects.is_empty(),
+            "a stale revision must be rejected before transport"
+        );
+    }
+
+    #[test]
+    fn archive_contract_rejects_unsent_draft() {
+        let mut mail = mail();
+        mail.follow_up = true;
+        mail.draft = "Keep this unsent reply".into();
+        let mut effects = Vec::new();
+        let _ = mail.dispatch(
+            archive_action("8452b258-df30-4985-bfa1-cd98245b2a06", 2),
+            "with-draft".into(),
+            &mut effects,
+        );
+        assert!(
+            effects.is_empty(),
+            "archival must not strand an unsent draft"
+        );
+    }
+
+    #[test]
+    fn archive_contract_rejects_processing_thread() {
+        let mut mail = mail();
+        mail.reader.thread.as_mut().unwrap().summary.status = MailStatus::Running;
+        let mut effects = Vec::new();
+        let _ = mail.dispatch(
+            archive_action("8452b258-df30-4985-bfa1-cd98245b2a06", 2),
+            "processing".into(),
+            &mut effects,
+        );
+        assert!(
+            effects.is_empty(),
+            "processing threads cannot issue manual archive"
+        );
+    }
+
+    #[test]
+    fn archive_contract_rejects_pending_read() {
+        let mut mail = mail();
+        let mut effects = Vec::new();
+        mail.dispatch(UiEvent::MailRefresh {}, "read".into(), &mut effects)
+            .unwrap();
+        effects.clear();
+        let _ = mail.dispatch(
+            archive_action("8452b258-df30-4985-bfa1-cd98245b2a06", 2),
+            "during-read".into(),
+            &mut effects,
+        );
+        assert!(
+            effects.is_empty(),
+            "archive cannot replace ownership of an in-flight read"
+        );
+    }
+
+    #[test]
+    fn archive_contract_disabled_capability_has_no_action() {
+        let mail = mail();
+        let mut projection = ViewModel::default();
+        mail.project(&mut projection, true, true, false);
+        let button = projection
+            .buttons
+            .iter()
+            .find(|b| b.id == "mail-archive-thread")
+            .unwrap();
+        assert!(
+            button.disabled && button.action.is_none(),
+            "disabled capability must not bind an archive action"
+        );
+    }
+
+    #[test]
+    fn archive_contract_uncertain_retry_preserves_original_tuple() {
+        let mut mail = archive_uncertain();
+        let mut effects = Vec::new();
+        let result = mail.dispatch(
+            archive_action("8452b258-df30-4985-bfa1-cd98245b2a06", 2),
+            "retry-archive".into(),
+            &mut effects,
+        );
+        assert!(
+            result.is_ok(),
+            "the projected uncertain retry must remain dispatchable"
+        );
+        assert!(
+            matches!(effects.as_slice(), [UiEffect::Mail(MailRequest::MailArchiveThread {
+            thread_id, expected_revision: 2, ..
+        })] if thread_id == "8452b258-df30-4985-bfa1-cd98245b2a06")
+        );
+    }
+
+    #[test]
+    fn archive_contract_uncertainty_survives_failed_refresh() {
+        let mut mail = archive_uncertain();
+        let mut effects = Vec::new();
+        mail.dispatch(UiEvent::MailRefresh {}, "reconcile".into(), &mut effects)
+            .unwrap();
+        mail.dispatch(
+            UiEvent::Mail(MailResponse::MailFailed {
+                request_id: "reconcile".into(),
+                code: MailFailure::Unavailable,
+            }),
+            "accepted-read-failure".into(),
+            &mut effects,
+        )
+        .unwrap();
+        assert!(
+            matches!(
+                mail.retry_intent,
+                Some(MailRequest::MailArchiveThread {
+                    expected_revision: 2,
+                    ..
+                })
+            ),
+            "a failed read does not resolve an unknown mutation"
+        );
+    }
+
+    #[test]
+    fn archive_contract_uncertainty_disables_global_navigation() {
+        let mail = archive_uncertain();
+        let mut projection = ViewModel::default();
+        projection.buttons.push(ButtonBinding {
+            action: None,
+            id: "open-chat",
+            disabled: false,
+            pressed: None,
+        });
+        mail.project(&mut projection, true, true, true);
+        assert!(
+            projection
+                .buttons
+                .iter()
+                .find(|b| b.id == "open-chat")
+                .unwrap()
+                .disabled,
+            "global navigation must preserve an uncertain archive owner"
+        );
     }
 }

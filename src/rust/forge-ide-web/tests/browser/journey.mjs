@@ -1193,6 +1193,7 @@ async function mailLayoutJourney(page, desktop) {
   const mail = page.locator('#mail');
   const inbox = page.locator('#mail-inbox');
   const archive = page.locator('#mail-archive');
+  const archiveThread = page.getByRole('button', { name: 'Archive thread', exact: true });
   const refresh = page.getByRole('button', { name: 'Refresh Mail', exact: true });
   const compose = page.getByRole('button', { name: 'Compose', exact: true });
   const back = page.getByRole('button', { name: 'Back to threads', exact: true });
@@ -1311,7 +1312,9 @@ async function mailLayoutJourney(page, desktop) {
     await check(page.locator('#mail-reader')).toBeVisible();
     await check(reply).toBeInViewport();
     await check(back).toBeInViewport();
-    for (const control of [back, refresh, reply]) await touchTarget(control);
+    await check(archiveThread).toBeInViewport();
+    await check(archiveThread).toBeEnabled();
+    for (const control of [back, refresh, reply, archiveThread]) await touchTarget(control);
     await noOverflow();
   }
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1323,6 +1326,7 @@ async function mailLayoutJourney(page, desktop) {
   await check(page.locator('#mail-subject-panel')).toBeHidden();
   await draft.fill('A controlled follow-up draft, preserved while switching screens.');
   await check(page.locator('#mail-send')).toBeEnabled();
+  await check(archiveThread).toBeDisabled();
   await page.locator('#open-chat').click();
   await check(page.locator('#chat')).toBeVisible();
   await page.locator('#open-mail').click();
@@ -1333,6 +1337,36 @@ async function mailLayoutJourney(page, desktop) {
   await check(draft).toHaveValue('');
   await check(reply).toBeVisible();
   await check(page.locator('#mail-composer')).toBeHidden();
+
+  await reply.focus();
+  await page.keyboard.press('Enter');
+  await check(draft).toBeFocused();
+  await check(draft).toHaveValue('');
+  await check(page.locator('#mail-composer')).toBeVisible();
+  await check(archiveThread).toBeEnabled();
+  await archiveThread.focus();
+  await check(archiveThread).toBeFocused();
+  await page.keyboard.press('Enter');
+  await check(page.locator('#mail-status')).toHaveText('Thread archived.');
+  await check(refresh).toBeEnabled();
+  await check(page.locator('#mail-composer')).toBeHidden();
+  await check(draft).toBeDisabled();
+  await check(reply).toBeHidden();
+  await check(back).toBeEnabled();
+  await back.click();
+  await check(row).toBeHidden();
+  await archive.click();
+  await check(row).toBeVisible();
+  await row.click();
+  await check(page.locator('#mail-archive-reason')).toHaveText('This thread was archived manually.');
+  await check(refresh).toBeEnabled();
+  await check(transcript.locator('.fg-message')).toHaveCount(2);
+  await check(page.locator('#mail-composer')).toBeHidden();
+  await check(draft).toBeDisabled();
+  await check(reply).toBeHidden();
+  await check(archiveThread).toBeHidden();
+  await check(back).toBeEnabled();
+
   await page.setViewportSize(desktop);
   await page.locator('#open-chat').click();
 }

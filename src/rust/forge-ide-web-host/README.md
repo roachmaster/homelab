@@ -348,11 +348,23 @@ before UI assertions; changing a supported browser selection is not a passing te
 
 ### Workbench asset compatibility
 
-The host accepts asset manifest ABI 4. Rebuild and replace the complete generated
-bundle for the report-keyed workbench; old ABI 1 or unknown asset versions fail
+The host accepts asset manifest ABI 5. Rebuild and replace the complete generated
+bundle for the report-keyed workbench; old ABI 4 or unknown asset versions fail
 before listening. Hashes bind the five files as a bundle, not publisher identity.
 The native session/inspection HTTP protocol remains 1. See the
 [local UI migration](../forge-ide-web/WORKBENCH.md#compatibility-and-verification).
+
+Manual Mail archiving is disabled by default. Enable `chat.mail_archive_enabled`
+only with normal Mail support and the matching runner/schema implementation.
+The native gateway rejects archive requests while the flag is false; the browser
+receives the capability only when it is enabled.
+
+Rollout requires a quiesced migration 0008, updated runner, native host, and atomic
+ABI 5 bundle before explicit opt-in. Host restart rotates session credentials and
+epochs; older strict Catalog readers must reload. Older Mail readers cannot decode
+the persisted `manual` archive reason. After manual data exists, rollback requires
+a compatible reader; do not erase or relabel archives to restore an older binary.
+This repository change does not modify the running portal’s configuration.
 
 ## Selected source reads
 
@@ -371,4 +383,4 @@ returned bytes against the expected digest before exposing source to WASM.
 denies reads, preserving inspection-only consumers. The native response is at most
 1 MiB. The UI displays bounded windows (256 lines / 64 KiB) and safely renders text;
 this is a read-only source viewer, with no save or execution route. Generated assets
-and WASM ABI 4 must be replaced atomically with this host.
+and WASM ABI 5 must be replaced atomically with this host.

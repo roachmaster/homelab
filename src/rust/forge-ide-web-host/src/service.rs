@@ -1074,6 +1074,9 @@ impl Host {
             return crate::run_dispatch::dispatch(relay, header, body, context.deadline);
         }
         if MailRequest::is_destination(header.route().destination()) {
+            if header.route().destination() == "ide.mail.archive" && !relay.mail_archive_enabled {
+                return Err(Rejection::Unavailable);
+            }
             if !relay.mail_enabled {
                 return Err(Rejection::Unavailable);
             }

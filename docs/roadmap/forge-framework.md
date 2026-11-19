@@ -1,7 +1,8 @@
 # Forge framework delivery roadmap
 
 **Status: current implementation checkpoints plus the original delivery sequence.**
-Reviewed against the repository on 18 November 2026. The table below replaces
+Reviewed against the repository on 19 November 2026. Deployment observations
+retain their separate dates. The table below replaces
 older blanket statements that durability, remote access or UI are future work.
 The original milestone exit criteria remain useful goals, not a claim that every
 generic lifecycle or production guarantee has been completed.
@@ -14,7 +15,7 @@ generic lifecycle or production guarantee has been completed.
 | Local terminal | Implemented node observations, admitted discovery, optional native disk sessions and a volatile manually stepped counter | Whole-machine health, a filesystem sandbox and arbitrary process execution |
 | Access and durable jobs | Implemented verified subject/deadline contexts, exact-route grants, a private locked file store, committed sum-job receipts/results, leased attempts and owned worker shutdown | Generic programs, automatic receipt retention, remote job delivery and broad identity/delegation |
 | Agent and managed editing | Implemented configured HTTPS/mTLS node/project/source calls and explicit managed-write grants with revision/journal guards | Enabling writes requires a provisioned private Unix workspace; arbitrary filesystem paths and shell execution remain outside the contract |
-| Generated portal | Implemented Chat/Mail/Workbench, compact mobile controls, Home, focused Design readers and same-tab workspace recovery; local WASM ABI 4 | General editor-widget integration and a universal replaceable navigation/module DSL remain separate designs |
+| Generated portal | Implemented Chat/Mail/Workbench, compact mobile controls, Home, focused Design readers and same-tab workspace recovery; local WASM ABI 5 | General editor-widget integration and a universal replaceable navigation/module DSL remain separate designs |
 | Reuse and release | Concrete optional capability consumers and public registrar fixtures exist | Workspace crates remain `publish = false`; source availability, local tests, deployed configuration and a supported public SDK are different claims |
 
 Use the [source-backed blueprint inventory](../architecture/forge-framework-blueprint.md#current-implementation)
@@ -38,8 +39,11 @@ header project/view sheets, a unified report-local entry/symbol query, Problems
 counts/navigation, reusable pane geometry/narrow controls and protected
 DOM teardown. Every local action carries accepted report context; stale integer
 IDs cannot select data from a new report. The current bundle uses local WASM
-ABI 4; older ABI 2 diagrams describe an earlier checkpoint. Native inspection
-protocol versioning remains separate.
+ABI 5; older ABI diagrams describe earlier checkpoints. Native HTTP protocol 1
+remains separate. Manual Mail archive is a repository capability behind the
+native `chat.mail_archive_enabled` opt-in, false by default. It requires matching
+runner/schema and host support; the dated live ABI 4 checkpoint has not been
+upgraded by this source change. See [archive compatibility and rollout](../../src/rust/forge-ide-web-host/README.md#workbench-asset-compatibility).
 Main promotion requires same-head Rust and actual sandboxed desktop/narrow browser
 checks plus visual review. Bounded source and managed-edit operations now have
 separately admitted native paths. An external editor-widget lifecycle remains a

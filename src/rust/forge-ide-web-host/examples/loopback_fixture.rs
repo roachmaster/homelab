@@ -190,6 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "workspace_persistence": true,
             "async_dispatch": true,
             "mail_enabled": true,
+            "mail_archive_enabled": true,
         });
         None
     } else if managed {

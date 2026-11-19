@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":4,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":5,"files":files})).unwrap(),
         )
         .unwrap();
         Self(p)
@@ -420,6 +420,7 @@ fn configured_host_resources_open_only_at_factory_creation() {
                     workspace_persistence: false,
                     async_dispatch: false,
                     mail_enabled: false,
+                    mail_archive_enabled: false,
                 }),
                 ..config(&files)
             },
@@ -1703,7 +1704,7 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 3, 5] {
+    for abi in [0, 1, 2, 3, 4, 6] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -2083,6 +2084,7 @@ fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
         workspace_persistence: false,
         async_dispatch: false,
         mail_enabled: false,
+        mail_archive_enabled: false,
     });
     let ((), factory) = Registry::new()
         .register(register_host("context-chat", settings).unwrap())
@@ -2276,6 +2278,7 @@ fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
         workspace_persistence: true,
         async_dispatch: false,
         mail_enabled: false,
+        mail_archive_enabled: false,
     });
     let (host, _) = host_with_config(settings);
     let (cookie, csrf, _) = paired(&host);
@@ -2489,6 +2492,7 @@ fn mail_relays_only_admitted_and_correlated_dispatch_requests() {
         workspace_persistence: true,
         async_dispatch: true,
         mail_enabled: true,
+        mail_archive_enabled: false,
     });
     let (host, _) = host_with_config(settings);
     let (cookie, csrf, _) = paired(&host);
@@ -2553,4 +2557,396 @@ fn mail_relays_only_admitted_and_correlated_dispatch_requests() {
     let uncorrelated = exchange(&host, post(&host, "ide.mail.send", send, &auth));
     assert!(uncorrelated.starts_with("HTTP/1.1 503"));
     runner.join().unwrap();
+}
+
+/// Direct tests of the new native authority boundary using only owned loopback
+/// resources. This is not evidence of an old browser or a production runner.
+#[cfg(unix)]
+mod manual_mail_archive_boundary {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Instant;
+
+    const THREAD: &str = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
+    const OTHER: &str = "9769c742-9e27-418a-8a08-a9f01b018c86";
+
+    fn request() -> Value {
+        json!({"kind":"mail_archive_thread","request_id":"request-1",
+            "thread_id":THREAD,"expected_revision":2})
+    }
+
+    fn receipt() -> Value {
+        json!({"protocol_version":1,"event":{"kind":"mail_archived",
+            "request_id":"request-1","thread_id":THREAD,"base_revision":2,"result_revision":3}})
+    }
+
+    fn settings(files: &Files, upstream: &TcpListener, enabled: bool) -> HostConfig {
+        let token_file = files.0.join("owned-archive-runner.token");
+        fs::write(&token_file, "ab".repeat(32)).unwrap();
+        fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
+        // Deliberately omit the new property to prove backwards-compatible
+        // configuration parsing keeps manual archival off until explicit opt-in.
+        let mut chat: forge_ide_web_host::ChatConfig = serde_json::from_value(json!({
+            "endpoint":upstream.local_addr().unwrap(),"token_file":token_file,
+            "workspace_persistence":true,"async_dispatch":true,"mail_enabled":true
+        }))
+        .unwrap();
+        assert!(!chat.mail_archive_enabled);
+        chat.mail_archive_enabled = enabled;
+        let mut config = config(files);
+        config.chat = Some(chat);
+        config
+    }
+
+    fn fixture(enabled: bool) -> (Files, TcpListener, Host, Rc<Cell<usize>>) {
+        let files = Files::new();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        let (host, calls) = host_with_config(settings(&files, &upstream, enabled));
+        (files, upstream, host, calls)
+    }
+
+    fn no_upstream(upstream: &TcpListener) {
+        assert!(
+            matches!(upstream.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock),
+            "rejected admission must not open an upstream connection"
+        );
+    }
+
+    fn catalog(response: &str) -> Value {
+        serde_json::from_str::<Value>(response.split_once("\r\n\r\n").unwrap().1).unwrap()["event"]
+            ["catalog"]
+            .clone()
+    }
+
+    fn pair_catalog(host: &Host) -> (String, String, Value) {
+        let response = exchange(
+            host,
+            post(
+                host,
+                "ui.session.open",
+                json!({
+                    "kind":"pair","request_id":"request-1","code":host.pairing_code().unwrap()
+                }),
+                "",
+            ),
+        );
+        let (cookie, csrf, _) = session_values(host, &response);
+        (cookie, csrf, catalog(&response))
+    }
+
+    #[test]
+    fn default_off_catalog_and_gate_never_contact_runner() {
+        let (_files, upstream, host, calls) = fixture(false);
+        let (cookie, csrf, catalog) = pair_catalog(&host);
+        assert!(catalog.get("mail_archive_enabled").is_none());
+        let current: forge_ide_ui::protocol::Catalog = serde_json::from_value(catalog).unwrap();
+        assert!(current.mail_enabled && !current.mail_archive_enabled);
+        let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+        let response = exchange(&host, post(&host, "ide.mail.archive", request(), &auth));
+        assert!(response.starts_with("HTTP/1.1 503"));
+        no_upstream(&upstream);
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn malformed_or_unadmitted_archive_requests_stop_before_runner() {
+        let (_files, upstream, host, calls) = fixture(true);
+        let (cookie, csrf, catalog) = pair_catalog(&host);
+        assert_eq!(catalog["mail_archive_enabled"], true);
+        let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+        let mut cases = vec![
+            (
+                "no session",
+                post(&host, "ide.mail.archive", request(), ""),
+                401,
+            ),
+            (
+                "no CSRF",
+                post(
+                    &host,
+                    "ide.mail.archive",
+                    request(),
+                    &format!("Cookie: {cookie}\r\n"),
+                ),
+                401,
+            ),
+            (
+                "destination/body mismatch",
+                post(&host, "ide.mail.list", request(), &auth),
+                400,
+            ),
+            (
+                "wrong variant",
+                post(
+                    &host,
+                    "ide.mail.archive",
+                    json!({"kind":"mail_open",
+                "request_id":"request-1","thread_id":THREAD}),
+                    &auth,
+                ),
+                400,
+            ),
+        ];
+        for (name, key, value) in [
+            ("malformed thread", "thread_id", json!("not-a-uuid")),
+            ("zero revision", "expected_revision", json!(0)),
+            ("negative revision", "expected_revision", json!(-1)),
+            (
+                "unsafe integer revision",
+                "expected_revision",
+                json!(9_007_199_254_740_992_u64),
+            ),
+            ("revision type", "expected_revision", json!("2")),
+            (
+                "body/header request mismatch",
+                "request_id",
+                json!("other-request"),
+            ),
+            (
+                "unrecognized property",
+                "client_endpoint",
+                json!("http://untrusted.invalid"),
+            ),
+        ] {
+            let mut body = request();
+            body[key] = value;
+            cases.push((name, post(&host, "ide.mail.archive", body, &auth), 400));
+        }
+        let valid = post(&host, "ide.mail.archive", request(), &auth);
+        cases.extend([
+            (
+                "malformed request header",
+                valid.replace(
+                    "Forge-Request-Id: request-1",
+                    "Forge-Request-Id: bad request",
+                ),
+                400,
+            ),
+            (
+                "duplicate request header",
+                post(
+                    &host,
+                    "ide.mail.archive",
+                    request(),
+                    &format!("{auth}Forge-Request-Id: other\r\n"),
+                ),
+                400,
+            ),
+            (
+                "unsupported contract",
+                valid.replace("Forge-Contract-Version: 1", "Forge-Contract-Version: 2"),
+                400,
+            ),
+        ]);
+        for (name, request, status) in cases {
+            let response = exchange(&host, request);
+            assert!(
+                response.starts_with(&format!("HTTP/1.1 {status}")),
+                "{name}: incorrect admission status"
+            );
+            no_upstream(&upstream);
+        }
+        assert_eq!(calls.get(), 0);
+    }
+
+    fn serve_replies(
+        upstream: TcpListener,
+        expected: Value,
+        replies: Vec<(u16, Value)>,
+    ) -> thread::JoinHandle<usize> {
+        thread::spawn(move || {
+            let count = replies.len();
+            for (status, response) in replies {
+                let deadline = Instant::now() + Duration::from_secs(3);
+                let mut stream = loop {
+                    match upstream.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error)
+                            if error.kind() == std::io::ErrorKind::WouldBlock
+                                && Instant::now() < deadline =>
+                        {
+                            thread::sleep(Duration::from_millis(1))
+                        }
+                        _ => panic!("owned runner did not receive the expected admitted request"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut input = BufReader::new(&mut stream);
+                let mut line = String::new();
+                input.read_line(&mut line).unwrap();
+                assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
+                let mut headers = BTreeMap::new();
+                loop {
+                    line.clear();
+                    input.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    let (name, value) = line.trim_end().split_once(": ").unwrap();
+                    headers.insert(name.to_ascii_lowercase(), value.to_owned());
+                }
+                assert_eq!(headers["forge-destination"], "ide.mail.archive");
+                assert_eq!(headers["forge-request-id"], "request-1");
+                assert_eq!(headers["forge-envelope-version"], "1");
+                assert_eq!(headers["forge-contract-version"], "1");
+                let mut body = vec![0; headers["content-length"].parse::<usize>().unwrap()];
+                assert!(body.len() < 1024);
+                input.read_exact(&mut body).unwrap();
+                assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
+                let response = response.to_string();
+                write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
+            }
+            count
+        })
+    }
+
+    #[test]
+    fn admitted_archive_forwards_exact_dto_and_validates_every_receipt_field() {
+        let (_files, upstream, host, calls) = fixture(true);
+        let (cookie, csrf, _) = pair_catalog(&host);
+        let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+        let mut replies = vec![(200, receipt())];
+        for (key, value) in [
+            ("request_id", json!("other-request")),
+            ("thread_id", json!(OTHER)),
+            ("base_revision", json!(1)),
+            ("result_revision", json!(4)),
+            ("result_revision", json!(9_007_199_254_740_992_u64)),
+            ("extra", json!(true)),
+        ] {
+            let mut response = receipt();
+            response["event"][key] = value;
+            replies.push((200, response));
+        }
+        replies.push((202, receipt()));
+        let mut wrong_version = receipt();
+        wrong_version["protocol_version"] = json!(2);
+        replies.push((200, wrong_version));
+        let expected_replies = replies.len();
+        let runner = serve_replies(upstream, request(), replies);
+        for index in 0..expected_replies {
+            let response = exchange(&host, post(&host, "ide.mail.archive", request(), &auth));
+            let expected_status = if index == 0 { 200 } else { 503 };
+            assert!(
+                response.starts_with(&format!("HTTP/1.1 {expected_status}")),
+                "receipt case {index}: incorrect native result"
+            );
+            if index == 0 {
+                assert_eq!(
+                    serde_json::from_str::<Value>(response.split_once("\r\n\r\n").unwrap().1)
+                        .unwrap(),
+                    receipt()
+                );
+            }
+        }
+        assert_eq!(runner.join().unwrap(), expected_replies);
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn inconsistent_archive_config_is_rejected_before_construction() {
+        let files = Files::new();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        let mut settings = config(&files);
+        settings.assets = files.0.join("assets-must-not-be-read");
+        let token_file = files.0.join("token-must-not-be-read");
+        settings.chat = Some(forge_ide_web_host::ChatConfig {
+            endpoint: upstream.local_addr().unwrap(),
+            token_file: token_file.clone(),
+            workspace_persistence: false,
+            async_dispatch: false,
+            mail_enabled: false,
+            mail_archive_enabled: true,
+        });
+        assert!(matches!(
+            register_host("archive-invalid", settings),
+            Err(HostError::Configuration(
+                "Mail archive requires mail to be enabled"
+            ))
+        ));
+        assert!(!token_file.exists());
+        assert!(!files.0.join("assets-must-not-be-read").exists());
+        no_upstream(&upstream);
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyCatalogSchema {
+        protocol_version: u16,
+        session_epoch: String,
+        timeout_ms: u64,
+        nodes: Vec<forge_ide_ui::protocol::NodeChoice>,
+        #[serde(default)]
+        chat_history: bool,
+        #[serde(default)]
+        async_chat: bool,
+        #[serde(default)]
+        mail_enabled: bool,
+        recent_write: Option<forge_ide_ui::protocol::ResumableWrite>,
+    }
+
+    #[test]
+    fn truthy_catalog_field_fences_a_strict_legacy_schema_after_epoch_rotation() {
+        let (_old_files, old_upstream, old_host, _) = fixture(false);
+        let (_, _, old_catalog) = pair_catalog(&old_host);
+        let legacy: LegacyCatalogSchema = serde_json::from_value(old_catalog).unwrap();
+        assert_eq!(legacy.protocol_version, 1);
+        assert!(
+            !legacy.session_epoch.is_empty() && legacy.timeout_ms > 0 && !legacy.nodes.is_empty()
+        );
+        assert!(
+            legacy.chat_history
+                && legacy.async_chat
+                && legacy.mail_enabled
+                && legacy.recent_write.is_none()
+        );
+        no_upstream(&old_upstream);
+
+        let files = Files::new();
+        let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+        upstream.set_nonblocking(true).unwrap();
+        let mut settings = settings(&files, &upstream, true);
+        settings.session_auth = SessionAuth::TrustedProxy;
+        settings.public_origin = Some("https://portal.example.com".into());
+        settings.limits.session_ttl = Duration::from_millis(80);
+        let (host, calls) = host_with_config(settings);
+        let first = exchange(
+            &host,
+            post(
+                &host,
+                "ui.session.resume",
+                json!({"kind":"resume","request_id":"request-1"}),
+                "",
+            ),
+        );
+        let (cookie, _, epoch) = session_values(&host, &first);
+        thread::sleep(Duration::from_millis(160));
+        let rotated = exchange(
+            &host,
+            post(
+                &host,
+                "ui.session.resume",
+                json!({"kind":"resume","request_id":"request-1"}),
+                &format!("Cookie: {cookie}\r\n"),
+            ),
+        );
+        let (_, _, next_epoch) = session_values(&host, &rotated);
+        assert_ne!(epoch, next_epoch);
+        let catalog = catalog(&rotated);
+        assert_eq!(catalog["mail_archive_enabled"], true);
+        let error = serde_json::from_value::<LegacyCatalogSchema>(catalog.clone())
+            .err()
+            .expect("legacy strict schema must reject the new advertised capability");
+        assert!(error.to_string().contains("mail_archive_enabled"));
+        let current: forge_ide_ui::protocol::Catalog = serde_json::from_value(catalog).unwrap();
+        assert!(current.mail_archive_enabled);
+        no_upstream(&upstream);
+        assert_eq!(calls.get(), 0);
+    }
 }

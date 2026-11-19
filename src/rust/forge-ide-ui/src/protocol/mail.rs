@@ -55,6 +55,11 @@ pub enum MailRequest {
         run_id: String,
         idempotency_key: String,
     },
+    MailArchiveThread {
+        request_id: String,
+        thread_id: String,
+        expected_revision: u64,
+    },
 }
 
 impl MailRequest {
@@ -63,14 +68,19 @@ impl MailRequest {
             Self::MailList { request_id, .. }
             | Self::MailOpen { request_id, .. }
             | Self::MailSend { request_id, .. }
-            | Self::MailRetry { request_id, .. } => request_id,
+            | Self::MailRetry { request_id, .. }
+            | Self::MailArchiveThread { request_id, .. } => request_id,
         }
     }
 
     pub fn is_destination(value: &str) -> bool {
         matches!(
             value,
-            "ide.mail.list" | "ide.mail.open" | "ide.mail.send" | "ide.mail.retry"
+            "ide.mail.list"
+                | "ide.mail.open"
+                | "ide.mail.send"
+                | "ide.mail.retry"
+                | "ide.mail.archive"
         )
     }
 
@@ -80,6 +90,7 @@ impl MailRequest {
             Self::MailOpen { .. } => "ide.mail.open",
             Self::MailSend { .. } => "ide.mail.send",
             Self::MailRetry { .. } => "ide.mail.retry",
+            Self::MailArchiveThread { .. } => "ide.mail.archive",
         }
     }
 
@@ -121,6 +132,11 @@ impl MailRequest {
                 idempotency_key,
                 ..
             } => valid_chat_id(run_id) && valid_chat_id(idempotency_key),
+            Self::MailArchiveThread {
+                thread_id,
+                expected_revision,
+                ..
+            } => valid_chat_id(thread_id) && (1..=MAX_MAIL_SEQUENCE).contains(expected_revision),
         }
     }
 }
@@ -158,6 +174,7 @@ impl MailStatus {
 #[serde(rename_all = "snake_case")]
 pub enum MailArchiveReason {
     ContextLimit,
+    Manual,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,6 +294,12 @@ pub enum MailResponse {
         request_id: String,
         code: MailFailure,
     },
+    MailArchived {
+        request_id: String,
+        thread_id: String,
+        base_revision: u64,
+        result_revision: u64,
+    },
 }
 
 impl MailResponse {
@@ -285,7 +308,8 @@ impl MailResponse {
             Self::MailListed { request_id, .. }
             | Self::MailOpened { request_id, .. }
             | Self::MailSent { request_id, .. }
-            | Self::MailFailed { request_id, .. } => request_id,
+            | Self::MailFailed { request_id, .. }
+            | Self::MailArchived { request_id, .. } => request_id,
         }
     }
 
@@ -367,6 +391,24 @@ impl MailResponse {
                 },
                 MailRequest::MailRetry { .. },
             ) => valid_chat_id(thread_id) && valid_chat_id(run_id),
+            (
+                Self::MailArchived {
+                    thread_id: res_thread_id,
+                    base_revision,
+                    result_revision,
+                    ..
+                },
+                MailRequest::MailArchiveThread {
+                    thread_id: req_thread_id,
+                    expected_revision,
+                    ..
+                },
+            ) => {
+                res_thread_id == req_thread_id
+                    && base_revision == expected_revision
+                    && *result_revision == base_revision.saturating_add(1)
+                    && (1..=MAX_MAIL_SEQUENCE).contains(result_revision)
+            }
             (Self::MailFailed { .. }, _) => true,
             _ => false,
         }

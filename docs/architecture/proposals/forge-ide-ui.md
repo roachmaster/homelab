@@ -1,6 +1,6 @@
 # Forge IDE UI: implemented browser boundary
 
-**Current reference — reviewed 18 November 2026.** The original proposal was implemented and extended. Use the [implementation status](../../design/implementation-status.md), [application guide](../../../src/rust/forge-ide-web/README.md) and [Workbench contract](../../../src/rust/forge-ide-web/WORKBENCH.md) for current behavior. The retained [PDF](forge-ide-ui.pdf) and M19–M24 diagrams are historical proposal snapshots, not current authoring or API instructions.
+**Current repository reference — reviewed 19 November 2026.** The original proposal was implemented and extended. Use the [implementation status](../../design/implementation-status.md), [application guide](../../../src/rust/forge-ide-web/README.md) and [Workbench contract](../../../src/rust/forge-ide-web/WORKBENCH.md) for current behavior. The retained [PDF](forge-ide-ui.pdf) and M19–M24 diagrams are historical proposal snapshots, not current authoring or API instructions.
 
 ## 1. Current application
 
@@ -8,7 +8,7 @@ The IDE at `/` has Chat, capability-gated Mail, and Workbench screens. Home (`/h
 
 Chat uses a thread-title drawer, a new-chat icon, an open message stream and an inline composer. Management and saved-history search live in the drawer. Mail uses inbox rows, Compose, a thread reader and quick reply. Workbench places node/project and View options in header sheets, uses one search field with an entry-name mode, and gives source the primary workspace. Source has line windows, Wrap, and Markdown Raw/Display. Problems are supplied inspection diagnostics.
 
-Contextual questions, staged edit proposals, direct text editing and guarded managed writes are implemented. They require verified source and the appropriate native capability. The inspected live source project remains read-only; deploying a generated control does not grant writes.
+Contextual questions, staged edit proposals, direct text editing and guarded managed writes are implemented. They require verified source and the appropriate native capability. The separately dated 18 November live source checkpoint was read-only; deploying a generated control does not grant writes.
 
 ## 2. Cohesive packages and ownership
 
@@ -34,7 +34,9 @@ Local filtering, pane switches and line paging do not issue inspection requests.
 
 ## 4. Versioned contracts and state
 
-The deployed browser/WASM ABI is **4**, and the native HTTP protocol is **1**. Replace the five generated assets and matching WASM atomically with a verified manifest. The source agent and its configured feature set have an independent release lifecycle.
+The repository browser/WASM ABI is **5**, and the native HTTP protocol remains **1**. The separately dated 18 November live portal checkpoint used ABI 4; this source update does not deploy or enable the new capability. Replace the five generated assets and matching WASM atomically with a verified manifest. The source agent and its configured feature set have an independent release lifecycle.
+
+Manual Mail archive requires the native `chat.mail_archive_enabled` opt-in (false by default), the matching runner/schema migration 0008, and coordinated host/ABI 5 asset rollout with session rotation. The terminal operation records a Manual reason and replays a matching owner/thread/base receipt without advancing its revision again. Older readers cannot decode that reason, so rollback after Manual records exist requires a compatible reader. See [host compatibility](../../../src/rust/forge-ide-web-host/README.md#workbench-asset-compatibility).
 
 Report-local integer IDs are not filesystem authority or stable bookmarks. Prepared source requests carry accepted report context; source bytes must match the inspected digest. Managed writes additionally require native revision fencing and a durable operation receipt. Unknown write outcomes remain reconcilable rather than being reported as a successful save.
 

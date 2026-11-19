@@ -242,6 +242,9 @@ impl UiModel {
                 return Err(UiError::NotConnected)
             }
             UiEvent::OpenChat {} => {
+                if self.mail.navigation_locked().unwrap_or(false) {
+                    return Ok(self.output(None));
+                }
                 self.mail.close();
                 self.chats.workbench = false;
                 if self.chats.async_chat {
@@ -252,6 +255,9 @@ impl UiModel {
                 }
             }
             UiEvent::OpenWorkbench {} => {
+                if self.mail.navigation_locked().unwrap_or(false) {
+                    return Ok(self.output(None));
+                }
                 self.mail.close();
                 self.chats.workbench = true;
                 self.workbench_seen = true;
@@ -291,6 +297,7 @@ impl UiModel {
             | UiEvent::SetMailDraft { .. }
             | UiEvent::SendMail { .. }
             | UiEvent::RetryMail { .. }
+            | UiEvent::MailArchiveThread { .. }
             | UiEvent::PollMail { .. }
             | UiEvent::Mail(_)) => {
                 if !self
@@ -299,6 +306,14 @@ impl UiModel {
                     .is_some_and(|catalog| catalog.mail_enabled)
                 {
                     return Err(UiError::InvalidAction);
+                }
+                if matches!(event, UiEvent::MailArchiveThread { .. })
+                    && !self
+                        .catalog
+                        .as_ref()
+                        .is_some_and(|c| c.mail_archive_enabled)
+                {
+                    return Ok(self.output(None));
                 }
                 if matches!(event, UiEvent::OpenMail {}) {
                     self.chats.workbench = false;

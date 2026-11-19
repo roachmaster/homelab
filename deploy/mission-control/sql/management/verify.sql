@@ -66,6 +66,21 @@ BEGIN
         RAISE EXCEPTION 'Forge IDE Mail migration 0007 is missing';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1 FROM forge_agent.schema_migrations
+        WHERE version = 8 AND name = 'mail_archive'
+    ) THEN
+        RAISE EXCEPTION 'Forge IDE Mail archive migration 0008 is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'forge_agent' AND table_name = 'mail_threads'
+          AND column_name = 'archive_reason'
+    ) THEN
+        RAISE EXCEPTION 'archive_reason column is missing';
+    END IF;
+
     IF has_schema_privilege('forge_gpu_worker', 'forge_agent', 'USAGE, CREATE')
        OR has_schema_privilege('forge_gpu_worker', 'forge_agent_worker_api', 'CREATE')
        OR NOT has_schema_privilege('forge_gpu_worker', 'forge_agent_worker_api', 'USAGE')

@@ -36,6 +36,10 @@ impl Session {
                 .is_some_and(|chat| chat.workspace_persistence),
             async_chat: config.chat.as_ref().is_some_and(|chat| chat.async_dispatch),
             mail_enabled: config.chat.as_ref().is_some_and(|chat| chat.mail_enabled),
+            mail_archive_enabled: config
+                .chat
+                .as_ref()
+                .is_some_and(|chat| chat.mail_archive_enabled),
             nodes: config
                 .nodes
                 .iter()

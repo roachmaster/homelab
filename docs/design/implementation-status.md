@@ -2,6 +2,8 @@
 
 Reviewed 18 November 2026 against the repository after `7e03991`. This is the current design reference. Earlier proposal PDFs, review reports and schematic diagrams remain dated design history. A capability implemented in the repository is not automatically enabled by a running host.
 
+Manual archive and browser ABI 5 were added to the repository on 19 November 2026. The operational checkpoint below remains the separately dated 18 November observation; this change does not enable or deploy the feature.
+
 ## Portal and workspace
 
 | Surface | Implemented behavior | Boundary or remaining work |
@@ -9,7 +11,7 @@ Reviewed 18 November 2026 against the repository after `7e03991`. This is the cu
 | Home | `/home` launches the IDE, Studio and Room One; compact documentation links lead to the Design hub. The Forge name returns here in the same tab. | A launcher link does not establish backend readiness. |
 | Design | `/design` is an index. Focused readers have shared Forge navigation, sticky topics and a Design breadcrumb. Previous chats has a local sandbox with Reset. | The sandbox uses sample data and does not mutate saved conversations. |
 | Chat | Compact thread-title history drawer, new-chat icon, open message stream, inline composer, model selection, saved history search and retention management. | Search covers the loaded history page. Model choices come from the admitted catalog. |
-| Mail | Inbox/Archive, sender and date metadata, bounded previews, Compose, thread headers, safe Markdown and a quick Reply action. | Reply ready is a generation status, not a persistent unread flag. Archive occurs at the recall limit; manual archive and delete mutations are not implemented. |
+| Mail | Inbox/Archive, sender and date metadata, bounded previews, Compose, thread headers, safe Markdown, quick Reply action, and manual archive. | Reply ready is a generation status, not a persistent unread flag. Manual archive is a repository capability gated by an opt-in flag; delete mutations are not implemented. |
 | Workbench | Header project breadcrumb and view sheet; unified search with entry-name mode; Explorer, verified File source, Outline and supplied Problems. Markdown has Raw/Display and source has Wrap. | Search covers the accepted report, not arbitrary filesystem contents or resolved references. Problems are inspection diagnostics, not compiler/test results. |
 | Editing | Contextual questions, bounded edit proposals/diffs, direct textarea editing, Apply, Undo and status reconciliation are implemented for admitted managed projects. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. A rendered button is not write authority. |
 
@@ -19,7 +21,7 @@ The current [implementation captures](/design/wireframes) use disposable accepta
 
 | Concern | Implemented ownership | Practical limit |
 | --- | --- | --- |
-| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The browser ABI is **4**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
+| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The browser ABI is **5**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
 | Same-tab navigation | The IDE saves a checkpoint and bounded local JSON handoff before Home/Design. Return resumes admission, restores state and re-verifies Workbench source. Declared `#chat`, `#mail` and `#workbench` entry actions run after restore and are consumed. | URLs contain view intent, not reports, credentials or source identities. A fresh tab does not inherit another tab's unsent drafts. |
 | Chat persistence | PostgreSQL keeps operator history, tab checkpoints, conversation retention and queued runs. The history DAO supports list/open, expiry, long-term retention and deletion. | A default expiry applies automatically; deleting a saved conversation is distinct from cancelling a model run. |
 | Mail persistence | PostgreSQL stores threads, ordered messages, queued runs and recall metadata. Each inference reconstructs the accepted transcript and pins its model/profile. | Mail drafts survive the supported same-tab documentation handoff in local JSON; there is no durable cross-device Mail-draft table. |

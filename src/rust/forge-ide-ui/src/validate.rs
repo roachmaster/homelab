@@ -15,6 +15,7 @@ pub fn validate_catalog(c: &Catalog) -> Result<(), UiError> {
         || c.nodes.is_empty()
         || c.nodes.len() > MAX_NODES
         || (c.async_chat && !c.chat_history)
+        || (c.mail_archive_enabled && !c.mail_enabled)
     {
         return Err(UiError::InvalidCatalog);
     }

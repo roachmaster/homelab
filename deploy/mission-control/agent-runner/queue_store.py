@@ -210,6 +210,15 @@ def _enqueue_mail(cursor, thread_id, messages, key, fingerprint, settings, sourc
     return _mail_receipt(thread_id, run["run_id"])
 
 
+def archive_mail(thread_id, expected_revision):
+    with transaction() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(20261112, 2)")
+        receipt, error = mail_store.archive_manual(cursor, OWNER, thread_id, expected_revision)
+        if error:
+            raise Rejected(404 if error == "not_found" else 409, error)
+        return receipt
+
+
 def admit_mail(thread_id, expected_revision, subject, content, idempotency_key):
     intent = {"thread_id": str(thread_id), "revision": expected_revision,
               "subject": subject, "content": content}

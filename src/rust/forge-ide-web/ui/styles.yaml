@@ -2208,7 +2208,7 @@
       declarations:
         - ["color", "var(--text)"]
         - ["background", "var(--surface)"]
-    - selector: "#mail-refresh,#mail-back"
+    - selector: "#mail-refresh,#mail-back,#mail-archive-thread"
       declarations:
         - ["flex", "none"]
         - ["width", "44px"]
@@ -2223,7 +2223,7 @@
     - selector: "#mail-refresh"
       declarations:
         - ["margin-inline-start", "auto"]
-    - selector: "#mail-refresh:hover:enabled,#mail-back:hover:enabled"
+    - selector: "#mail-refresh:hover:enabled,#mail-back:hover:enabled,#mail-archive-thread:hover:enabled"
       declarations:
         - ["background", "var(--raised)"]
     - selector: "#mail-new"

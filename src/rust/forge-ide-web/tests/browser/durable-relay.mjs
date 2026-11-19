@@ -43,6 +43,13 @@ export async function startDurableRelay(prompt, reply) {
   const tabs = new Map();
   const history = new Map();
   const removed = new Set();
+  const statefulThreads = [mailThread(false, true), mailThread(true, true)];
+  // Message dates belong to the saved messages, independent of later archival.
+  const mailMessageDatesByThread = Object.freeze(Object.fromEntries(statefulThreads.map(thread => [
+    thread.thread_id, Object.freeze(thread.status === 'archived'
+      ? ['2026-11-17T01:22:32Z', '2026-11-17T01:23:54Z']
+      : ['2026-11-16T22:10:32Z', '2026-11-16T22:11:59Z']),
+  ])));
   const runs = new Map();
   const submissions = new Map();
   let submitted = 0;
@@ -89,25 +96,43 @@ export async function startDurableRelay(prompt, reply) {
           return;
         }
         if (destination === 'ide.mail.list' && body.kind === 'mail_list') {
-          replyTo(200, { kind: 'mail_listed', items: [mailThread(body.archived === true, body.include_metadata === true)], next_cursor: null });
+          const items = statefulThreads.filter(t => (t.status === 'archived') === (body.archived === true)).map(t => ({ ...t, preview: body.include_metadata ? t.preview : undefined }));
+          replyTo(200, { kind: 'mail_listed', items, next_cursor: null });
           return;
         }
         if (destination === 'ide.mail.open' && body.kind === 'mail_open') {
-          const thread = [mailThread(false, body.include_metadata === true), mailThread(true, body.include_metadata === true)].find(item => item.thread_id === body.thread_id);
+          const thread = statefulThreads.find(item => item.thread_id === body.thread_id);
           if (!thread) {
             replyTo(404, { kind: 'mail_failed', code: 'not_found' });
             return;
           }
           replyTo(200, { kind: 'mail_opened',
-            thread: { ...thread, context_remaining_tokens: thread.status === 'archived' ? null : 1024 },
+            thread: { ...thread, context_remaining_tokens: thread.status === 'archived' ? null : 1024, preview: body.include_metadata ? thread.preview : undefined },
             messages: [
               { sequence: 1, role: 'user', content: 'Review the fixture',
-                ...(body.include_metadata === true ? { created_at: thread.status === 'archived' ? '2026-11-17T01:22:32Z' : '2026-11-16T22:10:32Z' } : {}) },
+                ...(body.include_metadata === true ? { created_at: mailMessageDatesByThread[thread.thread_id][0] } : {}) },
               { sequence: 2, role: 'assistant', content: '## Fixture review\n\n' + mailPreview,
-                ...(body.include_metadata === true ? { created_at: thread.status === 'archived' ? '2026-11-17T01:23:54Z' : '2026-11-16T22:11:59Z' } : {}) },
+                ...(body.include_metadata === true ? { created_at: mailMessageDatesByThread[thread.thread_id][1] } : {}) },
             ],
             next_sequence: null,
           });
+          return;
+        }
+        if (destination === 'ide.mail.archive' && body.kind === 'mail_archive_thread') {
+          const thread = statefulThreads.find(item => item.thread_id === body.thread_id);
+          if (!thread) { replyTo(404, { kind: 'mail_failed', code: 'not_found' }); return; }
+          if (thread.status === 'archived') {
+            if (thread.archive_reason === 'manual' && body.expected_revision === thread.revision - 1) {
+              replyTo(200, { kind: 'mail_archived', thread_id: thread.thread_id, base_revision: thread.revision - 1, result_revision: thread.revision }); return;
+            }
+            replyTo(409, { kind: 'mail_failed', code: 'thread_archived' }); return;
+          }
+          if (thread.revision !== body.expected_revision) { replyTo(409, { kind: 'mail_failed', code: 'revision_conflict' }); return; }
+          thread.status = 'archived';
+          thread.archive_reason = 'manual';
+          const base = thread.revision;
+          thread.revision += 1;
+          replyTo(200, { kind: 'mail_archived', thread_id: thread.thread_id, base_revision: base, result_revision: thread.revision });
           return;
         }
         if (destination === 'ide.chat.run.models' && body.kind === 'chat_run_models') {

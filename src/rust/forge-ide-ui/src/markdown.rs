@@ -35,7 +35,7 @@ const MAX_DEPTH: usize = 8;
 /// Render Markdown to sanitized HTML.
 ///
 /// Returns [`None`] when the input is blank or the rendering would exceed
-/// [`MAX_RENDERED_HTML_BYTES`]; callers render plain text in that case.
+/// `MAX_RENDERED_HTML_BYTES`; callers render plain text in that case.
 pub fn render_markdown(text: &str) -> Option<String> {
     if text.trim().is_empty() {
         return None;

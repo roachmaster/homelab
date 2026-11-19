@@ -59,9 +59,43 @@ def finalize(cursor, owner, thread_id, remaining=None, archive=False):
         UPDATE forge_agent.mail_threads
         SET revision = revision + 1, updated_at = clock_timestamp(),
             context_remaining_tokens = coalesce(%s, context_remaining_tokens),
-            archived_at = CASE WHEN %s THEN clock_timestamp() ELSE archived_at END
+            archived_at = CASE WHEN %s AND archived_at IS NULL THEN clock_timestamp() ELSE archived_at END,
+            archive_reason = CASE WHEN %s AND archive_reason IS NULL THEN 'context_limit' ELSE archive_reason END
+        WHERE (owner_id, id) = (%s, %s) AND archive_reason IS DISTINCT FROM 'manual'
+    """, (remaining, archive, archive, owner, thread_id))
+
+
+def archive_manual(cursor, owner, thread_id, expected_revision):
+    cursor.execute("""
+        SELECT archive_reason, archive_base_revision, revision, latest_run_id, archived_at
+        FROM forge_agent.mail_threads
+        WHERE (owner_id, id) = (%s, %s) FOR UPDATE
+    """, (owner, thread_id))
+    row = cursor.fetchone()
+    if not row:
+        return None, "not_found"
+    if row["archive_reason"] == "manual":
+        if row["archive_base_revision"] == expected_revision:
+            return {"base_revision": expected_revision, "result_revision": expected_revision + 1}, None
+        return None, "revision_conflict"
+    if row["archived_at"] is not None:
+        return None, "thread_archived"
+    if row["revision"] != expected_revision or expected_revision >= 9007199254740991:
+        return None, "revision_conflict"
+    if not row["latest_run_id"]:
+        return None, "thread_busy"
+    cursor.execute("SELECT status FROM forge_agent.runs WHERE (mail_owner_id, mail_thread_id, id) = (%s, %s, %s) FOR UPDATE", (owner, thread_id, row["latest_run_id"]))
+    run_row = cursor.fetchone()
+    if not run_row or run_row["status"] in ACTIVE:
+        return None, "thread_busy"
+    cursor.execute("""
+        UPDATE forge_agent.mail_threads
+        SET archive_reason = 'manual', archive_base_revision = %s,
+            archived_at = clock_timestamp(), updated_at = clock_timestamp(),
+            revision = revision + 1
         WHERE (owner_id, id) = (%s, %s)
-    """, (remaining, archive, owner, thread_id))
+    """, (expected_revision, owner, thread_id))
+    return {"base_revision": expected_revision, "result_revision": expected_revision + 1}, None
 
 
 def public_status(row):
@@ -79,7 +113,7 @@ def summary(row):
         "thread_id": row["id"], "subject": row["subject"], "status": public_status(row),
         "updated_at": history._timestamp(row["updated_at"]), "turn_count": row["turn_count"],
         "revision": row["revision"], "latest_run_id": row["latest_run_id"],
-        "archive_reason": "context_limit" if row["archived"] else None,
+        "archive_reason": row["archive_reason"],
     }
     preview = " ".join((row.get("preview") or "").split())[:MAX_PREVIEW_CHARS]
     if preview:
@@ -89,7 +123,7 @@ def summary(row):
 
 THREAD_SELECT = """
     SELECT t.id, t.subject, t.updated_at, t.archived_at IS NOT NULL AS archived, t.revision,
-           t.context_remaining_tokens, t.latest_run_id, r.status AS run_status,
+           t.context_remaining_tokens, t.latest_run_id, r.status AS run_status, t.archive_reason,
            EXISTS (SELECT 1 FROM forge_agent.gpu_worker_readiness
                    WHERE seen_at > statement_timestamp() - interval '30 seconds') AS worker_available,
            (SELECT count(*) FROM forge_agent.mail_messages m WHERE

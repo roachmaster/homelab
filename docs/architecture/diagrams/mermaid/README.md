@@ -351,7 +351,7 @@ preempted. No remote jobs, mutations or additional verbs are implemented.
 
 ![Current generated UI boundary](images/m25-ui-implementation.svg)
 
-[Source](m25-ui-implementation.mmd). Rust/YAML declarations build the verified ABI4 IDE bundle. Main JS owns DOM/focus/lifetime; Rust/WASM owns accepted domain state; generated worker I/O reaches the admitted native host. The source agent, PostgreSQL Chat/Mail runner and optional Studio relay are separate native targets. Managed writes and Studio require configuration; a diagram edge does not enable them. Static Home/Design routes are generated documents, not per-task API endpoints. M19–M24 and the PDF retain the original proposal snapshot.
+[Source](m25-ui-implementation.mmd). Rust/YAML declarations build the repository ABI5 IDE bundle. Main JS owns DOM/focus/lifetime; Rust/WASM owns accepted domain state; generated worker I/O reaches the admitted native host. The source agent, PostgreSQL Chat/Mail runner and optional Studio relay are separate native targets. Managed writes and Studio require configuration; a diagram edge does not enable them. Static Home/Design routes are generated documents, not per-task API endpoints. M19–M24 and the PDF retain the original proposal snapshot.
 
 ## Forge IDE workbench decomposition
 
@@ -373,7 +373,7 @@ preempted. No remote jobs, mutations or additional verbs are implemented.
 
 ![Current inspection, source and write guards](images/m28-ui-transitions.svg)
 
-[Source](m28-ui-transitions.mmd). Report tokens/expiry gate acceptance. Query mode, filtering and local paging issue no remote request; source activation can prepare a separate admitted digest-checked read. Optional writes add native revision fencing, a durable receipt and reconciliation. Cancellation stops local waiting, not proven remote execution. The current browser ABI is4 and HTTP protocol1.
+[Source](m28-ui-transitions.mmd). Report tokens/expiry gate acceptance. Query mode, filtering and local paging issue no remote request; source activation can prepare a separate admitted digest-checked read. Optional writes add native revision fencing, a durable receipt and reconciliation. Cancellation stops local waiting, not proven remote execution. The repository browser ABI is5 and HTTP protocol1. The dated live ABI4 checkpoint is unchanged by this source update.
 
 ### M29 — Documentation handoff and view entry
 

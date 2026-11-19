@@ -37,6 +37,8 @@ pub struct Catalog {
     pub async_chat: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub mail_enabled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mail_archive_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recent_write: Option<ResumableWrite>,
 }
@@ -656,6 +658,10 @@ pub enum UiEvent {
     },
     RetryMail {
         idempotency_key: String,
+    },
+    MailArchiveThread {
+        thread_id: String,
+        expected_revision: u64,
     },
     PollMail {
         watch: String,

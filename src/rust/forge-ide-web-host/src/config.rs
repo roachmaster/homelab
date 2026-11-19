@@ -150,6 +150,15 @@ impl HostConfig {
                 "Mail requires durable asynchronous dispatch",
             ));
         }
+        if self
+            .chat
+            .as_ref()
+            .is_some_and(|chat| chat.mail_archive_enabled && !chat.mail_enabled)
+        {
+            return Err(HostError::Configuration(
+                "Mail archive requires mail to be enabled",
+            ));
+        }
         let mut keys = BTreeSet::new();
         for n in &self.nodes {
             if !valid_token(&n.key)

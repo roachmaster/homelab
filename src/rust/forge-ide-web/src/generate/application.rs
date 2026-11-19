@@ -108,6 +108,7 @@ pub fn ide_document() -> Document {
                             ]),
                             component!(primary_icon "mail-back", "Back to threads", "mail_back", '←'),
                             component!(primary_icon "mail-refresh", "Refresh Mail", "mail_refresh", '↻'),
+                            component!(primary_icon "mail-archive-thread", "Archive thread", "mail_archive_thread", '⬇'),
                         ]),
                     ]),
                     component!(status "mail-status", ""),
@@ -444,6 +445,12 @@ pub fn ide_transport() -> Transport {
         ("mail_open", "ide.mail.open", "mail_opened", "mail_failed"),
         ("mail_send", "ide.mail.send", "mail_sent", "mail_failed"),
         ("mail_retry", "ide.mail.retry", "mail_sent", "mail_failed"),
+        (
+            "mail_archive_thread",
+            "ide.mail.archive",
+            "mail_archived",
+            "mail_failed",
+        ),
     ] {
         let mut headers = common.clone();
         headers.push(HeaderBinding::literal("Forge-Destination", destination));

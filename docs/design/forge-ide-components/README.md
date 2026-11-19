@@ -1,6 +1,6 @@
 # Forge IDE — components, views and transitions
 
-**Implementation reference, reviewed 18 November 2026.** The names C01–C09 are design compositions built from real reusable primitives, not exported Rust classes. The current model is in [forge-ide-ui](../../../src/rust/forge-ide-ui/src/model.rs); declarations are in [generate/application.rs](../../../src/rust/forge-ide-web/src/generate/application.rs). The local browser ABI is **4**, HTTP protocol **1**.
+**Implementation reference, reviewed 18 November 2026.** The names C01–C09 are design compositions built from real reusable primitives, not exported Rust classes. The current model is in [forge-ide-ui](../../../src/rust/forge-ide-ui/src/model.rs); declarations are in [generate/application.rs](../../../src/rust/forge-ide-web/src/generate/application.rs). The local browser ABI is **5**, HTTP protocol **1**.
 
 ## Current screen map
 

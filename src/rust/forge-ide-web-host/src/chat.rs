@@ -24,6 +24,8 @@ pub struct ChatConfig {
     pub async_dispatch: bool,
     #[serde(default)]
     pub mail_enabled: bool,
+    #[serde(default)]
+    pub mail_archive_enabled: bool,
 }
 
 impl ChatConfig {
@@ -46,6 +48,7 @@ pub(crate) struct ChatRelay {
     pub workspace_persistence: bool,
     pub async_dispatch: bool,
     pub mail_enabled: bool,
+    pub mail_archive_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -124,6 +127,7 @@ impl ChatRelay {
             workspace_persistence: config.workspace_persistence,
             async_dispatch: config.async_dispatch,
             mail_enabled: config.mail_enabled,
+            mail_archive_enabled: config.mail_archive_enabled,
         })
     }
 

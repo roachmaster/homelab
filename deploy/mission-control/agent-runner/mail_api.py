@@ -21,6 +21,13 @@ class Destination(Enum):
     OPEN = "ide.mail.open"
     SEND = "ide.mail.send"
     RETRY = "ide.mail.retry"
+    ARCHIVE = "ide.mail.archive"
+
+
+@dataclass(frozen=True)
+class ArchiveThread:
+    thread_id: UUID
+    expected_revision: int
 
 
 @dataclass(frozen=True)
@@ -121,6 +128,8 @@ def decode(route, correlation, body):
                         _key(body["idempotency_key"]))
     if route is Destination.RETRY and kind == "mail_retry" and body.keys() == base | {"run_id", "idempotency_key"}:
         return Retry(common.parse_chat_id(body["run_id"]), _key(body["idempotency_key"]))
+    if route is Destination.ARCHIVE and kind == "mail_archive_thread" and body.keys() == base | {"thread_id", "expected_revision"}:
+        return ArchiveThread(common.parse_chat_id(body["thread_id"]), common.parse_revision(body["expected_revision"]))
     raise Rejected(400, "invalid_request")
 
 
@@ -163,6 +172,9 @@ def dispatch(route, correlation, command):
                                        command.content, command.idempotency_key)
         elif route is Destination.RETRY and isinstance(command, Retry):
             receipt = queue.retry_mail(command.run_id, command.idempotency_key)
+        elif route is Destination.ARCHIVE and isinstance(command, ArchiveThread):
+            receipt = queue.archive_mail(command.thread_id, command.expected_revision)
+            return HTTPStatus.OK, common.envelope("mail_archived", correlation, thread_id=str(command.thread_id), **receipt)
         else:
             raise Rejected(400, "invalid_request")
     except TokenizerUnavailable:

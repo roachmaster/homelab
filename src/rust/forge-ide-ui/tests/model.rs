@@ -15,6 +15,7 @@ fn catalog() -> Catalog {
         chat_history: false,
         async_chat: false,
         mail_enabled: false,
+        mail_archive_enabled: false,
         nodes: vec![NodeChoice {
             key: "lab".into(),
             label: "Lab".into(),
@@ -2885,6 +2886,7 @@ fn mail_keeps_the_submission_key_and_opens_a_read_only_archive() {
             request_id,
             catalog: Catalog {
                 mail_enabled: true,
+                mail_archive_enabled: true,
                 ..catalog()
             },
         },

@@ -251,6 +251,10 @@ pub enum RowAction {
         byte_start: u32,
         conversation: usize,
     },
+    MailArchiveThread {
+        thread_id: String,
+        expected_revision: u64,
+    },
     MailOpenThread {
         thread_id: String,
     },

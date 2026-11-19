@@ -49,9 +49,9 @@ pub(crate) fn dispatch(
 fn status_matches(status: StatusCode, response: &MailResponse) -> bool {
     match response {
         MailResponse::MailSent { .. } => status == StatusCode::ACCEPTED,
-        MailResponse::MailListed { .. } | MailResponse::MailOpened { .. } => {
-            status == StatusCode::OK
-        }
+        MailResponse::MailListed { .. }
+        | MailResponse::MailOpened { .. }
+        | MailResponse::MailArchived { .. } => status == StatusCode::OK,
         MailResponse::MailFailed { code, .. } => match code {
             MailFailure::InvalidRequest => matches!(
                 status,

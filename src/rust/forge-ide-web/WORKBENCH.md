@@ -115,10 +115,13 @@ Report/entry context changes discard obsolete row focus keys. Filter inputs reta
 bounded in-flight presentation drafts until the matching worker acknowledgment;
 an old view cannot erase newer typing. A new context, disabled input or teardown
 clears the filter draft. After navigation, an admitted tab can recover its
-selected project, file and declaration from an in-memory host bookmark. Forge
+selected project, file and declaration from an admitted tab checkpoint. Forge
 obtains a fresh report and verifies source again. Browser session storage holds
-only the random tab identifier. There is no History API, deep link, localStorage,
-persistent report cache or cross-tab synchronization.
+the random tab identifier and a bounded navigation handoff containing supported
+drafts and bookmarks. Declared `#chat`, `#mail`, and `#workbench` fragments select
+a view after restore and are then consumed with `history.replaceState`. Source,
+report identities, and credentials do not enter URLs; there is no persistent
+report cache, arbitrary source deep link, or cross-tab draft synchronization.
 
 ## Authoring and runtime boundaries
 
@@ -127,7 +130,7 @@ persistent report cache or cross-tab synchronization.
 | `generate/application.rs`, `ui/theme.yaml` | Typed component composition, transport declarations and bounded visual tokens |
 | Component/generator primitives | Semantic Source, Region and PaneLink components, safe DOM, focus, geometry and lifecycle |
 | `forge-ide-ui` model/projection | Context, report/search/selection, source acceptance, source windows and typed presentation |
-| Generated worker and `src/wasm.rs` | Real ABI 4, bounded codecs, declared effects and transport cleanup |
+| Generated worker and `src/wasm.rs` | Real ABI 5, bounded codecs, declared effects and transport cleanup |
 | Native host/agent | Session/Origin/CSRF, configured aliases, mTLS, independent admission and bounded source reads |
 
 Source is a reusable read-only display component, not a JavaScript editor widget.
@@ -138,9 +141,13 @@ runtimes. Non-IDE component fixtures exercise the same primitives.
 
 ## Compatibility and verification
 
-**Local ABI 4 requires an atomic generated asset/WASM deployment.** It includes guarded source/edit events, source-window and editor bindings,
-Chat/Mail state, unified search actions and pane reveal metadata. Older ABI 2/3 workers/WASM cannot be mixed with this bundle. Source callers
-and serialized event producers must use the matching contracts.
+**Repository ABI 5 requires an atomic generated asset/WASM deployment.** It
+includes guarded source/edit events, source-window and editor bindings,
+Chat/Mail state, unified search actions, pane reveal metadata, and capability-gated
+manual Mail archive intents/results. Older workers/WASM, including ABI 4, cannot
+be mixed with this bundle. Source callers and serialized event producers must
+use the matching contracts. The dated live ABI 4 checkpoint is separate from
+this repository update; no deployment is implied.
 
 The browser/native protocol remains version 1 with a new typed source command on
 the existing `POST /forge/v1/dispatch` gateway. Core Task/IoClient, bootstrap/provider

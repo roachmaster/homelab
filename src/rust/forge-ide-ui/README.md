@@ -1,6 +1,7 @@
 # Forge IDE UI model
 
-Portable Rust policy for the read-only Forge IDE inspection UI. This package has
+Portable Rust policy for Forge IDE Chat, Mail, source inspection and opt-in
+managed editing. This package has
 only `serde` as a normal dependency: no native inspection, filesystem, DOM,
 network, TLS or asynchronous runtime. It is intentionally a pure model, not an
 empty DI container or an additional implementation of `Task`.
@@ -139,10 +140,23 @@ work or Explorer on narrow displays without becoming a domain-state controller.
 
 ## ABI and verification
 
-The local WASM ABI is **4** and includes chat intents, transcript bindings and
-inference effects. Deploy the generated scripts, HTML/CSS and WASM together as
-one verified bundle.
-The HTTP catalog/report protocol remains version 1.
+The repository WASM ABI is **5** and includes Chat/Mail intents, transcript
+bindings, inference effects and the manual Mail archive contract. Deploy the
+generated scripts, HTML/CSS and WASM together as one verified bundle; this source
+update does not change the dated live ABI 4 deployment. The HTTP catalog/report
+protocol remains version 1.
+
+Manual archive is available only when the admitted catalog enables it. The native
+`chat.mail_archive_enabled` flag defaults to false. Rust binds an eligible thread
+and its expected revision, blocks drafts and active jobs, and accepts only the
+matching authoritative receipt. A same-owner/thread/base replay returns the
+original committed revision; a Manual reason is distinct from ContextLimit.
+Uncertain delivery retains the archive intent for an explicit retry. The runner,
+registered migration 0008, native host and ABI 5 assets require a coordinated
+rollout with session rotation. Once Manual records exist, rollback requires a
+compatible reader; see [host compatibility](../forge-ide-web-host/README.md#workbench-asset-compatibility).
+Folder navigation, delete and unarchive remain separate operations; the latter
+two are not part of this archive capability.
 
 Worker order: `abi_version()` → `reserve_input(len)` → copy JSON bytes into the
 exported memory → `dispatch_input()` → copy `output_ptr()/output_len()` bytes →
