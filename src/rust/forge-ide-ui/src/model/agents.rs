@@ -1065,6 +1065,13 @@ impl Agents {
     }
     pub fn project(&self, view: &mut ViewModel, connected: bool, work: bool, usage: bool) {
         let active = connected && self.active;
+        view.visibility.push(visible("open-agents", connected));
+        view.buttons.push(ButtonBinding {
+            id: "open-agents",
+            disabled: !connected || (active && self.locked()),
+            pressed: Some(active),
+            action: None,
+        });
         if !active {
             view.visibility.push(visible("agents", false));
             return;

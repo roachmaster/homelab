@@ -1020,11 +1020,11 @@ fn usage_grants_and_refresh_scope_are_checked_before_io() {
 }
 
 #[test]
-fn agents_entry_redirects_in_the_same_document_and_usage_is_default_off() {
+fn agents_and_legacy_mail_entries_redirect_in_the_same_document_and_usage_is_default_off() {
     let files = Files::new();
     let (host, _) = host(&files);
     let auth = authenticate(&host);
-    for path in ["/agents", "/agents/"] {
+    for path in ["/agents", "/agents/", "/mail", "/mail/"] {
         for method in ["GET", "HEAD"] {
             let response = exchange(
                 &host,
@@ -1037,6 +1037,16 @@ fn agents_entry_redirects_in_the_same_document_and_usage_is_default_off() {
             assert!(response.contains("Location: /#agents\r\n"));
             assert!(response.ends_with("\r\n\r\n"));
         }
+        let denied = exchange(
+            &host,
+            format!(
+                "POST {path} HTTP/1.1\r\nHost: {}\r\nContent-Length: 0\r\n\r\n",
+                host.local_addr().unwrap()
+            ),
+        );
+        assert!(denied.starts_with("HTTP/1.1 405 "));
+        assert!(denied.contains("Allow: GET, HEAD\r\n"));
+        assert!(!denied.contains("Location:"));
     }
     assert_reply(
         &host,

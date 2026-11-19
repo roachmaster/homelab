@@ -216,7 +216,13 @@ fn guarded_edit_controls_share_the_generated_workbench_with_markdown_formats() {
 fn application_can_change_worker_policy_without_changing_its_adapter() {
     let original = build(config());
     let mut updated = config();
-    updated.transport.timers[0].delay_ms = 8_000;
+    updated
+        .transport
+        .timers
+        .iter_mut()
+        .find(|timer| timer.effect_kind == "agents_watch")
+        .unwrap()
+        .delay_ms = 8_000;
     let polls = updated
         .transport
         .bindings
@@ -231,8 +237,18 @@ fn application_can_change_worker_policy_without_changing_its_adapter() {
     let (updated_config, updated_adapter) = worker_parts(&updated);
     assert_eq!(original_adapter, updated_adapter);
     assert_eq!(original.files["main.js"], updated.files["main.js"]);
-    assert_eq!(original_config["timers"][0]["delay_ms"], 5_000);
-    assert_eq!(updated_config["timers"][0]["delay_ms"], 8_000);
+    let timer = |config: &serde_json::Value| {
+        config["timers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["effect_kind"] == "agents_watch")
+            .unwrap()["delay_ms"]
+            .as_u64()
+            .unwrap()
+    };
+    assert_eq!(timer(&original_config), 2_500);
+    assert_eq!(timer(&updated_config), 8_000);
     let polls = updated_config["bindings"]
         .as_array()
         .unwrap()
@@ -699,4 +715,36 @@ fn component_growth_and_checkpoint_paths_stay_bounded() {
         .unwrap();
     binding.policy.local_checkpoint_path = Some("retry_intent;execute()".into());
     assert!(register_assets("assets", c).is_err());
+}
+
+#[test]
+fn agents_replace_mail_without_generating_mail_controls_or_requests() {
+    let c = config();
+    assert_eq!(
+        c.transport.entry_actions.get("mail").map(String::as_str),
+        Some("open_agents")
+    );
+    assert!(c
+        .transport
+        .bindings
+        .iter()
+        .all(|b| !b.kind.starts_with("mail_")));
+    assert!(c
+        .transport
+        .timers
+        .iter()
+        .all(|t| t.effect_kind != "mail_watch"));
+    let assets = build(c);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    assert!(html.contains("id=\"open-agents\""));
+    for removed in ["id=\"open-mail\"", "id=\"mail\"", "id=\"mail-send\""] {
+        assert!(
+            !html.contains(removed),
+            "retired Mail control remains: {removed}"
+        );
+    }
+    let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
+    assert!(!css.contains("#mail"));
+    let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
+    assert!(worker.contains("if(matchesCache)savedMail=cache.mail??null;"));
 }

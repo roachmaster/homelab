@@ -71,9 +71,6 @@ jobs:
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/failure.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-chat-rendered.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-chat-rendered-phone.png
-            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-mail-inbox-phone.png
-            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-mail-thread-phone.png
-            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-mail-thread-desktop.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-portal-home-desktop.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-portal-home-phone.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-agents-progress-phone.png

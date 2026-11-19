@@ -114,7 +114,7 @@ project again. No file writes, editing, process commands or remote jobs are expo
 
 Open **Design** beside **Workbench** for the wireframes and workspace recovery
 diagram. Forge saves the current workspace before opening `/design` in the same
-tab. Use the docs' **Chat**, **Mail**, or **Workbench** navigation, or the browser's
+tab. Use the docs' **Chat**, **Agents**, or **Workbench** navigation, or the browser's
 Back button, to restore the workspace. Declarative transport `entry_actions`
 map bounded URL fragments to existing Rust events after session admission and
 workspace restoration. The generated adapter consumes the fragment after dispatch,
@@ -167,3 +167,12 @@ those bytes before listening. This detects drift, not publisher authenticity.
 Host configuration/content, generated WASM and local operator are trusted. The UI
 is not a secret-redaction system: identifiers, diagnostic/type spellings and native
 filename encodings may expose project metadata. Displayed source remains read-only; no editor/save API is exposed.
+
+
+Mail has been replaced by the Agents tab in the portal. The generated app has no
+Mail controls, request bindings, poll timer or Mail styles. Legacy `#mail` and
+`/mail` links open Agents. Valid old local Mail draft hints remain inert across
+the same-tab handoff; they never reopen Mail or replay an action. PostgreSQL Mail
+history and private backend contracts remain available for archival access.
+Disable both `chat.mail_enabled` and `chat.mail_archive_enabled` in deployed web
+configuration so cached older clients cannot invoke Mail through the gateway.

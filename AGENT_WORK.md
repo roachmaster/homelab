@@ -1,16 +1,15 @@
 # Shared Agent Work Checkpoint
 
-- **task_id:** `import-accepted-gemini-dashboard`
-- **objective:** Include Gemini's accepted dashboard work in the requested commit/push to main, preserving the complete proposal and reconciling it with the later dashboard and plan/progress work.
-- **authorized_scope:** User explicitly clarified that Commit and push all changes includes Gemini's accepted task. Review, integrate, verify, commit and push; leave the accepted workspace and database receipts untouched. No production deployment is needed for this Git publication request.
-- **phase:** `complete`
+- **task_id:** `replace-mail-with-agents`
+- **objective:** Replace Mail with Agents in the portal navigation and remove the active Mail UI while preserving PostgreSQL history and inert legacy local drafts.
+- **authorized_scope:** User requested Mail removal/replacement. Existing commit, push and portal deployment authorization persists. Preserve stored Mail data, private backend contracts, agent task receipts, account settings and unrelated services. Disable public Mail admission in the deployed web configuration; no database migration or API/worker restart is needed.
+- **phase:** `verifying`
 - **coordinator:** Codex
-- **worktree:** `/home/lrocha/repos/homelab`
-- **base:** `3fe1683`
-- **ownership:** Root is the only integration writer; the independent reviewer inspected the two task files read-only.
-- **decisions:** Complete original two-file proposal is preserved in commit ce93e377a65e45160d018696e50723c9ead8b92e, based on d41c33e. Main already implements its header, project selector, metric cards and pagination. Resolve markup to current main; retain new plan/progress panels and clock binding. Adopt Gemini's disclosure chevron/open state, reduced motion, disabled refresh, empty metadata hiding and wrapped timestamp alignment. Preserve current readable mobile typography, task clamping, stacked accounting values and 44px controls. Omit duplicated/stale geometry and unused selectors.
-- **verification:** Full local make ci passed (exit0, frozen source f21384d59073c2491663cf17c31009c3689b7ce94c8e4531b5f49ab859e02b47), all28 sandboxed browser groups passed with successful cleanup, and the phone accounting screenshot was reviewed. The native disclosure changes on keyboard open, reduced-motion transition is0s, timestamp alignment and44px targets are verified. Later edits are documentation/checkpoint only; runtime file hashes are retained in validation.json. The accepted Gemini workspace files remain byte-identical; older Gemini Mail/DB branches are clean and already ancestors of main.
-- **publication_deployment:** Complete Gemini proposal ce93e377a65e45160d018696e50723c9ead8b92e is preserved as a parent of the reviewed merge. The merge is published to origin/main; exact remote identity and ancestry are verified in the external publication.json receipt. Existing live aa2eb1a release is unchanged by this commit/push request.
-- **evidence:** `/mnt/data/homelab-build/gemini-import-20261119/`
-- **next_action:** Complete. The full proposal and reconciled implementation are included on main; preserve the original accepted task workspace and receipt.
-- **last_updated:** 2026-11-19T23:09:48.329087+00:00
+- **worktree/base:** `/home/lrocha/repos/homelab` / `c389f02`
+- **ownership:** Root owns generated application/transport/styles, cache-forwarding compatibility, source docs and integration. Model author owns Rust state/projection/legacy restore tests in a separate worktree. Native author owns shared Home/Design navigation, legacy HTTP redirects and native tests in a separate worktree. Browser author owns the journey and its guide in a separate worktree.
+- **decisions:** Five global tabs: Chat, Agents, Workbench, Home, Design. Agents remains available as an honest unconfigured page when Work/Usage is absent. Legacy /mail and #mail lead to Agents; decoded old Mail actions cannot execute. Preserve legacy local draft hints inert with active=false and no replay/locks. Remove Mail components, transport bindings/timer and scoped styles. Keep private database/backends/history and dated design references.
+- **verification:** All isolated patches integrated. Strict Clippy and 23 generator tests passed. Full fixed make ci and 28-group sandboxed browser gate pending; source frozen for verification.
+- **publication_deployment:** Current live release aa2eb1a remains unchanged. Latest main includes the reviewed Gemini merge c389f02. Prepared rollout will change only the web host/config/assets and preserve backend workers/credentials/data.
+- **evidence:** `/mnt/data/homelab-build/mail-to-agents-20261119/`
+- **next_action:** Complete full native/browser gates, publish the tested source, and verify the web-only deployment.
+- **last_updated:** 2026-11-19T23:29:57.729864+00:00

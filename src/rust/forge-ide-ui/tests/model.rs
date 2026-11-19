@@ -2876,144 +2876,96 @@ fn chat_is_the_landing_view_and_in_flight_replies_follow_their_conversation() {
 }
 
 #[test]
-fn mail_keeps_the_submission_key_and_opens_a_read_only_archive() {
-    let mut model = UiModel::default();
-    let UiEffect::Resume { request_id } = event(&mut model, UiEvent::Resume {}).effects.remove(0)
-    else {
-        panic!("expected pairing");
-    };
-    event(
-        &mut model,
-        UiEvent::Paired {
-            request_id,
-            catalog: Catalog {
-                mail_enabled: true,
-                mail_archive_enabled: true,
-                work_enabled: false,
-                usage_enabled: false,
-                ..catalog()
-            },
-        },
-    );
+fn legacy_mail_open_navigates_to_agents_without_mail_requests() {
+    let mut model = connected_chat();
     let output = event(&mut model, UiEvent::OpenMail {});
-    assert!(matches!(
-        output.effects.as_slice(),
-        [UiEffect::Mail(MailRequest::MailList {
-            archived: false,
-            ..
-        })]
-    ));
+    assert!(
+        output.effects.is_empty(),
+        "unconfigured Agents performs no I/O"
+    );
+    assert!(visible(&output.view, "agents"));
+    assert!(!visible(&output.view, "mail"));
     assert!(output
         .view
-        .visibility
+        .buttons
         .iter()
-        .any(|binding| binding.id == "mail" && binding.visible));
-    assert!(output
-        .view
-        .visibility
-        .iter()
-        .any(|binding| binding.id == "chat" && !binding.visible));
-    event(&mut model, UiEvent::MailNewMessage {});
-    event(
+        .any(|b| b.id == "open-agents" && b.pressed == Some(true)));
+}
+
+#[test]
+fn dirty_source_editor_survives_agents_pane_switch_without_weakening_file_fences() {
+    let mut model = connected();
+    let request = inspect(&mut model);
+    event(&mut model, result(&request, report()));
+    let selected = event(
         &mut model,
-        UiEvent::SetMailSubject {
-            value: "Maintenance".into(),
+        UiEvent::SelectEntry {
+            report: request.token.clone(),
+            value: 1,
         },
     );
+    let source = source_request(&selected);
     event(
         &mut model,
-        UiEvent::SetMailDraft {
-            value: "Draft a maintenance note".into(),
+        source_result(&source, "fn original() {}\n".into()),
+    );
+    let opened = event(
+        &mut model,
+        UiEvent::OpenDocument {
+            report: request.token.clone(),
+            entry: 1,
         },
     );
-    const THREAD: &str = "1b516c5f-c722-462e-a66c-d3f1cac3f880";
-    const RUN: &str = "f75b081b-9ca9-4994-86bc-24c644ccf094";
-    let UiEffect::Mail(MailRequest::MailSend { request_id, .. }) = event(
-        &mut model,
-        UiEvent::SendMail {
-            idempotency_key: THREAD.into(),
-        },
-    )
-    .effects
-    .remove(0) else {
-        panic!("expected Mail send");
+    let editor_id = match &opened
+        .view
+        .inputs
+        .iter()
+        .find(|b| b.id == "document-text")
+        .unwrap()
+        .action
+    {
+        Some(FilterAction::SetDocument { editor_id }) => editor_id.clone(),
+        _ => panic!("owned editor action"),
     };
-    event(
+    let draft = "fn retained_draft() {}\n";
+    let dirty = event(
         &mut model,
-        UiEvent::NetworkFailed {
-            request_id,
-            category: FailureKind::Timeout,
+        UiEvent::SetDocument {
+            editor_id,
+            value: draft.into(),
         },
     );
-    let UiEffect::Mail(MailRequest::MailSend {
-        request_id,
-        idempotency_key,
-        thread_id,
-        subject,
-        content,
-        ..
-    }) = event(
-        &mut model,
-        UiEvent::SendMail {
-            idempotency_key: RUN.into(),
-        },
-    )
-    .effects
-    .remove(0)
-    else {
-        panic!("expected a retry");
-    };
-    assert_eq!(idempotency_key, THREAD);
-    assert_eq!(thread_id, THREAD);
-    assert_eq!(subject.as_deref(), Some("Maintenance"));
-    assert_eq!(content, "Draft a maintenance note");
-    let UiEffect::Mail(MailRequest::MailOpen { request_id, .. }) = event(
-        &mut model,
-        UiEvent::Mail(MailResponse::MailSent {
-            request_id,
-            thread_id: THREAD.into(),
-            run_id: RUN.into(),
-            status: MailStatus::Queued,
-        }),
-    )
-    .effects
-    .remove(0) else {
-        panic!("expected a reader fetch");
-    };
-    let fixture = serde_json::json!({
-        "kind": "mail_opened", "request_id": request_id,
-        "thread": {
-            "thread_id": THREAD, "subject": "Maintenance", "status": "archived",
-            "updated_at": "2026-11-16T21:24:00Z", "turn_count": 1, "revision": 2,
-            "latest_run_id": RUN, "archive_reason": "context_limit", "context_remaining_tokens": null
-        },
-        "messages": [
-            { "sequence": 1, "role": "user", "content": "Draft a maintenance note" },
-            { "sequence": 2, "role": "assistant", "content": "## Maintenance" }
-        ],
-        "next_sequence": null
-    });
-    let output = event(&mut model, serde_json::from_value(fixture).unwrap());
-    assert!(output.effects.is_empty());
-    assert!(output
-        .view
-        .visibility
-        .iter()
-        .any(|binding| binding.id == "mail-archive-reason" && binding.visible));
-    assert!(output
-        .view
-        .visibility
-        .iter()
-        .any(|binding| binding.id == "mail-follow-up" && !binding.visible));
-    let transcript = output
-        .view
-        .transcripts
-        .iter()
-        .find(|binding| binding.id == "mail-transcript")
-        .unwrap();
+    assert!(dirty.view.document_dirty);
+    let agents = event(&mut model, UiEvent::OpenAgents {});
+    assert!(visible(&agents.view, "agents"));
+    assert!(agents.view.document_dirty);
+    let back = event(&mut model, UiEvent::OpenWorkbench {});
+    assert!(back.view.document_dirty);
     assert_eq!(
-        transcript.messages[1].rendered_html.as_deref(),
-        Some("<h2>Maintenance</h2>")
+        back.view
+            .inputs
+            .iter()
+            .find(|b| b.id == "document-text")
+            .unwrap()
+            .value,
+        draft
     );
-    assert_eq!(output.mail_navigation.unwrap().draft, "");
+    let blocked = event(
+        &mut model,
+        UiEvent::SelectProject {
+            value: "other".into(),
+        },
+    );
+    assert!(blocked.effects.is_empty());
+    assert!(blocked.view.document_dirty);
+    assert_eq!(
+        blocked
+            .view
+            .inputs
+            .iter()
+            .find(|b| b.id == "document-text")
+            .unwrap()
+            .value,
+        draft
+    );
 }

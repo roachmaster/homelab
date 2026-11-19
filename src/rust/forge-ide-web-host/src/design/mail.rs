@@ -3,7 +3,12 @@ use super::{text, Attribute, Node, Tag};
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Forge Mail design")),
-        element!(P; text("Implemented correspondence for GPT-OSS 120B: queue a request, return for its reply, and retain its complete thread after automatic recall-limit or optional manual archiving.")),
+        element!(P [Class = "contract-note"];
+            text("Retired portal view · 19 November 2026. "),
+            element!(A [Href = "/#agents"]; text("Agents replaces Mail in the portal")),
+            text(". This page and its captures are historical references. Saved PostgreSQL Mail threads and backend contracts are preserved."),
+        ),
+        element!(P; text("Historical correspondence design for GPT-OSS 120B: queued requests, saved replies, and retained threads after automatic recall-limit or optional manual archiving.")),
         element!(P [Class = "contract-note"]; text("Repository archive contract updated 19 November 2026. This page describes Rust UI, Python runner, PostgreSQL migrations, and Forge adapter support; live enablement is separate. Operational model settings must match on both hosts.")),
         element!(Nav [Class = "section-nav", AriaLabel = "Mail design sections"];
             element!(A [Href = "#wireframe"]; text("Wireframe")),

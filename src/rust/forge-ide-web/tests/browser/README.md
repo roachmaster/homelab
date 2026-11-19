@@ -84,6 +84,24 @@ cannot be established. Review images before sharing them beyond the test artifac
 | `injected.requests.cancel_retry`, `probe.presentation.ordered_drafts`, `injected.requests.revisions`, `injected.requests.refresh_focus` | Injected timing, local cancellation, repeated events, input acknowledgements and focus |
 | `injected.failures.unavailable_timeout`, `probe.worker.fatal`, `injected.catalog.empty`, `probe.session.missing` | Separately controlled error, fatal, catalog and session-lifetime cases |
 
+The connected application and native Design headers share five views in order:
+**Chat, Agents, Workbench, Home, Design**. Home keeps its focused launcher header
+and links to Agents without adding a duplicate IDE tab strip. The Agents workflow remains inside
+`real.report.partial`: it exercises keyboard entry from Workbench and Chat, active-tab
+semantics, same-tab Home handoff, legacy `#mail` recovery, retained Agents drafts and
+browser Back/Forward. A valid legacy Mail cache is retained as inactive recovery data
+without replacing the current Agents draft or issuing Mail requests.
+
+`probe.page.lifecycle` also checks the always-visible Agents tab on a host with no
+Work/Usage services, at 320/375/390px. Its actual catalog still advertises the
+preserved Mail backend; Agents honestly reports that it is not configured, legacy
+`/mail` redirects to `/#agents`, and navigation issues zero Mail, Work or Usage
+gateway requests. Legacy subject/draft data stays inert on this host as well.
+These checks replace the retired Mail inbox/thread/compose UI journey inside the
+existing groups; the 28-group inventory and ten viewport cases remain unchanged.
+Historical Mail design articles, dated wireframe images and the relay's retained
+backend handlers are reference coverage, not proof of a live browser Mail screen.
+
 ## Evidence scopes
 
 - **Real-agent journey:** disposable source directories and ephemeral test TLS
