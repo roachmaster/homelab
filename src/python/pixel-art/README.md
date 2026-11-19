@@ -134,9 +134,13 @@ Illustrated atlases use manifest version 2. The Scout's `frame_size` is
 `atlas_pivot` gives the pivot in atlas pixels. Use the atlas-pixel source
 rectangle and divide its dimensions by `atlas_scale` for the destination.
 
-The Room One browser renderer currently draws primitive shapes and has no atlas
-loader. These files are an integration input for that renderer or another
-consumer. The recipe format is specific to this tool.
+Room One now loads the cooked 4× illustrated atlas through verified asset admission
+and draws it at the logical gameplay size. The cooker removes the authored jump
+root translation so runtime physics owns world height. The playtest currently
+selects idle, walk, rise, fall and landing presentation; the remaining authored
+clips are artwork and timing references, not implemented combat/climbing controls.
+The [portal showcase](https://portal.thedevex.com/design/characters) presents the
+creation stages and all 16 clips. The recipe format remains specific to this tool.
 
 The scout's jump preview bakes height into the frame's `root` offset. For a
 game that applies its own vertical motion, set the airborne `root` offsets to

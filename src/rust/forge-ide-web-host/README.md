@@ -254,7 +254,8 @@ visit `/home` for links to the IDE, Studio, the Room One playtest, and Design.
 The host embeds these documents with their styles and diagrams. The Design
 overview is a compact index with sticky topics and focused readers. `/design/implementation`
 is the current source/configuration checkpoint; current controlled captures are in the
-wireframe reader. The sample
+wireframe reader. `/design/characters` showcases Scout creation stages and authored
+animation clips from the existing rig and illustrated skin. The sample
 Previous chats sandbox is at `/design/previous-chats`, layout snapshots are at
 `/design/wireframes`, and recovery notes are at `/design/workspace`. The chat
 history contracts and sequence diagrams are at `/design/chat-history`.

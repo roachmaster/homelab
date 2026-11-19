@@ -67,6 +67,7 @@ macro_rules! element {
     };
 }
 
+mod characters;
 mod dispatch;
 mod docs;
 mod forge_providers;
@@ -163,6 +164,7 @@ pub enum DesignPage {
     Home,
     Overview,
     Implementation,
+    Characters,
     PreviousChats,
     Wireframes,
     Workspace,
@@ -191,7 +193,7 @@ impl DesignPage {
             Self::PreviousChats | Self::ChatHistory | Self::ChatDispatch | Self::Mail => {
                 Some("chat-and-mail")
             }
-            Self::GameStudio | Self::GamePhysics | Self::GameAssetPipeline => {
+            Self::Characters | Self::GameStudio | Self::GamePhysics | Self::GameAssetPipeline => {
                 Some("game-development")
             }
             Self::Wireframes | Self::Workspace => Some("wireframes-and-workspace"),
@@ -204,6 +206,12 @@ impl DesignPage {
         let (title, back_href, back_label, body) = match self {
             Self::Home => ("Forge portal · Forge IDE", "/", "Back to Forge", home::BODY),
             Self::Overview => ("Forge IDE design", "/", "Back to Forge", landing::BODY),
+            Self::Characters => (
+                "Scout character creation · Forge IDE",
+                "/design#game-development",
+                "Back to Design",
+                characters::BODY,
+            ),
             Self::Implementation => (
                 "Current implementation · Forge IDE",
                 "/design#forge-foundations",
@@ -309,6 +317,7 @@ impl DesignPage {
             Self::Home => "<link rel=\"stylesheet\" href=\"/design/home.css\">",
             Self::Overview => "<link rel=\"stylesheet\" href=\"/design/index.css\">",
             Self::PreviousChats => "<script src=\"/design/previous-chats.js\" defer></script>",
+            Self::Characters => "<link rel=\"stylesheet\" href=\"/design/characters.css\">",
             Self::GameStudio => "<link rel=\"stylesheet\" href=\"/design/game-studio.css\">",
             Self::Playtest => concat!(
                 "<link rel=\"stylesheet\" href=\"/playtest/style.css\">",
@@ -449,4 +458,8 @@ fn render_topics(active: Option<&str>, output: &mut String) {
 
 pub fn docs_stylesheet() -> String {
     docs::stylesheet()
+}
+
+pub fn characters_stylesheet() -> String {
+    characters::stylesheet()
 }

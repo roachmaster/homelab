@@ -21,6 +21,8 @@ const HOME_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/home.css"));
 const DESIGN_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/design.html"));
 const PORTAL_NAVIGATION_SEQUENCE: &[u8] =
     include_bytes!("../../../../docs/architecture/diagrams/mermaid/images/m29-ui-docs-handoff.svg");
+const CHARACTERS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/characters.html"));
+const CHARACTERS_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/characters.css"));
 const IMPLEMENTATION_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/implementation.html"));
 const PREVIOUS_CHATS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/previous-chats.html"));
 const WIREFRAMES_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/wireframes.html"));
@@ -156,6 +158,10 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/portal-navigation-sequence.svg" => {
             Some(("image/svg+xml", PORTAL_NAVIGATION_SEQUENCE))
         }
+        "/design/characters" | "/design/characters/" => {
+            Some(("text/html; charset=utf-8", CHARACTERS_HTML))
+        }
+        "/design/characters.css" => Some(("text/css; charset=utf-8", CHARACTERS_CSS)),
         "/design/implementation" | "/design/implementation/" => {
             Some(("text/html; charset=utf-8", IMPLEMENTATION_HTML))
         }
@@ -227,6 +233,13 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/playtest/main.js" => Some(("text/javascript; charset=utf-8", PLAYTEST_JS)),
         "/playtest/assets-worker.js" => {
             Some(("text/javascript; charset=utf-8", PLAYTEST_ASSETS_WORKER_JS))
+        }
+        path if path.starts_with("/design/characters/") => {
+            let name = path.strip_prefix("/design/characters/")?;
+            crate::character_assets::ASSETS
+                .iter()
+                .find(|(file, _, _)| *file == name)
+                .map(|(_, content_type, bytes)| (*content_type, *bytes))
         }
         _ => {
             let name = path.strip_prefix("/design/")?;

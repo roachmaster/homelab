@@ -39,6 +39,8 @@ Read the focused [Chat history](/design/chat-history), [dispatch](/design/chat-d
 | Assets | Offline cooking, manifests, atlas scale, verified level loading, two authored rooms and replay resource admission are implemented. | Browser I/O workers return bytes; Rust verifies and owns simulation activation. |
 | Studio | Generated Studio UI and a Python/PostgreSQL static-web build service implement admission, idempotency, worker leases, cancellation and verified previews. | Studio's current browser controller is generated JavaScript; moving its application intent into Rust/WASM remains work. Native/desktop/mobile game export is not implied. |
 
+Explore [Scout character creation](/design/characters) for the greybox-to-illustrated workflow and all 16 authored animation clips.
+
 See [plug-and-play](/design/forge-providers), [workers](/design/forge-workers), [game runtime](/design/game-studio), [physics](/design/game-physics) and [assets](/design/game-asset-pipeline).
 
 ## Observed deployment checkpoint

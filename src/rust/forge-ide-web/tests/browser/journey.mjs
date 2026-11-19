@@ -1963,7 +1963,7 @@ async function homeJourney(page, traffic) {
   assert.equal(await tabKey(), originalTab, 'Home keeps the same workspace key');
   await check(page.getByRole('heading', { level: 1, name: 'Forge portal', exact: true })).toBeVisible();
   await check(page.locator('main').getByRole('heading', { level: 2 })).toHaveText([
-    'Tools', 'Design documentation',
+    'Character creation', 'Tools', 'Design documentation',
   ]);
   await check(page.locator('header').getByRole('link', { name: 'GitHub', exact: true }))
     .toHaveAttribute('href', 'https://github.com/roachmaster/homelab');
@@ -2049,6 +2049,7 @@ async function homeJourney(page, traffic) {
   const destinations = [
     ['Open Forge IDE', '/'],
     ['Browse design docs', '/design'],
+    ['Explore Scout character creation', '/design/characters'],
     ['Forge IDE', '/'],
     ['Forge Studio', '/studio'],
     ['Room One playtest', '/playtest'],
@@ -2174,6 +2175,7 @@ async function designJourney(page, traffic) {
   true, 'design index categories display side by side on desktop');
   await page.evaluate(() => scrollTo(0, 0));
   await screenshot(page, 'ide-design-index-desktop.png', { docs: true });
+  await characterDesignJourney(page, designUrl);
   await implementationDesignJourney(page, designUrl);
   await wireframesDesignJourney(page, designUrl);
   await providerLink.focus();
@@ -2208,6 +2210,81 @@ async function designJourney(page, traffic) {
   assert.deepEqual(context.pages(), pages, 'returning from Design uses the existing page');
   await check(page.locator('#workspace-panel')).toBeVisible();
   assert.equal(page.workers().length, 1, 'returning from Design starts one Forge worker');
+}
+
+async function characterDesignJourney(page, designUrl) {
+  process.stderr.write('QA_CHECK design_character_creation\n');
+  const pages = page.context().pages();
+  const index = page.getByRole('navigation', { name: 'Design sections' });
+  const link = index.locator('#game-development a[href="/design/characters"]');
+  await check(link).toContainText('Character creation');
+  await check(link).not.toHaveAttribute('target', /.+/);
+  await link.focus();
+  await page.keyboard.press('Enter');
+  await check(page).toHaveURL(new URL('/design/characters', designUrl).href);
+  assert.deepEqual(page.context().pages(), pages, 'the character showcase opens in the existing Design page');
+  const main = page.getByRole('main');
+  await check(main.getByRole('heading', { level: 1 })).toHaveText('Scout character creation');
+  await check(main.locator('.character-progression figure')).toHaveCount(3);
+  await check(main.locator('.character-clip')).toHaveCount(16);
+  await check(page.locator('script')).toHaveCount(0);
+  await check(page.getByRole('navigation', { name: 'Design topics' })
+    .getByRole('link', { name: 'Game Dev', exact: true })).toHaveAttribute('aria-current', 'location');
+  const clips = main.locator('details.character-clip');
+  await check(clips).toHaveCount(16);
+  assert.equal(await clips.evaluateAll(nodes => nodes.every(node => !node.open)), true,
+    'motion previews wait for an explicit native disclosure action');
+  for (const image of await main.locator('img:visible').all()) {
+    await check(image).toHaveAttribute('src', /^\/design\/characters\//);
+    await check(image).toHaveAttribute('alt', /\S/);
+    await image.scrollIntoViewIfNeeded();
+    await check.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0)).toBe(true);
+  }
+  for (const clip of await clips.all()) {
+    const summary = clip.locator(':scope > summary');
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await check(clip).toHaveJSProperty('open', true);
+    const motion = clip.locator('img.character-motion');
+    await check(motion).toBeVisible();
+    for (const image of await clip.locator('img:visible').all()) {
+      await check(image).toHaveAttribute('src', /^\/design\/characters\//);
+      await check(image).toHaveAttribute('alt', /\S/);
+      await image.scrollIntoViewIfNeeded();
+      await check.poll(() => image.evaluate(node => node.complete && node.naturalWidth > 0 && node.naturalHeight > 0)).toBe(true);
+    }
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await check(clip).toHaveJSProperty('open', false);
+  }
+  const firstClip = clips.first();
+  await firstClip.locator(':scope > summary').click();
+  await check(firstClip.locator('img.character-motion')).toBeVisible();
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await check(firstClip.locator('img.character-motion')).toBeHidden();
+  const still = firstClip.locator('img.character-motion-still');
+  await check(still).toBeVisible();
+  await check.poll(() => still.evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true);
+  assert.equal(await main.locator('*').evaluateAll(nodes => nodes.every(node => {
+    const style = getComputedStyle(node);
+    return (style.animationName === 'none' || style.animationPlayState === 'paused' || parseFloat(style.animationDuration) <= .001)
+      && style.transitionDuration.split(',').every(value => parseFloat(value) === 0);
+  })), true, 'character controls respect reduced motion alongside the still preview');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await firstClip.locator(':scope > summary').click();
+  for (const width of [375, 390, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+      'character art and frame strips keep overflow inside the showcase');
+  }
+  for (const [width, name] of [[390, 'phone'], [1440, 'desktop']]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.evaluate(() => scrollTo(0, 0));
+    await screenshot(page, `ide-design-characters-${name}.png`, { docs: true });
+  }
+  await page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Back to Design', exact: true }).click();
+  await check(page).toHaveURL(`${designUrl}#game-development`);
+  assert.deepEqual(page.context().pages(), pages, 'leaving the showcase retains the existing page');
 }
 
 async function implementationDesignJourney(page, designUrl) {
@@ -2597,6 +2674,7 @@ async function gameEngineDesignJourney(page, designUrl) {
       true, `the game engine report fits the ${width}px viewport`);
   }
 
+  await check(report.getByRole('link', { name: 'Character creation', exact: true })).toHaveAttribute('href', '/design/characters');
   const playtest = report.getByRole('link', { name: 'Open browser playtest', exact: true });
   await check(playtest).toHaveAttribute('href', '/playtest');
   await page.setViewportSize({ width: 320, height: 720 });

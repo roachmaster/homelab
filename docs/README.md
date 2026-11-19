@@ -15,6 +15,8 @@ Start with the [current implementation reference](design/implementation-status.m
 
 ## Game and Studio
 
+[Scout character creation](https://portal.thedevex.com/design/characters) showcases the approved greybox, pixel finish and 4× illustrated skin with the complete animation set. [Editable recipes and tool](../src/python/pixel-art/README.md).
+
 - [Game runtime and Studio](architecture/proposals/forge-game-engine.md).
 - [Snapshots](architecture/proposals/forge-game-snapshot.md), [debug/trace](architecture/proposals/forge-game-debug.md), [deterministic replay](architecture/proposals/forge-game-debug.md#full-replay-and-historical-assets).
 - [Physics](architecture/proposals/forge-game-physics.md), [assets](architecture/proposals/forge-game-asset-pipeline.md), [worker ownership](architecture/proposals/forge-worker-ownership.md).

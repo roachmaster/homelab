@@ -8,7 +8,7 @@ export async function screenshotEligibility(page, fixtures, { home = false, docs
   const fixture = fixtures.find(item => item.page === page);
   if (!fixture || !page || page.isClosed()) return 'unavailable';
   const url = new URL(page.url());
-  const docsPaths = new Set(['/design', '/design/implementation', '/design/previous-chats', '/design/wireframes']);
+  const docsPaths = new Set(['/design', '/design/implementation', '/design/characters', '/design/previous-chats', '/design/wireframes']);
   const pathAllowed = docs ? docsPaths.has(url.pathname) : url.pathname === (home ? '/home' : '/');
   const hashAllowed = !url.hash || (docs && url.pathname === '/design/wireframes' && ['#phone', '#desktop'].includes(url.hash));
   if ((home && docs) || url.origin !== fixture.origin || !pathAllowed || url.search || !hashAllowed) return 'skipped_unsafe_page';

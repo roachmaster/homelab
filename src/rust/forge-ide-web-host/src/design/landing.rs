@@ -55,6 +55,7 @@ pub(super) const BODY: &[Node] = &[
         element!(Section [Id = "game-development", Class = "index-panel", AriaLabelledby = "game-development-title"];
             element!(H2 [Id = "game-development-title"]; text("Game development")),
             element!(Ul;
+                doc_row!("/design/characters", "Character creation", "Scout: greybox, pixel art, illustrated skin and 16 animation clips."),
                 doc_row!("/design/game-studio", "Game engine design", "Runtime architecture, builds, and previews."),
                 doc_row!("/design/game-physics", "Game physics design", "Fixed ticks, collision, and animation ownership."),
                 doc_row!("/design/game-asset-pipeline", "Game asset pipeline design", "Cooking, manifests, and asset handoff."),

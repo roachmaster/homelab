@@ -77,6 +77,8 @@ jobs:
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-portal-home-desktop.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-portal-home-phone.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-implementation-phone.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-characters-phone.png
+            ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-characters-desktop.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-index-phone.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-index-desktop.png
             ${{ runner.temp }}/forge-ui-qa/forge-ui-qa-*/browser/ide-design-preview-phone.png

@@ -1,0 +1,483 @@
+{
+  "schema_version": 1,
+  "logical_frame_size": [
+    32,
+    44
+  ],
+  "atlas_frame_size": [
+    128,
+    176
+  ],
+  "atlas_scale": 4,
+  "pivot": [
+    13,
+    41
+  ],
+  "atlas_pivot": [
+    52,
+    164
+  ],
+  "clip_count": 16,
+  "frame_count": 103,
+  "gif_preview": {
+    "background": "#121721",
+    "timing": "cumulative centisecond rounding; at most 5 ms timeline error",
+    "note": "Motion preview only; PNG/SVG and the atlas manifest are the authoritative art/timing contract."
+  },
+  "sources": {
+    "src/python/pixel-art/examples/room-one-scout.json": "24c35467772ada7d6496315ab09f06a2f3d70fa1861e24203f038f04d5c0514f",
+    "src/python/pixel-art/examples/room-one-scout-illustrated.json": "d2aac13551693fed22268268aa3bfb13bacf0196dfbf753fc2f37574676f5bbd",
+    "src/python/pixel-art/examples/room-one-scout-illustrated-idle.svg": "5365fe61dede2e8fef9e44ac52b3ba8a31dcafa33a08725373c65c14525c2d5f",
+    "src/python/pixel-art/examples/room-one-scout-illustrated-front.svg": "50fc195e9bf71295532be2a50856d496ff06ae63c28ebf991241f7c0b4e19365",
+    "src/python/pixel-art/examples/room-one-scout-illustrated-back.svg": "b115922db0ae1f144a2ff70835847a4cb30d7d11713f9aea401cc7160eb7fd0a",
+    "src/python/pixel-art/examples/room-one-scout-illustrated-ladder.svg": "bd37122ff2dc95e957f13d5c9c30f96c5a7fe7d34e72f4af3c4071ca6fd9bcdc"
+  },
+  "clips": [
+    {
+      "id": "idle",
+      "frame_count": 1,
+      "duration_ms": 240,
+      "frame_durations_ms": [
+        240
+      ],
+      "gif_delays_centiseconds": [
+        24
+      ],
+      "strip": "clips/idle.png",
+      "motion_preview": "clips/idle.gif",
+      "strip_size": [
+        128,
+        176
+      ]
+    },
+    {
+      "id": "walk",
+      "frame_count": 4,
+      "duration_ms": 380,
+      "frame_durations_ms": [
+        105,
+        85,
+        105,
+        85
+      ],
+      "gif_delays_centiseconds": [
+        11,
+        8,
+        11,
+        8
+      ],
+      "strip": "clips/walk.png",
+      "motion_preview": "clips/walk.gif",
+      "strip_size": [
+        512,
+        176
+      ]
+    },
+    {
+      "id": "crouch",
+      "frame_count": 4,
+      "duration_ms": 545,
+      "frame_durations_ms": [
+        80,
+        300,
+        80,
+        85
+      ],
+      "gif_delays_centiseconds": [
+        8,
+        30,
+        8,
+        9
+      ],
+      "strip": "clips/crouch.png",
+      "motion_preview": "clips/crouch.gif",
+      "strip_size": [
+        512,
+        176
+      ]
+    },
+    {
+      "id": "jump",
+      "frame_count": 12,
+      "duration_ms": 765,
+      "frame_durations_ms": [
+        105,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        50,
+        80,
+        80,
+        100
+      ],
+      "gif_delays_centiseconds": [
+        11,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        8,
+        8,
+        10
+      ],
+      "strip": "clips/jump.png",
+      "motion_preview": "clips/jump.gif",
+      "strip_size": [
+        1536,
+        176
+      ]
+    },
+    {
+      "id": "attack",
+      "frame_count": 3,
+      "duration_ms": 315,
+      "frame_durations_ms": [
+        105,
+        75,
+        135
+      ],
+      "gif_delays_centiseconds": [
+        11,
+        7,
+        14
+      ],
+      "strip": "clips/attack.png",
+      "motion_preview": "clips/attack.gif",
+      "strip_size": [
+        384,
+        176
+      ]
+    },
+    {
+      "id": "spin",
+      "frame_count": 4,
+      "duration_ms": 295,
+      "frame_durations_ms": [
+        85,
+        70,
+        70,
+        70
+      ],
+      "gif_delays_centiseconds": [
+        9,
+        7,
+        7,
+        7
+      ],
+      "strip": "clips/spin.png",
+      "motion_preview": "clips/spin.gif",
+      "strip_size": [
+        512,
+        176
+      ]
+    },
+    {
+      "id": "kick",
+      "frame_count": 6,
+      "duration_ms": 520,
+      "frame_durations_ms": [
+        80,
+        85,
+        85,
+        65,
+        90,
+        115
+      ],
+      "gif_delays_centiseconds": [
+        8,
+        9,
+        8,
+        7,
+        9,
+        11
+      ],
+      "strip": "clips/kick.png",
+      "motion_preview": "clips/kick.gif",
+      "strip_size": [
+        768,
+        176
+      ]
+    },
+    {
+      "id": "roundhouse_kick",
+      "frame_count": 7,
+      "duration_ms": 530,
+      "frame_durations_ms": [
+        95,
+        60,
+        65,
+        55,
+        65,
+        85,
+        105
+      ],
+      "gif_delays_centiseconds": [
+        10,
+        6,
+        6,
+        6,
+        6,
+        9,
+        10
+      ],
+      "strip": "clips/roundhouse_kick.png",
+      "motion_preview": "clips/roundhouse_kick.gif",
+      "strip_size": [
+        896,
+        176
+      ]
+    },
+    {
+      "id": "punch",
+      "frame_count": 4,
+      "duration_ms": 325,
+      "frame_durations_ms": [
+        95,
+        65,
+        75,
+        90
+      ],
+      "gif_delays_centiseconds": [
+        10,
+        6,
+        8,
+        9
+      ],
+      "strip": "clips/punch.png",
+      "motion_preview": "clips/punch.gif",
+      "strip_size": [
+        512,
+        176
+      ]
+    },
+    {
+      "id": "uppercut",
+      "frame_count": 5,
+      "duration_ms": 405,
+      "frame_durations_ms": [
+        110,
+        50,
+        70,
+        85,
+        90
+      ],
+      "gif_delays_centiseconds": [
+        11,
+        5,
+        7,
+        9,
+        9
+      ],
+      "strip": "clips/uppercut.png",
+      "motion_preview": "clips/uppercut.gif",
+      "strip_size": [
+        640,
+        176
+      ]
+    },
+    {
+      "id": "roll",
+      "frame_count": 9,
+      "duration_ms": 650,
+      "frame_durations_ms": [
+        100,
+        70,
+        50,
+        50,
+        50,
+        50,
+        70,
+        110,
+        100
+      ],
+      "gif_delays_centiseconds": [
+        10,
+        7,
+        5,
+        5,
+        5,
+        5,
+        7,
+        11,
+        10
+      ],
+      "strip": "clips/roll.png",
+      "motion_preview": "clips/roll.gif",
+      "strip_size": [
+        1152,
+        176
+      ]
+    },
+    {
+      "id": "ledge_pull_up",
+      "frame_count": 9,
+      "duration_ms": 900,
+      "frame_durations_ms": [
+        105,
+        60,
+        75,
+        135,
+        90,
+        100,
+        90,
+        105,
+        140
+      ],
+      "gif_delays_centiseconds": [
+        11,
+        6,
+        7,
+        14,
+        9,
+        10,
+        9,
+        10,
+        14
+      ],
+      "strip": "clips/ledge_pull_up.png",
+      "motion_preview": "clips/ledge_pull_up.gif",
+      "strip_size": [
+        1152,
+        176
+      ]
+    },
+    {
+      "id": "rope_climb",
+      "frame_count": 8,
+      "duration_ms": 610,
+      "frame_durations_ms": [
+        90,
+        65,
+        70,
+        95,
+        65,
+        70,
+        90,
+        65
+      ],
+      "gif_delays_centiseconds": [
+        9,
+        7,
+        7,
+        9,
+        7,
+        7,
+        9,
+        6
+      ],
+      "strip": "clips/rope_climb.png",
+      "motion_preview": "clips/rope_climb.gif",
+      "strip_size": [
+        1024,
+        176
+      ]
+    },
+    {
+      "id": "ladder_climb",
+      "frame_count": 8,
+      "duration_ms": 610,
+      "frame_durations_ms": [
+        90,
+        65,
+        70,
+        95,
+        65,
+        70,
+        90,
+        65
+      ],
+      "gif_delays_centiseconds": [
+        9,
+        7,
+        7,
+        9,
+        7,
+        7,
+        9,
+        6
+      ],
+      "strip": "clips/ladder_climb.png",
+      "motion_preview": "clips/ladder_climb.gif",
+      "strip_size": [
+        1024,
+        176
+      ]
+    },
+    {
+      "id": "barrel_vault",
+      "frame_count": 9,
+      "duration_ms": 770,
+      "frame_durations_ms": [
+        100,
+        90,
+        95,
+        62,
+        66,
+        66,
+        65,
+        100,
+        126
+      ],
+      "gif_delays_centiseconds": [
+        10,
+        9,
+        10,
+        6,
+        6,
+        7,
+        6,
+        10,
+        13
+      ],
+      "strip": "clips/barrel_vault.png",
+      "motion_preview": "clips/barrel_vault.gif",
+      "strip_size": [
+        1152,
+        176
+      ]
+    },
+    {
+      "id": "barrel_jump_off",
+      "frame_count": 10,
+      "duration_ms": 824,
+      "frame_durations_ms": [
+        130,
+        110,
+        64,
+        58,
+        58,
+        58,
+        58,
+        58,
+        100,
+        130
+      ],
+      "gif_delays_centiseconds": [
+        13,
+        11,
+        6,
+        6,
+        6,
+        6,
+        6,
+        5,
+        10,
+        13
+      ],
+      "strip": "clips/barrel_jump_off.png",
+      "motion_preview": "clips/barrel_jump_off.gif",
+      "strip_size": [
+        1280,
+        176
+      ]
+    }
+  ]
+}

@@ -32,6 +32,7 @@ pub(super) fn media_stylesheet(media: &str, styles: Styles) -> String {
 const DOCUMENT_ROUTES: &[&str] = &[
     "/design",
     "/design/implementation",
+    "/design/characters",
     "/design/forge-providers",
     "/design/forge-workers",
     "/design/forge-workers/playtest",

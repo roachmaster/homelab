@@ -1,6 +1,19 @@
 use super::{markup, text, Attribute, Icon, Node, Tag};
 
 const STYLES: markup::Styles = &[
+    (".home-character-feature", &[
+        ("display", "grid"), ("grid-template-columns", "clamp(96px, 18vw, 160px) minmax(0, 1fr)"),
+        ("align-items", "center"), ("gap", "clamp(16px, 3vw, 32px)"), ("padding", "20px"),
+        ("border", "1px solid var(--border)"), ("border-radius", "12px"),
+        ("background", "var(--surface)"), ("color", "var(--text)"), ("text-decoration", "none"),
+        ("transition", "background 150ms ease, border-color 150ms ease"),
+    ]),
+    (".home-character-feature:hover", &[("background", "var(--raised)"), ("border-color", "#526a8d")]),
+    (".home-character-feature img", &[("inline-size", "100%"), ("max-block-size", "208px"), ("object-fit", "contain")]),
+    (".home-character-feature strong", &[("display", "block"), ("font-size", "clamp(1.125rem, 3vw, 1.5rem)"), ("line-height", "1.25")]),
+    (".home-character-description", &[("display", "block"), ("margin-block", "8px 12px"), ("color", "var(--muted)"), ("font-size", ".875rem"), ("line-height", "1.6")]),
+    (".home-character-action", &[("display", "block"), ("color", "var(--accent)"), ("font-size", ".875rem"), ("font-weight", "600")]),
+
     (
         "body.home-page",
         &[
@@ -112,7 +125,7 @@ const STYLES: markup::Styles = &[
         &[("background", "var(--raised)"), ("border-color", "#52627b")],
     ),
     (
-        ".home-actions a:focus-visible, .home-launcher:focus-visible, .home-doc-link:focus-visible, .home-footer a:focus-visible",
+        ".home-character-feature:focus-visible, .home-actions a:focus-visible, .home-launcher:focus-visible, .home-doc-link:focus-visible, .home-footer a:focus-visible",
         &[("outline", "2px solid var(--accent)"), ("outline-offset", "4px")],
     ),
     (
@@ -309,7 +322,7 @@ pub(super) fn stylesheet() -> String {
     css.push_str(&markup::media_stylesheet(
         "(prefers-reduced-motion: reduce)",
         &[(
-            ".home-actions a, .home-launcher, .home-doc-link, .home-footer a",
+            ".home-character-feature, .home-actions a, .home-launcher, .home-doc-link, .home-footer a",
             &[("transition", "none")],
         )],
     ));
@@ -359,6 +372,17 @@ pub(super) const BODY: &[Node] = &[
                 element!(Span [AriaHidden = "true"]; text("→")),
             ),
             element!(A [Class = "home-secondary", Href = "/design", AriaLabel = "Browse design docs"]; text("Design docs")),
+        ),
+    ),
+    element!(Section [Id = "home-characters", Class = "home-section", AriaLabelledby = "home-characters-title"];
+        element!(H2 [Id = "home-characters-title"]; text("Character creation")),
+        element!(A [Class = "home-character-feature", Href = "/design/characters", AriaLabel = "Explore Scout character creation"];
+            element!(Img [Src = "/design/characters/scout-illustrated-idle.svg", Width = "128", Height = "176", Alt = "Scout with a golden helmet, cyan visor, blue suit and backpack"]),
+            element!(Span;
+                element!(Strong; text("Meet the Scout")),
+                element!(Span [Class = "home-character-description"]; text("From a greybox rig to pixel art and a clean illustrated skin. Explore all 16 authored animation clips.")),
+                element!(Span [Class = "home-character-action"]; text("Explore character creation →")),
+            ),
         ),
     ),
     element!(Section [Id = "home-tools", Class = "home-section", AriaLabelledby = "home-tools-title"];

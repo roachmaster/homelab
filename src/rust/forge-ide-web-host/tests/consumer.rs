@@ -134,14 +134,14 @@ fn host_with_config(config: HostConfig) -> (Host, Rc<Cell<usize>>) {
     )]);
     (factory.create_with_ports(ports).unwrap(), calls)
 }
-fn exchange(host: &Host, request: String) -> String {
+fn exchange_bytes(host: &Host, request: String) -> Vec<u8> {
     let address = host.local_addr().unwrap();
     let client = thread::spawn(move || {
         let mut s = TcpStream::connect(address).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         s.write_all(request.as_bytes()).unwrap();
-        let mut out = String::new();
-        s.read_to_string(&mut out).unwrap();
+        let mut out = Vec::new();
+        s.read_to_end(&mut out).unwrap();
         out
     });
     let stop = AtomicBool::new(false);
@@ -152,6 +152,9 @@ fn exchange(host: &Host, request: String) -> String {
         thread::sleep(Duration::from_millis(1));
     }
     client.join().unwrap()
+}
+fn exchange(host: &Host, request: String) -> String {
+    String::from_utf8(exchange_bytes(host, request)).unwrap()
 }
 fn post(host: &Host, destination: &str, body: Value, extra: &str) -> String {
     let body = body.to_string();
@@ -1114,12 +1117,14 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
         assert!(response.contains("href=\"/design/home.css\""));
         assert!(response.contains("id=\"home-tools\""));
         assert!(response.contains("id=\"home-docs\""));
+        assert!(response.contains("home-character-feature"));
         assert!(response.contains("class=\"home-footer\""));
         assert!(response.contains("aria-label=\"GitHub\""));
         assert!(!response.contains("Back to Forge"));
         for (destination, label) in [
             ("/", "Open Forge IDE"),
             ("/design", "Browse design docs"),
+            ("/design/characters", "Explore Scout character creation"),
             ("/", "Forge IDE"),
             ("/studio", "Forge Studio"),
             ("/playtest", "Room One playtest"),
@@ -1167,6 +1172,7 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
         "/home",
         "/design",
         "/design/implementation",
+        "/design/characters",
         "/design/forge-providers",
         "/studio",
         "/playtest",
@@ -1207,6 +1213,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         assert!(response.contains("Forge IDE design"));
         assert!(response.contains("href=\"/design/index.css\""));
         assert!(response.contains("href=\"/design/implementation\""));
+        assert!(response.contains("href=\"/design/characters\""));
         assert!(response.contains("href=\"/design/forge-providers\""));
         assert!(response.contains("href=\"/design/chat-dispatch\""));
         assert!(response.contains("href=\"/design/mail\""));
@@ -1235,6 +1242,11 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
     assert!(request("GET", "/design/index.css").contains("Content-Type: text/css; charset=utf-8"));
     assert!(request("GET", "/design/docs.css").contains("Content-Type: text/css; charset=utf-8"));
     for (path, heading, marker) in [
+        (
+            "/design/characters",
+            "Scout character creation",
+            "src=\"/design/characters/",
+        ),
         (
             "/design/implementation",
             "Current Forge implementation",
@@ -1280,6 +1292,112 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
             assert!(request("POST", &target).starts_with("HTTP/1.1 405"));
         }
         assert!(request("GET", &format!("{path}/unknown")).starts_with("HTTP/1.1 404"));
+    }
+    let asset_request = |method: &str, target: &str| {
+        let response = exchange_bytes(
+            &h,
+            format!(
+                "{method} {target} HTTP/1.1\r\nHost: {}\r\n\r\n",
+                h.local_addr().unwrap()
+            ),
+        );
+        let split = response
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .unwrap()
+            + 4;
+        (
+            String::from_utf8(response[..split].to_vec()).unwrap(),
+            response[split..].to_vec(),
+        )
+    };
+    let characters = request("GET", "/design/characters");
+    assert!(characters.contains("href=\"/design/characters.css\""));
+    assert!(characters.contains("href=\"/design#game-development\""));
+    assert_eq!(characters.matches("class=\"character-clip\"").count(), 16);
+    assert!(!characters.contains("<script"));
+    let characters_css = request("GET", "/design/characters.css");
+    assert!(characters_css.starts_with("HTTP/1.1 200 OK"));
+    assert!(characters_css.contains("Content-Type: text/css; charset=utf-8"));
+    assert!(characters_css.contains("prefers-reduced-motion"));
+    for (name, mime) in [
+        ("scout-illustrated-idle.svg", "image/svg+xml"),
+        ("scout-illustrated-front.svg", "image/svg+xml"),
+        ("scout-illustrated-back.svg", "image/svg+xml"),
+        ("scout-illustrated-ladder.svg", "image/svg+xml"),
+        ("mannequin-idle.png", "image/png"),
+        ("pixel-idle.png", "image/png"),
+        ("illustrated-sheet.png", "image/png"),
+        ("illustrated-manifest.json", "application/json"),
+        ("showcase-manifest.json", "application/json"),
+    ] {
+        let path = format!("/design/characters/{name}");
+        let (response, body) = asset_request("GET", &path);
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{name}");
+        assert!(
+            response.contains(&format!("Content-Type: {mime}")),
+            "{name}"
+        );
+        assert!(response.contains("Content-Security-Policy:"), "{name}");
+        if mime == "image/png" {
+            assert!(body.starts_with(b"\x89PNG\r\n\x1a\n"), "{name}");
+        }
+        assert!(request("HEAD", &path).ends_with("\r\n\r\n"));
+        assert!(request("POST", &path).starts_with("HTTP/1.1 405"));
+    }
+    for clip in [
+        "idle",
+        "walk",
+        "crouch",
+        "jump",
+        "attack",
+        "spin",
+        "kick",
+        "roundhouse_kick",
+        "punch",
+        "uppercut",
+        "roll",
+        "ledge_pull_up",
+        "rope_climb",
+        "ladder_climb",
+        "barrel_vault",
+        "barrel_jump_off",
+    ] {
+        for (extension, mime) in [("png", "image/png"), ("gif", "image/gif")] {
+            let path = format!("/design/characters/clips/{clip}.{extension}");
+            let (response, body) = asset_request("GET", &path);
+            assert!(response.starts_with("HTTP/1.1 200 OK"), "{path}");
+            assert!(
+                response.contains(&format!("Content-Type: {mime}")),
+                "{path}"
+            );
+            if extension == "png" {
+                assert!(body.starts_with(b"\x89PNG\r\n\x1a\n"), "{path}");
+            } else {
+                assert!(
+                    body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a"),
+                    "{path}"
+                );
+                assert_eq!(u16::from_le_bytes([body[6], body[7]]), 128, "{path}");
+                assert_eq!(u16::from_le_bytes([body[8], body[9]]), 176, "{path}");
+            }
+        }
+    }
+    let showcase = request("GET", "/design/characters/showcase-manifest.json");
+    let showcase: serde_json::Value =
+        serde_json::from_str(showcase.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(showcase["atlas_scale"], 4);
+    assert_eq!(showcase["logical_frame_size"], serde_json::json!([32, 44]));
+    assert_eq!(showcase["atlas_frame_size"], serde_json::json!([128, 176]));
+    assert_eq!(showcase["clip_count"], 16);
+    assert_eq!(showcase["frame_count"], 103);
+    for path in [
+        "/design/characters/build_assets.py",
+        "/design/characters/unknown.png",
+        "/design/characters/clips/unknown.gif",
+        "/design/characters/../assets.rs",
+    ] {
+        assert!(request("GET", path).starts_with("HTTP/1.1 404"), "{path}");
     }
     let implementation = request("GET", "/design/implementation");
     assert!(implementation.contains("4,096 context / 1,024 completion"));

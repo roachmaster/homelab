@@ -17,6 +17,7 @@ fn main() -> io::Result<()> {
         ("home.html", DesignPage::Home),
         ("design.html", DesignPage::Overview),
         ("implementation.html", DesignPage::Implementation),
+        ("characters.html", DesignPage::Characters),
         ("previous-chats.html", DesignPage::PreviousChats),
         ("wireframes.html", DesignPage::Wireframes),
         ("workspace.html", DesignPage::Workspace),
@@ -40,6 +41,10 @@ fn main() -> io::Result<()> {
     }
     fs::write(output.join("home.css"), design::home_stylesheet())?;
     fs::write(output.join("docs.css"), design::docs_stylesheet())?;
+    fs::write(
+        output.join("characters.css"),
+        design::characters_stylesheet(),
+    )?;
     fs::write(output.join("design-index.css"), design::index_stylesheet())?;
     fs::write(
         output.join("game-studio.css"),
