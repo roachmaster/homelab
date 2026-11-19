@@ -1,7 +1,9 @@
-"""PostgreSQL DAO for Forge coding-job durable admission and queued cancellation."""
+"""PostgreSQL DAO for Forge coding-job durable admission, execution queries, and control."""
 
 from contextlib import closing, contextmanager
 from datetime import UTC
+import json
+import re
 from uuid import UUID, uuid4
 
 from psycopg2.extras import Json, RealDictCursor, register_uuid
@@ -10,19 +12,44 @@ from queue_store import Rejected
 from work_config import (
     DEFAULT_MAX_PENDING,
     MAX_MAX_PENDING,
+    MAX_PROFILES,
+    MAX_PROJECTS,
     MIN_MAX_PENDING,
     PinnedRecipe,
+    WorkConfig,
+    prepare_title,
     sha256_canonical,
     validate_identifier,
     validate_owner,
 )
+from work_policy import POLICY_DIGEST, POLICY_ID
 
 register_uuid()
 
 ADVISORY_LOCK_SALT = 2026111901
 NOTIFY_CHANNEL = "forge_coding_jobs"
 MAX_REVISION = 2**53 - 1
-VALID_STATUSES = frozenset({"queued", "cancelled"})
+RESULT_MIN_LIMIT_BYTES = 4
+RESULT_MAX_LIMIT_BYTES = 16384
+RESULT_MAX_JSON_CONTENT_BYTES = 32768
+WORKER_FRESHNESS_SECONDS = 90
+SHA1_HEX_RE = re.compile(r"[0-9a-f]{40}")
+RESULT_CURSOR_RE = re.compile(r"([0-9a-f]{64})\.(0|[1-9][0-9]{0,7})")
+VALID_STATUSES = frozenset({
+    "queued",
+    "running",
+    "cancel_requested",
+    "awaiting_review",
+    "completed",
+    "cancelled",
+    "failed",
+    "quota_blocked",
+    "blocked_auth",
+    "blocked_permission",
+    "needs_reconcile",
+})
+NON_RESUMABLE_STATUSES = frozenset({"queued", "running", "cancel_requested", "completed"})
+MODE_ORDER = ("plan", "review", "implement")
 
 
 def _timestamp(value):
@@ -33,7 +60,7 @@ def _timestamp(value):
 
 
 def _summary(row):
-    return {
+    item = {
         "task_id": str(row["id"]),
         "project_alias": row["project_alias"],
         "base_revision": row["base_revision"],
@@ -44,6 +71,9 @@ def _summary(row):
         "revision": row["revision"],
         "created_at": _timestamp(row["created_at"]),
     }
+    if row.get("title") is not None:
+        item["title"] = row["title"]
+    return item
 
 
 def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
@@ -67,8 +97,72 @@ def _cancel_intent_digest(*, project_alias, task_id, expected_revision):
     })
 
 
+def _accept_intent_digest(*, project_alias, task_id, expected_revision, review_note):
+    return sha256_canonical({
+        "action": "accept",
+        "project_alias": project_alias,
+        "task_id": str(task_id),
+        "expected_revision": expected_revision,
+        "review_note": review_note,
+    })
+
+
+def _resume_intent_digest(*, project_alias, task_id, expected_revision,
+                          agent_profile, reconciliation_receipt_id, note):
+    return sha256_canonical({
+        "action": "resume",
+        "project_alias": project_alias,
+        "task_id": str(task_id),
+        "expected_revision": expected_revision,
+        "agent_profile": agent_profile,
+        "reconciliation_receipt_id": str(reconciliation_receipt_id),
+        "note": note,
+    })
+
+
+def _decode_utf8_prefix(raw_bytes):
+    """Decode the longest valid UTF-8 prefix of raw_bytes without splitting a codepoint."""
+    end = len(raw_bytes)
+    min_end = max(0, end - 3)
+    while end >= min_end:
+        try:
+            return raw_bytes[:end].decode("utf-8")
+        except UnicodeDecodeError:
+            end -= 1
+    raise Rejected(400, "invalid_request")
+
+
+def _fit_json_content_bound(text):
+    """Trim Unicode characters from the end so JSON-escaped content stays within transport bounds."""
+    encoded = json.dumps(text, ensure_ascii=False).encode("utf-8")
+    if len(encoded) <= RESULT_MAX_JSON_CONTENT_BYTES:
+        return text
+    lo, hi = 1, len(text)
+    best = text[:1]
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = text[:mid]
+        if len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) <= RESULT_MAX_JSON_CONTENT_BYTES:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def _parse_result_cursor(cursor):
+    if cursor is None:
+        return None
+    if not isinstance(cursor, str) or len(cursor.encode("ascii", errors="ignore")) != len(cursor) or len(cursor) > 86:
+        raise Rejected(400, "invalid_request")
+    match = RESULT_CURSOR_RE.fullmatch(cursor)
+    if match is None:
+        raise Rejected(400, "invalid_request")
+    return match.group(1), int(match.group(2))
+
+
 class WorkStore:
-    """Owner- and project-scoped durable store for coding-job admission."""
+    """Owner- and project-scoped durable store for coding jobs, results, and control receipts."""
 
     def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING):
         self._owner = validate_owner(owner)
@@ -112,9 +206,93 @@ class WorkStore:
                         cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                     yield cursor
 
+    def catalog(self, *, config):
+        if not isinstance(config, WorkConfig) or config.owner != self._owner:
+            raise ValueError("Catalog requires matching frozen WorkConfig")
+        with self._transaction(read_only=True) as cursor:
+            cursor.execute("""
+                SELECT worker_id, policy_digest, projects, profiles, observed_at,
+                       (observed_at >= clock_timestamp() - make_interval(secs => %s)) AS is_fresh
+                FROM forge_agent.coding_worker_readiness
+                WHERE owner_id = %s
+                ORDER BY observed_at DESC, worker_id ASC
+            """, (WORKER_FRESHNESS_SECONDS, self._owner))
+            rows = cursor.fetchall()
+
+        if not rows:
+            worker_status = "unknown"
+            observed_at = None
+        else:
+            observed_at = _timestamp(rows[0]["observed_at"])
+            worker_status = "ready" if any(row["is_fresh"] for row in rows) else "offline"
+
+        advertised_revisions = {}
+        advertised_profile_modes = {}
+        for row in rows:
+            if not row["is_fresh"]:
+                continue
+            raw_projects = row["projects"] if isinstance(row["projects"], list) else []
+            for entry in raw_projects:
+                if not isinstance(entry, dict):
+                    continue
+                alias = entry.get("alias")
+                if alias not in config.allowed_projects or alias in advertised_revisions:
+                    continue
+                rev = entry.get("base_revision")
+                if rev is None or (isinstance(rev, str) and SHA1_HEX_RE.fullmatch(rev)):
+                    advertised_revisions[alias] = rev
+
+            if row["policy_digest"] != POLICY_DIGEST:
+                continue
+            raw_profiles = row["profiles"] if isinstance(row["profiles"], list) else []
+            for entry in raw_profiles:
+                if not isinstance(entry, dict):
+                    continue
+                alias = entry.get("alias")
+                profile = config.profiles.get(alias)
+                if profile is None or profile.resource_profile != POLICY_ID:
+                    continue
+                if entry.get("backend") != profile.backend or entry.get("model") != profile.model:
+                    continue
+                modes = entry.get("modes")
+                if not isinstance(modes, list):
+                    continue
+                valid = {m for m in modes if isinstance(m, str) and m in config.allowed_modes}
+                if valid:
+                    advertised_profile_modes.setdefault(alias, set()).update(valid)
+
+        projects = [
+            {
+                "alias": alias,
+                "label": config.project_label(alias),
+                "base_revision": advertised_revisions.get(alias),
+            }
+            for alias in sorted(config.allowed_projects)[:MAX_PROJECTS]
+        ]
+        profiles = []
+        for alias in sorted(config.profiles)[:MAX_PROFILES]:
+            modes = advertised_profile_modes.get(alias)
+            if not modes:
+                continue
+            profile = config.profiles[alias]
+            profiles.append({
+                "alias": alias,
+                "label": config.profile_label(alias),
+                "backend": profile.backend,
+                "model": profile.model,
+                "modes": [m for m in MODE_ORDER if m in modes],
+            })
+        return {
+            "projects": projects,
+            "profiles": profiles,
+            "worker_status": worker_status,
+            "observed_at": observed_at,
+        }
+
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
                prompt, acceptance_criteria, idempotency_key, resolve_recipe):
         self._require_project(project_alias)
+        title = prepare_title(prompt)
         intent_digest = _submit_intent_digest(
             project_alias=project_alias,
             base_revision=base_revision,
@@ -147,7 +325,8 @@ class WorkStore:
             cursor.execute("""
                 SELECT count(*) AS pending
                 FROM forge_agent.coding_tasks
-                WHERE owner_id = %s AND project_alias = %s AND status = 'queued'
+                WHERE owner_id = %s AND project_alias = %s
+                  AND status IN ('queued', 'running', 'cancel_requested')
             """, (self._owner, project_alias))
             if cursor.fetchone()["pending"] >= self._max_pending:
                 raise Rejected(503, "queue_full")
@@ -169,13 +348,13 @@ class WorkStore:
             cursor.execute("""
                 INSERT INTO forge_agent.coding_tasks (
                     owner_id, project_alias, id, idempotency_key, intent_digest,
-                    base_revision, mode, agent_profile, prompt, acceptance_criteria,
+                    base_revision, mode, agent_profile, title, prompt, acceptance_criteria,
                     pinned_recipe, recipe_digest, status, revision
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 1)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 1)
             """, (
                 self._owner, project_alias, task_id, idempotency_key, intent_digest,
-                base_revision, mode, agent_profile, prompt, acceptance_criteria,
+                base_revision, mode, agent_profile, title, prompt, acceptance_criteria,
                 Json(recipe.to_dict()), recipe.digest,
             ))
             cursor.execute("""
@@ -195,18 +374,72 @@ class WorkStore:
             cursor.execute("""
                 SELECT id, project_alias, base_revision, mode, agent_profile,
                        recipe_digest, status, revision, created_at,
-                       prompt, acceptance_criteria
+                       title, prompt, acceptance_criteria, latest_attempt_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
             """, (self._owner, project_alias, task_id))
             row = cursor.fetchone()
             if row is None:
                 raise Rejected(404, "not_found")
-            return {
+
+            attempt_dto = None
+            result_dto = None
+            reconciliation_receipt_id = None
+
+            if row["latest_attempt_id"] is not None:
+                cursor.execute("""
+                    SELECT attempt_id, worker_id, phase, started_at, finished_at, summary,
+                           published_at, result_sha256, result_byte_count, result_chunk_count
+                    FROM forge_agent.coding_attempts
+                    WHERE owner_id = %s AND project_alias = %s
+                      AND task_id = %s AND attempt_id = %s
+                """, (self._owner, project_alias, task_id, row["latest_attempt_id"]))
+                attempt = cursor.fetchone()
+                if attempt is not None:
+                    attempt_dto = {
+                        "attempt_id": str(attempt["attempt_id"]),
+                        "worker_id": attempt["worker_id"],
+                        "phase": attempt["phase"],
+                        "started_at": _timestamp(attempt["started_at"]),
+                        "finished_at": (
+                            _timestamp(attempt["finished_at"])
+                            if attempt["finished_at"] is not None else None
+                        ),
+                        "summary": attempt["summary"],
+                    }
+                    if attempt["published_at"] is not None and attempt["result_sha256"] is not None:
+                        result_dto = {
+                            "attempt_id": str(attempt["attempt_id"]),
+                            "sha256": attempt["result_sha256"],
+                            "byte_count": attempt["result_byte_count"],
+                            "chunk_count": attempt["result_chunk_count"],
+                        }
+
+                if row["status"] not in NON_RESUMABLE_STATUSES:
+                    cursor.execute("""
+                        SELECT receipt_id
+                        FROM forge_agent.coding_reconciliation_receipts
+                        WHERE owner_id = %s AND project_alias = %s
+                          AND task_id = %s AND attempt_id = %s
+                          AND task_revision = %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """, (self._owner, project_alias, task_id, row["latest_attempt_id"], row["revision"]))
+                    rec = cursor.fetchone()
+                    if rec is not None:
+                        reconciliation_receipt_id = str(rec["receipt_id"])
+
+            detail = {
                 **_summary(row),
                 "prompt": row["prompt"],
                 "acceptance_criteria": row["acceptance_criteria"],
+                "attempt": attempt_dto,
+                "result": result_dto,
+                "reconciliation_receipt_id": reconciliation_receipt_id,
             }
+            if "title" not in detail:
+                detail["title"] = prepare_title(row["prompt"])
+            return detail
 
     def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None):
         self._require_project(project_alias)
@@ -232,7 +465,7 @@ class WorkStore:
 
             cursor.execute("""
                 SELECT id, project_alias, base_revision, mode, agent_profile,
-                       recipe_digest, status, revision, created_at
+                       recipe_digest, status, revision, created_at, title
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s
                   AND (%s::text IS NULL OR status = %s::text)
@@ -300,6 +533,99 @@ class WorkStore:
             "next_sequence": next_sequence,
         }
 
+    def result(self, *, project_alias, task_id, attempt_id, cursor=None,
+               limit_bytes=RESULT_MAX_LIMIT_BYTES):
+        self._require_project(project_alias)
+        if (not isinstance(task_id, UUID)
+                or not isinstance(attempt_id, UUID)
+                or type(limit_bytes) is not int
+                or not RESULT_MIN_LIMIT_BYTES <= limit_bytes <= RESULT_MAX_LIMIT_BYTES):
+            raise Rejected(400, "invalid_request")
+        parsed_cursor = _parse_result_cursor(cursor)
+
+        with self._transaction(read_only=True) as db_cursor:
+            db_cursor.execute("""
+                SELECT result_sha256, result_byte_count, result_chunk_count, published_at
+                FROM forge_agent.coding_attempts
+                WHERE owner_id = %s AND project_alias = %s
+                  AND task_id = %s AND attempt_id = %s
+            """, (self._owner, project_alias, task_id, attempt_id))
+            attempt = db_cursor.fetchone()
+            if (attempt is None or attempt["published_at"] is None
+                    or attempt["result_sha256"] is None):
+                raise Rejected(404, "not_found")
+
+            result_sha256 = attempt["result_sha256"]
+            total_bytes = attempt["result_byte_count"]
+
+            if parsed_cursor is None:
+                offset_bytes = 0
+            else:
+                cursor_sha, offset_bytes = parsed_cursor
+                if cursor_sha != result_sha256:
+                    raise Rejected(409, "result_mismatch")
+                if not 0 <= offset_bytes < total_bytes:
+                    raise Rejected(400, "invalid_request")
+
+            db_cursor.execute("""
+                WITH spans AS (
+                    SELECT chunk_index, content, byte_length,
+                           coalesce(
+                               sum(byte_length) OVER (
+                                   ORDER BY chunk_index
+                                   ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                               ),
+                               0
+                           ) AS start_byte,
+                           sum(byte_length) OVER (ORDER BY chunk_index) AS end_byte
+                    FROM forge_agent.coding_result_chunks
+                    WHERE owner_id = %s AND project_alias = %s
+                      AND task_id = %s AND attempt_id = %s
+                )
+                SELECT chunk_index, content, byte_length, start_byte, end_byte
+                FROM spans
+                WHERE end_byte > %s AND start_byte < %s
+                ORDER BY chunk_index ASC
+            """, (
+                self._owner, project_alias, task_id, attempt_id,
+                offset_bytes, offset_bytes + limit_bytes,
+            ))
+            rows = db_cursor.fetchall()
+
+        if not rows:
+            raise Rejected(503, "unavailable")
+
+        raw_window = b"".join(row["content"].encode("utf-8") for row in rows)
+        window_start = rows[0]["start_byte"]
+        local_start = offset_bytes - window_start
+        if local_start < 0 or local_start >= len(raw_window):
+            raise Rejected(400, "invalid_request")
+        # Reject a forged byte offset landing inside a multi-byte UTF-8 sequence.
+        if (raw_window[local_start] & 0xC0) == 0x80:
+            raise Rejected(400, "invalid_request")
+
+        raw_slice = raw_window[local_start : local_start + limit_bytes]
+        content = _decode_utf8_prefix(raw_slice)
+        content = _fit_json_content_bound(content)
+        emitted_bytes = len(content.encode("utf-8"))
+        if emitted_bytes == 0:
+            raise Rejected(503, "unavailable")
+
+        next_offset = offset_bytes + emitted_bytes
+        complete = next_offset >= total_bytes
+        next_cursor = None if complete else f"{result_sha256}.{next_offset}"
+        return {
+            "project_alias": project_alias,
+            "task_id": str(task_id),
+            "attempt_id": str(attempt_id),
+            "result_digest": result_sha256,
+            "content": content,
+            "offset_bytes": offset_bytes,
+            "next_cursor": next_cursor,
+            "complete": complete,
+            "total_bytes": total_bytes,
+        }
+
     def cancel(self, *, project_alias, task_id, expected_revision, idempotency_key):
         self._require_project(project_alias)
         if (not isinstance(task_id, UUID)
@@ -323,32 +649,47 @@ class WorkStore:
                 raise Rejected(404, "not_found")
 
             cursor.execute("""
-                SELECT intent_digest, receipt_json
+                SELECT action, intent_digest, receipt_json
                 FROM forge_agent.coding_control_receipts
                 WHERE owner_id = %s AND project_alias = %s AND task_id = %s
-                  AND action = 'cancel' AND idempotency_key = %s
+                  AND idempotency_key = %s
             """, (self._owner, project_alias, task_id, idempotency_key))
             existing = cursor.fetchone()
             if existing is not None:
-                if existing["intent_digest"] != intent_digest:
+                if existing["action"] != "cancel" or existing["intent_digest"] != intent_digest:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
-            if task["status"] != "queued":
+            if task["status"] not in ("queued", "running"):
                 raise Rejected(409, "not_cancellable")
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
-            cursor.execute("""
-                UPDATE forge_agent.coding_tasks
-                SET status = 'cancelled',
-                    revision = revision + 1,
-                    cancelled_at = clock_timestamp(),
-                    updated_at = clock_timestamp()
-                WHERE owner_id = %s AND project_alias = %s AND id = %s
-                  AND status = 'queued' AND revision = %s
-                RETURNING revision
-            """, (self._owner, project_alias, task_id, expected_revision))
+            if task["status"] == "queued":
+                target_status = "cancelled"
+                event_kind = "cancelled"
+                cursor.execute("""
+                    UPDATE forge_agent.coding_tasks
+                    SET status = 'cancelled',
+                        revision = revision + 1,
+                        cancelled_at = clock_timestamp(),
+                        updated_at = clock_timestamp()
+                    WHERE owner_id = %s AND project_alias = %s AND id = %s
+                      AND status = 'queued' AND revision = %s
+                    RETURNING revision
+                """, (self._owner, project_alias, task_id, expected_revision))
+            else:
+                target_status = "cancel_requested"
+                event_kind = "cancel_requested"
+                cursor.execute("""
+                    UPDATE forge_agent.coding_tasks
+                    SET status = 'cancel_requested',
+                        revision = revision + 1,
+                        updated_at = clock_timestamp()
+                    WHERE owner_id = %s AND project_alias = %s AND id = %s
+                      AND status = 'running' AND revision = %s
+                    RETURNING revision
+                """, (self._owner, project_alias, task_id, expected_revision))
             updated = cursor.fetchone()
             if updated is None:
                 raise Rejected(409, "revision_conflict")
@@ -359,17 +700,17 @@ class WorkStore:
                 "task_id": str(task["id"]),
                 "base_revision": expected_revision,
                 "revision": new_revision,
-                "status": "cancelled",
+                "status": target_status,
             }
             cursor.execute("""
                 INSERT INTO forge_agent.coding_events (
                     owner_id, project_alias, task_id, sequence, event_kind, payload
                 )
-                SELECT %s, %s, %s, coalesce(max(sequence), 0) + 1, 'cancelled', %s
+                SELECT %s, %s, %s, coalesce(max(sequence), 0) + 1, %s, %s
                 FROM forge_agent.coding_events
                 WHERE owner_id = %s AND project_alias = %s AND task_id = %s
             """, (
-                self._owner, project_alias, task_id,
+                self._owner, project_alias, task_id, event_kind,
                 Json({"base_revision": expected_revision, "revision": new_revision}),
                 self._owner, project_alias, task_id,
             ))
@@ -383,4 +724,265 @@ class WorkStore:
                 self._owner, project_alias, task_id, idempotency_key,
                 intent_digest, expected_revision, new_revision, Json(receipt),
             ))
+            if target_status == "cancel_requested":
+                cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
+            return receipt
+
+    def accept(self, *, project_alias, task_id, expected_revision, idempotency_key, review_note=""):
+        self._require_project(project_alias)
+        if (not isinstance(task_id, UUID)
+                or type(expected_revision) is not int
+                or not 1 <= expected_revision <= MAX_REVISION
+                or not isinstance(review_note, str)
+                or len(review_note.encode("utf-8")) > 2048):
+            raise Rejected(400, "invalid_request")
+        intent_digest = _accept_intent_digest(
+            project_alias=project_alias,
+            task_id=task_id,
+            expected_revision=expected_revision,
+            review_note=review_note,
+        )
+        with self._transaction() as cursor:
+            cursor.execute("""
+                SELECT id, project_alias, status, revision, latest_attempt_id
+                FROM forge_agent.coding_tasks
+                WHERE owner_id = %s AND project_alias = %s AND id = %s
+                FOR UPDATE
+            """, (self._owner, project_alias, task_id))
+            task = cursor.fetchone()
+            if task is None:
+                raise Rejected(404, "not_found")
+
+            cursor.execute("""
+                SELECT action, intent_digest, receipt_json
+                FROM forge_agent.coding_control_receipts
+                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
+                  AND idempotency_key = %s
+            """, (self._owner, project_alias, task_id, idempotency_key))
+            existing = cursor.fetchone()
+            if existing is not None:
+                if existing["action"] != "accept" or existing["intent_digest"] != intent_digest:
+                    raise Rejected(409, "idempotency_conflict")
+                return dict(existing["receipt_json"])
+
+            if task["status"] != "awaiting_review" or task["latest_attempt_id"] is None:
+                raise Rejected(409, "not_reviewable")
+
+            cursor.execute("""
+                SELECT phase, reservation_active, published_at, result_sha256
+                FROM forge_agent.coding_attempts
+                WHERE owner_id = %s AND project_alias = %s
+                  AND task_id = %s AND attempt_id = %s
+            """, (self._owner, project_alias, task_id, task["latest_attempt_id"]))
+            attempt = cursor.fetchone()
+            if (attempt is None or attempt["phase"] != "stopped"
+                    or attempt["reservation_active"]
+                    or attempt["published_at"] is None
+                    or attempt["result_sha256"] is None):
+                raise Rejected(409, "not_reviewable")
+
+            if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
+                raise Rejected(409, "revision_conflict")
+
+            cursor.execute("""
+                UPDATE forge_agent.coding_tasks
+                SET status = 'completed',
+                    revision = revision + 1,
+                    accepted_at = clock_timestamp(),
+                    review_note = %s,
+                    updated_at = clock_timestamp()
+                WHERE owner_id = %s AND project_alias = %s AND id = %s
+                  AND status = 'awaiting_review' AND revision = %s
+                RETURNING revision
+            """, (review_note, self._owner, project_alias, task_id, expected_revision))
+            updated = cursor.fetchone()
+            if updated is None:
+                raise Rejected(409, "revision_conflict")
+            new_revision = updated["revision"]
+
+            receipt = {
+                "project_alias": task["project_alias"],
+                "task_id": str(task["id"]),
+                "base_revision": expected_revision,
+                "revision": new_revision,
+                "status": "completed",
+            }
+            cursor.execute("""
+                INSERT INTO forge_agent.coding_events (
+                    owner_id, project_alias, task_id, sequence, event_kind, payload
+                )
+                SELECT %s, %s, %s, coalesce(max(sequence), 0) + 1, 'completed', %s
+                FROM forge_agent.coding_events
+                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
+            """, (
+                self._owner, project_alias, task_id,
+                Json({"base_revision": expected_revision, "revision": new_revision, "review_note": review_note}),
+                self._owner, project_alias, task_id,
+            ))
+            cursor.execute("""
+                INSERT INTO forge_agent.coding_control_receipts (
+                    owner_id, project_alias, task_id, action, idempotency_key,
+                    intent_digest, base_revision, result_revision, receipt_json
+                )
+                VALUES (%s, %s, %s, 'accept', %s, %s, %s, %s, %s)
+            """, (
+                self._owner, project_alias, task_id, idempotency_key,
+                intent_digest, expected_revision, new_revision, Json(receipt),
+            ))
+            return receipt
+
+    def resume(self, *, project_alias, task_id, expected_revision, idempotency_key,
+               agent_profile, reconciliation_receipt_id, note="", allowed_modes, resolve_recipe):
+        self._require_project(project_alias)
+        if (not isinstance(task_id, UUID)
+                or not isinstance(reconciliation_receipt_id, UUID)
+                or type(expected_revision) is not int
+                or not 1 <= expected_revision <= MAX_REVISION
+                or not isinstance(note, str)
+                or len(note.encode("utf-8")) > 2048):
+            raise Rejected(400, "invalid_request")
+        intent_digest = _resume_intent_digest(
+            project_alias=project_alias,
+            task_id=task_id,
+            expected_revision=expected_revision,
+            agent_profile=agent_profile,
+            reconciliation_receipt_id=reconciliation_receipt_id,
+            note=note,
+        )
+        lock_scope = f"{self._owner}\n{project_alias}"
+        with self._transaction() as cursor:
+            cursor.execute(
+                "SELECT pg_catalog.pg_advisory_xact_lock("
+                "pg_catalog.hashtextextended(%s::text, %s::bigint))",
+                (lock_scope, ADVISORY_LOCK_SALT),
+            )
+            cursor.execute("""
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id
+                FROM forge_agent.coding_tasks
+                WHERE owner_id = %s AND project_alias = %s AND id = %s
+                FOR UPDATE
+            """, (self._owner, project_alias, task_id))
+            task = cursor.fetchone()
+            if task is None:
+                raise Rejected(404, "not_found")
+            if task["mode"] not in allowed_modes:
+                raise Rejected(403, "denied")
+
+            cursor.execute("""
+                SELECT action, intent_digest, receipt_json
+                FROM forge_agent.coding_control_receipts
+                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
+                  AND idempotency_key = %s
+            """, (self._owner, project_alias, task_id, idempotency_key))
+            existing = cursor.fetchone()
+            if existing is not None:
+                if existing["action"] != "resume" or existing["intent_digest"] != intent_digest:
+                    raise Rejected(409, "idempotency_conflict")
+                return dict(existing["receipt_json"])
+
+            if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
+                raise Rejected(409, "revision_conflict")
+            if task["status"] in NON_RESUMABLE_STATUSES or task["latest_attempt_id"] is None:
+                raise Rejected(409, "reconcile_required")
+
+            cursor.execute("""
+                SELECT receipt_id, attempt_id, task_revision, workspace_digest
+                FROM forge_agent.coding_reconciliation_receipts
+                WHERE owner_id = %s AND project_alias = %s
+                  AND task_id = %s AND receipt_id = %s
+            """, (self._owner, project_alias, task_id, reconciliation_receipt_id))
+            rec = cursor.fetchone()
+            if rec is None:
+                raise Rejected(409, "reconcile_required")
+            if (rec["task_revision"] != task["revision"]
+                    or rec["attempt_id"] != task["latest_attempt_id"]):
+                raise Rejected(409, "stale_reconciliation")
+
+            cursor.execute("""
+                SELECT count(*) FILTER (WHERE reservation_active OR lease_expires_at IS NOT NULL) AS reserved,
+                       bool_or(attempt_id = %s AND phase = 'stopped') AS attempt_stopped
+                FROM forge_agent.coding_attempts
+                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
+            """, (rec["attempt_id"], self._owner, project_alias, task_id))
+            attempt_check = cursor.fetchone()
+            if attempt_check["reserved"] > 0 or not attempt_check["attempt_stopped"]:
+                raise Rejected(409, "reconcile_required")
+
+            cursor.execute("""
+                SELECT count(*) AS pending
+                FROM forge_agent.coding_tasks
+                WHERE owner_id = %s AND project_alias = %s
+                  AND status IN ('queued', 'running', 'cancel_requested')
+            """, (self._owner, project_alias))
+            if cursor.fetchone()["pending"] >= self._max_pending:
+                raise Rejected(503, "queue_full")
+
+            recipe = resolve_recipe(task["mode"])
+            if (not isinstance(recipe, PinnedRecipe)
+                    or recipe.mode != task["mode"]
+                    or recipe.generation_token_limit is not None):
+                raise ValueError("Recipe resolver returned an invalid pinned recipe")
+
+            cursor.execute("""
+                UPDATE forge_agent.coding_tasks
+                SET status = 'queued',
+                    revision = revision + 1,
+                    agent_profile = %s,
+                    pinned_recipe = %s,
+                    recipe_digest = %s,
+                    resume_workspace_digest = %s,
+                    cancelled_at = NULL,
+                    updated_at = clock_timestamp()
+                WHERE owner_id = %s AND project_alias = %s AND id = %s
+                  AND revision = %s
+                RETURNING revision
+            """, (
+                agent_profile, Json(recipe.to_dict()), recipe.digest, rec["workspace_digest"],
+                self._owner, project_alias, task_id, expected_revision,
+            ))
+            updated = cursor.fetchone()
+            if updated is None:
+                raise Rejected(409, "revision_conflict")
+            new_revision = updated["revision"]
+
+            receipt = {
+                "project_alias": task["project_alias"],
+                "task_id": str(task["id"]),
+                "base_revision": expected_revision,
+                "revision": new_revision,
+                "status": "queued",
+                "recipe_digest": recipe.digest,
+            }
+            event_payload = {
+                "base_revision": expected_revision,
+                "revision": new_revision,
+                "agent_profile": agent_profile,
+                "recipe_digest": recipe.digest,
+                "reconciliation_receipt_id": str(reconciliation_receipt_id),
+                "workspace_digest": rec["workspace_digest"],
+            }
+            if note:
+                event_payload["note"] = note
+            cursor.execute("""
+                INSERT INTO forge_agent.coding_events (
+                    owner_id, project_alias, task_id, sequence, event_kind, payload
+                )
+                SELECT %s, %s, %s, coalesce(max(sequence), 0) + 1, 'resumed', %s
+                FROM forge_agent.coding_events
+                WHERE owner_id = %s AND project_alias = %s AND task_id = %s
+            """, (
+                self._owner, project_alias, task_id, Json(event_payload),
+                self._owner, project_alias, task_id,
+            ))
+            cursor.execute("""
+                INSERT INTO forge_agent.coding_control_receipts (
+                    owner_id, project_alias, task_id, action, idempotency_key,
+                    intent_digest, base_revision, result_revision, receipt_json
+                )
+                VALUES (%s, %s, %s, 'resume', %s, %s, %s, %s, %s)
+            """, (
+                self._owner, project_alias, task_id, idempotency_key,
+                intent_digest, expected_revision, new_revision, Json(receipt),
+            ))
+            cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
             return receipt

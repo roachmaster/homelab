@@ -5,6 +5,10 @@ mod chat_run;
 pub use chat_run::*;
 mod mail;
 pub use mail::*;
+mod work;
+pub use work::*;
+mod usage;
+pub use usage::*;
 
 pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -39,6 +43,10 @@ pub struct Catalog {
     pub mail_enabled: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub mail_archive_enabled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub work_enabled: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub usage_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recent_write: Option<ResumableWrite>,
 }
@@ -582,6 +590,54 @@ pub fn valid_chat_messages(messages: &[ChatMessage]) -> bool {
         })
 }
 
+/// Per-tab recovery hints, never permission or proof of a committed task.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentsNavigationSnapshot {
+    pub active: bool,
+    pub project_alias: String,
+    pub agent_profile: String,
+    pub mode: WorkMode,
+    pub prompt: String,
+    pub acceptance_criteria: String,
+    pub review_note: String,
+    pub task_id: Option<String>,
+    pub retry_intent: Option<WorkRequest>,
+}
+impl AgentsNavigationSnapshot {
+    pub fn is_valid(&self) -> bool {
+        let text = |s: &str, max| {
+            s.len() <= max && !s.chars().any(|c| c.is_control() && !"\r\n\t".contains(c))
+        };
+        (self.project_alias.is_empty() || valid_work_name(&self.project_alias, 64))
+            && (self.agent_profile.is_empty() || valid_work_name(&self.agent_profile, 64))
+            && text(&self.prompt, MAX_WORK_PROMPT_BYTES)
+            && text(&self.acceptance_criteria, MAX_WORK_CRITERIA_BYTES)
+            && text(&self.review_note, 2048)
+            && self.task_id.as_deref().is_none_or(valid_chat_id)
+            && self.retry_intent.as_ref().is_none_or(|r| {
+                r.is_valid()
+                    && r.is_mutation()
+                    && r.project_alias() == Some(self.project_alias.as_str())
+                    && match r {
+                        WorkRequest::WorkSubmit {
+                            prompt,
+                            acceptance_criteria,
+                            agent_profile,
+                            mode,
+                            ..
+                        } => {
+                            prompt == &self.prompt
+                                && acceptance_criteria == &self.acceptance_criteria
+                                && agent_profile == &self.agent_profile
+                                && *mode == self.mode
+                        }
+                        _ => r.task_id() == self.task_id.as_deref(),
+                    }
+            })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum UiEffect {
@@ -613,12 +669,19 @@ pub enum UiEffect {
     MailWatch {
         watch: String,
     },
+    AgentsWatch {
+        watch: String,
+    },
     #[serde(untagged)]
     ChatHistory(ChatHistoryRequest),
     #[serde(untagged)]
     ChatRun(ChatRunRequest),
     #[serde(untagged)]
     Mail(MailRequest),
+    #[serde(untagged)]
+    Work(WorkRequest),
+    #[serde(untagged)]
+    Usage(UsageRequest),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -632,6 +695,59 @@ pub enum UiEvent {
     OpenChat {},
     OpenWorkbench {},
     OpenMail {},
+    OpenAgents {},
+    AgentsNewTask {},
+    AgentsBack {},
+    AgentsRefresh {},
+    AgentsNext {},
+    AgentsPrevious {},
+    AgentsDiscardDraft {},
+    SelectAgentProject {
+        value: String,
+    },
+    SelectAgentProfile {
+        value: String,
+    },
+    SelectAgentMode {
+        value: String,
+    },
+    SetAgentPrompt {
+        value: String,
+    },
+    SetAgentCriteria {
+        value: String,
+    },
+    SetAgentReviewNote {
+        value: String,
+    },
+    SendAgentTask {
+        idempotency_key: String,
+    },
+    RetryAgentRequest {},
+    OpenAgentTask {
+        task_id: String,
+    },
+    CancelAgentTask {
+        idempotency_key: String,
+    },
+    AcceptAgentTask {
+        idempotency_key: String,
+    },
+    ResumeAgentTask {
+        idempotency_key: String,
+    },
+    NextAgentResult {},
+    PreviousAgentResult {},
+    RefreshAgentUsage {},
+    SelectAgentUsage {
+        agent_profile: String,
+    },
+    PollAgents {
+        watch: String,
+    },
+    RestoreAgentsNavigation {
+        snapshot: AgentsNavigationSnapshot,
+    },
     MailInbox {},
     MailArchive {},
     MailNewMessage {},
@@ -882,6 +998,10 @@ pub enum UiEvent {
     ChatRun(ChatRunResponse),
     #[serde(untagged)]
     Mail(MailResponse),
+    #[serde(untagged)]
+    Work(WorkResponse),
+    #[serde(untagged)]
+    Usage(UsageResponse),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

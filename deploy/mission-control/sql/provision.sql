@@ -12,17 +12,31 @@ SELECT 'CREATE ROLE forge_gpu_worker LOGIN NOINHERIT'
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'forge_gpu_worker')
 \gexec
 
+SELECT 'CREATE ROLE forge_coding_worker LOGIN NOINHERIT'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'forge_coding_worker')
+\gexec
+
+SELECT 'CREATE ROLE forge_coding_reconciler LOGIN NOINHERIT'
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'forge_coding_reconciler')
+\gexec
+
 DO $check$
 BEGIN
     IF EXISTS (
         SELECT FROM pg_roles
-        WHERE rolname IN ('forge_agent_owner', 'forge_agent', 'forge_gpu_worker')
+        WHERE rolname IN (
+            'forge_agent_owner', 'forge_agent', 'forge_gpu_worker',
+            'forge_coding_worker', 'forge_coding_reconciler'
+        )
           AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls
                OR rolcanlogin <> (rolname <> 'forge_agent_owner')
-               OR (rolname = 'forge_gpu_worker' AND rolinherit))
+               OR (rolname IN ('forge_gpu_worker', 'forge_coding_worker', 'forge_coding_reconciler') AND rolinherit))
     ) OR EXISTS (
         SELECT FROM pg_auth_members
-        WHERE member IN ('forge_agent_owner'::regrole, 'forge_agent'::regrole, 'forge_gpu_worker'::regrole)
+        WHERE member IN (
+            'forge_agent_owner'::regrole, 'forge_agent'::regrole, 'forge_gpu_worker'::regrole,
+            'forge_coding_worker'::regrole, 'forge_coding_reconciler'::regrole
+        )
     ) THEN
         RAISE EXCEPTION 'Existing Forge roles have unexpected privileges';
     END IF;
@@ -42,3 +56,5 @@ WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'forge_agent')
 REVOKE CONNECT, TEMP ON DATABASE forge_agent FROM PUBLIC;
 GRANT CONNECT ON DATABASE forge_agent TO forge_agent;
 GRANT CONNECT ON DATABASE forge_agent TO forge_gpu_worker;
+GRANT CONNECT ON DATABASE forge_agent TO forge_coding_worker;
+GRANT CONNECT ON DATABASE forge_agent TO forge_coding_reconciler;

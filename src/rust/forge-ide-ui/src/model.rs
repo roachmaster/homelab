@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::collections::BTreeSet;
 
 const PAGE_ROWS: usize = 256;
+mod agents;
 mod bookmark;
 mod chat;
 mod edit;
@@ -36,6 +37,10 @@ pub struct Output {
     pub mail_navigation: Option<MailNavigationSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mail_navigation_locked: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents_navigation: Option<AgentsNavigationSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents_navigation_locked: Option<bool>,
 }
 
 /// Instance-local UI semantics. This is not an authentication authority or an
@@ -49,6 +54,7 @@ pub struct UiModel {
     editor: Option<edit::Editor>,
     write: edit::WriteState,
     mail: mail::Mail,
+    agents: agents::Agents,
     workbench_seen: bool,
     workspace_restored: bool,
     workbench_recovery: Option<WorkbenchBookmark>,
@@ -91,6 +97,7 @@ impl Default for UiModel {
             editor: None,
             write: edit::WriteState::default(),
             mail: mail::Mail::default(),
+            agents: agents::Agents::default(),
             workbench_seen: false,
             workspace_restored: false,
             workbench_recovery: None,
@@ -163,6 +170,8 @@ impl UiModel {
             has_workspace_work: self.has_workspace_work(),
             mail_navigation: self.mail.navigation_snapshot(),
             mail_navigation_locked: self.mail.navigation_locked(),
+            agents_navigation: self.agents.snapshot(),
+            agents_navigation_locked: self.agents.locked().then_some(true),
         }
     }
     fn next_id(&mut self, now: u64) -> Result<String, UiError> {
@@ -201,6 +210,75 @@ impl UiModel {
         let mut effects = Vec::new();
         if self.editor_blocks(&input.event) {
             return Ok(self.output(None));
+        }
+        if matches!(
+            &input.event,
+            UiEvent::OpenChat {} | UiEvent::OpenWorkbench {} | UiEvent::OpenMail {}
+        ) && self.agents.locked()
+        {
+            return Ok(self.output(None));
+        }
+        if matches!(
+            &input.event,
+            UiEvent::OpenAgents {}
+                | UiEvent::AgentsNewTask {}
+                | UiEvent::AgentsBack {}
+                | UiEvent::AgentsRefresh {}
+                | UiEvent::AgentsNext {}
+                | UiEvent::AgentsPrevious {}
+                | UiEvent::AgentsDiscardDraft {}
+                | UiEvent::SelectAgentProject { .. }
+                | UiEvent::SelectAgentProfile { .. }
+                | UiEvent::SelectAgentMode { .. }
+                | UiEvent::SetAgentPrompt { .. }
+                | UiEvent::SetAgentCriteria { .. }
+                | UiEvent::SetAgentReviewNote { .. }
+                | UiEvent::SendAgentTask { .. }
+                | UiEvent::RetryAgentRequest {}
+                | UiEvent::OpenAgentTask { .. }
+                | UiEvent::CancelAgentTask { .. }
+                | UiEvent::AcceptAgentTask { .. }
+                | UiEvent::ResumeAgentTask { .. }
+                | UiEvent::NextAgentResult {}
+                | UiEvent::PreviousAgentResult {}
+                | UiEvent::RefreshAgentUsage {}
+                | UiEvent::SelectAgentUsage { .. }
+                | UiEvent::PollAgents { .. }
+                | UiEvent::RestoreAgentsNavigation { .. }
+                | UiEvent::Work(_)
+                | UiEvent::Usage(_)
+        ) {
+            let catalog = self.catalog.as_ref().ok_or(UiError::NotConnected)?;
+            let (work, usage) = (catalog.work_enabled, catalog.usage_enabled);
+            let id = self.next_id(input.now_ms)?;
+            let aux = self.next_id(input.now_ms)?;
+            match input.event {
+                UiEvent::OpenAgents {} => {
+                    if self.mail.navigation_locked().unwrap_or(false) {
+                        return Ok(self.output(None));
+                    }
+                    self.mail.close();
+                    self.chats.workbench = false;
+                    self.chats.close_history();
+                    self.agents
+                        .open(&self.project, work, usage, id, aux, &mut effects);
+                }
+                UiEvent::RestoreAgentsNavigation { snapshot } => {
+                    if snapshot.active && snapshot.is_valid() {
+                        self.mail.close();
+                        self.chats.workbench = false;
+                        self.chats.close_history();
+                    }
+                    self.agents
+                        .restore(snapshot, work, usage, id, aux, &mut effects);
+                }
+                event => self
+                    .agents
+                    .dispatch(event, id, aux, work, usage, &mut effects)?,
+            }
+            let mut output = self.output(None);
+            output.effects = effects;
+            return Ok(output);
         }
         match input.event {
             UiEvent::OpenChat {}
@@ -246,6 +324,7 @@ impl UiModel {
                     return Ok(self.output(None));
                 }
                 self.mail.close();
+                self.agents.close();
                 self.chats.workbench = false;
                 if self.chats.async_chat {
                     let request_id = self.next_id(input.now_ms)?;
@@ -259,6 +338,7 @@ impl UiModel {
                     return Ok(self.output(None));
                 }
                 self.mail.close();
+                self.agents.close();
                 self.chats.workbench = true;
                 self.workbench_seen = true;
                 self.chats.close_history();
@@ -316,6 +396,7 @@ impl UiModel {
                     return Ok(self.output(None));
                 }
                 if matches!(event, UiEvent::OpenMail {}) {
+                    self.agents.close();
                     self.chats.workbench = false;
                     self.chats.close_history();
                 }
@@ -505,6 +586,8 @@ impl UiModel {
                 request_id,
                 category,
             } => {
+                let watch = self.next_id(input.now_ms)?;
+                self.agents.network_failed(&request_id, watch, &mut effects);
                 self.write_failed(&request_id);
                 if self.is_pending_edit(&request_id) {
                     self.complete_edit(&request_id, EditOutcome::Error { category });
@@ -613,6 +696,7 @@ impl UiModel {
                     self.edit_review = None;
                     self.write = edit::WriteState::default();
                     self.mail = mail::Mail::default();
+                    self.agents = agents::Agents::default();
                     self.workbench_seen = false;
                     self.workspace_restored = false;
                 }
@@ -686,6 +770,33 @@ impl UiModel {
                     &mut effects,
                 );
             }
+            UiEvent::OpenAgents {}
+            | UiEvent::AgentsNewTask {}
+            | UiEvent::AgentsBack {}
+            | UiEvent::AgentsRefresh {}
+            | UiEvent::AgentsNext {}
+            | UiEvent::AgentsPrevious {}
+            | UiEvent::AgentsDiscardDraft {}
+            | UiEvent::SelectAgentProject { .. }
+            | UiEvent::SelectAgentProfile { .. }
+            | UiEvent::SelectAgentMode { .. }
+            | UiEvent::SetAgentPrompt { .. }
+            | UiEvent::SetAgentCriteria { .. }
+            | UiEvent::SetAgentReviewNote { .. }
+            | UiEvent::SendAgentTask { .. }
+            | UiEvent::RetryAgentRequest {}
+            | UiEvent::OpenAgentTask { .. }
+            | UiEvent::CancelAgentTask { .. }
+            | UiEvent::AcceptAgentTask { .. }
+            | UiEvent::ResumeAgentTask { .. }
+            | UiEvent::NextAgentResult {}
+            | UiEvent::PreviousAgentResult {}
+            | UiEvent::RefreshAgentUsage {}
+            | UiEvent::SelectAgentUsage { .. }
+            | UiEvent::PollAgents { .. }
+            | UiEvent::RestoreAgentsNavigation { .. }
+            | UiEvent::Work(_)
+            | UiEvent::Usage(_) => {}
             UiEvent::PairFailed {
                 request_id,
                 message,
@@ -1042,6 +1153,8 @@ impl UiModel {
             has_workspace_work: self.has_workspace_work(),
             mail_navigation: self.mail.navigation_snapshot(),
             mail_navigation_locked: self.mail.navigation_locked(),
+            agents_navigation: self.agents.snapshot(),
+            agents_navigation_locked: self.agents.locked().then_some(true),
         })
     }
     fn begin_inspection(&mut self, now: u64, effects: &mut Vec<UiEffect>) -> Result<(), UiError> {

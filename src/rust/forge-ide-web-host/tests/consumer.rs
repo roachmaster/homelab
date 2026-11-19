@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":5,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":6,"files":files})).unwrap(),
         )
         .unwrap();
         Self(p)
@@ -98,6 +98,7 @@ fn config(f: &Files) -> HostConfig {
         cooked_replay_archive: None,
         studio: None,
         work: None,
+        usage: None,
         limits: HostLimits::default(),
         nodes: vec![NodeConfig {
             key: "lab".into(),
@@ -449,6 +450,18 @@ fn configured_host_resources_open_only_at_factory_creation() {
                     allowed_projects: vec!["coding-only".into()],
                     allowed_profiles: vec!["agy-plan-v1".into()],
                     allowed_modes: vec![forge_ide_web_host::WorkMode::Plan],
+                }),
+                ..config(&files)
+            },
+            "invalid chat token file",
+        ),
+        (
+            HostConfig {
+                usage: Some(forge_ide_web_host::UsageConfig {
+                    endpoint: "127.0.0.1:1".parse().unwrap(),
+                    token_file: files.0.join("absent-usage-token"),
+                    allowed_projects: vec!["coding-only".into()],
+                    allowed_profiles: vec!["agy-plan-v1".into()],
                 }),
                 ..config(&files)
             },
@@ -1725,7 +1738,7 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 3, 4, 6] {
+    for abi in [0, 1, 2, 3, 4, 5, 7] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -2993,7 +3006,7 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
         assert!(home.contains(&format!("href=\"{href}\"")), "{href}");
         assert!(home.contains(&format!("aria-label=\"{label}\"")), "{label}");
     }
-    assert!(!home.contains("href=\"/agents\""));
+    assert!(home.contains("href=\"/agents\""));
 
     let index = request("GET", "/design");
     assert!(index.starts_with("HTTP/1.1 200 OK"));
@@ -3017,7 +3030,7 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
             cross_link: "/design/agent-usage",
             source_url: "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-coding-agent-dispatch.md",
             markers: &[
-                "<strong>Proposed / not implemented.</strong>",
+                "<strong>Implemented; activation is deployment controlled.</strong>",
                 "generation_token_limit: null",
                 "awaiting_review",
                 "needs_reconcile",
@@ -3036,7 +3049,7 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
             cross_link: "/design/coding-agents",
             source_url: "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-agent-usage.md",
             markers: &[
-                "<strong>Proposed / not implemented.</strong>",
+                "<strong>Implemented; activation is deployment controlled.</strong>",
                 "generation_token_limit: null",
                 "codex-cli 0.160.0",
                 "agy 1.5.12",
@@ -3160,7 +3173,6 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
         "/design/coding-agents/ownership.mmd",
         "/design/agent-usage/unknown",
         "/design/agent-usage/providers.mmd",
-        "/agents",
     ] {
         assert!(
             request("GET", missing).starts_with("HTTP/1.1 404 Not Found"),

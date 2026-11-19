@@ -1679,7 +1679,7 @@
 
 # Conversation views reserve the viewport for reading; secondary controls are contextual.
 - rules:
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])))"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden])))"
       declarations:
         - ["--bg", "#0b0e14"]
         - ["--surface", "#121721"]
@@ -1690,7 +1690,7 @@
         - ["display", "flex"]
         - ["flex-direction", "column"]
         - ["overflow", "hidden"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-header"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) .fg-header"
       declarations:
         - ["flex", "none"]
         - ["height", "48px"]
@@ -1698,16 +1698,16 @@
         - ["padding", "2px 12px"]
         - ["gap", "8px"]
         - ["border-color", "rgba(255,255,255,.08)"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-header>p,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand-context"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) .fg-header>p,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) .fg-brand-context"
       declarations:
         - ["display", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) .fg-brand"
       declarations:
         - ["flex", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand-link"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) .fg-brand-link"
       declarations:
         - ["min-height", "44px"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-brand h1"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) .fg-brand h1"
       declarations:
         - ["font-size", "15px"]
     - selector: "#chat-header-actions"
@@ -1766,7 +1766,7 @@
       declarations:
         - ["outline", "2px solid var(--accent)"]
         - ["outline-offset", "-2px"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) .fg-app"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) .fg-app"
       declarations:
         - ["display", "flex"]
         - ["flex-direction", "column"]
@@ -1776,7 +1776,7 @@
     - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden]))) #status[data-tone=neutral]"
       declarations:
         - ["display", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) #ide-navigation"
       declarations:
         - ["display", "flex"]
         - ["flex", "none"]
@@ -1789,7 +1789,7 @@
         - ["border-color", "rgba(255,255,255,.08)"]
         - ["overflow-x", "auto"]
         - ["scrollbar-width", "none"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link)"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link)"
       declarations:
         - ["display", "inline-flex"]
         - ["align-items", "center"]
@@ -1807,16 +1807,16 @@
         - ["font-weight", "600"]
         - ["white-space", "nowrap"]
         - ["transition", "color 150ms ease,background-color 150ms ease"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>button[aria-current=page]"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) #ide-navigation>button[aria-current=page]"
       declarations:
         - ["border-bottom-color", "var(--accent)"]
         - ["color", "var(--text)"]
         - ["font-weight", "700"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):hover"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):hover"
       declarations:
         - ["background", "var(--surface)"]
         - ["color", "var(--text)"]
-    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):focus-visible"
+    - selector: "body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link):focus-visible"
       declarations:
         - ["outline", "2px solid var(--accent)"]
         - ["outline-offset", "-4px"]
@@ -2145,7 +2145,7 @@
 
 - media: "(prefers-reduced-motion:reduce)"
   rules:
-    - selector: "#chat-header-actions button,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link),#chat-composer #send-chat"
+    - selector: "#chat-header-actions button,body:is(:has(#chat:not([hidden])),:has(#mail:not([hidden])),:has(#workbench:not([hidden])),:has(#agents:not([hidden]))) #ide-navigation>:is(button,.fg-navigation-link),#chat-composer #send-chat"
       declarations:
         - ["transition", "none"]
 
@@ -3163,3 +3163,143 @@
     - selector: "#workspace[data-narrow=true] .fg-tree"
       declarations:
         - ["min-height", "50px"]
+
+# Agent workspace: task reading stays dominant; usage is a separate overview.
+- rules:
+    - selector: "#agents:not([hidden])"
+      declarations:
+        - ["display", "block"]
+        - ["min-height", "0"]
+        - ["overflow-y", "auto"]
+        - ["grid-column", "1 / -1"]
+    - selector: "#agents>.fg-reading-column"
+      declarations:
+        - ["width", "min(100%,70rem)"]
+        - ["gap", "16px"]
+    - selector: "#agents .fg-toolbar"
+      declarations:
+        - ["display", "flex"]
+        - ["gap", "8px"]
+        - ["flex-wrap", "wrap"]
+        - ["align-items", "center"]
+    - selector: "#agents-heading"
+      declarations:
+        - ["flex", "1"]
+        - ["font-size", "clamp(1.4rem,3vw,2rem)"]
+        - ["letter-spacing", "-.02em"]
+    - selector: "#agents>.fg-reading-column>.fg-region,#agents-reader,#agents-compose,#agents-usage"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "12px"]
+        - ["min-width", "0"]
+    - selector: "#agents .fg-heading:not(#agents-heading)"
+      declarations:
+        - ["font-size", "1.05rem"]
+    - selector: "#agents .fg-field,#agents .fg-textarea"
+      declarations:
+        - ["min-width", "0"]
+    - selector: "#agents .fg-textarea textarea"
+      declarations:
+        - ["min-height", "7rem"]
+        - ["max-height", "24rem"]
+    - selector: "#agents-prompt"
+      declarations:
+        - ["min-height", "12rem"]
+    - selector: "#agents-task-prompt,#agents-task-criteria,#agents-attempt"
+      declarations:
+        - ["white-space", "pre-wrap"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: "#agents-tasks,#agents-providers"
+      declarations:
+        - ["padding", "0"]
+        - ["background", "transparent"]
+        - ["border", "0"]
+    - selector: "#agents-tasks .fg-tree-row"
+      declarations:
+        - ["margin", "0"]
+        - ["border-bottom", "1px solid rgba(255,255,255,.08)"]
+        - ["border-radius", "0"]
+    - selector: "#agents-tasks .fg-row-select"
+      declarations:
+        - ["background", "transparent"]
+        - ["border", "0"]
+        - ["border-radius", "0"]
+        - ["min-height", "84px"]
+        - ["padding", "12px 4px"]
+    - selector: "#agents-tasks .fg-row-secondary,#agents-providers .fg-row-secondary"
+      declarations:
+        - ["white-space", "pre-line"]
+        - ["line-height", "1.55"]
+        - ["max-width", "none"]
+        - ["font-size", ".875rem"]
+    - selector: "#agents-tasks .fg-row-select:hover:enabled"
+      declarations:
+        - ["background", "var(--surface)"]
+    - selector: "#agents-providers"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(0,1fr)"]
+        - ["gap", "12px"]
+    - selector: "#agents-providers .fg-tree-row"
+      declarations:
+        - ["margin", "0"]
+        - ["align-items", "stretch"]
+        - ["min-width", "0"]
+        - ["background", "transparent"]
+        - ["box-shadow", "none"]
+    - selector: "#agents-providers .fg-row-select"
+      declarations:
+        - ["grid-template-columns", "minmax(0,1fr)"]
+        - ["background", "var(--surface)"]
+        - ["border", "1px solid rgba(255,255,255,.08)"]
+        - ["padding", "16px"]
+        - ["gap", "12px"]
+    - selector: "#agents-providers .fg-row-select::after"
+      declarations:
+        - ["content", "none"]
+    - selector: "#agents-providers [data-selected=true] .fg-row-select,#agents-providers .fg-row-select:hover:enabled"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["border-color", "var(--accent)"]
+    - selector: "#agents-providers .fg-row-label"
+      declarations:
+        - ["font-size", "1rem"]
+        - ["line-height", "1.4"]
+    - selector: "#agents-usage"
+      declarations:
+        - ["margin-top", "24px"]
+    - selector: "#agents-result"
+      declarations:
+        - ["border", "0"]
+        - ["background", "transparent"]
+        - ["max-height", "none"]
+        - ["overflow", "visible"]
+        - ["padding", "0"]
+    - selector: "#agents-result .fg-message"
+      declarations:
+        - ["border", "0"]
+        - ["background", "transparent"]
+        - ["max-width", "100%"]
+        - ["padding", "0"]
+    - selector: "#agents-result .fg-message-body"
+      declarations:
+        - ["overflow-wrap", "anywhere"]
+        - ["min-width", "0"]
+    - selector: "#agents-result .fg-message-body :is(pre,table)"
+      declarations:
+        - ["max-width", "100%"]
+        - ["overflow-x", "auto"]
+    - selector: "#agents .fg-row"
+      declarations:
+        - ["flex-wrap", "wrap"]
+    - selector: "#agents [role=status]:empty"
+      declarations:
+        - ["display", "none"]
+- media: "(min-width:800px)"
+  rules:
+    - selector: "#agents-providers"
+      declarations:
+        - ["grid-template-columns", "repeat(2,minmax(0,1fr))"]
+    - selector: "#agents-compose"
+      declarations:
+        - ["max-width", "48rem"]

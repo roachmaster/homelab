@@ -26,6 +26,8 @@ pub(crate) struct Session {
 impl Session {
     pub fn new(config: &HostConfig) -> Result<Self, HostError> {
         let catalog = Catalog {
+            work_enabled: config.work.is_some(),
+            usage_enabled: config.usage.is_some(),
             recent_write: None,
             protocol_version: 1,
             session_epoch: random_token()?,

@@ -156,17 +156,13 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
                 headers["forge-request-id"],
                 request["request_id"].as_str().unwrap()
             );
-            assert_eq!(
-                headers["forge-destination"],
-                format!(
-                    "ide.work.{}",
-                    request["kind"]
-                        .as_str()
-                        .unwrap()
-                        .strip_prefix("work_")
-                        .unwrap()
-                )
-            );
+            let kind = request["kind"].as_str().unwrap();
+            let expected = if let Some(suffix) = kind.strip_prefix("work_") {
+                format!("ide.work.{suffix}")
+            } else {
+                format!("ide.usage.{}", kind.strip_prefix("usage_").unwrap())
+            };
+            assert_eq!(headers["forge-destination"], expected);
             received.push(request);
             let bytes = response.to_string();
             write!(
@@ -181,7 +177,7 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
 }
 
 #[test]
-fn work_is_default_off_and_deferred_destinations_are_explicitly_unsupported() {
+fn work_is_default_off_and_unknown_destinations_are_explicitly_unsupported() {
     let files = Files::new();
     let (host, _) = host(&files);
     let auth = authenticate(&host);
@@ -193,12 +189,7 @@ fn work_is_default_off_and_deferred_destinations_are_explicitly_unsupported() {
         503,
         failure("unavailable"),
     );
-    for destination in [
-        "ide.work.result",
-        "ide.work.accept",
-        "ide.work.resume",
-        "ide.work.unknown",
-    ] {
+    for destination in ["ide.work.unknown", "ide.work.execute_shell"] {
         assert!(
             exchange(&host, post(&host, destination, common("work_unknown"), ""))
                 .starts_with("HTTP/1.1 401 ")
@@ -411,10 +402,10 @@ fn work_denies_grants_and_malformed_dtos_before_upstream_effects() {
         assert_reply(
             &host,
             destination,
-            common("work_deferred"),
+            common("work_mismatched"),
             &auth,
-            404,
-            failure("not_found"),
+            400,
+            failure("invalid_request"),
         );
     }
     assert!(
@@ -561,7 +552,7 @@ fn work_rejects_wrong_identity_scope_digest_status_and_unrecognized_response_fie
         ("project_alias", json!("foreign")),
         ("recipe_digest", json!("b".repeat(63))),
         ("base_revision", json!("A".repeat(40))),
-        ("status", json!("running")),
+        ("status", json!("unrecognized")),
         ("revision", json!(0)),
         ("revision", json!(9_007_199_254_740_992_u64)),
         ("mode", json!("execute")),
@@ -828,4 +819,239 @@ fn work_checks_submit_cancel_receipts_and_boundary_pages() {
         assert_reply(&host, destination, body, &auth, status, expected);
     }
     worker.join().unwrap();
+}
+
+#[test]
+fn work_catalog_intersects_independent_grants_and_accepts_execution_event_sequences() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let catalog = reply(
+        "work_catalog",
+        json!({
+            "projects":[{"alias":PROJECT,"label":"Coding","base_revision":"a".repeat(40)},
+                        {"alias":"foreign","label":"Other","base_revision":null}],
+            "profiles":[{"alias":"agy-plan-v1","label":"Gemini","backend":"antigravity","model":"fixture-model","modes":["plan","review","implement"]},
+                        {"alias":"foreign","label":"Hidden","backend":"codex","model":"other","modes":["plan"]}],
+            "worker_status":"ready","observed_at":STAMP
+        }),
+    );
+    let mut expected = catalog.clone();
+    expected["event"]["projects"]
+        .as_array_mut()
+        .unwrap()
+        .truncate(1);
+    expected["event"]["profiles"]
+        .as_array_mut()
+        .unwrap()
+        .truncate(1);
+    expected["event"]["profiles"][0]["modes"] = json!(["plan"]);
+    let mut running = opened();
+    running["event"]["task"]["status"] = json!("running");
+    running["event"]["task"]["revision"] = json!(8);
+    let events = reply(
+        "work_events",
+        json!({"project_alias":PROJECT,"task_id":TASK,"revision":8,"status":"running",
+        "events":[{"sequence":12,"kind":"checkpoint","created_at":STAMP}],"next_sequence":12}),
+    );
+    let worker = backend(
+        upstream,
+        vec![
+            (200, catalog),
+            (200, running.clone()),
+            (200, events.clone()),
+        ],
+    );
+    assert_reply(
+        &host,
+        "ide.work.catalog",
+        json!({"kind":"work_catalog","request_id":"request-1"}),
+        &auth,
+        200,
+        expected,
+    );
+    assert_reply(
+        &host,
+        "ide.work.get",
+        task_request("work_get"),
+        &auth,
+        200,
+        running,
+    );
+    assert_reply(
+        &host,
+        "ide.work.events",
+        task_request("work_events"),
+        &auth,
+        200,
+        events,
+    );
+    assert_eq!(worker.join().unwrap().len(), 3);
+}
+
+#[test]
+fn work_resume_rechecks_saved_mode_before_any_mutation() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut saved = opened();
+    saved["event"]["task"]["mode"] = json!("implement");
+    saved["event"]["task"]["status"] = json!("failed");
+    saved["event"]["task"]["revision"] = json!(4);
+    let worker = backend(upstream, vec![(200, saved)]);
+    let mut request = task_request("work_resume");
+    request["expected_revision"] = json!(4);
+    request["idempotency_key"] = json!("resume-1");
+    request["agent_profile"] = json!("agy-plan-v1");
+    request["reconciliation_receipt_id"] = json!(OTHER);
+    assert_reply(
+        &host,
+        "ide.work.resume",
+        request,
+        &auth,
+        403,
+        failure("denied"),
+    );
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["kind"], "work_get");
+}
+
+fn usage_settings(files: &Files, upstream: &TcpListener) -> forge_ide_web_host::UsageConfig {
+    let work = settings(files, upstream);
+    forge_ide_web_host::UsageConfig {
+        endpoint: work.endpoint,
+        token_file: work.token_file,
+        allowed_projects: work.allowed_projects,
+        allowed_profiles: work.allowed_profiles,
+    }
+}
+fn configured_usage(files: &Files, upstream: &TcpListener) -> Host {
+    let mut value = config(files);
+    value.usage = Some(usage_settings(files, upstream));
+    assert!(value.work.is_none() && value.chat.is_none());
+    host_with_config(value).0
+}
+fn usage_provider(alias: &str) -> Value {
+    json!({"alias":alias,"label":"Codex","provider":"codex","model":"fixture-model",
+        "worker_state":"idle","active_task_id":null,"snapshot_state":"unknown","observed_at":null,
+        "source":"fixture-metadata","version":"1","last_error":null,"refresh_pending":false,
+        "allowance":{"state":"unknown","reason":null,"ordinary_usage_allowed":null,"buckets":[]},
+        "jobs":{"scope":"forge_project","input_tokens":"9007199254740993","output_tokens":"7","cached_input_tokens":null,
+                "total_tokens":"9007199254741000","known_attempts":1,"unknown_attempts":0,"elapsed_ms":"1000"},
+        "account_activity":{"state":"unknown","lifetime_tokens":null,"daily":[]}})
+}
+fn usage_failure(code: &str) -> Value {
+    reply("usage_failed", json!({"code":code}))
+}
+
+#[test]
+fn usage_selected_singleton_is_independent_and_filters_metadata_profiles() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured_usage(&files, &upstream);
+    let auth = authenticate(&host);
+    let overview = reply(
+        "usage_overview",
+        json!({"project_alias":PROJECT,"providers":[usage_provider("agy-plan-v1"),usage_provider("foreign")]}),
+    );
+    let expected = reply(
+        "usage_overview",
+        json!({"project_alias":PROJECT,"providers":[usage_provider("agy-plan-v1")]}),
+    );
+    let refresh = reply(
+        "usage_refresh_queued",
+        json!({"project_alias":PROJECT,"refresh_id":TASK,"profiles":["agy-plan-v1"],"coalesced":true}),
+    );
+    let worker = backend(upstream, vec![(200, overview), (202, refresh.clone())]);
+    assert_reply(
+        &host,
+        "ide.usage.overview",
+        common("usage_overview"),
+        &auth,
+        200,
+        expected,
+    );
+    let mut request = common("usage_refresh");
+    request["agent_profile"] = json!("agy-plan-v1");
+    assert_reply(&host, "ide.usage.refresh", request, &auth, 202, refresh);
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert!(calls
+        .iter()
+        .all(|c| c["kind"].as_str().unwrap().starts_with("usage_")));
+}
+
+#[test]
+fn usage_grants_and_refresh_scope_are_checked_before_io() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured_usage(&files, &upstream);
+    let auth = authenticate(&host);
+    for kind in ["usage_overview", "usage_detail", "usage_refresh"] {
+        let mut request = common(kind);
+        request["project_alias"] = json!("foreign");
+        if kind != "usage_overview" {
+            request["agent_profile"] = json!("agy-plan-v1");
+        }
+        let dest = format!("ide.usage.{}", kind.strip_prefix("usage_").unwrap());
+        assert_reply(&host, &dest, request, &auth, 403, usage_failure("denied"));
+    }
+    for alias in [json!(null), json!("foreign")] {
+        let mut request = common("usage_refresh");
+        request["agent_profile"] = alias;
+        assert_reply(
+            &host,
+            "ide.usage.refresh",
+            request,
+            &auth,
+            403,
+            usage_failure("denied"),
+        );
+    }
+    assert!(exchange(
+        &host,
+        post(&host, "ide.usage.overview", common("usage_overview"), "")
+    )
+    .starts_with("HTTP/1.1 401 "));
+    no_calls(&upstream);
+}
+
+#[test]
+fn agents_entry_redirects_in_the_same_document_and_usage_is_default_off() {
+    let files = Files::new();
+    let (host, _) = host(&files);
+    let auth = authenticate(&host);
+    for path in ["/agents", "/agents/"] {
+        for method in ["GET", "HEAD"] {
+            let response = exchange(
+                &host,
+                format!(
+                    "{method} {path} HTTP/1.1\r\nHost: {}\r\n\r\n",
+                    host.local_addr().unwrap()
+                ),
+            );
+            assert!(response.starts_with("HTTP/1.1 302 "));
+            assert!(response.contains("Location: /#agents\r\n"));
+            assert!(response.ends_with("\r\n\r\n"));
+        }
+    }
+    assert_reply(
+        &host,
+        "ide.usage.overview",
+        common("usage_overview"),
+        &auth,
+        503,
+        usage_failure("unavailable"),
+    );
+    assert_reply(
+        &host,
+        "ide.usage.unknown",
+        common("usage_unknown"),
+        &auth,
+        404,
+        usage_failure("not_found"),
+    );
 }

@@ -318,6 +318,7 @@ fn command(
     }
     if crate::studio::is_destination(destination)
         || crate::work::handles(destination)
+        || crate::usage::handles(destination)
         || history::is_destination(destination)
         || ChatRunRequest::is_destination(destination)
         || MailRequest::is_destination(destination)
@@ -326,6 +327,8 @@ fn command(
             host.studio_dispatch(&header, &r.body, &context)?
         } else if crate::work::handles(destination) {
             host.work_dispatch(&header, &r.body, &context)?
+        } else if crate::usage::handles(destination) {
+            host.usage_dispatch(&header, &r.body, &context)?
         } else {
             host.postgres_dispatch(&header, &r.body, &context)?
         };
@@ -422,6 +425,16 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
     }
     if !r.body.is_empty() {
         return Response::error(400, "unexpected_body");
+    }
+    if matches!(r.path.as_str(), "/agents" | "/agents/") {
+        if !matches!(r.method.as_str(), "GET" | "HEAD") {
+            let mut response = Response::error(405, "method_not_allowed");
+            response.allow = Some("GET, HEAD");
+            return response;
+        }
+        let mut response = Response::return_to_portal(r.method == "HEAD");
+        response.location = Some("/#agents");
+        return response;
     }
     let asset = host
         .assets()

@@ -411,9 +411,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==5"));
+    assert!(worker.contains("wasm.abi_version()!==6"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 5);
+    assert_eq!(manifest["abi_version"], 6);
 }
 
 #[test]
@@ -646,4 +646,57 @@ fn source_and_pane_navigation_are_reusable_safe_declarations() {
     assert!(source.csrf);
     assert_eq!(source.accept_events, ["source_result"]);
     assert_eq!(source.deadline.as_deref(), Some("request.expires_unix_ms"));
+}
+
+#[test]
+fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
+    let c = config();
+    assert_eq!(
+        c.transport.entry_actions.get("agents").map(String::as_str),
+        Some("open_agents")
+    );
+    for kind in ["work_submit", "work_cancel", "work_accept", "work_resume"] {
+        let binding = c
+            .transport
+            .bindings
+            .iter()
+            .find(|b| b.kind == kind)
+            .unwrap();
+        assert!(binding.csrf);
+        assert_eq!(
+            binding.policy.local_checkpoint_path.as_deref(),
+            Some("retry_intent")
+        );
+        assert!(binding.policy.expire_session_on_unauthenticated);
+        assert!(
+            !binding.policy.expire_session_on_denial,
+            "a 403 grant failure keeps the browser session"
+        );
+    }
+    let bundle = build(c);
+    let main = std::str::from_utf8(&bundle.files["main.js"]).unwrap();
+    let worker = std::str::from_utf8(&bundle.files["worker.js"]).unwrap();
+    assert!(!main.contains("fetch("));
+    assert!(main.contains("navigation_checkpoint_saved"));
+    assert!(worker.contains("!await localCheckpoint.pending"));
+    assert!(worker.contains("restore_agents_navigation"));
+    assert!(worker.contains("wasm.abi_version()!==6"));
+}
+
+#[test]
+fn component_growth_and_checkpoint_paths_stay_bounded() {
+    let mut c = config();
+    c.document.children = (0..385)
+        .map(|i| component!(text format!("limit-{i}"), "Bounded"))
+        .collect();
+    assert!(register_assets("assets", c).is_err());
+    let mut c = config();
+    let binding = c
+        .transport
+        .bindings
+        .iter_mut()
+        .find(|b| b.kind == "work_submit")
+        .unwrap();
+    binding.policy.local_checkpoint_path = Some("retry_intent;execute()".into());
+    assert!(register_assets("assets", c).is_err());
 }

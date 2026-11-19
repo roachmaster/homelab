@@ -23,7 +23,11 @@ BEGIN
         'tool_calls', 'tool_results', 'run_events',
         'ide_workspace_history', 'ide_workspace_tabs', 'ide_chats',
         'inference_results', 'gpu_worker_readiness', 'mail_threads', 'mail_messages',
-        'coding_tasks', 'coding_events', 'coding_control_receipts'
+        'coding_tasks', 'coding_events', 'coding_control_receipts',
+        'coding_worker_grants', 'coding_worker_readiness', 'coding_attempts',
+        'coding_result_chunks', 'coding_reconciliation_receipts',
+        'coding_provider_usage', 'coding_provider_usage_identities',
+        'coding_usage_refresh_requests'
     ] LOOP
         IF pg_catalog.to_regclass('forge_agent.' || relation) IS NULL THEN
             RAISE EXCEPTION 'Missing relation forge_agent.%', relation;
@@ -91,6 +95,13 @@ BEGIN
         WHERE version = 9 AND name = 'coding_admission'
     ) THEN
         RAISE EXCEPTION 'Forge coding admission migration 0009 is missing';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM forge_agent.schema_migrations
+        WHERE version = 10 AND name = 'coding_execution_and_usage'
+    ) THEN
+        RAISE EXCEPTION 'Forge coding execution and usage migration 0010 is missing';
     END IF;
 
     SELECT attnum INTO att_archive_reason
@@ -181,15 +192,24 @@ BEGIN
     -- Whitespace outside quoted values is ignored; other changes fail closed.
     FOR expected IN
         SELECT * FROM (VALUES
-            ('coding_tasks_by_project_created', $def$CREATE INDEX coding_tasks_by_project_created ON forge_agent.coding_tasks USING btree (owner_id, project_alias, created_at, id)$def$),
-            ('coding_tasks_by_project_status_created', $def$CREATE INDEX coding_tasks_by_project_status_created ON forge_agent.coding_tasks USING btree (owner_id, project_alias, status, created_at, id)$def$)
-        ) AS indexes(relname, definition)
+            ('coding_tasks', 'coding_tasks_by_project_created', $def$CREATE INDEX coding_tasks_by_project_created ON forge_agent.coding_tasks USING btree (owner_id, project_alias, created_at, id)$def$),
+            ('coding_tasks', 'coding_tasks_by_project_status_created', $def$CREATE INDEX coding_tasks_by_project_status_created ON forge_agent.coding_tasks USING btree (owner_id, project_alias, status, created_at, id)$def$),
+            ('coding_worker_readiness', 'coding_worker_readiness_by_owner_observed', $def$CREATE INDEX coding_worker_readiness_by_owner_observed ON forge_agent.coding_worker_readiness USING btree (owner_id, observed_at DESC)$def$),
+            ('coding_attempts', 'coding_attempts_one_open_per_task', $def$CREATE UNIQUE INDEX coding_attempts_one_open_per_task ON forge_agent.coding_attempts USING btree (owner_id, project_alias, task_id) WHERE (lease_expires_at IS NOT NULL)$def$),
+            ('coding_attempts', 'coding_attempts_one_reserved_per_task', $def$CREATE UNIQUE INDEX coding_attempts_one_reserved_per_task ON forge_agent.coding_attempts USING btree (owner_id, project_alias, task_id) WHERE reservation_active$def$),
+            ('coding_attempts', 'coding_attempts_by_task_no', $def$CREATE INDEX coding_attempts_by_task_no ON forge_agent.coding_attempts USING btree (owner_id, project_alias, task_id, attempt_no DESC)$def$),
+            ('coding_attempts', 'coding_attempts_by_lease_expiry', $def$CREATE INDEX coding_attempts_by_lease_expiry ON forge_agent.coding_attempts USING btree (lease_expires_at) WHERE (lease_expires_at IS NOT NULL)$def$),
+            ('coding_attempts', 'coding_attempts_by_project_usage', $def$CREATE INDEX coding_attempts_by_project_usage ON forge_agent.coding_attempts USING btree (owner_id, project_alias, published_at) WHERE (published_at IS NOT NULL)$def$),
+            ('coding_reconciliation_receipts', 'coding_reconciliation_receipts_by_task_rev', $def$CREATE INDEX coding_reconciliation_receipts_by_task_rev ON forge_agent.coding_reconciliation_receipts USING btree (owner_id, project_alias, task_id, task_revision DESC, created_at DESC)$def$),
+            ('coding_usage_refresh_requests', 'coding_usage_refresh_one_open_per_profile', $def$CREATE UNIQUE INDEX coding_usage_refresh_one_open_per_profile ON forge_agent.coding_usage_refresh_requests USING btree (owner_id, profile_alias) WHERE (status = ANY (ARRAY['pending'::text, 'in_progress'::text]))$def$),
+            ('coding_usage_refresh_requests', 'coding_usage_refresh_pending_order', $def$CREATE INDEX coding_usage_refresh_pending_order ON forge_agent.coding_usage_refresh_requests USING btree (owner_id, requested_at, profile_alias) WHERE (status = 'pending'::text)$def$)
+        ) AS indexes(tabname, relname, definition)
     LOOP
         SELECT pg_catalog.pg_get_indexdef(i.indexrelid, 0, false)
         INTO actual_expression
         FROM pg_catalog.pg_index i
         WHERE i.indexrelid = pg_catalog.to_regclass('forge_agent.' || expected.relname)
-          AND i.indrelid = 'forge_agent.coding_tasks'::regclass
+          AND i.indrelid = ('forge_agent.' || expected.tabname)::regclass
           AND i.indisvalid AND i.indisready AND i.indislive;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'Missing or invalid index forge_agent.%', expected.relname;
@@ -228,17 +248,18 @@ BEGIN
             ('coding_tasks', 'coding_tasks_agent_profile_check', 'c', $def$CHECK ((agent_profile ~ '^[A-Za-z0-9_.-]{1,64}$'::text))$def$),
             ('coding_tasks', 'coding_tasks_prompt_check', 'c', E'CHECK ((((octet_length(prompt) >= 1) AND (octet_length(prompt) <= 8192)) AND (btrim(prompt, '' \t\r\n''::text) <> ''''::text)))'),
             ('coding_tasks', 'coding_tasks_acceptance_criteria_check', 'c', E'CHECK ((((octet_length(acceptance_criteria) >= 1) AND (octet_length(acceptance_criteria) <= 2048)) AND (btrim(acceptance_criteria, '' \t\r\n''::text) <> ''''::text)))'),
+            ('coding_tasks', 'coding_tasks_title_check', 'c', $def$CHECK (((title IS NULL) OR ((char_length(title) >= 1) AND (char_length(title) <= 128) AND (octet_length(title) >= 1) AND (octet_length(title) <= 512) AND (btrim(title) <> ''::text))))$def$),
+            ('coding_tasks', 'coding_tasks_resume_workspace_digest_check', 'c', $def$CHECK (((resume_workspace_digest IS NULL) OR (resume_workspace_digest ~ '^[0-9a-f]{64}$'::text)))$def$),
+            ('coding_tasks', 'coding_tasks_review_note_check', 'c', $def$CHECK (((review_note IS NULL) OR (octet_length(review_note) <= 2048)))$def$),
             ('coding_tasks', 'coding_tasks_pinned_recipe_check', 'c', $def$CHECK ((((jsonb_typeof(pinned_recipe) = 'object'::text)
-                 AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text]) = '{}'::jsonb)
                  AND (pinned_recipe ? 'version'::text)
-                 AND ((pinned_recipe -> 'version'::text) = '1'::jsonb)
                  AND (pinned_recipe ? 'backend'::text)
                  AND (jsonb_typeof((pinned_recipe -> 'backend'::text)) = 'string'::text)
                  AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text]))
                  AND (pinned_recipe ? 'model'::text)
                  AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text)
-                 AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1)
-                 AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128))
+                 AND (octet_length((pinned_recipe ->> 'model'::text)) >= 1)
+                 AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128)
                  AND (btrim((pinned_recipe ->> 'model'::text)) <> ''::text)
                  AND ((pinned_recipe ->> 'model'::text) ~ '^[ -~]+$'::text)
                  AND (pinned_recipe ? 'resource_profile'::text)
@@ -248,29 +269,44 @@ BEGIN
                  AND (jsonb_typeof((pinned_recipe -> 'mode'::text)) = 'string'::text)
                  AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text]))
                  AND (pinned_recipe ? 'generation_token_limit'::text)
-                 AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text)) IS TRUE))$def$),
+                 AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text)
+                 AND ((((pinned_recipe -> 'version'::text) = '1'::jsonb)
+                     AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text]) = '{}'::jsonb))
+                 OR (((pinned_recipe -> 'version'::text) = '2'::jsonb)
+                     AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb)
+                     AND (pinned_recipe ? 'policy_digest'::text)
+                     AND (jsonb_typeof((pinned_recipe -> 'policy_digest'::text)) = 'string'::text)
+                     AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)))) IS TRUE))$def$),
             ('coding_tasks', 'coding_tasks_recipe_digest_check', 'c', $def$CHECK ((recipe_digest ~ '^[0-9a-f]{64}$'::text))$def$),
-            ('coding_tasks', 'coding_tasks_status_check', 'c', $def$CHECK ((status = ANY (ARRAY['queued'::text, 'cancelled'::text])))$def$),
+            ('coding_tasks', 'coding_tasks_status_check', 'c', $def$CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'cancel_requested'::text, 'awaiting_review'::text, 'completed'::text, 'cancelled'::text, 'failed'::text, 'quota_blocked'::text, 'blocked_auth'::text, 'blocked_permission'::text, 'needs_reconcile'::text])))$def$),
             ('coding_tasks', 'coding_tasks_revision_check', 'c', $def$CHECK (((revision >= 1)
                  AND (revision <= '9007199254740991'::bigint)))$def$),
             ('coding_tasks', 'coding_tasks_status_revision_check', 'c', $def$CHECK (((((status = 'queued'::text)
                  AND (cancelled_at IS NULL)
-                 AND (revision = 1)) OR ((status = 'cancelled'::text)
+                 AND (accepted_at IS NULL)) OR ((status = 'cancelled'::text)
                  AND (cancelled_at IS NOT NULL)
+                 AND (accepted_at IS NULL)
+                 AND (revision > 1)) OR ((status = 'completed'::text)
+                 AND (accepted_at IS NOT NULL)
+                 AND (cancelled_at IS NULL)
+                 AND (revision > 1)) OR ((status = ANY (ARRAY['running'::text, 'cancel_requested'::text, 'awaiting_review'::text, 'failed'::text, 'quota_blocked'::text, 'blocked_auth'::text, 'blocked_permission'::text, 'needs_reconcile'::text]))
+                 AND (cancelled_at IS NULL)
+                 AND (accepted_at IS NULL)
                  AND (revision > 1))) IS TRUE))$def$),
             ('coding_tasks', 'coding_tasks_recipe_mode_check', 'c', $def$CHECK (((pinned_recipe ->> 'mode'::text) = mode))$def$),
             ('coding_events', 'coding_events_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, sequence)$def$),
             ('coding_events', 'coding_events_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
             ('coding_events', 'coding_events_sequence_check', 'c', $def$CHECK (((sequence >= 1)
                  AND (sequence <= '9007199254740991'::bigint)))$def$),
-            ('coding_events', 'coding_events_kind_check', 'c', $def$CHECK ((event_kind = ANY (ARRAY['queued'::text, 'cancelled'::text])))$def$),
+            ('coding_events', 'coding_events_kind_check', 'c', $def$CHECK ((event_kind = ANY (ARRAY['queued'::text, 'started'::text, 'checkpoint'::text, 'cancel_requested'::text, 'cancelled'::text, 'awaiting_review'::text, 'completed'::text, 'failed'::text, 'quota_blocked'::text, 'blocked_auth'::text, 'blocked_permission'::text, 'needs_reconcile'::text, 'resumed'::text])))$def$),
             ('coding_events', 'coding_events_payload_check', 'c', $def$CHECK ((jsonb_typeof(payload) = 'object'::text))$def$),
             ('coding_events', 'coding_events_sequence_kind_check', 'c', $def$CHECK (((((sequence = 1)
                  AND (event_kind = 'queued'::text)) OR ((sequence > 1)
-                 AND (event_kind = 'cancelled'::text))) IS TRUE))$def$),
+                 AND (event_kind <> 'queued'::text))) IS TRUE))$def$),
             ('coding_control_receipts', 'coding_control_receipts_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, action, idempotency_key)$def$),
+            ('coding_control_receipts', 'coding_control_receipts_task_key_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, idempotency_key)$def$),
             ('coding_control_receipts', 'coding_control_receipts_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
-            ('coding_control_receipts', 'coding_control_receipts_action_check', 'c', $def$CHECK ((action = 'cancel'::text))$def$),
+            ('coding_control_receipts', 'coding_control_receipts_action_check', 'c', $def$CHECK ((action = ANY (ARRAY['cancel'::text, 'accept'::text, 'resume'::text])))$def$),
             ('coding_control_receipts', 'coding_control_receipts_idempotency_key_check', 'c', $def$CHECK ((idempotency_key ~ '^[A-Za-z0-9_.-]{1,128}$'::text))$def$),
             ('coding_control_receipts', 'coding_control_receipts_intent_digest_check', 'c', $def$CHECK ((intent_digest ~ '^[0-9a-f]{64}$'::text))$def$),
             ('coding_control_receipts', 'coding_control_receipts_base_revision_check', 'c', $def$CHECK (((base_revision >= 1)
@@ -278,7 +314,56 @@ BEGIN
             ('coding_control_receipts', 'coding_control_receipts_result_revision_check', 'c', $def$CHECK (((result_revision >= 2)
                  AND (result_revision <= '9007199254740991'::bigint)))$def$),
             ('coding_control_receipts', 'coding_control_receipts_receipt_json_check', 'c', $def$CHECK ((jsonb_typeof(receipt_json) = 'object'::text))$def$),
-            ('coding_control_receipts', 'coding_control_receipts_revision_step_check', 'c', $def$CHECK ((result_revision = (base_revision + 1)))$def$)
+            ('coding_control_receipts', 'coding_control_receipts_revision_step_check', 'c', $def$CHECK ((result_revision = (base_revision + 1)))$def$),
+            ('coding_worker_grants', 'coding_worker_grants_pkey', 'p', $def$PRIMARY KEY (worker_role, owner_id, project_alias, agent_profile, mode)$def$),
+            ('coding_worker_grants', 'coding_worker_grants_mode_check', 'c', $def$CHECK ((mode = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text])))$def$),
+            ('coding_worker_readiness', 'coding_worker_readiness_pkey', 'p', $def$PRIMARY KEY (worker_role, owner_id, worker_id)$def$),
+            ('coding_worker_readiness', 'coding_worker_readiness_policy_digest_check', 'c', $def$CHECK ((policy_digest ~ '^[0-9a-f]{64}$'::text))$def$),
+            ('coding_attempts', 'coding_attempts_agent_profile_check', 'c', $def$CHECK ((agent_profile ~ '^[A-Za-z0-9_.-]{1,64}$'::text))$def$),
+            ('coding_attempts', 'coding_attempts_pinned_recipe_check', 'c', $def$CHECK ((((jsonb_typeof(pinned_recipe) = 'object'::text)
+                 AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb)
+                 AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text])
+                 AND ((pinned_recipe -> 'version'::text) = '2'::jsonb)
+                 AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text]))
+                 AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text)
+                 AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1)
+                 AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128))
+                 AND ((pinned_recipe ->> 'resource_profile'::text) = 'forge-coding-v1'::text)
+                 AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text]))
+                 AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text)
+                 AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),
+            ('coding_attempts', 'coding_attempts_recipe_digest_check', 'c', $def$CHECK ((recipe_digest ~ '^[0-9a-f]{64}$'::text))$def$),
+            ('coding_attempts', 'coding_attempts_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, attempt_id)$def$),
+            ('coding_attempts', 'coding_attempts_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
+            ('coding_attempts', 'coding_attempts_id_unique', 'u', $def$UNIQUE (attempt_id)$def$),
+            ('coding_attempts', 'coding_attempts_no_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, attempt_no)$def$),
+            ('coding_attempts', 'coding_attempts_unit_name_unique', 'u', $def$UNIQUE (unit_name)$def$),
+            ('coding_attempts', 'coding_attempts_unit_name_check', 'c', $def$CHECK ((unit_name ~ '^forge-coding-[0-9a-f]{32}$'::text))$def$),
+            ('coding_attempts', 'coding_attempts_phase_check', 'c', $def$CHECK ((phase = ANY (ARRAY['starting'::text, 'running'::text, 'stopping'::text, 'stopped'::text, 'unknown'::text])))$def$),
+            ('coding_attempts', 'coding_attempts_outcome_check', 'c', $def$CHECK (((outcome IS NULL) OR (outcome = ANY (ARRAY['awaiting_review'::text, 'failed'::text, 'quota_blocked'::text, 'blocked_auth'::text, 'blocked_permission'::text, 'cancelled'::text, 'needs_reconcile'::text]))))$def$),
+            ('coding_attempts', 'coding_attempts_result_byte_count_check', 'c', $def$CHECK (((result_byte_count IS NULL) OR ((result_byte_count >= 1) AND (result_byte_count <= 16777216))))$def$),
+            ('coding_attempts', 'coding_attempts_result_chunk_count_check', 'c', $def$CHECK (((result_chunk_count IS NULL) OR ((result_chunk_count >= 1) AND (result_chunk_count <= 1024))))$def$),
+            ('coding_attempts', 'coding_attempts_summary_check', 'c', $def$CHECK ((octet_length(summary) <= 4096))$def$),
+            ('coding_attempts', 'coding_attempts_stop_proof_check', 'c', $def$CHECK (((stop_proof IS NULL) OR ((jsonb_typeof(stop_proof) = 'object'::text) AND ((stop_proof - ARRAY['unit_name'::text, 'scope_stopped'::text, 'source'::text, 'checked_at'::text]) = '{}'::jsonb) AND ((stop_proof ->> 'unit_name'::text) = unit_name) AND ((stop_proof ->> 'source'::text) = 'systemd'::text) AND (jsonb_typeof((stop_proof -> 'scope_stopped'::text)) = 'boolean'::text))))$def$),
+            ('coding_attempts', 'coding_attempts_publish_state_check', 'c', $def$CHECK (((((outcome IS NULL) AND (outcome_digest IS NULL) AND (publish_receipt IS NULL) AND (published_at IS NULL)) OR ((outcome IS NOT NULL) AND (outcome_digest IS NOT NULL) AND (publish_receipt IS NOT NULL) AND (published_at IS NOT NULL))) IS TRUE))$def$),
+            ('coding_attempts', 'coding_attempts_result_manifest_check', 'c', $def$CHECK (((((result_sha256 IS NULL) AND (result_byte_count IS NULL) AND (result_chunk_count IS NULL)) OR ((result_sha256 IS NOT NULL) AND (result_byte_count IS NOT NULL) AND (result_chunk_count IS NOT NULL))) IS TRUE))$def$),
+            ('coding_attempts', 'coding_attempts_awaiting_review_manifest_check', 'c', $def$CHECK (((outcome IS NULL) OR (outcome <> 'awaiting_review'::text) OR (result_sha256 IS NOT NULL)))$def$),
+            ('coding_result_chunks', 'coding_result_chunks_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, attempt_id, chunk_index)$def$),
+            ('coding_result_chunks', 'coding_result_chunks_attempt_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id, attempt_id) REFERENCES forge_agent.coding_attempts(owner_id, project_alias, task_id, attempt_id)$def$),
+            ('coding_result_chunks', 'coding_result_chunks_index_check', 'c', $def$CHECK (((chunk_index >= 0) AND (chunk_index <= 1023)))$def$),
+            ('coding_result_chunks', 'coding_result_chunks_content_check', 'c', $def$CHECK (((octet_length(content) >= 1) AND (octet_length(content) <= 16384)))$def$),
+            ('coding_result_chunks', 'coding_result_chunks_length_match_check', 'c', $def$CHECK ((byte_length = octet_length(content)))$def$),
+            ('coding_reconciliation_receipts', 'coding_reconciliation_receipts_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, receipt_id)$def$),
+            ('coding_reconciliation_receipts', 'coding_reconciliation_receipts_id_unique', 'u', $def$UNIQUE (receipt_id)$def$),
+            ('coding_reconciliation_receipts', 'coding_reconciliation_receipts_attempt_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id, attempt_id) REFERENCES forge_agent.coding_attempts(owner_id, project_alias, task_id, attempt_id)$def$),
+            ('coding_reconciliation_receipts', 'coding_reconciliation_receipts_stop_proof_check', 'c', $def$CHECK (((jsonb_typeof(stop_proof) = 'object'::text) AND ((stop_proof - ARRAY['unit_name'::text, 'scope_stopped'::text, 'source'::text, 'checked_at'::text]) = '{}'::jsonb) AND ((stop_proof ->> 'source'::text) = 'systemd'::text) AND ((stop_proof -> 'scope_stopped'::text) = 'true'::jsonb)))$def$),
+            ('coding_provider_usage', 'coding_provider_usage_pkey', 'p', $def$PRIMARY KEY (owner_id, profile_alias)$def$),
+            ('coding_provider_usage', 'coding_provider_usage_generation_order_check', 'c', $def$CHECK ((recorded_generation <= current_generation))$def$),
+            ('coding_provider_usage', 'coding_provider_usage_epoch_order_check', 'c', $def$CHECK ((recorded_epoch <= configuration_epoch))$def$),
+            ('coding_provider_usage_identities', 'coding_provider_usage_identities_pkey', 'p', $def$PRIMARY KEY (owner_id, profile_alias)$def$),
+            ('coding_provider_usage_identities', 'coding_provider_usage_identities_usage_fk', 'f', $def$FOREIGN KEY (owner_id, profile_alias) REFERENCES forge_agent.coding_provider_usage(owner_id, profile_alias)$def$),
+            ('coding_usage_refresh_requests', 'coding_usage_refresh_requests_pkey', 'p', $def$PRIMARY KEY (owner_id, profile_alias, refresh_id)$def$),
+            ('coding_usage_refresh_requests', 'coding_usage_refresh_requests_status_check', 'c', $def$CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'failed'::text])))$def$)
         ) AS req(relname, conname, contype, definition)
     LOOP
         SELECT pg_catalog.pg_get_constraintdef(c.oid, false), c.conindid
@@ -324,7 +409,11 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM unnest(ARRAY[
-            'coding_tasks', 'coding_events', 'coding_control_receipts'
+            'coding_tasks', 'coding_events', 'coding_control_receipts',
+            'coding_worker_grants', 'coding_worker_readiness', 'coding_attempts',
+            'coding_result_chunks', 'coding_reconciliation_receipts',
+            'coding_provider_usage', 'coding_provider_usage_identities',
+            'coding_usage_refresh_requests'
         ]) AS relname
         WHERE has_table_privilege(
                   'public',
@@ -336,12 +425,24 @@ BEGIN
                   'forge_agent.' || relname,
                   'SELECT, INSERT, UPDATE, REFERENCES'
               )
-    ) THEN
+    ) OR has_schema_privilege('public', 'forge_coding_worker_api', 'USAGE, CREATE')
+      OR has_schema_privilege('public', 'forge_coding_reconciler_api', 'USAGE, CREATE')
+      OR EXISTS (
+          SELECT 1
+          FROM pg_catalog.pg_proc p
+          WHERE p.pronamespace IN (
+              'forge_coding_worker_api'::regnamespace,
+              'forge_coding_reconciler_api'::regnamespace
+          )
+            AND has_function_privilege('public', p.oid, 'EXECUTE')
+      ) THEN
         RAISE EXCEPTION 'Unexpected PUBLIC privileges on Forge coding admission tables';
     END IF;
 
     IF has_schema_privilege('forge_gpu_worker', 'forge_agent', 'USAGE, CREATE')
        OR has_schema_privilege('forge_gpu_worker', 'forge_agent_worker_api', 'CREATE')
+       OR has_schema_privilege('forge_gpu_worker', 'forge_coding_worker_api', 'USAGE, CREATE')
+       OR has_schema_privilege('forge_gpu_worker', 'forge_coding_reconciler_api', 'USAGE, CREATE')
        OR NOT has_schema_privilege('forge_gpu_worker', 'forge_agent_worker_api', 'USAGE')
        OR has_database_privilege('forge_gpu_worker', current_database(), 'CREATE, TEMP')
        OR has_function_privilege('forge_gpu_worker', 'forge_agent_worker_api.lock_attempt(uuid,uuid)', 'EXECUTE')
@@ -356,8 +457,90 @@ BEGIN
              AND (has_table_privilege('forge_gpu_worker', rel.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
                   OR has_any_column_privilege('forge_gpu_worker', rel.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
        )
+       OR EXISTS (
+           SELECT 1
+           FROM pg_catalog.pg_proc p
+           WHERE p.pronamespace IN (
+               'forge_coding_worker_api'::regnamespace,
+               'forge_coding_reconciler_api'::regnamespace
+           )
+             AND has_function_privilege('forge_gpu_worker', p.oid, 'EXECUTE')
+       )
     THEN
         RAISE EXCEPTION 'Unexpected Forge GPU worker privileges';
+    END IF;
+
+    IF has_schema_privilege('forge_coding_worker', 'forge_agent', 'USAGE, CREATE')
+       OR has_schema_privilege('forge_coding_worker', 'forge_agent_worker_api', 'USAGE, CREATE')
+       OR has_schema_privilege('forge_coding_worker', 'forge_coding_reconciler_api', 'USAGE, CREATE')
+       OR has_schema_privilege('forge_coding_worker', 'forge_coding_worker_api', 'CREATE')
+       OR NOT has_schema_privilege('forge_coding_worker', 'forge_coding_worker_api', 'USAGE')
+       OR has_database_privilege('forge_coding_worker', current_database(), 'CREATE, TEMP')
+       OR has_function_privilege('forge_coding_worker', 'forge_coding_worker_api._validate_stop_proof(jsonb,text)', 'EXECUTE')
+       OR has_function_privilege('forge_coding_worker', 'forge_coding_worker_api._validate_usage_json(jsonb)', 'EXECUTE')
+       OR has_function_privilege('forge_coding_worker', 'forge_coding_worker_api._validate_provider_snapshot(jsonb)', 'EXECUTE')
+       OR has_function_privilege('forge_coding_worker', 'forge_coding_worker_api._lock_task_and_attempt(uuid,uuid)', 'EXECUTE')
+       OR NOT (
+           has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.advertise(text,uuid,jsonb,jsonb,text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.claim(text,uuid,text[])', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.renew(uuid,uuid)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.checkpoint(uuid,uuid,text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.append_result(uuid,uuid,integer,text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.publish(uuid,uuid,text,jsonb,jsonb,text,jsonb)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.record_stop(uuid,uuid,jsonb,text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.cancellation_requested(uuid,uuid)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.begin_usage_poll(text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.next_refresh()', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.record_usage(text,bigint,bigint,jsonb)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.fail_usage_poll(text,bigint,bigint,text)', 'EXECUTE')
+       )
+       OR EXISTS (
+           SELECT FROM pg_catalog.pg_class rel
+           WHERE rel.relnamespace = 'forge_agent'::regnamespace AND rel.relkind IN ('r', 'p')
+             AND (has_table_privilege('forge_coding_worker', rel.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                  OR has_any_column_privilege('forge_coding_worker', rel.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+       )
+       OR EXISTS (
+           SELECT 1
+           FROM pg_catalog.pg_proc p
+           WHERE p.pronamespace IN (
+               'forge_agent_worker_api'::regnamespace,
+               'forge_coding_reconciler_api'::regnamespace
+           )
+             AND has_function_privilege('forge_coding_worker', p.oid, 'EXECUTE')
+       )
+    THEN
+        RAISE EXCEPTION 'Unexpected Forge coding worker privileges';
+    END IF;
+
+    IF has_schema_privilege('forge_coding_reconciler', 'forge_agent', 'USAGE, CREATE')
+       OR has_schema_privilege('forge_coding_reconciler', 'forge_agent_worker_api', 'USAGE, CREATE')
+       OR has_schema_privilege('forge_coding_reconciler', 'forge_coding_worker_api', 'USAGE, CREATE')
+       OR has_schema_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api', 'CREATE')
+       OR NOT has_schema_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api', 'USAGE')
+       OR has_database_privilege('forge_coding_reconciler', current_database(), 'CREATE, TEMP')
+       OR NOT (
+           has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.expire_leases()', 'EXECUTE')
+           AND has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.pending_reconciliations(integer)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.reconcile(uuid,uuid,text,jsonb)', 'EXECUTE')
+       )
+       OR EXISTS (
+           SELECT FROM pg_catalog.pg_class rel
+           WHERE rel.relnamespace = 'forge_agent'::regnamespace AND rel.relkind IN ('r', 'p')
+             AND (has_table_privilege('forge_coding_reconciler', rel.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+                  OR has_any_column_privilege('forge_coding_reconciler', rel.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))
+       )
+       OR EXISTS (
+           SELECT 1
+           FROM pg_catalog.pg_proc p
+           WHERE p.pronamespace IN (
+               'forge_agent_worker_api'::regnamespace,
+               'forge_coding_worker_api'::regnamespace
+           )
+             AND has_function_privilege('forge_coding_reconciler', p.oid, 'EXECUTE')
+       )
+    THEN
+        RAISE EXCEPTION 'Unexpected Forge coding reconciler privileges';
     END IF;
 END;
 $verify$;

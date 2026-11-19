@@ -155,6 +155,14 @@ class WorkStorePostgresTest(unittest.TestCase):
             "coding_tasks": {"SELECT", "INSERT", "UPDATE"},
             "coding_events": {"SELECT", "INSERT"},
             "coding_control_receipts": {"SELECT", "INSERT"},
+            "coding_worker_grants": set(),
+            "coding_worker_readiness": {"SELECT"},
+            "coding_attempts": {"SELECT"},
+            "coding_result_chunks": {"SELECT"},
+            "coding_reconciliation_receipts": {"SELECT"},
+            "coding_provider_usage": {"SELECT"},
+            "coding_provider_usage_identities": set(),
+            "coding_usage_refresh_requests": {"SELECT", "INSERT"},
         }
         columns = {
             "mail_threads": "owner_id",
@@ -164,6 +172,14 @@ class WorkStorePostgresTest(unittest.TestCase):
             "coding_tasks": "prompt",
             "coding_events": "payload",
             "coding_control_receipts": "receipt_json",
+            "coding_worker_grants": "worker_role",
+            "coding_worker_readiness": "worker_id",
+            "coding_attempts": "attempt_token",
+            "coding_result_chunks": "content",
+            "coding_reconciliation_receipts": "workspace_digest",
+            "coding_provider_usage": "allowance",
+            "coding_provider_usage_identities": "account_identity",
+            "coding_usage_refresh_requests": "profile_alias",
         }
         for table, privileges in allowed.items():
             for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
@@ -296,7 +312,7 @@ class WorkStorePostgresTest(unittest.TestCase):
              "FOREIGN KEY (task_id) REFERENCES forge_agent.coding_tasks(id)"),
             ("coding_tasks", "coding_tasks_revision_check", "CHECK (revision >= 1)"),
             ("coding_tasks", "coding_tasks_status_check",
-             "CHECK (status IN ('queued', 'cancelled', 'running'))"),
+             "CHECK (status IN ('queued', 'cancelled'))"),
             ("coding_tasks", "coding_tasks_status_revision_check", "CHECK (true)"),
             ("coding_tasks", "coding_tasks_pinned_recipe_check",
              "CHECK (jsonb_typeof(pinned_recipe) = 'object')"),
@@ -304,6 +320,14 @@ class WorkStorePostgresTest(unittest.TestCase):
             ("coding_events", "coding_events_sequence_check", "CHECK (sequence >= 1)"),
             ("coding_control_receipts", "coding_control_receipts_revision_step_check",
              "CHECK (result_revision >= base_revision)"),
+            ("coding_control_receipts", "coding_control_receipts_task_key_unique",
+             "UNIQUE (owner_id, project_alias, task_id, action, idempotency_key)"),
+            ("coding_attempts", "coding_attempts_awaiting_review_manifest_check", "CHECK (true)"),
+            ("coding_attempts", "coding_attempts_stop_proof_check", "CHECK (true)"),
+            ("coding_result_chunks", "coding_result_chunks_length_match_check", "CHECK (byte_length > 0)"),
+            ("coding_reconciliation_receipts", "coding_reconciliation_receipts_stop_proof_check",
+             "CHECK (jsonb_typeof(stop_proof) = 'object')"),
+            ("coding_provider_usage", "coding_provider_usage_generation_order_check", "CHECK (true)"),
         )
         for table, constraint, drift in drifts:
             with self.subTest(constraint=constraint):
@@ -350,6 +374,31 @@ class WorkStorePostgresTest(unittest.TestCase):
                     self.assert_sql_verification(script, error=name)
                 finally:
                     self.cluster.admin_exec(f"DROP INDEX forge_agent.{name}", original)
+                self.assert_sql_verification(script)
+
+        # Also verify migration 0010 partial unique index drift detection.
+        for idx_name, bad_def in (
+            (
+                "coding_attempts_one_reserved_per_task",
+                "ON forge_agent.coding_attempts (owner_id, project_alias, task_id)",
+            ),
+            (
+                "coding_usage_refresh_one_open_per_profile",
+                "ON forge_agent.coding_usage_refresh_requests (owner_id, profile_alias) WHERE status = 'pending'",
+            ),
+        ):
+            with self.subTest(index=idx_name):
+                with closing(self.cluster.connect("postgres")) as connection, connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_get_indexdef(%s::regclass, 0, false)", (f"forge_agent.{idx_name}",))
+                    orig_idx = cursor.fetchone()[0]
+                try:
+                    self.cluster.admin_exec(
+                        f"DROP INDEX forge_agent.{idx_name}",
+                        f"CREATE UNIQUE INDEX {idx_name} {bad_def}",
+                    )
+                    self.assert_sql_verification(script, error=idx_name)
+                finally:
+                    self.cluster.admin_exec(f"DROP INDEX forge_agent.{idx_name}", orig_idx)
                 self.assert_sql_verification(script)
 
     def test_schema_constraints_and_runner_immutability_grants(self):

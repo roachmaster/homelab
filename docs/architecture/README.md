@@ -1,6 +1,6 @@
 # Forge architecture
 
-The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Reviewed 18 November 2026; distinguish source capabilities from what a live host enables.
+The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 19 November 2026; distinguish source capabilities from what a live host enables.
 
 ## Current design references
 
@@ -9,11 +9,11 @@ The [current implementation reference](../design/implementation-status.md) and [
 - [Game framework](proposals/forge-game-engine.md), [physics](proposals/forge-game-physics.md), [asset pipeline](proposals/forge-game-asset-pipeline.md), [snapshot](proposals/forge-game-snapshot.md), [debug/trace](proposals/forge-game-debug.md), [replay](proposals/forge-game-debug.md#full-replay-and-historical-assets), [worker ownership](proposals/forge-worker-ownership.md).
 - [Implementation roadmap](../roadmap/forge-framework.md), [source component and transition contracts](../design/forge-ide-components/README.md), [current layouts](../design/forge-ide-wireframes/README.md).
 
-## Proposed coding-agent dispatch
+## Coding-agent dispatch and usage
 
-[Coding assignment admission](coding-admission.md): first implemented, default-off backend slice for durable submit/get/list/events/queued cancellation. Not enabled live. [Assignment/event/CLI/result workflow](proposals/forge-coding-agent-dispatch.md) describes the remaining provider/DAO boundaries, attempts/results, CLI ownership and sequence diagrams for completion and reviewed takeover; the worker and usage collectors remain proposed.
+[Current coding-agent workflow](coding-admission.md) covers the implemented Agents UI, nine Work destinations, immutable policy/recipe, isolated native workers, scoped execute-only database roles, result paging and explicit review/resume. Work/Usage remain independently opt-in; this source checkpoint does not claim live deployment.
 
-[Agent usage and portal visibility](proposals/forge-agent-usage.md): no inherited llama.cpp token budget for coding CLIs; per-agent allowance, reset, task tokens and cost provenance, with provider/collector ownership and a collection/read/refresh sequence. The Agents screen is proposed, not deployed.
+[Dispatch sequences](proposals/forge-coding-agent-dispatch.md) retain ownership/lifecycle/completion/takeover diagrams with current source mapping. [Agent usage](proposals/forge-agent-usage.md) separates supported provider allowance/account activity from Forge project token/runtime totals. Codex metadata is supported; Antigravity headless allowance is explicitly unsupported. Refresh performs metadata only and never automatically resumes a quota-blocked task.
 
 ## Contracts and construction
 

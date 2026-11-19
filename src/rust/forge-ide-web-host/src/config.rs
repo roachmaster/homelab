@@ -73,6 +73,7 @@ pub struct HostConfig {
     pub studio: Option<crate::StudioConfig>,
     /// Opt-in coding assignment admission, independent of model inference.
     pub work: Option<crate::WorkConfig>,
+    pub usage: Option<crate::UsageConfig>,
     pub nodes: Vec<NodeConfig>,
     pub limits: HostLimits,
 }
@@ -86,6 +87,9 @@ impl HostConfig {
         }
         if let Some(work) = &self.work {
             work.validate()?;
+        }
+        if let Some(usage) = &self.usage {
+            usage.validate()?;
         }
         if let Some(studio) = &self.studio {
             studio.validate()?;
@@ -287,6 +291,8 @@ struct FileConfig {
     studio: Option<crate::StudioConfig>,
     #[serde(default)]
     work: Option<crate::WorkConfig>,
+    #[serde(default)]
+    usage: Option<crate::UsageConfig>,
     credentials: CredentialFiles,
     nodes: Vec<NodeFile>,
     #[serde(default = "timeout_default")]
@@ -403,6 +409,10 @@ pub fn load_config(path: &Path) -> Result<HostConfig, HostError> {
         work: f.work.map(|mut work| {
             work.token_file = resolve(base, &work.token_file);
             work
+        }),
+        usage: f.usage.map(|mut usage| {
+            usage.token_file = resolve(base, &usage.token_file);
+            usage
         }),
         nodes,
         limits: HostLimits {

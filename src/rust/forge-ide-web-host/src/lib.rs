@@ -17,6 +17,7 @@ mod run_dispatch;
 mod service;
 mod session;
 mod studio;
+mod usage;
 mod work;
 mod workspace;
 
@@ -27,6 +28,7 @@ pub use projection::project_report;
 pub use service::{Host, HostFactory, InspectionPort};
 use std::{error::Error, fmt, io};
 pub use studio::StudioConfig;
+pub use usage::UsageConfig;
 pub use work::{WorkConfig, WorkMode};
 
 #[derive(Debug)]

@@ -276,38 +276,77 @@ For rollback, stop Forge claims and resolve distributed runs and result
 receipts before restoring the legacy service template. The first rollout
 handles text inference. [Dispatch design](../../../docs/architecture/forge-postgres-inference-dispatch.md)
 
-## Coding-job durable admission (opt-in, first slice)
+## Coding-job durable backend & usage (opt-in)
 
-Coding-job admission (`ide.work.*`) is **disabled by default** and operates
-independently of legacy/dispatch inference, Mail, Chat persistence, and GPU
-flags. To opt in, set `FORGE_RUNNER_WORK_CONFIG` to the absolute path of a
-trusted JSON configuration file containing strict keys `owner`,
-`allowed_projects`, `allowed_modes` (subset of `plan`, `review`, `implement`),
-optional `max_pending` (default `32`, range `1..256`), and `profiles` (mapping
-each profile alias to `{backend, model, resource_profile}` where `backend` is
-`antigravity` or `codex`). When `FORGE_RUNNER_WORK_CONFIG` is unset, startup
-performs no work config file reads, database connections, or CLI actions, and
-supported `ide.work.*` requests return `503` (`work_failed`, `unavailable`).
-Unsupported `ide.work.*` destinations always return `404` (`not_found`).
+Coding-job routes (`ide.work.*`) and provider usage routes (`ide.usage.*`) are
+**disabled by default** and operate independently of legacy/dispatch inference,
+Mail, Chat persistence, and GPU flags.
 
-Supported destinations on authenticated `POST /v1/dispatch` (version `1` Forge
-headers, 16 KiB raw request bound):
+- Set `FORGE_RUNNER_WORK_CONFIG` to the absolute path of a trusted JSON
+  configuration file containing strict keys `owner`, `allowed_projects` (max 64),
+  `allowed_modes` (subset of `plan`, `review`, `implement`), optional
+  `max_pending` (default `32`, range `1..256`), optional `project_labels`, and
+  `profiles` (max 64, mapping each profile alias to `{backend, model,
+  resource_profile}` plus optional `label`). Profiles using
+  `resource_profile: "forge-coding-v1"` pin immutable recipe version `2` with
+  `policy_digest` from `work_policy.py`; legacy version `1` fixtures remain
+  readable/admissible but are never claimed by workers.
+- Set `FORGE_RUNNER_USAGE_CONFIG` independently to enable `ide.usage.*` through
+  `UsageServiceFactory(config, lambda cfg: UsageStore(cfg, store.connect))`
+  (when `usage_api.py` is installed). It may point to the same trusted config
+  file, but is never implicitly enabled by `FORGE_RUNNER_WORK_CONFIG`.
+- When disabled, startup performs no work/usage config file reads, database
+  connections, or CLI actions; supported `ide.work.*` / `ide.usage.*` routes
+  return `503` (`work_failed` / `usage_failed`, `unavailable`) and unsupported
+  destinations return `404` (`not_found`).
+
+Supported `ide.work.*` destinations on authenticated `POST /v1/dispatch`
+(version `1` Forge headers, 16 KiB raw request bound):
 
 | Forge destination | Request `kind` | Response `kind` & status |
 | --- | --- | --- |
-| `ide.work.submit` | `work_submit` | `202` `work_submitted` (idempotent; pins nonsecret recipe and commits task, `queued` event sequence 1, and empty `pg_notify('forge_coding_jobs', '')`) |
-| `ide.work.get` | `work_get` | `200` `work_opened` (owner/project-scoped task summary plus `prompt` and `acceptance_criteria`, without recipe body) |
-| `ide.work.list` | `work_list` | `200` `work_listed` (ascending `(created_at, task_id)` keyset pagination scoped to owner and project) |
-| `ide.work.events` | `work_events` | `200` `work_events` (monotonic per-task events strictly after `after_sequence`) |
-| `ide.work.cancel` | `work_cancel` | `200` `work_cancel_recorded` (queued-only CAS cancellation with immutable control-receipt replay before CAS/state checks) |
+| `ide.work.catalog` | `work_catalog` | `200` `work_catalog` (configured projects/profiles filtered by fresh <=90s trusted worker advertisements; no host paths/binaries/auth files) |
+| `ide.work.submit` | `work_submit` | `202` `work_submitted` (idempotent; pins nonsecret recipe v2/v1, prepares bounded `title`, commits task, `queued` event sequence 1, and empty `pg_notify('forge_coding_jobs', '')`) |
+| `ide.work.get` | `work_get` | `200` `work_opened` (`event.task`: owner/project-scoped task detail with `title`, `prompt`, `acceptance_criteria`, nullable `attempt`, published-only `result`, and current `reconciliation_receipt_id`) |
+| `ide.work.list` | `work_list` | `200` `work_listed` (ascending `(created_at, task_id)` keyset pagination scoped to owner and project across all 11 statuses; omits prompt body) |
+| `ide.work.events` | `work_events` | `200` `work_events` (monotonic per-task events strictly after `after_sequence`; event sequence is independent of task revision) |
+| `ide.work.cancel` | `work_cancel` | `200` `work_cancel_recorded` (queued cancels immediately to `cancelled`; running transitions to `cancel_requested`; cross-action idempotent receipt replay before state/CAS checks) |
+| `ide.work.result` | `work_result` | `200` `work_result_page` (UTF-8 boundary-safe, JSON-bounded paging over published immutable full results via `<sha256>.<byte_offset>` cursor; staging unreadable) |
+| `ide.work.accept` | `work_accept` | `200` `work_accepted` (explicit acceptance of confirmed-stopped `awaiting_review` tasks to `completed`; never auto-merges code) |
+| `ide.work.resume` | `work_resume` | `202` `work_resumed` (explicit resume requiring current trusted `reconciliation_receipt_id`, CAS `expected_revision`, and configured grants; pins `resume_workspace_digest`) |
+
+### Database roles, WorkerDB, and UsageStore
+
+Migration `0010_coding_execution_and_usage.sql` extends `coding_tasks`,
+`coding_events`, and `coding_control_receipts` (adding cross-action
+`(owner_id, project_alias, task_id, idempotency_key)` uniqueness) and adds
+`coding_worker_grants`, `coding_worker_readiness`, `coding_attempts`,
+`coding_result_chunks`, `coding_reconciliation_receipts`,
+`coding_provider_usage`, `coding_provider_usage_identities`, and
+`coding_usage_refresh_requests`.
+
+- `forge_agent` receives narrow table-level CRUD/read grants only and has zero
+  access to `coding_worker_grants`, `coding_provider_usage_identities`, or
+  worker/reconciler schemas.
+- `forge_coding_worker` (`LOGIN NOINHERIT`) has `EXECUTE` only on scoped
+  `SECURITY DEFINER` routines in `forge_coding_worker_api` (fixed
+  `search_path = pg_catalog, pg_temp`) and zero direct table/column access.
+- `forge_coding_reconciler` (`LOGIN NOINHERIT`) has `EXECUTE` only on
+  `forge_coding_reconciler_api` (`expire_leases`, `pending_reconciliations`,
+  `reconcile`) with no automatic requeue.
+- `forge_gpu_worker` retains zero access to all coding/usage tables and APIs.
+- `work_worker_store.WorkerDB(connect_factory, owner, *, reconcile_connect_factory=None)`
+  is the injected-connection worker/reconciler adapter; `usage_store.UsageStore(config, connect_factory)`
+  serves `overview(project_alias, profiles=None)` and `request_refresh(project_alias, agent_profile=None)`.
 
 **Model-native token policy:** Pinned coding recipes always store
 `generation_token_limit: null` and never inherit `llama.cpp` or Mail token
-caps; native provider/model limits still apply.
+caps; native provider/model limits still apply. Repository changes do not
+deploy migrations, roles, or live service configurations automatically.
 
-**Current scope limits:** This first slice covers durable admission and queued
-cancellation only. No coding-agent execution worker, subprocess runner, attempt
-claiming, result chunks, `resume`, `accept`, usage collector, or UI is
-implemented or started; admitted tasks remain `queued` until explicitly
-cancelled. Migration `0009_coding_admission.sql` and runner config activation
-are **not** deployed to production by repository changes alone.
+### Isolated API staging
+
+`FORGE_RUNNER_PORT` selects a validated loopback port (default `18083`).
+Set `FORGE_RUNNER_API_ONLY=1` with a separate staging port to serve authenticated
+Work/Usage APIs without starting Chat/Mail completion, tool or expiry consumers.
+Normal service behavior uses `FORGE_RUNNER_API_ONLY=0` (the default).

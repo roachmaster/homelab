@@ -1,4 +1,4 @@
-"""Versioned, header-selected coding-job admission API and service factory."""
+"""Versioned, header-selected coding-job API and service factory."""
 
 from dataclasses import dataclass
 from enum import Enum
@@ -10,30 +10,56 @@ from uuid import UUID
 import chat_history_api as common
 from queue_store import Rejected
 from work_config import VALID_MODES, WorkCatalog, WorkConfig
-from work_store import WorkStore
+from work_store import (
+    RESULT_MAX_LIMIT_BYTES,
+    RESULT_MIN_LIMIT_BYTES,
+    VALID_STATUSES,
+    WorkStore,
+)
 
 MAX_REQUEST_BYTES = 16 * 1024
 MAX_PROMPT_BYTES = 8192
 MAX_ACCEPTANCE_BYTES = 2048
+MAX_NOTE_BYTES = 2048
 MAX_REVISION = 2**53 - 1
 LIST_DEFAULT_LIMIT = 20
 LIST_MAX_LIMIT = 50
 EVENTS_DEFAULT_LIMIT = 50
 EVENTS_MAX_LIMIT = 100
+RESULT_DEFAULT_LIMIT_BYTES = RESULT_MAX_LIMIT_BYTES
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 IDEMPOTENCY_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 UUID36_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 SHA1_HEX_RE = re.compile(r"[0-9a-f]{40}")
-VALID_STATUS_FILTERS = frozenset({"queued", "cancelled"})
+RESULT_CURSOR_RE = re.compile(r"[0-9a-f]{64}\.(0|[1-9][0-9]{0,7})")
+VALID_STATUS_FILTERS = VALID_STATUSES
+CONFLICT_CODES = frozenset({
+    "idempotency_conflict",
+    "revision_conflict",
+    "not_cancellable",
+    "reconcile_required",
+    "not_reviewable",
+    "stale_reconciliation",
+    "result_mismatch",
+})
 
 
 class Destination(Enum):
+    CATALOG = "ide.work.catalog"
     SUBMIT = "ide.work.submit"
     GET = "ide.work.get"
     LIST = "ide.work.list"
     EVENTS = "ide.work.events"
     CANCEL = "ide.work.cancel"
+    RESULT = "ide.work.result"
+    ACCEPT = "ide.work.accept"
+    RESUME = "ide.work.resume"
+
+
+@dataclass(frozen=True)
+class WorkCatalogRequest:
+    pass
 
 
 @dataclass(frozen=True)
@@ -77,6 +103,35 @@ class WorkCancel:
     idempotency_key: str
 
 
+@dataclass(frozen=True)
+class WorkResult:
+    project_alias: str
+    task_id: UUID
+    attempt_id: UUID
+    cursor: str | None
+    limit_bytes: int
+
+
+@dataclass(frozen=True)
+class WorkAccept:
+    project_alias: str
+    task_id: UUID
+    expected_revision: int
+    idempotency_key: str
+    review_note: str = ""
+
+
+@dataclass(frozen=True)
+class WorkResume:
+    project_alias: str
+    task_id: UUID
+    expected_revision: int
+    idempotency_key: str
+    agent_profile: str
+    reconciliation_receipt_id: UUID
+    note: str = ""
+
+
 class WorkService:
     """Authorized application service coordinating configured grants, catalog, and store."""
 
@@ -94,6 +149,9 @@ class WorkService:
     def _require_project(self, project_alias):
         if project_alias not in self._config.allowed_projects:
             raise Rejected(403, "denied")
+
+    def catalog(self, _command=None):
+        return self._store.catalog(config=self._config)
 
     def submit(self, command):
         self._require_project(command.project_alias)
@@ -150,6 +208,49 @@ class WorkService:
             task_id=command.task_id,
             expected_revision=command.expected_revision,
             idempotency_key=command.idempotency_key,
+        )
+
+    def result(self, command):
+        self._require_project(command.project_alias)
+        return self._store.result(
+            project_alias=command.project_alias,
+            task_id=command.task_id,
+            attempt_id=command.attempt_id,
+            cursor=command.cursor,
+            limit_bytes=command.limit_bytes,
+        )
+
+    def accept(self, command):
+        self._require_project(command.project_alias)
+        return self._store.accept(
+            project_alias=command.project_alias,
+            task_id=command.task_id,
+            expected_revision=command.expected_revision,
+            idempotency_key=command.idempotency_key,
+            review_note=command.review_note,
+        )
+
+    def resume(self, command):
+        self._require_project(command.project_alias)
+        if command.agent_profile not in self._config.profiles:
+            raise Rejected(403, "denied")
+
+        def resolve_recipe(mode):
+            try:
+                return self._catalog.resolve(command.agent_profile, mode)
+            except KeyError:
+                raise Rejected(503, "unavailable") from None
+
+        return self._store.resume(
+            project_alias=command.project_alias,
+            task_id=command.task_id,
+            expected_revision=command.expected_revision,
+            idempotency_key=command.idempotency_key,
+            agent_profile=command.agent_profile,
+            reconciliation_receipt_id=command.reconciliation_receipt_id,
+            note=command.note,
+            allowed_modes=self._config.allowed_modes,
+            resolve_recipe=resolve_recipe,
         )
 
 
@@ -222,8 +323,10 @@ def _mode(value):
     raise Rejected(400, "invalid_request")
 
 
-def _text(value, max_bytes):
-    if not isinstance(value, str) or not value.strip():
+def _text(value, max_bytes, *, allow_empty=False):
+    if not isinstance(value, str):
+        raise Rejected(400, "invalid_request")
+    if not allow_empty and not value.strip():
         raise Rejected(400, "invalid_request")
     try:
         encoded = value.encode("utf-8")
@@ -234,6 +337,15 @@ def _text(value, max_bytes):
     if any(unicodedata.category(char) == "Cc" and char not in "\r\n\t" for char in value):
         raise Rejected(400, "invalid_request")
     return value
+
+
+def _result_cursor(value):
+    if value is None:
+        return None
+    if (isinstance(value, str) and len(value) <= 86
+            and value.isascii() and RESULT_CURSOR_RE.fullmatch(value)):
+        return value
+    raise Rejected(400, "invalid_request")
 
 
 def _int_range(value, minimum, maximum):
@@ -247,10 +359,16 @@ def decode(route, correlation, body):
             or type(body.get("request_id")) is not str
             or body.get("request_id") != correlation):
         raise Rejected(400, "invalid_request")
+    kind = body.get("kind")
+
+    if route is Destination.CATALOG:
+        if kind == "work_catalog" and body.keys() == {"kind", "request_id"}:
+            return WorkCatalogRequest()
+        raise Rejected(400, "invalid_request")
+
     base = {"kind", "request_id", "project_alias"}
     if not base <= body.keys():
         raise Rejected(400, "invalid_request")
-    kind = body.get("kind")
     project_alias = _identifier(body["project_alias"])
 
     if (route is Destination.SUBMIT and kind == "work_submit"
@@ -299,6 +417,48 @@ def decode(route, correlation, body):
             idempotency_key=_idempotency_key(body["idempotency_key"]),
         )
 
+    if route is Destination.RESULT and kind == "work_result":
+        required = base | {"task_id", "attempt_id"}
+        if required <= body.keys() <= required | {"cursor", "limit_bytes"}:
+            return WorkResult(
+                project_alias=project_alias,
+                task_id=_uuid(body["task_id"]),
+                attempt_id=_uuid(body["attempt_id"]),
+                cursor=_result_cursor(body.get("cursor", None)),
+                limit_bytes=_int_range(
+                    body.get("limit_bytes", RESULT_DEFAULT_LIMIT_BYTES),
+                    RESULT_MIN_LIMIT_BYTES,
+                    RESULT_MAX_LIMIT_BYTES,
+                ),
+            )
+
+    if route is Destination.ACCEPT and kind == "work_accept":
+        required = base | {"task_id", "expected_revision", "idempotency_key"}
+        if required <= body.keys() <= required | {"review_note"}:
+            return WorkAccept(
+                project_alias=project_alias,
+                task_id=_uuid(body["task_id"]),
+                expected_revision=_int_range(body["expected_revision"], 1, MAX_REVISION),
+                idempotency_key=_idempotency_key(body["idempotency_key"]),
+                review_note=_text(body.get("review_note", ""), MAX_NOTE_BYTES, allow_empty=True),
+            )
+
+    if route is Destination.RESUME and kind == "work_resume":
+        required = base | {
+            "task_id", "expected_revision", "idempotency_key",
+            "agent_profile", "reconciliation_receipt_id",
+        }
+        if required <= body.keys() <= required | {"note"}:
+            return WorkResume(
+                project_alias=project_alias,
+                task_id=_uuid(body["task_id"]),
+                expected_revision=_int_range(body["expected_revision"], 1, MAX_REVISION),
+                idempotency_key=_idempotency_key(body["idempotency_key"]),
+                agent_profile=_identifier(body["agent_profile"]),
+                reconciliation_receipt_id=_uuid(body["reconciliation_receipt_id"]),
+                note=_text(body.get("note", ""), MAX_NOTE_BYTES, allow_empty=True),
+            )
+
     raise Rejected(400, "invalid_request")
 
 
@@ -311,7 +471,7 @@ def failed(correlation, error):
         code = "denied"
     elif error.status == 404:
         code = "not_found"
-    elif error.status == 409 and error.code in {"idempotency_conflict", "revision_conflict", "not_cancellable"}:
+    elif error.status == 409 and error.code in CONFLICT_CODES:
         code = error.code
     elif error.status == 503 and error.code == "queue_full":
         code = "queue_full"
@@ -324,6 +484,9 @@ def failed(correlation, error):
 def dispatch(route, correlation, command, service):
     if service is None:
         raise Rejected(503, "unavailable")
+    if route is Destination.CATALOG and isinstance(command, WorkCatalogRequest):
+        catalog_data = service.catalog(command)
+        return HTTPStatus.OK, common.envelope("work_catalog", correlation, **catalog_data)
     if route is Destination.SUBMIT and isinstance(command, WorkSubmit):
         receipt = service.submit(command)
         return HTTPStatus.ACCEPTED, common.envelope("work_submitted", correlation, **receipt)
@@ -339,4 +502,13 @@ def dispatch(route, correlation, command, service):
     if route is Destination.CANCEL and isinstance(command, WorkCancel):
         receipt = service.cancel(command)
         return HTTPStatus.OK, common.envelope("work_cancel_recorded", correlation, **receipt)
+    if route is Destination.RESULT and isinstance(command, WorkResult):
+        page = service.result(command)
+        return HTTPStatus.OK, common.envelope("work_result_page", correlation, **page)
+    if route is Destination.ACCEPT and isinstance(command, WorkAccept):
+        receipt = service.accept(command)
+        return HTTPStatus.OK, common.envelope("work_accepted", correlation, **receipt)
+    if route is Destination.RESUME and isinstance(command, WorkResume):
+        receipt = service.resume(command)
+        return HTTPStatus.ACCEPTED, common.envelope("work_resumed", correlation, **receipt)
     raise Rejected(400, "invalid_request")

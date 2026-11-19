@@ -152,6 +152,9 @@ pub enum FilterAction {
     SetChatHistoryQuery {},
     SetMailSubject {},
     SetMailDraft {},
+    SetAgentPrompt {},
+    SetAgentCriteria {},
+    SetAgentReviewNote {},
     SetFileFilter {
         report: RequestToken,
     },
@@ -214,6 +217,12 @@ pub struct CorrespondenceRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    OpenAgentTask {
+        task_id: String,
+    },
+    SelectAgentUsage {
+        agent_profile: String,
+    },
     ToggleExplorerFilter {
         report: RequestToken,
     },

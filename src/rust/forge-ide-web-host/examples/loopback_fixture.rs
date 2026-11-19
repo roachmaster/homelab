@@ -84,12 +84,13 @@ fn write_projects(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)>
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let (durable, studio) = match args.as_slice() {
-        [_, _] => (None, None),
-        [_, _, mode] if mode == "--faults" || mode == "--single-project" || mode == "--managed-writes" => (None, None),
-        [_, _, mode, bind, relay, token] if mode == "--durable" => (Some((bind, relay, token)), None),
-        [_, _, mode, relay, token, preview] if mode == "--studio" => (None, Some((relay, token, preview))),
-        _ => return Err("usage: loopback_fixture ASSETS AGENT [--faults|--single-project|--managed-writes|--durable BIND RELAY TOKEN_FILE|--studio RELAY TOKEN_FILE PREVIEW_ORIGIN]".into()),
+    let (durable, studio, agents) = match args.as_slice() {
+        [_, _] => (None, None, None),
+        [_, _, mode] if mode == "--faults" || mode == "--single-project" || mode == "--managed-writes" => (None, None, None),
+        [_, _, mode, bind, relay, token] if mode == "--durable" => (Some((bind, relay, token)), None, None),
+        [_, _, mode, relay, token, preview] if mode == "--studio" => (None, Some((relay, token, preview)), None),
+        [_, _, mode, bind, relay, token] if mode == "--agents" => (None, None, Some((bind, relay, token))),
+        _ => return Err("usage: loopback_fixture ASSETS AGENT [--faults|--single-project|--managed-writes|--durable BIND RELAY TOKEN_FILE|--studio RELAY TOKEN_FILE PREVIEW_ORIGIN|--agents BIND RELAY TOKEN_FILE]".into()),
     };
     let faults = args.get(2).is_some_and(|value| value == "--faults");
     let managed = args.get(2).is_some_and(|value| value == "--managed-writes");
@@ -206,6 +207,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "token_file": PathBuf::from(token),
             "preview_origin": preview.to_str().ok_or("invalid Studio preview origin")?,
         });
+    }
+    if let Some((bind, relay, token_file)) = agents {
+        host_config["bind"] = json!(bind.to_str().ok_or("invalid Agents bind")?);
+        host_config["work"] = json!({"endpoint":relay.to_str().ok_or("invalid Agents endpoint")?,"token_file":PathBuf::from(token_file),"allowed_projects":["workspace"],"allowed_profiles":["agy-primary","codex-primary"],"allowed_modes":["plan","review"]});
+        host_config["usage"] = json!({"endpoint":relay.to_str().ok_or("invalid Usage endpoint")?,"token_file":PathBuf::from(token_file),"allowed_projects":["workspace"],"allowed_profiles":["agy-primary","codex-primary"]});
     }
     let config_path = fixture.root.join("host.json");
     fs::write(&config_path, serde_json::to_vec(&host_config)?)?;

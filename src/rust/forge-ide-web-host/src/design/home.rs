@@ -391,6 +391,7 @@ pub(super) const BODY: &[Node] = &[
             launcher!("/", "home-launcher home-launcher-ide", Terminal, "Forge IDE", "Chat, Mail, and the source workbench."),
             launcher!("/studio", "home-launcher home-launcher-studio", Studio, "Forge Studio", "Submit a build and open its preview."),
             launcher!("/playtest", "home-launcher home-launcher-playtest", Playtest, "Room One playtest", "Explore the game runtime and replay tools."),
+            launcher!("/agents", "home-launcher home-launcher-agents", Terminal, "Agents", "Assign work to Gemini or Codex, review results, and check usage."),
         ),
     ),
     element!(Section [Id = "home-docs", Class = "home-section", AriaLabelledby = "home-design-title"];

@@ -48,14 +48,25 @@ BEGIN
           ('mail_messages',           ARRAY['SELECT', 'INSERT']),
           ('inference_results',       ARRAY['SELECT', 'DELETE']),
           ('gpu_worker_readiness',    ARRAY['SELECT']),
-          ('coding_tasks',            ARRAY['SELECT', 'INSERT', 'UPDATE']),
-          ('coding_events',           ARRAY['SELECT', 'INSERT']),
-          ('coding_control_receipts', ARRAY['SELECT', 'INSERT'])
+          ('coding_tasks',                    ARRAY['SELECT', 'INSERT', 'UPDATE']),
+          ('coding_events',                   ARRAY['SELECT', 'INSERT']),
+          ('coding_control_receipts',         ARRAY['SELECT', 'INSERT']),
+          ('coding_worker_grants',            ARRAY[]::text[]),
+          ('coding_worker_readiness',         ARRAY['SELECT']),
+          ('coding_attempts',                 ARRAY['SELECT']),
+          ('coding_result_chunks',            ARRAY['SELECT']),
+          ('coding_reconciliation_receipts',  ARRAY['SELECT']),
+          ('coding_provider_usage',           ARRAY['SELECT']),
+          ('coding_provider_usage_identities', ARRAY[]::text[]),
+          ('coding_usage_refresh_requests',   ARRAY['SELECT', 'INSERT'])
       ) AS spec(relation, allowed)
       CROSS JOIN unnest(ARRAY[
         'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
       ]) AS privilege
     )
+    AND NOT has_schema_privilege(current_user, 'forge_agent_worker_api', 'USAGE, CREATE')
+    AND NOT has_schema_privilege(current_user, 'forge_coding_worker_api', 'USAGE, CREATE')
+    AND NOT has_schema_privilege(current_user, 'forge_coding_reconciler_api', 'USAGE, CREATE')
   INTO ok;
 
   IF ok IS DISTINCT FROM true THEN

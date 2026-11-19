@@ -73,7 +73,8 @@ function writeNavigationCache(cache){
   try{
     if(typeof cache==='string')sessionStorage.setItem(NAVIGATION_CACHE_KEY,cache);
     else sessionStorage.removeItem(NAVIGATION_CACHE_KEY);
-  }catch(_){}
+    return true;
+  }catch(_){return false;}
 }
 function navigationStatus(message){
   const status=document.querySelector('[data-workspace-navigation-status]');
@@ -87,7 +88,8 @@ function finishNavigation(result){
     navigationStatus('Your latest workspace changes are still open here. Try opening the page again.');
     return;
   }
-  writeNavigationCache(result.cache);
+  const cached=writeNavigationCache(result.cache);
+  if(result.requires_cache&&!cached){navigationStatus('Local recovery storage is unavailable. Keep this page open to preserve your draft.');return;}
   leaving=true;syncLeaveWarning();location.assign(url);
 }
 for(const link of document.querySelectorAll('a[data-workspace-navigation]'))link.addEventListener('click',event=>{
@@ -147,6 +149,7 @@ function sendAction(n,value,sequence){
     const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
     action={...action,[uuidField]:[hex.slice(0,8),hex.slice(8,12),hex.slice(12,16),hex.slice(16,20),hex.slice(20)].join('-')};
   }
+  if(!navigation)navigationStatus('');
   tell(value===undefined?action:{...action,value},sequence);
   pendingActionOrigin={sequence,pane};
 }
@@ -254,7 +257,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   }
   for(const sheet of sheets.values())if(sheet.open&&sheet.closest('[hidden]'))sheet.close();
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
-  for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;if(typeof b.pressed==='boolean')n.setAttribute('aria-pressed',String(b.pressed));actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
+  for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;if(typeof b.pressed==='boolean')n.setAttribute('aria-pressed',String(b.pressed));actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(typeof b.pressed==='boolean'?b.pressed:b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
   for(const b of view.inputs||[]){
     const n=element(b.id);if(!n)continue;
     const context=JSON.stringify(b.action);const draft=inputDrafts.get(n);
@@ -548,6 +551,7 @@ function start(){
         else if(data.kind==='workspace_flushed')finishReload?.();
         else if(data.kind==='workspace_navigation_flushed')finishNavigation(data);
         else if(data.kind==='clear_navigation_cache')writeNavigationCache(null);
+        else if(data.kind==='navigation_checkpoint')owned.postMessage({navigation_checkpoint_saved:{id:data.id,saved:writeNavigationCache(data.cache)}});
         else if(data.kind==='entry_applied'&&data.fragment===entryFragment&&location.hash==='#'+entryFragment)history.replaceState(history.state,'',location.pathname+location.search);
       }catch(_){fatal('Could not display the checked view. Reload to retry.');}
     };
@@ -777,6 +781,9 @@ let latestCheckpoint=null;
 let latestWorkspace=null;
 let mailNavigation=null;
 let mailNavigationLocked=false;
+let agentsNavigation=null;
+let localCheckpointSequence=0;
+const localCheckpointAcks=new Map();
 let workspaceEpoch=null;
 let navigationCache=null;
 let pendingEntryAction=null;
@@ -881,10 +888,22 @@ async function flushNavigation(id){
   let cache=null;
   if(saved&&workspaceEpoch&&!mailNavigationLocked){
     const local=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,
-      snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{})});
+      snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),...(agentsNavigation?{agents:agentsNavigation}:{})});
     if(encoder.encode(local).length<=NAVIGATION_CACHE_MAX)cache=local;
   }
-  postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!mailNavigation||cache!==null),cache});
+  postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!(mailNavigation||agentsNavigation)||cache!==null),requires_cache:Boolean(mailNavigation||agentsNavigation),cache});
+}
+function localNavigationCheckpoint(snapshot){
+  if(!agentsNavigation||!workspaceEpoch||!workspaceTab)return null;
+  const cache=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),agents:agentsNavigation});
+  if(encoder.encode(cache).length>NAVIGATION_CACHE_MAX||localCheckpointAcks.size>=64)return {snapshot:agentsNavigation,pending:Promise.resolve(false)};
+  const id=++localCheckpointSequence;
+  const pending=new Promise(resolve=>{
+    const timer=setTimeout(()=>{localCheckpointAcks.delete(id);resolve(false);},2500);
+    localCheckpointAcks.set(id,{resolve,timer});
+  });
+  postMessage({kind:'navigation_checkpoint',id,cache});
+  return {snapshot:agentsNavigation,pending};
 }
 function navigationSnapshot(snapshot){
   // Keep draft text and selection hints. Rust validates the restored snapshot.
@@ -917,13 +936,16 @@ function dispatch(event,presentation_sequence=null,suppressView=false){
   if(!status || !len || len>MAX || out+len>wasm.memory.buffer.byteLength)throw new Error('Invalid WASM result');
   let result;try{result=safeJson(decoder.decode(new Uint8Array(wasm.memory.buffer,out,len).slice()));}finally{wasm.release_output();}
   if(result.protocol_version!==1)throw new Error('Protocol mismatch');
+  let localCheckpoint=null;
   if(!suppressView){
     mailNavigation=result.mail_navigation??null;
-    mailNavigationLocked=result.mail_navigation_locked===true;
+    agentsNavigation=result.agents_navigation??null;
+    mailNavigationLocked=result.mail_navigation_locked===true||result.agents_navigation_locked===true;
     postMessage({kind:'view',view:result.view,presentation_sequence,has_workspace_work:result.has_workspace_work});
     checkpointWorkspace(result.workspace);
+    localCheckpoint=localNavigationCheckpoint(result.workspace);
   }
-  for(const effect of result.effects)run(effect).catch(()=>fatal('Invalid application effect. Reload to retry.'));
+  for(const effect of result.effects)run(effect,localCheckpoint).catch(()=>fatal('Invalid application effect. Reload to retry.'));
 }
 function fatal(message){
   if(closed)return;
@@ -932,12 +954,14 @@ function fatal(message){
   for(const timer of timers.values())clearTimeout(timer);
   pending.clear();
   timers.clear();
+  for(const ack of localCheckpointAcks.values()){clearTimeout(ack.timer);ack.resolve(false);}
+  localCheckpointAcks.clear();
   csrf=null;
   wasm=null;
   postMessage({kind:'fatal',message});
 }
 function failed(id,category){try{dispatch({kind:'network_failed',request_id:id,category});}catch(_){fatal('The worker could not accept a transport result. Reload to retry.');}}
-async function run(effect){
+async function run(effect,localCheckpoint=null){
   if(effect.kind==='abort'){const active=pending.get(effect.token.request_id);if(active)active.abort();return;}
   const timerBinding=CONFIG.timers.find(timer=>timer.effect_kind===effect.kind);
   if(timerBinding){
@@ -952,7 +976,10 @@ async function run(effect){
   }
   const binding=CONFIG.bindings.find(b=>b.kind===effect.kind);if(!binding)throw new Error('Undeclared transport effect');
   const id=String(field(effect,binding.request_id));
-  const {delay_ms,wait_for_slot_ms,checkpoint,expire_session_on_denial}=binding.policy;
+  const {delay_ms,wait_for_slot_ms,checkpoint,expire_session_on_denial,expire_session_on_unauthenticated,local_checkpoint_path}=binding.policy;
+  if(local_checkpoint_path&&(!localCheckpoint||JSON.stringify(valueAt(localCheckpoint.snapshot,local_checkpoint_path))!==JSON.stringify(effect)||!await localCheckpoint.pending)){
+    failed(id,'unavailable');return;
+  }
   if(delay_ms)await new Promise(resolve=>setTimeout(resolve,delay_ms));
   if(checkpoint&&!await checkpointMatches(effect,checkpoint)){
     failed(id,'unavailable');
@@ -976,7 +1003,7 @@ async function run(effect){
     const body=JSON.stringify(effect);if(encoder.encode(body).length>16384)throw new Error('Request limit');
     const response=await fetch('/forge/v1/dispatch',{method:'POST',headers,body,credentials:'same-origin',redirect:'error',signal:controller.signal,cache:'no-store'});
     const typedErrors=binding.error_events??[];
-    if(expire_session_on_denial&&(response.status===401||response.status===403)){
+    if(expire_session_on_denial&&(response.status===401||response.status===403)||expire_session_on_unauthenticated&&response.status===401){
       if(response.body)await response.body.cancel();
       fatal('Your Forge session expired. Reload to reconnect.');return;
     }
@@ -990,6 +1017,7 @@ async function run(effect){
     if(decoded.protocol_version!==1||!decoded.event||!events.includes(decoded.event.kind)||(!response.ok&&decoded.event.request_id!==id))throw new Error('Unexpected response envelope');
     let saved=null;
     let savedMail=null;
+    let savedAgents=null;
     if(decoded.csrf!==undefined && decoded.csrf!==null){
       if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');
       csrf=decoded.csrf;
@@ -999,6 +1027,7 @@ async function run(effect){
       navigationCache=null;
       const matchesCache=cache?.version===1&&cache.tab===workspaceTab&&workspaceEpoch&&cache.epoch===workspaceEpoch;
       if(matchesCache&&decoded.event.catalog?.mail_enabled===true)savedMail=cache.mail??null;
+      if(matchesCache&&(decoded.event.catalog?.work_enabled===true||decoded.event.catalog?.usage_enabled===true))savedAgents=cache.agents??null;
       if(restore.unavailable&&matchesCache){
         saved=navigationSnapshot(cache.snapshot);
       }else{
@@ -1009,9 +1038,10 @@ async function run(effect){
     try{
       // The completed request should not occupy a slot used by its effects.
       pending.delete(id);
-      dispatch(decoded.event,null,saved!==null||savedMail!==null);
+      dispatch(decoded.event,null,saved!==null||savedMail!==null||savedAgents!==null);
       if(saved!==null)dispatch({kind:'restore_workspace',snapshot:saved});
       if(savedMail!==null)dispatch({kind:'restore_mail_navigation',snapshot:savedMail});
+      if(savedAgents!==null)dispatch({kind:'restore_agents_navigation',snapshot:savedAgents});
       if(decoded.csrf!==undefined&&decoded.csrf!==null){sessionRestored=true;applyEntryAction();}
     }catch(_){fatal('Invalid application ABI result. Reload to retry.');}
   }catch(e){failed(id,timedOut?'timeout':controller.signal.aborted?'cancelled':e instanceof TypeError?'unavailable':'invalid_response');}
@@ -1021,11 +1051,19 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==5 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==6 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));
 onmessage=async({data})=>{if(closed)return;try{
+  if(data&&typeof data==='object'&&Object.hasOwn(data,'navigation_checkpoint_saved')){
+    const value=data.navigation_checkpoint_saved;
+    if(value&&Number.isSafeInteger(value.id)&&typeof value.saved==='boolean'){
+      const ack=localCheckpointAcks.get(value.id);
+      if(ack){localCheckpointAcks.delete(value.id);clearTimeout(ack.timer);ack.resolve(value.saved);}
+    }
+    return;
+  }
   if(typeof data?.workspace_navigation_cache==='string'){
     const text=data.workspace_navigation_cache;
     if(text.length<=NAVIGATION_CACHE_MAX&&encoder.encode(text).length<=NAVIGATION_CACHE_MAX){

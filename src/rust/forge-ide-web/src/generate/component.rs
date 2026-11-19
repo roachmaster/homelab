@@ -321,6 +321,7 @@ macro_rules! component {
     (uuid_icon $id:expr, $label:expr, $action:expr, $input:expr, $uuid_field:expr, $glyph:expr) => { $crate::generate::Component::IconButton{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,glyph:$glyph,check_input:Some($input.into()),uuid_field:Some($uuid_field.into())} };
     (checked_button $id:expr, $label:expr, $action:expr, $input:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:None} };
     (uuid_button $id:expr, $label:expr, $action:expr, $input:expr, $uuid_field:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Primary,check_input:Some($input.into()),controls:None,uuid_field:Some($uuid_field.into())} };
+    (uuid_action $id:expr, $label:expr, $action:expr, $uuid_field:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:None,uuid_field:Some($uuid_field.into())} };
     (toggle_panel $id:expr, $label:expr, $action:expr, $controls:expr) => { $crate::generate::Component::Button{id:$id.into(),label:$label.into(),action:$action.into(),emphasis:$crate::generate::ButtonEmphasis::Standard,check_input:None,controls:Some($controls.into()),uuid_field:None} };
     (date_input $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::DateInput{id:$id.into(),label:$label.into(),action:$action.into()} };
     (filter $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Filter{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:None} };
@@ -386,7 +387,7 @@ impl Document {
         ) -> Result<(), &'static str> {
             let in_layout = matches!(parent, Some(Component::PaneLayout { .. }));
             *count += 1;
-            if depth > 12 || *count > 256 {
+            if depth > 12 || *count > 384 {
                 return Err("component declaration limit");
             }
             let (id, label, action) = match c {

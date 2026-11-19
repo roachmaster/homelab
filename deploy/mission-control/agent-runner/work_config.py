@@ -1,17 +1,26 @@
 """Frozen configuration and pure recipe catalog for Forge coding admission."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
 import re
 from types import MappingProxyType
+import unicodedata
+
+from work_policy import POLICY_DIGEST, POLICY_ID
 
 CONFIG_ENV_VAR = "FORGE_RUNNER_WORK_CONFIG"
+USAGE_CONFIG_ENV_VAR = "FORGE_RUNNER_USAGE_CONFIG"
 MAX_CONFIG_BYTES = 64 * 1024
 DEFAULT_MAX_PENDING = 32
 MIN_MAX_PENDING = 1
 MAX_MAX_PENDING = 256
+MAX_PROJECTS = 64
+MAX_PROFILES = 64
+MAX_LABEL_BYTES = 128
+MAX_TITLE_CHARS = 128
+MAX_TITLE_BYTES = 512
 VALID_MODES = frozenset({"plan", "review", "implement"})
 VALID_BACKENDS = frozenset({"antigravity", "codex"})
 
@@ -20,8 +29,9 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
+PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label"}
 
 
 def canonical_json_bytes(value):
@@ -54,6 +64,42 @@ def validate_model(value):
     return value
 
 
+def validate_label(value, field_name="label"):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Invalid work {field_name}")
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(f"Invalid work {field_name}") from None
+    if len(encoded) > MAX_LABEL_BYTES:
+        raise ValueError(f"Invalid work {field_name}")
+    if any(unicodedata.category(char) == "Cc" for char in value):
+        raise ValueError(f"Invalid work {field_name}")
+    return value
+
+
+def prepare_title(prompt):
+    """Derive a bounded single-line TaskSummary title from the first non-blank prompt line."""
+    if not isinstance(prompt, str):
+        raise ValueError("Invalid prompt for title")
+    first_line = ""
+    for line in prompt.splitlines():
+        stripped = line.strip()
+        if stripped:
+            first_line = stripped
+            break
+    if not first_line:
+        raise ValueError("Prompt must contain a non-blank line")
+    collapsed = re.sub(r"\s+", " ", first_line)
+    trimmed = collapsed[:MAX_TITLE_CHARS]
+    while len(trimmed.encode("utf-8")) > MAX_TITLE_BYTES:
+        trimmed = trimmed[:-1]
+    trimmed = trimmed.rstrip()
+    if not trimmed:
+        raise ValueError("Prepared title is empty")
+    return trimmed
+
+
 def _unique_json_object(pairs):
     result = {}
     for key, value in pairs:
@@ -73,6 +119,7 @@ class WorkProfile:
     backend: str
     model: str
     resource_profile: str
+    label: str | None = None
 
     def __post_init__(self):
         validate_identifier(self.alias, "profile alias")
@@ -80,6 +127,12 @@ class WorkProfile:
             raise ValueError("Invalid work profile backend")
         validate_model(self.model)
         validate_identifier(self.resource_profile, "resource profile")
+        if self.label is not None:
+            validate_label(self.label, "profile label")
+
+    @property
+    def display_label(self):
+        return self.label if self.label is not None else self.alias
 
 
 @dataclass(frozen=True)
@@ -91,9 +144,10 @@ class PinnedRecipe:
     mode: str
     generation_token_limit: None
     digest: str
+    policy_digest: str | None = None
 
     def __post_init__(self):
-        if type(self.version) is not int or self.version != 1:
+        if type(self.version) is not int or self.version not in (1, 2):
             raise ValueError("Invalid pinned recipe version")
         if not isinstance(self.backend, str) or self.backend not in VALID_BACKENDS:
             raise ValueError("Invalid pinned recipe backend")
@@ -103,6 +157,15 @@ class PinnedRecipe:
             raise ValueError("Invalid pinned recipe mode")
         if self.generation_token_limit is not None:
             raise ValueError("Coding recipe generation_token_limit must be null")
+        if self.version == 1:
+            if self.policy_digest is not None:
+                raise ValueError("Version 1 recipe must not carry policy_digest")
+        else:
+            if (not isinstance(self.policy_digest, str)
+                    or not DIGEST_HEX_RE.fullmatch(self.policy_digest)):
+                raise ValueError("Version 2 recipe requires a 64-hex policy_digest")
+            if self.resource_profile == POLICY_ID and self.policy_digest != POLICY_DIGEST:
+                raise ValueError("Version 2 recipe policy_digest does not match immutable builtin policy")
         expected = sha256_canonical(self.to_dict())
         if (not isinstance(self.digest, str)
                 or not DIGEST_HEX_RE.fullmatch(self.digest)
@@ -110,7 +173,7 @@ class PinnedRecipe:
             raise ValueError("Invalid pinned recipe digest")
 
     def to_dict(self):
-        return {
+        payload = {
             "version": self.version,
             "backend": self.backend,
             "model": self.model,
@@ -118,6 +181,9 @@ class PinnedRecipe:
             "mode": self.mode,
             "generation_token_limit": None,
         }
+        if self.version == 2:
+            payload["policy_digest"] = self.policy_digest
+        return payload
 
 
 class WorkCatalog:
@@ -129,8 +195,8 @@ class WorkCatalog:
             if not isinstance(profile, WorkProfile) or profile.alias != alias:
                 raise ValueError("Invalid work catalog profile")
             copied[alias] = profile
-        if not copied:
-            raise ValueError("Work catalog must define at least one profile")
+        if not copied or len(copied) > MAX_PROFILES:
+            raise ValueError("Work catalog must define between 1 and 64 profiles")
         self._profiles = MappingProxyType(copied)
 
     @property
@@ -149,6 +215,26 @@ class WorkCatalog:
         profile = self._profiles.get(profile_alias)
         if profile is None:
             raise KeyError("Unknown work profile")
+        if profile.resource_profile == POLICY_ID:
+            payload = {
+                "version": 2,
+                "backend": profile.backend,
+                "model": profile.model,
+                "resource_profile": profile.resource_profile,
+                "mode": mode,
+                "generation_token_limit": None,
+                "policy_digest": POLICY_DIGEST,
+            }
+            return PinnedRecipe(
+                version=2,
+                backend=profile.backend,
+                model=profile.model,
+                resource_profile=profile.resource_profile,
+                mode=mode,
+                generation_token_limit=None,
+                digest=sha256_canonical(payload),
+                policy_digest=POLICY_DIGEST,
+            )
         payload = {
             "version": 1,
             "backend": profile.backend,
@@ -175,14 +261,15 @@ class WorkConfig:
     allowed_modes: frozenset[str]
     max_pending: int
     profiles: MappingProxyType
+    project_labels: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self):
         owner = validate_owner(self.owner)
         if not isinstance(self.allowed_projects, (frozenset, set, tuple, list)):
             raise ValueError("Invalid work allowed_projects")
         projects = frozenset(validate_identifier(item, "project alias") for item in self.allowed_projects)
-        if not projects:
-            raise ValueError("Work allowed_projects must be non-empty")
+        if not projects or len(projects) > MAX_PROJECTS:
+            raise ValueError("Work allowed_projects must contain between 1 and 64 entries")
         if not isinstance(self.allowed_modes, (frozenset, set, tuple, list)):
             raise ValueError("Invalid work allowed_modes")
         modes = frozenset(self.allowed_modes)
@@ -197,20 +284,37 @@ class WorkConfig:
             if not isinstance(profile, WorkProfile) or profile.alias != alias:
                 raise ValueError("Invalid work profile mapping")
             copied_profiles[alias] = profile
-        if not copied_profiles:
-            raise ValueError("Work profiles must be non-empty")
+        if not copied_profiles or len(copied_profiles) > MAX_PROFILES:
+            raise ValueError("Work profiles must contain between 1 and 64 entries")
+        if not isinstance(self.project_labels, (dict, MappingProxyType)):
+            raise ValueError("Invalid work project_labels")
+        copied_labels = {}
+        for alias, label in self.project_labels.items():
+            validate_identifier(alias, "project label alias")
+            if alias not in projects:
+                raise ValueError("Work project_labels key must be in allowed_projects")
+            copied_labels[alias] = validate_label(label, "project label")
         object.__setattr__(self, "owner", owner)
         object.__setattr__(self, "allowed_projects", projects)
         object.__setattr__(self, "allowed_modes", modes)
         object.__setattr__(self, "profiles", MappingProxyType(copied_profiles))
+        object.__setattr__(self, "project_labels", MappingProxyType(copied_labels))
+
+    def project_label(self, alias):
+        return self.project_labels.get(alias, alias)
+
+    def profile_label(self, alias):
+        return self.profiles[alias].display_label
 
     def catalog(self):
         return WorkCatalog(self.profiles)
 
 
-def _unique_sequence(value, validator, label):
+def _unique_sequence(value, validator, label, *, max_items=None):
     if not isinstance(value, (list, tuple)) or not value:
         raise ValueError(f"Invalid work {label}")
+    if max_items is not None and len(value) > max_items:
+        raise ValueError(f"Too many entries in work {label}")
     validated = [validator(item) for item in value]
     if len(set(validated)) != len(validated):
         raise ValueError(f"Duplicate entry in work {label}")
@@ -232,32 +336,47 @@ def parse_work_config(raw):
         raise ValueError("Invalid work configuration keys")
     owner = validate_owner(raw["owner"])
     allowed_projects = _unique_sequence(
-        raw["allowed_projects"], lambda item: validate_identifier(item, "project alias"), "allowed_projects"
+        raw["allowed_projects"],
+        lambda item: validate_identifier(item, "project alias"),
+        "allowed_projects",
+        max_items=MAX_PROJECTS,
     )
-    allowed_modes = _unique_sequence(raw["allowed_modes"], _validate_mode, "allowed_modes")
+    allowed_modes = _unique_sequence(raw["allowed_modes"], _validate_mode, "allowed_modes", max_items=3)
     max_pending = raw.get("max_pending", DEFAULT_MAX_PENDING)
     if type(max_pending) is not int or not MIN_MAX_PENDING <= max_pending <= MAX_MAX_PENDING:
         raise ValueError("Invalid work max_pending")
     raw_profiles = raw["profiles"]
-    if not isinstance(raw_profiles, dict) or not raw_profiles:
-        raise ValueError("Work profiles must be a non-empty object")
+    if not isinstance(raw_profiles, dict) or not raw_profiles or len(raw_profiles) > MAX_PROFILES:
+        raise ValueError("Work profiles must be a non-empty object of at most 64 entries")
     profiles = {}
     for alias, spec in raw_profiles.items():
         validate_identifier(alias, "profile alias")
-        if not isinstance(spec, dict) or set(spec.keys()) != PROFILE_REQUIRED_KEYS:
+        if (not isinstance(spec, dict)
+                or not PROFILE_REQUIRED_KEYS <= set(spec.keys()) <= PROFILE_ALLOWED_KEYS):
             raise ValueError("Invalid work profile definition")
         profiles[alias] = WorkProfile(
             alias=alias,
             backend=spec["backend"],
             model=spec["model"],
             resource_profile=spec["resource_profile"],
+            label=spec.get("label"),
         )
+    raw_project_labels = raw.get("project_labels", {})
+    if not isinstance(raw_project_labels, dict):
+        raise ValueError("Invalid work project_labels")
+    project_labels = {}
+    for alias, label in raw_project_labels.items():
+        validate_identifier(alias, "project label alias")
+        if alias not in allowed_projects:
+            raise ValueError("Unknown project alias in work project_labels")
+        project_labels[alias] = validate_label(label, "project label")
     return WorkConfig(
         owner=owner,
         allowed_projects=allowed_projects,
         allowed_modes=allowed_modes,
         max_pending=max_pending,
         profiles=MappingProxyType(profiles),
+        project_labels=MappingProxyType(project_labels),
     )
 
 

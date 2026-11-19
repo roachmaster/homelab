@@ -1,0 +1,361 @@
+"""Factory-wired native coding worker; PostgreSQL remains the queue authority."""
+
+from contextlib import nullcontext
+from dataclasses import fields, is_dataclass
+import hashlib
+import logging
+import os
+import json
+import signal
+import threading
+import time
+from uuid import UUID, uuid4
+
+from work_executor import (
+    CliOutcome, CommandRunnerProvider, ExecutionError, SystemdSupervisor,
+    WorkspaceProvider, unit_name, utf8_chunks,
+)
+from work_policy import POLICY, POLICY_DIGEST
+from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
+
+LOG = logging.getLogger("forge-coding-worker")
+SCAN_SECONDS = 5
+ADVERTISE_SECONDS = 30
+
+
+def _lease(value):
+    result = _mapping(value)
+    required = {"task_id", "project_alias", "base_revision", "mode", "agent_profile", "prompt",
+                "acceptance_criteria", "recipe", "attempt_id", "attempt_token", "worker_id",
+                "incarnation", "lease_expires_at", "deadline_at", "unit_name"}
+    if not required <= result.keys():
+        raise ValueError("Incomplete coding lease")
+    for field in ("task_id", "attempt_id", "attempt_token"):
+        if str(UUID(str(result[field]))) != str(result[field]):
+            raise ValueError("Invalid coding lease identity")
+    if result["unit_name"] != unit_name(result["attempt_id"]):
+        raise ValueError("Invalid coding lease scope")
+    return result
+
+
+def _mapping(value):
+    if callable(getattr(value, "to_dict", None)):
+        return value.to_dict()
+    if is_dataclass(value):
+        return {field.name: getattr(value, field.name) for field in fields(value)}
+    return dict(value)
+
+
+def _recovery(value, owner):
+    """Trusted recovery has no old writer token, prompt or execution authority."""
+    result = _mapping(value)
+    required = {"owner_id", "task_id", "project_alias", "base_revision", "attempt_id",
+                "worker_id", "incarnation", "unit_name"}
+    if not required <= result.keys() or result["owner_id"] != owner:
+        raise ValueError("Invalid coding recovery scope")
+    for field in ("task_id", "attempt_id", "incarnation"):
+        if str(UUID(str(result[field]))) != str(result[field]):
+            raise ValueError("Invalid coding recovery identity")
+    if result["unit_name"] != unit_name(result["attempt_id"]):
+        raise ValueError("Invalid coding recovery unit")
+    return result
+
+
+def _retryable(error):
+    return (isinstance(error, (OSError, TimeoutError))
+            or type(error).__module__.startswith("psycopg2")
+            and type(error).__name__ in {"OperationalError", "InterfaceError"})
+
+
+class CodingWorker:
+    """Owned collaborators are supplied by bootstrap; no global lookups."""
+
+    def __init__(self, config, store, runner_provider, workspace_provider, supervisor,
+                 *, collector=None, clock=time.monotonic, stop=None, usage_normalizer=None):
+        self.config, self.store = config, store
+        self.runner, self.workspaces, self.supervisor = runner_provider, workspace_provider, supervisor
+        self.collector, self.clock = collector, clock
+        self.stop = stop if stop is not None else threading.Event()
+        self.usage_normalizer = usage_normalizer
+        self.incarnation = str(uuid4())
+        self._last_advertisement = float("-inf")
+
+    def advertise(self):
+        if self.clock() - self._last_advertisement >= ADVERTISE_SECONDS:
+            self.store.advertise(self.config.worker_id, self.incarnation, self.workspaces.projects(),
+                                 self.config.advertised_profiles(), POLICY_DIGEST)
+            self._last_advertisement = self.clock()
+
+    def reconcile_pending(self):
+        self.store.expire_leases()
+        for raw in self.store.pending_reconciliations():
+            if self.stop.is_set():
+                break
+            lease = _recovery(raw, self.config.owner)
+            # The DB facade returns only expired/stopped tasks owned by its
+            # separately authorized reconciler role. Never infer expiry locally.
+            proof = self.supervisor.stop(lease["unit_name"])
+            if not proof["scope_stopped"]:
+                continue
+            try:
+                with self.workspaces.inspect(lease) as workspace:
+                    self.store.reconcile(lease, workspace.digest(), proof)
+            except ExecutionError:
+                # Preserve uninspectable workspaces and their reservations.
+                continue
+
+    def _normalize_usage(self, lease, outcome):
+        if outcome.usage is None:
+            return None
+        try:
+            normalizer = self.usage_normalizer
+            if normalizer is None:
+                from usage_provider import normalize_attempt_usage
+                normalizer = normalize_attempt_usage
+            return normalizer(lease["recipe"]["backend"], outcome.usage, fresh_session=True)
+        except Exception:
+            # Missing telemetry never changes a coherent coding result.
+            LOG.warning("Coding usage observation unavailable")
+            return None
+
+    def _publish(self, lease, outcome, *, usage):
+        manifest = None
+        if outcome.status == "awaiting_review":
+            chunks = list(utf8_chunks(outcome.text))
+            if len(chunks) > 1024:
+                outcome = CliOutcome("failed", "", outcome.conversation_id, outcome.usage,
+                                     "Agent response exceeded its declared chunk resource bound.", outcome.stop_proof)
+            else:
+                encoded = outcome.text.encode("utf-8")
+                manifest = {"sha256": hashlib.sha256(encoded).hexdigest(), "byte_count": len(encoded),
+                            "chunk_count": len(chunks)}
+                self._spool_result(lease, encoded, manifest)
+                for index, content in enumerate(chunks):
+                    try:
+                        self.store.append_result(lease, index, content)
+                    except Exception as error:
+                        if not _retryable(error):
+                            raise
+                        self.store.append_result(lease, index, content)
+        try:
+            return self.store.publish(lease, outcome.status, manifest, usage, outcome.summary, outcome.stop_proof)
+        except Exception as error:
+            if not _retryable(error):
+                raise
+            # Retry the identical receipt, never the CLI.
+            return self.store.publish(lease, outcome.status, manifest, usage, outcome.summary, outcome.stop_proof)
+
+    def _spool_result(self, lease, content, manifest):
+        """Retain the complete stopped reply if database publication is uncertain.
+
+        This parent-owned directory is outside the child's writable attempt alias.
+        A spool never authorizes publication after an expired lease or a CLI rerun.
+        """
+        directory = self.config.state_root / "results" / str(UUID(lease["attempt_id"]))
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.is_symlink() or directory.parent.is_symlink():
+            raise OSError("Coding result spool cannot be a symlink")
+        for name, data in (("reply.txt", content), ("manifest.json", json.dumps(manifest, sort_keys=True).encode())):
+            path = directory / name
+            try:
+                descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            except FileExistsError:
+                if path.is_symlink() or path.read_bytes() != data:
+                    raise OSError("Coding result spool conflicts with the retained outcome") from None
+            else:
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(data)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def process(self, raw):
+        lease = _lease(raw)
+        if lease["worker_id"] != self.config.worker_id or lease["incarnation"] != self.incarnation:
+            raise ValueError("Coding claim belongs to another worker incarnation")
+        stop = threading.Event()
+        done = threading.Event()
+        lost = threading.Event()
+        cancelled = threading.Event()
+
+        def renew():
+            while not done.is_set():
+                try:
+                    if self.store.cancellation_requested(lease):
+                        cancelled.set()
+                        stop.set()
+                    if not self.store.renew(lease):
+                        lost.set()
+                        stop.set()
+                except Exception:
+                    lost.set()
+                    stop.set()
+                try:
+                    self.advertise()
+                except Exception:
+                    LOG.warning("Coding worker heartbeat advertisement unavailable")
+                if self.stop.is_set():
+                    stop.set()
+                done.wait(POLICY["renew_seconds"])
+
+        heartbeat = threading.Thread(target=renew, name="forge-coding-lease", daemon=True)
+        heartbeat.start()  # Renewal covers workspace setup, process and cleanup.
+        workspace = None
+        proof = None
+        try:
+            if not verify_recipe(self.config, lease):
+                raise ExecutionError("failed", "Pinned execution policy or profile is unavailable.")
+            if lost.is_set() or not self.store.renew(lease):
+                lost.set()
+                raise ExecutionError("needs_reconcile", "The assignment lease is no longer current.")
+            with self.workspaces.acquire(lease) as workspace:
+                if lost.is_set() or not self.store.renew(lease):
+                    lost.set()
+                    raise ExecutionError("needs_reconcile", "The assignment lease is no longer current.")
+                if self.store.cancellation_requested(lease):
+                    cancelled.set()
+                if self.stop.is_set() or cancelled.is_set():
+                    stop.set()
+                if stop.is_set():
+                    proof = self.supervisor.stop(lease["unit_name"])
+                    outcome = CliOutcome("cancelled", "", None, None, "The assignment stopped before execution.", proof)
+                else:
+                    self.store.checkpoint(lease, "Starting the selected coding agent in its isolated task workspace.")
+                    # Second pure policy check is immediately before spawning.
+                    if not verify_recipe(self.config, lease):
+                        raise ExecutionError("failed", "Pinned execution policy changed before startup.")
+                    outcome = self.runner.run(lease, workspace, stop)
+                    proof = outcome.stop_proof
+                if self.stop.is_set() and not cancelled.is_set():
+                    outcome = CliOutcome("needs_reconcile", "", outcome.conversation_id, outcome.usage,
+                                         "Worker shutdown requires review before any replacement attempt.", proof)
+                if lost.is_set():
+                    self.store.record_stop(lease, proof, "Prior agent scope stopped after its lease was lost.")
+                    return
+                if not proof["scope_stopped"]:
+                    outcome = CliOutcome("needs_reconcile", "", outcome.conversation_id, outcome.usage,
+                                         "Agent scope stop could not be verified.", proof)
+                self._publish(lease, outcome, usage=self._normalize_usage(lease, outcome))
+                if proof["scope_stopped"]:
+                    try:
+                        self.store.reconcile(lease, workspace.digest(), proof)
+                    except Exception:
+                        LOG.warning("Coding reconciliation receipt unavailable; takeover remains disabled")
+        except ExecutionError as error:
+            proof = proof or self.supervisor.stop(lease["unit_name"])
+            if lost.is_set():
+                self.store.record_stop(lease, proof, error.summary)
+            else:
+                status = error.outcome if proof["scope_stopped"] else "needs_reconcile"
+                outcome = CliOutcome(status, "", None, None, error.summary, proof)
+                self._publish(lease, outcome, usage=None)
+        except Exception:
+            proof = proof or self.supervisor.stop(lease["unit_name"])
+            try:
+                self.store.record_stop(lease, proof, "Worker lost publication certainty; review is required.")
+            except Exception:
+                pass
+            raise
+        finally:
+            done.set()
+            heartbeat.join(timeout=12)
+
+    def run_once(self):
+        self.reconcile_pending()
+        self.advertise()
+        lease = self.store.claim(self.config.worker_id, self.incarnation, list(self.config.allowed_profiles))
+        if lease is not None:
+            self.process(lease)
+            self.collect_usage()
+            return True
+        self.collect_usage()
+        return False
+
+    def collect_usage(self):
+        if self.collector is not None and not self.stop.is_set():
+            try:
+                self.collector.run_once()
+            except Exception:
+                LOG.warning("Agent metadata collector unavailable")
+
+    def run_forever(self):
+        while not self.stop.is_set():
+            try:
+                listener = self.store.listen() if hasattr(self.store, "listen") else nullcontext(None)
+                with listener as committed_listener:
+                    # LISTEN is committed by the DB port before the first scan.
+                    while not self.stop.is_set():
+                        if self.run_once():
+                            continue
+                        if committed_listener is not None and hasattr(self.store, "wait"):
+                            self.store.wait(committed_listener, SCAN_SECONDS)
+                        else:
+                            self.stop.wait(SCAN_SECONDS)
+            except Exception:
+                LOG.warning("Coding worker reconnecting; no assignment is automatically replayed")
+                self.stop.wait(SCAN_SECONDS)
+
+
+class CodingWorkerFactory:
+    """Effect-free selection; explicit create validates then acquires ready ports."""
+
+    def __init__(self, config, store_factory, *, runner_factory=None, workspace_factory=None,
+                 supervisor_factory=None, collector_factory=None, clock=time.monotonic, stop=None,
+                 usage_normalizer=None):
+        if not isinstance(config, WorkerConfig) or not callable(store_factory):
+            raise TypeError("Coding worker requires frozen configuration and a store factory")
+        self.config, self.store_factory = validated_copy(config), store_factory
+        self.runner_factory = (runner_factory if runner_factory is not None
+                               else lambda config, supervisor: CommandRunnerProvider(config, supervisor))
+        self.workspace_factory = workspace_factory if workspace_factory is not None else WorkspaceProvider
+        self.supervisor_factory = supervisor_factory if supervisor_factory is not None else SystemdSupervisor
+        self.collector_factory, self.clock, self.stop = collector_factory, clock, stop
+        self.usage_normalizer = usage_normalizer
+
+    def create(self):
+        store = self.store_factory(self.config)
+        supervisor = self.supervisor_factory(self.config)
+        workspaces = self.workspace_factory(self.config)
+        runner = self.runner_factory(self.config, supervisor)
+        workspaces.prepare()
+        runner.prepare()
+        collector = self.collector_factory(self.config, store) if self.collector_factory else None
+        return CodingWorker(self.config, store, runner, workspaces, supervisor, collector=collector,
+                            clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer)
+
+
+def default_store_factory(config):
+    import psycopg2
+    from work_worker_store import WorkerDB
+
+    return WorkerDB(
+        lambda: psycopg2.connect(**config.database.connection_arguments()), config.owner,
+        reconcile_connect_factory=lambda: psycopg2.connect(**config.database.connection_arguments(reconciler=True)),
+    )
+
+
+def default_collector_factory(config, store):
+    if config.usage is None:
+        return None
+    from usage_collector import create_worker_usage_collector
+
+    return create_worker_usage_collector(config, store)
+
+
+def main():
+    logging.basicConfig(level=logging.INFO)
+    config = load_config(os.environ[CONFIG_ENV])
+    stop = threading.Event()
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(signum, lambda _signal, _frame: stop.set())
+    worker = CodingWorkerFactory(config, default_store_factory, stop=stop,
+                                 collector_factory=default_collector_factory).create()
+    worker.run_forever()
+
+
+if __name__ == "__main__":
+    main()

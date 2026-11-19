@@ -65,6 +65,9 @@ pub struct RequestPolicy {
     pub wait_for_slot_ms: Option<u32>,
     pub checkpoint: Option<CheckpointBinding>,
     pub expire_session_on_denial: bool,
+    pub expire_session_on_unauthenticated: bool,
+    /// Exact prepared intent under the Rust-owned local navigation snapshot.
+    pub local_checkpoint_path: Option<String>,
 }
 
 /// Match a request against the corresponding intent in the saved workspace.
@@ -99,7 +102,7 @@ impl Transport {
         }
         if !component::key(&self.initial_event)
             || self.bindings.is_empty()
-            || self.bindings.len() > 24
+            || self.bindings.len() > 48
             || self.timers.len() > 8
             || self.entry_actions.len() > 16
             || self
@@ -132,7 +135,14 @@ impl Transport {
                 .into_iter()
                 .flatten()
                 .any(|ms| !(1..=30_000).contains(&ms))
-                || (b.policy.expire_session_on_denial && !b.csrf)
+                || ((b.policy.expire_session_on_denial
+                    || b.policy.expire_session_on_unauthenticated
+                    || b.policy.local_checkpoint_path.is_some())
+                    && !b.csrf)
+                || b.policy
+                    .local_checkpoint_path
+                    .as_deref()
+                    .is_some_and(|p| !path(p))
             {
                 return Err("invalid request policy");
             }
@@ -338,7 +348,7 @@ impl Factory<AssetBundle> for AssetFactory {
         ]);
         let manifest = Manifest {
             format_version: 1,
-            abi_version: 5,
+            abi_version: 6,
             files: files
                 .iter()
                 .map(|(path, bytes)| ManifestFile {

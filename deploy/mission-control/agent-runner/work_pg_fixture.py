@@ -118,4 +118,22 @@ class DisposablePostgresCluster:
                     cursor.execute(statement)
 
     def reset_coding_tables(self):
-        self.admin_exec("TRUNCATE forge_agent.coding_tasks CASCADE", owner=False)
+        self.admin_exec(
+            "TRUNCATE forge_agent.coding_tasks, forge_agent.coding_worker_grants, "
+            "forge_agent.coding_worker_readiness, forge_agent.coding_provider_usage, "
+            "forge_agent.coding_usage_refresh_requests CASCADE",
+            owner=False,
+        )
+
+    def grant_worker(self, owner_id, project_alias, agent_profile, modes=("plan", "review", "implement"),
+                     *, worker_role="forge_coding_worker"):
+        with closing(self.connect("postgres")) as connection:
+            with connection, connection.cursor() as cursor:
+                for mode in modes:
+                    cursor.execute("""
+                        INSERT INTO forge_agent.coding_worker_grants (
+                            worker_role, owner_id, project_alias, agent_profile, mode
+                        )
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (worker_role, owner_id, project_alias, agent_profile, mode))

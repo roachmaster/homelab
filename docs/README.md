@@ -13,11 +13,11 @@ Start with the [current implementation reference](design/implementation-status.m
 - [Managed inline editing](architecture/proposals/forge-ide-inline-edit.md): staged review, revision fencing, receipts and reconciliation.
 - [Portal Home](architecture/proposals/forge-portal-landing.md): generated launchers and documentation navigation.
 
-## Proposed coding-agent workflow
+## Coding agents and usage
 
-[Coding assignment admission](architecture/coding-admission.md) documents the first implemented backend slice: opt-in factories, durable submit/get/list/events/queued cancellation and immutable retry receipts. It is disabled by default and not enabled live. [The full dispatch proposal](architecture/proposals/forge-coding-agent-dispatch.md) covers the remaining CLI worker, saved responses, review acceptance and agent takeover, with provider/DAO ownership and sequence diagrams.
+[Coding-agent workflow](architecture/coding-admission.md) documents the implemented source: catalog-backed Agents view, durable assignments, scoped native CLI workers, full-result paging, explicit acceptance and receipt-gated resume. Work/Usage are independent opt-in capabilities; deployment verification is pending.
 
-[Agent usage and limits](architecture/proposals/forge-agent-usage.md) adds provider-managed generation limits, paged full results and an Agents portal design for Codex, Gemini/Antigravity and future adapters. It separates account allowance/reset windows, observed job tokens, context and cost estimates.
+[Dispatch and sequence design](architecture/proposals/forge-coding-agent-dispatch.md) maps the current role/supervisor/provider boundaries to the retained UML. [Agent usage](architecture/proposals/forge-agent-usage.md) covers supported Codex metadata, Antigravity's explicit unsupported headless allowance, real per-job counters, account/project separation and metadata-only refresh. No local inference output-token cap is inherited.
 
 ## Game and Studio
 

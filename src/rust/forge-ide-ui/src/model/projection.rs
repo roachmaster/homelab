@@ -1194,6 +1194,12 @@ impl UiModel {
                 .as_ref()
                 .is_some_and(|catalog| catalog.mail_archive_enabled),
         );
+        self.agents.project(
+            &mut view,
+            connected,
+            self.catalog.as_ref().is_some_and(|c| c.work_enabled),
+            self.catalog.as_ref().is_some_and(|c| c.usage_enabled),
+        );
         view
     }
 }

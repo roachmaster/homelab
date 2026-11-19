@@ -12,15 +12,17 @@ import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from
 import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
 import { mailPreview, mailSubject, startDurableRelay } from './durable-relay.mjs';
+import { startAgentsRelay } from './agents-relay.mjs';
 
-let assets, agent, fixtureBinary, output, browser, browserOwner, durableRelayOwner, check, report;
+let assets, agent, fixtureBinary, output, browser, browserOwner, durableRelayOwner, agentsRelayOwner, check, report;
 const active = new Set();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-async function startFixture(faults = false, singleProject = false, { durable, managedWrites = false } = {}) {
+async function startFixture(faults = false, singleProject = false, { durable, agents, managedWrites = false } = {}) {
   report.ensureActive();
   report.setStage('fixture_start');
   const mode = durable ? ['--durable', durable.bind, durable.endpoint, durable.tokenFile]
+    : agents ? ['--agents', '127.0.0.1:0', agents.endpoint, agents.tokenFile]
     : faults ? ['--faults'] : managedWrites ? ['--managed-writes'] : singleProject ? ['--single-project'] : [];
   const child = spawn(fixtureBinary, [assets, agent, ...mode], {
     stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
@@ -1467,9 +1469,13 @@ async function durableHostRestartJourney() {
     await check(model).toBeEnabled();
     await check(model.locator('option[value="qwen2.5-coder-7b"]')).toHaveText(/ · loaded$/);
     await page.locator('#new-chat').click();
+    // Input events carry the accepted conversation identity from the view.
+    // Wait for New chat's Rust acknowledgement before entering its draft.
+    await check(page.locator('#chat-conversation')).toHaveValue('1');
     await draft.fill(privateDraft);
     const persisted = checkpointSaved(page, snapshot => snapshot.workbench_open &&
-      snapshot.workbench?.entry?.path.at(-1)?.value === file && checkpointHasDraft(snapshot, privateDraft) &&
+      snapshot.workbench?.entry?.path.at(-1)?.value === file && snapshot.chat.selected === 1 &&
+      snapshot.chat.conversations[1]?.draft === privateDraft &&
       snapshot.chat.conversations[0]?.messages.some(message => message.role === 'assistant' && message.content === reply));
     await page.locator('#open-workbench').click();
     await inspect(page, 'workspace');
@@ -2012,9 +2018,10 @@ async function homeJourney(page, traffic) {
   const docs = page.locator('#home-docs .home-doc-link');
   const primary = page.getByRole('link', { name: 'Open Forge IDE', exact: true });
   const secondary = page.getByRole('link', { name: 'Browse design docs', exact: true });
-  await check(launchers).toHaveCount(3);
+  await check(launchers).toHaveCount(4);
   await check(docs).toHaveCount(7);
-  await check(launchers.locator('svg[aria-hidden="true"]')).toHaveCount(3);
+  await check(launchers.locator('svg[aria-hidden="true"]')).toHaveCount(4);
+  await check(page.locator('.home-launcher-agents')).toHaveAttribute('href','/agents');
   await primary.focus();
   assert.equal(await primary.evaluate(link => {
     const style = getComputedStyle(link);
@@ -3188,8 +3195,144 @@ async function chatJourney(page, context) {
   await page.locator('#open-workbench').click();
 }
 
+async function agentsJourney() {
+  process.stderr.write('QA_CHECK portal_agents_workflow\n');
+  agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
+  let fixture, context;
+  try {
+    const relay = await agentsRelayOwner.ready;
+    fixture = await startFixture(false, false, { agents: relay });
+    context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const { page, errors } = await connect(context, fixture);
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin + '/home');
+    await page.locator('.home-launcher-agents').focus();
+    await page.keyboard.press('Enter');
+    await check(page.locator('#agents')).toBeVisible();
+    await check(page.locator('#agents-worker')).toHaveText('Worker ready');
+    await check(page.locator('#open-chat')).toBeEnabled();
+    await check(page.locator('#ide-navigation [aria-current="page"]')).toHaveCount(0);
+    await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(5);
+    await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
+    await check(page.locator('#agents-providers')).toContainText('Headless allowance unavailable');
+    await check(page.locator('#agents-providers')).toContainText('9007199254740998');
+    await check(page.locator('#agents-new')).toBeEnabled();
+
+    await page.locator('#agents-new').click();
+    const prompt = page.locator('#agents-prompt');
+    const criteria = page.locator('#agents-criteria');
+    const retained = 'Keep this local Agents draft.';
+    await prompt.fill(retained);
+    await criteria.fill('Recover the draft after portal navigation.');
+    await check(page.locator('#agents-send')).toBeEnabled();
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin + '/home');
+    await page.locator('.home-launcher-agents').click();
+    await check(page.locator('#agents-compose')).toBeVisible();
+    await check(prompt).toHaveValue(retained);
+    await check(criteria).toHaveValue('Recover the draft after portal navigation.');
+
+    // The main thread acknowledges opaque Rust recovery data before Work IO.
+    let checkpoints = 0;
+    await context.route(fixture.origin + '/forge/v1/dispatch', async route => {
+      const request = route.request().postDataJSON();
+      if (['work_submit', 'work_cancel', 'work_accept', 'work_resume'].includes(request.kind)) {
+        const saved = await page.evaluate(intent => {
+          const cache = JSON.parse(sessionStorage.getItem('forge-workspace-navigation'));
+          return cache?.agents?.retry_intent?.kind === intent.kind
+            && cache.agents.retry_intent.idempotency_key === intent.idempotency_key;
+        }, request);
+        assert.equal(saved, true, 'mutating request identity is cached before network dispatch');
+        checkpoints++;
+      }
+      await route.continue();
+    });
+    relay.faults.denyNextSubmit = true;
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-status')).toContainText('not authorized');
+    await check(page.locator('#agents-compose')).toBeVisible();
+    await check(page.locator('#connection')).toBeHidden();
+    await check(page.locator('#agents-send')).toBeEnabled();
+    assert.equal(relay.taskCount, 1, 'typed403 does not expire the session or admit a task');
+
+    relay.faults.dropNextSubmit = true;
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-retry')).toBeVisible();
+    await check(prompt).toBeDisabled();
+    assert.equal(relay.taskCount, 2);
+    await page.locator('#forge-home').click();
+    await check(page.locator('[data-workspace-navigation-status]')).toContainText('still open');
+    await check(page.locator('#agents')).toBeVisible();
+    await page.locator('#agents-retry').click();
+    await check(page.locator('[data-workspace-navigation-status]')).toBeHidden();
+    await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-status')).toContainText('Ready for review');
+    await check(page.locator('#agents-result')).toContainText('Verified first section.');
+    assert.equal(relay.taskCount, 2, 'unknown-outcome retry reuses the committed admission');
+    await check(page.locator('#agents-result script,#agents-result img')).toHaveCount(0);
+    let pages = 1;
+    while (pages < 16 && await page.locator('#agents-result-next').isEnabled()) {
+      const before = await page.locator('#agents-result-page').textContent();
+      await page.locator('#agents-result-next').click();
+      await check.poll(() => page.locator('#agents-result-page').textContent()).not.toBe(before);
+      pages++;
+    }
+    assert(pages >= 5, 'a response larger than64KiB is read through bounded pages');
+    await check(page.locator('#agents-result')).toContainText('Final fixture marker.');
+    await check(page.locator('#agents-result-next')).toBeDisabled();
+    await page.locator('#agents-result-previous').click();
+    await check(page.locator('#agents-result-next')).toBeEnabled();
+    await page.locator('#agents-review-note').fill('Reviewed the fixture result.');
+    await page.locator('#agents-accept').click();
+    await check(page.locator('#agents-task-status')).toContainText('Accepted');
+    await check(page.locator('#agents-accept')).toBeHidden();
+
+    await page.locator('#agents-new').click();
+    await prompt.fill('Cancel fixture work');
+    await criteria.fill('Confirm that the worker stops.');
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-task-status')).toContainText('Running');
+    await page.locator('#agents-cancel').click();
+    await check(page.locator('#agents-task-status')).toContainText('Stopping');
+    await check(page.locator('#agents-task-status')).toContainText('Cancelled');
+    await page.locator('#agents-back').click();
+    await check(page.locator('#agents-providers')).toBeVisible();
+    const submissions = relay.calls.filter(kind => kind === 'work_submit').length;
+    await page.locator('#agents-providers .fg-row-select').filter({ hasText: 'Codex fixture' }).click();
+    await check(page.locator('#agents-usage-refresh')).toBeEnabled();
+    await page.locator('#agents-usage-refresh').click();
+    await check.poll(() => relay.refreshes).toBe(1);
+    assert.equal(relay.calls.filter(kind => kind === 'work_submit').length, submissions,
+      'metadata refresh never starts a generation');
+
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+        'Agents controls, task rows and usage cards fit the viewport');
+      assert.equal(await page.locator('#agents-providers .fg-tree-row').evaluateAll((nodes, phone) => {
+        const [a, b] = nodes.map(node => node.getBoundingClientRect());
+        return phone ? b.top >= a.bottom - 1 : Math.abs(a.top - b.top) <= 1;
+      }, width < 800), true, 'provider cards stack on phones and share a desktop row');
+      await page.locator('#agents-new').focus();
+      await check(page.locator('#agents-new')).toBeFocused();
+    }
+    for (const [width, name] of [[390, 'phone'], [1440, 'desktop']]) {
+      await page.setViewportSize({ width, height: 844 });
+      await page.locator('#agents').evaluate(node => { node.scrollTop = 0; });
+      await screenshot(page, `ide-agents-overview-${name}.png`);
+    }
+    assert(checkpoints >= 5, 'submission, retry, acceptance and cancellation all checkpoint before IO');
+    assert.deepEqual(errors, []);
+    assert.equal(context.pages().length, 1, 'the Agents workflow uses one browser page');
+  } finally {
+    try { if (context) await context.close(); }
+    finally { try { if (fixture) await stopFixture(fixture); } finally { await agentsRelayOwner.close(); } }
+  }
+}
+
 async function realJourney() {
   report.start('real.report.partial');
+  await agentsJourney();
   await sourceSearchJourney();
   const fixture = await startFixture();
   report.setStage('context_start');
@@ -3630,6 +3773,7 @@ const passed = await runHarness({
       ...(browserOwner ? [{ name: 'browser', close: () => browserOwner.close() }] : []),
       ...[...active].map(fixture => ({ name: fixture.name, close: () => stopFixture(fixture) })),
       ...(durableRelayOwner ? [{ name: 'real_fixture', close: () => durableRelayOwner.close() }] : []),
+      ...(agentsRelayOwner ? [{ name: 'real_fixture', close: () => agentsRelayOwner.close() }] : []),
     ], currentReport);
   },
 });

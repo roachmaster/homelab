@@ -26,18 +26,18 @@ pub(super) const DISPATCH: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Coding-agent dispatch")),
         element!(P;
-            element!(Strong; text("Proposed / not implemented.")),
-            text(" Design-only architecture at base revision "),
+            element!(Strong; text("Implemented; activation is deployment controlled.")),
+            text(" Source checkpoint: 19 November 2026. Original design base "),
             element!(Code; text("2e1300a00da92e9f97bdb1a656c2b182d4219a6c")),
-            text(". An operator submits a coding assignment through the shared Forge gateway; PostgreSQL commits the task and wakes a separate native coding worker, which stores the full result for review acceptance. No coding worker, migration, or production activation is enabled here."),
+            text(". The source implements the Agents view, durable assignments, native Antigravity/Codex workers, full-result paging and explicit review/resume. Work and Usage are independent opt-in capabilities. This reader does not certify deployment of the bundle, migrations or worker. Retained diagrams use original illustrative port names."),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Coding-agent dispatch sections"];
             element!(A [Href = "#flow"]; text("End-to-end flow")),
             element!(A [Href = "#ownership"]; text("Ownership and providers")),
             element!(A [Href = "#lifecycle"]; text("Leases and takeover")),
-            element!(A [Href = "#contracts"]; text("Proposed contracts")),
+            element!(A [Href = "#contracts"]; text("Implemented contracts")),
             element!(A [Href = "#rollout"]; text("Rollout")),
-            element!(A [Href = "/design/agent-usage"]; text("Agent usage design (proposed)")),
+            element!(A [Href = "/design/agent-usage"]; text("Agent usage and limits")),
         ),
     ),
     element!(Section [Id = "flow", Class = "design-section", AriaLabelledby = "flow-title"];
@@ -116,8 +116,8 @@ pub(super) const DISPATCH: &[Node] = &[
             element!(Code; text("coding_result_chunks")),
             text(" and read in bounded pages via "),
             element!(Code; text("ide.work.result")),
-            text("; preview bounds never truncate the stored reply. See "),
-            element!(A [Href = "/design/agent-usage"]; text("Agent usage and token limits (proposed)")),
+            text(" (up to 16 MiB). Result cursors bind SHA-256 and byte offset; UTF-8 pages are at most 16 KiB, and the browser retains one page with bounded history. Preview bounds never truncate the stored reply. See "),
+            element!(A [Href = "/design/agent-usage"]; text("Agent usage and token limits")),
             text(" for allowance and accounting boundaries."),
         ),
         diagram!(
@@ -168,30 +168,30 @@ pub(super) const DISPATCH: &[Node] = &[
                     element!(Code; text("forge_agent")),
                     text(" with "),
                     element!(Code; text("ProtectHome=true")),
-                    text(", the coding worker runs as a separate native process under the approved signed-in OS account ("),
+                    text(", a separate worker uses a root-managed fixed namespace supervisor that drops the CLI to the approved signed-in OS account ("),
                     element!(Code; text("lrocha")),
-                    text("). Its composition root injects "),
-                    element!(Code; text("WorkerDbPort")),
+                    text(") with zero capabilities and no-new-privileges. The launcher only creates namespaces and drops privilege; the agent never runs as root. Canonical repositories, DB/control sockets and credentials are hidden; plan/review is read-only and implement is separately opted in. Its composition root injects "),
+                    element!(Code; text("WorkerDB")),
                     text(", "),
-                    element!(Code; text("CommandRunnerProvider")),
+                    element!(Code; text("CliRunnerFactory")),
                     text(", and "),
-                    element!(Code; text("WorkspaceProvider")),
+                    element!(Code; text("WorkspaceFactory")),
                     text("; workers never query a global registry, OAuth stays out of the runner/DB, and DB or bearer secrets stay out of child CLI env. Pure DTO values need no empty registrars."),
                 ),
             ),
             element!(Div;
                 element!(Dt; text("Least-privilege DB role and trusted Reconciler")),
                 element!(Dd;
-                    text("The worker calls only "),
+                    text("The execute-only worker has no direct table/column access and calls only "),
                     element!(Code; text("forge_coding_worker_api.*")),
                     text(" "),
                     element!(Code; text("SECURITY DEFINER")),
-                    text(" routines. A separate trusted local "),
+                    text(" routines bound to trusted owner/project/profile/mode grants. The GPU role has no coding/usage privileges. A separate trusted local "),
                     element!(Code; text("Reconciler")),
                     text(" holds "),
                     element!(Code; text("expire_leases")),
                     text(" and "),
-                    element!(Code; text("record_reconciliation")),
+                    element!(Code; text("reconcile")),
                     text(" to verify process-scope stop and workspace digest without ability to submit or spawn replacements."),
                 ),
             ),
@@ -228,12 +228,12 @@ pub(super) const DISPATCH: &[Node] = &[
                 ),
             ),
             element!(Div;
-                element!(Dt; text("No expired-lease replay of edits")),
+                element!(Dt; text("No expired-lease replay or automatic quota retry")),
                 element!(Dd;
                     text("An attempt token fences database publication, not filesystem writes. Lease expiry, worker crash, or unconfirmed stop enters "),
                     element!(Code; text("needs_reconcile")),
-                    text(" while keeping "),
-                    element!(Code; text("workspace_reserved = true")),
+                    text(" while retaining the durable workspace reservation "),
+                    element!(Code; text("workspace_reserved")),
                     text(". There is no automatic "),
                     element!(Code; text("running")),
                     text(" to "),
@@ -250,7 +250,7 @@ pub(super) const DISPATCH: &[Node] = &[
                     element!(Code; text("coding_reconciliation_receipts")),
                     text(" row at the current task revision. "),
                     element!(Code; text("ide.work.resume")),
-                    text(" requires that receipt and "),
+                    text(" is an explicit user action requiring the selected admitted profile, that receipt and "),
                     element!(Code; text("expected_revision")),
                     text("; the next worker recomputes the actual worktree digest under its writer lock right before spawning."),
                 ),
@@ -272,7 +272,7 @@ pub(super) const DISPATCH: &[Node] = &[
                     element!(Code; text("plan")),
                     text(" and "),
                     element!(Code; text("review")),
-                    text(" map to native "),
+                    text(" map in Antigravity to native "),
                     element!(Code; text("--mode plan")),
                     text(" (never literal "),
                     element!(Code; text("--mode review")),
@@ -302,9 +302,9 @@ pub(super) const DISPATCH: &[Node] = &[
         ),
     ),
     element!(Section [Id = "contracts", Class = "design-section", AriaLabelledby = "contracts-title"];
-        element!(H2 [Id = "contracts-title"]; text("Proposed API, DTO, and DAO contracts")),
+        element!(H2 [Id = "contracts-title"]; text("Implemented API, DTO, and DAO contracts")),
         element!(P;
-            text("All proposed destinations share "),
+            text("All implemented destinations share "),
             element!(Code; text("POST /forge/v1/dispatch")),
             text(" -> private "),
             element!(Code; text("POST /v1/dispatch")),
@@ -325,13 +325,19 @@ pub(super) const DISPATCH: &[Node] = &[
             element!(Table;
                 element!(Thead;
                     element!(Tr;
-                        element!(Th; text("Destination (proposed)")),
+                        element!(Th; text("Destination")),
                         element!(Th; text("Request kind & key fields")),
                         element!(Th; text("Response & status")),
                         element!(Th; text("Key rejections")),
                     ),
                 ),
                 element!(Tbody;
+                    element!(Tr;
+                        element!(Td; element!(Code; text("ide.work.catalog"))),
+                        element!(Td; element!(Code; text("work_catalog")), text(": request_id; no caller paths or base SHA")),
+                        element!(Td; element!(Code; text("work_catalog")), text(" (200): admitted projects/base revisions, profiles/models/modes and trusted worker freshness")),
+                        element!(Td; text("403 grants, 503 unavailable; no secret account data")),
+                    ),
                     element!(Tr;
                         element!(Td; element!(Code; text("ide.work.submit"))),
                         element!(Td; element!(Code; text("work_submit")), text(": project_alias, base_revision, mode, agent_profile, prompt, acceptance_criteria, idempotency_key")),
@@ -340,8 +346,8 @@ pub(super) const DISPATCH: &[Node] = &[
                     ),
                     element!(Tr;
                         element!(Td; element!(Code; text("ide.work.get"))),
-                        element!(Td; element!(Code; text("work_get")), text(": task_id, include_checkpoint")),
-                        element!(Td; element!(Code; text("work_opened")), text(" (200): task header, attempt summary, preview, result_manifest, provenance-split checkpoint")),
+                        element!(Td; element!(Code; text("work_get")), text(": project_alias, task_id")),
+                        element!(Td; element!(Code; text("work_opened")), text(" (200): event.task with prompt, attempt summary, published result and trusted receipt")),
                         element!(Td; text("404 not_found (including cross-owner)")),
                     ),
                     element!(Tr;
@@ -364,7 +370,7 @@ pub(super) const DISPATCH: &[Node] = &[
                     ),
                     element!(Tr;
                         element!(Td; element!(Code; text("ide.work.cancel"))),
-                        element!(Td; element!(Code; text("work_cancel")), text(": task_id, expected_revision, idempotency_key, optional reconciliation_receipt_id")),
+                        element!(Td; element!(Code; text("work_cancel")), text(": project_alias, task_id, expected_revision, idempotency_key")),
                         element!(Td; element!(Code; text("work_cancel_recorded")), text(" (200): base/result revision, status (cancel_requested or cancelled)")),
                         element!(Td; text("404, 409 idempotency / revision / reconcile_required")),
                     ),
@@ -385,7 +391,7 @@ pub(super) const DISPATCH: &[Node] = &[
         ),
         element!(Div [Class = "recovery"];
             element!(Details;
-                element!(Summary; text("Proposed PostgreSQL DAO tables (proposed migration slot 0009)")),
+                element!(Summary; text("Implemented PostgreSQL tables (0009 plus 0010)")),
                 element!(Dl [Class = "storage"];
                     element!(Div;
                         element!(Dt; element!(Code; text("forge_agent.coding_tasks"))),
@@ -416,7 +422,7 @@ pub(super) const DISPATCH: &[Node] = &[
         ),
         element!(Div [Class = "recovery"];
             element!(Details;
-                element!(Summary; text("Proposed submit request and 202 receipt example")),
+                element!(Summary; text("Illustrative submit request and 202 receipt example")),
                 element!(Pre [Class = "contract-code"];
                     element!(Code; text("{\"kind\":\"work_submit\",\"request_id\":\"req-9f2a\",\"project_alias\":\"homelab\",\"base_revision\":\"2e1300a00da92e9f97bdb1a656c2b182d4219a6c\",\"mode\":\"plan\",\"agent_profile\":\"agy-plan-v1\",\"prompt\":\"Draft fix plan\",\"acceptance_criteria\":\"Bounded plan\",\"idempotency_key\":\"task-001\"}\n\n202 Accepted (after COMMIT):\n{\"protocol_version\":1,\"event\":{\"kind\":\"work_submitted\",\"request_id\":\"req-9f2a\",\"task_id\":\"8c1d4c3e-6b4f-4d2e-9a1b-2c3d4e5f6a7b\",\"revision\":1,\"status\":\"queued\",\"recipe_digest\":\"sha256:...\"}}")),
                 ),
@@ -427,8 +433,8 @@ pub(super) const DISPATCH: &[Node] = &[
         element!(H2 [Id = "rollout-title"]; text("Phased rollout and verification gates")),
         element!(Ol [Class = "contract-steps"];
             element!(Li;
-                element!(Strong; text("Phase 1 — Backend, disposable PostgreSQL, and fake CLI (no paid calls).")),
-                text(" Implement migration, Rust "),
+                element!(Strong; text("Implemented backend and isolated CLI source.")),
+                text(" Source includes migrations 0009/0010, Rust "),
                 element!(Code; text("WorkConfig")),
                 text("/"),
                 element!(Code; text("WorkRelayFactory")),
@@ -443,7 +449,7 @@ pub(super) const DISPATCH: &[Node] = &[
                 text(" isolation, replay-before-CAS, zero expired-lease replay, chunked paging above 64 KiB, and reconciliation/drift rejection."),
             ),
             element!(Li;
-                element!(Strong; text("Phase 2 — Supported real read-only adapter smoke.")),
+                element!(Strong; text("Separate real-provider validation gate.")),
                 text(" Exercise bounded "),
                 element!(Code; text("plan")),
                 text("/"),
@@ -453,8 +459,8 @@ pub(super) const DISPATCH: &[Node] = &[
                 text(" binary under the approved signed-in account in an isolated disposable worktree."),
             ),
             element!(Li;
-                element!(Strong; text("Phase 3 — Generated UI later.")),
-                text(" Author typed Rust/YAML portal views under existing worker ownership and verify with "),
+                element!(Strong; text("Implemented generated Agents UI; release checks remain separate.")),
+                text(" Typed Rust/YAML portal views preserve existing worker ownership; verify the atomic ABI-6 release with "),
                 element!(Code; text("make ci")),
                 text(" and "),
                 element!(Code; text("make ui-qa")),
@@ -468,11 +474,11 @@ pub(super) const DISPATCH: &[Node] = &[
                 element!(Code; text("review")),
                 text(" first after role/service sign-off. Write-profile "),
                 element!(Code; text("implement")),
-                text(" remains blocked until verified supervision and OS/credential isolation exist. No production activation is part of this design."),
+                text(" requires explicit enablement and actual supervision, canonical-write-denial and descendant-cleanup checks. Source implementation is not a live deployment claim."),
             ),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Related coding-agent design references"];
-            element!(A [Href = "/design/agent-usage"]; text("Agent usage and token limits (proposed)")),
+            element!(A [Href = "/design/agent-usage"]; text("Agent usage and token limits")),
             element!(A [Href = "/design/forge-providers"]; text("Forge plug-and-play")),
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-coding-agent-dispatch.md"]; text("Full coding-agent dispatch Markdown")),
         ),
@@ -483,16 +489,16 @@ pub(super) const USAGE: &[Node] = &[
     element!(Div [Class = "intro"];
         element!(H1; text("Agent usage and token limits")),
         element!(P;
-            element!(Strong; text("Proposed / not implemented.")),
-            text(" Design-only architecture at base revision "),
+            element!(Strong; text("Implemented; activation is deployment controlled.")),
+            text(" Source checkpoint: 19 November 2026. Original design base "),
             element!(Code; text("2e1300a00da92e9f97bdb1a656c2b182d4219a6c")),
             text(". Coding agents run under native provider limits instead of local "),
             element!(Code; text("llama.cpp")),
-            text(" caps, while a planned "),
+            text(" caps, while the implemented "),
             element!(Code; text("/agents")),
-            text(" portal view separates provider allowances, Forge-observed job tokens, context occupancy, and cost estimates without fabricated percentages. No live "),
+            text(" portal view separates provider allowances, Forge-observed job tokens and account activity with source/freshness. Context occupancy and cost estimates remain future fields. The "),
             element!(Code; text("/agents")),
-            text(" route, account probes, or usage percentages are active here."),
+            text(" entry redirects to the same-tab Agents application. Supported Codex metadata has been verified without generation; live activation remains deployment controlled."),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Agent usage design sections"];
             element!(A [Href = "#limits"]; text("Limits and metrics")),
@@ -500,11 +506,11 @@ pub(super) const USAGE: &[Node] = &[
             element!(A [Href = "#accounting"]; text("Providers and accounting")),
             element!(A [Href = "#layout"]; text("Illustrative layout")),
             element!(A [Href = "#rollout"]; text("Rollout")),
-            element!(A [Href = "/design/coding-agents"]; text("Coding-agent dispatch (proposed)")),
+            element!(A [Href = "/design/coding-agents"]; text("Coding-agent dispatch")),
         ),
     ),
     element!(Section [Id = "limits", Class = "design-section", AriaLabelledby = "limits-title"];
-        element!(H2 [Id = "limits-title"]; text("Token-limit separation and planned /agents visibility")),
+        element!(H2 [Id = "limits-title"]; text("Token-limit separation and Agents visibility")),
         element!(P;
             text("Coding-agent recipes default to "),
             element!(Code; text("generation_token_limit: null")),
@@ -519,9 +525,9 @@ pub(super) const USAGE: &[Node] = &[
             text(" completion). Native provider context windows and allowances still apply, and full coding replies use chunked storage and paging independently of token generation."),
         ),
         element!(P;
-            text("The planned "),
+            text("The implemented "),
             element!(Code; text("/agents")),
-            text(" view enters from Home and compact IDE overflow—avoiding top-level tab sprawl and keeping at most two header/navigation bars below "),
+            text(" view enters from Home without a sixth global tab, keeping at most two header/navigation bars below "),
             element!(Code; text("640 px")),
             text(". Every metric carries "),
             element!(Code; text("source")),
@@ -551,9 +557,9 @@ pub(super) const USAGE: &[Node] = &[
                 ),
             ),
             element!(Div;
-                element!(Dt; text("Separately scoped activity, context, and cost estimates")),
+                element!(Dt; text("Account activity; context and cost remain future work")),
                 element!(Dd;
-                    text("Disclosed progressively rather than mixed into primary counters. Context occupancy treats absent or zero capacity as "),
+                    text("Current account activity is disclosed separately. Context and cost are absent from the current public DTO. A future context contract must treat absent or zero capacity as "),
                     element!(Code; text("null")),
                     text(". Subscription and API billing stay distinct ("),
                     element!(Code; text("null != 0")),
@@ -564,13 +570,13 @@ pub(super) const USAGE: &[Node] = &[
     ),
     element!(Section [Id = "providers", Class = "design-section", AriaLabelledby = "providers-title"];
         element!(H2 [Id = "providers-title"]; text("Provider capability matrix")),
-        element!(P; text("Capabilities reflect installed CLI safe-help and published protocol schemas, not live authenticated probes. Missing or unverified feeds remain explicitly unknown or unsupported.")),
+        element!(P; text("Capabilities follow pinned protocols and implemented adapters. An authenticated metadata-only Codex probe verified allowance and account activity. Antigravity headless allowance remains explicitly unsupported; no model turn is used to poll quota.")),
         element!(P [Class = "table-scroll-hint", Id = "provider-scroll"]; text("More columns → Swipe or use arrow keys in the table.")),
         element!(Div [Class = "engine-table", Role = "region", Tabindex = "0", AriaLabel = "Agent provider capability comparison", AriaDescribedby = "provider-scroll"];
             element!(Table;
                 element!(Thead;
                     element!(Tr;
-                        element!(Th; text("Proposed adapter (CLI)")),
+                        element!(Th; text("Implemented adapter (CLI)")),
                         element!(Th; text("Observed job tokens")),
                         element!(Th; text("Provider allowance / reset")),
                         element!(Th; text("Activity, context, and constraints")),
@@ -579,14 +585,14 @@ pub(super) const USAGE: &[Node] = &[
                 element!(Tbody;
                     element!(Tr;
                         element!(Td; element!(Code; text("CodexUsageProvider")), text(" ("), element!(Code; text("codex-cli 0.160.0")), text(")")),
-                        element!(Td; text("Per-turn "), element!(Code; text("turn.completed.usage")), text(" in exec mode; app-server "), element!(Code; text("last")), text(" vs cumulative "), element!(Code; text("total")), text(".")),
+                        element!(Td; text("Fresh-session per-turn "), element!(Code; text("turn.completed.usage")), text(" in exec mode; not the separate app-server/account cumulative feed.")),
                         element!(Td; text("Machine-readable "), element!(Code; text("account/rateLimits/read")), text(" and updates: meter buckets, nullable primary/secondary windows, used fraction, and reset.")),
-                        element!(Td; text("Machine-readable "), element!(Code; text("account/usage/read")), text(" supports nullable account activity/daily buckets and separate thread cost estimates. Authenticated availability is untested; "), element!(Code; text("ordinaryUsageAllowed")), text(" stays tri-state.")),
+                        element!(Td; text("Machine-readable "), element!(Code; text("account/usage/read")), text(" supports nullable account activity/daily buckets and was verified by a metadata-only capability probe. Context/cost fields are not in the current public DTO; "), element!(Code; text("ordinaryUsageAllowed")), text(" stays tri-state.")),
                     ),
                     element!(Tr;
                         element!(Td; element!(Code; text("AntigravityUsageProvider")), text(" ("), element!(Code; text("agy 1.5.12")), text(")")),
                         element!(Td; text("Session-cumulative result metadata (usage, turn count, and duration) from headless output.")),
-                        element!(Td; text("Headless results do not report remaining quota. Statusline TUI documents bucket "), element!(Code; text("remaining_fraction")), text("/"), element!(Code; text("remaining_amount")), text(" and reset, but a supported headless allowance feed is still unverified, so allowance stays "), element!(Code; text("unknown")), text(".")),
+                        element!(Td; text("Headless results do not report remaining quota. Statusline TUI documents bucket "), element!(Code; text("remaining_fraction")), text("/"), element!(Code; text("remaining_amount")), text(" and reset, but no supported headless allowance feed is implemented, so allowance is "), element!(Code; text("unsupported_headless")), text(".")),
                         element!(Td; text("Context and list-price estimates stay separate. No hidden-endpoint scraping, no transcript/email leakage, and no model turns to poll quota.")),
                     ),
                     element!(Tr;
@@ -625,47 +631,47 @@ pub(super) const USAGE: &[Node] = &[
                 ),
             ),
             element!(Div;
-                element!(Dt; text("Canonical feeds, baselines, dedup, and epoch + lineage")),
+                element!(Dt; text("Canonical terminal feeds and generation/epoch fences")),
                 element!(Dd;
-                    text("Pin one canonical accounting feed per attempt (Codex exec or app-server; AGY session results or verified steps). Cumulative metadata computes deltas once against a verified matching session/epoch baseline in the same transaction as the canonical origin-key dedup receipt. Missing baselines or ambiguous counter decreases stay raw-only/unknown. Preallocated poll generation and configuration epoch prevent stale overwrites and account-switch mixing; parent-inclusive subagent totals require explicit covered-child identities."),
+                    text("Each fresh attempt records one validated terminal feed: Codex exec turn usage or Antigravity result usage. It never adds step updates, account totals or overlapping cache/thinking subdivisions. Immutable publication prevents replay double counting; missing telemetry stays partial/unknown. Provider metadata allocates generation and configuration epoch before I/O, with private HMAC account binding. No arbitrary historical/cumulative-session import is implemented."),
                 ),
             ),
             element!(Div;
                 element!(Dt; text("Metadata-only refresh and failure isolation")),
                 element!(Dd;
                     element!(Code; text("ide.usage.refresh")),
-                    text(" coalesces and rate-limits supported metadata reads with durable receipts ("),
+                    text(" durably coalesces supported metadata requests for the explicitly selected admitted profile ("),
                     element!(Code; text("202 usage_refresh_queued")),
-                    text("). Refresh never runs generation, auth flows, spend/credit top-ups, or auto-rotation. Poll errors stay separate from last-success freshness, and telemetry failures never fail completed coding work."),
+                    text("). Public omitted/null-profile refresh is denied before I/O. Refresh never runs generation, interactive login, credit top-ups/reset or auto-rotation; normal provider-managed OAuth refresh may occur. Poll errors stay separate from last-success freshness, and telemetry failures never fail completed coding work."),
                 ),
             ),
         ),
         element!(Div [Class = "recovery"];
             element!(Details;
-                element!(Summary; text("Proposed usage destinations and PostgreSQL storage")),
+                element!(Summary; text("Implemented usage destinations and PostgreSQL storage")),
                 element!(Dl [Class = "storage"];
                     element!(Div;
-                        element!(Dt; text("Proposed destinations (POST /forge/v1/dispatch)")),
+                        element!(Dt; text("Destinations (POST /forge/v1/dispatch)")),
                         element!(Dd;
                             element!(Code; text("ide.usage.overview")),
-                            text(" (paginated summary + coverage), "),
+                            text(" (bounded project-scoped providers), "),
                             element!(Code; text("ide.usage.detail")),
-                            text(" (configured alias allowance windows, job links, optional diagnostics), and "),
+                            text(" (exactly one admitted profile and its quota, job totals and account activity), and "),
                             element!(Code; text("ide.usage.refresh")),
-                            text(" (idempotent coalesced metadata poll). Owner and project grants filter rows before aggregation; large counters use validated decimal strings."),
+                            text(" (durably coalesced metadata poll). Reply kinds are usage_overview, usage_detail and usage_refresh_queued. Owner/project/profile grants filter before aggregation; large counters use validated decimal strings."),
                         ),
                     ),
                     element!(Div;
-                        element!(Dt; text("Proposed tables (migration slot unfrozen)")),
+                        element!(Dt; text("Migration 0010 storage")),
                         element!(Dd;
-                            element!(Code; text("attempt_usage_samples")),
-                            text(" (canonical origin-key dedup and lineage), "),
-                            element!(Code; text("agent_allowance_snapshots")),
-                            text(" (monotonic generation + multi-window buckets), "),
-                            element!(Code; text("agent_account_activity_snapshots")),
-                            text(" (separate account activity and labeled cost estimates), and "),
-                            element!(Code; text("agent_usage_refreshes")),
-                            text(" (coalesced idempotent refresh receipts)."),
+                            element!(Code; text("coding_attempts")),
+                            text(" (one canonical attempt usage publication), "),
+                            element!(Code; text("coding_provider_usage")),
+                            text(" (current epoch/generation-bound allowance and account activity), "),
+                            element!(Code; text("coding_provider_usage_identities")),
+                            text(" (private HMAC account bindings, not public IDs), and "),
+                            element!(Code; text("coding_usage_refresh_requests")),
+                            text(" (durable coalesced metadata requests)."),
                         ),
                     ),
                 ),
@@ -691,14 +697,14 @@ pub(super) const USAGE: &[Node] = &[
         ),
     ),
     element!(Section [Id = "layout", Class = "design-section", AriaLabelledby = "layout-title"];
-        element!(H2 [Id = "layout-title"]; text("Illustrative /agents layout (placeholders only)")),
+        element!(H2 [Id = "layout-title"]; text("Retained layout illustration (sample states only)")),
         element!(P [Class = "contract-note"];
             element!(Strong; text("Static design illustration only: ")),
             text("Placeholder rows and "),
             element!(Code; text("unknown")),
             text(" states built from typed Rust nodes to preview information hierarchy. These are not working controls, not a live "),
             element!(Code; text("/agents")),
-            text(" screen, and not live account data."),
+            text(" account metrics. Open Agents from Home for the separately configured working application; this preview never displays private account data."),
         ),
         element!(Div [Class = "contract-examples"];
             element!(Div [Class = "contract-example"];
@@ -722,7 +728,7 @@ pub(super) const USAGE: &[Node] = &[
                             element!(Tr;
                                 element!(Td; text("codex · <model> (codex-primary)")),
                                 element!(Td; text("unknown (<task_id>)")),
-                                element!(Td; text("unknown (untested)")),
+                                element!(Td; text("available / unknown (provider reported)")),
                                 element!(Td; text("— / —")),
                                 element!(Td; text("unknown")),
                             ),
@@ -737,7 +743,7 @@ pub(super) const USAGE: &[Node] = &[
                     ),
                 ),
                 element!(Details;
-                    element!(Summary; text("Detail disclosure: Context & cost estimate (illustrative — closed by default)")),
+                    element!(Summary; text("Future extension: Context & cost (not current DTO fields)")),
                     element!(P;
                         element!(Small; text("Context occupancy: unknown (capacity null). Cost estimate: unknown (subscription plan — not billed from tokens). Account activity: separately scoped, unknown.")),
                     ),
@@ -755,7 +761,7 @@ pub(super) const USAGE: &[Node] = &[
                     element!(Div;
                         element!(Dt; text("codex · <model> / codex-primary · unknown")),
                         element!(Dd; text("Worker: unknown (<task_id>)")),
-                        element!(Dd; text("Provider allowance: unknown (authenticated feed untested)")),
+                        element!(Dd; text("Provider allowance: supported metadata; sample omitted")),
                         element!(Dd; text("Forge-observed jobs: — tokens · — runtime · updated unknown")),
                     ),
                     element!(Div;
@@ -772,12 +778,12 @@ pub(super) const USAGE: &[Node] = &[
         element!(H2 [Id = "rollout-title"]; text("Phased verification and rollout gates")),
         element!(Ol [Class = "contract-steps"];
             element!(Li;
-                element!(Strong; text("Phase 1 — Backend, disposable PostgreSQL, and fake providers (no model calls).")),
-                text(" Verify idempotent replay/conflicts, canonical-feed deduplication, cumulative baselines, delayed/decreasing/reset samples, covered-child lineage, null/decimal-string counters, out-of-order poll generations, account-switch epoch rotation, pre-aggregation owner/project isolation, coalesced refresh receipts, and telemetry failure isolation."),
+                element!(Strong; text("Implemented backend/adapters; verify exact source fences.")),
+                text(" Check immutable terminal publication, nullable decimal counters, unknown telemetry, generation/epoch/account-switch fences, owner/project/profile isolation, coalesced refresh requests and telemetry failure isolation. General historical imports and context/cost metrics remain future work."),
             ),
             element!(Li;
-                element!(Strong; text("Phase 2 — Generated UI gate (separate).")),
-                text(" Build typed Rust/YAML "),
+                element!(Strong; text("Implemented UI; generated browser release gate.")),
+                text(" Verify typed Rust/YAML "),
                 element!(Code; text("/agents")),
                 text(" views under "),
                 element!(Code; text("make ci")),
@@ -790,12 +796,12 @@ pub(super) const USAGE: &[Node] = &[
                 text(" states)."),
             ),
             element!(Li;
-                element!(Strong; text("Phase 3 — Versioned read-only real-CLI capability smoke.")),
-                text(" Verify installed CLI capability feeds before enabling live collectors; never auto-enable unverified feeds or TUI-only hooks headless."),
+                element!(Strong; text("Versioned metadata smoke and explicit deployment.")),
+                text(" Codex allowance/activity metadata capability has been verified without generation. Requalify the release, then explicitly provision/configure/deploy; Antigravity headless allowance stays unsupported and is never inferred from TUI-only hooks."),
             ),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Related agent usage design references"];
-            element!(A [Href = "/design/coding-agents"]; text("Coding-agent dispatch (proposed)")),
+            element!(A [Href = "/design/coding-agents"]; text("Coding-agent dispatch")),
             element!(A [Href = "/design/forge-providers"]; text("Forge plug-and-play")),
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-agent-usage.md"]; text("Full agent usage Markdown")),
         ),

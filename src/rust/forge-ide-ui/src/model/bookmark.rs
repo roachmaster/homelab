@@ -17,6 +17,7 @@ impl UiModel {
                 || self.chats.has_work()
                 || self.mail.active
                 || self.mail.has_draft())
+            || self.catalog.is_some() && self.agents.has_work()
     }
 
     fn workbench_bookmark(&self) -> Option<WorkbenchBookmark> {

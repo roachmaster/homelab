@@ -153,6 +153,84 @@ pub fn ide_document() -> Document {
                     component!(toggle_panel "mail-new", "Compose", "mail_new_message", "mail-composer"),
                 ]),
             ]),
+            component!(screen "agents", "Agents", true; [
+                component!(reading_column [
+                    component!(toolbar [
+                        component!(primary_icon "agents-back", "Back to tasks", "agents_back", '←'),
+                        component!(heading "agents-heading", "Agents"),
+                        component!(primary_icon "agents-refresh", "Refresh agents", "agents_refresh", '↻'),
+                        component!(primary "agents-new", "New task", "agents_new_task"),
+                    ]),
+                    component!(caption "agents-worker", "Worker status unknown"),
+                    component!(status "agents-status", ""),
+                    component!(select "agents-project", "Project", "select_agent_project"),
+                    component!(region "agents-unsupported"; [
+                        component!(text "agents-unsupported-message", "Agents are not configured on this host."),
+                    ]),
+                    component!(region "agents-overview"; [
+                        component!(region "agents-task-list"; [
+                            component!(heading "agents-tasks-heading", "Tasks"),
+                            component!(stacked_tree "agents-tasks", "Coding assignments"),
+                        ]),
+                    ]),
+                    component!(region "agents-list-pagination"; [
+                        component!(row [
+                            component!(button "agents-previous", "Previous tasks", "agents_previous"),
+                            component!(button "agents-next", "Next tasks", "agents_next"),
+                        ]),
+                    ]),
+                    component!(region "agents-compose"; [
+                        component!(heading "agents-compose-heading", "New assignment"),
+                        component!(text "agents-compose-help", "Runs in the background. Review the result before accepting it."),
+                        component!(select "agents-profile", "Agent", "select_agent_profile"),
+                        component!(select "agents-mode", "Mode", "select_agent_mode"),
+                        component!(caption "agents-base", "Waiting for a project revision…"),
+                        component!(textarea "agents-prompt", "Assignment", "set_agent_prompt", "Describe the task or question…"),
+                        component!(textarea "agents-criteria", "Acceptance criteria", "set_agent_criteria", "What should the result include or verify?"),
+                        component!(caption "agents-compose-limit", "This draft is too large to submit. Shorten the assignment or acceptance criteria."),
+                        component!(row [
+                            component!(uuid_button "agents-send", "Send assignment", "send_agent_task", "agents-prompt", "idempotency_key"),
+                            component!(button "agents-discard", "Discard draft", "agents_discard_draft"),
+                        ]),
+                    ]),
+                    component!(button "agents-retry", "Retry saved request", "retry_agent_request"),
+                    component!(region "agents-reader"; [
+                        component!(heading "agents-task-title", "Task"),
+                        component!(status "agents-task-status", ""),
+                        component!(caption "agents-attempt", ""),
+                        component!(row [
+                            component!(uuid_action "agents-cancel", "Cancel task", "cancel_agent_task", "idempotency_key"),
+                            component!(uuid_action "agents-resume", "Resume this agent", "resume_agent_task", "idempotency_key"),
+                        ]),
+                        component!(disclosure "agents-assignment-details", "Assignment details"; [
+                            component!(text "agents-task-prompt", ""),
+                            component!(caption "agents-task-criteria", ""),
+                        ]),
+                        component!(region "agents-result-panel"; [
+                            component!(caption "agents-result-page", ""),
+                            component!(transcript "agents-result", "Agent result page", "You", "Agent", "The agent has not published a result yet."),
+                            component!(row [
+                                component!(button "agents-result-previous", "Previous result page", "previous_agent_result"),
+                                component!(button "agents-result-next", "Next result page", "next_agent_result"),
+                            ]),
+                        ]),
+                        component!(region "agents-review"; [
+                            component!(text_field "agents-review-note", "Review note", "set_agent_review_note"),
+                            component!(text "agents-accept-help", "Acceptance records your review. It does not merge or publish code."),
+                            component!(uuid_button "agents-accept", "Accept result", "accept_agent_task", "agents-review-note", "idempotency_key"),
+                        ]),
+                    ]),
+                    component!(region "agents-usage"; [
+                        component!(heading "agents-usage-heading", "Agent usage"),
+                        component!(status "agents-usage-status", ""),
+                        component!(stacked_tree "agents-providers", "Agent usage providers"),
+                        component!(button "agents-usage-refresh", "Refresh selected agent", "refresh_agent_usage"),
+                        component!(disclosure "agents-usage-more", "Source and accounting details"; [
+                            component!(details "agents-usage-details"),
+                        ]),
+                    ]),
+                ]),
+            ]),
             component!(screen "workbench", "Read-only workbench", true; [
                 component!(sheet "project-options", "Project options", "node"; [
                     component!(select "node", "Node", "select_node"),
@@ -485,21 +563,136 @@ pub fn ide_transport() -> Transport {
             policy,
         });
     }
+    for (kind, destination, success_event, error_event, mutating) in [
+        (
+            "work_catalog",
+            "ide.work.catalog",
+            "work_catalog",
+            "work_failed",
+            false,
+        ),
+        (
+            "work_submit",
+            "ide.work.submit",
+            "work_submitted",
+            "work_failed",
+            true,
+        ),
+        (
+            "work_get",
+            "ide.work.get",
+            "work_opened",
+            "work_failed",
+            false,
+        ),
+        (
+            "work_list",
+            "ide.work.list",
+            "work_listed",
+            "work_failed",
+            false,
+        ),
+        (
+            "work_events",
+            "ide.work.events",
+            "work_events",
+            "work_failed",
+            false,
+        ),
+        (
+            "work_cancel",
+            "ide.work.cancel",
+            "work_cancel_recorded",
+            "work_failed",
+            true,
+        ),
+        (
+            "work_result",
+            "ide.work.result",
+            "work_result_page",
+            "work_failed",
+            false,
+        ),
+        (
+            "work_accept",
+            "ide.work.accept",
+            "work_accepted",
+            "work_failed",
+            true,
+        ),
+        (
+            "work_resume",
+            "ide.work.resume",
+            "work_resumed",
+            "work_failed",
+            true,
+        ),
+        (
+            "usage_overview",
+            "ide.usage.overview",
+            "usage_overview",
+            "usage_failed",
+            false,
+        ),
+        (
+            "usage_detail",
+            "ide.usage.detail",
+            "usage_detail",
+            "usage_failed",
+            false,
+        ),
+        (
+            "usage_refresh",
+            "ide.usage.refresh",
+            "usage_refresh_queued",
+            "usage_failed",
+            false,
+        ),
+    ] {
+        let mut headers = common.clone();
+        headers.push(HeaderBinding::literal("Forge-Destination", destination));
+        headers.push(HeaderBinding::field("Forge-Request-Id", "request_id"));
+        bindings.push(RequestBinding {
+            kind: kind.into(),
+            request_id: "request_id".into(),
+            headers,
+            csrf: true,
+            timeout_ms: Some(10_000),
+            deadline: None,
+            accept_events: vec![success_event.into()],
+            error_events: vec![error_event.into()],
+            policy: RequestPolicy {
+                wait_for_slot_ms: Some(5_000),
+                expire_session_on_unauthenticated: true,
+                local_checkpoint_path: mutating.then(|| "retry_intent".into()),
+                ..RequestPolicy::default()
+            },
+        });
+    }
     Transport {
         initial_event: "resume".into(),
         entry_actions: [
             ("chat".into(), "open_chat".into()),
             ("mail".into(), "open_mail".into()),
             ("workbench".into(), "open_workbench".into()),
+            ("agents".into(), "open_agents".into()),
         ]
         .into(),
         bindings,
-        timers: vec![TimerBinding {
-            effect_kind: "mail_watch".into(),
-            event_kind: "poll_mail".into(),
-            argument_field: "watch".into(),
-            delay_ms: 5_000,
-        }],
+        timers: vec![
+            TimerBinding {
+                effect_kind: "mail_watch".into(),
+                event_kind: "poll_mail".into(),
+                argument_field: "watch".into(),
+                delay_ms: 5_000,
+            },
+            TimerBinding {
+                effect_kind: "agents_watch".into(),
+                event_kind: "poll_agents".into(),
+                argument_field: "watch".into(),
+                delay_ms: 2_500,
+            },
+        ],
     }
 }
 pub const IDE_THEME: &str = include_str!("../../ui/theme.yaml");

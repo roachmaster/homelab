@@ -19,8 +19,10 @@ import psycopg2
 import chat_history_api
 import runner
 from queue_store import Rejected
+import usage_store
 import work_api
 import work_config
+import work_policy
 
 TOKEN = "a" * 32
 REQUEST_ID = "work-req-1"
@@ -89,11 +91,12 @@ def reply(kind, request_id=REQUEST_ID, **fields):
 
 
 @contextmanager
-def runner_server(*, work_service=None, distributed=False):
+def runner_server(*, work_service=None, usage_service=None, distributed=False):
     ready = threading.Event()
     ready.set()
     with runner.Server(
-        TOKEN, ready, None, distributed=distributed, work_service=work_service, port=0
+        TOKEN, ready, None, distributed=distributed,
+        work_service=work_service, usage_service=usage_service, port=0
     ) as server:
         thread = threading.Thread(
             target=lambda: server.serve_forever(poll_interval=0.01), daemon=True
@@ -128,8 +131,12 @@ class WorkConfigAndFactoryTest(unittest.TestCase):
     def test_runner_installer_includes_transitive_local_imports(self):
         root = Path(__file__).resolve().parent
         installer = (root / "setup-runner.sh").read_text()
-        published = set(re.findall(r'publish "\$directory/([^"/]+\.py)" "\$target/\1"', installer))
-        self.assertIn("runner.py", published)
+        required = set(re.findall(r'(?<!_)publish "\$directory/([^"/]+\.py)" "\$target/\1"', installer))
+        optional = set(re.findall(r'publish_if_present "\$directory/([^"/]+\.py)" "\$target/\1"', installer))
+        published = required | {name for name in optional if (root / name).is_file()}
+        self.assertIn("runner.py", required)
+        self.assertIn("work_policy.py", required)
+        self.assertIn("usage_store.py", required)
         for name in published:
             for node in ast.walk(ast.parse((root / name).read_text())):
                 modules = ([item.name for item in node.names] if isinstance(node, ast.Import)
@@ -268,6 +275,36 @@ class WorkConfigAndFactoryTest(unittest.TestCase):
                 mode="plan", generation_token_limit=256, digest="0" * 64,
             )
 
+    def test_v2_policy_profile_pins_immutable_policy_digest_and_title_bounds(self):
+        raw = sample_raw_config()
+        raw["project_labels"] = {"homelab": "Homelab Repo"}
+        raw["profiles"]["codex-v2"] = {
+            "backend": "codex",
+            "model": "gpt-5.4",
+            "resource_profile": work_policy.POLICY_ID,
+            "label": "Codex 5.4",
+        }
+        config = work_config.parse_work_config(raw)
+        self.assertEqual(config.project_label("homelab"), "Homelab Repo")
+        self.assertEqual(config.project_label("docs"), "docs")
+        self.assertEqual(config.profile_label("codex-v2"), "Codex 5.4")
+        self.assertEqual(config.profile_label("agy-plan"), "agy-plan")
+
+        recipe_v2 = config.catalog().resolve("codex-v2", "review")
+        self.assertEqual(recipe_v2.version, 2)
+        self.assertEqual(recipe_v2.policy_digest, work_policy.POLICY_DIGEST)
+        self.assertEqual(set(recipe_v2.to_dict().keys()), {
+            "version", "backend", "model", "resource_profile",
+            "mode", "generation_token_limit", "policy_digest",
+        })
+        self.assertIsNone(recipe_v2.to_dict()["generation_token_limit"])
+
+        # Title preparation picks first non-blank line, collapses whitespace, and caps at 128 chars / 512 bytes.
+        self.assertEqual(work_config.prepare_title("\n  \t  First   line\there \nSecond line"), "First line here")
+        emoji_title = work_config.prepare_title("😀" * 200)
+        self.assertEqual(len(emoji_title), 128)
+        self.assertEqual(len(emoji_title.encode("utf-8")), 512)
+
     def test_factory_is_effect_free_and_zero_config_never_connects(self):
         connect = Mock(side_effect=AssertionError("must not connect during factory construction"))
         self.assertIsNone(work_api.WorkServiceFactory(None, connect).create())
@@ -389,7 +426,7 @@ class WorkDecodeTest(unittest.TestCase):
             }),
             (work_api.Destination.LIST, {
                 "kind": "work_list", "request_id": REQUEST_ID, "project_alias": "homelab",
-                "status_filter": "running",
+                "status_filter": "bogus_status",
             }),
             (work_api.Destination.LIST, {
                 "kind": "work_list", "request_id": REQUEST_ID, "project_alias": "homelab",
@@ -556,11 +593,35 @@ class WorkHttpApiTest(unittest.TestCase):
                         (503, reply("work_failed", code="unavailable"), "no-store"),
                     )
 
-            for unsupported in ("ide.work.result", "ide.work.resume", "ide.work.accept", "ide.work.unknown"):
+            for unsupported in ("ide.work.unknown", "ide.work.delete"):
                 with self.subTest(unsupported=unsupported):
                     self.assertEqual(
                         work_post(port, unsupported, submit_body()),
                         (404, reply("work_failed", code="not_found"), "no-store"),
+                    )
+
+            for extended_dest, body in [
+                (work_api.Destination.CATALOG, {"kind": "work_catalog", "request_id": REQUEST_ID}),
+                (work_api.Destination.RESULT, {
+                    "kind": "work_result", "request_id": REQUEST_ID,
+                    "project_alias": "homelab", "task_id": str(TASK_ID), "attempt_id": str(CURSOR_ID),
+                }),
+                (work_api.Destination.ACCEPT, {
+                    "kind": "work_accept", "request_id": REQUEST_ID,
+                    "project_alias": "homelab", "task_id": str(TASK_ID),
+                    "expected_revision": 2, "idempotency_key": "acc-1",
+                }),
+                (work_api.Destination.RESUME, {
+                    "kind": "work_resume", "request_id": REQUEST_ID,
+                    "project_alias": "homelab", "task_id": str(TASK_ID),
+                    "expected_revision": 2, "idempotency_key": "res-1",
+                    "agent_profile": "agy-plan", "reconciliation_receipt_id": str(CURSOR_ID),
+                }),
+            ]:
+                with self.subTest(extended_dest=extended_dest):
+                    self.assertEqual(
+                        work_post(port, extended_dest, body),
+                        (503, reply("work_failed", code="unavailable"), "no-store"),
                     )
 
     def test_denied_grants_and_invalid_ingress_have_zero_store_effects(self):
@@ -608,7 +669,7 @@ class WorkHttpApiTest(unittest.TestCase):
 
             # Unsupported Work destination with active service still returns 404.
             self.assertEqual(
-                work_post(port, "ide.work.resume", submit_body()),
+                work_post(port, "ide.work.unknown", submit_body()),
                 (404, reply("work_failed", code="not_found"), "no-store"),
             )
 
@@ -687,6 +748,210 @@ class WorkHttpApiTest(unittest.TestCase):
                     self.assertNotIn("internal_secret_code", serialized)
                     self.assertNotIn("secret_timeout_detail", serialized)
 
+    def test_extended_work_routes_and_new_conflict_codes(self):
+        service, fake_store = self._service_with_mock_store()
+        fake_store.catalog.return_value = {
+            "projects": [{"alias": "homelab", "label": "homelab", "base_revision": BASE_REV}],
+            "profiles": [{
+                "alias": "agy-plan", "label": "agy-plan",
+                "backend": "antigravity", "model": "gemini-2.5-pro", "modes": ["plan"],
+            }],
+            "worker_status": "ready",
+            "observed_at": CREATED_AT,
+        }
+        fake_store.result.return_value = {
+            "project_alias": "homelab",
+            "task_id": str(TASK_ID),
+            "attempt_id": str(CURSOR_ID),
+            "result_digest": RECIPE_DIGEST,
+            "content": "hello",
+            "offset_bytes": 0,
+            "next_cursor": None,
+            "complete": True,
+            "total_bytes": 5,
+        }
+        fake_store.accept.return_value = {
+            "project_alias": "homelab",
+            "task_id": str(TASK_ID),
+            "base_revision": 3,
+            "revision": 4,
+            "status": "completed",
+        }
+        fake_store.resume.return_value = {
+            "project_alias": "homelab",
+            "task_id": str(TASK_ID),
+            "base_revision": 3,
+            "revision": 4,
+            "status": "queued",
+            "recipe_digest": RECIPE_DIGEST,
+        }
+
+        with runner_server(work_service=service, distributed=False) as port:
+            self.assertEqual(
+                work_post(port, work_api.Destination.CATALOG, {
+                    "kind": "work_catalog", "request_id": REQUEST_ID,
+                }),
+                (200, reply("work_catalog", **fake_store.catalog.return_value), "no-store"),
+            )
+            self.assertEqual(
+                work_post(port, work_api.Destination.RESULT, {
+                    "kind": "work_result", "request_id": REQUEST_ID,
+                    "project_alias": "homelab", "task_id": str(TASK_ID), "attempt_id": str(CURSOR_ID),
+                    "cursor": f"{RECIPE_DIGEST}.0", "limit_bytes": 16,
+                }),
+                (200, reply("work_result_page", **fake_store.result.return_value), "no-store"),
+            )
+            self.assertEqual(
+                work_post(port, work_api.Destination.ACCEPT, {
+                    "kind": "work_accept", "request_id": REQUEST_ID,
+                    "project_alias": "homelab", "task_id": str(TASK_ID),
+                    "expected_revision": 3, "idempotency_key": "acc-1", "review_note": "Looks good",
+                }),
+                (200, reply("work_accepted", **fake_store.accept.return_value), "no-store"),
+            )
+            self.assertEqual(
+                work_post(port, work_api.Destination.RESUME, {
+                    "kind": "work_resume", "request_id": REQUEST_ID,
+                    "project_alias": "homelab", "task_id": str(TASK_ID),
+                    "expected_revision": 3, "idempotency_key": "res-1",
+                    "agent_profile": "agy-plan", "reconciliation_receipt_id": str(CURSOR_ID),
+                    "note": "Retry after stop",
+                }),
+                (202, reply("work_resumed", **fake_store.resume.return_value), "no-store"),
+            )
+            for code in ("reconcile_required", "not_reviewable", "stale_reconciliation", "result_mismatch"):
+                fake_store.resume.side_effect = Rejected(409, code)
+                self.assertEqual(
+                    work_post(port, work_api.Destination.RESUME, {
+                        "kind": "work_resume", "request_id": REQUEST_ID,
+                        "project_alias": "homelab", "task_id": str(TASK_ID),
+                        "expected_revision": 3, "idempotency_key": "res-err",
+                        "agent_profile": "agy-plan", "reconciliation_receipt_id": str(CURSOR_ID),
+                    }),
+                    (409, reply("work_failed", code=code), "no-store"),
+                )
+
+    def test_usage_factory_injection_independent_config_and_routing_before_gpu_flags(self):
+        created_factories = []
+
+        class FakeUsageService:
+            def __init__(self, config, store):
+                self.config = config
+                self.store = store
+
+        class FakeUsageServiceFactory:
+            def __init__(self, config, store_factory):
+                self.config = config
+                self.store_factory = store_factory
+                created_factories.append(self)
+
+            def create(self):
+                if self.config is None:
+                    return None
+                return FakeUsageService(self.config, self.store_factory(self.config))
+
+        class FakeUsageApi:
+            MAX_REQUEST_BYTES = 16 * 1024
+            UsageServiceFactory = FakeUsageServiceFactory
+
+            @staticmethod
+            def handles(headers):
+                return any(v.startswith("ide.usage.") for v in headers.get_all("Forge-Destination", []))
+
+            @staticmethod
+            def destination(headers):
+                dest = chat_history_api.dispatch_destination(headers)
+                if dest not in {"ide.usage.overview", "ide.usage.detail", "ide.usage.refresh"}:
+                    raise Rejected(404, "not_found")
+                return dest
+
+            @staticmethod
+            def decode(route, correlation, body):
+                if not isinstance(body, dict) or body.get("request_id") != correlation:
+                    raise Rejected(400, "invalid_request")
+                return (route, body)
+
+            @staticmethod
+            def failed(correlation, error):
+                code = "not_found" if error.status == 404 else "unavailable"
+                status = 404 if error.status == 404 else 503
+                return status, chat_history_api.envelope("usage_failed", correlation, code=code)
+
+            @staticmethod
+            def dispatch(route, correlation, command, service):
+                return 200, chat_history_api.envelope(
+                    "usage_overview", correlation,
+                    project_alias=command[1]["project_alias"],
+                    providers=[],
+                    owner=service.store.owner,
+                )
+
+        no_connect = Mock(side_effect=AssertionError("must not connect during startup factory"))
+        # Both disabled -> zero file/DB effects.
+        with patch.object(Path, "stat", side_effect=AssertionError("must not touch fs")):
+            work_svc, usage_svc = runner.build_work_and_usage_services(
+                {}, no_connect, usage_api_module=FakeUsageApi
+            )
+        self.assertIsNone(work_svc)
+        self.assertIsNone(usage_svc)
+        no_connect.assert_not_called()
+
+        with TemporaryDirectory(prefix="forge-usage-cfg-") as tmp:
+            cfg_path = Path(tmp) / "usage.json"
+            cfg_path.write_text(json.dumps(sample_raw_config()), encoding="utf-8")
+
+            # Work enabled alone does NOT implicitly enable usage.
+            work_only, usage_off = runner.build_work_and_usage_services(
+                {work_config.CONFIG_ENV_VAR: str(cfg_path)}, no_connect, usage_api_module=FakeUsageApi
+            )
+            self.assertIsInstance(work_only, work_api.WorkService)
+            self.assertIsNone(usage_off)
+
+            # Usage enabled alone works independently and injects UsageStore via lambda.
+            work_off, usage_only = runner.build_work_and_usage_services(
+                {work_config.USAGE_CONFIG_ENV_VAR: str(cfg_path)}, no_connect, usage_api_module=FakeUsageApi
+            )
+            self.assertIsNone(work_off)
+            self.assertIsInstance(usage_only, FakeUsageService)
+            self.assertIsInstance(usage_only.store, usage_store.UsageStore)
+            no_connect.assert_not_called()
+
+            # Usage routes run before GPU distributed=False check and default-off returns 503/404.
+            with patch.object(runner, "usage_api", FakeUsageApi):
+                with runner_server(work_service=None, usage_service=usage_only, distributed=False) as port:
+                    self.assertEqual(
+                        work_post(port, "ide.usage.overview", {
+                            "kind": "usage_overview", "request_id": REQUEST_ID, "project_alias": "homelab",
+                        }),
+                        (200, reply("usage_overview", project_alias="homelab", providers=[], owner="mission-control"), "no-store"),
+                    )
+                    self.assertEqual(
+                        work_post(port, "ide.usage.unknown", {
+                            "kind": "usage_overview", "request_id": REQUEST_ID, "project_alias": "homelab",
+                        }),
+                        (404, reply("usage_failed", code="not_found"), "no-store"),
+                    )
+                with runner_server(work_service=None, usage_service=None, distributed=True) as port:
+                    self.assertEqual(
+                        work_post(port, "ide.usage.overview", {
+                            "kind": "usage_overview", "request_id": REQUEST_ID, "project_alias": "homelab",
+                        }),
+                        (503, reply("usage_failed", code="unavailable"), "no-store"),
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunnerListenerConfigurationTests(unittest.TestCase):
+    def test_default_and_staged_api_only_listener(self):
+        self.assertEqual(runner.configured_listener({}), (18083, False))
+        self.assertEqual(runner.configured_listener({"FORGE_RUNNER_PORT": "18084", "FORGE_RUNNER_API_ONLY": "1"}), (18084, True))
+
+    def test_invalid_listener_is_rejected(self):
+        for value in ("", "0", "65536", "-1", " 18084", "１８０８４", "18084x"):
+            with self.subTest(port=value), self.assertRaises(ValueError):
+                runner.configured_listener({"FORGE_RUNNER_PORT": value})
+        with self.assertRaises(ValueError):
+            runner.configured_listener({"FORGE_RUNNER_API_ONLY": "true"})

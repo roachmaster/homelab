@@ -112,4 +112,15 @@ INSERT INTO forge_agent.schema_migrations (version, name)
 VALUES (9, 'coding_admission');
 \endif
 
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 10
+) AS apply_0010
+\gset
+
+\if :apply_0010
+\ir migrations/0010_coding_execution_and_usage.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (10, 'coding_execution_and_usage');
+\endif
+
 COMMIT;

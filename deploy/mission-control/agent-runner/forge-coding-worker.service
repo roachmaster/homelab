@@ -1,0 +1,30 @@
+[Unit]
+Description=Forge coding assignment worker and trusted reconciliation supervisor
+Requires=postgresql@16-main.service
+After=postgresql@16-main.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=lrocha
+Group=lrocha
+ExecStart=/usr/bin/python3 -B /opt/homelab-forge/coding-worker/work_worker.py
+Environment=FORGE_CODING_WORKER_CONFIG=/etc/homelab-forge/coding-worker/worker.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillMode=control-group
+# This trusted parent uses the existing privileged scope launcher. Agent code
+# executes only after unshare + setpriv drop UID/caps and set no_new_privs=1.
+NoNewPrivileges=no
+UMask=0077
+ProtectSystem=strict
+ProtectControlGroups=true
+ReadWritePaths=/mnt/data/homelab-coding-workspaces /mnt/data/homelab-coding-worker
+# CLI state is mounted into each child only for its selected native provider.
+ReadWritePaths=/home/lrocha/.codex /home/lrocha/.gemini
+# Provisioning must extend this narrow Git administration grant for each
+# configured project. The model's child scope mounts the canonical tree RO.
+ReadWritePaths=/home/lrocha/repos/homelab/.git
+
+[Install]
+WantedBy=multi-user.target

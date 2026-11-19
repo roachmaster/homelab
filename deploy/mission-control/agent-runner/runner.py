@@ -26,8 +26,59 @@ import mail_api
 from model_adapter import MAX_BODY, ModelAdapter
 import queue_store as store
 from queue_store import Message, Rejected, Submit
+import usage_store
 import work_api
 import work_config
+
+try:
+    import usage_api
+except ModuleNotFoundError:
+    usage_api = None
+
+
+class _UnavailableUsageApi:
+    """Fallback router when usage_api is not installed so ide.usage.* never hits GPU/Chat paths."""
+
+    MAX_REQUEST_BYTES = 16 * 1024
+    _KNOWN = frozenset({"ide.usage.overview", "ide.usage.detail", "ide.usage.refresh"})
+
+    @staticmethod
+    def handles(headers):
+        return any(value.startswith("ide.usage.") for value in headers.get_all("Forge-Destination", []))
+
+    @classmethod
+    def destination(cls, headers):
+        value = history_api.dispatch_destination(headers)
+        if value in cls._KNOWN:
+            return value
+        raise Rejected(404, "not_found")
+
+    @staticmethod
+    def decode(_route, correlation, body):
+        if (not isinstance(body, dict)
+                or type(body.get("request_id")) is not str
+                or body.get("request_id") != correlation):
+            raise Rejected(400, "invalid_request")
+        return body
+
+    @staticmethod
+    def failed(correlation, error):
+        if correlation is None:
+            return error.status, {"error": "invalid_request"}
+        if error.status in {400, 413, 415}:
+            code = "invalid_request"
+        elif error.status in {401, 403}:
+            code = "denied"
+        elif error.status == 404:
+            code = "not_found"
+        else:
+            code = "unavailable"
+        status = 503 if code == "unavailable" else error.status
+        return status, history_api.envelope("usage_failed", correlation, code=code)
+
+    @staticmethod
+    def dispatch(_route, _correlation, _command, _service):
+        raise Rejected(503, "unavailable")
 
 PORT = 18083
 DEFAULT_MODEL = "gpt-oss-20b"
@@ -434,12 +485,16 @@ class Handler(BaseHTTPRequestHandler):
     def versioned_api(self):
         if work_api.handles(self.headers):
             return work_api
+        u_api = usage_api if usage_api is not None else _UnavailableUsageApi
+        if u_api.handles(self.headers):
+            return u_api
         if mail_api.handles(self.headers):
             return mail_api
         return run_api if run_api.handles(self.headers) else history_api
 
     def versioned_request(self):
         api = self.versioned_api()
+        u_api = usage_api if usage_api is not None else _UnavailableUsageApi
         correlation = history_api.request_id(self.headers)
         try:
             if correlation is None:
@@ -447,6 +502,7 @@ class Handler(BaseHTTPRequestHandler):
             route = api.destination(self.headers)
             limit = (
                 work_api.MAX_REQUEST_BYTES if api is work_api
+                else getattr(u_api, "MAX_REQUEST_BYTES", history_api.MAX_REQUEST_BYTES) if api is u_api
                 else mail_api.MAX_REQUEST_BYTES if api is mail_api
                 else history_api.MAX_REQUEST_BYTES
             )
@@ -457,6 +513,11 @@ class Handler(BaseHTTPRequestHandler):
                 if work_service is None:
                     raise Rejected(503, "unavailable")
                 return api.dispatch(route, correlation, command, work_service)
+            if api is u_api:
+                usage_service = getattr(self.server, "usage_service", None)
+                if usage_service is None:
+                    raise Rejected(503, "unavailable")
+                return api.dispatch(route, correlation, command, usage_service)
             if api in (run_api, mail_api) and not getattr(self.server, "distributed", False):
                 raise Rejected(503, "unavailable")
             if api is run_api:
@@ -523,7 +584,8 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     def __init__(self, token, ready, inference, *, distributed=False, pinned_model=DEFAULT_MODEL,
-                 configured_models=None, tool_repositories=None, work_service=None, port=PORT):
+                 configured_models=None, tool_repositories=None, work_service=None,
+                 usage_service=None, port=PORT):
         self.authorization = f"Bearer {token}".encode()
         self.ready = ready
         self.inference = inference
@@ -532,6 +594,7 @@ class Server(ThreadingHTTPServer):
         self.configured_models = (pinned_model,) if configured_models is None else configured_models
         self.tool_repositories = {} if tool_repositories is None else tool_repositories
         self.work_service = work_service
+        self.usage_service = usage_service
         self.slots = threading.BoundedSemaphore(24)
         super().__init__(("127.0.0.1", port), Handler)
 
@@ -559,7 +622,40 @@ def configured_models(default_model, setting):
     return models
 
 
+def build_work_and_usage_services(environ=None, connect_factory=store.connect, *,
+                                  usage_api_module=None):
+    """Load/freeze independent Work and Usage configs and create selected services via factories."""
+    env = os.environ if environ is None else environ
+    work_cfg = work_config.load_work_config(env.get(work_config.CONFIG_ENV_VAR))
+    work_service = work_api.WorkServiceFactory(work_cfg, connect_factory).create()
+    usage_cfg = work_config.load_work_config(env.get(work_config.USAGE_CONFIG_ENV_VAR))
+    u_api = usage_api if usage_api_module is None else usage_api_module
+    store_factory = lambda cfg: usage_store.UsageStore(cfg, connect_factory)
+    if u_api is None:
+        if usage_cfg is not None:
+            raise RuntimeError("usage_api module is required when FORGE_RUNNER_USAGE_CONFIG is configured")
+        usage_service = None
+    else:
+        usage_service = u_api.UsageServiceFactory(usage_cfg, store_factory).create()
+    return work_service, usage_service
+
+
+def configured_listener(environ):
+    """Validate staging controls before acquiring credentials or starting consumers."""
+    raw_port = environ.get("FORGE_RUNNER_PORT", str(PORT))
+    if not isinstance(raw_port, str) or not raw_port.isascii() or not raw_port.isdecimal():
+        raise ValueError("Invalid configured runner port")
+    port = int(raw_port)
+    if not 1 <= port <= 65535:
+        raise ValueError("Invalid configured runner port")
+    api_only = environ.get("FORGE_RUNNER_API_ONLY", "0")
+    if api_only not in {"0", "1"}:
+        raise ValueError("Invalid configured API-only mode")
+    return port, api_only == "1"
+
+
 def main():
+    port, api_only = configured_listener(os.environ)
     logging.basicConfig(level=logging.INFO)
     mode = os.environ.get("FORGE_RUNNER_MODE", "legacy")
     model = os.environ.get("FORGE_RUNNER_MODEL", DEFAULT_MODEL)
@@ -567,14 +663,13 @@ def main():
         raise ValueError("Invalid configured runner mode or model")
     models = configured_models(model, os.environ.get("FORGE_RUNNER_MODELS"))
     repositories = agent_tools.repository_catalog(os.environ.get("FORGE_RUNNER_TOOL_REPOSITORIES"))
-    work_cfg = work_config.load_work_config(os.environ.get(work_config.CONFIG_ENV_VAR))
-    work_service = work_api.WorkServiceFactory(work_cfg, store.connect).create()
+    work_service, usage_service = build_work_and_usage_services(os.environ, store.connect)
     credentials = Path(os.environ["CREDENTIALS_DIRECTORY"])
     inbound = (credentials / "runner.token").read_text().strip()
     if not re.fullmatch(r"[a-fA-F0-9]{32,128}", inbound):
         raise ValueError("Expected a hexadecimal runner bearer credential")
     inference = None
-    if mode == "legacy" or repositories:
+    if not api_only and (mode == "legacy" or repositories):
         outbound = (credentials / "forge.token").read_text().strip()
         if not re.fullmatch(r"[a-fA-F0-9]{32,128}", outbound):
             raise ValueError("Expected a hexadecimal Forge bearer credential")
@@ -582,16 +677,19 @@ def main():
     ready = threading.Event()
     with Server(inbound, ready, inference, distributed=mode == "dispatch", pinned_model=model,
                 configured_models=models, tool_repositories=repositories,
-                work_service=work_service) as server:
-        if mode == "dispatch":
+                work_service=work_service, usage_service=usage_service, port=port) as server:
+        if api_only:
+            ready.set()
+        elif mode == "dispatch":
             threading.Thread(target=complete_dispatched_runs, args=(ready,), daemon=True).start()
             if repositories:
                 threading.Thread(target=worker, args=(inference, threading.Event(), repositories),
                                  kwargs={"tools_only": True}, daemon=True).start()
         else:
             threading.Thread(target=worker, args=(inference, ready, repositories), daemon=True).start()
-        threading.Thread(target=expire_chat_history, daemon=True).start()
-        LOG.info("Listening on loopback port %d", PORT)
+        if not api_only:
+            threading.Thread(target=expire_chat_history, daemon=True).start()
+        LOG.info("Listening on loopback port %d (api_only=%s)", port, api_only)
         server.serve_forever()
 
 
