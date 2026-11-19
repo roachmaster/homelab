@@ -3,9 +3,11 @@
 **Source checkpoint: 19 November 2026.** The repository now implements durable
 coding work, native CLI execution, result paging, explicit review/resume, provider
 usage collection and the generated Agents view. Work and Usage remain independent,
-optional capabilities. This reference records source behavior; it does **not**
-certify that the new bundle, migrations or worker have been deployed to the live
-portal. The earlier admission-only slice is superseded by this implementation.
+optional capabilities. The ABI6 portal, API runner and coding worker were deployed
+and verified on 19 November 2026 from code commit `619ac0a`. Open
+[Agents](https://portal.thedevex.com/agents) or Home → Agents. The
+[deployment checkpoint](../design/implementation-status.md#observed-deployment-checkpoint)
+records the scope and checks. The earlier admission-only slice is superseded.
 
 The [dispatch design](proposals/forge-coding-agent-dispatch.md) and
 [usage design](proposals/forge-agent-usage.md) retain the sequence diagrams and

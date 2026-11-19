@@ -350,3 +350,21 @@ deploy migrations, roles, or live service configurations automatically.
 Set `FORGE_RUNNER_API_ONLY=1` with a separate staging port to serve authenticated
 Work/Usage APIs without starting Chat/Mail completion, tool or expiry consumers.
 Normal service behavior uses `FORGE_RUNNER_API_ONLY=0` (the default).
+
+### Verified coding-worker credential layout
+
+The 19 November 2026 live rollout uses an immutable release, a separately
+readable nonsecret API config under `/etc/homelab-forge/coding-api/`, and a
+root-owned worker config under `/etc/homelab-forge/coding-worker/`. Do not place
+service-readable JSON beneath the existing root-only runner-token directory.
+
+The stable usage HMAC source is root-only and delivered with systemd
+`LoadCredential=usage.hmac:...`. Since systemd credential-file modes may include
+group-read access, the installed unit uses
+`ExecStartPre=/usr/bin/install -m 0600 %d/usage.hmac /mnt/data/homelab-coding-worker/usage.hmac`.
+The worker config selects that private runtime copy beneath its `0700` control
+state. This retains strict regular-file/owner/`0600` HMAC validation. Child
+scopes mask the entire control state, credential directory and explicit key path.
+The key never enters a DTO or browser response.
+
+[Verified deployment and operational boundaries](../../../docs/design/implementation-status.md#observed-deployment-checkpoint).

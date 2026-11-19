@@ -1,10 +1,11 @@
 # Coding-agent dispatch: implementation and sequence design
 
-**Status: implemented in source; deployment verification pending.**
+**Status: implemented and deployed on 19 November 2026 (code `619ac0a`, ABI6).**
 **Updated: 19 November 2026.** This supersedes the admission-only checkpoint and
 the original design-only status at `2e1300a00da92e9f97bdb1a656c2b182d4219a6c`.
-Work remains optional/default-off until explicitly configured. This document is
-not a claim that the live portal or worker has been updated.
+Work remains optional/default-off until explicitly configured. The live Homelab
+portal now enables the two verified profiles; see the
+[deployment checkpoint](../../design/implementation-status.md#observed-deployment-checkpoint).
 
 The authoritative current contract is [Coding-agent workflow](../coding-admission.md).
 It covers exact destinations, bounded DTOs, role grants, execution policy,

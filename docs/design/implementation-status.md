@@ -2,7 +2,7 @@
 
 Updated 19 November 2026 against the current source. The preceding review checkpoint was after `7e03991`. This is the current design reference. Earlier proposal PDFs, review reports and schematic diagrams remain dated design history. A capability implemented in the repository is not automatically enabled by a running host.
 
-Manual archive and the functional Agents/Usage source were added on 19 November 2026. The browser ABI is now **6**. The operational checkpoint below remains the separately dated 18 November observation; this documentation update does not certify deployment of the new bundle or worker.
+Manual archive and the functional Agents/Usage source were added on 19 November 2026. The browser ABI is now **6**. The operational checkpoint below records the verified 19 November rollout of the ABI6 portal, API runner and coding worker; earlier observations remain dated separately.
 
 [Coding-agent workflow](https://github.com/roachmaster/homelab/blob/main/docs/architecture/coding-admission.md) now includes catalog-backed assignment, native Antigravity/Codex execution, full-result paging, explicit review/receipt-gated resume and truthful provider/project usage. Work and Usage remain independently optional/default-off until configured and verified.
 
@@ -51,6 +51,32 @@ Explore [Scout character creation](/design/characters) for the greybox-to-illust
 See [plug-and-play](/design/forge-providers), [workers](/design/forge-workers), [game runtime](/design/game-studio), [physics](/design/game-physics) and [assets](/design/game-asset-pipeline).
 
 ## Observed deployment checkpoint
+
+On **19 November 2026**, code commit `619ac0a` was deployed as release
+`20261119T191912Z-619ac0a-agents`. Open [Agents](https://portal.thedevex.com/agents)
+from Home. Work/Usage are enabled for `homelab`: `agy-primary` uses
+`Gemini 4 Neon (High)` and `codex-primary` uses `gpt-6.1-sol`, with plan, review
+and isolated implementation modes. The web host, API runner and coding worker
+are active and enabled. Chat/Mail configuration is preserved; manual Mail
+archive remains opt-in and disabled on this host.
+
+Full `make ci`, all 28 browser groups and 184 Python tests passed. Real included-account
+jobs from both profiles completed through the header-routed API, PostgreSQL,
+worker and manifest-checked result reader, then explicit acceptance. Queued
+cancellation and usage collection passed. A separate live 390px browser verified
+task forms, saved results and both usage cards without overflow, extra tabs or
+runtime errors. Codex allowance/account activity is available; Antigravity
+headless allowance remains explicitly unknown/unsupported. Forge job tokens are
+separate from account-wide metrics. There is no inherited llama.cpp token cap,
+paid fallback, automatic account rotation or automatic code merge.
+
+PostgreSQL was backed up privately and migrated through version10, then reloaded
+without restart. Worker and reconciler use separate scoped roles. SSH, Cloudflare,
+PostgreSQL and the source agent kept their PIDs. The public proxy serves the
+verified ABI6 bundle. Detailed private evidence is under
+`/mnt/data/homelab-build/portal-agents-20261119/` on Mission Control.
+
+### Earlier observation
 
 Read-only checks on 18 November 2026 found the local web host, source agent and Chat/Mail runner active. The web host uses the trusted-proxy origin `https://portal.thedevex.com` and listener `127.0.0.1:8788`. The checked host has **no Studio relay configured**. Its source agent has the `homelab` project without managed-write opt-in. Studio and managed edits are therefore repository capabilities, not enabled live-portal operations at this checkpoint.
 

@@ -1,10 +1,12 @@
 # Agent token limits and portal usage visibility
 
-**Status: implemented in source; deployment verification pending.**
+**Status: implemented and deployed on 19 November 2026 (code `619ac0a`, ABI6).**
 **Updated: 19 November 2026.** This supersedes the earlier design-only scope at
 `2e1300a00da92e9f97bdb1a656c2b182d4219a6c`. Generated Agents views, Work/Usage
 relays, provider adapters, collector and storage now exist. Optional configuration
-still governs enablement; this page does not assert a live portal rollout.
+still governs enablement. The live Homelab profiles were verified through real
+tasks, stored results and truthful provider metadata; see the
+[deployment checkpoint](../../design/implementation-status.md#observed-deployment-checkpoint).
 
 See [Coding-agent workflow](../coding-admission.md) for execution, role fences,
 result paging and explicit review/resume. The original diagram stereotypes below
