@@ -54,15 +54,21 @@ class WorkspaceStoreTest(unittest.TestCase):
             subprocess.run([POSTGRES_BIN / name, *map(str, args)], capture_output=True,
                            check=True, timeout=40)
 
+        def stop_server():
+            if (cls.data / "postmaster.pid").exists():
+                command("pg_ctl", "-D", cls.data, "-m", "immediate", "-w", "stop")
+
         command("initdb", "-D", cls.data, "--username=postgres", "--auth=trust", "--no-locale", "--encoding=UTF8")
+        cls.addClassCleanup(stop_server)
         command("pg_ctl", "-D", cls.data, "-l", cls.root / "postgres.log", "-o",
                 f"-k {cls.root} -c listen_addresses=", "-w", "start")
-        cls.addClassCleanup(command, "pg_ctl", "-D", cls.data, "-m", "immediate", "-w", "stop")
         psql = ("-h", cls.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1")
         command("psql", *psql, "-d", "postgres", "-f", SQL / "provision.sql")
         command("psql", *psql, "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
                 "-f", SQL / "apply.sql", "-f", SQL / "apply.sql",
                 "-f", SQL / "management/grant-runner.sql", "-f", SQL / "management/verify.sql")
+        command("psql", "-h", cls.root, "-U", "forge_agent", "-X", "-v", "ON_ERROR_STOP=1",
+                "-d", "forge_agent", "-f", SQL / "management/verify-runner-privileges.sql")
 
     def connect(self, user="forge_agent"):
         return psycopg2.connect(host=str(self.root), dbname="forge_agent", user=user, connect_timeout=2)
@@ -80,6 +86,425 @@ class WorkspaceStoreTest(unittest.TestCase):
         with closing(self.connect("forge_gpu_worker")) as connection, connection, connection.cursor() as cursor:
             cursor.execute("SELECT forge_agent_worker_api." + call, parameters)
             return cursor.fetchone()[0]
+
+    def run_sql_script(self, script_path, user="postgres"):
+        return subprocess.run(
+            [POSTGRES_BIN / "psql", "-h", str(self.root), "-U", user, "-X",
+             "-v", "ON_ERROR_STOP=1", "-d", "forge_agent", "-f", str(script_path)],
+            capture_output=True, text=True, timeout=20,
+        )
+
+    def admin_exec(self, *statements, owner=True):
+        with closing(self.connect("postgres")) as connection, connection, connection.cursor() as cursor:
+            if owner:
+                cursor.execute("SET ROLE forge_agent_owner")
+            for statement in statements:
+                cursor.execute(statement)
+
+    def assert_sql_verification(self, script, *, user="postgres", error=None):
+        result = self.run_sql_script(script, user=user)
+        if error is None:
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        else:
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn(error, result.stderr)
+
+    def test_runner_privilege_verification_enforces_exact_scoped_grants(self):
+        script = SQL / "management/verify-runner-privileges.sql"
+        self.assert_sql_verification(script, user="forge_agent")
+        self.assert_sql_verification(script, error="Expected current_user forge_agent")
+
+        allowed = {
+            "mail_threads": {"SELECT", "INSERT", "UPDATE"},
+            "mail_messages": {"SELECT", "INSERT"},
+            "inference_results": {"SELECT", "DELETE"},
+            "gpu_worker_readiness": {"SELECT"},
+        }
+        for table, privileges in allowed.items():
+            for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"):
+                required = privilege in privileges
+                change, restore = ("REVOKE", "GRANT") if required else ("GRANT", "REVOKE")
+                with self.subTest(drift=change, table=table, privilege=privilege):
+                    try:
+                        self.admin_exec(f"{change} {privilege} ON forge_agent.{table} "
+                                        f"{'FROM' if required else 'TO'} forge_agent")
+                        self.assert_sql_verification(script, user="forge_agent",
+                                                     error="Unexpected Forge database privileges")
+                    finally:
+                        self.admin_exec(f"{restore} {privilege} ON forge_agent.{table} "
+                                        f"{'TO' if required else 'FROM'} forge_agent")
+                    self.assert_sql_verification(script, user="forge_agent")
+
+        columns = {"mail_threads": "owner_id", "mail_messages": "content",
+                   "inference_results": "run_id", "gpu_worker_readiness": "worker_name"}
+        for table, privileges in allowed.items():
+            for privilege in ("SELECT", "INSERT", "UPDATE", "REFERENCES"):
+                if privilege in privileges:
+                    continue
+                with self.subTest(drift="column_grant", table=table, privilege=privilege):
+                    try:
+                        self.admin_exec(f"GRANT {privilege} ({columns[table]}) ON forge_agent.{table} TO forge_agent")
+                        self.assert_sql_verification(script, user="forge_agent",
+                                                     error="Unexpected Forge database privileges")
+                    finally:
+                        self.admin_exec(f"REVOKE {privilege} ({columns[table]}) ON forge_agent.{table} FROM forge_agent")
+                    self.assert_sql_verification(script, user="forge_agent")
+
+        try:
+            self.admin_exec("REVOKE USAGE ON SCHEMA forge_agent FROM forge_agent")
+            self.assert_sql_verification(script, user="forge_agent",
+                                         error="Unexpected Forge database privileges")
+        finally:
+            self.admin_exec("GRANT USAGE ON SCHEMA forge_agent TO forge_agent")
+        self.assert_sql_verification(script, user="forge_agent")
+
+    def test_runner_verification_uses_effective_public_and_inherited_privileges(self):
+        script = SQL / "management/verify-runner-privileges.sql"
+        inherited = "forge_test_runner_grants"
+        self.admin_exec(f"CREATE ROLE {inherited} NOLOGIN", f"GRANT {inherited} TO forge_agent", owner=False)
+        try:
+            for grantee in ("PUBLIC", inherited):
+                with self.subTest(grantee=grantee):
+                    try:
+                        self.admin_exec("REVOKE SELECT ON forge_agent.mail_messages FROM forge_agent",
+                                        f"GRANT SELECT ON forge_agent.mail_messages TO {grantee}")
+                        self.assert_sql_verification(script, user="forge_agent")
+                        self.admin_exec(f"GRANT DELETE ON forge_agent.mail_messages TO {grantee}")
+                        self.assert_sql_verification(script, user="forge_agent",
+                                                     error="Unexpected Forge database privileges")
+                    finally:
+                        self.admin_exec(f"REVOKE SELECT, DELETE ON forge_agent.mail_messages FROM {grantee}",
+                                        "GRANT SELECT ON forge_agent.mail_messages TO forge_agent")
+                    self.assert_sql_verification(script, user="forge_agent")
+        finally:
+            self.admin_exec(f"REVOKE {inherited} FROM forge_agent", f"DROP ROLE {inherited}", owner=False)
+
+    def test_verify_sql_detects_migration_0008_column_and_constraint_drift(self):
+        verify_script = SQL / "management/verify.sql"
+        self.assert_sql_verification(verify_script)
+
+        def single_column_check_name(column_name):
+            with closing(self.connect("postgres")) as connection, connection.cursor() as cursor:
+                cursor.execute("""
+                    SELECT c.conname
+                    FROM pg_catalog.pg_constraint c
+                    JOIN pg_catalog.pg_attribute a
+                      ON a.attrelid = c.conrelid AND c.conkey = ARRAY[a.attnum]
+                    WHERE c.conrelid = 'forge_agent.mail_threads'::regclass
+                      AND c.contype = 'c'
+                      AND a.attname = %s
+                """, (column_name,))
+                rows = [row[0] for row in cursor.fetchall()]
+                self.assertEqual(len(rows), 1, f"expected one check constraint on {column_name}")
+                return rows[0]
+
+        cross_check_sql = (
+            "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_archive_reason_check CHECK ("
+            "((archived_at IS NULL AND archive_reason IS NULL AND archive_base_revision IS NULL) "
+            "OR (archived_at IS NOT NULL AND archive_reason = 'context_limit' AND archive_base_revision IS NULL) "
+            "OR (archived_at IS NOT NULL AND archive_reason = 'manual' AND archive_base_revision IS NOT NULL "
+            "AND archive_base_revision = revision - 1)) IS TRUE)"
+        )
+        reason_check_sql = (
+            "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_reason_check "
+            "CHECK (archive_reason IN ('context_limit', 'manual'))"
+        )
+        base_check_sql = (
+            "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_base_revision_check "
+            "CHECK (archive_base_revision > 0 AND archive_base_revision <= 9007199254740991)"
+        )
+
+        cases = [
+            (
+                "missing_archive_reason",
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check",
+                    "ALTER TABLE forge_agent.mail_threads DROP COLUMN archive_reason",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads ADD COLUMN archive_reason text "
+                    "CHECK (archive_reason IN ('context_limit', 'manual'))",
+                    cross_check_sql,
+                ),
+            ),
+            (
+                "missing_archive_base_revision",
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check",
+                    "ALTER TABLE forge_agent.mail_threads DROP COLUMN archive_base_revision",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads ADD COLUMN archive_base_revision bigint "
+                    "CHECK (archive_base_revision > 0 AND archive_base_revision <= 9007199254740991)",
+                    cross_check_sql,
+                ),
+            ),
+            (
+                "wrong_type_archive_reason",
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_reason TYPE varchar(32)"),
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_reason TYPE text"),
+            ),
+            (
+                "not_null_archive_reason",
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_reason SET NOT NULL"),
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_reason DROP NOT NULL"),
+            ),
+            (
+                "wrong_type_archive_base_revision",
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_base_revision TYPE integer"),
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_base_revision TYPE bigint"),
+            ),
+            (
+                "not_null_archive_base_revision",
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_base_revision SET NOT NULL"),
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads ALTER COLUMN archive_base_revision DROP NOT NULL"),
+            ),
+            (
+                "dropped_reason_check_only",
+                lambda: self.admin_exec(f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_reason')}"),
+                lambda: self.admin_exec(reason_check_sql),
+            ),
+            (
+                "weakened_reason_check_only",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_reason')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_reason_check "
+                    "CHECK (archive_reason IN ('context_limit', 'manual', 'other'))",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_threads_archive_reason_check",
+                    reason_check_sql,
+                ),
+            ),
+            (
+                "weakened_reason_unprobed_value",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_reason')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_reason_check "
+                    "CHECK (archive_reason IN ('context_limit', 'manual', 'future_reason'))",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_threads_archive_reason_check",
+                    reason_check_sql,
+                ),
+            ),
+            (
+                "reason_literal_contains_space",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_reason')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_reason_check "
+                    "CHECK (archive_reason IN ('context_ limit', 'manual'))",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_threads_archive_reason_check",
+                    reason_check_sql,
+                ),
+            ),
+            (
+                "not_valid_reason_check_only",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_reason')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_reason_check "
+                    "CHECK (archive_reason IN ('context_limit', 'manual')) NOT VALID",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads VALIDATE CONSTRAINT mail_threads_archive_reason_check"
+                ),
+            ),
+            (
+                "dropped_base_check_only",
+                lambda: self.admin_exec(f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_base_revision')}"),
+                lambda: self.admin_exec(base_check_sql),
+            ),
+            (
+                "weakened_base_lower_bound_only",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_base_revision')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_base_revision_check "
+                    "CHECK (archive_base_revision >= 0 AND archive_base_revision <= 9007199254740991)",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_threads_archive_base_revision_check",
+                    base_check_sql,
+                ),
+            ),
+            (
+                "weakened_base_upper_bound_only",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_base_revision')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_base_revision_check "
+                    "CHECK (archive_base_revision > 0)",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_threads_archive_base_revision_check",
+                    base_check_sql,
+                ),
+            ),
+            (
+                "weakened_base_unprobed_value",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_base_revision')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_base_revision_check "
+                    "CHECK ((archive_base_revision > 0 AND archive_base_revision <= 9007199254740991) "
+                    "OR archive_base_revision = 123456789012345678)",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_threads_archive_base_revision_check",
+                    base_check_sql,
+                ),
+            ),
+            (
+                "not_valid_base_check_only",
+                lambda: self.admin_exec(
+                    f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {single_column_check_name('archive_base_revision')}",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_threads_archive_base_revision_check "
+                    "CHECK (archive_base_revision > 0 AND archive_base_revision <= 9007199254740991) NOT VALID",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads VALIDATE CONSTRAINT mail_threads_archive_base_revision_check"
+                ),
+            ),
+            (
+                "dropped_cross_check_only",
+                lambda: self.admin_exec("ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check"),
+                lambda: self.admin_exec(cross_check_sql),
+            ),
+            (
+                "weakened_cross_check_missing_is_true",
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check",
+                    "ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT mail_archive_reason_check CHECK ("
+                    "(archived_at IS NULL AND archive_reason IS NULL AND archive_base_revision IS NULL) "
+                    "OR (archived_at IS NOT NULL AND archive_reason = 'context_limit' AND archive_base_revision IS NULL) "
+                    "OR (archived_at IS NOT NULL AND archive_reason = 'manual' AND archive_base_revision IS NOT NULL "
+                    "AND archive_base_revision = revision - 1))",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check",
+                    cross_check_sql,
+                ),
+            ),
+            (
+                "renamed_cross_check",
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads RENAME CONSTRAINT mail_archive_reason_check TO alternate_archive_check"
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads RENAME CONSTRAINT alternate_archive_check TO mail_archive_reason_check"
+                ),
+            ),
+            (
+                "weakened_cross_unprobed_revision",
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check",
+                    cross_check_sql[:-1] + " OR revision = 123456)",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check",
+                    cross_check_sql,
+                ),
+            ),
+            (
+                "not_valid_cross_check",
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT mail_archive_reason_check",
+                    cross_check_sql + " NOT VALID",
+                ),
+                lambda: self.admin_exec(
+                    "ALTER TABLE forge_agent.mail_threads VALIDATE CONSTRAINT mail_archive_reason_check"
+                ),
+            ),
+        ]
+
+        for label, drift, restore in cases:
+            with self.subTest(drift=label):
+                try:
+                    drift()
+                    self.assert_sql_verification(verify_script, error="archive")
+                finally:
+                    restore()
+                self.assert_sql_verification(verify_script)
+
+    def test_verify_sql_does_not_execute_catalog_check_code(self):
+        check = "mail_threads_archive_reason_check"
+        try:
+            self.admin_exec(
+                "CREATE FUNCTION forge_agent.fixture_catalog_check(text) RETURNS boolean "
+                "LANGUAGE plpgsql AS $body$ BEGIN "
+                "RAISE EXCEPTION 'catalog_check_was_executed'; END; $body$",
+                f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {check}",
+                f"ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT {check} "
+                "CHECK (forge_agent.fixture_catalog_check(archive_reason))",
+            )
+            result = self.run_sql_script(SQL / "management/verify.sql")
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("archive", result.stderr)
+            self.assertNotIn("catalog_check_was_executed", result.stderr)
+        finally:
+            self.admin_exec(
+                f"ALTER TABLE forge_agent.mail_threads DROP CONSTRAINT {check}",
+                f"ALTER TABLE forge_agent.mail_threads ADD CONSTRAINT {check} "
+                "CHECK (archive_reason IN ('context_limit', 'manual'))",
+                "DROP FUNCTION forge_agent.fixture_catalog_check(text)",
+            )
+        self.assert_sql_verification(SQL / "management/verify.sql")
+
+    def test_mail_archive_row_contract_accepts_valid_and_rejects_invalid_states(self):
+        now = datetime(2026, 11, 19, 0, 0, tzinfo=UTC)
+        valid_rows = [
+            ("active", 0, None, None, None),
+            ("active_upper_bound", 9007199254740991, None, None, None),
+            ("context_limit", 1, now, "context_limit", None),
+            ("manual", 2, now, "manual", 1),
+            ("manual_upper_bound", 9007199254740991, now, "manual", 9007199254740990),
+        ]
+        invalid_rows = [
+            ("unknown_reason", 2, now, "other", None),
+            ("future_reason", 2, now, "future_reason", None),
+            ("archived_without_reason", 2, now, None, None),
+            ("archived_without_reason_with_base", 2, now, None, 1),
+            ("active_with_reason", 1, None, "context_limit", None),
+            ("active_with_base", 2, None, None, 1),
+            ("context_limit_with_base", 2, now, "context_limit", 1),
+            ("manual_without_timestamp", 2, None, "manual", 1),
+            ("manual_without_base", 2, now, "manual", None),
+            ("manual_wrong_pair_low", 3, now, "manual", 1),
+            ("manual_wrong_pair_equal", 2, now, "manual", 2),
+            ("manual_zero_base", 1, now, "manual", 0),
+            ("manual_negative_base", 0, now, "manual", -1),
+            ("active_negative_revision", -1, None, None, None),
+            ("active_revision_over_max", 9007199254740992, None, None, None),
+            ("manual_rev_over_max", 9007199254740992, now, "manual", 9007199254740991),
+            ("manual_base_over_max", 9007199254740993, now, "manual", 9007199254740992),
+        ]
+        insert_sql = """
+            INSERT INTO forge_agent.mail_threads
+                (owner_id, id, subject, revision, profile_id, context_remaining_tokens,
+                 archived_at, archive_reason, archive_base_revision)
+            VALUES ('fixture-owner', %s, 'Archive contract', %s, 'gpt-oss-120b-harmony-v1', 100, %s, %s, %s)
+        """
+        with closing(self.connect("forge_agent")) as connection:
+            try:
+                with connection.cursor() as cursor:
+                    for label, revision, archived_at, reason, base_rev in valid_rows:
+                        with self.subTest(valid=label):
+                            cursor.execute("SAVEPOINT row_check")
+                            try:
+                                cursor.execute(insert_sql, (uuid4(), revision, archived_at, reason, base_rev))
+                            finally:
+                                cursor.execute("ROLLBACK TO SAVEPOINT row_check")
+                                cursor.execute("RELEASE SAVEPOINT row_check")
+                    for label, revision, archived_at, reason, base_rev in invalid_rows:
+                        with self.subTest(invalid=label):
+                            cursor.execute("SAVEPOINT row_check")
+                            try:
+                                with self.assertRaises(psycopg2.errors.CheckViolation):
+                                    cursor.execute(insert_sql, (uuid4(), revision, archived_at, reason, base_rev))
+                            finally:
+                                cursor.execute("ROLLBACK TO SAVEPOINT row_check")
+                                cursor.execute("RELEASE SAVEPOINT row_check")
+            finally:
+                connection.rollback()
 
     def test_verified_file_attachment_is_historical_in_saved_chat(self):
         model, chat_id = "gpt-oss-20b", uuid4()

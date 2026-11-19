@@ -108,7 +108,7 @@ pub(super) const BODY: &[Node] = &[
                 element!(Dd; text("Thread ID and expected_revision in. Manual archive stops future follow-ups but retains messages. Returns mail_archived with result_revision. The same owner, thread, and base revision returns the original receipt without changing timestamps or revision again.")),
             ),
         ),
-        element!(P; text("mail_store owns ordered mail_threads and mail_messages reads and writes. queue_store owns turn admission, idempotency, saved inference input, and finalization transactions. The MailRequest / MailResponse Rust DTOs and Python command dataclasses enforce the same four operations. The runner uses its configured mission-control owner; callers cannot supply an owner. The GPU worker receives only the bounded inference payload through the restricted claim API.")),
+        element!(P; text("mail_store owns ordered mail_threads and mail_messages reads and writes. queue_store owns turn admission, idempotency, saved inference input, and finalization transactions. The MailRequest / MailResponse Rust DTOs and Python command dataclasses enforce the same five operations. The runner uses its configured mission-control owner; callers cannot supply an owner. The GPU worker receives only the bounded inference payload through the restricted claim API.")),
     ),
     element!(Section [Id = "qualification", Class = "design-section", AriaLabelledby = "qualification-title"];
         element!(H2 [Id = "qualification-title"]; text("Forge qualification")),

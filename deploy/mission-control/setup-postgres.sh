@@ -64,21 +64,8 @@ check_cluster() {
         SELECT current_user, current_database(), current_setting('server_version') AS server_version,
                count(*) AS conversations FROM forge_agent.conversations;
     "
-    local privileges
-    privileges="$(psql_as "$runner" forge_agent -Atc "
-        SELECT NOT has_schema_privilege(current_user, 'forge_agent', 'CREATE')
-           AND NOT has_table_privilege(current_user, 'forge_agent.schema_migrations', 'INSERT')
-           AND (
-               SELECT bool_and(has_table_privilege(current_user, 'forge_agent.' || relation, privilege))
-               FROM unnest(ARRAY['conversations', 'runs', 'messages', 'tool_calls', 'tool_results', 'run_events', 'ide_workspace_tabs']) AS relation
-               CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE']) AS privilege
-           ) AND (
-               SELECT bool_and(has_table_privilege(current_user, 'forge_agent.' || relation, privilege))
-               FROM unnest(ARRAY['ide_workspace_history', 'ide_chats']) AS relation
-               CROSS JOIN unnest(ARRAY['SELECT', 'INSERT', 'UPDATE']) AS privilege
-           );
-    ")"
-    [[ "$privileges" == t ]] || fail 'Unexpected Forge database privileges.'
+    psql_as "$runner" forge_agent -f "$directory/sql/management/verify-runner-privileges.sql" \
+        || fail 'Unexpected Forge database privileges.'
 }
 
 if [[ "$action" == --check ]]; then
