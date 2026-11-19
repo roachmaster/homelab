@@ -34,6 +34,12 @@ Checkpoint after coherent changes and before expensive checks so a hard quota
 stop does not lose the next action. Record tests and source identity; reuse green
 evidence only after confirming identical artifacts. Keep required quality gates.
 Capture reusable verified corrections in the relevant skill, contract or test.
+Before reporting that all agent work is published, inspect the accepted task
+workspaces and relevant feature branches as well as the main checkout. Review
+and integrate their changes, then verify remote reachability. Preserve
+receipt-bound task workspaces by importing their snapshot into a separate
+worktree.
+
 The record coordinates existing authorization; it does not grant new publication,
 deployment or paid-credit authority. The coordinator currently manages agent
 switching; no automatic quota controller is configured.

@@ -3573,16 +3573,55 @@
     - selector: ".fg-metric-details>summary"
       declarations:
         - ["min-height", "44px"]
-        - ["line-height", "44px"]
+        - ["line-height", "1.5"]
         - ["font-size", ".8125rem"]
         - ["font-weight", "500"]
         - ["color", "var(--muted)"]
         - ["cursor", "pointer"]
         - ["border-radius", "5px"]
-        - ["list-style-position", "inside"]
-    - selector: ".fg-metric-details>summary:hover"
+        - ["list-style", "none"]
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["gap", "8px"]
+        - ["padding", "6px 2px"]
+        - ["transition", "color 150ms ease"]
+    - selector: ".fg-metric-details>summary:hover,.fg-metric-details[open]>summary"
       declarations:
         - ["color", "var(--text)"]
+    - selector: ".fg-badge:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-row-tag:empty,.fg-row-time:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-metric-refresh:disabled"
+      declarations:
+        - ["opacity", ".45"]
+    - selector: ".fg-metric-slug:empty,.fg-metric-scope:empty,.fg-metric-time:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-metric-observation>.fg-metric-time"
+      declarations:
+        - ["margin-inline-start", "auto"]
+        - ["text-align", "end"]
+    - selector: ".fg-metric-details>summary::-webkit-details-marker"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-metric-details>summary::after"
+      declarations:
+        - ["content", "''"]
+        - ["flex", "none"]
+        - ["width", "6px"]
+        - ["height", "6px"]
+        - ["margin-inline-end", "4px"]
+        - ["border", "solid currentColor"]
+        - ["border-width", "0 1.5px 1.5px 0"]
+        - ["transform", "rotate(45deg)"]
+        - ["transition", "transform 150ms ease"]
+    - selector: ".fg-metric-details[open]>summary::after"
+      declarations:
+        - ["transform", "rotate(-135deg)"]
     - selector: ".fg-metric-properties"
       declarations:
         - ["display", "grid"]
@@ -3687,6 +3726,6 @@
         - ["max-width", "48rem"]
 - media: "(prefers-reduced-motion:reduce)"
   rules:
-    - selector: ".fg-metric-card,.fg-metric-select,.fg-metric-refresh,#agents .fg-row-select"
+    - selector: ".fg-metric-card,.fg-metric-select,.fg-metric-refresh,.fg-metric-details>summary,.fg-metric-details>summary::after,#agents .fg-row-select"
       declarations:
         - ["transition", "none"]

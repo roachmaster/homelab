@@ -3395,9 +3395,16 @@ async function agentsJourney() {
     await check(codexCard).toHaveAttribute('data-selected', 'true');
     const details = codexCard.locator('details.fg-metric-details');
     const summary = details.locator(':scope > summary');
+    const closedChevron = await summary.evaluate(node => getComputedStyle(node, '::after').transform);
+    assert.notEqual(closedChevron, 'none', 'Gemini disclosure cue is styled before opening');
     await summary.focus();
     await page.keyboard.press('Enter');
     await check(details).toHaveJSProperty('open', true);
+    await check.poll(() => summary.evaluate(node => getComputedStyle(node, '::after').transform)).not.toBe(closedChevron);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await check.poll(() => summary.evaluate(node => getComputedStyle(node, '::after').transitionDuration)).toBe('0s');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await check(codexCard.locator('.fg-metric-observation > .fg-metric-time')).toHaveCSS('text-align', 'end');
     await check(details).toContainText('9007199254740998');
     await check(details.locator('code')).not.toHaveCount(0);
     await check(geminiCard.locator('details.fg-metric-details')).toBeHidden();
