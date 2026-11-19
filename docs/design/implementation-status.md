@@ -52,6 +52,34 @@ See [plug-and-play](/design/forge-providers), [workers](/design/forge-workers), 
 
 ## Observed deployment checkpoint
 
+On **19 November 2026**, code commit `aa2eb1a` was deployed as release
+`20261119T225400Z-aa2eb1a-agents-dashboard`. Gemini publishes a public plan first
+and reports milestones through the supervising worker's scoped database port.
+The portal reads those checkpoint events at unchanged task revision and restores
+current-attempt history when a saved task is reopened. Completion still requires
+a coherent final result and confirmed process stop; review acceptance is explicit.
+Codex keeps its existing sandbox and terminal-result reporting.
+
+Full local `make ci`, 75 UI model/protocol tests, all 28 sandboxed browser groups
+and 210 backend tests passed. An actual included-account Gemini plan-mode fixture
+published both plan and progress while its process was alive, returned its final
+reply, preserved its read-only repository and stopped cleanly. That model check
+used an owned fixture outside the production queue; separate actual PostgreSQL
+tests verified persistence, API projection, idempotency and lease fences.
+
+The existing operator task was allowed to finish before activation and was
+subsequently observed Accepted. The migration12 transaction was proved twice on
+a disposable schema11 database, then backed up and applied/verified atomically
+on the live database. API/worker configuration, credentials and policy2 stayed
+unchanged. Live read-only browser checks verified the saved result, current task
+status, truthful absence of a retroactive plan, provider cards and phone/desktop
+layout. The public proxy serves the exact ABI7 bundle and updated dispatch
+design; staging is closed. Evidence is under
+`/mnt/data/homelab-build/agent-progress-20261119/` on Mission Control, with the
+real model proof under `/mnt/data/homelab-build/agents-progress-20261119/plan-proof/`.
+
+### Earlier dashboard and workspace-autonomy rollout
+
 On **19 November 2026**, code commit `679088c` was deployed as release
 `20261119T215116Z-679088c-agents-dashboard`. The web host, API runner and coding
 worker are active and enabled. [Agents](https://portal.thedevex.com/agents)

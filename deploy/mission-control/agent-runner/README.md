@@ -423,3 +423,9 @@ retroactively. Codex retains its existing sandbox and terminal-result behavior.
 
 See [ownership and sequence](../../../docs/architecture/coding-admission.md#public-plans-and-live-progress)
 and the live [dispatch design](https://portal.thedevex.com/design/coding-agents#progress).
+
+Verified live progress release: `20261119T225400Z-aa2eb1a-agents-dashboard`
+(code `aa2eb1a`, schema12, browser ABI7, unchanged policy2). The running operator
+attempt was allowed to finish before activation. No historical task acquired a
+retroactive plan or automatic replay. Configuration and credentials were
+preserved, and the staged/live portal checks passed.
