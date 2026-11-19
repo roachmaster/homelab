@@ -32,8 +32,11 @@ const STYLES: markup::Styles = &[
     (
         ".docs-reader .engine-table",
         &[
+            ("inline-size", "100%"),
+            ("min-inline-size", "0"),
             ("max-inline-size", "100%"),
-            ("overflow", "auto"),
+            ("overflow-x", "auto"),
+            ("-webkit-overflow-scrolling", "touch"),
             ("margin-block", "16px"),
             ("border", "1px solid var(--border)"),
             ("border-radius", "8px"),
@@ -53,11 +56,30 @@ const STYLES: markup::Styles = &[
         ".docs-reader .engine-table th, .docs-reader .engine-table td",
         &[
             ("padding", "12px"),
+            ("min-inline-size", "14rem"),
+            ("word-break", "normal"),
+            ("overflow-wrap", "normal"),
             ("text-align", "start"),
             ("vertical-align", "top"),
             ("border-block-end", "1px solid var(--border)"),
         ],
     ),
+    (
+        ".docs-reader .engine-table th:first-child, .docs-reader .engine-table td:first-child",
+        &[("min-inline-size", "12rem")],
+    ),
+    (
+        ".docs-reader .engine-table code",
+        &[("overflow-wrap", "anywhere"), ("word-break", "normal")],
+    ),
+    (
+        ".docs-reader .engine-table:focus-visible",
+        &[
+            ("outline", "2px solid var(--accent)"),
+            ("outline-offset", "3px"),
+        ],
+    ),
+    (".table-scroll-hint", &[("display", "none")]),
     (
         ".docs-page",
         &[
@@ -591,6 +613,15 @@ const WIDE_STYLES: markup::Styles = &[
 ];
 
 const PHONE_STYLES: markup::Styles = &[
+    (
+        ".table-scroll-hint",
+        &[
+            ("display", "block"),
+            ("font-size", ".8125rem"),
+            ("color", "var(--accent)"),
+            ("margin-block-end", "-8px"),
+        ],
+    ),
     (
         ".docs-page .docs-global-nav",
         &[("gap", "8px"), ("justify-content", "space-between")],

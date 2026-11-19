@@ -320,7 +320,8 @@ pub(super) const DISPATCH: &[Node] = &[
             element!(Code; text("request_id")),
             text("."),
         ),
-        element!(Div [Class = "engine-table"];
+        element!(P [Class = "table-scroll-hint", Id = "work-contract-scroll"]; text("More columns → Swipe or use arrow keys in the table.")),
+        element!(Div [Class = "engine-table", Role = "region", Tabindex = "0", AriaLabel = "Coding-agent API comparison", AriaDescribedby = "work-contract-scroll"];
             element!(Table;
                 element!(Thead;
                     element!(Tr;
@@ -564,7 +565,8 @@ pub(super) const USAGE: &[Node] = &[
     element!(Section [Id = "providers", Class = "design-section", AriaLabelledby = "providers-title"];
         element!(H2 [Id = "providers-title"]; text("Provider capability matrix")),
         element!(P; text("Capabilities reflect installed CLI safe-help and published protocol schemas, not live authenticated probes. Missing or unverified feeds remain explicitly unknown or unsupported.")),
-        element!(Div [Class = "engine-table"];
+        element!(P [Class = "table-scroll-hint", Id = "provider-scroll"]; text("More columns → Swipe or use arrow keys in the table.")),
+        element!(Div [Class = "engine-table", Role = "region", Tabindex = "0", AriaLabel = "Agent provider capability comparison", AriaDescribedby = "provider-scroll"];
             element!(Table;
                 element!(Thead;
                     element!(Tr;
@@ -704,7 +706,8 @@ pub(super) const USAGE: &[Node] = &[
                 element!(P;
                     element!(Small; text("Header bar: Forge · Home · Chat · Mail · Workbench · More — Scope: Forge-observed jobs · Metadata refresh (placeholder)")),
                 ),
-                element!(Div [Class = "engine-table"];
+                element!(P [Class = "table-scroll-hint", Id = "agents-layout-scroll"]; text("More columns → Swipe or use arrow keys in the table.")),
+                element!(Div [Class = "engine-table", Role = "region", Tabindex = "0", AriaLabel = "Illustrative agent usage columns", AriaDescribedby = "agents-layout-scroll"];
                     element!(Table;
                         element!(Thead;
                             element!(Tr;

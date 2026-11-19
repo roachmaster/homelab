@@ -146,6 +146,22 @@ clear snapshot labels. Keep full-size diagrams reachable without forcing the
 index to load them. Check the sticky navigation, deep links, browser Back,
 keyboard focus and phone overflow in the actual generated pages.
 
+## Responsive tables and data matrices
+
+Protect every multi-column table on narrow screens. Either use a named,
+keyboard-focusable horizontal scroll region with a table minimum width of at
+least 600px and readable column minimums, or stack labeled key-value rows below
+640px. Give identifier columns at least 160px; do not shrink them into columns
+that split ordinary words mid-letter. Keep normal word wrapping in prose and
+use `overflow-wrap: anywhere` specifically inside long code identifiers.
+
+Show a visible swipe/scroll cue on phones when columns extend beyond the
+viewport. Keep the scrollbar available, preserve native touch scrolling, and
+show a clear focus ring. Verify that touch and keyboard scrolling reach the
+last column while the page itself stays within the viewport. Test the actual
+column widths and inherited wrapping rules; a table minimum width alone does
+not prevent its first column from collapsing.
+
 ## Control the layout rhythm
 
 Use a centered responsive container around 960–1120px for portal launchers.

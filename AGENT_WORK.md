@@ -18,13 +18,13 @@ Compact shared handoff record for **Antigravity** (primary worker using included
 - **objective:** Keep coding agents free of inherited llama.cpp token caps and design portal visibility across Codex, Gemini/Antigravity and future providers.
 - **authorized_scope:** User authorized publishing both agent designs to the live portal, then commit/push, then begin backend implementation. Antigravity first owns only the assigned generated Rust design readers/routes/tests; Codex reviews, stages an ABI-compatible docs release, publishes and pushes. Real agent execution/live DB provisioning and account spending are not part of this initial implementation slice.
 - **acceptance_criteria:** Source-grounded distinction between inference caps and coding-agent policy; provider capability/provenance matrix; responsive Agents view; injected factories/providers, admitted DTO/DAO contracts, accurate accounting and collection sequence; validated diagrams and links.
-- **phase:** `ready_for_review`
-- **active_agent:** `Codex`
+- **phase:** `implementing`
+- **active_agent:** `Codex (canonical UI); Antigravity (isolated Python worktree)`
 - **coordinator:** `Codex`
 - **worktree:** `/home/lrocha/repos/homelab`
 - **branch:** `main`
 - **base:** `2e1300a00da92e9f97bdb1a656c2b182d4219a6c`
-- **HEAD:** `2e1300a00da92e9f97bdb1a656c2b182d4219a6c`
+- **HEAD:** `624409a70f7d4d45aaccb768bc581d31f8eb66fb`
 - **changed_files:**
   - Task: `docs/architecture/proposals/forge-agent-usage.md`, `docs/architecture/proposals/forge-coding-agent-dispatch.md`, `docs/README.md`, `docs/architecture/README.md`, `AGENT_WORK.md`.
   - Pre-existing local setup preserved byte-for-byte: `AGENTS.md`, `GEMINI.md`. Prior dispatch/checkpoint snapshots are retained in the external evidence directory.
@@ -38,12 +38,16 @@ Compact shared handoff record for **Antigravity** (primary worker using included
   - Staged and live sandboxed Chromium checks passed for both readers on phone/desktop, all six diagrams, same-tab navigation and overflow. Home and reader screenshots visually reviewed.
   - Live publication verified fixed routes/MIME/CSP, preserved active ABI-4 UI assets byte-for-byte, unchanged peer services and Cloudflare Access sign-in enforcement.
 - **evidence:** `/mnt/data/homelab-build/portal-agent-design-20261119/` (native/browser reports, exact-source reuse proof, deployment candidate/stage/publication evidence); design-authoring evidence remains under `/mnt/data/homelab-build/agent-usage-design-20261119/`.
-- **running_processes:** Authoring CLI exited successfully. Staging service stopped after publication. No coding/usage worker, reconciler or collector installed or started.
-- **publication_deployment:** Both design readers published at `/design/coding-agents` and `/design/agent-usage` in release `20261119T170355Z-2e1300a-c4d05ac9-agent-designs`. This is a docs-only overlay on the captured live ABI-4 source; it is not a full-main/ABI-5 runtime deployment. Source is ready for the authorized design commit/push before backend implementation.
-- **last_updated:** `2026-11-19T17:09:12.671288+00:00`
+- **running_processes:** Table-fix staging service stopped after publication. Antigravity is authoring Python/SQL in its isolated worktree; Rust admission work is frozen in a separate worktree. No coding/usage worker, reconciler or collector installed or started.
+- **publication_deployment:** Designs pushed to main as `624409a`. Both readers are live at `/design/coding-agents` and `/design/agent-usage`. User-requested mobile table correction published in release `20261119T172723Z-624409a-e17aa8ad-table-readability`: minimum column widths, normal prose wrapping, focusable local scroll regions and phone swipe cues. This remains a docs-only overlay preserving the live ABI-4 application bundle; no backend activation or full-main/ABI-5 deployment.
+- **table_fix_verification:** Full canonical CI passed on Rust1.97.1; native inputs reused after proven removal of a task-created CPython bytecode file (no source/build/test changes). First browser run passed all28 groups but failed source-consistency after that cleanup; a fresh unchanged-source run passed28/28 with cleanup. Captured-live candidate independently passed full CI, all28 browser groups and release build. Its dependency receipt was rebound to the fresh canonical run with preserved failure/provenance, without rewriting QA artifacts or rerunning candidate checks. Staged/live sandboxed Chrome verified nine comparison regions at320/390/1440, readable cells, normal prose wrapping, visible mobile cues, focus/actual arrow-key scrolling and last-column access. First/last-column and cue screenshots reviewed. Skill validation passed.
+- **table_fix_evidence:** `/mnt/data/homelab-build/portal-table-fix-20261119/` (native reuse proof, freshQApath, candidate checks/receipt provenance, staging/live screenshots and publication evidence).
+- **hosted_ci:** Design commit retains known pre-existing Rust1.100 unreachable-call failure in loopback.rs and draft-restoration browser failure at journey.mjs:1497. Local gates passed on Rust1.97.1; hosted CI is not claimed green. These fixes are outside the current slice.
+
+- **last_updated:** `2026-11-19T17:30:43.568803+00:00`
 - **observed_quota:** `unknown`; no purchased-credit fallback enabled. Native token counters are observations, not a subscription balance or invoice.
 - **blockers_uncertainties:** Actual provider account responses, supported headless Gemini allowance feeds and write-profile process isolation remain unverified. Preserve the design's opt-in activation gates.
-- **next_action:** Commit/push the published designs and shared agent setup. Then implement a default-off backend slice: independent admitted Work relay/service, durable scoped admission and receipts, fenced result storage/paging and fake-worker verification in disposable PostgreSQL. Defer real CLI execution, resume/reconciliation operations, live provisioning, usage polling and the Agents application screen.
+- **next_action:** Designs pushed to main624409a. Antigravity owns Python/SQL admission only (submit/get/list/events/queued cancel) in `/mnt/data/homelab-build/coding-admission-20261119/python-worktree`. A separate Rust agent owns the independent relay/config in `/mnt/data/homelab-build/coding-admission-20261119/rust-worktree`; coordinator integrates after both freeze. Frozen contract and brief are under `/mnt/data/homelab-build/coding-admission-20261119/`. Workers, attempts/results/resume/accept, usage polling/UI and live backend activation remain subsequent slices.
 
 ## Blank Task Template
 

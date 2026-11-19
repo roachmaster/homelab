@@ -2213,6 +2213,7 @@ async function designJourney(page, traffic) {
   await screenshot(page, 'ide-design-index-desktop.png', { docs: true });
   await characterDesignJourney(page, designUrl);
   await implementationDesignJourney(page, designUrl);
+  await agentDesignTablesJourney(page, designUrl);
   await wireframesDesignJourney(page, designUrl);
   await providerLink.focus();
   await check(providerLink).toBeFocused();
@@ -2366,6 +2367,48 @@ async function implementationDesignJourney(page, designUrl) {
   await check(page).toHaveURL(new URL('/design/implementation', designUrl).href);
   await page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Back to Design', exact: true }).click();
   await check(page).toHaveURL(`${designUrl}#forge-foundations`);
+}
+
+async function agentDesignTablesJourney(page, designUrl) {
+  process.stderr.write('QA_CHECK design_agent_table_scroll\n');
+  for (const path of ['/design/coding-agents', '/design/agent-usage']) {
+    await page.getByRole('navigation', { name: 'Design sections' }).locator(`a[href="${path}"]`).click();
+    await check(page).toHaveURL(new URL(path, designUrl).href);
+    const tables = page.locator('main .engine-table');
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
+        'wide comparison tables scroll locally without widening the page');
+      for (const table of await tables.all()) {
+        await check(table).toHaveAttribute('role', 'region');
+        await check(table).toHaveAttribute('aria-label', /\S/);
+        await check(table).toHaveAttribute('tabindex', '0');
+        assert.equal(await table.locator('th, td').evaluateAll(cells => cells.every(cell => {
+          const style = getComputedStyle(cell);
+          return cell.getBoundingClientRect().width >= 160
+            && style.wordBreak === 'normal' && style.overflowWrap === 'normal';
+        })), true, 'prose and identifier columns retain readable widths and normal word wrapping');
+        if (width < 640) {
+          const cueId = await table.getAttribute('aria-describedby');
+          await check(page.locator(`#${cueId}`)).toBeVisible();
+          assert.equal(await table.evaluate(node => node.scrollWidth > node.clientWidth), true);
+          await table.evaluate(node => { node.scrollLeft = 0; });
+          await table.focus();
+          await check(table).toBeFocused();
+          await page.keyboard.press('ArrowRight');
+          await check.poll(() => table.evaluate(node => node.scrollLeft)).toBeGreaterThan(0);
+          await table.evaluate(node => { node.scrollLeft = node.scrollWidth; });
+          assert.equal(await table.evaluate(node => {
+            const edge = node.getBoundingClientRect().right;
+            return [...node.querySelectorAll('tr')].every(row => row.lastElementChild.getBoundingClientRect().right <= edge + 1);
+          }), true, 'horizontal scrolling exposes the last column instead of clipping it permanently');
+          await table.evaluate(node => { node.scrollLeft = 0; });
+        }
+      }
+    }
+    await page.getByRole('link', { name: 'Back to Design', exact: true }).click();
+    await check(page).toHaveURL(`${designUrl}#forge-foundations`);
+  }
 }
 
 async function wireframesDesignJourney(page, designUrl) {
