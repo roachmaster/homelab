@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "e7f7e43276a60a0efffd3e99beddf0955d7916e098ab1825980829b3cdf3e88d",
-    "validate.mjs": "07d98218614896e1bea5abbba1dd644d6d53da82b1acf320e6a952e8d380d698"
+    "render.py": "a9b6521d72b2727a9e412f597aee92ae6b57c1ee4cfbc4c79c26fb9b3c65c52f",
+    "validate.mjs": "a131c9ed69a54cf7bd8d5fa8ac6360eea1ef1de13e57c80b03d353b38f43a6f2"
   },
   "diagrams": [
     {
@@ -241,6 +241,42 @@
       "source_sha256": "023926bb29128d79e0d62e9ab3075384705ee95907a99fbed90b787152c59997",
       "svg": "images/forge-studio-worker-lease.svg",
       "svg_sha256": "980d583511ca897da75a749a8af9759a5afc75469597a750a35664bb044a668f"
+    },
+    {
+      "source": "coding-agent-ownership.mmd",
+      "source_sha256": "13086a17029724b38324a04d82ceda6c54379554b088586cd66362dec39091a8",
+      "svg": "images/coding-agent-ownership.svg",
+      "svg_sha256": "15e8b019be7e6992608f43ea77c2512cbd8ebf7b22a674a0071098f67b1cd6bf"
+    },
+    {
+      "source": "coding-agent-lifecycle.mmd",
+      "source_sha256": "077aeb01913e4a1107f5ba556e474c3ea47c5f2faf0678e12c863fbe9798bdaf",
+      "svg": "images/coding-agent-lifecycle.svg",
+      "svg_sha256": "b39968c6dd65e2dae5382ce783273eba8a3ad6efb7874980d7305a3632a10ea1"
+    },
+    {
+      "source": "coding-agent-completion.mmd",
+      "source_sha256": "04cfe4d88b6a7172ceadcc41b6a20c506cf942338d2493f8468e77bdb61fff8f",
+      "svg": "images/coding-agent-completion.svg",
+      "svg_sha256": "9d12cacd4de1180c92a9ab2f513e52c7fa102089ed5144f8ed69e87a3ef9edbe"
+    },
+    {
+      "source": "coding-agent-takeover.mmd",
+      "source_sha256": "4f90177e3c8da91485a7aef07076e90774fea111f6b4fe10ba9aa30fb579f9d7",
+      "svg": "images/coding-agent-takeover.svg",
+      "svg_sha256": "ae19f7ab9913d57072da9a3db2a5e7b5050dd9c8000057ead501d8c376d87bb0"
+    },
+    {
+      "source": "agent-usage-providers.mmd",
+      "source_sha256": "b750c394adc2821a34e90d48634ed56a1b386c8815fa023f337dc44492068875",
+      "svg": "images/agent-usage-providers.svg",
+      "svg_sha256": "672e6db6b9b461077c7c238202ef87031621e050c2df9e45351871d05b14ba58"
+    },
+    {
+      "source": "agent-usage-collection.mmd",
+      "source_sha256": "51394454e7365220e66df261b7860f670a2c140473e38c837d6374d5752e63f1",
+      "svg": "images/agent-usage-collection.svg",
+      "svg_sha256": "670e8dd40f5ff7b7f51460cde28cb43d384de455efa71f800546b6c36550eb8e"
     }
   ]
 }

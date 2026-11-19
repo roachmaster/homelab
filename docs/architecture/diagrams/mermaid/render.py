@@ -22,6 +22,8 @@ SOURCES = [ROOT / f"{name}.mmd" for name in (
     "game-physics-tick", "game-physics-animation", "game-physics-authority",
     "game-asset-pipeline-cook", "game-asset-pipeline-load", "game-asset-pipeline-contract",
     "forge-worker-ownership", "forge-game-worker-handoff", "forge-studio-worker-lease",
+    "coding-agent-ownership", "coding-agent-lifecycle", "coding-agent-completion", "coding-agent-takeover",
+    "agent-usage-providers", "agent-usage-collection",
 )]
 MANIFEST = ROOT / "render-manifest.json"
 

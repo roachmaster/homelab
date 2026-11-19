@@ -2950,3 +2950,200 @@ mod manual_mail_archive_boundary {
         assert_eq!(calls.get(), 0);
     }
 }
+
+#[test]
+fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
+    let files = Files::new();
+    let (host, _) = host(&files);
+    let address = host.local_addr().unwrap();
+    let request = |method: &str, target: &str| {
+        exchange(
+            &host,
+            format!("{method} {target} HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        )
+    };
+
+    let home = request("GET", "/home");
+    assert!(home.starts_with("HTTP/1.1 200 OK"));
+    for (href, label) in [
+        ("/design/coding-agents", "Coding-agent dispatch design"),
+        ("/design/agent-usage", "Agent usage visibility design"),
+    ] {
+        assert!(home.contains(&format!("href=\"{href}\"")), "{href}");
+        assert!(home.contains(&format!("aria-label=\"{label}\"")), "{label}");
+    }
+    assert!(!home.contains("href=\"/agents\""));
+
+    let index = request("GET", "/design");
+    assert!(index.starts_with("HTTP/1.1 200 OK"));
+    assert!(index.contains("href=\"/design/coding-agents\""));
+    assert!(index.contains("href=\"/design/agent-usage\""));
+    assert!(!index.contains("href=\"/agents\""));
+    assert!(!index.contains("<img"));
+
+    struct DesignReaderCase {
+        path: &'static str,
+        heading: &'static str,
+        cross_link: &'static str,
+        source_url: &'static str,
+        markers: &'static [&'static str],
+        diagrams: &'static [&'static str],
+    }
+    let pages = [
+        DesignReaderCase {
+            path: "/design/coding-agents",
+            heading: "Coding-agent dispatch",
+            cross_link: "/design/agent-usage",
+            source_url: "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-coding-agent-dispatch.md",
+            markers: &[
+                "<strong>Proposed / not implemented.</strong>",
+                "generation_token_limit: null",
+                "awaiting_review",
+                "needs_reconcile",
+                "coding_reconciliation_receipts",
+            ],
+            diagrams: &[
+                "/design/coding-agents/ownership.svg",
+                "/design/coding-agents/lifecycle.svg",
+                "/design/coding-agents/completion.svg",
+                "/design/coding-agents/takeover.svg",
+            ],
+        },
+        DesignReaderCase {
+            path: "/design/agent-usage",
+            heading: "Agent usage and token limits",
+            cross_link: "/design/coding-agents",
+            source_url: "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-agent-usage.md",
+            markers: &[
+                "<strong>Proposed / not implemented.</strong>",
+                "generation_token_limit: null",
+                "codex-cli 0.160.0",
+                "agy 1.5.12",
+                "Forge-observed jobs",
+                "unsupported_headless",
+                "Static design illustration only:",
+            ],
+            diagrams: &[
+                "/design/agent-usage/providers.svg",
+                "/design/agent-usage/collection.svg",
+            ],
+        },
+    ];
+
+    for DesignReaderCase {
+        path,
+        heading,
+        cross_link,
+        source_url,
+        markers,
+        diagrams,
+    } in pages
+    {
+        for target in [path.to_owned(), format!("{path}/")] {
+            let response = request("GET", &target);
+            assert!(response.starts_with("HTTP/1.1 200 OK"), "{target}");
+            assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+            assert!(response.contains("Content-Security-Policy:"));
+            assert_eq!(response.matches("<h1").count(), 1, "{target}");
+            assert!(
+                response.contains(&format!("<h1>{heading}</h1>")),
+                "{target}"
+            );
+            assert!(
+                response.contains(&format!("href=\"{cross_link}\"")),
+                "{target}"
+            );
+            assert!(
+                response.contains(&format!("href=\"{source_url}\"")),
+                "{target}"
+            );
+            assert!(response.contains("class=\"wireframe-stage\""), "{target}");
+            assert!(response.contains("loading=\"lazy\""), "{target}");
+            assert!(response.contains("aria-label=\"Forge views\""), "{target}");
+            assert!(
+                response.contains("aria-label=\"Design topics\""),
+                "{target}"
+            );
+            assert!(
+                response.contains("href=\"/design#forge-foundations\" aria-current=\"location\""),
+                "{target}"
+            );
+            assert!(response.contains("class=\"docs-breadcrumb\""), "{target}");
+            assert!(response.contains("href=\"/design/docs.css\""), "{target}");
+            assert!(
+                response.contains("class=\"wordmark return-link\" href=\"/home\""),
+                "{target}"
+            );
+            for href in ["/#chat", "/#mail", "/#workbench", "/home", "/design"] {
+                assert!(
+                    response.contains(&format!("href=\"{href}\"")),
+                    "{target}: {href}"
+                );
+            }
+            for marker in markers {
+                assert!(response.contains(marker), "{target}: {marker}");
+            }
+            for diagram in diagrams {
+                assert!(
+                    response.contains(&format!("src=\"{diagram}\"")),
+                    "{target}: {diagram}"
+                );
+                assert!(
+                    response.contains(&format!("href=\"{diagram}\"")),
+                    "{target}: {diagram}"
+                );
+            }
+            assert!(!response.contains("<script"), "{target}");
+            assert!(!response.contains("target=\"_blank\""), "{target}");
+
+            let head = request("HEAD", &target);
+            assert!(head.starts_with("HTTP/1.1 200 OK"), "{target}");
+            assert!(head.ends_with("\r\n\r\n"), "{target}");
+            assert!(
+                request("POST", &target).starts_with("HTTP/1.1 405 Method Not Allowed"),
+                "{target}"
+            );
+        }
+    }
+
+    for svg in [
+        "/design/coding-agents/ownership.svg",
+        "/design/coding-agents/lifecycle.svg",
+        "/design/coding-agents/completion.svg",
+        "/design/coding-agents/takeover.svg",
+        "/design/agent-usage/providers.svg",
+        "/design/agent-usage/collection.svg",
+    ] {
+        let get = request("GET", svg);
+        assert!(get.starts_with("HTTP/1.1 200 OK"), "{svg}");
+        assert!(get.contains("Content-Type: image/svg+xml"), "{svg}");
+        assert!(get.contains("Content-Security-Policy:"), "{svg}");
+        let body = get.split_once("\r\n\r\n").unwrap().1.trim();
+        assert!(body.starts_with("<svg"), "{svg}");
+        assert!(body.ends_with("</svg>"), "{svg}");
+
+        let head = request("HEAD", svg);
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{svg}");
+        assert!(head.contains("Content-Type: image/svg+xml"), "{svg}");
+        assert!(head.contains("Content-Security-Policy:"), "{svg}");
+        assert!(head.ends_with("\r\n\r\n"), "{svg}");
+
+        assert!(
+            request("POST", svg).starts_with("HTTP/1.1 405 Method Not Allowed"),
+            "{svg}"
+        );
+    }
+
+    for missing in [
+        "/design/coding-agents/unknown",
+        "/design/coding-agents/ownership.mmd",
+        "/design/agent-usage/unknown",
+        "/design/agent-usage/providers.mmd",
+        "/agents",
+    ] {
+        assert!(
+            request("GET", missing).starts_with("HTTP/1.1 404 Not Found"),
+            "{missing}"
+        );
+    }
+}

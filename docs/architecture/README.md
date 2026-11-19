@@ -9,6 +9,12 @@ The [current implementation reference](../design/implementation-status.md) and [
 - [Game framework](proposals/forge-game-engine.md), [physics](proposals/forge-game-physics.md), [asset pipeline](proposals/forge-game-asset-pipeline.md), [snapshot](proposals/forge-game-snapshot.md), [debug/trace](proposals/forge-game-debug.md), [replay](proposals/forge-game-debug.md#full-replay-and-historical-assets), [worker ownership](proposals/forge-worker-ownership.md).
 - [Implementation roadmap](../roadmap/forge-framework.md), [source component and transition contracts](../design/forge-ide-components/README.md), [current layouts](../design/forge-ide-wireframes/README.md).
 
+## Proposed coding-agent dispatch
+
+[Assignment/event/CLI/result workflow](proposals/forge-coding-agent-dispatch.md): provider and DAO boundaries, PostgreSQL task/attempt/event persistence, CLI process ownership and sequence diagrams for completion and reviewed takeover. This is a design proposal, not an installed queue or worker.
+
+[Agent usage and portal visibility](proposals/forge-agent-usage.md): no inherited llama.cpp token budget for coding CLIs; per-agent allowance, reset, task tokens and cost provenance, with provider/collector ownership and a collection/read/refresh sequence. The Agents screen is proposed, not deployed.
+
 ## Contracts and construction
 
 [Bootstrap/registrars](bootstrap-registrars.md) · [Dependency injection](dependency-injection.md) · [Module authoring](module-authoring.md) · [Foundation contracts](foundation-contracts.md) · [Foundation interface sketches](foundation-interfaces.md) · [DSL semantics](framework-dsl.md) · [Analysis/design method](analysis-and-design.md) · [Reuse map](reuse-map.md).

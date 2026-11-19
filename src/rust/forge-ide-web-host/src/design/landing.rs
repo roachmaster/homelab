@@ -41,6 +41,8 @@ pub(super) const BODY: &[Node] = &[
                 doc_row!("/design/forge-workers", "Forge worker design", "Ownership across rendering, Rust, and I/O."),
                 doc_row!("/design/forge-workers/playtest", "Playtest worker flow", "Verified asset requests, room handoff, and replay."),
                 doc_row!("/design/forge-workers/studio", "Studio build worker flow", "Build attempts and preview publication."),
+                doc_row!("/design/coding-agents", "Coding-agent dispatch (proposed)", "PostgreSQL assignment queue, native coding worker, and reviewed takeover design."),
+                doc_row!("/design/agent-usage", "Agent usage and token limits (proposed)", "Provider-managed limits, allowance visibility, and accounting design."),
             ),
         ),
         element!(Section [Id = "chat-and-mail", Class = "index-panel", AriaLabelledby = "chat-and-mail-title"];

@@ -1,0 +1,94 @@
+classDiagram
+    class HostFactory {
+        +config: HostConfig
+        +work: Option~WorkRelayFactory~
+        +create_with_ports() Host
+    }
+    class WorkConfig {
+        <<proposed>>
+        +endpoint: SocketAddr
+        +token_file: PathBuf
+        +allowed_projects: Vec~String~
+        +allowed_profiles: Vec~String~
+        +allowed_modes: Vec~String~
+        +validate()
+    }
+    class WorkRelayFactory {
+        <<proposed>>
+        +transport: ChatRelayFactory
+        +create() WorkRelay
+    }
+    class WorkRelay {
+        <<proposed>>
+        +dispatch(header, body, deadline)
+    }
+    class WorkRequest {
+        <<proposed DTO>>
+        +kind: String
+        +request_id: String
+        +destination() str
+    }
+    class WorkService {
+        <<proposed>>
+        -store: WorkStore
+        -catalog: WorkCatalog
+        +dispatch(route, correlation, cmd)
+    }
+    class WorkStore {
+        <<proposed DAO>>
+        +admit_task()
+        +get_task()
+        +get_result_page()
+        +list_tasks()
+        +get_events()
+        +cancel_task()
+        +resume_task()
+        +accept_task()
+    }
+    class WorkerDbPort {
+        <<proposed interface>>
+        +listen()
+        +claim(profiles)
+        +renew(task_id, token)
+        +checkpoint(task_id, token, data)
+        +append_result(token, chunk)
+        +publish(task_id, token, outcome)
+        +record_stop(task_id, attempt_id, token, incarnation, evidence)
+    }
+    class CodingWorker {
+        <<proposed>>
+        -store: WorkerDbPort
+        -runner_provider: CommandRunnerProvider
+        -workspace_provider: WorkspaceProvider
+        +run_forever()
+    }
+    class CommandRunnerProvider {
+        <<proposed factory>>
+        +acquire(recipe, cwd) AgentCliAdapter
+    }
+    class WorkspaceProvider {
+        <<proposed factory>>
+        +acquire(task_id, project, base_rev) WorkspaceLease
+    }
+    class AgentCliAdapter {
+        <<proposed>>
+        +run(prompt, conversation_id, limits) CliOutcome
+        +terminate()
+    }
+    class WorkspaceLease {
+        <<proposed>>
+        +worktree_path: Path
+        +writer_lock: FileLock
+        +snapshot_observed_state()
+    }
+    HostFactory *-- WorkRelayFactory : stages optional
+    WorkRelayFactory ..> WorkConfig : configured by
+    WorkRelayFactory ..> WorkRelay : creates Singleton
+    WorkRelay ..> WorkRequest : validates
+    WorkRelay --> WorkService : private POST /v1/dispatch
+    WorkService o-- WorkStore : injected
+    CodingWorker o-- WorkerDbPort : injected
+    CodingWorker o-- CommandRunnerProvider : injected
+    CodingWorker o-- WorkspaceProvider : injected
+    CommandRunnerProvider ..> AgentCliAdapter : creates per attempt
+    WorkspaceProvider ..> WorkspaceLease : acquires per attempt

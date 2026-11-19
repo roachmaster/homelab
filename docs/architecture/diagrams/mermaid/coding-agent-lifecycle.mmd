@@ -1,0 +1,15 @@
+flowchart TD
+    queued["queued"] -->|claim| running["running"]
+    queued -->|cancel| cancelled["cancelled"]
+    running -->|coherent reply| awaiting_review["awaiting_review"]
+    running -->|stopped error| blocked["quota_blocked / blocked_auth / blocked_permission / failed"]
+    running -->|expiry or uncertainty| needs_reconcile["needs_reconcile"]
+    running -->|cancel| cancel_req["cancel_requested"]
+    cancel_req -->|stop proven| cancelled
+    cancel_req -->|uncertain| needs_reconcile
+    awaiting_review -->|accept| completed["completed"]
+    awaiting_review --> resume_gate{"Valid reconciliation receipt + revision"}
+    blocked --> resume_gate
+    needs_reconcile --> resume_gate
+    resume_gate -->|explicit resume| queued
+    resume_gate -->|explicit cancel| cancelled

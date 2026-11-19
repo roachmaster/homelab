@@ -18,3 +18,22 @@ visual hierarchy and interaction states. Follow
 [Design Forge UI](.agents/skills/design-forge-ui/SKILL.md) for typed Rust/YAML
 authoring and [Test Forge UI](.agents/skills/test-forge-ui/SKILL.md) to verify
 the rendered result.
+
+## Shared agent workflow
+
+Use [AGENT_WORK.md](AGENT_WORK.md) as the active task, ownership and handoff record.
+Antigravity is the preferred implementation worker while its included quota is
+available; the coordinating agent assigns bounded work, reviews the actual diff,
+and verifies delivery. Codex or another authorized agent can take over from the
+same record. Use one writer per worktree; parallel writers need separate worktrees.
+Delegate when it reduces total work, and handle small fixes or blockers directly
+when that is more efficient. Ensure a new worktree has the current task record
+and instructions; uncommitted setup files are not inherited by `git worktree`.
+
+Checkpoint after coherent changes and before expensive checks so a hard quota
+stop does not lose the next action. Record tests and source identity; reuse green
+evidence only after confirming identical artifacts. Keep required quality gates.
+Capture reusable verified corrections in the relevant skill, contract or test.
+The record coordinates existing authorization; it does not grant new publication,
+deployment or paid-credit authority. The coordinator currently manages agent
+switching; no automatic quota controller is configured.

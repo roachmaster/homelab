@@ -1,0 +1,31 @@
+sequenceDiagram
+    participant UI as Browser WASM
+    participant Host as Rust Host
+    participant Svc as UsageService
+    participant DB as PostgreSQL
+    participant Col as UsageCollector
+    participant Prov as Native Provider
+
+    Note over Col,Prov: Native trusted source only
+    Col->>Prov: Read metadata or CLI event
+    Prov-->>Col: Raw usage or buckets
+    Col->>DB: Commit sample or snapshot
+    DB-->>Col: Committed + lossy NOTIFY
+    UI->>Host: ide.usage.overview
+    Host->>Host: Admit headers and grants
+    Host->>Svc: Private dispatch
+    Svc->>DB: Owner-filtered read
+    DB-->>Svc: Rows + freshness + scope
+    Svc-->>Host: 200 usage_overview_loaded
+    Host-->>UI: Bounded DTO response
+    UI->>Host: ide.usage.refresh
+    Host->>Host: Admit before effects
+    Host->>Svc: Private dispatch
+    Svc->>DB: Coalesce and save receipt
+    DB-->>Svc: Receipt + NOTIFY
+    Svc-->>Host: 202 usage_refresh_queued
+    Host-->>UI: Durable receipt
+    DB-->>Col: Wake or scan DB queue
+    Col->>Prov: Metadata read only
+    Prov-->>Col: Allowance snapshot
+    Col->>DB: Monotonic snapshot commit

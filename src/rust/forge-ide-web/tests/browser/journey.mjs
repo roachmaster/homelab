@@ -2013,7 +2013,7 @@ async function homeJourney(page, traffic) {
   const primary = page.getByRole('link', { name: 'Open Forge IDE', exact: true });
   const secondary = page.getByRole('link', { name: 'Browse design docs', exact: true });
   await check(launchers).toHaveCount(3);
-  await check(docs).toHaveCount(5);
+  await check(docs).toHaveCount(7);
   await check(launchers.locator('svg[aria-hidden="true"]')).toHaveCount(3);
   await primary.focus();
   assert.equal(await primary.evaluate(link => {
@@ -2092,6 +2092,8 @@ async function homeJourney(page, traffic) {
     ['Chat and Mail', '/design#chat-and-mail'],
     ['Game development', '/design#game-development'],
     ['Wireframes & IDE screens', '/design#wireframes-and-workspace'],
+    ['Coding-agent dispatch design', '/design/coding-agents'],
+    ['Agent usage visibility design', '/design/agent-usage'],
   ];
   for (const [label, href] of destinations) {
     const destination = homeMain.getByRole('link', { name: label, exact: true });

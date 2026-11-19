@@ -82,6 +82,26 @@ const FORGE_WORKERS_PLAYTEST: &[u8] = include_bytes!(
 const FORGE_WORKERS_STUDIO: &[u8] = include_bytes!(
     "../../../../docs/architecture/diagrams/mermaid/images/forge-studio-worker-lease.svg"
 );
+const CODING_AGENTS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/coding-agents.html"));
+const AGENT_USAGE_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/agent-usage.html"));
+const CODING_AGENT_OWNERSHIP: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/coding-agent-ownership.svg"
+);
+const CODING_AGENT_LIFECYCLE: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/coding-agent-lifecycle.svg"
+);
+const CODING_AGENT_COMPLETION: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/coding-agent-completion.svg"
+);
+const CODING_AGENT_TAKEOVER: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/coding-agent-takeover.svg"
+);
+const AGENT_USAGE_PROVIDERS: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/agent-usage-providers.svg"
+);
+const AGENT_USAGE_COLLECTION: &[u8] = include_bytes!(
+    "../../../../docs/architecture/diagrams/mermaid/images/agent-usage-collection.svg"
+);
 const PLAYTEST_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.html"));
 const PLAYTEST_CSS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.css"));
 const PLAYTEST_JS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/playtest.js"));
@@ -228,6 +248,18 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/forge-workers/ownership.svg" => Some(("image/svg+xml", FORGE_WORKERS_OWNERSHIP)),
         "/design/forge-workers/playtest.svg" => Some(("image/svg+xml", FORGE_WORKERS_PLAYTEST)),
         "/design/forge-workers/studio.svg" => Some(("image/svg+xml", FORGE_WORKERS_STUDIO)),
+        "/design/coding-agents" | "/design/coding-agents/" => {
+            Some(("text/html; charset=utf-8", CODING_AGENTS_HTML))
+        }
+        "/design/coding-agents/ownership.svg" => Some(("image/svg+xml", CODING_AGENT_OWNERSHIP)),
+        "/design/coding-agents/lifecycle.svg" => Some(("image/svg+xml", CODING_AGENT_LIFECYCLE)),
+        "/design/coding-agents/completion.svg" => Some(("image/svg+xml", CODING_AGENT_COMPLETION)),
+        "/design/coding-agents/takeover.svg" => Some(("image/svg+xml", CODING_AGENT_TAKEOVER)),
+        "/design/agent-usage" | "/design/agent-usage/" => {
+            Some(("text/html; charset=utf-8", AGENT_USAGE_HTML))
+        }
+        "/design/agent-usage/providers.svg" => Some(("image/svg+xml", AGENT_USAGE_PROVIDERS)),
+        "/design/agent-usage/collection.svg" => Some(("image/svg+xml", AGENT_USAGE_COLLECTION)),
         "/playtest" | "/playtest/" => Some(("text/html; charset=utf-8", PLAYTEST_HTML)),
         "/playtest/style.css" => Some(("text/css; charset=utf-8", PLAYTEST_CSS)),
         "/playtest/main.js" => Some(("text/javascript; charset=utf-8", PLAYTEST_JS)),

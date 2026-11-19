@@ -1,0 +1,45 @@
+sequenceDiagram
+    participant Caller
+    participant Host as Rust Host
+    participant API as WorkService
+    participant DB as PostgreSQL
+    participant Worker as CodingWorker
+    participant CLI as agy CLI
+
+    Worker->>DB: LISTEN, commit, then scan
+    Caller->>Host: ide.work.submit
+    Host->>Host: Admit headers, grants, body
+    Host->>API: Private dispatch
+    API->>DB: BEGIN: task + event + notify
+    DB-->>API: COMMIT, revision=1
+    API-->>Host: 202 work_submitted
+    Host-->>Caller: Durable admission receipt
+    DB-->>Worker: NOTIFY or timed scan
+    Worker->>DB: claim with SKIP LOCKED
+    DB-->>Worker: Token, lease, revision=2
+    par Renewal
+        Worker->>DB: Periodic renew(token)
+    and Work
+        Worker->>Worker: Lock workspace, revalidate
+        Worker->>CLI: Fixed argv, JSON stdin, EOF
+        CLI-->>Worker: NDJSON progress
+        Worker->>DB: checkpoint(token)
+        CLI-->>Worker: Final result, exit 0
+        Worker->>DB: append_result(token, chunks)
+        Worker->>Worker: Validate reply + scope stop
+    end
+    Worker->>DB: publish(token, outcome_digest)
+    DB-->>Worker: awaiting_review, revision=3
+    Caller->>Host: ide.work.get / result
+    Host->>API: Private dispatch
+    API->>DB: Owner-filtered read
+    DB-->>API: Response page + checkpoint
+    API-->>Host: work_opened / work_result_page
+    Host-->>Caller: Stored bounded response
+    Caller->>Caller: Review patch and evidence
+    Caller->>Host: ide.work.accept, revision=3
+    Host->>API: Private dispatch
+    API->>DB: Replay check, CAS, receipt
+    DB-->>API: completed, revision=4
+    API-->>Host: 200 work_accepted
+    Host-->>Caller: Durable acceptance receipt

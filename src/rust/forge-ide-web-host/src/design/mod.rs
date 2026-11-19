@@ -68,6 +68,7 @@ macro_rules! element {
 }
 
 mod characters;
+mod coding_agents;
 mod dispatch;
 mod docs;
 mod forge_providers;
@@ -178,6 +179,8 @@ pub enum DesignPage {
     ForgeWorkers,
     ForgeWorkersPlaytest,
     ForgeWorkersStudio,
+    CodingAgents,
+    AgentUsage,
     Playtest,
     Studio,
 }
@@ -189,7 +192,9 @@ impl DesignPage {
             | Self::ForgeProviders
             | Self::ForgeWorkers
             | Self::ForgeWorkersPlaytest
-            | Self::ForgeWorkersStudio => Some("forge-foundations"),
+            | Self::ForgeWorkersStudio
+            | Self::CodingAgents
+            | Self::AgentUsage => Some("forge-foundations"),
             Self::PreviousChats | Self::ChatHistory | Self::ChatDispatch | Self::Mail => {
                 Some("chat-and-mail")
             }
@@ -295,6 +300,18 @@ impl DesignPage {
                 "/design/forge-workers",
                 "Back to worker ownership",
                 forge_workers::STUDIO,
+            ),
+            Self::CodingAgents => (
+                "Coding-agent dispatch · Forge IDE",
+                "/design#forge-foundations",
+                "Back to Design",
+                coding_agents::DISPATCH,
+            ),
+            Self::AgentUsage => (
+                "Agent usage and token limits · Forge IDE",
+                "/design#forge-foundations",
+                "Back to Design",
+                coding_agents::USAGE,
             ),
             Self::Playtest => (
                 "Room One · Forge Playtest",

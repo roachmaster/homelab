@@ -1,0 +1,58 @@
+classDiagram
+    class HostFactory {
+        +config: HostConfig
+        +usage: UsageRelayFactory
+        +create_with_ports()
+    }
+    class AgentUsageConfig {
+        <<proposed>>
+        +endpoint
+        +account_aliases
+        +validate()
+    }
+    class UsageRelayFactory {
+        <<proposed>>
+        +create()
+    }
+    class UsageRelay {
+        <<proposed Singleton>>
+        +dispatch()
+    }
+    class UsageService {
+        <<proposed>>
+        +overview()
+        +detail()
+        +refresh()
+    }
+    class UsageStore {
+        <<proposed DAO>>
+        +read_overview()
+        +commit_sample()
+        +commit_snapshot()
+    }
+    class UsageCollector {
+        <<proposed>>
+        +poll_metadata()
+        +ingest_attempt()
+    }
+    class AgentUsageProvider {
+        <<proposed port>>
+        +capabilities()
+        +read_allowance()
+        +read_account_activity()
+    }
+    class CodexUsageProvider {
+        <<proposed adapter>>
+    }
+    class AntigravityUsageProvider {
+        <<proposed adapter>>
+    }
+    HostFactory *-- UsageRelayFactory : stages
+    UsageRelayFactory ..> AgentUsageConfig : frozen config
+    UsageRelayFactory ..> UsageRelay : creates
+    UsageRelay --> UsageService : relay
+    UsageService o-- UsageStore : injected
+    UsageCollector o-- UsageStore : injected
+    UsageCollector o-- AgentUsageProvider : scoped adapters
+    AgentUsageProvider <|.. CodexUsageProvider
+    AgentUsageProvider <|.. AntigravityUsageProvider

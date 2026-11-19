@@ -410,3 +410,16 @@ The [worker reference](../../proposals/forge-worker-ownership.md) records actual
 | Owners and communications | [Mermaid](forge-worker-ownership.mmd) | [SVG](images/forge-worker-ownership.svg) |
 | Game activation and replay handoff | [Mermaid](forge-game-worker-handoff.mmd) | [SVG](images/forge-game-worker-handoff.svg) |
 | Studio submission, lease and publication | [Mermaid](forge-studio-worker-lease.mmd) | [SVG](images/forge-studio-worker-lease.svg) |
+
+## Proposed coding-agent dispatch and usage
+
+These six views are **proposals**, not installed coding workers or live account usage. They correspond to the embedded Mermaid in the [dispatch design](../../proposals/forge-coding-agent-dispatch.md) and [usage/limits design](../../proposals/forge-agent-usage.md); keep those contracts and editable sources aligned when behavior changes. Render with the pinned workflow above.
+
+| View | Editable source | Rendered diagram |
+| --- | --- | --- |
+| Coding providers and ownership | [Mermaid](coding-agent-ownership.mmd) | [SVG](images/coding-agent-ownership.svg) |
+| Coding task lifecycle | [Mermaid](coding-agent-lifecycle.mmd) | [SVG](images/coding-agent-lifecycle.svg) |
+| Assignment to reviewed completion | [Mermaid](coding-agent-completion.mmd) | [SVG](images/coding-agent-completion.svg) |
+| Quota/crash takeover | [Mermaid](coding-agent-takeover.mmd) | [SVG](images/coding-agent-takeover.svg) |
+| Usage providers and collection | [Mermaid](agent-usage-providers.mmd) | [SVG](images/agent-usage-providers.svg) |
+| Usage collection, read and refresh | [Mermaid](agent-usage-collection.mmd) | [SVG](images/agent-usage-collection.svg) |

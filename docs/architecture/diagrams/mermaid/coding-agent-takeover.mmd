@@ -1,0 +1,47 @@
+sequenceDiagram
+    participant Coord as Coordinator
+    participant Host as Rust Host
+    participant API as WorkService
+    participant DB as PostgreSQL
+    participant Recon as Reconciler
+    participant Worker as Agent A Worker
+    participant CLI as agy CLI
+
+    Worker->>CLI: Run attempt T1
+    alt Quota
+        CLI-->>Worker: Trusted quota error
+        Worker->>Worker: Stop scope, snapshot work
+        Worker->>DB: publish(T1, quota_blocked)
+        DB-->>Worker: COMMIT, revision=3
+    else Lease lost
+        DB-->>Worker: renew(T1) rejected
+        Worker->>CLI: TERM, grace, KILL, reap
+        Worker->>DB: record_stop(T1, evidence)
+        Recon->>DB: expire_leases()
+        DB-->>Recon: needs_reconcile
+    else Crash
+        Recon->>DB: expire_leases()
+        DB-->>Recon: needs_reconcile
+        Recon->>CLI: Inspect and stop old scope
+    end
+    Note over DB,Recon: No automatic requeue
+    Coord->>Recon: Request local reconciliation
+    Recon->>Recon: Prove stop, lock and inspect
+    Recon->>DB: record_reconciliation()
+    DB-->>Recon: Receipt R1 at revision V
+    Recon-->>Coord: R1, workspace digest, V
+    Coord->>Host: ide.work.get / events
+    Host->>Host: Admit headers, grants, body
+    Host->>API: Private dispatch
+    API->>DB: Owner-filtered read
+    DB-->>API: State, proof, checkpoint
+    API-->>Host: 200 work_opened
+    Host-->>Coord: Stored takeover evidence
+    Coord->>Coord: Review checkpoint and scope
+    Coord->>Host: ide.work.resume(R1, V, B)
+    Host->>API: Private dispatch
+    API->>DB: Replay check, receipt, CAS
+    DB-->>API: queued + recipe B, receipt
+    API-->>Host: 202 work_resumed
+    Host-->>Coord: Durable resume receipt
+    Note over DB,Worker: New claim rechecks actual workspace

@@ -401,6 +401,8 @@ pub(super) const BODY: &[Node] = &[
             document_link!("/design#chat-and-mail", "home-doc-link", "Chat and Mail", "Conversation storage, dispatch, and replies.", "Inference"),
             document_link!("/design#game-development", "home-doc-link", "Game development", "Engine, physics, and the asset pipeline.", "Engine"),
             document_link!("/design#wireframes-and-workspace", "home-doc-link", "Wireframes & IDE screens", "Phone, desktop, and workspace layouts.", "Interface"),
+            document_link!("/design/coding-agents", "home-doc-link", "Coding-agent dispatch design", "Proposed PostgreSQL queue, worker leases, and reviewed takeover.", "Proposed"),
+            document_link!("/design/agent-usage", "home-doc-link", "Agent usage visibility design", "Proposed token-limit policy, provider allowances, and /agents plan.", "Proposed"),
         ),
     ),
     element!(Footer [Class = "home-footer"];
