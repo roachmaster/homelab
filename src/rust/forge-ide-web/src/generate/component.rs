@@ -175,6 +175,14 @@ pub enum Component {
         live: bool,
         style: TextStyle,
     },
+    Badge {
+        id: String,
+        label: String,
+    },
+    MetricCards {
+        id: String,
+        label: String,
+    },
     Select {
         id: String,
         label: String,
@@ -310,6 +318,8 @@ macro_rules! component {
     (pane $id:expr, $title:expr, $position:ident, $min:expr, $initial:expr, $max:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Pane{id:$id.into(),title:$title.into(),position:$crate::generate::PanePosition::$position,min:$min,initial:$initial,max:$max,children:vec![$($child),*]} };
     (pane_footer $id:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::PaneFooter{id:$id.into(),children:vec![$($child),*]} };
     (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
+    (badge $id:expr, $label:expr) => { $crate::generate::Component::Badge{id:$id.into(),label:$label.into()} };
+    (metric_cards $id:expr, $label:expr) => { $crate::generate::Component::MetricCards{id:$id.into(),label:$label.into()} };
     (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
     (context $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Context} };
     (heading $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Heading} };
@@ -429,7 +439,9 @@ impl Document {
                 | Component::PairForm { id, label, action } => {
                     (Some(id), Some(label), Some(action))
                 }
-                Component::Transcript { id, label, .. }
+                Component::Badge { id, label }
+                | Component::MetricCards { id, label }
+                | Component::Transcript { id, label, .. }
                 | Component::Tree { id, label, .. }
                 | Component::Reload { id, label }
                 | Component::CompactToolbar { id, label, .. }

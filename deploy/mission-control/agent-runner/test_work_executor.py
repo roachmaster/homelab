@@ -17,7 +17,7 @@ from work_executor import (
     CliParser, CommandRunnerProvider, ExecutionError, SystemdSupervisor,
     WorkspaceLease, WorkspaceProvider, unit_name, utf8_chunks,
 )
-from work_policy import POLICY_DIGEST, POLICY_ID
+from work_policy import POLICY, POLICY_DIGEST, POLICY_ID
 from work_worker_config import parse_config, load_config, verify_recipe
 
 
@@ -117,6 +117,23 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertTrue(verify_recipe(parse_config(raw), value))
         value["recipe"]["policy_digest"] = "b" * 64
         self.assertFalse(verify_recipe(parse_config(raw), value))
+
+    def test_elevated_policy_is_versioned_and_refuses_previous_recipes(self):
+        previous_digest = "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44"
+        self.assertEqual(POLICY_ID, "forge-coding-v2")
+        self.assertEqual(POLICY["antigravity_tool_policy"], "workspace-elevated-v1")
+        self.assertNotEqual(POLICY_DIGEST, previous_digest)
+        config = parse_config(raw_config("/tmp/forge-config-fixture"))
+        self.assertTrue(verify_recipe(config, lease(config)))
+        for resource, digest in (
+            ("forge-coding-v1", POLICY_DIGEST),
+            (POLICY_ID, previous_digest),
+            ("forge-coding-v1", previous_digest),
+        ):
+            with self.subTest(resource=resource, digest=digest):
+                previous = lease(config)
+                previous["recipe"].update(resource_profile=resource, policy_digest=digest)
+                self.assertFalse(verify_recipe(config, previous))
 
 
 class CliParserTest(unittest.TestCase):
@@ -243,12 +260,49 @@ class SupervisorContractTest(unittest.TestCase):
             settings = json.loads((invocation.scratch / "settings.json").read_text())
             self.assertFalse(settings["useG1Credits"])
             self.assertIn("write_file(*)", settings["permissions"]["deny"])
-            self.assertIn("command(git status)", settings["permissions"]["allow"])
-            self.assertNotIn("command(*)", settings["permissions"]["allow"])
+            self.assertIn("command(*)", settings["permissions"]["allow"])
+            self.assertEqual(settings["permissions"]["ask"], [])
             codex = provider.invocation(lease(config, backend="codex"), workspace)
             self.assertIn("--no-daemon", codex.argv)
             self.assertIn("--ignore-user-config", codex.argv)
             self.assertIn("read-only", codex.argv)
+
+    def test_elevated_agy_tools_keep_mode_scoped_writes_and_unavailable_tools_denied(self):
+        with TemporaryDirectory(prefix="forge-elevated-tools-") as root:
+            raw = raw_config(root)
+            raw["allow_implement"] = True
+            config = parse_config(raw)
+            provider = CommandRunnerProvider(config, SystemdSupervisor(config))
+            provider.prepare()
+            for mode in ("plan", "review", "implement"):
+                with self.subTest(mode=mode):
+                    value = lease(config, mode=mode)
+                    workspace = WorkspaceLease(Path(root) / "task", config.projects["homelab"],
+                                               config.projects["homelab"] / ".git/worktrees/fixture",
+                                               value["task_id"], "a" * 40)
+                    invocation = provider.invocation(value, workspace)
+                    settings = json.loads((invocation.scratch / "settings.json").read_text())
+                    permissions = settings["permissions"]
+                    self.assertFalse(settings["useG1Credits"])
+                    self.assertEqual(permissions["ask"], [])
+                    for rule in ("command(*)", "read_url(*)",
+                                 "read_file(/run/forge-coding-workspace)",
+                                 "read_file(/run/forge-coding-attempt)"):
+                        self.assertIn(rule, permissions["allow"])
+                    self.assertIn("mcp(*)", permissions["deny"])
+                    self.assertIn("execute_url(*)", permissions["deny"])
+                    self.assertNotIn("--dangerously-skip-permissions", invocation.argv)
+                    self.assertIn("MCP and browser actuation are not provisioned", invocation.stdin.decode())
+                    writes = sorted(rule for rule in permissions["allow"] if rule.startswith("write_file("))
+                    if mode == "implement":
+                        self.assertEqual(writes, ["write_file(/run/forge-coding-attempt)",
+                                                  "write_file(/run/forge-coding-workspace)"])
+                        self.assertNotIn("write_file(*)", permissions["deny"])
+                        self.assertIn("accept-edits", invocation.argv)
+                    else:
+                        self.assertEqual(writes, [])
+                        self.assertIn("write_file(*)", permissions["deny"])
+                        self.assertIn("plan", invocation.argv)
 
     def test_stopped_proof_requires_inactive_unit_and_empty_descendant_cgroup(self):
         with TemporaryDirectory(prefix="forge-cgroup-") as root:

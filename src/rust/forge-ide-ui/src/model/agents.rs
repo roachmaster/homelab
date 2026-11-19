@@ -1,6 +1,9 @@
 //! Owned coding-task and usage UI state. Network/DOM work stays at typed ports.
 use super::*;
 use crate::markdown::render_markdown;
+mod presentation;
+use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
+const USAGE_PAGE: usize = 6;
 
 fn visible(id: &'static str, visible: bool) -> VisibilityBinding {
     VisibilityBinding { id, visible }
@@ -63,6 +66,9 @@ pub(super) struct Agents {
     providers: Vec<ProviderUsage>,
     selected_usage: Option<String>,
     usage_waiting: bool,
+    usage_page: usize,
+    clock_watch: Option<String>,
+    pub(super) now_ms: u64,
     watch: Option<String>,
     status: String,
     usage_status: String,
@@ -101,6 +107,7 @@ impl Agents {
     pub fn close(&mut self) {
         self.active = false;
         self.watch = None;
+        self.clock_watch = None;
     }
     pub fn open(
         &mut self,
@@ -112,6 +119,10 @@ impl Agents {
         effects: &mut Vec<UiEffect>,
     ) {
         self.active = true;
+        if work || usage {
+            self.clock_watch = Some(id.clone());
+            effects.push(UiEffect::AgentsClock { watch: id.clone() });
+        }
         self.usage_enabled = usage;
         if self.project.is_empty() {
             self.project = project.into();
@@ -292,6 +303,12 @@ impl Agents {
             }
         }
         match event {
+            UiEvent::TickAgentTime { watch } => {
+                if self.active && self.clock_watch.as_ref() == Some(&watch) {
+                    self.clock_watch = Some(id.clone());
+                    effects.push(UiEffect::AgentsClock { watch: id });
+                }
+            }
             UiEvent::Work(response) => self.complete_work(response, id, aux, effects),
             UiEvent::Usage(response) => self.complete_usage(response, id, effects),
             UiEvent::PollAgents { watch } => {
@@ -549,6 +566,28 @@ impl Agents {
                     if let Some(previous) = self.result_history.last().cloned() {
                         self.result_page(id, previous, effects);
                     }
+                }
+            }
+            UiEvent::NextAgentUsage {} if usage => {
+                if self.usage_page + USAGE_PAGE < self.providers.len() {
+                    self.usage_page += USAGE_PAGE;
+                    self.selected_usage = Some(self.providers[self.usage_page].alias.clone());
+                }
+            }
+            UiEvent::PreviousAgentUsage {} if usage => {
+                self.usage_page = self.usage_page.saturating_sub(USAGE_PAGE);
+                self.selected_usage = self.providers.get(self.usage_page).map(|p| p.alias.clone());
+            }
+            UiEvent::RefreshAgentProfile {
+                agent_profile,
+                project_alias,
+            } if usage => {
+                if project_alias == self.project
+                    && self.providers.iter().any(|p| p.alias == agent_profile)
+                    && self.pending_usage.is_none()
+                {
+                    self.selected_usage = Some(agent_profile);
+                    self.dispatch(UiEvent::RefreshAgentUsage {}, id, aux, work, usage, effects)?;
                 }
             }
             UiEvent::RefreshAgentUsage {} if usage => {
@@ -921,7 +960,12 @@ impl Agents {
                 {
                     self.selected_usage = self.providers.first().map(|p| p.alias.clone());
                 }
-                self.usage_status = "Allowance and Forge job counters have separate scopes.".into();
+                self.usage_page = self
+                    .providers
+                    .iter()
+                    .position(|p| Some(&p.alias) == self.selected_usage.as_ref())
+                    .map_or(0, |i| i / USAGE_PAGE * USAGE_PAGE);
+                self.usage_status.clear();
                 self.schedule(id, effects);
             }
             UsageResponse::UsageRefreshQueued { .. } => {
@@ -950,6 +994,8 @@ impl Agents {
         view.tables.clear();
         view.sources.clear();
         view.diffs.clear();
+        view.badges.clear();
+        view.metric_cards.clear();
         view.transcripts.clear();
         let compose = self.pane == Pane::Compose;
         let reader = self.pane == Pane::Reader;
@@ -978,6 +1024,21 @@ impl Agents {
         }
         view.visibility.extend([
             visible("agents", active),
+            visible(
+                "agents-status",
+                self.warning
+                    || pending
+                    || self.retry.is_some()
+                    || self
+                        .task
+                        .as_ref()
+                        .is_some_and(|t| t.status == WorkStatus::CancelRequested),
+            ),
+            visible(
+                "agents-usage-status",
+                self.pending_usage.is_some() || self.usage_waiting || !self.usage_status.is_empty(),
+            ),
+            visible("agents-usage-pagination", self.providers.len() > USAGE_PAGE),
             visible("agents-compose", active && work && compose),
             visible(
                 "agents-compose-limit",
@@ -1015,6 +1076,15 @@ impl Agents {
             text("agents-status", &self.status),
             text("agents-usage-status", &self.usage_status),
             text(
+                "agents-usage-page",
+                format!(
+                    "Agents {}–{} of {}",
+                    self.usage_page + 1,
+                    (self.usage_page + USAGE_PAGE).min(self.providers.len()),
+                    self.providers.len()
+                ),
+            ),
+            text(
                 "agents-worker",
                 self.catalog
                     .as_ref()
@@ -1044,14 +1114,9 @@ impl Agents {
             ),
             text(
                 "agents-task-status",
-                self.task.as_ref().map_or_else(String::new, |t| {
-                    format!(
-                        "{} · {} · revision {}",
-                        t.status.label(),
-                        t.agent_profile,
-                        t.revision
-                    )
-                }),
+                self.task
+                    .as_ref()
+                    .map_or_else(String::new, |t| t.status.label().into()),
             ),
             text(
                 "agents-task-prompt",
@@ -1094,6 +1159,11 @@ impl Agents {
         }
         let enabled = active && !locked;
         for (id, disabled) in [
+            ("agents-usage-previous", self.usage_page == 0),
+            (
+                "agents-usage-next",
+                self.usage_page + USAGE_PAGE >= self.providers.len(),
+            ),
             ("agents-back", !enabled),
             ("agents-new", !enabled),
             ("agents-refresh", !enabled || pending),
@@ -1178,7 +1248,7 @@ impl Agents {
                         .iter()
                         .map(|p| OptionView {
                             value: p.alias.clone(),
-                            label: format!("{} · {}", p.label, p.model),
+                            label: model_title(&p.label, &p.model),
                         })
                         .collect()
                 }),
@@ -1224,12 +1294,7 @@ impl Agents {
                     icon: RowIcon::Symbol,
                     kind_label: "Coding task",
                     parent: None,
-                    secondary: format!(
-                        "{} · {}\n{}",
-                        t.agent_profile,
-                        t.status.label(),
-                        t.created_at
-                    ),
+                    secondary: String::new(),
                     depth: 0,
                     selected: self.selected.as_ref() == Some(&t.task_id),
                     expanded: None,
@@ -1238,89 +1303,58 @@ impl Agents {
                     },
                     toggle: None,
                     correspondence: None,
+                    summary: Some(RowSummary {
+                        badge: task_badge(t.status),
+                        tag: t.agent_profile.clone(),
+                        time: timestamp(&t.created_at, self.now_ms),
+                    }),
                 })
                 .collect(),
         });
-        view.lists.push(ListBinding {
+        view.metric_cards.push(MetricCardsBinding {
             id: "agents-providers",
-            empty_message:
-                "No usage observations yet. Refresh metadata to check supported providers.".into(),
-            rows: self
+            empty_message: "No usage observations yet.".into(),
+            cards: self
                 .providers
                 .iter()
-                .map(|p| RowView {
-                    id: p.alias.clone(),
-                    label: format!("{} · {}", p.label, p.model),
-                    glyph: match p.provider {
-                        WorkBackend::Antigravity => "G",
-                        WorkBackend::Codex => "C",
-                    }
-                    .into(),
-                    icon: RowIcon::Symbol,
-                    kind_label: "Agent usage",
-                    parent: None,
-                    secondary: provider_card(p),
-                    depth: 0,
-                    selected: self.selected_usage.as_ref() == Some(&p.alias),
-                    expanded: None,
-                    action: RowAction::SelectAgentUsage {
-                        agent_profile: p.alias.clone(),
-                    },
-                    toggle: None,
-                    correspondence: None,
+                .skip(self.usage_page)
+                .take(USAGE_PAGE)
+                .map(|p| {
+                    provider_card(
+                        p,
+                        self.selected_usage.as_ref() == Some(&p.alias),
+                        self.now_ms,
+                        self.pending_usage.is_some(),
+                        &self.project,
+                    )
                 })
                 .collect(),
         });
-        let selected = self
-            .providers
-            .iter()
-            .find(|p| Some(&p.alias) == self.selected_usage.as_ref());
-        view.tables.push(TableBinding {
-            id: "agents-usage-details",
-            rows: selected.map_or_else(Vec::new, |p| {
-                vec![
-                    Property {
-                        label: "Provider / source".into(),
-                        value: format!("{} / {} {}", p.provider.label(), p.source, p.version),
-                    },
-                    Property {
-                        label: "Observed".into(),
-                        value: p.observed_at.clone().unwrap_or_else(|| "Unknown".into()),
-                    },
-                    Property {
-                        label: "Account activity (separate scope)".into(),
-                        value: format!(
-                            "Lifetime tokens: {} · {} daily observations",
-                            counter(&p.account_activity.lifetime_tokens),
-                            p.account_activity.daily.len()
-                        ),
-                    },
-                    Property {
-                        label: "Accounting coverage".into(),
-                        value: format!(
-                            "{} known attempts · {} unknown attempts",
-                            p.jobs.known_attempts, p.jobs.unknown_attempts
-                        ),
-                    },
-                    Property {
-                        label: "Provider permission to use".into(),
-                        value: match p.allowance.ordinary_usage_allowed {
-                            Some(true) => "Allowed",
-                            Some(false) => "Not allowed",
-                            None => "Unknown",
-                        }
-                        .into(),
-                    },
-                    Property {
-                        label: "Last refresh error".into(),
-                        value: p
-                            .last_error
-                            .clone()
-                            .unwrap_or_else(|| "None reported".into()),
-                    },
-                ]
-            }),
+        let worker = self
+            .catalog
+            .as_ref()
+            .map_or(WorkWorkerStatus::Unknown, |c| c.worker_status);
+        view.badges.push(BadgeBinding {
+            id: "agents-worker",
+            badge: badge(
+                match worker {
+                    WorkWorkerStatus::Ready => "Worker ready",
+                    WorkWorkerStatus::Offline => "Worker offline",
+                    WorkWorkerStatus::Unknown => "Worker unknown",
+                },
+                match worker {
+                    WorkWorkerStatus::Ready => BadgeTone::Success,
+                    WorkWorkerStatus::Offline => BadgeTone::Warning,
+                    _ => BadgeTone::Neutral,
+                },
+            ),
         });
+        if let Some(t) = &self.task {
+            view.badges.push(BadgeBinding {
+                id: "agents-task-status",
+                badge: task_badge(t.status),
+            });
+        }
         view.transcripts.push(TranscriptBinding {
             id: "agents-result",
             conversation: 0,
@@ -1375,52 +1409,224 @@ fn rekey(mut request: WorkRequest, id: String) -> WorkRequest {
     };
     request
 }
-fn counter(value: &Option<String>) -> &str {
-    value.as_deref().unwrap_or("Unknown")
+fn badge(label: impl Into<String>, tone: BadgeTone) -> BadgeView {
+    BadgeView {
+        label: label.into(),
+        tone,
+    }
 }
-fn provider_card(p: &ProviderUsage) -> String {
-    let worker = match p.worker_state {
-        UsageWorkerState::Idle => "Idle",
-        UsageWorkerState::Running => "Running",
-        UsageWorkerState::Offline => "Offline",
-        UsageWorkerState::Unknown => "Unknown",
+fn task_badge(status: WorkStatus) -> BadgeView {
+    badge(
+        status.label(),
+        match status {
+            WorkStatus::Completed => BadgeTone::Success,
+            WorkStatus::Running | WorkStatus::AwaitingReview => BadgeTone::Accent,
+            WorkStatus::Failed => BadgeTone::Error,
+            WorkStatus::CancelRequested
+            | WorkStatus::QuotaBlocked
+            | WorkStatus::BlockedAuth
+            | WorkStatus::BlockedPermission
+            | WorkStatus::NeedsReconcile => BadgeTone::Warning,
+            _ => BadgeTone::Neutral,
+        },
+    )
+}
+fn timestamp(value: &str, now: u64) -> TimeView {
+    TimeView {
+        label: relative_time(value, now),
+        exact: Some(value.into()),
+    }
+}
+fn provider_card(
+    p: &ProviderUsage,
+    selected: bool,
+    now: u64,
+    refresh_disabled: bool,
+    project: &str,
+) -> MetricCard {
+    let state = match p.worker_state {
+        UsageWorkerState::Idle => badge("Idle", BadgeTone::Neutral),
+        UsageWorkerState::Running => badge("Running", BadgeTone::Accent),
+        UsageWorkerState::Offline => badge("Offline", BadgeTone::Warning),
+        UsageWorkerState::Unknown => badge("Unknown", BadgeTone::Neutral),
     };
-    let allowance = if p.allowance.state == UsageAllowanceState::Available {
-        let buckets = p
+    let observation = badge(
+        p.snapshot_state.label(),
+        match p.snapshot_state {
+            UsageSnapshotState::Fresh => BadgeTone::Success,
+            UsageSnapshotState::Stale | UsageSnapshotState::AuthRequired => BadgeTone::Warning,
+            UsageSnapshotState::Unavailable => BadgeTone::Error,
+            UsageSnapshotState::Unknown => BadgeTone::Neutral,
+        },
+    );
+    let quota_state = match p.allowance.state {
+        UsageAllowanceState::Available => None,
+        UsageAllowanceState::Unsupported | UsageAllowanceState::Unknown => {
+            Some(badge("Not reported", BadgeTone::Neutral))
+        }
+        UsageAllowanceState::AuthRequired => Some(badge("Sign in required", BadgeTone::Warning)),
+        UsageAllowanceState::Unavailable => Some(badge("Unavailable", BadgeTone::Warning)),
+    };
+    let metrics = [
+        ("Total", &p.jobs.total_tokens),
+        ("In", &p.jobs.input_tokens),
+        ("Out", &p.jobs.output_tokens),
+        ("Cached", &p.jobs.cached_input_tokens),
+    ]
+    .into_iter()
+    .map(|(label, value)| MetricView {
+        label: label.into(),
+        value: compact_counter(value),
+        exact: group_counter(value),
+    })
+    .collect();
+    let mut details = vec![
+        MetricProperty {
+            label: "Provider / source".into(),
+            value: format!("{} / {}", p.provider.label(), p.source),
+            code: true,
+        },
+        MetricProperty {
+            label: "Model".into(),
+            value: p.model.clone(),
+            code: true,
+        },
+        MetricProperty {
+            label: "Version".into(),
+            value: p.version.clone(),
+            code: true,
+        },
+        MetricProperty {
+            label: "Observed".into(),
+            value: p
+                .observed_at
+                .as_deref()
+                .map_or_else(|| "Unknown".into(), short_time),
+            code: false,
+        },
+        MetricProperty {
+            label: "Exact observation (UTC)".into(),
+            value: p.observed_at.clone().unwrap_or_else(|| "Unknown".into()),
+            code: true,
+        },
+        MetricProperty {
+            label: "Accounting coverage".into(),
+            value: format!(
+                "{} known attempts · {} unknown attempts",
+                p.jobs.known_attempts, p.jobs.unknown_attempts
+            ),
+            code: false,
+        },
+        MetricProperty {
+            label: "Account activity (separate scope)".into(),
+            value: format!(
+                "Lifetime tokens: {} · {} daily observations",
+                group_counter(&p.account_activity.lifetime_tokens),
+                p.account_activity.daily.len()
+            ),
+            code: false,
+        },
+        MetricProperty {
+            label: "Provider permission to use".into(),
+            value: match p.allowance.ordinary_usage_allowed {
+                Some(true) => "Allowed",
+                Some(false) => "Not allowed",
+                None => "Unknown",
+            }
+            .into(),
+            code: false,
+        },
+        MetricProperty {
+            label: "Last refresh error".into(),
+            value: p
+                .last_error
+                .clone()
+                .unwrap_or_else(|| "None reported".into()),
+            code: true,
+        },
+    ];
+    for (label, value) in [
+        ("Total tokens", &p.jobs.total_tokens),
+        ("Input tokens", &p.jobs.input_tokens),
+        ("Output tokens", &p.jobs.output_tokens),
+        ("Cached input tokens", &p.jobs.cached_input_tokens),
+    ] {
+        details.push(MetricProperty {
+            label: label.into(),
+            value: value.clone().unwrap_or_else(|| "Unknown".into()),
+            code: true,
+        });
+    }
+    MetricCard {
+        id: p.alias.clone(),
+        title: model_title(&p.label, &p.model),
+        slug: p.alias.clone(),
+        selected,
+        state,
+        observation,
+        observed: p.observed_at.as_deref().map_or(
+            TimeView {
+                label: "Not observed".into(),
+                exact: None,
+            },
+            |v| {
+                let mut t = timestamp(v, now);
+                t.label = format!("Updated {}", t.label);
+                t
+            },
+        ),
+        quota_state,
+        quota_message: match p.allowance.state {
+            UsageAllowanceState::Unsupported => {
+                "This provider does not expose account allowance.".into()
+            }
+            UsageAllowanceState::Unknown => "No verified allowance observation.".into(),
+            UsageAllowanceState::AuthRequired => "Sign in to view provider allowance.".into(),
+            UsageAllowanceState::Unavailable => "Allowance could not be refreshed.".into(),
+            UsageAllowanceState::Available if p.allowance.buckets.is_empty() => {
+                "No quota windows reported.".into()
+            }
+            _ => String::new(),
+        },
+        quotas: p
             .allowance
             .buckets
             .iter()
-            .map(|b| {
-                format!(
-                    "{}: {}{}",
-                    b.label,
-                    b.used_percent.map_or_else(
-                        || "Unknown usage".into(),
-                        |v| format!("{:.1}% used", v.value())
-                    ),
-                    b.resets_at
-                        .as_ref()
-                        .map_or_else(String::new, |t| format!(" · resets {t}"))
-                )
+            .map(|b| QuotaView {
+                label: b.label.clone(),
+                accessible_label: format!("{} quota used", b.label),
+                percent: b.used_percent.map(|v| format!("{:.1}", v.value())),
+                used_label: b.used_percent.map_or_else(
+                    || "Usage unknown".into(),
+                    |v| format!("{:.1}% used", v.value()),
+                ),
+                reset: b.resets_at.as_deref().map_or(
+                    TimeView {
+                        label: "Reset unknown".into(),
+                        exact: None,
+                    },
+                    |v| TimeView {
+                        label: format!("Resets {}", short_time(v)),
+                        exact: Some(v.into()),
+                    },
+                ),
             })
-            .collect::<Vec<_>>();
-        if buckets.is_empty() {
-            "No quota windows supplied".into()
-        } else {
-            buckets.join("\n")
-        }
-    } else {
-        p.allowance.reason.clone().unwrap_or_else(|| {
-            match p.allowance.state {
-                UsageAllowanceState::Unsupported => "Not supported by this provider",
-                UsageAllowanceState::AuthRequired => "Sign-in required",
-                UsageAllowanceState::Unavailable => "Unavailable",
-                _ => "Unknown",
-            }
-            .into()
-        })
-    };
-    format!("Worker · {worker}\nAllowance · {allowance}\nForge project jobs · {} total tokens\nInput {} · Output {} · Cached {}\n{} · {}{}",counter(&p.jobs.total_tokens),counter(&p.jobs.input_tokens),counter(&p.jobs.output_tokens),counter(&p.jobs.cached_input_tokens),p.snapshot_state.label(),p.observed_at.as_deref().unwrap_or("not observed"),if p.refresh_pending{" · refresh pending"}else{""})
+            .collect(),
+        select_label: format!("Select {} usage", model_title(&p.label, &p.model)),
+        refresh_label: format!("Refresh {} usage", model_title(&p.label, &p.model)),
+        details_label: "Accounting & source details".into(),
+        scope_label: "Forge project tokens".into(),
+        metrics,
+        details,
+        select: RowAction::SelectAgentUsage {
+            agent_profile: p.alias.clone(),
+        },
+        refresh: RowAction::RefreshAgentProfile {
+            agent_profile: p.alias.clone(),
+            project_alias: project.into(),
+        },
+        refresh_disabled,
+    }
 }
 fn work_failure(code: WorkFailure) -> &'static str {
     match code {

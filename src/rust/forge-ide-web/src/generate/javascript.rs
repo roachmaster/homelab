@@ -185,6 +185,7 @@ function updateSourceFormat(format,context,markdown){
   format.unavailable.hidden=!markdown||html!==null;
   showSourceFormat(format);
 }
+let metricViews=new WeakMap();
 function clearProtected(){
   // Synchronous: never leave catalog/report pixels behind on pagehide or bfcache restore.
   for(const n of document.querySelectorAll('[data-protected]'))n.hidden=true;
@@ -193,7 +194,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('select[data-action]')){n.replaceChildren();n.value='';n.removeAttribute('title');delete n.dataset.options;n.disabled=true;}
   for(const n of document.querySelectorAll('input,textarea')){n.value='';n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
-  for(const n of document.querySelectorAll('.fg-tree,.fg-details,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
+  for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
   for(const n of document.querySelectorAll('[data-diff-view]')){n.replaceChildren();n.scrollTop=0;}
   for(const n of document.querySelectorAll('[data-source-wrap],[data-compact-toolbar]')){
     if(n.hasAttribute('data-source-wrap')){
@@ -210,6 +211,7 @@ function clearProtected(){
   for(const n of [...panelToggles.values(),...document.querySelectorAll('[data-sheet-open]')])n.setAttribute('aria-expanded','false');
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();diffViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
+  metricViews=new WeakMap();
   workspaceWork=false;
   documentDirty=false;
   syncLeaveWarning();
@@ -234,6 +236,87 @@ function focusRow(row){
   if(pendingActionOrigin)pendingActionOrigin={sequence:pendingActionOrigin.sequence,pane:row.closest('[data-pane]')};
   row.focus();row.scrollIntoView({block:'nearest'});
 }
+function paintBadge(node,value){
+  node.classList.add('fg-badge');node.textContent=value.label;
+  node.dataset.tone=['neutral','success','accent','warning','error'].includes(value.tone)?value.tone:'neutral';
+}
+function paintTime(node,value){
+  node.textContent=value.label;
+  if(value.exact){node.dateTime=value.exact;node.title=value.exact;}
+  else{node.removeAttribute('datetime');node.removeAttribute('title');}
+}
+function renderMetricCards(binding){
+  const host=element(binding.id);if(!host)return;
+  const prior=new Map([...host.children].filter(n=>n.dataset.cardId).map(n=>[n.dataset.cardId,n]));
+  const keep=new Set();let index=0;
+  for(const card of binding.cards){
+    keep.add(card.id);let node=prior.get(card.id),parts=node&&metricViews.get(node);
+    if(!parts){
+      node=document.createElement('article');node.className='fg-metric-card';node.dataset.cardId=card.id;node.setAttribute('role','listitem');
+      const header=document.createElement('div');header.className='fg-metric-header';
+      const select=document.createElement('button');select.type='button';select.className='fg-metric-select';
+      const state=document.createElement('span');
+      const refresh=document.createElement('button');refresh.type='button';refresh.className='fg-metric-refresh';refresh.textContent='↻';
+      header.append(select,state,refresh);
+      const slug=document.createElement('code');slug.className='fg-metric-slug';
+      const quotas=document.createElement('div');quotas.className='fg-metric-quotas';
+      const scope=document.createElement('p');scope.className='fg-metric-scope';
+      const metrics=document.createElement('dl');metrics.className='fg-metric-grid';
+      const observation=document.createElement('div');observation.className='fg-metric-observation';
+      const freshness=document.createElement('span');const observed=document.createElement('time');observed.className='fg-metric-time';observation.append(freshness,observed);
+      const details=document.createElement('details');details.className='fg-metric-details';
+      const summary=document.createElement('summary');summary.textContent=card.details_label;
+      const properties=document.createElement('dl');properties.className='fg-metric-properties';details.append(summary,properties);
+      node.append(header,slug,quotas,scope,metrics,observation,details);
+      select.addEventListener('click',()=>sendAction(select));refresh.addEventListener('click',()=>sendAction(refresh));
+      parts={select,state,refresh,quotas,scope,metrics,freshness,observed,details,summary,properties,metricSignature:null,quotaSignature:null,detailSignature:null};metricViews.set(node,parts);
+    }
+    node.dataset.selected=String(card.selected);parts.summary.textContent=card.details_label;parts.select.textContent=card.title;parts.select.title=card.title;
+    parts.select.setAttribute('aria-pressed',String(card.selected));parts.select.setAttribute('aria-label',card.select_label);
+    actionByElement.set(parts.select,card.select);actionByElement.set(parts.refresh,card.refresh);
+    focusKeyByElement.set(parts.select,binding.id+':'+card.id+':select:'+JSON.stringify(card.select));
+    focusKeyByElement.set(parts.refresh,binding.id+':'+card.id+':refresh:'+JSON.stringify(card.refresh));
+    parts.refresh.disabled=card.refresh_disabled;parts.refresh.setAttribute('aria-label',card.refresh_label);parts.refresh.title=card.refresh_label;
+    node.querySelector(':scope > .fg-metric-slug').textContent=card.slug;
+    paintBadge(parts.state,card.state);paintBadge(parts.freshness,card.observation);paintTime(parts.observed,card.observed);parts.scope.textContent=card.scope_label;
+    const quotaSignature=JSON.stringify([card.quota_state,card.quota_message,card.quotas]);
+    if(parts.quotaSignature!==quotaSignature){
+      const rows=[];
+      if(card.quota_state||card.quota_message){
+        const unavailable=document.createElement('div');unavailable.className='fg-quota-unavailable';
+        if(card.quota_state){const state=document.createElement('span');paintBadge(state,card.quota_state);unavailable.append(state);}
+        const message=document.createElement('span');message.textContent=card.quota_message;unavailable.append(message);rows.push(unavailable);
+      }
+      for(const quota of card.quotas){
+        const row=document.createElement('div');row.className='fg-quota';
+        const meta=document.createElement('div');meta.className='fg-quota-meta';
+        const label=document.createElement('span');label.className='fg-quota-label';label.textContent=quota.label;
+        const used=document.createElement('span');used.className='fg-quota-value';used.textContent=quota.used_label;meta.append(label,used);row.append(meta);
+        if(quota.percent!==null){
+          const meter=document.createElement('meter');meter.className='fg-quota-meter';meter.min=0;meter.max=100;meter.setAttribute('value',quota.percent);
+          meter.setAttribute('aria-label',quota.accessible_label);meter.setAttribute('aria-valuetext',quota.used_label);row.append(meter);
+        }
+        const reset=document.createElement('time');reset.className='fg-metric-time';paintTime(reset,quota.reset);row.append(reset);rows.push(row);
+      }
+      parts.quotas.replaceChildren(...rows);parts.quotaSignature=quotaSignature;
+    }
+    const metricSignature=JSON.stringify(card.metrics);
+    if(parts.metricSignature!==metricSignature){
+      const rows=card.metrics.map(metric=>{const row=document.createElement('div');row.className='fg-metric';const label=document.createElement('dt');label.textContent=metric.label;const value=document.createElement('dd');value.textContent=metric.value;value.title=metric.exact;value.setAttribute('aria-label',metric.label+': '+metric.exact);row.append(label,value);return row;});
+      parts.metrics.replaceChildren(...rows);parts.metricSignature=metricSignature;
+    }
+    parts.details.hidden=!card.selected;
+    const detailSignature=JSON.stringify(card.details);
+    if(parts.detailSignature!==detailSignature){
+      const rows=card.details.map(property=>{const row=document.createElement('div');row.className='fg-property';const label=document.createElement('dt');label.textContent=property.label;const value=document.createElement('dd');if(property.code){const code=document.createElement('code');code.textContent=property.value;value.append(code);}else value.textContent=property.value;row.append(label,value);return row;});
+      parts.properties.replaceChildren(...rows);parts.detailSignature=detailSignature;
+    }
+    const at=host.children[index++];if(at!==node)host.insertBefore(node,at||null);
+  }
+  for(const node of [...host.children])if(!node.dataset.cardId||!keep.has(node.dataset.cardId))node.remove();
+  if(!binding.cards.length){const empty=document.createElement('p');empty.className='fg-empty';empty.textContent=binding.empty_message;host.append(empty);}
+}
+
 function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(!view||typeof view!=='object')throw new Error('Invalid view');
   const focus=document.activeElement;
@@ -257,6 +340,8 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   }
   for(const sheet of sheets.values())if(sheet.open&&sheet.closest('[hidden]'))sheet.close();
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
+  for(const b of view.badges||[]){const n=element(b.id);if(n)paintBadge(n,b.badge);}
+  for(const b of view.metric_cards||[])renderMetricCards(b);
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;if(typeof b.pressed==='boolean')n.setAttribute('aria-pressed',String(b.pressed));actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(typeof b.pressed==='boolean'?b.pressed:b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
   for(const b of view.inputs||[]){
     const n=element(b.id);if(!n)continue;
@@ -321,9 +406,15 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
         delete item.dataset.correspondence;delete select.dataset.correspondence;delete select.dataset.ready;
         metadata?.remove();preview?.remove();
       }
+      let summary=select.querySelector(':scope > .fg-row-summary');
+      if(row.summary){
+        item.dataset.summary='true';
+        if(!summary){summary=document.createElement('span');summary.className='fg-row-summary';const badge=document.createElement('span');const tag=document.createElement('code');tag.className='fg-row-tag';const time=document.createElement('time');time.className='fg-row-time';summary.append(badge,tag,time);select.append(summary);}
+        paintBadge(summary.children[0],row.summary.badge);summary.children[1].textContent=row.summary.tag;paintTime(summary.children[2],row.summary.time);
+      }else{delete item.dataset.summary;summary?.remove();}
       const description=n.classList?.contains('fg-stacked-tree')?row.secondary:row.kind_label;
       const accessible=correspondence?[row.label,correspondence.sender,correspondence.status,correspondence.timestamp].filter(Boolean).join(', '):description?row.label+', '+description:row.label;
-      select.setAttribute('aria-label',accessible);select.title=row.label;
+      select.setAttribute('aria-label',row.summary?[row.label,row.summary.badge.label,row.summary.tag,row.summary.time.label].join(', '):accessible);select.title=row.label;
       // Preserve stable rows and their scroll anchor; moving every existing node
       // would transiently reorder the list even when its accepted order is unchanged.
       const at=n.children[rowIndex++];if(at!==item)n.insertBefore(item,at||null);
@@ -1051,7 +1142,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==6 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==7 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

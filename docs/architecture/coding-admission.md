@@ -82,7 +82,13 @@ prompt and only wake work discovery; committed rows are authoritative.
 Execution-capable profiles pin recipe **version 2**, including backend, explicit
 model, mode, resource profile, `generation_token_limit: null` and immutable
 `policy_digest`. The worker validates the complete canonical recipe against
-`forge-coding-v1` before workspace creation or CLI spawn. Admission-era version-1
+`forge-coding-v2` before workspace creation or CLI spawn. This explicitly versioned
+policy approves Gemini commands, scoped implementation writes and read-only
+documentation URLs without headless approval prompts. Plan/review remains
+read-only; OS isolation and database/canonical-source masks remain unchanged.
+Migration11 permits policy1 and policy2 history while exact advertised policy
+digests keep claims separate. Previous attempts retain their original policy.
+Admission-era version-1
 recipes remain readable and are never silently upgraded or executed.
 
 The worker claims with `FOR UPDATE SKIP LOCKED`, uses a 60-second database-time

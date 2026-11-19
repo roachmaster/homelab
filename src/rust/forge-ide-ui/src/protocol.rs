@@ -669,6 +669,9 @@ pub enum UiEffect {
     MailWatch {
         watch: String,
     },
+    AgentsClock {
+        watch: String,
+    },
     AgentsWatch {
         watch: String,
     },
@@ -739,8 +742,17 @@ pub enum UiEvent {
     NextAgentResult {},
     PreviousAgentResult {},
     RefreshAgentUsage {},
+    RefreshAgentProfile {
+        agent_profile: String,
+        project_alias: String,
+    },
+    NextAgentUsage {},
+    PreviousAgentUsage {},
     SelectAgentUsage {
         agent_profile: String,
+    },
+    TickAgentTime {
+        watch: String,
     },
     PollAgents {
         watch: String,

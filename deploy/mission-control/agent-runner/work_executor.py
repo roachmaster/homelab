@@ -567,18 +567,27 @@ class CommandRunnerProvider:
                   + "\n\nACCEPTANCE CRITERIA:\n" + lease["acceptance_criteria"])
         implement = lease["mode"] == "implement"
         if backend == "antigravity":
+            prompt += ("\n\nAgent tools: filesystem tools, shell commands, and read-only URL reads "
+                       "are provisioned within the approved coding scope. MCP and browser "
+                       "actuation are not provisioned. Use the available coding tools rather "
+                       "than requesting additional tool access.")
             settings = scratch / "settings.json"
             ancestor_reads = ["read_file(" + str(path) + ")" for path in (
                 self.config.account.home / "repos/AGENTS.md",
                 self.config.account.home / "repos/mission-control/AGENTS.md")]
-            commands = (["command(make)", "command(cargo)", "command(python3)", "command(/usr/bin/python3)"]
-                        if implement else [])
-            commands.extend("command(" + command + ")" for command in (
-                "git status", "git diff", "git log", "git rev-parse", "pwd", "rg", "ls", "sed"))
+            workspace_reads = ["read_file(" + str(path) + ")" for path in (
+                CHILD_WORKSPACE, CHILD_STATE)]
+            workspace_writes = (["write_file(" + str(path) + ")" for path in (
+                CHILD_WORKSPACE, CHILD_STATE)] if implement else [])
             settings.write_text(json.dumps({
                 "useG1Credits": False,
-                "permissions": {"allow": [*ancestor_reads, *commands],
-                                "deny": ["mcp(*)", *([] if implement else ["write_file(*)"])]},
+                "permissions": {
+                    "allow": [*ancestor_reads, *workspace_reads, *workspace_writes,
+                              "command(*)", "read_url(*)"],
+                    "ask": [],
+                    "deny": ["mcp(*)", "execute_url(*)",
+                             *([] if implement else ["write_file(*)"])],
+                },
             }), encoding="utf-8")
             settings.chmod(0o600)
             argv = (str(actual), "--settings", str(CHILD_STATE / "settings.json"), "--mode", "accept-edits" if implement else "plan",

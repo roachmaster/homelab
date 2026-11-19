@@ -158,6 +158,7 @@ impl UiModel {
             let directory = e.kind == EntryKind::Directory;
             rows.push(RowView {
                 correspondence: None,
+                summary: None,
                 id: format!("entry-{}", e.id),
                 parent: e.parent.map(|p| format!("entry-{p}")),
                 label: self.entry_name(e),
@@ -229,6 +230,7 @@ impl UiModel {
             };
             RowView {
                 correspondence: None,
+                summary: None,
                 id: format!(
                     "search-{entry}-{}",
                     declaration
@@ -279,6 +281,7 @@ impl UiModel {
             }
             rows.push(RowView {
                 correspondence: None,
+                summary: None,
                 id: format!("declaration-{}-{}", e.id, d.id),
                 parent: d.parent.map(|p| format!("declaration-{}-{p}", e.id)),
                 label: d.name.clone(),
@@ -321,6 +324,7 @@ impl UiModel {
                 .enumerate()
                 .map(move |(index, text)| RowView {
                     correspondence: None,
+                    summary: None,
                     id: format!("problem-{}-{index}", e.id),
                     parent: None,
                     label: text.clone(),
@@ -1111,6 +1115,8 @@ impl UiModel {
             ],
             transcripts: vec![],
             diffs: vec![],
+            badges: vec![],
+            metric_cards: vec![],
         };
         self.chats.project(&mut view, connected);
         let (workbench_chat, propose, attachment) = match (key, entry, &self.source) {
@@ -1220,6 +1226,7 @@ fn shape_row(
 ) -> RowView {
     RowView {
         correspondence: None,
+        summary: None,
         id,
         parent,
         depth,
@@ -1491,6 +1498,7 @@ mod tests {
         let name = name_label(&NativeName::Utf8("\u{1f}".repeat(MAX_TEXT_BYTES)));
         let row = RowView {
             correspondence: None,
+            summary: None,
             id: "declaration-4294967295-4294967295".into(),
             parent: Some("declaration-4294967295-4294967295".into()),
             label: "\u{1f}".repeat(MAX_TEXT_BYTES),

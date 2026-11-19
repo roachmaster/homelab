@@ -207,6 +207,7 @@ impl UiModel {
         if input.now_ms > MAX_JS_INTEGER {
             return Err(UiError::InvalidClock);
         }
+        self.agents.now_ms = input.now_ms;
         let mut effects = Vec::new();
         if self.editor_blocks(&input.event) {
             return Ok(self.output(None));
@@ -242,6 +243,10 @@ impl UiModel {
                 | UiEvent::NextAgentResult {}
                 | UiEvent::PreviousAgentResult {}
                 | UiEvent::RefreshAgentUsage {}
+                | UiEvent::RefreshAgentProfile { .. }
+                | UiEvent::TickAgentTime { .. }
+                | UiEvent::NextAgentUsage {}
+                | UiEvent::PreviousAgentUsage {}
                 | UiEvent::SelectAgentUsage { .. }
                 | UiEvent::PollAgents { .. }
                 | UiEvent::RestoreAgentsNavigation { .. }
@@ -792,6 +797,10 @@ impl UiModel {
             | UiEvent::NextAgentResult {}
             | UiEvent::PreviousAgentResult {}
             | UiEvent::RefreshAgentUsage {}
+            | UiEvent::RefreshAgentProfile { .. }
+            | UiEvent::TickAgentTime { .. }
+            | UiEvent::NextAgentUsage {}
+            | UiEvent::PreviousAgentUsage {}
             | UiEvent::SelectAgentUsage { .. }
             | UiEvent::PollAgents { .. }
             | UiEvent::RestoreAgentsNavigation { .. }

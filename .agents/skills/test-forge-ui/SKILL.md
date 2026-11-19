@@ -125,6 +125,24 @@ with test-owned inbox, active thread, archived thread and compose states.
   retry, back navigation and draft-discard behavior. A visual Archive folder
   does not prove a manual archive mutation or unread persistence exists.
 
+## Telemetry and dashboard checks
+
+For changed task lists or usage cards, inspect the rendered phone and desktop
+states and exercise their controls in the existing browser path:
+
+- Check readable relative/short UTC dates in primary content, with exact times
+  available through keyboard/touch-accessible details. Raw ISO strings belong
+  in the tooltip/details rather than the visible summary.
+- Check readable text and contrast for success, cancellation, busy, error and
+  unknown/stale pills; state must remain understandable without color.
+- Compare quota bars and accessible values with supplied percentages, including
+  zero and full usage. Unknown/unsupported allowance must not display a fabricated
+  value. Verify exact wide counters remain available when KPI labels abbreviate.
+- Select a different provider and verify refresh and accounting details stay
+  beside that card. Toggle details by keyboard, retain disclosure/focus across
+  background updates, and confirm refresh targets that provider without starting
+  a model turn. Check long titles and metric groups for phone overflow.
+
 ## Workbench acceptance checklist
 
 Use [Design Forge IDE UX](../design-forge-ide-ux/SKILL.md) for the product hierarchy

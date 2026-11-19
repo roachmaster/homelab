@@ -104,6 +104,33 @@ BEGIN
         RAISE EXCEPTION 'Forge coding execution and usage migration 0010 is missing';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1 FROM forge_agent.schema_migrations
+        WHERE version = 11 AND name = 'coding_elevated_tool_policy'
+    ) THEN
+        RAISE EXCEPTION 'Forge elevated coding tool policy migration 0011 is missing';
+    END IF;
+
+    -- This is a capability/version guard, not permission inferred from a
+    -- comment or from a recipe ID alone. Keep exact worker/recipe digest
+    -- matching and the SECURITY DEFINER search path when replacing claim.
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_proc p
+        WHERE p.oid = 'forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure
+          AND p.prosecdef
+          AND 'search_path=pg_catalog, pg_temp' = ANY(p.proconfig)
+          AND position(
+              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2')$predicate$
+              IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
+          ) > 0
+          AND position(
+              $predicate$(t.pinned_recipe->>'policy_digest')=r.policy_digest$predicate$
+              IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
+          ) > 0
+    ) THEN
+        RAISE EXCEPTION 'Missing or unexpected migration 0011 claim policy predicates';
+    END IF;
+
     SELECT attnum INTO att_archive_reason
     FROM pg_catalog.pg_attribute
     WHERE attrelid = 'forge_agent.mail_threads'::regclass
@@ -328,7 +355,7 @@ BEGIN
                  AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text)
                  AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1)
                  AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128))
-                 AND ((pinned_recipe ->> 'resource_profile'::text) = 'forge-coding-v1'::text)
+                 AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text]))
                  AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text]))
                  AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text)
                  AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),

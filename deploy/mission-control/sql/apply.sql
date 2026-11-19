@@ -123,4 +123,15 @@ INSERT INTO forge_agent.schema_migrations (version, name)
 VALUES (10, 'coding_execution_and_usage');
 \endif
 
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 11
+) AS apply_0011
+\gset
+
+\if :apply_0011
+\ir migrations/0011_coding_elevated_tool_policy.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (11, 'coding_elevated_tool_policy');
+\endif
+
 COMMIT;

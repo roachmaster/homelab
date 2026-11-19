@@ -3199,6 +3199,7 @@ async function agentsJourney() {
   process.stderr.write('QA_CHECK portal_agents_workflow\n');
   agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
   let fixture, context;
+  let releaseUsageOverview = () => {};
   try {
     const relay = await agentsRelayOwner.ready;
     fixture = await startFixture(false, false, { agents: relay });
@@ -3214,14 +3215,48 @@ async function agentsJourney() {
     await check(page.locator('#ide-navigation [aria-current="page"]')).toHaveCount(0);
     await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(5);
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
-    await check(page.locator('#agents-providers')).toContainText('Headless allowance unavailable');
-    await check(page.locator('#agents-providers')).toContainText('9007199254740998');
+    const cards = page.locator('#agents-providers article.fg-metric-card');
+    const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
+    const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
+    await check(cards).toHaveCount(2);
+    await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
+    await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
+    await check(geminiCard.locator('.fg-quota-unavailable')).toContainText('does not expose account allowance');
+    await check(geminiCard.locator('meter')).toHaveCount(0);
+    await check(geminiCard.locator('.fg-metric-header > .fg-badge')).toHaveText('Idle');
+    await check(codexCard.locator('.fg-metric-observation > .fg-badge')).toHaveText('Fresh');
+    const quota = codexCard.locator('meter.fg-quota-meter');
+    await check(quota).toHaveJSProperty('min', 0);
+    await check(quota).toHaveJSProperty('max', 100);
+    await check(quota).toHaveJSProperty('value', 12.5);
+    await check(quota).toHaveAttribute('aria-label', 'Provider window quota used');
+    await check(quota).toHaveAttribute('aria-valuetext', '12.5% used');
+    await check(codexCard.locator('.fg-quota > time')).toHaveAttribute('title', '2026-11-19T19:30:00Z');
+    const total = codexCard.locator('.fg-metric dd').first();
+    assert.equal((await total.getAttribute('title')).replace(/[^0-9]/g, ''), '9007199254740998',
+      'wide token counts retain every exact digit alongside their compact KPI');
+    assert.notEqual((await total.textContent()).replace(/[^0-9]/g, ''), '9007199254740998');
+    const seed = page.locator('#agents-tasks [data-row-id="11111111-1111-4111-8111-111111111111"]');
+    await check(seed.locator('.fg-row-summary .fg-badge')).toHaveText('Ready for review');
+    await check(seed.locator('.fg-row-summary .fg-badge')).toHaveAttribute('data-tone', 'accent');
+    await check(seed.locator('time.fg-row-time')).toHaveAttribute('title', '2026-11-19T18:00:00Z');
+    await check(seed.locator('time.fg-row-time')).toHaveAttribute('datetime', '2026-11-19T18:00:00Z');
+    assert.equal(await page.locator('#agents time').evaluateAll(nodes => nodes.every(node => !/\d{4}-\d{2}-\d{2}T/.test(node.textContent))), true,
+      'raw ISO dates do not appear in primary rows or card summaries');
+    await check(page.locator('#agents-worker')).toHaveAttribute('data-tone', 'success');
+    const initialLayout = await Promise.all(['#agents-heading', '#agents-worker', '#agents-tasks .fg-tree-row'].map(selector => page.locator(selector).first().boundingBox()));
+    assert(Math.abs(initialLayout[0].y + initialLayout[0].height / 2 - initialLayout[1].y - initialLayout[1].height / 2) < 20,
+      'worker status is inline with the Agents heading');
+    assert(initialLayout[2].y < 380 && initialLayout[2].y + initialLayout[2].height < 844,
+      'the first task is readable above the phone fold');
     await check(page.locator('#agents-new')).toBeEnabled();
+    const newTaskBox = await page.locator('#agents-new').boundingBox();
+    assert(Math.abs(newTaskBox.y + newTaskBox.height / 2 - initialLayout[0].y - initialLayout[0].height / 2) < 20, 'New task shares the compact Agents header row');
 
     await page.locator('#agents-new').click();
     const prompt = page.locator('#agents-prompt');
     const criteria = page.locator('#agents-criteria');
-    const retained = 'Keep this local Agents draft.';
+    const retained = 'Keep this local Agents draft. A long task title preserves useful context across the dashboard without pushing status or timestamps out of view.';
     await prompt.fill(retained);
     await criteria.fill('Recover the draft after portal navigation.');
     await check(page.locator('#agents-send')).toBeEnabled();
@@ -3234,8 +3269,17 @@ async function agentsJourney() {
 
     // The main thread acknowledges opaque Rust recovery data before Work IO.
     let checkpoints = 0;
+    const refreshedProfiles = [];
+    let holdUsageOverview = false, usageOverviewHeld = false;
+    const usageOverviewGate = new Promise(resolve => { releaseUsageOverview = resolve; });
     await context.route(fixture.origin + '/forge/v1/dispatch', async route => {
       const request = route.request().postDataJSON();
+      if (request.kind === 'usage_refresh') refreshedProfiles.push({ profile: request.agent_profile, project: request.project_alias });
+      if (request.kind === 'usage_overview' && holdUsageOverview) {
+        holdUsageOverview = false;
+        usageOverviewHeld = true;
+        await usageOverviewGate;
+      }
       if (['work_submit', 'work_cancel', 'work_accept', 'work_resume'].includes(request.kind)) {
         const saved = await page.evaluate(intent => {
           const cache = JSON.parse(sessionStorage.getItem('forge-workspace-navigation'));
@@ -3298,21 +3342,66 @@ async function agentsJourney() {
     await page.locator('#agents-back').click();
     await check(page.locator('#agents-providers')).toBeVisible();
     const submissions = relay.calls.filter(kind => kind === 'work_submit').length;
-    await page.locator('#agents-providers .fg-row-select').filter({ hasText: 'Codex fixture' }).click();
-    await check(page.locator('#agents-usage-refresh')).toBeEnabled();
-    await page.locator('#agents-usage-refresh').click();
+    await codexCard.locator('.fg-metric-select').click();
+    await check(codexCard).toHaveAttribute('data-selected', 'true');
+    const details = codexCard.locator('details.fg-metric-details');
+    const summary = details.locator(':scope > summary');
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await check(details).toHaveJSProperty('open', true);
+    await check(details).toContainText('9007199254740998');
+    await check(details.locator('code')).not.toHaveCount(0);
+    await check(geminiCard.locator('details.fg-metric-details')).toBeHidden();
+    await check(page.locator('#agents-usage-more,#agents-usage-details,#agents-usage-refresh')).toHaveCount(0);
+    await check(page.locator('#agents-providers button button')).toHaveCount(0);
+    const detailsNode = await details.elementHandle();
+    const refresh = codexCard.locator('.fg-metric-refresh');
+    await check(refresh).toBeEnabled();
+    await check(refresh).toHaveAttribute('aria-label', 'Refresh Codex usage');
+    holdUsageOverview = true;
+    await refresh.click();
     await check.poll(() => relay.refreshes).toBe(1);
+    await check.poll(() => usageOverviewHeld).toBe(true);
+    await summary.focus();
+    await check(summary).toBeFocused();
+    releaseUsageOverview();
+    await check(page.locator('#agents-usage-status')).toBeHidden();
+    await check(refresh).toBeEnabled();
+    await check(details).toHaveJSProperty('open', true);
+    await check(summary).toBeFocused();
+    assert.equal(await details.evaluate((node, original) => node === original, detailsNode), true,
+      'accepted metadata updates preserve the same native disclosure');
+    await detailsNode.dispose();
+    assert.deepEqual(refreshedProfiles, [{ profile: 'codex-primary', project: 'workspace' }],
+      'the adjacent refresh action carries its own admitted profile');
     assert.equal(relay.calls.filter(kind => kind === 'work_submit').length, submissions,
       'metadata refresh never starts a generation');
+    await screenshot(page, 'ide-agents-accounting-phone.png');
+    await summary.focus();
+    await page.keyboard.press('Enter');
+    await check(details).toHaveJSProperty('open', false);
+    const accepted = page.locator('#agents-tasks .fg-tree-row').filter({ hasText: 'Keep this local Agents draft.' });
+    await check(accepted.locator('.fg-row-summary .fg-badge')).toHaveText('Accepted');
+    await check(accepted.locator('.fg-row-summary .fg-badge')).toHaveAttribute('data-tone', 'success');
+    const cancelled = page.locator('#agents-tasks .fg-tree-row').filter({ hasText: 'Cancel fixture work' });
+    await check(cancelled.locator('.fg-row-summary .fg-badge')).toHaveText('Cancelled');
 
     for (const width of [320, 390, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
         'Agents controls, task rows and usage cards fit the viewport');
-      assert.equal(await page.locator('#agents-providers .fg-tree-row').evaluateAll((nodes, phone) => {
+      assert.equal(await cards.evaluateAll((nodes, phone) => {
         const [a, b] = nodes.map(node => node.getBoundingClientRect());
         return phone ? b.top >= a.bottom - 1 : Math.abs(a.top - b.top) <= 1;
       }, width < 800), true, 'provider cards stack on phones and share a desktop row');
+      assert.equal(await accepted.locator('.fg-row-label').evaluate(node => {
+        const style = getComputedStyle(node);
+        return style.webkitLineClamp === '2' && node.getBoundingClientRect().height <= 2 * parseFloat(style.lineHeight) + 1;
+      }), true, 'long task titles occupy at most two readable lines');
+      for (const control of [codexCard.locator('.fg-metric-refresh'), summary]) {
+        const box = await control.boundingBox();
+        assert(box && box.width >= 44 && box.height >= 44, 'card actions retain touch-sized targets');
+      }
       await page.locator('#agents-new').focus();
       await check(page.locator('#agents-new')).toBeFocused();
     }
@@ -3325,6 +3414,7 @@ async function agentsJourney() {
     assert.deepEqual(errors, []);
     assert.equal(context.pages().length, 1, 'the Agents workflow uses one browser page');
   } finally {
+    releaseUsageOverview();
     try { if (context) await context.close(); }
     finally { try { if (fixture) await stopFixture(fixture); } finally { await agentsRelayOwner.close(); } }
   }

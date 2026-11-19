@@ -536,6 +536,22 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
         Component::PairForm { id, label, action } => {
             let _=write!(out,"<form id=\"{id}-form\" data-action=\"{}\" class=\"fg-row\"><label class=\"fg-field\" for=\"{id}-code\"><span>{}</span><input id=\"{id}-code\" name=\"value\" type=\"password\" maxlength=\"128\" autocomplete=\"off\" required></label><button id=\"{id}\" type=\"submit\" disabled>Connect</button></form>",escape(action),escape(label));
         }
+        Component::Badge { id, label } => {
+            let _ = write!(
+                out,
+                "<span id=\"{}\" class=\"fg-badge\" data-bind-text>{}</span>",
+                escape(id),
+                escape(label)
+            );
+        }
+        Component::MetricCards { id, label } => {
+            let _ = write!(
+                out,
+                "<div id=\"{}\" class=\"fg-metric-cards\" role=\"list\" aria-label=\"{}\"></div>",
+                escape(id),
+                escape(label)
+            );
+        }
         Component::Tree { id, label, stacked } => {
             let class = if *stacked {
                 "fg-tree fg-stacked-tree"

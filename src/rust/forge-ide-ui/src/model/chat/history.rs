@@ -682,6 +682,7 @@ impl Chats {
             .filter(|item| item.title.to_lowercase().contains(&query))
             .map(|item| RowView {
                 correspondence: None,
+                summary: None,
                 id: item.chat_id.clone(),
                 label: item.title.clone(),
                 glyph: String::new(),

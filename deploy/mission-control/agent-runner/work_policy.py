@@ -8,10 +8,11 @@ import hashlib
 import json
 from types import MappingProxyType
 
-POLICY_ID = "forge-coding-v1"
+POLICY_ID = "forge-coding-v2"
 _POLICY = {
     "id": POLICY_ID,
     "adapter_versions": {"antigravity": "1.5.12", "codex": "0.160.0"},
+    "antigravity_tool_policy": "workspace-elevated-v1",
     "max_wall_seconds": 1800,
     "max_stream_bytes": 67108864,
     "max_result_bytes": 16777216,

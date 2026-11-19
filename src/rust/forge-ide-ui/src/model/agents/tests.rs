@@ -477,12 +477,15 @@ fn usage_unknowns_keep_precision_and_refresh_is_one_explicit_profile() {
     let mut agents = ready();
     let mut observation = provider();
     assert!(observation.is_valid());
-    let card = provider_card(&observation);
-    assert!(card.contains("Unknown total tokens"));
-    assert!(!card.contains("0%"));
+    let card = provider_card(&observation, true, 0, false, "workspace");
+    assert_eq!(card.metrics[0].value, "Unknown");
+    assert!(card.quotas.is_empty());
+    assert!(card.quota_state.is_some());
     let large = "9999999999999999999999999999999999999999".to_owned();
     observation.jobs.total_tokens = Some(large.clone());
-    assert!(provider_card(&observation).contains(&large));
+    let card = provider_card(&observation, true, 0, false, "workspace");
+    assert!(card.details.iter().any(|p| p.value == large));
+    assert_eq!(card.metrics[0].exact, group_counter(&Some(large)));
     agents.providers = vec![observation];
     agents.selected_usage = Some("agy-primary".into());
     let effects = step(&mut agents, UiEvent::RefreshAgentUsage {}, "usage");
@@ -520,4 +523,89 @@ fn active_agents_remove_retained_tab_selection_and_only_lock_during_uncertain_mu
     agents.project(&mut view, true, true, true);
     assert!(view.buttons[0].disabled);
     assert_eq!(view.buttons[0].pressed, Some(false));
+}
+
+#[test]
+fn card_refresh_rejects_stale_project_or_removed_alias_before_io() {
+    let mut agents = ready();
+    agents.providers = vec![provider()];
+    for (project, alias) in [("other", "agy-primary"), ("workspace", "removed")] {
+        assert!(step(
+            &mut agents,
+            UiEvent::RefreshAgentProfile {
+                agent_profile: alias.into(),
+                project_alias: project.into()
+            },
+            "stale"
+        )
+        .is_empty());
+    }
+    let effects = step(
+        &mut agents,
+        UiEvent::RefreshAgentProfile {
+            agent_profile: "agy-primary".into(),
+            project_alias: "workspace".into(),
+        },
+        "refresh",
+    );
+    assert!(
+        matches!(&effects[0],UiEffect::Usage(UsageRequest::UsageRefresh { agent_profile: Some(alias), project_alias, .. }) if alias == "agy-primary" && project_alias == "workspace")
+    );
+}
+
+#[test]
+fn local_clock_updates_do_not_poll_backend_and_stop_after_close() {
+    let mut agents = ready();
+    agents.clock_watch = Some("clock".into());
+    let effects = step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "clock".into(),
+        },
+        "next-clock",
+    );
+    assert!(matches!(&effects[..], [UiEffect::AgentsClock { watch }] if watch == "next-clock"));
+    assert!(step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "clock".into()
+        },
+        "stale"
+    )
+    .is_empty());
+    agents.close();
+    assert!(step(
+        &mut agents,
+        UiEvent::TickAgentTime {
+            watch: "next-clock".into()
+        },
+        "closed"
+    )
+    .is_empty());
+}
+
+#[test]
+fn usage_pages_are_local_and_keep_a_selected_card_on_the_visible_page() {
+    let mut agents = ready();
+    agents.providers = (0..14)
+        .map(|i| {
+            let mut p = provider();
+            p.alias = format!("agent-{i}");
+            p
+        })
+        .collect();
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert_eq!(view.metric_cards[0].cards.len(), USAGE_PAGE);
+    assert!(step(&mut agents, UiEvent::NextAgentUsage {}, "next").is_empty());
+    assert_eq!(agents.selected_usage.as_deref(), Some("agent-6"));
+    assert!(step(&mut agents, UiEvent::NextAgentUsage {}, "last").is_empty());
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert_eq!(view.metric_cards[0].cards.len(), 2);
+    assert!(view.metric_cards[0].cards[0].selected);
+    assert!(step(&mut agents, UiEvent::NextAgentUsage {}, "end").is_empty());
+    assert_eq!(agents.usage_page, 12);
+    step(&mut agents, UiEvent::PreviousAgentUsage {}, "back");
+    assert_eq!(agents.usage_page, 6);
 }

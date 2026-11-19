@@ -460,7 +460,7 @@ pub(super) const DISPATCH: &[Node] = &[
             ),
             element!(Li;
                 element!(Strong; text("Implemented generated Agents UI; release checks remain separate.")),
-                text(" Typed Rust/YAML portal views preserve existing worker ownership; verify the atomic ABI-6 release with "),
+                text(" Typed Rust/YAML portal views preserve existing worker ownership; verify the atomic browser bundle with "),
                 element!(Code; text("make ci")),
                 text(" and "),
                 element!(Code; text("make ui-qa")),

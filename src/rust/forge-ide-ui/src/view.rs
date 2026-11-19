@@ -16,6 +16,8 @@ pub struct ViewModel {
     pub sources: Vec<SourceBinding>,
     pub transcripts: Vec<TranscriptBinding>,
     pub diffs: Vec<DiffBinding>,
+    pub badges: Vec<BadgeBinding>,
+    pub metric_cards: Vec<MetricCardsBinding>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DiffBinding {
@@ -204,6 +206,92 @@ pub struct RowView {
     /// Optional inbox anatomy, with all status and date policy owned by Rust.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correspondence: Option<CorrespondenceRow>,
+    /// Model-formatted summary; the host performs no date or state inference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<RowSummary>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BadgeTone {
+    Neutral,
+    Success,
+    Accent,
+    Warning,
+    Error,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BadgeView {
+    pub label: String,
+    pub tone: BadgeTone,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct BadgeBinding {
+    pub id: &'static str,
+    pub badge: BadgeView,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TimeView {
+    pub label: String,
+    pub exact: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct RowSummary {
+    pub badge: BadgeView,
+    pub tag: String,
+    pub time: TimeView,
+}
+/// Reusable presentation-only metric cards. Rust owns all formatting, scopes,
+/// selected identity and admitted actions; the renderer retains native focus
+/// and disclosure state in keyed DOM nodes.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MetricCardsBinding {
+    pub id: &'static str,
+    pub cards: Vec<MetricCard>,
+    pub empty_message: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MetricCard {
+    pub id: String,
+    pub title: String,
+    pub slug: String,
+    pub selected: bool,
+    pub state: BadgeView,
+    pub observation: BadgeView,
+    pub observed: TimeView,
+    pub quota_state: Option<BadgeView>,
+    pub quota_message: String,
+    pub quotas: Vec<QuotaView>,
+    pub select_label: String,
+    pub refresh_label: String,
+    pub details_label: String,
+    pub scope_label: String,
+    pub metrics: Vec<MetricView>,
+    pub details: Vec<MetricProperty>,
+    pub select: RowAction,
+    pub refresh: RowAction,
+    pub refresh_disabled: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MetricView {
+    pub label: String,
+    pub value: String,
+    pub exact: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct QuotaView {
+    pub label: String,
+    pub accessible_label: String,
+    /// Validated finite percentage formatted in Rust, never a JS token count.
+    pub percent: Option<String>,
+    pub used_label: String,
+    pub reset: TimeView,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MetricProperty {
+    pub label: String,
+    pub value: String,
+    pub code: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -217,6 +305,10 @@ pub struct CorrespondenceRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    RefreshAgentProfile {
+        agent_profile: String,
+        project_alias: String,
+    },
     OpenAgentTask {
         task_id: String,
     },

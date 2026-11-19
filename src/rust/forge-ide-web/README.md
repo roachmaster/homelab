@@ -9,7 +9,7 @@ adapts inspection and bounded source reads to the remote agent; native credentia
 
 The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
 project-wide file/symbol search, numbered source windows, Outline, Problems and
-reversible keyboard/narrow panes. Chat uses the local ABI 5 bundle.
+reversible keyboard/narrow panes. Chat uses the local ABI 7 bundle.
 
 ## Authoring and build boundary
 

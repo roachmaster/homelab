@@ -154,7 +154,7 @@ Work and Usage remain disabled when their respective configuration is absent.
 
 See [the complete contracts and worker setup](../../../docs/architecture/coding-admission.md)
 and [the runner guide](../../../deploy/mission-control/agent-runner/README.md).
-The host validates browser ABI6; deploy the matching generated bundle atomically.
+The host validates browser ABI7; deploy the matching generated bundle atomically.
 
 Work requests are at most16 KiB on the wire, with an8 KiB UTF-8 prompt and2 KiB
 acceptance criteria. Escaped JSON may reach the wire limit first. Lists default to20

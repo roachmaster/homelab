@@ -2,7 +2,7 @@
 
 Updated 19 November 2026 against the current source. The preceding review checkpoint was after `7e03991`. This is the current design reference. Earlier proposal PDFs, review reports and schematic diagrams remain dated design history. A capability implemented in the repository is not automatically enabled by a running host.
 
-Manual archive and the functional Agents/Usage source were added on 19 November 2026. The browser ABI is now **6**. The operational checkpoint below records the verified 19 November rollout of the ABI6 portal, API runner and coding worker; earlier observations remain dated separately.
+Manual archive and the functional Agents/Usage source were added on 19 November 2026. The current source browser ABI is **7**, adding typed dashboard badges, formatted times, quota meters, compact exact-safe metrics and adjacent accounting disclosures. Gemini workspace autonomy uses pinned `forge-coding-v2` and additive migration11. The operational checkpoint below records the verified 19 November rollout of the ABI6 portal, API runner and coding worker; earlier observations remain dated separately.
 
 [Coding-agent workflow](https://github.com/roachmaster/homelab/blob/main/docs/architecture/coding-admission.md) now includes catalog-backed assignment, native Antigravity/Codex execution, full-result paging, explicit review/receipt-gated resume and truthful provider/project usage. Work and Usage remain independently optional/default-off until configured and verified.
 

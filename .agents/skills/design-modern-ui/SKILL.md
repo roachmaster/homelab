@@ -162,6 +162,29 @@ last column while the page itself stays within the viewport. Test the actual
 column widths and inherited wrapping rules; a table minimum width alone does
 not prevent its first column from collapsing.
 
+## Telemetry, logs and timestamps
+
+Use relative times or short UTC dates in primary list rows and summary cards.
+Reserve raw ISO-8601 strings for exact-time tooltips or expandable details;
+keep the full timestamp available without requiring hover. Rust prepares the
+date labels and numeric presentation; the generated browser adapter renders them.
+
+Render states such as Accepted, Cancelled, Idle, Error and Unknown as semantic
+colored pills with readable text. Color supplements the label; it never carries
+the state alone. Keep stale observations visibly distinct from fresh data.
+
+Show actual percentage quotas with a labeled progress bar and readable percentage
+and reset time. Unknown or unsupported allowance remains explicit, with no
+invented percentage or empty bar suggesting zero usage. Separate provider
+allowance, account activity and project job counters. Compact token totals into
+labeled KPI groups; retain exact decimal values in accessible details alongside
+abbreviations without converting wide counters through floating-point numbers.
+
+Keep refresh and source/accounting disclosures adjacent to the selected agent
+card, with clear accessible names and keyboard/touch access. Avoid changing a
+disconnected panel below the list. Preserve an open disclosure and its focus
+during background updates, and keep interactive controls out of other buttons.
+
 ## Control the layout rhythm
 
 Use a centered responsive container around 960–1120px for portal launchers.

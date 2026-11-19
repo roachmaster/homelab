@@ -914,6 +914,7 @@ impl Mail {
                     .summaries
                     .iter()
                     .map(|summary| RowView {
+                        summary: None,
                         correspondence: Some(CorrespondenceRow {
                             sender: "GPT-OSS 120B".into(),
                             timestamp: format_updated_at(&summary.updated_at)

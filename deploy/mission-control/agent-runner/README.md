@@ -288,7 +288,7 @@ Mail, Chat persistence, and GPU flags.
   `max_pending` (default `32`, range `1..256`), optional `project_labels`, and
   `profiles` (max 64, mapping each profile alias to `{backend, model,
   resource_profile}` plus optional `label`). Profiles using
-  `resource_profile: "forge-coding-v1"` pin immutable recipe version `2` with
+  `resource_profile: "forge-coding-v2"` pin immutable recipe version `2` with
   `policy_digest` from `work_policy.py`; legacy version `1` fixtures remain
   readable/admissible but are never claimed by workers.
 - Set `FORGE_RUNNER_USAGE_CONFIG` independently to enable `ide.usage.*` through
@@ -299,6 +299,21 @@ Mail, Chat persistence, and GPU flags.
   connections, or CLI actions; supported `ide.work.*` / `ide.usage.*` routes
   return `503` (`work_failed` / `usage_failed`, `unavailable`) and unsupported
   destinations return `404` (`not_found`).
+
+The `forge-coding-v2` policy pins `antigravity_tool_policy: workspace-elevated-v1`.
+Gemini coding tasks allow shell commands and read-only URL reads without an
+approval prompt (`ask: []`); filesystem tools can read the task workspace and
+attempt scratch area. Implement mode grants file writes only to those two scoped
+paths. Plan/review retain `write_file(*)` denial and a read-only workspace mount.
+MCP and browser actuation remain denied; the invocation does not bypass the CLI
+permission system. OS isolation, unprivileged UID/capability drop, canonical/DB
+masks, supervision and `useG1Credits: false` remain unchanged. Apply additive
+migration `0011_coding_elevated_tool_policy.sql` and verify it before activating
+policy2; it preserves policy1 history and exact digest fencing. No new secret is
+needed. Install the new policy in both API admission and
+worker releases and explicitly select its resource profile before accepting new
+work; previous policy IDs/digests retain their identity and are refused by the
+new worker, never silently upgraded or automatically replayed.
 
 Supported `ide.work.*` destinations on authenticated `POST /v1/dispatch`
 (version `1` Forge headers, 16 KiB raw request bound):
@@ -368,3 +383,13 @@ scopes mask the entire control state, credential directory and explicit key path
 The key never enters a DTO or browser response.
 
 [Verified deployment and operational boundaries](../../../docs/design/implementation-status.md#observed-deployment-checkpoint).
+
+The approved worker command set expects `rg` on its sanitized public tool PATH
+(`/usr/local/bin:/usr/bin:/bin`, following the selected Rust tools). The dashboard
+authoring attempt on19November stopped because `rg` was absent and its `grep`
+fallback was not permitted by policy1. The verified existing ripgrep15.2.0 binary
+is now installed root-owned in `/usr/local/bin/rg`; an actual isolated-scope
+probe confirmed discovery without changing permissions. Policy2 additionally
+authorizes ordinary coding commands, and its real Gemini check ran both `rg` and
+`grep`, wrote/read its own task file, and returned a coherent result with no
+approval requests. The original blocked attempt remains immutable.
