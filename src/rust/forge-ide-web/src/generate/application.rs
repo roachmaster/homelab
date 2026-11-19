@@ -158,12 +158,14 @@ pub fn ide_document() -> Document {
                     component!(toolbar [
                         component!(primary_icon "agents-back", "Back to tasks", "agents_back", '←'),
                         component!(heading "agents-heading", "Agents"),
+                        component!(badge "agents-worker", "Worker status unknown"),
                         component!(primary_icon "agents-refresh", "Refresh agents", "agents_refresh", '↻'),
                         component!(primary "agents-new", "New task", "agents_new_task"),
                     ]),
-                    component!(caption "agents-worker", "Worker status unknown"),
                     component!(status "agents-status", ""),
-                    component!(select "agents-project", "Project", "select_agent_project"),
+                    component!(region "agents-project-bar"; [
+                        component!(select "agents-project", "Project", "select_agent_project"),
+                    ]),
                     component!(region "agents-unsupported"; [
                         component!(text "agents-unsupported-message", "Agents are not configured on this host."),
                     ]),
@@ -223,10 +225,13 @@ pub fn ide_document() -> Document {
                     component!(region "agents-usage"; [
                         component!(heading "agents-usage-heading", "Agent usage"),
                         component!(status "agents-usage-status", ""),
-                        component!(stacked_tree "agents-providers", "Agent usage providers"),
-                        component!(button "agents-usage-refresh", "Refresh selected agent", "refresh_agent_usage"),
-                        component!(disclosure "agents-usage-more", "Source and accounting details"; [
-                            component!(details "agents-usage-details"),
+                        component!(metric_cards "agents-providers", "Agent usage providers"),
+                        component!(region "agents-usage-pagination"; [
+                            component!(caption "agents-usage-page", ""),
+                            component!(row [
+                                component!(button "agents-usage-previous", "Previous agents", "previous_agent_usage"),
+                                component!(button "agents-usage-next", "Next agents", "next_agent_usage"),
+                            ]),
                         ]),
                     ]),
                 ]),

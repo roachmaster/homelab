@@ -3164,7 +3164,486 @@
       declarations:
         - ["min-height", "50px"]
 
-# Agent workspace: task reading stays dominant; usage is a separate overview.
+# Reusable semantic badges, compact stacked-row summaries, and metric cards.
+- rules:
+    - selector: ".fg-badge"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["gap", "5px"]
+        - ["max-width", "100%"]
+        - ["padding", "2px 8px"]
+        - ["border", "1px solid rgba(255,255,255,.12)"]
+        - ["border-radius", "999px"]
+        - ["background", "var(--raised)"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "11px"]
+        - ["font-weight", "600"]
+        - ["line-height", "1.4"]
+        - ["letter-spacing", ".01em"]
+        - ["white-space", "nowrap"]
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-badge:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-toolbar>.fg-badge"
+      declarations:
+        - ["margin", "0"]
+        - ["padding", "2px 8px"]
+        - ["border", "1px solid rgba(255,255,255,.12)"]
+        - ["border-radius", "999px"]
+    - selector: ".fg-badge[data-tone=neutral]"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["border-color", "rgba(255,255,255,.12)"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-badge[data-tone=success]"
+      declarations:
+        - ["background", "color-mix(in srgb,#2ea043 18%,var(--surface))"]
+        - ["border-color", "color-mix(in srgb,#3fb950 38%,transparent)"]
+        - ["color", "#7ee787"]
+    - selector: ".fg-badge[data-tone=accent]"
+      declarations:
+        - ["background", "color-mix(in srgb,var(--accent) 16%,var(--surface))"]
+        - ["border-color", "color-mix(in srgb,var(--accent) 38%,transparent)"]
+        - ["color", "var(--accent)"]
+    - selector: ".fg-badge[data-tone=warning]"
+      declarations:
+        - ["background", "color-mix(in srgb,var(--warning) 16%,var(--surface))"]
+        - ["border-color", "color-mix(in srgb,var(--warning) 38%,transparent)"]
+        - ["color", "var(--warning)"]
+    - selector: ".fg-badge[data-tone=error]"
+      declarations:
+        - ["background", "color-mix(in srgb,var(--error) 16%,var(--surface))"]
+        - ["border-color", "color-mix(in srgb,var(--error) 38%,transparent)"]
+        - ["color", "var(--error)"]
+    - selector: ".fg-row-summary"
+      declarations:
+        - ["grid-column", "1"]
+        - ["grid-row", "1"]
+        - ["order", "0"]
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "4px 8px"]
+        - ["width", "100%"]
+        - ["min-width", "0"]
+    - selector: ".fg-row-summary>.fg-badge"
+      declarations:
+        - ["flex", "none"]
+    - selector: ".fg-row-tag"
+      declarations:
+        - ["flex", "1 1 4rem"]
+        - ["min-width", "0"]
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+        - ["white-space", "nowrap"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["font-weight", "500"]
+    - selector: ".fg-row-tag:empty,.fg-row-time:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-row-time"
+      declarations:
+        - ["margin-inline-start", "auto"]
+        - ["flex", "none"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["font-weight", "400"]
+        - ["font-variant-numeric", "tabular-nums"]
+        - ["white-space", "nowrap"]
+    - selector: ".fg-stacked-tree .fg-row-select[data-summary=true],.fg-stacked-tree .fg-tree-row[data-summary=true] .fg-row-select"
+      declarations:
+        - ["gap", "6px 10px"]
+        - ["align-items", "center"]
+        - ["min-height", "var(--touch)"]
+    - selector: ".fg-stacked-tree .fg-row-select[data-summary=true]>.fg-row-label,.fg-stacked-tree .fg-tree-row[data-summary=true] .fg-row-label"
+      declarations:
+        - ["grid-column", "1"]
+        - ["grid-row", "2"]
+        - ["order", "1"]
+        - ["min-width", "0"]
+        - ["display", "-webkit-box"]
+        - ["-webkit-line-clamp", "2"]
+        - ["-webkit-box-orient", "vertical"]
+        - ["overflow", "hidden"]
+        - ["color", "var(--text)"]
+        - ["font-size", "14px"]
+        - ["font-weight", "600"]
+        - ["line-height", "1.4"]
+        - ["white-space", "normal"]
+        - ["overflow-wrap", "break-word"]
+    - selector: ".fg-row-select[data-summary=true]>.fg-row-secondary,.fg-tree-row[data-summary=true] .fg-row-secondary"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-metric-cards"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "minmax(0,1fr)"]
+        - ["align-items", "start"]
+        - ["gap", "12px"]
+        - ["min-width", "0"]
+    - selector: ".fg-metric-cards>.fg-empty"
+      declarations:
+        - ["margin", "0"]
+        - ["padding", "14px 0"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "13px"]
+    - selector: ".fg-metric-card"
+      declarations:
+        - ["display", "flex"]
+        - ["flex-direction", "column"]
+        - ["gap", "10px"]
+        - ["min-width", "0"]
+        - ["padding", "14px"]
+        - ["background", "var(--surface)"]
+        - ["border", "1px solid rgba(255,255,255,.08)"]
+        - ["border-radius", "12px"]
+        - ["transition", "border-color 150ms ease,background-color 150ms ease"]
+    - selector: ".fg-metric-card:hover"
+      declarations:
+        - ["border-color", "rgba(255,255,255,.16)"]
+    - selector: ".fg-metric-card[data-selected=true]"
+      declarations:
+        - ["border-color", "color-mix(in srgb,var(--accent) 42%,rgba(255,255,255,.08))"]
+        - ["background", "color-mix(in srgb,var(--accent) 4%,var(--surface))"]
+        - ["box-shadow", "inset 0 2px 0 color-mix(in srgb,var(--accent) 75%,transparent)"]
+    - selector: ".fg-metric-header"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "6px"]
+        - ["min-width", "0"]
+    - selector: ".fg-metric-header>.fg-badge"
+      declarations:
+        - ["flex", "0 1 auto"]
+        - ["max-width", "45%"]
+    - selector: ".fg-metric-select"
+      declarations:
+        - ["flex", "1 1 auto"]
+        - ["min-width", "0"]
+        - ["min-height", "var(--touch)"]
+        - ["padding", "4px 6px 4px 0"]
+        - ["border", "0"]
+        - ["border-radius", "6px"]
+        - ["background", "transparent"]
+        - ["color", "var(--text)"]
+        - ["font-size", "15px"]
+        - ["font-weight", "650"]
+        - ["line-height", "1.3"]
+        - ["text-align", "start"]
+        - ["white-space", "nowrap"]
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-metric-select:hover:enabled"
+      declarations:
+        - ["color", "var(--accent)"]
+    - selector: ".fg-metric-refresh"
+      declarations:
+        - ["flex", "none"]
+        - ["display", "grid"]
+        - ["place-items", "center"]
+        - ["width", "var(--touch)"]
+        - ["height", "var(--touch)"]
+        - ["min-width", "var(--touch)"]
+        - ["min-height", "var(--touch)"]
+        - ["margin", "-4px -6px -4px 0"]
+        - ["padding", "0"]
+        - ["border", "1px solid transparent"]
+        - ["border-radius", "8px"]
+        - ["background", "transparent"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "18px"]
+        - ["font-weight", "400"]
+        - ["line-height", "1"]
+        - ["transition", "background-color 150ms ease,color 150ms ease,border-color 150ms ease"]
+    - selector: ".fg-metric-refresh:hover:enabled"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["border-color", "rgba(255,255,255,.12)"]
+        - ["color", "var(--text)"]
+    - selector: ".fg-metric-refresh:disabled"
+      declarations:
+        - ["opacity", ".45"]
+    - selector: ".fg-metric-select:focus-visible,.fg-metric-refresh:focus-visible,.fg-metric-details>summary:focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-2px"]
+    - selector: ".fg-metric-slug"
+      declarations:
+        - ["display", "block"]
+        - ["margin-top", "-6px"]
+        - ["min-width", "0"]
+        - ["font-family", "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"]
+        - ["font-size", "11px"]
+        - ["line-height", "1.35"]
+        - ["color", "var(--muted)"]
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-metric-slug:empty,.fg-metric-scope:empty,.fg-metric-time:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-metric-scope"
+      declarations:
+        - ["margin", "0"]
+        - ["font-size", "11px"]
+        - ["font-weight", "600"]
+        - ["letter-spacing", ".04em"]
+        - ["text-transform", "uppercase"]
+        - ["color", "var(--muted)"]
+        - ["overflow-wrap", "normal"]
+    - selector: ".fg-metric-grid"
+      declarations:
+        - ["display", "grid"]
+        - ["grid-template-columns", "repeat(4,minmax(0,1fr))"]
+        - ["gap", "4px"]
+        - ["margin", "0"]
+        - ["padding", "8px 6px"]
+        - ["background", "color-mix(in srgb,var(--bg) 65%,var(--surface))"]
+        - ["border-radius", "8px"]
+        - ["min-width", "0"]
+    - selector: ".fg-metric"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "2px"]
+        - ["margin", "0"]
+        - ["min-width", "0"]
+        - ["padding", "0 4px"]
+    - selector: ".fg-metric+.fg-metric"
+      declarations:
+        - ["border-inline-start", "1px solid rgba(255,255,255,.07)"]
+    - selector: ".fg-metric dt"
+      declarations:
+        - ["margin", "0"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "11px"]
+        - ["font-weight", "500"]
+        - ["line-height", "1.25"]
+        - ["white-space", "nowrap"]
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-metric dd"
+      declarations:
+        - ["margin", "0"]
+        - ["color", "var(--text)"]
+        - ["font-size", "14px"]
+        - ["font-weight", "650"]
+        - ["line-height", "1.3"]
+        - ["font-variant-numeric", "tabular-nums"]
+        - ["white-space", "nowrap"]
+        - ["overflow", "hidden"]
+        - ["text-overflow", "ellipsis"]
+    - selector: ".fg-quota"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "5px"]
+        - ["min-width", "0"]
+    - selector: ".fg-quota-meta"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "baseline"]
+        - ["justify-content", "space-between"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "4px 8px"]
+        - ["min-width", "0"]
+    - selector: ".fg-quota-label"
+      declarations:
+        - ["font-size", "12px"]
+        - ["font-weight", "500"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-quota-value"
+      declarations:
+        - ["font-size", "12px"]
+        - ["font-weight", "650"]
+        - ["color", "var(--text)"]
+        - ["font-variant-numeric", "tabular-nums"]
+        - ["white-space", "nowrap"]
+    - selector: ".fg-quota-meter"
+      declarations:
+        - ["display", "block"]
+        - ["width", "100%"]
+        - ["height", "8px"]
+        - ["border", "0"]
+        - ["border-radius", "999px"]
+        - ["background", "var(--raised)"]
+        - ["overflow", "hidden"]
+    - selector: ".fg-quota-meter::-webkit-meter-bar"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["border", "0"]
+        - ["border-radius", "999px"]
+        - ["height", "8px"]
+    - selector: ".fg-quota-meter::-webkit-meter-optimum-value"
+      declarations:
+        - ["background", "var(--accent)"]
+        - ["border-radius", "999px"]
+    - selector: ".fg-quota-meter::-webkit-meter-suboptimum-value"
+      declarations:
+        - ["background", "var(--warning)"]
+        - ["border-radius", "999px"]
+    - selector: ".fg-quota-meter::-webkit-meter-even-less-good-value"
+      declarations:
+        - ["background", "var(--error)"]
+        - ["border-radius", "999px"]
+    - selector: ".fg-quota-meter::-moz-meter-bar"
+      declarations:
+        - ["background", "var(--accent)"]
+        - ["border-radius", "999px"]
+    - selector: ".fg-quota-meter:-moz-meter-sub-optimum::-moz-meter-bar"
+      declarations:
+        - ["background", "var(--warning)"]
+    - selector: ".fg-quota-meter:-moz-meter-sub-sub-optimum::-moz-meter-bar"
+      declarations:
+        - ["background", "var(--error)"]
+    - selector: ".fg-quota-meter[data-tone=success]::-webkit-meter-optimum-value"
+      declarations:
+        - ["background", "#3fb950"]
+    - selector: ".fg-quota-meter[data-tone=success]::-moz-meter-bar"
+      declarations:
+        - ["background", "#3fb950"]
+    - selector: ".fg-quota-meter[data-tone=warning]::-webkit-meter-optimum-value"
+      declarations:
+        - ["background", "var(--warning)"]
+    - selector: ".fg-quota-meter[data-tone=warning]::-moz-meter-bar"
+      declarations:
+        - ["background", "var(--warning)"]
+    - selector: ".fg-quota-meter[data-tone=error]::-webkit-meter-optimum-value"
+      declarations:
+        - ["background", "var(--error)"]
+    - selector: ".fg-quota-meter[data-tone=error]::-moz-meter-bar"
+      declarations:
+        - ["background", "var(--error)"]
+    - selector: ".fg-quota-unavailable"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "6px 8px"]
+        - ["padding", "8px 10px"]
+        - ["border-radius", "8px"]
+        - ["background", "color-mix(in srgb,var(--bg) 55%,var(--surface))"]
+        - ["min-width", "0"]
+    - selector: ".fg-quota-unavailable>span:not(.fg-badge)"
+      declarations:
+        - ["flex", "1 1 10rem"]
+        - ["min-width", "0"]
+        - ["font-size", "12px"]
+        - ["line-height", "1.4"]
+        - ["color", "var(--muted)"]
+    - selector: ".fg-metric-time"
+      declarations:
+        - ["color", "var(--muted)"]
+        - ["font-size", "11px"]
+        - ["line-height", "1.35"]
+        - ["font-variant-numeric", "tabular-nums"]
+    - selector: ".fg-metric-observation"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "6px 8px"]
+        - ["padding-top", "8px"]
+        - ["border-top", "1px solid rgba(255,255,255,.06)"]
+        - ["min-width", "0"]
+    - selector: ".fg-metric-observation>.fg-metric-time"
+      declarations:
+        - ["margin-inline-start", "auto"]
+        - ["text-align", "end"]
+    - selector: ".fg-metric-details"
+      declarations:
+        - ["min-width", "0"]
+        - ["border-top", "1px solid rgba(255,255,255,.08)"]
+        - ["padding-top", "4px"]
+    - selector: ".fg-metric-card+.fg-metric-details"
+      declarations:
+        - ["padding", "4px 14px 12px"]
+        - ["background", "var(--surface)"]
+        - ["border", "1px solid rgba(255,255,255,.08)"]
+        - ["border-radius", "12px"]
+    - selector: ".fg-metric-cards>.fg-metric-details"
+      declarations:
+        - ["grid-column", "1 / -1"]
+    - selector: ".fg-metric-details>summary"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["gap", "8px"]
+        - ["min-height", "var(--touch)"]
+        - ["padding", "6px 2px"]
+        - ["cursor", "pointer"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["font-weight", "600"]
+        - ["list-style", "none"]
+        - ["border-radius", "6px"]
+        - ["transition", "color 150ms ease"]
+    - selector: ".fg-metric-details>summary::-webkit-details-marker"
+      declarations:
+        - ["display", "none"]
+    - selector: ".fg-metric-details>summary::after"
+      declarations:
+        - ["content", "''"]
+        - ["flex", "none"]
+        - ["width", "6px"]
+        - ["height", "6px"]
+        - ["margin-inline-end", "4px"]
+        - ["border", "solid currentColor"]
+        - ["border-width", "0 1.5px 1.5px 0"]
+        - ["transform", "rotate(45deg)"]
+        - ["transition", "transform 150ms ease"]
+    - selector: ".fg-metric-details[open]>summary::after"
+      declarations:
+        - ["transform", "rotate(-135deg)"]
+    - selector: ".fg-metric-details>summary:hover,.fg-metric-details[open]>summary"
+      declarations:
+        - ["color", "var(--text)"]
+    - selector: ".fg-metric-properties"
+      declarations:
+        - ["margin", "4px 0 0"]
+        - ["display", "grid"]
+        - ["min-width", "0"]
+    - selector: ".fg-metric-properties>.fg-property"
+      declarations:
+        - ["grid-template-columns", "minmax(90px,38%) minmax(0,1fr)"]
+        - ["gap", "2px 10px"]
+        - ["padding", "6px 0"]
+        - ["border-bottom", "1px solid rgba(255,255,255,.06)"]
+        - ["align-items", "baseline"]
+    - selector: ".fg-metric-properties>.fg-property:last-child"
+      declarations:
+        - ["border-bottom", "0"]
+        - ["padding-bottom", "0"]
+    - selector: ".fg-metric-properties dt"
+      declarations:
+        - ["margin", "0"]
+        - ["padding", "0"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["line-height", "1.4"]
+        - ["min-width", "0"]
+    - selector: ".fg-metric-properties dd"
+      declarations:
+        - ["margin", "0"]
+        - ["padding", "0"]
+        - ["color", "var(--text)"]
+        - ["font-size", "12px"]
+        - ["line-height", "1.45"]
+        - ["font-variant-numeric", "tabular-nums"]
+        - ["overflow-wrap", "break-word"]
+        - ["min-width", "0"]
+    - selector: ".fg-metric-properties dd code"
+      declarations:
+        - ["font-family", "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"]
+        - ["font-size", "11px"]
+        - ["padding", "1px 5px"]
+        - ["border-radius", "4px"]
+        - ["background", "color-mix(in srgb,var(--bg) 70%,var(--surface))"]
+        - ["overflow-wrap", "anywhere"]
+
+# Agent workspace: compact developer dashboard with task list and usage cards.
 - rules:
     - selector: "#agents:not([hidden])"
       declarations:
@@ -3175,26 +3654,129 @@
     - selector: "#agents>.fg-reading-column"
       declarations:
         - ["width", "min(100%,70rem)"]
-        - ["gap", "16px"]
+        - ["gap", "14px"]
+        - ["align-content", "start"]
+        - ["padding-bottom", "max(24px,env(safe-area-inset-bottom))"]
     - selector: "#agents .fg-toolbar"
       declarations:
         - ["display", "flex"]
-        - ["gap", "8px"]
-        - ["flex-wrap", "wrap"]
         - ["align-items", "center"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "8px"]
+        - ["min-height", "var(--touch)"]
+        - ["padding", "0 0 12px"]
+        - ["border-bottom", "1px solid rgba(255,255,255,.08)"]
+        - ["background", "transparent"]
     - selector: "#agents-heading"
       declarations:
-        - ["flex", "1"]
-        - ["font-size", "clamp(1.4rem,3vw,2rem)"]
+        - ["flex", "0 1 auto"]
+        - ["margin", "0"]
+        - ["max-height", "none"]
+        - ["overflow", "visible"]
+        - ["font-size", "clamp(1.25rem,2.2vw,1.55rem)"]
+        - ["font-weight", "700"]
         - ["letter-spacing", "-.02em"]
-    - selector: "#agents>.fg-reading-column>.fg-region,#agents-reader,#agents-compose,#agents-usage"
+        - ["line-height", "1.2"]
+    - selector: "#agents-worker"
+      declarations:
+        - ["margin", "0"]
+        - ["flex", "0 1 auto"]
+        - ["padding", "3px 9px"]
+        - ["font-size", "11px"]
+    - selector: "#agents-back,#agents-refresh"
+      declarations:
+        - ["flex", "none"]
+        - ["width", "var(--touch)"]
+        - ["height", "var(--touch)"]
+        - ["min-height", "var(--touch)"]
+        - ["border", "1px solid rgba(255,255,255,.12)"]
+        - ["border-radius", "var(--radius)"]
+        - ["background", "var(--surface)"]
+        - ["color", "var(--text)"]
+    - selector: "#agents-refresh"
+      declarations:
+        - ["margin-inline-start", "auto"]
+    - selector: "#agents-back:hover:enabled,#agents-refresh:hover:enabled"
+      declarations:
+        - ["background", "var(--raised)"]
+        - ["border-color", "var(--accent)"]
+    - selector: "#agents-back:disabled,#agents-refresh:disabled"
+      declarations:
+        - ["background", "transparent"]
+        - ["border-color", "transparent"]
+        - ["color", "var(--muted)"]
+        - ["opacity", ".45"]
+    - selector: "#agents-new"
+      declarations:
+        - ["flex", "none"]
+        - ["min-height", "var(--touch)"]
+        - ["padding", "8px 12px"]
+        - ["font-size", "13px"]
+        - ["font-weight", "650"]
+        - ["white-space", "nowrap"]
+    - selector: "#agents-project-bar"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["min-width", "0"]
+    - selector: "#agents-project-bar>.fg-field"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "10px"]
+        - ["width", "100%"]
+        - ["max-width", "26rem"]
+        - ["min-width", "0"]
+    - selector: "#agents-project-bar>.fg-field>span"
+      declarations:
+        - ["flex", "none"]
+        - ["font-size", "11px"]
+        - ["font-weight", "700"]
+        - ["letter-spacing", ".06em"]
+        - ["text-transform", "uppercase"]
+        - ["color", "var(--muted)"]
+        - ["white-space", "nowrap"]
+    - selector: "#agents-project-bar select"
+      declarations:
+        - ["flex", "1 1 0"]
+        - ["width", "auto"]
+        - ["min-width", "0"]
+        - ["max-width", "100%"]
+        - ["min-height", "var(--touch)"]
+        - ["padding", "6px 10px"]
+        - ["background", "var(--surface)"]
+        - ["border", "1px solid rgba(255,255,255,.14)"]
+        - ["font-size", "14px"]
+    - selector: "#agents-project-bar select:hover:enabled"
+      declarations:
+        - ["border-color", "var(--accent)"]
+    - selector: "#agents-project-bar select:disabled"
+      declarations:
+        - ["opacity", ".65"]
+    - selector: "#agents>.fg-reading-column>.fg-region:not(#agents-project-bar),#agents-task-list,#agents-reader,#agents-result-panel,#agents-review,#agents-compose,#agents-usage"
       declarations:
         - ["display", "grid"]
         - ["gap", "12px"]
         - ["min-width", "0"]
-    - selector: "#agents .fg-heading:not(#agents-heading)"
+    - selector: "#agents-task-list"
       declarations:
-        - ["font-size", "1.05rem"]
+        - ["gap", "8px"]
+    - selector: "#agents-tasks-heading,#agents-usage-heading"
+      declarations:
+        - ["margin", "0"]
+        - ["max-height", "none"]
+        - ["overflow", "visible"]
+        - ["font-size", "12px"]
+        - ["font-weight", "700"]
+        - ["letter-spacing", ".08em"]
+        - ["text-transform", "uppercase"]
+        - ["color", "var(--muted)"]
+    - selector: "#agents-compose-heading,#agents-task-title"
+      declarations:
+        - ["margin", "0"]
+        - ["max-height", "none"]
+        - ["overflow", "visible"]
+        - ["font-size", "clamp(1.15rem,2vw,1.45rem)"]
     - selector: "#agents .fg-field,#agents .fg-textarea"
       declarations:
         - ["min-width", "0"]
@@ -3209,7 +3791,7 @@
       declarations:
         - ["white-space", "pre-wrap"]
         - ["overflow-wrap", "anywhere"]
-    - selector: "#agents-tasks,#agents-providers"
+    - selector: "#agents-tasks"
       declarations:
         - ["padding", "0"]
         - ["background", "transparent"]
@@ -3219,55 +3801,77 @@
         - ["margin", "0"]
         - ["border-bottom", "1px solid rgba(255,255,255,.08)"]
         - ["border-radius", "0"]
+    - selector: "#agents-tasks .fg-tree-row[data-selected=true]"
+      declarations:
+        - ["background", "transparent"]
+        - ["box-shadow", "none"]
     - selector: "#agents-tasks .fg-row-select"
       declarations:
         - ["background", "transparent"]
         - ["border", "0"]
         - ["border-radius", "0"]
-        - ["min-height", "84px"]
-        - ["padding", "12px 4px"]
-    - selector: "#agents-tasks .fg-row-secondary,#agents-providers .fg-row-secondary"
+        - ["min-height", "var(--touch)"]
+        - ["padding", "11px 8px"]
+        - ["transition", "background-color 150ms ease"]
+    - selector: "#agents-tasks .fg-tree-row[data-selected=true] .fg-row-select"
       declarations:
-        - ["white-space", "pre-line"]
-        - ["line-height", "1.55"]
-        - ["max-width", "none"]
-        - ["font-size", ".875rem"]
+        - ["background", "color-mix(in srgb,var(--accent) 8%,var(--surface))"]
+        - ["box-shadow", "inset 2px 0 var(--accent)"]
+    - selector: "#agents-tasks .fg-row-select::after"
+      declarations:
+        - ["border-color", "var(--muted)"]
     - selector: "#agents-tasks .fg-row-select:hover:enabled"
       declarations:
         - ["background", "var(--surface)"]
-    - selector: "#agents-providers"
+    - selector: "#agents-tasks .fg-tree-row[data-selected=true] .fg-row-select:hover:enabled"
       declarations:
-        - ["display", "grid"]
-        - ["grid-template-columns", "minmax(0,1fr)"]
-        - ["gap", "12px"]
-    - selector: "#agents-providers .fg-tree-row"
+        - ["background", "color-mix(in srgb,var(--accent) 12%,var(--surface))"]
+    - selector: "#agents-tasks .fg-row-select:hover:enabled::after"
       declarations:
-        - ["margin", "0"]
-        - ["align-items", "stretch"]
-        - ["min-width", "0"]
-        - ["background", "transparent"]
-        - ["box-shadow", "none"]
-    - selector: "#agents-providers .fg-row-select"
-      declarations:
-        - ["grid-template-columns", "minmax(0,1fr)"]
-        - ["background", "var(--surface)"]
-        - ["border", "1px solid rgba(255,255,255,.08)"]
-        - ["padding", "16px"]
-        - ["gap", "12px"]
-    - selector: "#agents-providers .fg-row-select::after"
-      declarations:
-        - ["content", "none"]
-    - selector: "#agents-providers [data-selected=true] .fg-row-select,#agents-providers .fg-row-select:hover:enabled"
-      declarations:
-        - ["background", "var(--raised)"]
         - ["border-color", "var(--accent)"]
-    - selector: "#agents-providers .fg-row-label"
+    - selector: "#agents-tasks .fg-row-secondary"
       declarations:
-        - ["font-size", "1rem"]
-        - ["line-height", "1.4"]
+        - ["white-space", "pre-line"]
+        - ["line-height", "1.5"]
+        - ["max-width", "none"]
+        - ["font-size", "13px"]
     - selector: "#agents-usage"
       declarations:
-        - ["margin-top", "24px"]
+        - ["margin-top", "16px"]
+        - ["padding-top", "18px"]
+        - ["border-top", "1px solid rgba(255,255,255,.08)"]
+    - selector: "#agents-usage-pagination"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "8px 12px"]
+        - ["padding-top", "8px"]
+    - selector: "#agents-usage-page"
+      declarations:
+        - ["padding", "0"]
+        - ["color", "var(--muted)"]
+        - ["font-size", "12px"]
+        - ["font-variant-numeric", "tabular-nums"]
+    - selector: "#agents-usage-page:empty"
+      declarations:
+        - ["display", "none"]
+    - selector: "#agents-usage-pagination>.fg-row,#agents-list-pagination>.fg-row,#agents-compose>.fg-row,#agents-reader>.fg-row,#agents-result-panel>.fg-row"
+      declarations:
+        - ["border-top", "0"]
+        - ["padding", "0"]
+        - ["margin", "0"]
+        - ["gap", "8px"]
+        - ["justify-content", "flex-start"]
+    - selector: "#agents-usage-pagination>.fg-row"
+      declarations:
+        - ["margin-inline-start", "auto"]
+    - selector: "#agents-usage-pagination button,#agents-list-pagination button,#agents-compose button,#agents-reader button,#agents-retry"
+      declarations:
+        - ["min-height", "var(--touch)"]
+        - ["padding", "6px 12px"]
+        - ["font-size", "13px"]
     - selector: "#agents-result"
       declarations:
         - ["border", "0"]
@@ -3292,14 +3896,76 @@
     - selector: "#agents .fg-row"
       declarations:
         - ["flex-wrap", "wrap"]
+    - selector: "#agents [role=status]"
+      declarations:
+        - ["min-height", "0"]
+        - ["padding", "8px 12px"]
+        - ["border", "1px solid rgba(255,255,255,.08)"]
+        - ["border-inline-start", "3px solid var(--muted)"]
+        - ["border-radius", "8px"]
+        - ["background", "var(--surface)"]
+        - ["font-size", "13px"]
+        - ["line-height", "1.45"]
+    - selector: "#agents [role=status][data-tone=success]"
+      declarations:
+        - ["border-inline-start-color", "#3fb950"]
+        - ["background", "color-mix(in srgb,#2ea043 10%,var(--surface))"]
+        - ["color", "#7ee787"]
+    - selector: "#agents [role=status][data-tone=accent]"
+      declarations:
+        - ["border-inline-start-color", "var(--accent)"]
+        - ["background", "color-mix(in srgb,var(--accent) 8%,var(--surface))"]
+    - selector: "#agents [role=status][data-tone=warning]"
+      declarations:
+        - ["border-inline-start-color", "var(--warning)"]
+        - ["background", "color-mix(in srgb,var(--warning) 8%,var(--surface))"]
+    - selector: "#agents [role=status][data-tone=error]"
+      declarations:
+        - ["border-inline-start-color", "var(--error)"]
+        - ["background", "color-mix(in srgb,var(--error) 10%,var(--surface))"]
     - selector: "#agents [role=status]:empty"
       declarations:
         - ["display", "none"]
+    - selector: "#agents :is(button:not(.fg-button-primary),select,summary,.fg-row-select):focus-visible"
+      declarations:
+        - ["outline", "2px solid var(--accent)"]
+        - ["outline-offset", "-2px"]
+
+- media: "(max-width:360px)"
+  rules:
+    - selector: "#agents .fg-toolbar"
+      declarations:
+        - ["gap", "6px"]
+    - selector: "#agents-heading"
+      declarations:
+        - ["font-size", "1.15rem"]
+    - selector: "#agents-new"
+      declarations:
+        - ["padding", "8px 10px"]
+    - selector: ".fg-metric-card"
+      declarations:
+        - ["padding", "12px"]
+    - selector: ".fg-metric"
+      declarations:
+        - ["padding", "0 3px"]
+    - selector: ".fg-metric dd"
+      declarations:
+        - ["font-size", "13px"]
+
+- media: "(min-width:640px)"
+  rules:
+    - selector: ".fg-metric-cards"
+      declarations:
+        - ["grid-template-columns", "repeat(auto-fit,minmax(260px,1fr))"]
+
 - media: "(min-width:800px)"
   rules:
-    - selector: "#agents-providers"
-      declarations:
-        - ["grid-template-columns", "repeat(2,minmax(0,1fr))"]
     - selector: "#agents-compose"
       declarations:
         - ["max-width", "48rem"]
+
+- media: "(prefers-reduced-motion:reduce)"
+  rules:
+    - selector: ".fg-metric-card,.fg-metric-refresh,.fg-metric-details>summary,.fg-metric-details>summary::after,#agents :is(button,.fg-row-select)"
+      declarations:
+        - ["transition", "none"]
