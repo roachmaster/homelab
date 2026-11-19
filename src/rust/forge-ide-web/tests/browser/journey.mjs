@@ -1433,6 +1433,7 @@ async function durableHostRestartJourney() {
     await check(model).toBeEnabled();
     await check(model.locator('option[value="qwen2.5-coder-7b"]')).toHaveText(/ · loaded$/);
     await page.locator('#new-chat').click();
+    await check(page.locator('#chat-conversation')).toHaveValue('1');
     await draft.fill(privateDraft);
     const persisted = checkpointSaved(page, snapshot => snapshot.workbench_open &&
       snapshot.workbench?.entry?.path.at(-1)?.value === file && checkpointHasDraft(snapshot, privateDraft) &&
