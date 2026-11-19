@@ -1,6 +1,7 @@
 use crate::assets::{AssetFactory, Assets};
 use crate::chat::{ChatRelay, ChatRelayFactory};
 use crate::studio::{StudioRelay, StudioRelayFactory};
+use crate::work::{WorkRelay, WorkRelayFactory};
 use crate::workspace::{WorkspaceReply, WorkspaceRequest};
 use crate::{history, http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
@@ -92,6 +93,7 @@ pub struct HostFactory {
     assets: AssetFactory,
     chat: Option<ChatRelayFactory>,
     studio: Option<StudioRelayFactory>,
+    work: Option<WorkRelayFactory>,
 }
 impl HostFactory {
     pub(crate) fn new(config: HostConfig) -> Self {
@@ -103,6 +105,7 @@ impl HostFactory {
             },
             chat: config.chat.clone().map(ChatRelayFactory),
             studio: config.studio.clone().map(StudioRelayFactory::from_config),
+            work: config.work.clone().map(WorkRelayFactory),
             config,
         }
     }
@@ -137,7 +140,13 @@ impl HostFactory {
             .map(Factory::create)
             .transpose()?
             .map(Singleton::new);
-        Host::assemble(self.config.clone(), ports, assets, chat, studio)
+        let work = self
+            .work
+            .as_ref()
+            .map(Factory::create)
+            .transpose()?
+            .map(Singleton::new);
+        Host::assemble(self.config.clone(), ports, assets, chat, studio, work)
     }
 }
 impl Factory<Host> for HostFactory {
@@ -288,7 +297,8 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
         destination
             if (history::is_destination(destination)
                 || ChatRunRequest::is_destination(destination)
-                || MailRequest::is_destination(destination))
+                || MailRequest::is_destination(destination)
+                || crate::work::handles(destination))
                 && c.authenticated
                 && c.csrf_valid =>
         {
@@ -893,6 +903,7 @@ pub struct Host {
     pub(crate) origin: String,
     state: Rc<State>,
     studio: Option<Singleton<StudioRelay>>,
+    work: Option<Singleton<WorkRelay>>,
     bridge: AppBridge,
 }
 impl Host {
@@ -902,6 +913,7 @@ impl Host {
         assets: Singleton<Assets>,
         chat: Option<Singleton<ChatRelay>>,
         studio: Option<Singleton<StudioRelay>>,
+        work: Option<Singleton<WorkRelay>>,
     ) -> Result<Self, HostError> {
         let session = Session::new(&config)?;
         let state = Rc::new(State {
@@ -964,6 +976,7 @@ impl Host {
             origin,
             state,
             studio,
+            work,
             bridge,
         })
     }
@@ -1053,6 +1066,22 @@ impl Host {
             .map(shared::<StudioRelay>)
             .ok_or(Rejection::Unavailable)?
             .dispatch(header, body, &self.config.nodes, context.deadline)
+    }
+
+    pub(crate) fn work_dispatch(
+        &self,
+        header: &Header,
+        body: &[u8],
+        context: &Context,
+    ) -> Result<(u16, hyper::body::Bytes), Rejection> {
+        admit(header, context).map_err(|_| Rejection::Denied)?;
+        if !crate::work::is_destination(header.route().destination()) {
+            return crate::work::failed(header, crate::work::Failure::NotFound);
+        }
+        let Some(relay) = self.work.as_ref() else {
+            return crate::work::failed(header, crate::work::Failure::Unavailable);
+        };
+        shared(relay).dispatch(header, body, context.deadline)
     }
 
     pub(crate) fn postgres_dispatch(

@@ -26,6 +26,8 @@ import mail_api
 from model_adapter import MAX_BODY, ModelAdapter
 import queue_store as store
 from queue_store import Message, Rejected, Submit
+import work_api
+import work_config
 
 PORT = 18083
 DEFAULT_MODEL = "gpt-oss-20b"
@@ -430,6 +432,8 @@ class Handler(BaseHTTPRequestHandler):
         raise Rejected(404, "route_not_found")
 
     def versioned_api(self):
+        if work_api.handles(self.headers):
+            return work_api
         if mail_api.handles(self.headers):
             return mail_api
         return run_api if run_api.handles(self.headers) else history_api
@@ -441,10 +445,18 @@ class Handler(BaseHTTPRequestHandler):
             if correlation is None:
                 raise Rejected(400, "invalid_request")
             route = api.destination(self.headers)
-            body = self.read_json_body(
-                mail_api.MAX_REQUEST_BYTES if api is mail_api else history_api.MAX_REQUEST_BYTES, "invalid_request"
+            limit = (
+                work_api.MAX_REQUEST_BYTES if api is work_api
+                else mail_api.MAX_REQUEST_BYTES if api is mail_api
+                else history_api.MAX_REQUEST_BYTES
             )
+            body = self.read_json_body(limit, "invalid_request")
             command = api.decode(route, correlation, body)
+            if api is work_api:
+                work_service = getattr(self.server, "work_service", None)
+                if work_service is None:
+                    raise Rejected(503, "unavailable")
+                return api.dispatch(route, correlation, command, work_service)
             if api in (run_api, mail_api) and not getattr(self.server, "distributed", False):
                 raise Rejected(503, "unavailable")
             if api is run_api:
@@ -511,7 +523,7 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     def __init__(self, token, ready, inference, *, distributed=False, pinned_model=DEFAULT_MODEL,
-                 configured_models=None, tool_repositories=None):
+                 configured_models=None, tool_repositories=None, work_service=None, port=PORT):
         self.authorization = f"Bearer {token}".encode()
         self.ready = ready
         self.inference = inference
@@ -519,8 +531,9 @@ class Server(ThreadingHTTPServer):
         self.pinned_model = pinned_model
         self.configured_models = (pinned_model,) if configured_models is None else configured_models
         self.tool_repositories = {} if tool_repositories is None else tool_repositories
+        self.work_service = work_service
         self.slots = threading.BoundedSemaphore(24)
-        super().__init__(("127.0.0.1", PORT), Handler)
+        super().__init__(("127.0.0.1", port), Handler)
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):
@@ -554,6 +567,8 @@ def main():
         raise ValueError("Invalid configured runner mode or model")
     models = configured_models(model, os.environ.get("FORGE_RUNNER_MODELS"))
     repositories = agent_tools.repository_catalog(os.environ.get("FORGE_RUNNER_TOOL_REPOSITORIES"))
+    work_cfg = work_config.load_work_config(os.environ.get(work_config.CONFIG_ENV_VAR))
+    work_service = work_api.WorkServiceFactory(work_cfg, store.connect).create()
     credentials = Path(os.environ["CREDENTIALS_DIRECTORY"])
     inbound = (credentials / "runner.token").read_text().strip()
     if not re.fullmatch(r"[a-fA-F0-9]{32,128}", inbound):
@@ -566,7 +581,8 @@ def main():
         inference = Inference(outbound)
     ready = threading.Event()
     with Server(inbound, ready, inference, distributed=mode == "dispatch", pinned_model=model,
-                configured_models=models, tool_repositories=repositories) as server:
+                configured_models=models, tool_repositories=repositories,
+                work_service=work_service) as server:
         if mode == "dispatch":
             threading.Thread(target=complete_dispatched_runs, args=(ready,), daemon=True).start()
             if repositories:

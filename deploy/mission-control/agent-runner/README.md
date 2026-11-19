@@ -55,7 +55,7 @@ single Mission Control operator.
 | `GET /v1/runs/{id}/events?after=0&wait=20` | Replay events after the given sequence and wait up to 20 seconds for an update |
 | `POST /v1/chat/completions` | Compatibility route for the existing IDE relay |
 | `POST /v1/workspace` | Save or restore an authenticated Forge IDE workspace through PostgreSQL |
-| `POST /v1/dispatch` | Header-routed saved-chat and asynchronous IDE run operations |
+| `POST /v1/dispatch` | Header-routed saved-chat, asynchronous IDE run, Mail, and opt-in coding-job admission operations |
 
 For a new async run, send JSON with `messages` and optional `model`,
 `max_tokens`, and `temperature`. Send the returned `conversation_id` and the new
@@ -275,3 +275,39 @@ database routines. Transcript writes remain with Mission Control.
 For rollback, stop Forge claims and resolve distributed runs and result
 receipts before restoring the legacy service template. The first rollout
 handles text inference. [Dispatch design](../../../docs/architecture/forge-postgres-inference-dispatch.md)
+
+## Coding-job durable admission (opt-in, first slice)
+
+Coding-job admission (`ide.work.*`) is **disabled by default** and operates
+independently of legacy/dispatch inference, Mail, Chat persistence, and GPU
+flags. To opt in, set `FORGE_RUNNER_WORK_CONFIG` to the absolute path of a
+trusted JSON configuration file containing strict keys `owner`,
+`allowed_projects`, `allowed_modes` (subset of `plan`, `review`, `implement`),
+optional `max_pending` (default `32`, range `1..256`), and `profiles` (mapping
+each profile alias to `{backend, model, resource_profile}` where `backend` is
+`antigravity` or `codex`). When `FORGE_RUNNER_WORK_CONFIG` is unset, startup
+performs no work config file reads, database connections, or CLI actions, and
+supported `ide.work.*` requests return `503` (`work_failed`, `unavailable`).
+Unsupported `ide.work.*` destinations always return `404` (`not_found`).
+
+Supported destinations on authenticated `POST /v1/dispatch` (version `1` Forge
+headers, 16 KiB raw request bound):
+
+| Forge destination | Request `kind` | Response `kind` & status |
+| --- | --- | --- |
+| `ide.work.submit` | `work_submit` | `202` `work_submitted` (idempotent; pins nonsecret recipe and commits task, `queued` event sequence 1, and empty `pg_notify('forge_coding_jobs', '')`) |
+| `ide.work.get` | `work_get` | `200` `work_opened` (owner/project-scoped task summary plus `prompt` and `acceptance_criteria`, without recipe body) |
+| `ide.work.list` | `work_list` | `200` `work_listed` (ascending `(created_at, task_id)` keyset pagination scoped to owner and project) |
+| `ide.work.events` | `work_events` | `200` `work_events` (monotonic per-task events strictly after `after_sequence`) |
+| `ide.work.cancel` | `work_cancel` | `200` `work_cancel_recorded` (queued-only CAS cancellation with immutable control-receipt replay before CAS/state checks) |
+
+**Model-native token policy:** Pinned coding recipes always store
+`generation_token_limit: null` and never inherit `llama.cpp` or Mail token
+caps; native provider/model limits still apply.
+
+**Current scope limits:** This first slice covers durable admission and queued
+cancellation only. No coding-agent execution worker, subprocess runner, attempt
+claiming, result chunks, `resume`, `accept`, usage collector, or UI is
+implemented or started; admitted tasks remain `queued` until explicitly
+cancelled. Migration `0009_coding_admission.sql` and runner config activation
+are **not** deployed to production by repository changes alone.

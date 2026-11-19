@@ -71,6 +71,8 @@ pub struct HostConfig {
     pub cooked_replay_archive: Option<PathBuf>,
     pub chat: Option<crate::ChatConfig>,
     pub studio: Option<crate::StudioConfig>,
+    /// Opt-in coding assignment admission, independent of model inference.
+    pub work: Option<crate::WorkConfig>,
     pub nodes: Vec<NodeConfig>,
     pub limits: HostLimits,
 }
@@ -81,6 +83,9 @@ impl HostConfig {
         }
         if let Some(chat) = &self.chat {
             chat.validate()?;
+        }
+        if let Some(work) = &self.work {
+            work.validate()?;
         }
         if let Some(studio) = &self.studio {
             studio.validate()?;
@@ -280,6 +285,8 @@ struct FileConfig {
     chat: Option<crate::ChatConfig>,
     #[serde(default)]
     studio: Option<crate::StudioConfig>,
+    #[serde(default)]
+    work: Option<crate::WorkConfig>,
     credentials: CredentialFiles,
     nodes: Vec<NodeFile>,
     #[serde(default = "timeout_default")]
@@ -392,6 +399,10 @@ pub fn load_config(path: &Path) -> Result<HostConfig, HostError> {
         studio: f.studio.map(|mut studio| {
             studio.token_file = resolve(base, &studio.token_file);
             studio
+        }),
+        work: f.work.map(|mut work| {
+            work.token_file = resolve(base, &work.token_file);
+            work
         }),
         nodes,
         limits: HostLimits {

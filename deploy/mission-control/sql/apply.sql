@@ -101,4 +101,15 @@ INSERT INTO forge_agent.schema_migrations (version, name)
 VALUES (8, 'mail_archive');
 \endif
 
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 9
+) AS apply_0009
+\gset
+
+\if :apply_0009
+\ir migrations/0009_coding_admission.sql
+INSERT INTO forge_agent.schema_migrations (version, name)
+VALUES (9, 'coding_admission');
+\endif
+
 COMMIT;

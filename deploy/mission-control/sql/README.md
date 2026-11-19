@@ -8,8 +8,8 @@ This directory holds the SQL for the Forge agent database on Mission Control.
 | `apply.sql` | Apply registered migrations in order and record their versions. |
 | `migrations/` | Store numbered schema changes. |
 | `management/grant-runner.sql` | Grant the runner access to its scoped application tables and grant the GPU worker access to its function API. |
-| `management/verify.sql` | Check the expected schema, migration 0008 archive constraints, GPU worker privileges, and applied versions. |
-| `management/verify-runner-privileges.sql` | Check required legacy permissions and exact effective permissions on the four scoped runtime tables (used by `setup-postgres.sh --check` and disposable database tests). |
+| `management/verify.sql` | Check the expected schema, migration 0008 archive constraints, migration 0009 coding admission constraints/PUBLIC revocation, GPU worker privileges, and applied versions. |
+| `management/verify-runner-privileges.sql` | Check required legacy permissions and exact effective permissions on the scoped Mail, GPU, and coding-admission runtime tables (used by `setup-postgres.sh --check` and disposable database tests). |
 | `management/run-status.sql` | Summarize run and tool states without printing prompts or tool output. |
 | `tests/schema.sql` | Exercise the schema with a disposable transcript inside a rolled-back transaction. |
 
@@ -30,8 +30,18 @@ Run `apply.sql` with the database role that owns the schema. It takes a transact
 The verification scripts are read-only checks; they do not repair grants or
 rewrite applied migrations. The runner check retains the existing legacy
 permission checks and enforces the intended permissions on `mail_threads`,
-`mail_messages`, `inference_results`, and `gpu_worker_readiness`. Required access
+`mail_messages`, `inference_results`, `gpu_worker_readiness`, `coding_tasks`,
+`coding_events`, and `coding_control_receipts`. Required access
 and unexpected effective access are checked separately for these scoped tables.
+
+Migration `0009_coding_admission.sql` adds the three core durable admission
+tables (`coding_tasks`, `coding_events`, `coding_control_receipts`) in
+`forge_agent` with `PUBLIC` revoked and exact `forge_agent` grants (`SELECT`,
+`INSERT`, `UPDATE` on `coding_tasks`; `SELECT`, `INSERT` on `coding_events` and
+`coding_control_receipts`). Separate coding-worker schemas, roles, and SQL
+functions are intentionally deferred until the execution-worker slice. This
+migration is registered in `apply.sql` for verification in disposable PostgreSQL
+16 tests and is not deployed to production by repository changes alone.
 
 Migration 0008 verification checks both archive columns and their validated
 CHECK constraints, including the existing revision bound. Canonical PostgreSQL

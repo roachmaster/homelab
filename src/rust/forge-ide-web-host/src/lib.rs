@@ -17,6 +17,7 @@ mod run_dispatch;
 mod service;
 mod session;
 mod studio;
+mod work;
 mod workspace;
 
 pub use config::{load_config, HostConfig, HostLimits, NodeConfig, SessionAuth};
@@ -26,6 +27,7 @@ pub use projection::project_report;
 pub use service::{Host, HostFactory, InspectionPort};
 use std::{error::Error, fmt, io};
 pub use studio::StudioConfig;
+pub use work::{WorkConfig, WorkMode};
 
 #[derive(Debug)]
 pub enum HostError {

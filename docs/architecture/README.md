@@ -11,7 +11,7 @@ The [current implementation reference](../design/implementation-status.md) and [
 
 ## Proposed coding-agent dispatch
 
-[Assignment/event/CLI/result workflow](proposals/forge-coding-agent-dispatch.md): provider and DAO boundaries, PostgreSQL task/attempt/event persistence, CLI process ownership and sequence diagrams for completion and reviewed takeover. This is a design proposal, not an installed queue or worker.
+[Coding assignment admission](coding-admission.md): first implemented, default-off backend slice for durable submit/get/list/events/queued cancellation. Not enabled live. [Assignment/event/CLI/result workflow](proposals/forge-coding-agent-dispatch.md) describes the remaining provider/DAO boundaries, attempts/results, CLI ownership and sequence diagrams for completion and reviewed takeover; the worker and usage collectors remain proposed.
 
 [Agent usage and portal visibility](proposals/forge-agent-usage.md): no inherited llama.cpp token budget for coding CLIs; per-agent allowance, reset, task tokens and cost provenance, with provider/collector ownership and a collection/read/refresh sequence. The Agents screen is proposed, not deployed.
 

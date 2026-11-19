@@ -44,10 +44,13 @@ BEGIN
       )
       FROM (
         VALUES
-          ('mail_threads',         ARRAY['SELECT', 'INSERT', 'UPDATE']),
-          ('mail_messages',        ARRAY['SELECT', 'INSERT']),
-          ('inference_results',    ARRAY['SELECT', 'DELETE']),
-          ('gpu_worker_readiness', ARRAY['SELECT'])
+          ('mail_threads',            ARRAY['SELECT', 'INSERT', 'UPDATE']),
+          ('mail_messages',           ARRAY['SELECT', 'INSERT']),
+          ('inference_results',       ARRAY['SELECT', 'DELETE']),
+          ('gpu_worker_readiness',    ARRAY['SELECT']),
+          ('coding_tasks',            ARRAY['SELECT', 'INSERT', 'UPDATE']),
+          ('coding_events',           ARRAY['SELECT', 'INSERT']),
+          ('coding_control_receipts', ARRAY['SELECT', 'INSERT'])
       ) AS spec(relation, allowed)
       CROSS JOIN unnest(ARRAY[
         'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'

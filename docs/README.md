@@ -15,7 +15,7 @@ Start with the [current implementation reference](design/implementation-status.m
 
 ## Proposed coding-agent workflow
 
-[PostgreSQL-backed coding-agent dispatch](architecture/proposals/forge-coding-agent-dispatch.md) designs assignment admission, a separate CLI worker, saved responses and reviewed agent takeover. Includes provider/DAO ownership, task states and normal/recovery sequence diagrams. **Design only; not implemented or deployed.**
+[Coding assignment admission](architecture/coding-admission.md) documents the first implemented backend slice: opt-in factories, durable submit/get/list/events/queued cancellation and immutable retry receipts. It is disabled by default and not enabled live. [The full dispatch proposal](architecture/proposals/forge-coding-agent-dispatch.md) covers the remaining CLI worker, saved responses, review acceptance and agent takeover, with provider/DAO ownership and sequence diagrams.
 
 [Agent usage and limits](architecture/proposals/forge-agent-usage.md) adds provider-managed generation limits, paged full results and an Agents portal design for Codex, Gemini/Antigravity and future adapters. It separates account allowance/reset windows, observed job tokens, context and cost estimates.
 

@@ -1,8 +1,8 @@
 # Proposed Architecture: PostgreSQL-Backed Coding-Agent Dispatch
 
-**Status:** Proposed (design-only — **not implemented**).
+**Status:** Execution/review flow proposed; admission-only backend implemented in source, disabled by default.
 **Date:** 2026-11-19 | **Base revision:** `2e1300a00da92e9f97bdb1a656c2b182d4219a6c` (`main`).
-All new destinations, Rust/Python types, SQL objects, migration slot `0009`, and numeric bounds below are **proposed**; they are not current exports, applied migrations, or live services. Current source code takes precedence over dated documents (for example, [`mail_api.py`](../../../deploy/mission-control/agent-runner/mail_api.py) and [`service.rs`](../../../src/rust/forge-ide-web-host/src/service.rs) implement opt-in `ide.mail.archive`, superseding stale text in [`forge-postgres-inference-dispatch.md`](../forge-postgres-inference-dispatch.md)).
+The [implemented admission contract](../coding-admission.md) is the authority for the first slice: `submit/get/list/events/queued cancel`, independent Rust/runner configuration, and three tables in migration `0009`. It is not enabled live. Attempts, CLI execution, full results, reconciliation, resume, acceptance and usage collection below remain **proposed**; their additional tables need later migrations. All implemented requests require `project_alias`, and acceptance criteria are bounded text. Current source code takes precedence over dated documents (for example, [`mail_api.py`](../../../deploy/mission-control/agent-runner/mail_api.py) and [`service.rs`](../../../src/rust/forge-ide-web-host/src/service.rs) implement opt-in `ide.mail.archive`, superseding stale text in [`forge-postgres-inference-dispatch.md`](../forge-postgres-inference-dispatch.md)).
 
 An operator submits an assignment through the same gateway used by Mail. PostgreSQL saves the assignment and wakes a separate worker, which runs the configured coding agent and saves its response for review. A CLI reply means **ready for review**; completion requires acceptance. Agent takeover uses the saved checkpoint and proof that the previous writer stopped.
 

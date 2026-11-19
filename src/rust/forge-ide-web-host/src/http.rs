@@ -317,12 +317,15 @@ fn command(
         return Err(Rejection::Unavailable);
     }
     if crate::studio::is_destination(destination)
+        || crate::work::handles(destination)
         || history::is_destination(destination)
         || ChatRunRequest::is_destination(destination)
         || MailRequest::is_destination(destination)
     {
         let (status, body) = if crate::studio::is_destination(destination) {
             host.studio_dispatch(&header, &r.body, &context)?
+        } else if crate::work::handles(destination) {
+            host.work_dispatch(&header, &r.body, &context)?
         } else {
             host.postgres_dispatch(&header, &r.body, &context)?
         };

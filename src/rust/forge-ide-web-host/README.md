@@ -89,7 +89,7 @@ retrieve the exact level bytes across releases. The active cook is served by
 its digest even when an archive directory is unset.
 
 The host registrar stages typed recipes for the asset bundle and archive,
-Chat relay, and Studio relay. The host factory opens the configured directories
+Chat relay, Studio relay, and optional Work relay. The host factory opens the configured directories
 and reads relay credentials after registry freeze. Each assembled host owns
 one of each configured resource and shares the ready instances with its handlers.
 
@@ -100,6 +100,51 @@ its `token_file`, and the separate HTTPS `preview_origin`. The web host checks
 the browser session, CSRF token, and configured project grants before dispatch.
 Open **Forge Studio** from the Game Engine design page or go to `/studio`.
 [Studio service setup](../../../deploy/mission-control/studio/README.md)
+
+### Coding assignment admission
+
+The optional `work` block enables durable assignment admission through the existing
+private runner. It is disabled when absent and uses its own transport and grants;
+Chat, Mail, GPU availability and the node's read-only inspection grants do not enable it.
+The runner must independently configure its matching Work service and schema.
+
+```json
+"work": {
+  "endpoint": "127.0.0.1:18081",
+  "token_file": "/etc/homelab-forge/web/runner.token",
+  "allowed_projects": ["homelab"],
+  "allowed_profiles": ["agy-plan-v1"],
+  "allowed_modes": ["plan"]
+}
+```
+
+`forge_ide_web_host::{WorkConfig, WorkMode}` supplies the typed public configuration.
+`register_host` stages the Work factory without reading its token. After startup
+validation and registry freeze, `HostFactory` creates one ready relay, wraps it in
+`Singleton`, and injects it into `Host`. Requests acquire that host-owned instance;
+neither requests nor workers consult a registry. The native bearer credential is
+read only at creation and never forwarded to the browser.
+
+Use `POST /forge/v1/dispatch` with the normal session/CSRF admission and existing
+four Forge headers. The admitted destinations are `ide.work.submit`, `.get`, `.list`,
+`.events`, and `.cancel`. Each strict JSON request includes matching `kind`,
+`request_id`, and `project_alias`; the host checks independent project grants and
+the submit profile/mode before contacting the runner. The runner derives the owner
+from trusted configuration and must independently enforce owner/project scope.
+Replies are typed version-1 envelopes and are checked for correlation, task/project
+identity, digest/revision bounds, timestamps, pagination, event order and status codes.
+
+This slice admits intent only: even `implement` mode starts no agent. Tasks remain
+queued until cancelled. Exact submit/cancel retries return their stored original
+business receipt with the current request ID. Deferred `result`, `resume`, and
+`accept` operations return explicit `404` after browser authentication. A missing
+Work service returns `503`; revoked submit grants return `403` without relay effects.
+No CLI, worker, provider-account polling, usage screen, or live configuration is enabled.
+
+Work requests are at most16 KiB on the wire, with an8 KiB UTF-8 prompt and2 KiB
+acceptance criteria. Escaped JSON may reach the wire limit first. Lists default to20
+tasks (maximum50), and event pages default to50 (maximum100). These admission and
+transport bounds do not impose a model output-token limit or alter Chat/Mail budgets.
 
 ### Disposable real-agent fixture
 

@@ -10,6 +10,8 @@ TO forge_agent;
 GRANT SELECT, INSERT, UPDATE ON forge_agent.ide_workspace_history, forge_agent.ide_chats TO forge_agent;
 GRANT SELECT, INSERT, UPDATE ON forge_agent.mail_threads TO forge_agent;
 GRANT SELECT, INSERT ON forge_agent.mail_messages TO forge_agent;
+GRANT SELECT, INSERT, UPDATE ON forge_agent.coding_tasks TO forge_agent;
+GRANT SELECT, INSERT ON forge_agent.coding_events, forge_agent.coding_control_receipts TO forge_agent;
 GRANT SELECT, DELETE ON forge_agent.inference_results TO forge_agent;
 GRANT SELECT ON forge_agent.gpu_worker_readiness TO forge_agent;
 GRANT USAGE ON SCHEMA forge_agent_worker_api TO forge_gpu_worker;

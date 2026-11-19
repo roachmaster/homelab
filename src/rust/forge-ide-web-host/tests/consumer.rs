@@ -97,6 +97,7 @@ fn config(f: &Files) -> HostConfig {
         alternate_cooked_assets: None,
         cooked_replay_archive: None,
         studio: None,
+        work: None,
         limits: HostLimits::default(),
         nodes: vec![NodeConfig {
             key: "lab".into(),
@@ -116,6 +117,9 @@ fn config(f: &Files) -> HostConfig {
         }],
     }
 }
+#[cfg(unix)]
+#[path = "consumer/work.rs"]
+mod work;
 fn host(f: &Files) -> (Host, Rc<Cell<usize>>) {
     host_with_config(config(f))
 }
@@ -437,6 +441,19 @@ fn configured_host_resources_open_only_at_factory_creation() {
             },
             "invalid chat token file",
         ),
+        (
+            HostConfig {
+                work: Some(forge_ide_web_host::WorkConfig {
+                    endpoint: "127.0.0.1:1".parse().unwrap(),
+                    token_file: files.0.join("absent-work-token"),
+                    allowed_projects: vec!["coding-only".into()],
+                    allowed_profiles: vec!["agy-plan-v1".into()],
+                    allowed_modes: vec![forge_ide_web_host::WorkMode::Plan],
+                }),
+                ..config(&files)
+            },
+            "invalid chat token file",
+        ),
     ] {
         let (_, factory) = Registry::new()
             .register(register_host("ui", config).unwrap())
@@ -642,10 +659,14 @@ fn startup_file_loads_explicit_https_origin_and_old_config_remains_local() {
     let old_config = forge_ide_web_host::load_config(&path).unwrap();
     assert!(old_config.public_origin.is_none());
     assert!(old_config.alternate_cooked_assets.is_none());
+    assert!(old_config.work.is_none());
     value["public_origin"] = json!("https://portal.example.com");
+    value["work"] = json!({"endpoint":"127.0.0.1:18081","token_file":"work.token",
+        "allowed_projects":["coding-only"],"allowed_profiles":["agy-plan-v1"],"allowed_modes":["plan"]});
     value["alternate_cooked_assets"] = json!("pinned-cooked-assets");
     fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
     let configured = forge_ide_web_host::load_config(&path).unwrap();
+    assert_eq!(configured.work.unwrap().token_file, f.0.join("work.token"));
     assert_eq!(
         configured.alternate_cooked_assets,
         Some(f.0.join("pinned-cooked-assets"))

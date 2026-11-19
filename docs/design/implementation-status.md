@@ -4,6 +4,8 @@ Reviewed 18 November 2026 against the repository after `7e03991`. This is the cu
 
 Manual archive and browser ABI 5 were added to the repository on 19 November 2026. The operational checkpoint below remains the separately dated 18 November observation; this change does not enable or deploy the feature.
 
+The 19 November source also includes [coding assignment admission](https://github.com/roachmaster/homelab/blob/main/docs/architecture/coding-admission.md): opt-in Rust/runner factories, durable submit/get/list/events/queued cancellation, immutable retry receipts and recipes with no inherited inference token cap. This backend is disabled by default and has not been enabled live. Coding execution, full results, review acceptance and agent-usage collection/UI remain proposed.
+
 ## Portal and workspace
 
 | Surface | Implemented behavior | Boundary or remaining work |
