@@ -2,7 +2,7 @@
 
 Updated 19 November 2026 against the current source. The preceding review checkpoint was after `7e03991`. This is the current design reference. Earlier proposal PDFs, review reports and schematic diagrams remain dated design history. A capability implemented in the repository is not automatically enabled by a running host.
 
-Manual archive and the functional Agents/Usage source were added on 19 November 2026. The current source browser ABI is **7**, adding typed dashboard badges, formatted times, quota meters, compact exact-safe metrics and adjacent accounting disclosures. Gemini workspace autonomy uses pinned `forge-coding-v2` and additive migration11. The operational checkpoint below records the verified 19 November rollout of the ABI6 portal, API runner and coding worker; earlier observations remain dated separately.
+Manual archive and the functional Agents/Usage source were added on 19 November 2026. The current browser ABI is **7**, adding typed dashboard badges, formatted times, quota meters, compact exact-safe metrics and adjacent accounting disclosures. Gemini workspace autonomy uses pinned `forge-coding-v2` and additive migration11. The operational checkpoint below records their verified deployment; earlier observations remain dated separately.
 
 [Coding-agent workflow](https://github.com/roachmaster/homelab/blob/main/docs/architecture/coding-admission.md) now includes catalog-backed assignment, native Antigravity/Codex execution, full-result paging, explicit review/receipt-gated resume and truthful provider/project usage. Work and Usage remain independently optional/default-off until configured and verified.
 
@@ -15,7 +15,7 @@ Manual archive and the functional Agents/Usage source were added on 19 November 
 | Chat | Compact thread-title history drawer, new-chat icon, open message stream, inline composer, model selection, saved history search and retention management. | Search covers the loaded history page. Model choices come from the admitted catalog. |
 | Mail | Inbox/Archive, sender and date metadata, bounded previews, Compose, thread headers, safe Markdown, quick Reply action, and manual archive. | Reply ready is a generation status, not a persistent unread flag. Manual archive is a repository capability gated by an opt-in flag; delete mutations are not implemented. |
 | Workbench | Header project breadcrumb and view sheet; unified search with entry-name mode; Explorer, verified File source, Outline and supplied Problems. Markdown has Raw/Display and source has Wrap. | Search covers the accepted report, not arbitrary filesystem contents or resolved references. Problems are inspection diagnostics, not compiler/test results. |
-| Agents | Catalog-backed projects/models/modes; assignment, task/events, cancellation, full-result pages, explicit acceptance and trusted-receipt resume; provider metadata and project usage details. | Independent Work/Usage grants and supervised worker configuration are required. Quota blocks never automatically retry, rotate accounts or purchase credits. |
+| Agents | Catalog-backed assignment and task lifecycle; semantic task/worker badges, readable times, compact exact-safe token metrics, truthful quota meters and adjacent accounting disclosures with scoped refresh. Provider pages are bounded locally. | Independent Work/Usage grants and supervised worker configuration are required. Quota blocks never automatically retry, rotate accounts or purchase credits. |
 | Editing | Contextual questions, bounded edit proposals/diffs, direct textarea editing, Apply, Undo and status reconciliation are implemented for admitted managed projects. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. A rendered button is not write authority. |
 
 The current [implementation captures](/design/wireframes) use disposable acceptance fixtures. Some fixtures deliberately disable Mail, contain partial inspection results, or mask editable controls. They are current generated UI, not captures of private operator data.
@@ -24,7 +24,7 @@ The current [implementation captures](/design/wireframes) use disposable accepta
 
 | Concern | Implemented ownership | Practical limit |
 | --- | --- | --- |
-| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The browser ABI is **6**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
+| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The browser ABI is **7**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
 | Same-tab navigation | The IDE saves a checkpoint and bounded local JSON handoff before Home/Design. Return resumes admission, restores state and re-verifies Workbench source. Declared `#chat`, `#mail`, `#workbench` and `#agents` entry actions run after restore and are consumed. | URLs contain view intent, not reports, credentials or source identities. A fresh tab does not inherit another tab's unsent drafts. |
 | Chat persistence | PostgreSQL keeps operator history, tab checkpoints, conversation retention and queued runs. The history DAO supports list/open, expiry, long-term retention and deletion. | A default expiry applies automatically; deleting a saved conversation is distinct from cancelling a model run. |
 | Mail persistence | PostgreSQL stores threads, ordered messages, queued runs and recall metadata. Each inference reconstructs the accepted transcript and pins its model/profile. | Mail drafts survive the supported same-tab documentation handoff in local JSON; there is no durable cross-device Mail-draft table. |
@@ -51,6 +51,32 @@ Explore [Scout character creation](/design/characters) for the greybox-to-illust
 See [plug-and-play](/design/forge-providers), [workers](/design/forge-workers), [game runtime](/design/game-studio), [physics](/design/game-physics) and [assets](/design/game-asset-pipeline).
 
 ## Observed deployment checkpoint
+
+On **19 November 2026**, code commit `679088c` was deployed as release
+`20261119T215116Z-679088c-agents-dashboard`. The web host, API runner and coding
+worker are active and enabled. [Agents](https://portal.thedevex.com/agents)
+now shows the compact dashboard above. Full `make ci`, all 28 sandboxed browser
+groups and 190 backend tests passed. Separate read-only staged and live browser
+checks verified the real catalog, saved result, both provider cards, truthful
+quota states, inline accounting and layouts at 320, 390 and 1440px. The public
+proxy serves the exact verified ABI7 bundle; the staging listener is closed.
+
+Gemini's new policy allows coding commands, read-only URL reads and scoped
+implement-mode file writes without approval prompts. The actual factory/CLI
+candidate check ran `rg` and `grep`, wrote/read its task file and produced a
+coherent result without a permission stop; that check used an owned fixture
+outside the production job queue. The live API profiles select policy2 and the
+worker advertises its exact digest. OS isolation and read-only plan/review mounts
+remain in force. The original blocked policy1 task was not automatically replayed.
+
+PostgreSQL was backed up privately and migration11, grants and the complete schema
+verification committed atomically. Policy1 history remains intact. Only the API,
+coding worker and web host restarted; SSH, Cloudflare, PostgreSQL and the source
+agent kept their PIDs. Existing credentials and unrelated service settings were
+preserved. Evidence is under
+`/mnt/data/homelab-build/agents-dashboard-20261119/` on Mission Control.
+
+### Earlier functional Agents rollout
 
 On **19 November 2026**, code commit `619ac0a` was deployed as release
 `20261119T191912Z-619ac0a-agents`. Open [Agents](https://portal.thedevex.com/agents)

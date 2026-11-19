@@ -384,12 +384,18 @@ The key never enters a DTO or browser response.
 
 [Verified deployment and operational boundaries](../../../docs/design/implementation-status.md#observed-deployment-checkpoint).
 
-The approved worker command set expects `rg` on its sanitized public tool PATH
+The coding workspace expects `rg` on its sanitized public tool PATH
 (`/usr/local/bin:/usr/bin:/bin`, following the selected Rust tools). The dashboard
-authoring attempt on19November stopped because `rg` was absent and its `grep`
-fallback was not permitted by policy1. The verified existing ripgrep15.2.0 binary
+authoring attempt on 19 November stopped because `rg` was absent and its `grep`
+fallback was not permitted by policy1. The verified existing ripgrep 15.2.0 binary
 is now installed root-owned in `/usr/local/bin/rg`; an actual isolated-scope
 probe confirmed discovery without changing permissions. Policy2 additionally
 authorizes ordinary coding commands, and its real Gemini check ran both `rg` and
 `grep`, wrote/read its own task file, and returned a coherent result with no
 approval requests. The original blocked attempt remains immutable.
+
+The verified live policy2/ABI7 release is
+`20261119T215116Z-679088c-agents-dashboard` (code `679088c`). Both API admission
+profiles select `forge-coding-v2`; the worker advertised the matching digest after
+restart. Migration11 was backed up, applied and verified atomically before that
+activation. Existing attempts were not upgraded or retried implicitly.
