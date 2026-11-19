@@ -4,6 +4,7 @@ from contextlib import closing, contextmanager
 from datetime import UTC
 import json
 import re
+import unicodedata
 from uuid import UUID, uuid4
 
 from psycopg2.extras import Json, RealDictCursor, register_uuid
@@ -48,6 +49,28 @@ VALID_STATUSES = frozenset({
     "blocked_permission",
     "needs_reconcile",
 })
+
+
+def _public_progress(payload):
+    """Project only explicit public reports, never arbitrary event payloads."""
+    if not isinstance(payload, dict) or set(payload) != {
+        "attempt_id", "progress_sequence", "stage", "summary"
+    }:
+        return None
+    attempt, ordinal = payload["attempt_id"], payload["progress_sequence"]
+    stage, summary = payload["stage"], payload["summary"]
+    try:
+        valid = (isinstance(attempt, str) and str(UUID(attempt)) == attempt
+                 and type(ordinal) is int and 1 <= ordinal <= 128
+                 and stage in {"plan", "progress"}
+                 and (stage == "plan") == (ordinal == 1)
+                 and isinstance(summary, str) and bool(summary.strip())
+                 and len(summary.encode("utf-8")) <= 4096
+                 and all(unicodedata.category(c) != "Cc" or c in "\n\t" for c in summary))
+    except (ValueError, TypeError, UnicodeError):
+        return None
+    return ({"attempt_id": attempt, "sequence": ordinal, "stage": stage,
+             "summary": summary} if valid else None)
 NON_RESUMABLE_STATUSES = frozenset({"queued", "running", "cancel_requested", "completed"})
 MODE_ORDER = ("plan", "review", "implement")
 
@@ -506,7 +529,7 @@ class WorkStore:
                 raise Rejected(404, "not_found")
 
             cursor.execute("""
-                SELECT sequence, event_kind, created_at
+                SELECT sequence, event_kind, created_at, payload
                 FROM forge_agent.coding_events
                 WHERE owner_id = %s AND project_alias = %s AND task_id = %s
                   AND sequence > %s
@@ -520,6 +543,8 @@ class WorkStore:
                 "sequence": row["sequence"],
                 "kind": row["event_kind"],
                 "created_at": _timestamp(row["created_at"]),
+                **({"progress": progress} if row["event_kind"] == "checkpoint"
+                   and (progress := _public_progress(row["payload"])) is not None else {}),
             }
             for row in rows
         ]

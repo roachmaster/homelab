@@ -208,6 +208,14 @@ pub fn ide_document() -> Document {
                             component!(text "agents-task-prompt", ""),
                             component!(caption "agents-task-criteria", ""),
                         ]),
+                        component!(region "agents-progress-panel"; [
+                            component!(heading "agents-plan-heading", "Agent plan"),
+                            component!(caption "agents-plan-help", "Public plan and milestones reported by the agent. Completion requires a verified final result."),
+                            component!(transcript "agents-plan", "Agent plan", "You", "Plan", "Waiting for the agent to publish its plan…"),
+                            component!(disclosure "agents-progress-details", "Recent progress"; [
+                                component!(transcript "agents-progress", "Recent agent progress", "You", "Progress", "No milestones reported yet."),
+                            ]),
+                        ]),
                         component!(region "agents-result-panel"; [
                             component!(caption "agents-result-page", ""),
                             component!(transcript "agents-result", "Agent result page", "You", "Agent", "The agent has not published a result yet."),

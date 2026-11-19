@@ -4,6 +4,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 import re
 import select
+import unicodedata
 from types import MappingProxyType
 from uuid import UUID
 
@@ -409,6 +410,23 @@ class WorkerDB:
             cursor.execute(
                 "SELECT forge_coding_worker_api.checkpoint(%s, %s, %s)",
                 (attempt_id, attempt_token, sanitized_summary),
+            )
+
+    def report_progress(self, lease, sequence, kind, summary):
+        attempt_id, attempt_token = _extract_attempt_creds(lease)
+        if type(sequence) is not int or not 1 <= sequence <= 128:
+            raise ValueError("Progress sequence must be an integer in 1..128")
+        if not isinstance(kind, str) or kind not in {"plan", "progress"}:
+            raise ValueError("Invalid progress kind")
+        summary = _validate_summary(summary)
+        if not summary.strip() or any(
+            unicodedata.category(char) == "Cc" and char not in "\n\t" for char in summary
+        ):
+            raise ValueError("Progress summary must be nonblank text without control characters")
+        with self._worker_cursor() as cursor:
+            cursor.execute(
+                "SELECT forge_coding_worker_api.report_progress(%s, %s, %s, %s, %s)",
+                (attempt_id, attempt_token, sequence, kind, summary),
             )
 
     def append_result(self, lease, index, content):

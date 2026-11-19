@@ -36,6 +36,7 @@ GRANT EXECUTE ON FUNCTION
     forge_coding_worker_api.claim(text, uuid, text[]),
     forge_coding_worker_api.renew(uuid, uuid),
     forge_coding_worker_api.checkpoint(uuid, uuid, text),
+    forge_coding_worker_api.report_progress(uuid, uuid, integer, text, text),
     forge_coding_worker_api.append_result(uuid, uuid, integer, text),
     forge_coding_worker_api.publish(uuid, uuid, text, jsonb, jsonb, text, jsonb),
     forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text),

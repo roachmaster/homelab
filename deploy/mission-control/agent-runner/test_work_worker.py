@@ -45,12 +45,16 @@ class FakeWorkspaces:
 class FakeRunner:
     def __init__(self, events, action=None):
         self.events, self.action = events, action
+        self.callbacks = []
 
     def prepare(self):
         self.events.append("runner-prepare")
 
-    def run(self, lease, workspace, stop):
+    def run(self, lease, workspace, stop, *, report_progress=None):
         self.events.append("runner")
+        self.callbacks.append(report_progress)
+        if report_progress is not None:
+            report_progress(1, "plan", "Fixture public plan.")
         if self.action:
             return self.action(lease, workspace, stop)
         return CliOutcome("awaiting_review", "é🛠x" * 20_000, "c" * 36,
@@ -66,6 +70,7 @@ class FakeStore:
         self.cancelled = False
         self.pending = []
         self.claimed = None
+        self.reports = []
 
     def advertise(self, *args):
         self.events.append("advertise")
@@ -79,6 +84,10 @@ class FakeStore:
 
     def checkpoint(self, lease, summary):
         self.events.append("checkpoint")
+
+    def report_progress(self, lease, sequence, kind, summary):
+        self.events.append("progress")
+        self.reports.append((lease, sequence, kind, summary))
 
     def append_result(self, lease, index, text):
         self.chunks.append((index, text))
@@ -109,6 +118,39 @@ class FakeStore:
 
 
 class WorkerLifecycleTest(unittest.TestCase):
+    def test_codex_retains_terminal_reporting_without_scratch_write_callback(self):
+        with TemporaryDirectory(prefix="forge-codex-no-progress-") as root:
+            worker, _, store, events = self._worker(root)
+            value = lease(worker.config, backend="codex")
+            value["incarnation"] = worker.incarnation
+            worker.process(value)
+            self.assertEqual(worker.runner.callbacks, [None])
+            self.assertEqual(store.reports, [])
+            self.assertEqual(store.publications[0][1], "awaiting_review")
+            self.assertEqual(events.count("runner"), 1)
+
+    def test_public_progress_uses_owned_store_and_retries_only_identical_receipt(self):
+        with TemporaryDirectory(prefix="forge-progress-retry-") as root:
+            worker, value, store, events = self._worker(root)
+            store.report_progress = Mock(side_effect=[ConnectionError("lost ack"), None])
+            worker.process(value)
+            self.assertEqual(store.report_progress.call_count, 2)
+            self.assertEqual(store.report_progress.call_args_list[0], store.report_progress.call_args_list[1])
+            self.assertEqual(store.report_progress.call_args.args, (value, 1, "plan", "Fixture public plan."))
+            self.assertEqual(events.count("runner"), 1)
+            self.assertEqual(store.publications[0][1], "awaiting_review")
+
+    def test_unrecoverable_progress_failure_never_publishes_success_or_replays_cli(self):
+        with TemporaryDirectory(prefix="forge-progress-failure-") as root:
+            worker, value, store, events = self._worker(root)
+            store.report_progress = Mock(side_effect=ValueError("invalid receipt"))
+            with self.assertRaises(ValueError):
+                worker.process(value)
+            self.assertEqual(store.report_progress.call_count, 1)
+            self.assertEqual(events.count("runner"), 1)
+            self.assertEqual(store.publications, [])
+            self.assertIn("record-stop", events)
+
     def test_real_immutable_database_lease_is_accepted_without_deepcopy(self):
         with TemporaryDirectory(prefix="forge-worker-lease-") as root:
             worker, value, store, events = self._worker(root)

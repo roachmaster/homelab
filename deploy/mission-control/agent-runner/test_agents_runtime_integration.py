@@ -70,7 +70,7 @@ class AgentsRuntimeIntegrationTest(unittest.TestCase):
         self.supervisor.stop.side_effect = lambda unit: make_stop_proof(unit)
         self.response = "Runtime boundary: é🛠\n" * 4000
         self.runner = Mock()
-        self.runner.run.side_effect = lambda lease, workspace, stop: CliOutcome(
+        self.runner.run.side_effect = lambda lease, workspace, stop, *, report_progress=None: CliOutcome(
             "awaiting_review", self.response, str(uuid4()), {"input_tokens": 7},
             "Selected fake CLI completed", make_stop_proof(lease["unit_name"]),
         )
@@ -107,6 +107,7 @@ class AgentsRuntimeIntegrationTest(unittest.TestCase):
             self.assertIsInstance(lease.recipe, MappingProxyType)
             worker.process(lease)
             self.runner.run.assert_called_once()
+            self.assertIsNone(self.runner.run.call_args.kwargs["report_progress"])
             opened = self.service.get(WorkGet("homelab", task_id))
             self.assertEqual(opened["status"], "awaiting_review")
             self.assertEqual(opened["attempt"]["phase"], "stopped")

@@ -3622,24 +3622,27 @@
     - selector: "#agents-usage-page"
       declarations:
         - ["font-size", ".75rem"]
-    - selector: "#agents-result"
+    - selector: "#agents-result,#agents-plan,#agents-progress"
       declarations:
         - ["border", "0"]
         - ["background", "transparent"]
         - ["max-height", "none"]
         - ["overflow", "visible"]
         - ["padding", "0"]
-    - selector: "#agents-result .fg-message"
+    - selector: "#agents-plan,#agents-progress"
+      declarations:
+        - ["min-height", "0"]
+    - selector: "#agents-result .fg-message,#agents-plan .fg-message,#agents-progress .fg-message"
       declarations:
         - ["border", "0"]
         - ["background", "transparent"]
         - ["max-width", "100%"]
         - ["padding", "0"]
-    - selector: "#agents-result .fg-message-body"
+    - selector: "#agents-result .fg-message-body,#agents-plan .fg-message-body,#agents-progress .fg-message-body"
       declarations:
         - ["overflow-wrap", "anywhere"]
         - ["min-width", "0"]
-    - selector: "#agents-result .fg-message-body :is(pre,table)"
+    - selector: "#agents-result .fg-message-body :is(pre,table),#agents-plan .fg-message-body :is(pre,table),#agents-progress .fg-message-body :is(pre,table)"
       declarations:
         - ["max-width", "100%"]
         - ["overflow-x", "auto"]

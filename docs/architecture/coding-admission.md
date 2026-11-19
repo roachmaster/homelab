@@ -3,8 +3,8 @@
 **Source checkpoint: 19 November 2026.** The repository now implements durable
 coding work, native CLI execution, result paging, explicit review/resume, provider
 usage collection and the generated Agents view. Work and Usage remain independent,
-optional capabilities. The ABI6 portal, API runner and coding worker were deployed
-and verified on 19 November 2026 from code commit `619ac0a`. Open
+optional capabilities. The ABI7 portal, API runner and coding worker were deployed
+and verified on 19 November 2026 from code commit `679088c`. Open
 [Agents](https://portal.thedevex.com/agents) or Home → Agents. The
 [deployment checkpoint](../design/implementation-status.md#observed-deployment-checkpoint)
 records the scope and checks. The earlier admission-only slice is superseded.
@@ -19,7 +19,7 @@ Home links to `/#agents`; `/agents` redirects to that declared same-tab view.
 Existing global navigation stays compact. Rust/WASM owns selection, drafts,
 request guards, actions and polling; generated main JavaScript renders and passes
 actions, and generated I/O worker JavaScript performs admitted requests. The
-browser ABI is **6**, while the HTTP contract stays version **1**. Deploy the
+browser ABI is **7**, while the HTTP contract stays version **1**. Deploy the
 HTML/CSS/JavaScript/WASM bundle atomically.
 
 The catalog supplies permitted projects, their worker-observed Git revisions,
@@ -123,6 +123,63 @@ hashes the actual workspace, and issues a receipt bound to current task revision
 under its lock before spawning. Quota/auth/permission blocks do not automatically
 retry or swap agents. The user must review and explicitly resume with an admitted
 profile. No browser boolean can assert process stop or workspace safety.
+
+## Public plans and live progress
+
+Gemini tasks publish an explicit public plan before work, then summaries of
+observable milestones and blockers. A self-contained `report_progress.py` helper
+writes immutable sequential JSON reports inside the already admitted attempt
+scratch area. It receives no database credentials, attempt IDs or writer tokens.
+The parent owns a bounded directory reader and injects a scoped progress callback
+into the selected command runner. Pure validation stays outside provisioning.
+
+```mermaid
+sequenceDiagram
+    participant A as Gemini CLI
+    participant H as Scratch helper
+    participant W as Supervising worker
+    participant D as PostgreSQL
+    participant P as Portal Rust model
+    A->>H: plan(public steps), then progress(public milestone)
+    H->>H: Atomic numbered JSON report
+    W->>H: Read and validate bounded consecutive reports
+    W->>D: report_progress(attempt token, ordinal, stage, summary)
+    D->>D: Fence owner/lease; commit checkpoint; notify
+    D-->>W: Idempotent receipt
+    P->>D: Existing admitted work_events route through host/runner
+    D-->>P: Whitelisted public progress only
+    P->>P: Render plan and recent current-attempt milestones
+    A-->>W: Final result
+    W->>W: Confirm process scope stopped
+    W->>D: Publish immutable result: awaiting_review
+```
+
+Migration12 adds a narrow worker-only `report_progress` function and report
+identity constraints on existing checkpoint events. Report ordinal1 is `plan`;
+2–128 are `progress`. Each summary is nonblank, at most4096 UTF-8 bytes, and
+rejects control characters except newline/tab. Exact receipt replay is harmless,
+even after the lease expires; new reports require the current attempt's active
+owner/token/lease/deadline fences. Conflicting or skipped ordinals fail. Neither
+reporting nor notifications changes task status, task revision or stop authority.
+A transient lost acknowledgement retries the same report, never model execution.
+
+The existing event reader optionally returns a typed `progress` object containing
+only `attempt_id`, report `sequence`, `stage` and `summary`; it never forwards opaque
+payloads, provider transcripts, tool arguments or private reasoning. The global
+event sequence remains independent of the report ordinal and task revision. Rust
+loads history for finished tasks, retains the plan plus the latest20 milestones,
+filters other attempts and refreshes when new events arrive at unchanged revision.
+The complete bounded history remains in PostgreSQL. Receipt dates, rather than
+worker heartbeat times, identify agent updates.
+
+An otherwise successful Gemini run requires a persisted public plan. This is a
+reporting requirement, not an OS write gate or proof that the plan was followed.
+Final publication still requires the coherent result and verified stopped scope;
+acceptance remains explicit. Plan/review repository mounts stay read-only while
+the allowed command helper writes scratch. Codex keeps its existing sandbox and
+terminal reporting; its read-only inner sandbox has no admitted scratch-write
+channel in this slice. Existing attempts retain their original instructions and
+cannot acquire this reporting path while already running.
 
 ## Full results and uncertain acknowledgements
 

@@ -51,6 +51,9 @@ pub(super) struct Agents {
     selected: Option<String>,
     task: Option<WorkTaskDetail>,
     event_sequence: u64,
+    events_loaded: bool,
+    events_more: bool,
+    progress: Vec<WorkLogEvent>,
     result: String,
     result_digest: Option<String>,
     result_attempt: Option<String>,
@@ -250,9 +253,58 @@ impl Agents {
         }
     }
     fn schedule(&mut self, id: String, effects: &mut Vec<UiEffect>) {
+        if self.active
+            && self.pending.is_none()
+            && self.task.is_some()
+            && (!self.events_loaded || self.events_more)
+        {
+            self.read_events(id, effects);
+            return;
+        }
         if self.active && (self.processing() || self.usage_waiting) {
             self.watch = Some(id.clone());
             effects.push(UiEffect::AgentsWatch { watch: id });
+        }
+    }
+    fn read_events(&mut self, id: String, effects: &mut Vec<UiEffect>) {
+        if let Some(task_id) = self.selected.clone() {
+            self.request(
+                WorkRequest::WorkEvents {
+                    request_id: id,
+                    project_alias: self.project.clone(),
+                    task_id,
+                    after_sequence: self.event_sequence,
+                    limit: 50,
+                },
+                effects,
+            );
+        }
+    }
+    fn clear_progress(&mut self) {
+        self.event_sequence = 0;
+        self.events_loaded = false;
+        self.events_more = false;
+        self.progress.clear();
+    }
+    fn keep_progress(&mut self, events: Vec<WorkLogEvent>) {
+        let attempt = self
+            .task
+            .as_ref()
+            .filter(|t| t.status != WorkStatus::Queued)
+            .and_then(|t| t.attempt.as_ref())
+            .map(|a| a.attempt_id.as_str());
+        for event in events {
+            if event
+                .progress
+                .as_ref()
+                .is_some_and(|p| Some(p.attempt_id.as_str()) == attempt)
+            {
+                self.progress.push(event);
+            }
+        }
+        // Retain the plan and the latest20 public milestones; history stays in PostgreSQL.
+        while self.progress.len() > 21 {
+            self.progress.remove(1);
         }
     }
     fn processing(&self) -> bool {
@@ -270,7 +322,15 @@ impl Agents {
                 self.status="Could not refresh tasks. Your draft and previous result are kept. Try Refresh.".into();
             }
             self.warning = true;
-            self.schedule(watch, effects);
+            // Transport failures retry only after the normal polling delay.
+            if self.active
+                && (self.processing()
+                    || self.usage_waiting
+                    || self.task.is_some() && (!self.events_loaded || self.events_more))
+            {
+                self.watch = Some(watch.clone());
+                effects.push(UiEffect::AgentsWatch { watch });
+            }
         }
         if self
             .pending_usage
@@ -318,7 +378,9 @@ impl Agents {
                 self.watch = None;
                 if work
                     && self.pending.is_none()
-                    && self.task.as_ref().is_some_and(|t| t.status.is_processing())
+                    && self.task.as_ref().is_some_and(|t| {
+                        t.status.is_processing() || !self.events_loaded || self.events_more
+                    })
                 {
                     self.request(
                         WorkRequest::WorkEvents {
@@ -358,6 +420,7 @@ impl Agents {
                 self.pending = None;
                 self.selected = None;
                 self.task = None;
+                self.clear_progress();
                 self.clear_result();
                 self.pane = Pane::Compose;
                 self.status =
@@ -368,10 +431,17 @@ impl Agents {
                 self.pane = Pane::List;
                 self.selected = None;
                 self.task = None;
+                self.clear_progress();
                 self.watch = None;
                 if work {
                     self.pending = None;
-                    self.list(id, Direction::Current, effects);
+                    // A restored draft may be closed before its catalog reply.
+                    // Keep bootstrap available for the next assignment.
+                    if self.catalog.is_none() {
+                        self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
+                    } else {
+                        self.list(id, Direction::Current, effects);
+                    }
                 }
             }
             UiEvent::AgentsDiscardDraft {} => {
@@ -411,6 +481,7 @@ impl Agents {
                     self.providers.clear();
                     self.selected = None;
                     self.task = None;
+                    self.clear_progress();
                     self.list_cursor = None;
                     self.list_next = None;
                     self.list_history.clear();
@@ -489,7 +560,7 @@ impl Agents {
                     self.pending = None;
                     self.selected = Some(task_id);
                     self.task = None;
-                    self.event_sequence = 0;
+                    self.clear_progress();
                     self.clear_result();
                     self.pane = Pane::Reader;
                     self.get(id, effects);
@@ -760,17 +831,22 @@ impl Agents {
                 self.criteria.clear();
                 self.selected = Some(task_id);
                 self.task = None;
+                self.clear_progress();
                 self.pane = Pane::Reader;
-                self.event_sequence = 0;
                 self.clear_result();
                 self.status = "Task saved. The agent works in the background.".into();
                 self.get(id, effects);
             }
             WorkResponse::WorkOpened { task, .. } => {
                 let manifest = task.result.clone();
-                let changed = self.task.as_ref().is_none_or(|t| t.task_id != task.task_id);
+                let changed = self.task.as_ref().is_none_or(|t| {
+                    t.task_id != task.task_id
+                        || (t.status != WorkStatus::Queued && task.status == WorkStatus::Queued)
+                        || t.attempt.as_ref().map(|a| &a.attempt_id)
+                            != task.attempt.as_ref().map(|a| &a.attempt_id)
+                });
                 if changed {
-                    self.event_sequence = 0;
+                    self.clear_progress();
                 }
                 self.status = task.status.label().into();
                 self.task = Some(*task);
@@ -820,13 +896,18 @@ impl Agents {
                 revision,
                 status,
                 next_sequence,
+                events,
                 ..
             } => {
                 self.event_sequence = next_sequence;
+                self.events_loaded = true;
+                self.events_more = events.len() == 50;
+                let updates = !events.is_empty();
+                self.keep_progress(events);
                 if self
                     .task
                     .as_ref()
-                    .is_some_and(|t| t.revision != revision || t.status != status)
+                    .is_some_and(|t| t.revision != revision || t.status != status || updates)
                 {
                     self.get(id, effects);
                 } else {
@@ -852,7 +933,7 @@ impl Agents {
             WorkResponse::WorkResumed { .. } => {
                 self.retry = None;
                 self.review_note.clear();
-                self.event_sequence = 0;
+                self.clear_progress();
                 self.clear_result();
                 self.status = "Task queued after trusted reconciliation.".into();
                 self.get(id, effects);
@@ -900,6 +981,7 @@ impl Agents {
                 self.result_total = total_bytes;
                 self.result_next = next_cursor;
                 self.result_complete = complete;
+                self.schedule(id, effects);
             }
             WorkResponse::WorkFailed { code, .. } => {
                 self.retry = if code == WorkFailure::Unavailable && request.is_mutation() {
@@ -1046,6 +1128,10 @@ impl Agents {
             ),
             visible("agents-overview", active && !compose && !reader),
             visible("agents-reader", active && work && reader),
+            visible(
+                "agents-progress-panel",
+                active && reader && self.task.as_ref().is_some_and(|t| t.attempt.is_some()),
+            ),
             visible("agents-back", active && (compose || reader)),
             visible("agents-new", active && work && !compose),
             visible("agents-retry", active && self.retry.is_some()),
@@ -1130,10 +1216,27 @@ impl Agents {
             ),
             text(
                 "agents-attempt",
-                self.task
-                    .as_ref()
-                    .and_then(|t| t.attempt.as_ref())
-                    .map_or("", |a| a.summary.as_str()),
+                self.progress.last().map_or_else(
+                    || {
+                        self.task
+                            .as_ref()
+                            .filter(|t| t.status != WorkStatus::Queued)
+                            .and_then(|t| t.attempt.as_ref())
+                            .map_or_else(String::new, |a| a.summary.clone())
+                    },
+                    |e| {
+                        let p = e.progress.as_ref().expect("retained public report");
+                        format!(
+                            "{} · {}",
+                            if p.stage == WorkProgressStage::Plan {
+                                "Plan saved"
+                            } else {
+                                "Progress saved"
+                            },
+                            relative_time(&e.created_at, self.now_ms)
+                        )
+                    },
+                ),
             ),
             text(
                 "agents-result-page",
@@ -1355,6 +1458,58 @@ impl Agents {
                 badge: task_badge(t.status),
             });
         }
+        let plan = self.progress.iter().find(|e| {
+            e.progress
+                .as_ref()
+                .is_some_and(|p| p.stage == WorkProgressStage::Plan)
+        });
+        let message = |event: &WorkLogEvent| {
+            let p = event.progress.as_ref().expect("retained public report");
+            TranscriptMessage {
+                role: ChatRole::Assistant,
+                content: p.summary.clone(),
+                rendered_html: render_markdown(&p.summary),
+                notice: Some(short_time(&event.created_at)),
+                header: None,
+            }
+        };
+        view.transcripts.push(TranscriptBinding {
+            id: "agents-plan",
+            conversation: 0,
+            assistant_label: Some("Plan"),
+            messages: plan.map_or_else(
+                || {
+                    vec![TranscriptMessage {
+                        role: ChatRole::Assistant,
+                        content: if self.task.as_ref().is_some_and(|t| t.status.is_processing()) {
+                            "Waiting for the agent to publish its plan…"
+                        } else {
+                            "This attempt did not publish a plan."
+                        }
+                        .into(),
+                        rendered_html: None,
+                        notice: None,
+                        header: None,
+                    }]
+                },
+                |e| vec![message(e)],
+            ),
+        });
+        view.transcripts.push(TranscriptBinding {
+            id: "agents-progress",
+            conversation: 0,
+            assistant_label: Some("Progress"),
+            messages: self
+                .progress
+                .iter()
+                .filter(|e| {
+                    e.progress
+                        .as_ref()
+                        .is_some_and(|p| p.stage == WorkProgressStage::Progress)
+                })
+                .map(message)
+                .collect(),
+        });
         view.transcripts.push(TranscriptBinding {
             id: "agents-result",
             conversation: 0,

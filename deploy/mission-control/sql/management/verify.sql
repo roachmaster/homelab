@@ -111,6 +111,31 @@ BEGIN
         RAISE EXCEPTION 'Forge elevated coding tool policy migration 0011 is missing';
     END IF;
 
+    IF NOT EXISTS (
+        SELECT 1 FROM forge_agent.schema_migrations WHERE version = 12 AND name = 'coding_progress'
+    ) THEN
+        RAISE EXCEPTION 'Forge coding progress migration 0012 is missing';
+    END IF;
+    FOR expected IN
+        SELECT * FROM (VALUES ('progress_attempt_id', 'uuid'), ('progress_sequence', 'integer')) AS columns(name, type)
+    LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_catalog.pg_attribute a
+            WHERE a.attrelid = 'forge_agent.coding_events'::regclass
+              AND a.attname = expected.name AND a.atttypid = expected.type::regtype
+              AND NOT a.attnotnull AND NOT a.attisdropped
+        ) THEN
+            RAISE EXCEPTION 'Missing or unexpected nullable progress column %', expected.name;
+        END IF;
+    END LOOP;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_proc p
+        WHERE p.oid = 'forge_coding_worker_api.report_progress(uuid,uuid,integer,text,text)'::regprocedure
+          AND p.prosecdef AND 'search_path=pg_catalog, pg_temp' = ANY(p.proconfig)
+    ) THEN
+        RAISE EXCEPTION 'Missing or unexpected coding progress function';
+    END IF;
+
     -- This is a capability/version guard, not permission inferred from a
     -- comment or from a recipe ID alone. Keep exact worker/recipe digest
     -- matching and the SECURITY DEFINER search path when replacing claim.
@@ -219,6 +244,7 @@ BEGIN
     -- Whitespace outside quoted values is ignored; other changes fail closed.
     FOR expected IN
         SELECT * FROM (VALUES
+            ('coding_events', 'coding_events_progress_identity', E'CREATE UNIQUE INDEX coding_events_progress_identity ON forge_agent.coding_events USING btree (owner_id, project_alias, task_id, progress_attempt_id, progress_sequence) WHERE (progress_attempt_id IS NOT NULL)'),
             ('coding_tasks', 'coding_tasks_by_project_created', $def$CREATE INDEX coding_tasks_by_project_created ON forge_agent.coding_tasks USING btree (owner_id, project_alias, created_at, id)$def$),
             ('coding_tasks', 'coding_tasks_by_project_status_created', $def$CREATE INDEX coding_tasks_by_project_status_created ON forge_agent.coding_tasks USING btree (owner_id, project_alias, status, created_at, id)$def$),
             ('coding_worker_readiness', 'coding_worker_readiness_by_owner_observed', $def$CREATE INDEX coding_worker_readiness_by_owner_observed ON forge_agent.coding_worker_readiness USING btree (owner_id, observed_at DESC)$def$),
@@ -321,6 +347,8 @@ BEGIN
                  AND (accepted_at IS NULL)
                  AND (revision > 1))) IS TRUE))$def$),
             ('coding_tasks', 'coding_tasks_recipe_mode_check', 'c', $def$CHECK (((pinned_recipe ->> 'mode'::text) = mode))$def$),
+            ('coding_events', 'coding_events_progress_attempt_fk', 'f', E'FOREIGN KEY (owner_id, project_alias, task_id, progress_attempt_id) REFERENCES forge_agent.coding_attempts(owner_id, project_alias, task_id, attempt_id)'),
+            ('coding_events', 'coding_events_progress_check', 'c', E'CHECK (((((progress_attempt_id IS NULL) AND (progress_sequence IS NULL)) OR ((progress_attempt_id IS NOT NULL) AND ((progress_sequence >= 1) AND (progress_sequence <= 128)) AND (event_kind = ''checkpoint''::text) AND ((payload - ARRAY[''attempt_id''::text, ''progress_sequence''::text, ''stage''::text, ''summary''::text]) = ''{}''::jsonb) AND (payload ?& ARRAY[''attempt_id''::text, ''progress_sequence''::text, ''stage''::text, ''summary''::text]) AND (jsonb_typeof((payload -> ''attempt_id''::text)) = ''string''::text) AND ((payload ->> ''attempt_id''::text) = (progress_attempt_id)::text) AND (jsonb_typeof((payload -> ''progress_sequence''::text)) = ''number''::text) AND ((payload ->> ''progress_sequence''::text) = (progress_sequence)::text) AND (jsonb_typeof((payload -> ''stage''::text)) = ''string''::text) AND (((progress_sequence = 1) AND ((payload ->> ''stage''::text) = ''plan''::text)) OR ((progress_sequence > 1) AND ((payload ->> ''stage''::text) = ''progress''::text))) AND (jsonb_typeof((payload -> ''summary''::text)) = ''string''::text) AND ((octet_length((payload ->> ''summary''::text)) >= 1) AND (octet_length((payload ->> ''summary''::text)) <= 4096)) AND (btrim((payload ->> ''summary''::text), '' \u0009\u000d\u000a''::text) <> ''''::text) AND ((payload ->> ''summary''::text) !~ ''[\u0001-\u0008\u000b-\u001f\u007f-\u009f]''::text))) IS TRUE))'),
             ('coding_events', 'coding_events_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, sequence)$def$),
             ('coding_events', 'coding_events_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
             ('coding_events', 'coding_events_sequence_check', 'c', $def$CHECK (((sequence >= 1)
@@ -512,6 +540,7 @@ BEGIN
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.claim(text,uuid,text[])', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.renew(uuid,uuid)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.checkpoint(uuid,uuid,text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.report_progress(uuid,uuid,integer,text,text)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.append_result(uuid,uuid,integer,text)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.publish(uuid,uuid,text,jsonb,jsonb,text,jsonb)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.record_stop(uuid,uuid,jsonb,text)', 'EXECUTE')

@@ -291,6 +291,22 @@ fn polling_uses_owned_watch_and_accepts_events_beyond_task_revision() {
     );
     assert!(effects
         .iter()
+        .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkEvents { .. }))));
+    let effects = step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkEvents {
+            request_id: "watch".into(),
+            project_alias: "workspace".into(),
+            task_id: TASK.into(),
+            revision: 4,
+            status: WorkStatus::Running,
+            events: vec![],
+            next_sequence: 0,
+        }),
+        "watch",
+    );
+    assert!(effects
+        .iter()
         .any(|e| matches!(e,UiEffect::AgentsWatch{watch} if watch=="watch")));
     assert!(step(
         &mut agents,
@@ -321,6 +337,7 @@ fn polling_uses_owned_watch_and_accepts_events_beyond_task_revision() {
             events: vec![WorkLogEvent {
                 sequence: 55,
                 kind: WorkEventKind::Checkpoint,
+                progress: None,
                 created_at: TIME.into(),
             }],
             next_sequence: 55,
@@ -346,6 +363,7 @@ fn result_pages_are_utf8_bounded_manifest_bound_and_previous_is_exact() {
     agents.task = Some(task);
     agents.selected = Some(TASK.into());
     agents.pane = Pane::Reader;
+    agents.events_loaded = true; // This test isolates paging after history was admitted.
     agents.result_page("page-0".into(), None, &mut vec![]);
     for page in 0..4 {
         let offset = page * 16384;
@@ -608,4 +626,198 @@ fn usage_pages_are_local_and_keep_a_selected_card_on_the_visible_page() {
     assert_eq!(agents.usage_page, 12);
     step(&mut agents, UiEvent::PreviousAgentUsage {}, "back");
     assert_eq!(agents.usage_page, 6);
+}
+
+#[test]
+fn terminal_history_keeps_public_plan_and_updates_without_revision_changes() {
+    let mut agents = ready();
+    agents.selected = Some(TASK.into());
+    agents.pane = Pane::Reader;
+    agents.get("get".into(), &mut vec![]);
+    let effects = step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkOpened {
+            request_id: "get".into(),
+            task: detail(WorkStatus::AwaitingReview).into(),
+        }),
+        "history",
+    );
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkEvents { .. }))));
+    let events = (1..=31)
+        .map(|ordinal| WorkLogEvent {
+            sequence: ordinal,
+            kind: WorkEventKind::Checkpoint,
+            created_at: TIME.into(),
+            progress: Some(WorkProgress {
+                attempt_id: ATTEMPT.into(),
+                sequence: ordinal as u16,
+                stage: if ordinal == 1 {
+                    WorkProgressStage::Plan
+                } else {
+                    WorkProgressStage::Progress
+                },
+                summary: if ordinal == 1 {
+                    "## Public plan\n1. Inspect\n2. Test".into()
+                } else {
+                    format!("Milestone {ordinal}")
+                },
+            }),
+        })
+        .collect();
+    let effects = step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkEvents {
+            request_id: "history".into(),
+            project_alias: "workspace".into(),
+            task_id: TASK.into(),
+            revision: 4,
+            status: WorkStatus::AwaitingReview,
+            events,
+            next_sequence: 31,
+        }),
+        "refresh",
+    );
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkGet { .. }))));
+    assert_eq!(agents.progress.len(), 21);
+    assert_eq!(
+        agents.progress[0].progress.as_ref().unwrap().stage,
+        WorkProgressStage::Plan
+    );
+    assert_eq!(agents.progress[1].progress.as_ref().unwrap().sequence, 12);
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    let plan = view
+        .transcripts
+        .iter()
+        .find(|t| t.id == "agents-plan")
+        .unwrap();
+    assert!(plan.messages[0]
+        .rendered_html
+        .as_ref()
+        .unwrap()
+        .contains("<h2>Public plan</h2>"));
+    assert_eq!(
+        agents.task.as_ref().unwrap().status,
+        WorkStatus::AwaitingReview
+    );
+    // A resumed attempt clears the previous attempt's plan and reads its own history.
+    let mut replacement = detail(WorkStatus::Running);
+    replacement.attempt.as_mut().unwrap().attempt_id = KEY.into();
+    step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkOpened {
+            request_id: "refresh".into(),
+            task: replacement.into(),
+        }),
+        "new-history",
+    );
+    assert!(agents.progress.is_empty());
+    assert_eq!(agents.event_sequence, 0);
+}
+
+#[test]
+fn reports_from_an_old_attempt_do_not_become_current_progress() {
+    let mut agents = ready();
+    agents.task = Some(detail(WorkStatus::Running));
+    agents.keep_progress(vec![WorkLogEvent {
+        sequence: 10,
+        kind: WorkEventKind::Checkpoint,
+        created_at: TIME.into(),
+        progress: Some(WorkProgress {
+            attempt_id: KEY.into(),
+            sequence: 1,
+            stage: WorkProgressStage::Plan,
+            summary: "Foreign attempt plan".into(),
+        }),
+    }]);
+    assert!(agents.progress.is_empty());
+}
+
+#[test]
+fn an_external_resume_clears_the_old_plan_once_without_restarting_history_forever() {
+    let mut agents = ready();
+    agents.selected = Some(TASK.into());
+    agents.task = Some(detail(WorkStatus::Failed));
+    agents.progress = vec![WorkLogEvent {
+        sequence: 3,
+        kind: WorkEventKind::Checkpoint,
+        created_at: TIME.into(),
+        progress: Some(WorkProgress {
+            attempt_id: ATTEMPT.into(),
+            sequence: 1,
+            stage: WorkProgressStage::Plan,
+            summary: "Old plan".into(),
+        }),
+    }];
+    agents.get("refresh".into(), &mut vec![]);
+    step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkOpened {
+            request_id: "refresh".into(),
+            task: detail(WorkStatus::Queued).into(),
+        }),
+        "history",
+    );
+    assert!(agents.progress.is_empty());
+    assert_eq!(agents.event_sequence, 0);
+    agents.event_sequence = 9;
+    agents.events_loaded = true;
+    agents.get("same".into(), &mut vec![]);
+    step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkOpened {
+            request_id: "same".into(),
+            task: detail(WorkStatus::Queued).into(),
+        }),
+        "watch",
+    );
+    assert_eq!(agents.event_sequence, 9);
+    assert!(agents.events_loaded);
+}
+
+#[test]
+fn failed_terminal_history_waits_for_a_timer_before_retrying() {
+    let mut agents = ready();
+    agents.task = Some(detail(WorkStatus::Completed));
+    agents.selected = Some(TASK.into());
+    agents.read_events("history".into(), &mut vec![]);
+    let mut effects = vec![];
+    agents.network_failed("history", "retry-watch".into(), &mut effects);
+    assert!(!effects.iter().any(|e| matches!(e, UiEffect::Work(_))));
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, UiEffect::AgentsWatch { .. })));
+    let effects = step(
+        &mut agents,
+        UiEvent::PollAgents {
+            watch: "retry-watch".into(),
+        },
+        "retry",
+    );
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkEvents { .. }))));
+}
+
+#[test]
+fn closing_a_restored_draft_before_catalog_arrives_restarts_catalog_admission() {
+    let mut agents = ready();
+    agents.catalog = None;
+    agents.pane = Pane::Compose;
+    agents.request(
+        WorkRequest::WorkCatalog {
+            request_id: "initial".into(),
+        },
+        &mut vec![],
+    );
+    let effects = step(&mut agents, UiEvent::AgentsBack {}, "catalog");
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkCatalog { .. }))));
+    assert_eq!(agents.pending.as_ref().unwrap().request_id(), "catalog");
+    assert!(!agents.can_submit());
 }

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import time
 from tempfile import TemporaryDirectory
 import threading
 import unittest
@@ -266,6 +267,10 @@ class SupervisorContractTest(unittest.TestCase):
             self.assertIn("--no-daemon", codex.argv)
             self.assertIn("--ignore-user-config", codex.argv)
             self.assertIn("read-only", codex.argv)
+            self.assertEqual(codex.argv, (str(Path("/usr/bin/python3").resolve()), "--no-daemon", "--ask-for-approval", "never", "exec",
+                                         "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+                                         "--model", "fixture-model", "--json", "--color", "never", "--ephemeral", "-"))
+            self.assertFalse((codex.scratch / "report_progress.py").exists())
 
     def test_elevated_agy_tools_keep_mode_scoped_writes_and_unavailable_tools_denied(self):
         with TemporaryDirectory(prefix="forge-elevated-tools-") as root:
@@ -371,7 +376,7 @@ class FakeSupervisor:
         self.script, self.process = script, None
 
     def argv(self, _lease, _invocation):
-        return ["/usr/bin/python3", "-c", self.script]
+        return ["/usr/bin/python3", "-c", self.script.replace("__SCRATCH__", repr(str(_invocation.scratch)))]
 
     def stop(self, unit):
         if self.process is not None and self.process.poll() is None:
@@ -381,7 +386,7 @@ class FakeSupervisor:
 
 
 class FakeChildTest(unittest.TestCase):
-    def _run(self, script, stop=None):
+    def _run(self, script, stop=None, report_progress=None):
         with TemporaryDirectory(prefix="forge-coding-child-") as root:
             config = parse_config(raw_config(root))
             value = lease(config)
@@ -393,7 +398,48 @@ class FakeChildTest(unittest.TestCase):
             provider.prepare()
             workspace = WorkspaceLease(Path(root) / "task", config.projects["homelab"], Path(root) / "git",
                                        value["task_id"], value["base_revision"])
-            return provider.run(value, workspace, stop or threading.Event())
+            return provider.run(value, workspace, stop or threading.Event(), report_progress=report_progress)
+
+    def test_fake_child_public_plan_and_progress_persist_during_execution_and_final_flush(self):
+        with TemporaryDirectory(prefix="forge-progress-live-ack-") as root:
+            acknowledgement = Path(root) / "plan-persisted"
+            reports = []
+            script = ("import sys,json,uuid,subprocess,pathlib,time\nsys.stdin.read()\n"
+                      "helper=str(pathlib.Path(__SCRATCH__)/'report_progress.py')\n"
+                      "subprocess.run(['/usr/bin/python3',helper,'plan','Read and test'],check=True)\n"
+                      "deadline=time.monotonic()+5\n"
+                      f"while not pathlib.Path({str(acknowledgement)!r}).exists():\n"
+                      " if time.monotonic()>deadline: raise RuntimeError('No live progress callback')\n"
+                      " time.sleep(.01)\n"
+                      "subprocess.run(['/usr/bin/python3',helper,'progress','Tests passed'],check=True)\n"
+                      "print(json.dumps({'event':'result','result':{'status':'SUCCESS',"
+                      "'conversation_id':str(uuid.uuid4()),'response':'Final public result'}}))")
+            def persisted(*record):
+                reports.append(record)
+                acknowledgement.write_text("persisted")
+            result = self._run(script, report_progress=persisted)
+            self.assertEqual(result.status, "awaiting_review")
+            self.assertEqual(reports, [(1, "plan", "Read and test"), (2, "progress", "Tests passed")])
+
+    def test_fake_child_missing_plan_malformed_report_or_uncertain_sink_cannot_publish_success(self):
+        terminal = ("print(json.dumps({'event':'result','result':{'status':'SUCCESS',"
+                    "'conversation_id':str(uuid.uuid4()),'response':'Final public result'}}))")
+        base = "import sys,json,uuid,pathlib,subprocess;sys.stdin.read();"
+        result = self._run(base + terminal, report_progress=lambda *_: None)
+        self.assertEqual(result.status, "failed")
+        self.assertIn("public plan", result.summary)
+        result = self._run(base + "(pathlib.Path(__SCRATCH__)/'progress/000001.json').symlink_to('/etc/passwd');" + terminal,
+                           report_progress=lambda *_: None)
+        self.assertEqual(result.status, "failed")
+        def unavailable(*_):
+            raise ConnectionError("private connection detail")
+        before = time.monotonic()
+        result = self._run(base + "subprocess.run(['/usr/bin/python3',str(pathlib.Path(__SCRATCH__)/'report_progress.py'),"
+                           "'plan','Public plan'],check=True);import time;time.sleep(30);" + terminal,
+                           report_progress=unavailable)
+        self.assertEqual(result.status, "needs_reconcile")
+        self.assertNotIn("private", result.summary)
+        self.assertLess(time.monotonic() - before, 5, "Uncertain persistence must stop the still-running child")
 
     def test_fake_child_drains_both_pipes_and_preserves_large_final_reply(self):
         result = self._run("import sys,json,uuid; sys.stdin.read(); "

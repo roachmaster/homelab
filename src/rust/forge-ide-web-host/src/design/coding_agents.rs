@@ -34,6 +34,7 @@ pub(super) const DISPATCH: &[Node] = &[
         element!(Nav [Class = "section-nav", AriaLabel = "Coding-agent dispatch sections"];
             element!(A [Href = "#flow"]; text("End-to-end flow")),
             element!(A [Href = "#ownership"]; text("Ownership and providers")),
+            element!(A [Href = "#progress"]; text("Plans and live progress")),
             element!(A [Href = "#lifecycle"]; text("Leases and takeover")),
             element!(A [Href = "#contracts"]; text("Implemented contracts")),
             element!(A [Href = "#rollout"]; text("Rollout")),
@@ -300,6 +301,18 @@ pub(super) const DISPATCH: &[Node] = &[
             "Sequence diagram showing quota_blocked, lease-loss stop recording, and crash lease expiry all avoiding automatic requeue, followed by trusted Reconciler verification, receipt issuance, coordinator inspection, and ide.work.resume with recipe B.",
             "Open full-size takeover sequence diagram"
         ),
+    ),
+    element!(Section [Id = "progress", Class = "design-section", AriaLabelledby = "progress-title"];
+        element!(H2 [Id = "progress-title"]; text("Plans and live progress")),
+        element!(P; text("Gemini publishes a concise public plan before work and reports observable milestones through its provisioned scratch helper. The trusted worker validates bounded, sequential reports and persists them as checkpoint events. No database credentials or attempt tokens enter the agent process.")),
+        element!(Ol [Class = "contract-steps"];
+            element!(Li; text("Gemini → scratch helper: publish plan, then milestone summaries.")),
+            element!(Li; text("Worker → scoped database port: report_progress with the current attempt token and report sequence.")),
+            element!(Li; text("PostgreSQL: validate owner, token, active lease and order; commit one checkpoint per report and notify listeners. Exact retries reuse the receipt.")),
+            element!(Li; text("Portal → admitted events endpoint: read the current attempt's plan and recent progress, including after reload. A new checkpoint refreshes the view without changing the task revision.")),
+            element!(Li; text("Worker → final publication: a coherent result and confirmed scope stop establish Ready for review. Only explicit review acceptance establishes Accepted.")),
+        ),
+        element!(P; text("Reports describe intended steps and observed work; they are not private reasoning, verified test evidence or completion authority. Plan-first is an agent reporting requirement, not an operating-system write gate. Codex retains its existing sandbox and terminal-result reporting; this scratch-helper integration is enabled for Gemini. Older attempts cannot acquire reporting instructions retroactively.")),
     ),
     element!(Section [Id = "contracts", Class = "design-section", AriaLabelledby = "contracts-title"];
         element!(H2 [Id = "contracts-title"]; text("Implemented API, DTO, and DAO contracts")),

@@ -3204,7 +3204,7 @@ async function agentsJourney() {
     const relay = await agentsRelayOwner.ready;
     fixture = await startFixture(false, false, { agents: relay });
     context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    const { page, errors } = await connect(context, fixture);
+    const { page, errors, respondToLeaveWarning } = await connect(context, fixture);
     await page.locator('#forge-home').click();
     await check(page).toHaveURL(fixture.origin + '/home');
     await page.locator('.home-launcher-agents').focus();
@@ -3253,6 +3253,18 @@ async function agentsJourney() {
     const newTaskBox = await page.locator('#agents-new').boundingBox();
     assert(Math.abs(newTaskBox.y + newTaskBox.height / 2 - initialLayout[0].y - initialLayout[0].height / 2) < 20, 'New task shares the compact Agents header row');
 
+    // A finished task has no polling lifecycle; opening it must still read its
+    // persisted public plan/history rather than waiting for a state revision.
+    await seed.locator('.fg-row-select').click();
+    await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-status')).toContainText('Ready for review');
+    await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
+    await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
+    await check(page.locator('#agents-progress-panel')).not.toContainText('FOREIGN ATTEMPT PROGRESS MUST NOT APPEAR');
+    await check(page.locator('#agents-progress-panel script,#agents-progress-panel img')).toHaveCount(0);
+    await page.locator('#agents-back').click();
+    await check(page.locator('#agents-overview')).toBeVisible();
+
     await page.locator('#agents-new').click();
     const prompt = page.locator('#agents-prompt');
     const criteria = page.locator('#agents-criteria');
@@ -3300,6 +3312,8 @@ async function agentsJourney() {
     assert.equal(relay.taskCount, 1, 'typed403 does not expire the session or admit a task');
 
     relay.faults.dropNextSubmit = true;
+    relay.faults.holdProgressCompletion = true;
+    const progressRefetches = relay.progressRefetches;
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-retry')).toBeVisible();
     await check(prompt).toBeDisabled();
@@ -3310,6 +3324,22 @@ async function agentsJourney() {
     await page.locator('#agents-retry').click();
     await check(page.locator('[data-workspace-navigation-status]')).toBeHidden();
     await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
+    await check(page.locator('#agents-plan h2')).toHaveText('Public fixture plan');
+    await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
+    await check(page.locator('#agents-task-status')).toContainText('Running');
+    await check(page.locator('#agents-accept')).toBeHidden();
+    await check(page.locator('#agents-result-panel')).toBeHidden();
+    await check(page.locator('#agents-attempt')).toContainText('Progress saved');
+    await check.poll(() => relay.progressRefetches).toBeGreaterThan(progressRefetches);
+    await check(page.locator('#agents-progress-panel')).not.toContainText('FOREIGN ATTEMPT PROGRESS MUST NOT APPEAR');
+    await check(page.locator('#agents-progress-panel script,#agents-progress-panel img')).toHaveCount(0);
+    assert.equal(await page.evaluate(() => globalThis.__forgeProgressExecuted), undefined,
+      'public Markdown progress is inert text and grants no execution or terminal status');
+    await disclosure(page, 'agents-progress-details', true);
+    await check(page.locator('#agents-progress')).toBeVisible();
+    await screenshot(page, 'ide-agents-progress-phone.png');
+    relay.faults.holdProgressCompletion = false;
     await check(page.locator('#agents-task-status')).toContainText('Ready for review');
     await check(page.locator('#agents-result')).toContainText('Verified first section.');
     assert.equal(relay.taskCount, 2, 'unknown-outcome retry reuses the committed admission');
@@ -3330,7 +3360,25 @@ async function agentsJourney() {
     await page.locator('#agents-accept').click();
     await check(page.locator('#agents-task-status')).toContainText('Accepted');
     await check(page.locator('#agents-accept')).toBeHidden();
+    const historyReads = relay.calls.filter(kind => kind === 'work_events').length;
+    const acceptedTitle = await page.locator('#agents-task-title').innerText();
+    await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+    // Reload restores the earlier local handoff draft. Reopen the saved task
+    // from the list; progress history comes from PostgreSQL, not that draft.
+    await check(page.locator('#agents')).toBeVisible();
+    await page.locator('#agents-back').click();
+    await check(page.locator('#agents-overview')).toBeVisible();
+    await page.locator('#agents-tasks .fg-row-select').filter({ hasText: acceptedTitle }).click();
+    await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-status')).toContainText('Accepted');
+    await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
+    await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
+    await check.poll(() => relay.calls.filter(kind => kind === 'work_events').length).toBeGreaterThan(historyReads);
+    await check(page.locator('#agents-progress-panel')).not.toContainText('FOREIGN ATTEMPT PROGRESS MUST NOT APPEAR');
+    await check(page.locator('#agents-progress-panel script,#agents-progress-panel img')).toHaveCount(0);
+    assert.equal(await page.evaluate(() => globalThis.__forgeProgressExecuted), undefined);
 
+    relay.faults.holdProgressCompletion = true;
     await page.locator('#agents-new').click();
     await prompt.fill('Cancel fixture work');
     await criteria.fill('Confirm that the worker stops.');
@@ -3339,6 +3387,7 @@ async function agentsJourney() {
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-task-status')).toContainText('Stopping');
     await check(page.locator('#agents-task-status')).toContainText('Cancelled');
+    relay.faults.holdProgressCompletion = false;
     await page.locator('#agents-back').click();
     await check(page.locator('#agents-providers')).toBeVisible();
     const submissions = relay.calls.filter(kind => kind === 'work_submit').length;

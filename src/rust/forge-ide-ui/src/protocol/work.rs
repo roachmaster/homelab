@@ -386,6 +386,37 @@ pub struct WorkLogEvent {
     pub sequence: u64,
     pub kind: WorkEventKind,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<WorkProgress>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkProgressStage {
+    Plan,
+    Progress,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkProgress {
+    pub attempt_id: String,
+    pub sequence: u16,
+    pub stage: WorkProgressStage,
+    pub summary: String,
+}
+impl WorkProgress {
+    pub fn is_valid(&self) -> bool {
+        valid_chat_id(&self.attempt_id)
+            && (1..=128).contains(&self.sequence)
+            && (self.stage == WorkProgressStage::Plan) == (self.sequence == 1)
+            && !self.summary.trim().is_empty()
+            && self.summary.len() <= 4096
+            && self
+                .summary
+                .chars()
+                .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -882,6 +913,9 @@ impl WorkResponse {
                         valid_work_revision(e.sequence)
                             && e.sequence > *after_sequence
                             && valid_work_timestamp(&e.created_at)
+                            && e.progress
+                                .as_ref()
+                                .is_none_or(|p| e.kind == WorkEventKind::Checkpoint && p.is_valid())
                     })
                     && events.windows(2).all(|p| p[0].sequence < p[1].sequence)
                     && *next_sequence == events.last().map_or(*after_sequence, |e| e.sequence)
@@ -1034,11 +1068,41 @@ mod tests {
             events: vec![WorkLogEvent {
                 sequence: 5,
                 kind: WorkEventKind::Checkpoint,
+                progress: None,
                 created_at: "2026-01-01T00:00:00Z".into(),
             }],
             next_sequence: 5,
         };
         assert!(reply.valid_for(&request, 200));
         assert!(!reply.valid_for(&request, 202));
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+    #[test]
+    fn public_progress_is_optional_bounded_and_has_no_completion_authority() {
+        let legacy = r#"{"sequence":1,"kind":"queued","created_at":"2026-11-19T00:00:00Z"}"#;
+        assert!(serde_json::from_str::<WorkLogEvent>(legacy)
+            .unwrap()
+            .progress
+            .is_none());
+        let mut progress = WorkProgress {
+            attempt_id: "11111111-1111-4111-8111-111111111111".into(),
+            sequence: 1,
+            stage: WorkProgressStage::Plan,
+            summary: "1. Inspect\n2. Test".into(),
+        };
+        assert!(progress.is_valid());
+        progress.sequence = 2;
+        assert!(!progress.is_valid());
+        progress.stage = WorkProgressStage::Progress;
+        assert!(progress.is_valid());
+        progress.summary = "x".repeat(4097);
+        assert!(!progress.is_valid());
+        progress.summary = "hidden\u{7f}control".into();
+        assert!(!progress.is_valid());
+        assert!(serde_json::from_str::<WorkProgress>(r#"{"attempt_id":"11111111-1111-4111-8111-111111111111","sequence":1,"stage":"completed","summary":"done"}"#).is_err());
     }
 }

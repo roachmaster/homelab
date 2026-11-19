@@ -9,6 +9,9 @@ import { join } from 'node:path';
 const time = '2026-11-19T18:00:00Z';
 const project = 'workspace';
 const base = 'a'.repeat(40);
+const publicPlan = '## Public fixture plan\n\n1. Inspect approved files.\n2. Implement the change.\n3. Verify the result.\n\nLiteral <script>window.__forgeProgressExecuted = true</script> stays text.';
+const publicMilestone = 'Public fixture milestone: implementation complete; running verification. <script>window.__forgeProgressExecuted = true</script>';
+const foreignProgress = 'FOREIGN ATTEMPT PROGRESS MUST NOT APPEAR';
 const resultText = '## Fixture agent result\n\nVerified first section.\n\n'
   + 'A readable fixture paragraph with élève and safe <script> text.\n\n'.repeat(1500)
   + '\nFinal fixture marker.\n';
@@ -21,15 +24,35 @@ const profiles = [
 
 function task(status, number, input = {}) {
   const taskId = number === 0 ? '11111111-1111-4111-8111-111111111111' : randomUUID();
-  return {
+  const item = {
     task_id: taskId, project_alias: project, base_revision: base, mode: input.mode ?? 'review',
     agent_profile: input.agent_profile ?? 'agy-primary', recipe_digest: 'b'.repeat(64),
     status, revision: status === 'awaiting_review' ? 3 : 1,
     created_at: `2026-11-19T18:00:${String(number).padStart(2, '0')}Z`,
     title: input.prompt ? Array.from(input.prompt.split('\n')[0]).slice(0, 128).join('').replace(/[\r\t]/g, ' ') : 'Fixture existing report',
     prompt: input.prompt ?? 'Review the fixture', acceptance_criteria: input.acceptance_criteria ?? 'Return the complete report',
-    attempt_id: randomUUID(), sequence: 1,
+    attempt_id: randomUUID(), sequence: 0, events: [], progress_emitted: false,
   };
+  event(item, 'queued');
+  if (status !== 'queued') {
+    event(item, 'started');
+    progress(item);
+    event(item, status);
+  }
+  return item;
+}
+function event(t, kind, report) {
+  const item = { sequence: ++t.sequence, kind, created_at: time };
+  if (report) item.progress = report;
+  t.events.push(item);
+}
+function progress(t) {
+  if (t.progress_emitted) return;
+  event(t, 'checkpoint', { attempt_id: t.attempt_id, sequence: 1, stage: 'plan', summary: publicPlan });
+  event(t, 'checkpoint', { attempt_id: randomUUID(), sequence: 2, stage: 'progress', summary: foreignProgress });
+  event(t, 'checkpoint', { attempt_id: t.attempt_id, sequence: 2, stage: 'progress', summary: publicMilestone });
+  t.public_summary = publicMilestone;
+  t.progress_emitted = true;
 }
 function summary(t) {
   return Object.fromEntries(['task_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]]));
@@ -38,7 +61,7 @@ function detail(t) {
   const processing = ['running', 'cancel_requested'].includes(t.status);
   return {
     ...summary(t), prompt: t.prompt, acceptance_criteria: t.acceptance_criteria,
-    attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
+    attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? t.public_summary ?? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
     result: ['awaiting_review', 'completed'].includes(t.status) ? { attempt_id: t.attempt_id, sha256: digest, byte_count: bytes.length, chunk_count: Math.ceil(bytes.length / 16384) } : null,
     reconciliation_receipt_id: null,
   };
@@ -67,8 +90,8 @@ export async function startAgentsRelay() {
   const receipts = new Map();
   const controls = new Map();
   const calls = [];
-  const faults = { dropNextSubmit: false, denyNextSubmit: false };
-  let refreshes = 0;
+  const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false };
+  let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
     try {
       if (request.method !== 'POST' || request.url !== '/v1/dispatch' || request.headers.authorization !== `Bearer ${token}`) {
@@ -115,13 +138,18 @@ export async function startAgentsRelay() {
       const selected = tasks.get(input.task_id);
       if (!selected) { failed(404, 'not_found'); return; }
       if (input.kind === 'work_get') {
-        if (selected.status === 'queued') { selected.status = 'running'; selected.revision++; selected.sequence = 4; }
+        if (selected.status === 'queued') { selected.status = 'running'; selected.revision++; event(selected, 'started'); }
+        else if (selected.status === 'running' && selected.progress_emitted) progressRefetches++;
         send(200, 'work_opened', { task: detail(selected) }); return;
       }
       if (input.kind === 'work_events') {
-        if (selected.status === 'running') { selected.status = 'awaiting_review'; selected.revision++; selected.sequence = 9; }
-        else if (selected.status === 'cancel_requested') { selected.status = 'cancelled'; selected.revision++; selected.sequence = 11; }
-        const events = selected.sequence > (input.after_sequence ?? 0) ? [{ sequence: selected.sequence, kind: selected.status === 'awaiting_review' ? 'awaiting_review' : selected.status, created_at: time }] : [];
+        if (selected.status === 'running' && !selected.progress_emitted) progress(selected);
+        else if (selected.status === 'running' && !faults.holdProgressCompletion) {
+          selected.status = 'awaiting_review'; selected.revision++; event(selected, 'awaiting_review');
+        } else if (selected.status === 'cancel_requested') {
+          selected.status = 'cancelled'; selected.revision++; event(selected, 'cancelled');
+        }
+        const events = selected.events.filter(item => item.sequence > (input.after_sequence ?? 0)).slice(0, input.limit ?? 50);
         send(200, 'work_events', { project_alias: project, task_id: selected.task_id, revision: selected.revision, status: selected.status, events, next_sequence: events.at(-1)?.sequence ?? input.after_sequence ?? 0 }); return;
       }
       if (input.kind === 'work_cancel' || input.kind === 'work_accept') {
@@ -131,6 +159,7 @@ export async function startAgentsRelay() {
           const before = selected.revision;
           if (input.kind === 'work_accept' && selected.status !== 'awaiting_review') { failed(409, 'not_reviewable'); return; }
           selected.status = input.kind === 'work_accept' ? 'completed' : selected.status === 'queued' ? 'cancelled' : 'cancel_requested'; selected.revision++;
+          event(selected, selected.status);
           receipt = { project_alias: project, task_id: selected.task_id, base_revision: before, revision: selected.revision, status: selected.status };
           controls.set(input.idempotency_key, receipt);
         }
@@ -152,6 +181,7 @@ export async function startAgentsRelay() {
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
     get taskCount() { return tasks.size; }, get refreshes() { return refreshes; },
+    get progressRefetches() { return progressRefetches; },
     async close() { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); },
   };
 }

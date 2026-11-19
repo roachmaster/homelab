@@ -37,7 +37,7 @@ class PreUpgradeCluster(DisposablePostgresCluster):
             "psql", "-h", self.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
             "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner",
             "-f", self.legacy_sql / "apply.sql",
-            "-f", SQL_DIR / "management/grant-runner.sql",
+            "-f", self.legacy_sql / "management/grant-runner.sql",
         )
 
 
@@ -102,12 +102,18 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         with TemporaryDirectory(prefix="forge-policy-upgrade-", dir="/tmp") as temporary:
             legacy_sql = Path(temporary) / "sql"
             shutil.copytree(SQL_DIR, legacy_sql)
+            # This fixture is genuinely schema 10; the additive progress routine
+            # does not exist until migration 12. Keep its grant out of the copy.
+            grant = legacy_sql / "management/grant-runner.sql"
+            grant.write_text(grant.read_text().replace(
+                "    forge_coding_worker_api.report_progress(uuid, uuid, integer, text, text),\n", ""
+            ))
             apply = (legacy_sql / "apply.sql").read_text()
             apply, removed = re.subn(
                 r"SELECT NOT EXISTS \(\s*SELECT 1 FROM forge_agent\.schema_migrations "
-                r"WHERE version\s*=\s*11\s*\).*?\\endif\s*", "", apply, count=1, flags=re.DOTALL,
+                r"WHERE version\s*=\s*(?:1[1-9]|[2-9][0-9]+)\s*\).*?\\endif\s*", "", apply, flags=re.DOTALL,
             )
-            self.assertEqual(removed, 1, "The current apply registry must contain migration 11")
+            self.assertGreaterEqual(removed, 1, "The legacy registry excludes migration 11 and all successors")
             (legacy_sql / "apply.sql").write_text(apply)
             cluster = PreUpgradeCluster(legacy_sql).start()
             try:
@@ -128,7 +134,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 # Invoke the production migration registry/verifiers against the existing cluster.
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 11)
+                self.assertEqual(self.rows(cluster, "SELECT version FROM forge_agent.schema_migrations WHERE version = 11")[0][0], 11)
                 self.assertEqual(self.rows(
                     cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -182,7 +188,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
     def test_apply_twice_and_verify_policy_membership_and_digest_predicate_drift(self):
         self.cluster.apply_and_verify()
         self.cluster.apply_and_verify()
-        self.assertEqual(self.rows(self.cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 11)
+        self.assertEqual(self.rows(self.cluster, "SELECT version FROM forge_agent.schema_migrations WHERE version = 11")[0][0], 11)
         script = SQL_DIR / "management/verify.sql"
         original = self.rows(self.cluster,
             "SELECT pg_get_constraintdef(oid,false) FROM pg_constraint "

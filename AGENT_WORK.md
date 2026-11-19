@@ -1,17 +1,16 @@
 # Shared Agent Work Checkpoint
 
-- **task_id:** `agents-dashboard-polish`
-- **objective:** Modernize the live generated Agents dashboard per the user's blueprint: compact chrome, semantic status pills, readable time, two-line task summaries, quota gauges and exact-safe compact token metrics; keep selected-agent refresh and accounting disclosure together. Add the telemetry rule to UI skills, verify and deploy.
-- **authorized_scope:** User requested this follow-up to the working live Agents portal; existing commit/push/deploy authorization persists. Preserve backend APIs, worker/account policy, data and existing task lifecycle. No paid fallback, quota rotation or automatic merges. User then explicitly requested Gemini elevated tool access to avoid headless permission stops; implement new pinned policy2, its required additive migration11/API/worker activation, and real included-account edit/command verification. An included-account AGY implementation task may author the bounded UI declarations/styles in its own workspace; root reviews and integrates.
-- **phase:** `complete`
-- **coordinator:** `Codex`
+- **task_id:** `agent-plan-progress`
+- **objective:** Have coding agents publish an explicit public plan before work and report milestones to PostgreSQL through the supervising worker; show those events in the portal and diagnose the current Running task.
+- **authorized_scope:** User requested implementation of agent plan/event reporting. Existing commit, push and portal deployment authorization persists. Preserve the running task, account settings, canonical-source isolation and worker-owned completion checks. No direct database credentials enter the CLI.
+- **phase:** `implementing`
+- **coordinator:** Codex
 - **worktree:** `/home/lrocha/repos/homelab`
-- **branch:** `main`
-- **base:** `d41c33e`
-- **ownership:** Root owns reusable typed view/generator, Agents projection/state/tests, browser verification/integration/deployment. Formatter agent owns only model/agents/presentation.rs. Skills agent changed only Design Modern UI and Test Forge UI. AGY author task stopped under policy1 permission boundary before edits. Layout/browser authors delivered scoped worktrees; root integrated. Policy author delivered four-file policy2 patch; SQL expert owns migration11/apply/verifier/PG tests in sql-policy worktree. No overlapping writers.
-- **decisions:** Rust formats all display values, keeping exact UTC/decimal values in tooltip/details/accessibility. Generic badge/summary/metric-card primitives map typed presentation only; no app HTML/CSS/JS strings. Native quota meter only for known percentages. Native keyed card disclosure and scoped profile refresh. Current backend grants and zero-auto-rotation retained. Policy2 explicitly allows commands/read-only URLs and scoped implement writes with ask[], retaining plan read-only mounts/MCP+browser-actuation denial; purepolicy ID/digest changes so old attempts never gain authority implicitly.
-- **verification:** Final frozen source passed full make ci, all28 sandboxed browser groups and190 backend tests (zero skips). Real policy2 factory/AGY fixture check passed rg+grep, own task-file write/read, coherent result, stopped scope and unchanged canonical fixture. Actual isolated PATH probe passed. Private PostgreSQL backup verified; migration11/apply/grants/complete verifier committed atomically. API/worker advertise exact policy2; real staged/live read-only browser checks passed320/390/1440px, truthful quotas, inline details and saved result. Exact ABI7 WASM verified through live host8788 and public proxy8090; services active/enabled, stage closed. Protected unrelated peers retained PIDs.
-- **publication_deployment:** Functional commit679088c pushed to origin/main and deployed as /opt/homelab-forge/releases/20261119T215116Z-679088c-agents-dashboard. Web/API/worker use this immutable source; schema11, policy2, browserABI7. Deployment documentation follow-up is separate from release source. Previous policy1 history and blocked task retained, no automatic replay. No paid fallback/account rotation or code merge.
-- **evidence:** `/mnt/data/homelab-build/agents-dashboard-20261119/`
-- **next_action:** Complete; new portal Gemini tasks use elevated workspace permissions. Review/resume any historical blocked task explicitly rather than replaying it automatically.
-- **last_updated:** 2026-11-19T21:53:33.111422+00:00
+- **branch/base:** `main` / `71d845d`
+- **ownership:** Root owns API event projection, Rust protocol/model/rendering and integration. Worker author owns executor/worker/progress helper/tests in a separate worktree. SQL author owns additive migration12, verifier/grants and WorkerDB/tests in a separate worktree. Review agent is read-only.
+- **decisions:** Reuse checkpoint events with typed public progress payloads. Agent writes bounded sequential reports in its existing scratch scope; parent validates and persists them with token/owner/lease fences and idempotent report ordinals. Reports do not assert completion. Preserve independent task revision and event sequence. Rust renders the current attempt plan and recent milestones; terminal tasks retain readable history.
+- **verification:** Initial live check found task 3f7c0936-6a98-4961-9c41-62a3e7ffb50b running with a fresh lease after user resume. Gap reproduced in source: only one starting checkpoint, omitted event payloads, and UI ignoring unchanged-revision checkpoints. Full verification pending final integration.
+- **publication_deployment:** Prior release 679088c / ABI7 / policy2 / schema11 remains live. Do not restart a worker with an active task; finish or observe its normal stop first.
+- **evidence:** `/mnt/data/homelab-build/agent-progress-20261119/`
+- **next_action:** Integrate bounded progress channel, fenced persistence and typed UI; test and deploy after the current task stops.
+- **last_updated:** 2026-11-19T22:23:15.497145+00:00

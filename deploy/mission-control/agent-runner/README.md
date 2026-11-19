@@ -399,3 +399,27 @@ The verified live policy2/ABI7 release is
 profiles select `forge-coding-v2`; the worker advertised the matching digest after
 restart. Migration11 was backed up, applied and verified atomically before that
 activation. Existing attempts were not upgraded or retried implicitly.
+
+
+### Gemini public plan and progress reporting
+
+Migration `0012_coding_progress.sql` must be applied, granted and verified before
+starting a worker with live progress enabled. The normal `CodingWorkerFactory`
+injects the scoped `WorkerDB.report_progress` callback into the Antigravity
+command runner. The agent uses the provisioned command helper in its attempt
+scratch to publish a public plan first, then observable milestone summaries.
+The trusted parent validates strict bounded reports and persists idempotent
+checkpoint events; database credentials and attempt tokens remain parent-owned.
+The installer includes the self-contained `work_progress.py` runtime module.
+
+The portal reads whitelisted public progress through `ide.work.events`, keeps the
+current attempt's plan and latest20 milestones, and loads finished-task history.
+Checkpoint events do not bump task revision, so new events also trigger a detail
+refresh at unchanged revision. Reports cannot mark a task completed: a coherent
+final result plus confirmed scope stop produces Ready for review; acceptance is
+explicit. A successful Gemini result without a persisted public plan fails with
+an actionable message. Existing running attempts cannot receive new instructions
+retroactively. Codex retains its existing sandbox and terminal-result behavior.
+
+See [ownership and sequence](../../../docs/architecture/coding-admission.md#public-plans-and-live-progress)
+and the live [dispatch design](https://portal.thedevex.com/design/coding-agents#progress).

@@ -182,6 +182,17 @@ class CodingWorker:
         lost = threading.Event()
         cancelled = threading.Event()
 
+        def report_progress(sequence, kind, summary):
+            if lost.is_set() or stop.is_set():
+                raise ExecutionError("needs_reconcile", "The assignment is no longer accepting progress reports.")
+            try:
+                return self.store.report_progress(lease, sequence, kind, summary)
+            except Exception as error:
+                if not _retryable(error) or lost.is_set() or stop.is_set():
+                    raise
+                # Retry only the identical idempotent report, never agent work.
+                return self.store.report_progress(lease, sequence, kind, summary)
+
         def renew():
             while not done.is_set():
                 try:
@@ -228,7 +239,11 @@ class CodingWorker:
                     # Second pure policy check is immediately before spawning.
                     if not verify_recipe(self.config, lease):
                         raise ExecutionError("failed", "Pinned execution policy changed before startup.")
-                    outcome = self.runner.run(lease, workspace, stop)
+                    # Only the AGY adapter has proven scoped command-tool
+                    # scratch writes in plan mode. Codex read-only sandbox
+                    # stays unchanged and retains terminal-result reporting.
+                    reporter = report_progress if lease["recipe"]["backend"] == "antigravity" else None
+                    outcome = self.runner.run(lease, workspace, stop, report_progress=reporter)
                     proof = outcome.stop_proof
                 if self.stop.is_set() and not cancelled.is_set():
                     outcome = CliOutcome("needs_reconcile", "", outcome.conversation_id, outcome.usage,
