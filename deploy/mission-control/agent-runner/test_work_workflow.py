@@ -129,6 +129,16 @@ class AutonomousWorkflowTest(unittest.TestCase):
   from work_store import ADVISORY_LOCK_SALT
   blocker=self.cluster.connect('postgres');blocker.autocommit=False
   with blocker.cursor() as cursor:cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",('mission-control\nhomelab',ADVISORY_LOCK_SALT))
+  merging=self.get(admitted['task_id']);self.assertEqual(merging['workflow']['phase'],'merging');self.assertFalse(merging['workflow']['can_cancel'])
+  cancellation=[]
+  def cancel_during_merge():
+   try:self.service.cancel(WorkCancel('homelab',UUID(admitted['task_id']),merging['revision'],'cancel-during-merge'));cancellation.append('incorrectly_cancelled')
+   except Rejected as error:cancellation.append(error.code)
+  cancel_thread=threading.Thread(target=cancel_during_merge);cancel_thread.start();time.sleep(.1);self.assertTrue(cancel_thread.is_alive())
+  blocker.rollback();blocker.close();cancel_thread.join(5);self.assertFalse(cancel_thread.is_alive());self.assertEqual(cancellation,['not_cancellable'])
+  self.assertEqual(self.get(admitted['task_id'])['workflow']['phase'],'merging');self.assertTrue(self.db.merge_renew(job))
+  blocker=self.cluster.connect('postgres');blocker.autocommit=False
+  with blocker.cursor() as cursor:cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",('mission-control\nhomelab',ADVISORY_LOCK_SALT))
   results=[];errors=[]
   def acknowledge():
    try:results.append(self.db.merge_finish(job,'merged',outcome))
