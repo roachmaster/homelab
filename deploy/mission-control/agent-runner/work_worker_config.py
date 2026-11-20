@@ -95,6 +95,7 @@ class WorkerConfig:
     allow_implement: bool = False
     usage: UsageConfig | None = None
     source_path: Path | None = field(default=None, compare=False)
+    autonomous_projects: frozenset[str] = frozenset()
 
     @property
     def allowed_profiles(self):
@@ -112,7 +113,7 @@ class WorkerConfig:
 def parse_config(raw, *, source_path=None):
     raw = _object(raw, {"worker_id", "owner", "database", "account", "workspace_root",
                         "state_root", "projects", "profiles", "binaries"},
-                  {"allow_implement", "usage"})
+                  {"allow_implement", "usage", "autonomous_projects"})
     worker_id = identifier(raw["worker_id"])
     owner = raw["owner"]
     if (not isinstance(owner, str) or not owner.strip() or len(owner) > 128
@@ -137,6 +138,10 @@ def parse_config(raw, *, source_path=None):
     if not isinstance(projects, dict) or not 1 <= len(projects) <= 64:
         raise ValueError("Invalid coding worker project catalog")
     projects = {identifier(alias): absolute_path(path) for alias, path in projects.items()}
+    autonomous = raw.get("autonomous_projects", [])
+    if (not isinstance(autonomous, list) or any(not isinstance(alias, str) for alias in autonomous)
+            or len(set(autonomous)) != len(autonomous) or not set(autonomous) <= projects.keys()):
+        raise ValueError("Invalid autonomous project source selection")
     for repository in projects.values():
         if (repository == workspace_root or repository == state_root
                 or workspace_root.is_relative_to(repository) or state_root.is_relative_to(repository)
@@ -180,6 +185,7 @@ def parse_config(raw, *, source_path=None):
         worker_id, owner, database, account, workspace_root, state_root,
         MappingProxyType(projects), MappingProxyType(frozen_profiles), MappingProxyType(binaries),
         allow_implement, usage, absolute_path(source_path) if source_path is not None else None,
+        frozenset(autonomous),
     )
 
 
@@ -242,6 +248,7 @@ def validated_copy(config):
                      for key, value in config.profiles.items()},
         "binaries": {key: str(value) for key, value in config.binaries.items()},
         "allow_implement": config.allow_implement,
+        "autonomous_projects": sorted(config.autonomous_projects),
     }
     if config.usage is not None:
         raw["usage"] = {"hmac_key_file": str(config.usage.hmac_key_file),

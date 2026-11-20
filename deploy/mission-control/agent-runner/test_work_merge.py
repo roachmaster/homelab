@@ -16,6 +16,7 @@ from work_publication import PublicationWorkerFactory
 from work_publication_clients import GitHubPullRequestClient, PublicationError, WorkspaceSnapshotProvider, branch_name
 from work_publication_config import parse_config
 from work_review import ReviewedCandidateProvider, ReviewWorker
+from work_source_revision import VerifiedSourceSyncProvider
 
 
 class GitHubGitFixture:
@@ -94,7 +95,7 @@ class MergeStore:
 def merge_fixture():
     with fixture() as values:
         _, config, source, workspaces, _, bare, git, *_ = values
-        config = replace(config, merge_enabled=True)
+        config = replace(config, merge_enabled=True, worker=replace(config.worker, autonomous_projects=frozenset({"homelab"})))
         local_job, local_store = review_job(source), ReviewStore()
         candidates = ReviewedCandidateProvider(config, git)
         ReviewWorker(config, local_store, WorkspaceSnapshotProvider(workspaces), git,
@@ -127,7 +128,7 @@ class ExactTreeMergeTest(unittest.TestCase):
                     self.assertIsNotNone(store.intent)
                 return original_api(method, path, payload)
             client._api = checked_api
-            MergeWorker(config, store, provider).process(job)
+            MergeWorker(config, store, provider, source_sync=VerifiedSourceSyncProvider(config, provider.git)).process(job)
             self.assertEqual(store.results[-1][0], "merged")
             intent = store.intent
             self.assertTrue(client.assert_nonforce)
@@ -142,7 +143,7 @@ class ExactTreeMergeTest(unittest.TestCase):
             client.race = client.git("-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit-tree", tree,
                                      "-p", base, data=b"unreviewed concurrent main\n").stdout.decode().strip()
             store = MergeStore()
-            MergeWorker(config, store, provider).process(job)
+            MergeWorker(config, store, provider, source_sync=VerifiedSourceSyncProvider(config, provider.git)).process(job)
             self.assertEqual(store.results[-1][0], "needs_reconcile")
             self.assertEqual(client.git("rev-parse", "main").stdout.decode().strip(), client.race)
             self.assertEqual(sum(method == "PATCH" for method, *_ in client.calls), 1)
@@ -151,7 +152,7 @@ class ExactTreeMergeTest(unittest.TestCase):
         with merge_fixture() as (config, job, provider, client, _candidates, _hosted):
             store = MergeStore()
             client.lose_ack = True
-            worker = MergeWorker(config, store, provider)
+            worker = MergeWorker(config, store, provider, source_sync=VerifiedSourceSyncProvider(config, provider.git))
             worker.process(job)
             self.assertEqual(store.results[-1][0], "merged")
             worker.process({**job, "intent": store.intent})
@@ -170,7 +171,7 @@ class ExactTreeMergeTest(unittest.TestCase):
                     client.head = "f" * 40
                 else:
                     store.live = False
-                MergeWorker(config, store, provider).process(job)
+                MergeWorker(config, store, provider, source_sync=VerifiedSourceSyncProvider(config, provider.git)).process(job)
                 self.assertEqual(client.git("rev-parse", "main").stdout, old_main)
                 self.assertFalse(store.results and store.results[-1][0] == "merged")
                 if case != "protection":

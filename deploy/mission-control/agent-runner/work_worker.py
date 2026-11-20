@@ -22,6 +22,7 @@ from work_review_context import ReviewContextError, ReviewContextProvider
 from work_consumer_cache import configured_consumer_caches
 from work_candidate_source import ReviewCandidateSourceProvider
 from work_peer_context import PeerReviewContextProvider, PeerReviewCandidateSourceProvider
+from work_source_revision import SelectedSourceRevisionProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
@@ -401,7 +402,8 @@ class CodingWorkerFactory:
 
     def __init__(self, config, store_factory, *, runner_factory=None, workspace_factory=None,
                  supervisor_factory=None, session_factory=None, collector_factory=None, clock=time.monotonic, stop=None,
-                 usage_normalizer=None, review_context_factory=None, peer_context_factory=None):
+                 usage_normalizer=None, review_context_factory=None, peer_context_factory=None,
+                 source_revision_factory=SelectedSourceRevisionProvider):
         if not isinstance(config, WorkerConfig) or not callable(store_factory):
             raise TypeError("Coding worker requires frozen configuration and a store factory")
         self.config, self.store_factory = validated_copy(config), store_factory
@@ -410,9 +412,8 @@ class CodingWorkerFactory:
                                else lambda config, supervisor: CommandRunnerProvider(
                                    config, supervisor, sessions=self.session_factory(config)
                                    if "antigravity" in config.binaries else None))
-        self.workspace_factory = (workspace_factory if workspace_factory is not None else
-                                  lambda config: WorkspaceProvider(config,
-                                      candidate_source_provider=ReviewCandidateSourceProvider(config, _workspace_git)))
+        self.workspace_factory = workspace_factory
+        self.source_revision_factory = source_revision_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None
                                    else lambda config: SystemdSupervisor(
                                        config, consumer_cache_provider=configured_consumer_caches(config)))
@@ -426,7 +427,9 @@ class CodingWorkerFactory:
     def create(self):
         store = self.store_factory(self.config)
         supervisor = self.supervisor_factory(self.config)
-        workspaces = self.workspace_factory(self.config)
+        workspaces = (self.workspace_factory(self.config) if self.workspace_factory is not None else
+            WorkspaceProvider(self.config, candidate_source_provider=ReviewCandidateSourceProvider(self.config, _workspace_git),
+                              source_revision_provider=self.source_revision_factory(self.config, store, _workspace_git)))
         runner = self.runner_factory(self.config, supervisor)
         workspaces.prepare()
         runner.prepare()
