@@ -106,6 +106,12 @@ class Lease:
     repair_source_review_id: str | None = None
     repair_candidate_commit: str | None = None
     scope_plan_decision_id: str | None = None
+    parent_task_id: str | None = None
+    workflow_id: str | None = None
+    workflow_review_id: str | None = None
+    review_target_sha256: str | None = None
+    workflow_feedback_review_id: str | None = None
+    workflow_feedback_sha256: str | None = None
 
     def to_dict(self):
         return {
@@ -129,6 +135,8 @@ class Lease:
             "plan_decision_id": self.plan_decision_id,
             "feedback_id":self.feedback_id,"feedback_sha256":self.feedback_sha256,
             "repair_source_review_id":self.repair_source_review_id,"repair_candidate_commit":self.repair_candidate_commit,"scope_plan_decision_id":self.scope_plan_decision_id,
+            "parent_task_id":self.parent_task_id,"workflow_id":self.workflow_id,"workflow_review_id":self.workflow_review_id,"review_target_sha256":self.review_target_sha256,
+            "workflow_feedback_review_id":self.workflow_feedback_review_id,"workflow_feedback_sha256":self.workflow_feedback_sha256,
         }
 
 
@@ -410,6 +418,12 @@ class WorkerDB:
             repair_source_review_id=str(payload["repair_source_review_id"]) if payload.get("repair_source_review_id") else None,
             repair_candidate_commit=payload.get("repair_candidate_commit"),
             scope_plan_decision_id=str(payload["scope_plan_decision_id"]) if payload.get("scope_plan_decision_id") else None,
+            parent_task_id=str(payload["parent_task_id"]) if payload.get("parent_task_id") else None,
+            workflow_id=str(payload["workflow_id"]) if payload.get("workflow_id") else None,
+            workflow_review_id=str(payload["workflow_review_id"]) if payload.get("workflow_review_id") else None,
+            review_target_sha256=payload.get("review_target_sha256"),
+            workflow_feedback_review_id=str(payload["workflow_feedback_review_id"]) if payload.get("workflow_feedback_review_id") else None,
+            workflow_feedback_sha256=payload.get("workflow_feedback_sha256"),
         )
 
     def renew(self, lease):
@@ -626,6 +640,44 @@ class WorkerDB:
             cursor.execute("SELECT forge_coding_worker_api.read_feedback(%s,%s)",(attempt,token))
             value=cursor.fetchone()[0]
         return None if value is None else dict(value)
+
+    def read_workflow_feedback(self,lease):
+        attempt,token=_extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.read_workflow_feedback(%s,%s)",(attempt,token))
+            result=cursor.fetchone()[0]
+        return None if result is None else dict(result)
+
+    def read_review_target(self,lease):
+        attempt,token=_extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.read_review_target(%s,%s)",(attempt,token))
+            result=cursor.fetchone()[0]
+        return None if result is None else dict(result)
+
+    def merge_claim(self,worker_id):
+        validate_identifier(worker_id,"worker_id")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.merge_claim(%s)",(worker_id,))
+            result=cursor.fetchone()[0]
+        return None if result is None else dict(result)
+
+    def merge_renew(self,job):
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.merge_renew(%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token'])))
+            return bool(cursor.fetchone()[0])
+
+    def merge_intent(self,job,intent):
+        if not isinstance(intent,dict):raise ValueError("Invalid merge intent")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.merge_intent(%s,%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token']),Json(intent)))
+            return dict(cursor.fetchone()[0])
+
+    def merge_finish(self,job,status,receipt):
+        if status not in {'merged','handoff','needs_reconcile'} or not isinstance(receipt,dict):raise ValueError("Invalid merge outcome")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.merge_finish(%s,%s,%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token']),status,Json(receipt)))
+            return dict(cursor.fetchone()[0])
 
     def queue_review(self,lease,reconciliation_receipt_id):
         attempt,token=_extract_attempt_creds(lease)

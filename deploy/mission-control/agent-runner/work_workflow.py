@@ -1,0 +1,263 @@
+"""DB-only autonomous workflow coordinator, selected at API bootstrap.
+
+Native tasks run through the ordinary worker. This coordinator owns delegated
+state transitions; it has no process, filesystem-source or GitHub ports.
+"""
+from dataclasses import dataclass
+import hashlib
+import json
+import logging
+import threading
+from uuid import UUID,uuid4
+from psycopg2.extras import Json
+from queue_store import Rejected
+from work_config import PinnedRecipe,sha256_canonical,prepare_title
+from work_policy import POLICY_ID,POLICY_DIGEST
+
+LOG=logging.getLogger('forge-workflow')
+MAX_TARGET_BYTES=64*1024*1024+65536
+
+
+def recipe_from_snapshot(snapshot,key):
+    entry=snapshot['recipes'][key];value=entry['recipe']
+    return PinnedRecipe(**value,digest=entry['digest'])
+
+
+@dataclass(frozen=True)
+class BoundDelegatedAuthority:
+    """Unserializable server-only capability valid inside one locked transaction."""
+    store:object
+    cursor:object
+    workflow:dict
+    action:dict
+    review:dict
+    verdict:dict
+
+    def validate(self,cursor,task,kind):
+        if cursor is not self.cursor or task['workflow_id']!=self.workflow['workflow_id'] or self.review['source_task_id']!=task['id'] or self.review['target_kind']!=kind:
+            raise Rejected(403,'denied')
+        cursor.execute("SELECT status,lease_token,lease_expires_at>clock_timestamp() AS valid FROM forge_agent.coding_workflow_actions WHERE action_id=%s FOR UPDATE",(self.action['action_id'],))
+        current=cursor.fetchone()
+        if not current or current['status']!='leased' or current['lease_token']!=self.action['lease_token'] or not current['valid']:
+            raise Rejected(409,'reconcile_required')
+        if task['status']!='awaiting_review' or task['revision']!=self.review['source_revision'] or task['latest_attempt_id']!=self.review['source_attempt_id']:
+            raise Rejected(409,'result_mismatch')
+        cursor.execute("SELECT enabled,phase FROM forge_agent.coding_workflows WHERE workflow_id=%s",(self.workflow['workflow_id'],))
+        state=cursor.fetchone()
+        if not state or not state['enabled'] or state['phase'] in {'cancelled','completed','escalated'}:
+            raise Rejected(403,'denied')
+        if self.verdict['source_result_sha256']!=self.review['source_result_sha256']:
+            raise Rejected(409,'result_mismatch')
+
+    def attestation(self):
+        return {'workflow_id':str(self.workflow['workflow_id']),'workflow_review_id':str(self.review['workflow_review_id']),
+                'reviewer_task_id':str(self.review['reviewer_task_id']),'reviewer_attempt_id':str(self.review['reviewer_attempt_id']),
+                'reviewer_result_sha256':self.review['reviewer_result_sha256'],'policy_digest':self.workflow['policy_digest']}
+
+
+class WorkflowStore:
+    def __init__(self,config,catalog,store):
+        self.config=config;self.catalog=catalog;self.store=store
+
+    def _current_policy(self,workflow):
+        policy=self.config.project_workflows.get(workflow['project_alias'])
+        if policy is None or policy.snapshot(self.catalog,self.config.repair_policy)['policy_digest']!=workflow['policy_digest']:
+            raise Rejected(403,'denied')
+        if not {'plan','review','implement'}<=self.config.allowed_modes:
+            raise Rejected(403,'denied')
+        return policy
+
+    def _grant(self,cursor,workflow,profile,mode):
+        self._current_policy(workflow)
+        if profile not in self.config.profiles:
+            raise Rejected(403,'denied')
+        cursor.execute("SELECT forge_agent.coding_workflow_role_granted(%s,%s,%s) AS allowed",(workflow['workflow_id'],profile,mode))
+        if not cursor.fetchone()['allowed']:raise Rejected(403,'denied')
+
+    def _escalate(self,cursor,w,reason):
+        reason=reason[:2048]
+        cursor.execute("UPDATE forge_agent.coding_workflows SET phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
+        cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='handoff',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(w['workflow_id'],))
+
+    def recover(self,cursor):
+        """Authoritative replay fills missed callbacks using immutable source keys."""
+        cursor.execute("SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND phase NOT IN('completed','cancelled','escalated') ORDER BY created_at",(self.store.owner,))
+        for w in cursor.fetchall():
+            try:self._current_policy(w)
+            except Rejected:self._escalate(cursor,w,'Workflow delegation or role grant is no longer current.');continue
+            cursor.execute("SELECT t.*,a.phase AS attempt_phase,a.result_sha256,a.reservation_active,a.lease_expires_at,a.published_at FROM forge_agent.coding_tasks t LEFT JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id) WHERE t.owner_id=%s AND t.project_alias=%s AND t.workflow_id=%s ORDER BY t.created_at",(self.store.owner,w['project_alias'],w['workflow_id']))
+            tasks=cursor.fetchall()
+            for t in tasks:
+                if t['status'] in {'quota_blocked','blocked_auth','blocked_permission','needs_reconcile','failed'}:
+                    self._escalate(cursor,w,'Agent stopped: '+t['status']);break
+                if t['status']=='cancelled':
+                    self._escalate(cursor,w,'Workflow task was cancelled.');break
+                if t['status']!='awaiting_review' or t['attempt_phase']!='stopped' or t['reservation_active'] or t['lease_expires_at'] is not None or not t['published_at'] or not t['result_sha256']:continue
+                cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s) AS ready",(self.store.owner,w['project_alias'],t['id'],t['latest_attempt_id']))
+                if not cursor.fetchone()['ready']:continue
+                if t['workflow_review_id'] is not None:
+                    cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,workflow_review_id,kind,source_key) SELECT workflow_id,owner_id,project_alias,workflow_review_id,'decide',%s FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s AND status='reviewing' ON CONFLICT DO NOTHING",(str(t['latest_attempt_id'])+':'+t['result_sha256'],t['workflow_review_id']))
+                    continue
+                if t['mode']=='plan':self._queue_review(cursor,w,t,None)
+                elif t['mode']=='implement':
+                    cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s AND phase='local' ORDER BY created_at DESC LIMIT 1",(self.store.owner,w['project_alias'],t['id'],t['latest_attempt_id']))
+                    q=cursor.fetchone()
+                    if q and q['status']=='awaiting_review' and q['verification'].get('checks_passed') is True and q['verification'].get('cleanup_confirmed') is True:
+                        self._queue_review(cursor,w,t,q)
+                    elif q and q['status'] in {'handoff','needs_reconcile','revise_plan'}:self._escalate(cursor,w,q['reason'] or q['status'])
+            cursor.execute("""SELECT p.*,q.candidate_commit,q.gate_manifest_sha256 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)
+              JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.owner_decision->>'closed_by'='peer_reviewer'
+              AND EXISTS(SELECT 1 FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha AND h.required_green ORDER BY h.observed_at DESC LIMIT 1) ORDER BY p.created_at DESC""",(w['workflow_id'],))
+            for p in cursor.fetchall():
+                if not w['snapshot']['auto_merge']:continue
+                cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) VALUES(%s,%s,%s,'merge',%s,%s) ON CONFLICT DO NOTHING",(w['workflow_id'],self.store.owner,w['project_alias'],str(p['publication_id'])+':'+p['commit_sha'],p['publication_id']))
+                cursor.execute("UPDATE forge_agent.coding_workflows SET phase='merging',updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('cancelled','escalated','completed')",(w['workflow_id'],))
+
+    def _queue_review(self,cursor,w,t,q):
+        cursor.execute("""INSERT INTO forge_agent.coding_workflow_reviews(workflow_id,owner_id,project_alias,target_kind,source_task_id,source_attempt_id,source_result_sha256,source_revision,source_review_id,candidate_commit,gate_manifest_sha256)
+          VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING workflow_review_id""",
+          (w['workflow_id'],self.store.owner,w['project_alias'],'code' if q else 'plan',t['id'],t['latest_attempt_id'],t['result_sha256'],t['revision'],q['review_id'] if q else None,q['candidate_commit'] if q else None,q['gate_manifest_sha256'] if q else None))
+        created=cursor.fetchone()
+        if created is None:return
+        rid=created['workflow_review_id']
+        cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,workflow_review_id,kind,source_key) VALUES(%s,%s,%s,%s,'review',%s)",(w['workflow_id'],self.store.owner,w['project_alias'],rid,str(rid)))
+        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('code_review' if q else 'plan_review',w['workflow_id']))
+
+    def claim(self,worker_id):
+        with self.store._transaction() as cursor:
+            self.recover(cursor)
+            cursor.execute("""SELECT a.* FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w ON w.workflow_id=a.workflow_id WHERE a.owner_id=%s AND a.kind IN('review','decide') AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated') AND(a.status='pending' OR(a.status='leased' AND a.lease_expires_at<=clock_timestamp())) ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(self.store.owner,))
+            action=cursor.fetchone()
+            if not action:return None
+            cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='leased',worker_id=%s,lease_token=gen_random_uuid(),lease_expires_at=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp() WHERE action_id=%s RETURNING *",(worker_id,action['action_id']))
+            return dict(cursor.fetchone())
+
+    def _artifact(self,cursor,task_id,attempt_id):
+        cursor.execute("SELECT a.result_sha256,a.result_byte_count,a.phase,a.reservation_active,a.lease_expires_at,string_agg(c.content,'' ORDER BY c.chunk_index) AS content FROM forge_agent.coding_attempts a JOIN forge_agent.coding_result_chunks c ON(c.owner_id,c.project_alias,c.task_id,c.attempt_id)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id) WHERE a.owner_id=%s AND a.task_id=%s AND a.attempt_id=%s GROUP BY a.owner_id,a.project_alias,a.task_id,a.attempt_id",(self.store.owner,task_id,attempt_id))
+        a=cursor.fetchone()
+        if not a or a['phase']!='stopped' or a['reservation_active'] or a['lease_expires_at'] is not None or a['content'] is None or len(a['content'].encode())!=a['result_byte_count'] or hashlib.sha256(a['content'].encode()).hexdigest()!=a['result_sha256']:raise Rejected(409,'result_mismatch')
+        return a
+
+    def process(self,job):
+        from work_peer_review import validate_review_target,parse_review_target,parse_review_verdict
+        with self.store._transaction() as cursor:
+            # Task -> peer review -> action is shared with owner/cancel paths.
+            cursor.execute("SELECT source_task_id FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s",(job['workflow_review_id'],));identity=cursor.fetchone()
+            if not identity:return
+            cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND id=%s FOR UPDATE",(self.store.owner,identity['source_task_id']));task=cursor.fetchone()
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s FOR UPDATE",(job['workflow_review_id'],));review=dict(cursor.fetchone())
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE action_id=%s FOR UPDATE",(job['action_id'],));action=cursor.fetchone()
+            if not action or action['status']!='leased' or action['lease_token']!=job['lease_token']:return
+            cursor.execute("SELECT %s>clock_timestamp() AS valid",(action['lease_expires_at'],))
+            if not cursor.fetchone()['valid']:raise Rejected(409,'reconcile_required')
+            cursor.execute("SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(action['workflow_id'],));w=cursor.fetchone()
+            cursor.execute('SAVEPOINT workflow_action')
+            try:
+                self._current_policy(w)
+                if not w['enabled'] or w['phase'] in {'cancelled','escalated','completed'}:raise Rejected(403,'denied')
+                if task['revision']!=review['source_revision'] or task['latest_attempt_id']!=review['source_attempt_id'] or task['status']!='awaiting_review':raise Rejected(409,'result_mismatch')
+                if action['kind']=='review':
+                    receipt=self._admit_reviewer(cursor,w,review,task,validate_review_target)
+                else:
+                    target=parse_review_target(review['target_json'],review['target_sha256'])
+                    receipt=self._apply_verdict(cursor,w,review,task,action,target,parse_review_verdict)
+            except (Rejected,ValueError,KeyError) as error:
+                cursor.execute('ROLLBACK TO SAVEPOINT workflow_action')
+                self._escalate(cursor,w,'Peer review could not safely continue: '+(getattr(error,'code',None) or type(error).__name__))
+                cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
+                return
+            cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_token=lease_token,finish_receipt=%s,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(Json(receipt),action['action_id']))
+
+    def _admit_reviewer(self,cursor,w,review,task,validate_target):
+        p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
+        source=self._artifact(cursor,task['id'],review['source_attempt_id']);reviewer_id=uuid4()
+        target={'version':1,'workflow_id':str(w['workflow_id']),'workflow_review_id':str(review['workflow_review_id']),'policy_digest':w['policy_digest'],
+            'target_kind':review['target_kind'],'reviewer_task_id':str(reviewer_id),'author_profile':p['author_profile'],'reviewer_profile':p['reviewer_profile'],
+            'source_task_id':str(task['id']),'source_attempt_id':str(review['source_attempt_id']),'source_result_sha256':review['source_result_sha256'],
+            'source_revision':review['source_revision'],'base_revision':review['candidate_commit'] or task['base_revision'],'plan_revision':w['plan_revisions'],
+            'plan_decision_id':None,'review_id':str(review['source_review_id']) if review['source_review_id'] else None,'candidate_commit':review['candidate_commit'],
+            'gate_manifest_sha256':review['gate_manifest_sha256'],'integration_base':None,'workspace_digest':None,'source_text':source['content'],'acceptance_criteria':task['acceptance_criteria'],
+            'findings':[],'verification':None,'approved_plan':None}
+        if review['target_kind']=='code':
+            cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE",(review['source_review_id'],));q=cursor.fetchone()
+            if q['status']!='awaiting_review' or q['verification'].get('checks_passed') is not True or q['verification'].get('cleanup_confirmed') is not True:raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT * FROM forge_agent.coding_plan_decisions WHERE owner_id=%s AND project_alias=%s AND decision_id=%s",(self.store.owner,w['project_alias'],task['plan_decision_id'] or task['scope_plan_decision_id']));plan=cursor.fetchone()
+            if not plan or plan['decision']!='resume':raise Rejected(409,'not_reviewable')
+            plan_source=self._artifact(cursor,plan['task_id'],plan['plan_attempt_id'])
+            target.update(plan_decision_id=str(plan['decision_id']),integration_base=q['verification']['integration_base'],workspace_digest=q['verification']['candidate_workspace_digest'],findings=[{**x,'status':'verified' if x['finding_id'] in q['verified_finding_ids'] else x.get('status','open')} for x in q['findings']],
+                verification={'checks_passed':True,'toolchain':q['verification'].get('toolchain','Not reported'),
+                    'checks':[{'check_id':x['check_id'],'status':x['status'],'head_sha':x['head_sha']} for x in q['verification'].get('checks',[])]},
+                approved_plan={'attempt_id':str(plan['plan_attempt_id']),'sha256':plan['plan_sha256'],'content':plan_source['content']})
+        target=validate_target(target);raw=json.dumps(target,ensure_ascii=False,separators=(',',':'),allow_nan=False)
+        if len(raw.encode())>MAX_TARGET_BYTES:raise ValueError('target_resource_bound')
+        digest=hashlib.sha256(raw.encode()).hexdigest();recipe=recipe_from_snapshot(p,'reviewer_review')
+        cursor.execute("SELECT count(*) AS n FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND status IN('queued','running','cancel_requested')",(self.store.owner,w['project_alias']))
+        if cursor.fetchone()['n']>=self.store.max_pending:raise Rejected(503,'queue_full')
+        prompt='Independently review the immutable agent-review.json target. Return exactly the specified source-bound JSON verdict. Do not modify source, execute builds, or implement fixes.'
+        receipt={'task_id':str(reviewer_id),'project_alias':w['project_alias'],'revision':1,'status':'queued','recipe_digest':recipe.digest}
+        cursor.execute("""INSERT INTO forge_agent.coding_tasks(owner_id,project_alias,id,idempotency_key,intent_digest,base_revision,mode,agent_profile,title,prompt,acceptance_criteria,pinned_recipe,recipe_digest,status,revision,auto_repair,review_required,workflow_required,workflow_id,workflow_review_id,review_target_sha256)
+          VALUES(%s,%s,%s,%s,%s,%s,'review',%s,%s,%s,%s,%s,%s,'queued',1,false,false,true,%s,%s,%s)""",
+          (self.store.owner,w['project_alias'],reviewer_id,'peer-'+str(review['workflow_review_id']),sha256_canonical(target),target['base_revision'],p['reviewer_profile'],'Review '+task['title'],prompt,'Return a strict source-bound verdict only.',Json(recipe.to_dict()),recipe.digest,w['workflow_id'],review['workflow_review_id'],digest))
+        cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET target_json=%s,target_sha256=%s,reviewer_task_id=%s,status='reviewing',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(raw,digest,reviewer_id,review['workflow_review_id']))
+        cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) VALUES(%s,%s,%s,1,'queued',%s)",(self.store.owner,w['project_alias'],reviewer_id,Json(receipt)))
+        cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
+        return receipt
+
+    def _apply_verdict(self,cursor,w,review,task,action,target,parse_verdict):
+        p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
+        cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],review['reviewer_task_id']));critic=cursor.fetchone()
+        expected=recipe_from_snapshot(p,'reviewer_review')
+        if not critic or critic['mode']!='review' or critic['agent_profile']!=p['reviewer_profile'] or critic['recipe_digest']!=expected.digest or critic['workflow_review_id']!=review['workflow_review_id'] or critic['status']!='awaiting_review':raise Rejected(409,'result_mismatch')
+        result=self._artifact(cursor,critic['id'],critic['latest_attempt_id'])
+        verdict=parse_verdict(result['content'],target)
+        cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET reviewer_attempt_id=%s,reviewer_result_sha256=%s,verdict_json=%s,verdict_sha256=%s WHERE workflow_review_id=%s",(critic['latest_attempt_id'],result['result_sha256'],result['content'],hashlib.sha256(result['content'].encode()).hexdigest(),review['workflow_review_id']))
+        review.update(reviewer_attempt_id=critic['latest_attempt_id'],reviewer_result_sha256=result['result_sha256'])
+        authority=BoundDelegatedAuthority(self.store,cursor,w,action,review,verdict)
+        decision=verdict['decision'];key='peer-'+str(review['workflow_review_id'])
+        if decision=='escalate' or(review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=p['max_plan_revisions']):
+            self._escalate(cursor,w,verdict['summary']);receipt={'status':'escalated','workflow_id':str(w['workflow_id'])}
+        elif review['target_kind']=='plan':
+            mode='implement' if decision=='approve' else 'plan';self._grant(cursor,w,p['author_profile'],mode)
+            note=verdict['summary']
+            if verdict['findings']:note+='\n'+json.dumps(verdict['findings'],ensure_ascii=False,separators=(',',':'))
+            if len(note.encode())>2048:note=verdict['summary'] # full source-bound verdict remains in readonly Plan feedback below
+            receipt=self.store.plan_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],plan_attempt_id=review['source_attempt_id'],plan_sha256=review['source_result_sha256'],decision='resume' if decision=='approve' else 'revise',agent_profile=p['author_profile'],idempotency_key=key,note=note,resolve_recipe=lambda _:recipe_from_snapshot(p,'author_implement' if decision=='approve' else 'author_plan'),auto_repair=True,_authority=authority)
+            cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,plan_revisions=plan_revisions+%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('implement' if decision=='approve' else 'plan_revision',0 if decision=='approve' else 1,w['workflow_id']))
+        else:
+            if decision=='revise':self._grant(cursor,w,p['author_profile'],'implement')
+            receipt=self.store.review_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],review_id=review['source_review_id'],decision='approve' if decision=='approve' else 'repair',agent_profile=p['author_profile'],note=verdict['summary'],idempotency_key=key,findings=verdict['findings'],verified_finding_ids=verdict['attested_finding_ids'],resolve_recipe=lambda:recipe_from_snapshot(p,'author_implement'),_authority=authority)
+            cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('publishing' if decision=='approve' else 'repair',w['workflow_id']))
+        if decision in {'approve','revise'} and not (review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=p['max_plan_revisions']):
+            next_task=UUID(receipt['repair_task_id']) if receipt.get('repair_task_id') else task['id']
+            cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_feedback_review_id=%s,workflow_feedback_sha256=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(review['workflow_review_id'],hashlib.sha256(result['content'].encode()).hexdigest(),self.store.owner,w['project_alias'],next_task))
+        cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='decided',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
+        cursor.execute("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,w['project_alias'],critic['id']))
+        return receipt
+
+
+class WorkflowCoordinator:
+    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=1):
+        self.store=store;self.worker_id=worker_id;self.interval_seconds=interval_seconds;self.stop=threading.Event();self._thread=None
+    def run_once(self):
+        job=self.store.claim(self.worker_id)
+        if job:self.store.process(job)
+        return job is not None
+    def run(self):
+        while not self.stop.is_set():
+            try:busy=self.run_once()
+            except Exception:LOG.exception('Workflow coordination unavailable');busy=False
+            if not busy:self.stop.wait(self.interval_seconds)
+    def start(self):
+        if self._thread is not None:raise RuntimeError('Workflow coordinator already started')
+        self._thread=threading.Thread(target=self.run,name='forge-workflow',daemon=True);self._thread.start()
+    def close(self):
+        self.stop.set()
+        if self._thread:self._thread.join(timeout=15)
+        if self._thread and self._thread.is_alive():raise RuntimeError('Workflow coordinator did not quiesce')
+
+
+class WorkflowCoordinatorFactory:
+    def __init__(self,config,catalog,store):self.config=config;self.catalog=catalog;self.store=store
+    def create(self):
+        if not self.config.project_workflows:return None
+        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store))
