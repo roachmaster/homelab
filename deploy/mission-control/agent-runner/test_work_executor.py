@@ -272,11 +272,32 @@ class SupervisorContractTest(unittest.TestCase):
             codex = provider.invocation(lease(config, backend="codex"), workspace)
             self.assertIn("--no-daemon", codex.argv)
             self.assertIn("--ignore-user-config", codex.argv)
-            self.assertIn("read-only", codex.argv)
+            self.assertIn("danger-full-access", codex.argv)
+            self.assertTrue(codex.external_sandbox)
             self.assertEqual(codex.argv, (str(Path("/usr/bin/python3").resolve()), "--no-daemon", "--ask-for-approval", "never", "exec",
-                                         "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+                                         "--ignore-user-config", "--ignore-rules", "--sandbox", "danger-full-access",
                                          "--model", "fixture-model", "--json", "--color", "never", "--ephemeral", "-"))
             self.assertFalse((codex.scratch / "report_progress.py").exists())
+            guarded = provider.supervisor.argv(value, codex)
+            self.assertTrue(any("/run/forge-coding-workspace" in arg for arg in guarded if "ReadOnlyPaths=" in arg))
+            self.assertIn("--bounding-set=-all", guarded)
+            from dataclasses import replace
+            with self.assertRaises(ExecutionError):
+                provider.supervisor.argv(value, replace(codex, external_sandbox=False))
+
+    def test_an_unadvertised_supervisor_does_not_get_external_codex_execution(self):
+        with TemporaryDirectory(prefix="forge-nested-codex-") as root:
+            config = parse_config(raw_config(root))
+            class UnadvertisedSupervisor:
+                pass
+            provider = CommandRunnerProvider(config, UnadvertisedSupervisor())
+            provider.prepare()
+            value = lease(config, backend="codex", mode="review")
+            workspace = WorkspaceLease(Path(root) / "task", config.projects["homelab"],
+                                       Path(root) / "git", value["task_id"], value["base_revision"])
+            invocation = provider.invocation(value, workspace)
+            self.assertIn("read-only", invocation.argv)
+            self.assertFalse(invocation.external_sandbox)
 
     def test_elevated_agy_tools_keep_mode_scoped_writes_and_unavailable_tools_denied(self):
         with TemporaryDirectory(prefix="forge-elevated-tools-") as root:
