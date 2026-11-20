@@ -5,7 +5,8 @@ fn main() {
 mod tests {
     use forge_bootstrap::Registry;
     use forge_ide::{
-        assembly::{register_ide, IdeConfig},
+        assembly::{register_ast_graph, register_ide, AstGraphConfig, IdeConfig},
+        ast_graph::AstGraphRequest,
         task::InspectRequest,
     };
     use forge_provider::{Factory, InstanceProvider, Singleton, Transient};
@@ -91,6 +92,33 @@ mod tests {
         assert!(factory.create().is_ok());
         assert!(register_ide("relative", IdeConfig::project(PathBuf::from("relative"))).is_err());
         assert!(register_ide("parent", IdeConfig::project(t.0.join(".."))).is_err());
+    }
+    #[test]
+    fn public_ast_graph_registration_works_without_yaml_or_cli() {
+        let t = Temp::new();
+        std::fs::write(
+            t.0.join("lib.rs"),
+            "pub use crate::inner::Item;\nmod inner { pub struct Item; }\n",
+        )
+        .unwrap();
+        let group =
+            register_ast_graph("consumer.ast_graph", AstGraphConfig::project(t.0.clone())).unwrap();
+        let frozen = Registry::new()
+            .register(group)
+            .unwrap_or_else(|_| panic!())
+            .freeze()
+            .unwrap_or_else(|_| panic!());
+        let ((), factory) = frozen.into_factories();
+        let provider = Singleton::new(factory.create().unwrap());
+        let report = provider
+            .acquire()
+            .unwrap()
+            .run(AstGraphRequest::Workspace)
+            .unwrap();
+        assert!(report.complete);
+        assert_eq!(report.rust_files, 1);
+        assert_eq!(report.files[0].imports.len(), 1);
+        assert!(report.files[0].imports[0].reexport);
     }
 }
 

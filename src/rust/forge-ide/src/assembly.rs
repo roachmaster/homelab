@@ -1,6 +1,7 @@
 //! Public reusable registration. Configuration is checked without native I/O;
 //! the selected factory opens the root only after the host freezes registration.
 use crate::{
+    ast_graph::{AstGraphLimits, AstGraphTask},
     filesystem::{FsError, NativeFiles},
     task::{InspectError, InspectTask, Limits},
 };
@@ -90,6 +91,70 @@ pub fn register_ide(
     config: IdeConfig,
 ) -> Result<PreparedGroup<InspectFactory>, AssemblyError> {
     let factory = configured_factory(config)?;
+    let id = id.into();
+    PreparedGroup::new(id.clone(), &[&id], &[], factory).map_err(AssemblyError::Registration)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AstGraphConfig {
+    Native {
+        root: PathBuf,
+        limits: AstGraphLimits,
+        excluded_names: Vec<OsString>,
+    },
+}
+
+impl AstGraphConfig {
+    pub fn project(root: PathBuf) -> Self {
+        Self::Native {
+            root,
+            limits: AstGraphLimits::default(),
+            excluded_names: vec![
+                ".git".into(),
+                "target".into(),
+                "node_modules".into(),
+                crate::filesystem::WRITE_JOURNAL.into(),
+            ],
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct AstGraphFactory {
+    root: PathBuf,
+    limits: AstGraphLimits,
+    excluded_names: Vec<OsString>,
+}
+
+impl Factory<AstGraphTask<NativeFiles>> for AstGraphFactory {
+    type Error = AssemblyError;
+
+    fn create(&self) -> Result<AstGraphTask<NativeFiles>, AssemblyError> {
+        let files = NativeFiles::open(&self.root).map_err(AssemblyError::Filesystem)?;
+        AstGraphTask::new(files, self.limits.clone(), self.excluded_names.clone())
+            .map_err(AssemblyError::Configuration)
+    }
+}
+
+/// Stage the AST graph task without opening the root directory.
+/// The host freezes registration before calling `AstGraphFactory::create`.
+pub fn register_ast_graph(
+    id: impl Into<String>,
+    config: AstGraphConfig,
+) -> Result<PreparedGroup<AstGraphFactory>, AssemblyError> {
+    let AstGraphConfig::Native {
+        root,
+        limits,
+        excluded_names,
+    } = config;
+    validate_root(&root)?;
+    AstGraphTask::new((), limits.clone(), excluded_names.clone())
+        .map_err(AssemblyError::Configuration)?;
+    let factory = AstGraphFactory {
+        root,
+        limits,
+        excluded_names,
+    };
     let id = id.into();
     PreparedGroup::new(id.clone(), &[&id], &[], factory).map_err(AssemblyError::Registration)
 }
