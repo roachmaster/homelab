@@ -24,6 +24,8 @@ from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
 from work_sessions import SessionError, SessionSelection
 from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext
+from work_consumer_cache import ConsumerCacheError
+from work_candidate_source import CandidateSourceError
 from work_worker_config import WorkerConfig, verify_recipe
 
 UNIT_RE = re.compile(r"forge-coding-[0-9a-f]{32}")
@@ -133,8 +135,9 @@ class WorkspaceLease:
 class WorkspaceProvider:
     """Worker-owned provider; each task owns one preserved detached Git worktree."""
 
-    def __init__(self, config):
+    def __init__(self, config, *, candidate_source_provider=None):
         self.config = config
+        self.candidate_sources = candidate_source_provider
 
     def prepare(self):
         self.config.workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -179,6 +182,13 @@ class WorkspaceProvider:
                 if not path.exists():
                     if not create or metadata_path.exists():
                         raise ExecutionError("needs_reconcile", "The preserved task workspace is unavailable.")
+                    if lease.get("repair_source_review_id") is not None or lease.get("repair_candidate_commit") is not None:
+                        try:
+                            if self.candidate_sources is None:
+                                raise CandidateSourceError()
+                            self.candidate_sources.ensure(lease, repository)
+                        except CandidateSourceError:
+                            raise ExecutionError("needs_reconcile", "The reviewed repair source could not be verified.") from None
                     revision = _git(repository, "rev-parse", "--verify",
                                     lease["base_revision"] + "^{commit}").decode().strip()
                     if revision != lease["base_revision"]:
@@ -423,10 +433,12 @@ class CliParser:
 class SystemdSupervisor:
     """Trusted parent launches and verifies root-managed per-attempt cgroups."""
 
-    def __init__(self, config, *, command=subprocess.run, cgroup_root=Path("/sys/fs/cgroup")):
+    def __init__(self, config, *, command=subprocess.run, cgroup_root=Path("/sys/fs/cgroup"),
+                 consumer_cache_provider=None):
         self.config = config
         self.command = command
         self.cgroup_root = Path(cgroup_root)
+        self.consumer_caches = consumer_cache_provider
 
     def _root(self, *args):
         return [*(["/usr/bin/sudo", "-n", "--"] if os.geteuid() != 0 else []), *args]
@@ -455,6 +467,12 @@ class SystemdSupervisor:
             if path is not None:
                 hidden.append(path)
         bindings = [str(invocation.scratch) + ":" + str(CHILD_STATE)]
+        if self.consumer_caches is not None and invocation.implement:
+            try:
+                caches = self.consumer_caches.prepare(invocation.workspace, invocation.scratch)
+            except ConsumerCacheError:
+                raise ExecutionError("needs_reconcile", "Consumer build output requires reconciliation before execution.") from None
+            bindings.extend(str(source) + ":" + str(target) for source, target in caches)
         if native_state is not None:
             bindings.append(str(native_state))
         readonly_bindings = [str(path) for path in readonly]

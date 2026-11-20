@@ -115,6 +115,10 @@ class FakeStore:
         self.events.append("reconcile")
         return "fixture-receipt"
 
+    def queue_review(self, *args):
+        self.events.append("queue-review")
+        return "fixture-review"
+
     def claim(self, *args):
         self.events.append("claim")
         value, self.claimed = self.claimed, None

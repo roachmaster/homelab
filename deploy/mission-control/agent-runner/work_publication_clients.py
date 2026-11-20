@@ -65,7 +65,7 @@ def uuid(value):
 
 
 def branch_name(job):
-    return "forge/task-" + uuid(job["publication_id"])
+    return "forge/task-" + uuid(job.get("target_publication_id") or job["publication_id"])
 
 
 def command(argv, *, env, cwd=None, data=None, timeout=60):

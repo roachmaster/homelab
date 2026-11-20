@@ -113,3 +113,22 @@ class ConsumerCacheProvider:
             raise ConsumerCacheError("Consumer cache preparation could not be verified.") from error
         return tuple((scratch / name, self.child_workspace / relative)
                      for relative, name in zip(CONSUMER_TARGETS, cache_names))
+
+
+class ScopedConsumerCacheProvider:
+    """Bootstrap selects only configured Forge projects, never arbitrary paths."""
+    def __init__(self, repositories, provider=None):
+        self.repositories = frozenset(_absolute(path) for path in repositories)
+        self.provider = provider if provider is not None else ConsumerCacheProvider()
+
+    def prepare(self, workspace, scratch):
+        if workspace.repository not in self.repositories:
+            return ()
+        return self.provider.prepare(workspace, scratch)
+
+
+def configured_consumer_caches(config):
+    # The fixed capability belongs to the explicit homelab project grant. Other
+    # projects keep their ordinary scratch contract and gain no extra mounts.
+    selected = (config.projects["homelab"],) if "homelab" in config.projects else ()
+    return ScopedConsumerCacheProvider(selected)
