@@ -77,6 +77,7 @@ COMMIT;
 BEGIN;
 GRANT EXECUTE ON FUNCTION forge_agent.coding_workflow_role_granted(uuid,text,text) TO forge_agent;
 GRANT SELECT,INSERT,UPDATE ON forge_agent.coding_workflows,forge_agent.coding_workflow_reviews,forge_agent.coding_workflow_actions TO forge_agent;
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.project_revisions() TO forge_coding_worker;
 GRANT EXECUTE ON FUNCTION forge_coding_worker_api.read_review_target(uuid,uuid),forge_coding_worker_api.read_workflow_feedback(uuid,uuid) TO forge_coding_worker;
 GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.merge_claim(text),forge_coding_reconciler_api.merge_renew(uuid,uuid),forge_coding_reconciler_api.merge_intent(uuid,uuid,jsonb),forge_coding_reconciler_api.merge_finish(uuid,uuid,text,jsonb) TO forge_coding_reconciler;
 COMMIT;

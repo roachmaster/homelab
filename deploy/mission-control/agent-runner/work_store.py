@@ -298,6 +298,16 @@ class WorkStore:
                 if valid:
                     advertised_profile_modes.setdefault(alias, set()).update(valid)
 
+        with self._transaction(read_only=True) as cursor:
+            cursor.execute("""SELECT DISTINCT ON(a.project_alias) a.project_alias,a.finish_receipt->'receipt'->>'merge_commit' AS merge_commit
+             FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING(workflow_id)
+             WHERE a.owner_id=%s AND a.kind='merge' AND a.status='completed' AND a.finish_receipt->>'status'='merged'
+             AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
+             ORDER BY a.project_alias,a.updated_at DESC,a.action_id DESC""",(self._owner,))
+            for merged in cursor.fetchall():
+                if merged['project_alias'] in config.project_workflows:
+                    advertised_revisions[merged['project_alias']]=merged['merge_commit']
+
         projects = [
             {
                 "alias": alias,
@@ -374,7 +384,14 @@ class WorkStore:
                 raise Rejected(503, "queue_full")
 
             workflow=resolve_workflow()
-            if workflow is not None:auto_repair=True
+            if workflow is not None:
+                cursor.execute("""SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a
+                 JOIN forge_agent.coding_workflows w USING(workflow_id) WHERE a.owner_id=%s AND a.project_alias=%s AND a.kind='merge' AND a.status='completed'
+                 AND a.finish_receipt->>'status'='merged' AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
+                 ORDER BY a.updated_at DESC,a.action_id DESC LIMIT 1""",(self._owner,project_alias))
+                merged=cursor.fetchone()
+                if merged and merged['head']!=base_revision:raise Rejected(409,'result_mismatch')
+                auto_repair=True
             recipe = resolve_recipe()
             if (not isinstance(recipe, PinnedRecipe)
                     or recipe.mode != mode

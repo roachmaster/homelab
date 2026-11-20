@@ -641,6 +641,15 @@ class WorkerDB:
             value=cursor.fetchone()[0]
         return None if value is None else dict(value)
 
+    def project_revisions(self):
+        """Only durable merged heads for this owner and this worker's project grants."""
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.project_revisions()")
+            value=cursor.fetchone()[0]
+        if not isinstance(value,dict) or any(not isinstance(k,str) or not isinstance(v,str) or not SHA1_HEX_RE.fullmatch(v) for k,v in value.items()):
+            raise ValueError("Invalid verified project revisions")
+        return dict(value)
+
     def read_workflow_feedback(self,lease):
         attempt,token=_extract_attempt_creds(lease)
         with self._worker_cursor() as cursor:
