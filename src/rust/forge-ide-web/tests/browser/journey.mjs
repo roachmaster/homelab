@@ -2771,6 +2771,44 @@ async function oversizedDormantWorkspaceJourney(page, context, fixture, relay, t
   }
 }
 
+async function museEmailDirectoryJourney(page) {
+  process.stderr.write('QA_CHECK muse_email_directory\n');
+  const viewport=page.viewportSize();
+  const card=page.locator('#agents-overview #agents-external-agents > #agents-muse-email');
+  await check(card).toBeVisible();
+  await check(card.getByRole('heading',{name:'Muse Email',exact:true})).toBeVisible();
+  await check(card).toContainText('Email · manual contact');
+  await check(card).toContainText('To: roachmaster@muse.ai');
+  await check(card.locator('#agents-muse-email-sender')).toHaveText('Your verified Gmail sender');
+  await check(card).not.toContainText(/@gmail\.com/i);
+  await check(card).toContainText('Manual email contact. Sender identity verified; sending, replies and background task tracking are not integrated with Forge.');
+  await check(card.locator('button,a,input,textarea,select,[contenteditable],[data-action]')).toHaveCount(0);
+  await check(card.locator('meter,progress,.fg-quota,.fg-metric,[data-card-id]')).toHaveCount(0);
+  await check(card).not.toContainText(/\b(?:Idle|Ready|Quota|Tokens?)\b/i);
+  await check(page.locator('#agents-providers #agents-muse-email')).toHaveCount(0);
+  await check(page.locator('#agents-profile option').filter({hasText:/muse/i})).toHaveCount(0);
+  for(const width of [320,390,1440]){
+    await page.setViewportSize({width,height:844});
+    await card.scrollIntoViewIfNeeded();
+    await check(card).toBeInViewport();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,
+      'the external contact directory fits phone and desktop viewports');
+    assert.equal(await card.evaluate(node=>{
+      const bounds=node.getBoundingClientRect();
+      if(bounds.left< -1 || bounds.right>innerWidth+1)return false;
+      const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);
+      for(let text=walker.nextNode();text;text=walker.nextNode()){
+        if(!text.textContent.trim())continue;
+        const range=document.createRange();range.selectNodeContents(text);
+        if([...range.getClientRects()].some(rect=>rect.left< -1 || rect.right>innerWidth+1))return false;
+      }
+      return true;
+    }),true,'both contact addresses wrap without clipped text');
+  }
+  if(viewport)await page.setViewportSize(viewport);
+  await page.locator('#agents-heading').scrollIntoViewIfNeeded();
+}
+
 async function agentsJourney() {
   process.stderr.write('QA_CHECK portal_agents_workflow\n');
   agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
@@ -2810,6 +2848,7 @@ async function agentsJourney() {
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
     await check(cards).toHaveCount(2);
+    await museEmailDirectoryJourney(page);
     await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
     await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
     await check(geminiCard.locator('.fg-quota-unavailable')).toContainText('does not expose account allowance');
@@ -2848,6 +2887,7 @@ async function agentsJourney() {
     // persisted public plan/history rather than waiting for a state revision.
     await seed.locator('.fg-row-select').click();
     await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-muse-email')).toBeHidden();
     await check(page.locator('#agents-task-status')).toContainText('Ready for review');
     await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
     await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
@@ -2857,6 +2897,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-overview')).toBeVisible();
 
     await page.locator('#agents-new').click();
+    await check(page.locator('#agents-muse-email')).toBeHidden();
     // Keep the existing result-acceptance journey on a Review task. Finished
     // Plan tasks now use the explicit artifact-bound decision flow below.
     await page.locator('#agents-mode').selectOption('review');

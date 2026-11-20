@@ -6,6 +6,7 @@ use super::{
 };
 use crate::component;
 use forge_ide_ui::PORTAL_PRESENTATION;
+mod external_agents;
 
 pub fn ide_document() -> Document {
     let mut document = Document {
@@ -120,6 +121,7 @@ pub fn ide_document() -> Document {
                             component!(heading "agents-tasks-heading", "Tasks"),
                             component!(stacked_tree "agents-tasks", "Coding assignments"),
                         ]),
+                        external_agents::directory(),
                     ]),
                     component!(region "agents-list-pagination"; [
                         component!(row [

@@ -854,3 +854,51 @@ fn portal_chat_retirement_removes_entry_controls_and_transport_but_preserves_wor
     let (wire, _) = worker_parts(&assets);
     assert_eq!(wire["preserve_workspace_chat"], true);
 }
+
+#[test]
+fn muse_email_directory_is_contact_data_without_native_actions_or_usage_metrics() {
+    let config = config();
+    let bindings = config
+        .transport
+        .bindings
+        .iter()
+        .map(|b| b.kind.clone())
+        .collect::<Vec<_>>();
+    let assets = build(config);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let card = html
+        .split_once("id=\"agents-muse-email\"")
+        .unwrap()
+        .1
+        .split_once("</section>")
+        .unwrap()
+        .0;
+    for text in [
+        "Muse Email",
+        "Email · manual contact",
+        "roachmaster@muse.ai",
+        "Your verified Gmail sender",
+        "not integrated with Forge",
+    ] {
+        assert!(card.contains(text), "contact detail {text}");
+    }
+    for unsupported in [
+        "<button",
+        "<meter",
+        "data-action",
+        "Idle",
+        "Ready",
+        "Token",
+        "Quota",
+    ] {
+        assert!(
+            !card.contains(unsupported),
+            "directory must not imply {unsupported}"
+        );
+    }
+    assert!(bindings
+        .iter()
+        .all(|b| !b.contains("email") && !b.contains("muse")));
+    assert!(bindings.iter().any(|b| b == "work_submit"));
+    assert!(bindings.iter().any(|b| b == "usage_overview"));
+}
