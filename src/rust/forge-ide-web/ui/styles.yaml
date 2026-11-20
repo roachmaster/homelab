@@ -2626,12 +2626,30 @@
     - selector: "#agents .fg-selection-heading:not(#agents-heading)"
       declarations:
         - ["font-size", "1.05rem"]
-    - selector: "#agents-tasks-heading,#agents-usage-heading"
+    - selector: "#agents-tasks-heading,#agents-usage-heading,#agents-external-heading"
       declarations:
         - ["font-size", ".75rem"]
         - ["letter-spacing", ".08em"]
         - ["text-transform", "uppercase"]
         - ["color", "var(--muted)"]
+    - selector: "#agents-external-agents"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "12px"]
+        - ["margin-top", "20px"]
+        - ["min-width", "0"]
+    - selector: "#agents-muse-email>h2"
+      declarations:
+        - ["font-size", "1rem"]
+        - ["margin-bottom", "6px"]
+    - selector: "#agents-muse-email-recipient,#agents-muse-email-sender"
+      declarations:
+        - ["overflow-wrap", "anywhere"]
+    - selector: "#agents-muse-email-capabilities"
+      declarations:
+        - ["font-size", ".875rem"]
+        - ["line-height", "1.5"]
+        - ["margin-bottom", "0"]
     - selector: "#agents-project-bar .fg-field"
       declarations:
         - ["display", "flex"]

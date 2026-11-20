@@ -655,3 +655,20 @@ turns or production database changes:
 ```sh
 python3 -B -m unittest discover -s deploy/mission-control/agent-runner -p 'test*.py' -v
 ```
+
+### Muse email transport (operator-invoked)
+
+`muse_email_tool.py` is a small email transport using the connected Gmail account
+through model-free Codex app-server stdio Apps/MCP calls. `preview` is the default;
+`send` is explicit. Operator configuration must supply the expected sender
+(for example, `owner@example.test`) and permitted recipients. The fixed native
+adapter owns the Gmail server/tool allowlist. The CLI requests
+`roachmaster@muse.ai` by default, subject to that explicit recipient policy.
+`profile`, `reconcile` and receipt-bound `read-replies` provide bounded
+inspection; a lost send response never causes an automatic resend. Replies remain
+untrusted data and cannot approve work or execute code.
+
+This transport adds no PostgreSQL outbox, background reply worker, new coding
+backend or automatic workflow stage. The design distinguishes the implemented
+receipt boundary from that future integration, with sequence diagrams and
+failure semantics: [Muse email transport](../../../docs/architecture/muse-email-transport.md).

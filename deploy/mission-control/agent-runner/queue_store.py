@@ -966,6 +966,14 @@ def _workspace_history(cursor):
     return cursor.fetchone()
 
 
+def _workspace_history_marker(cursor):
+    # Inert workspace I/O needs the owner lock and FK marker, never transcripts.
+    cursor.execute("""
+        SELECT revision FROM forge_agent.ide_workspace_history WHERE owner_id = %s FOR UPDATE
+    """, (OWNER,))
+    return cursor.fetchone()
+
+
 def _workspace_tab(cursor, tab):
     cursor.execute("""
         SELECT lease, revision, base_history_revision, base_history_fingerprint, snapshot, chat_history_enabled
@@ -974,8 +982,9 @@ def _workspace_tab(cursor, tab):
     return cursor.fetchone()
 
 
-def restore_workspace(tab, *, history_enabled=False, models=False):
-    if not isinstance(tab, str) or not re.fullmatch(r"[0-9a-f]{32}", tab):
+def restore_workspace(tab, *, history_enabled=False, models=False, preserve_chat=False):
+    if (not isinstance(tab, str) or not re.fullmatch(r"[0-9a-f]{32}", tab)
+            or type(preserve_chat) is not bool or (preserve_chat and (history_enabled or models))):
         raise Rejected(400, "invalid_workspace")
     lease = secrets.token_hex(32)
     with transaction() as cursor:
@@ -986,16 +995,25 @@ def restore_workspace(tab, *, history_enabled=False, models=False):
                 INSERT INTO forge_agent.ide_workspace_history (owner_id) VALUES (%s)
                 ON CONFLICT (owner_id) DO NOTHING RETURNING owner_id
             """, (OWNER,))
-            if cursor.fetchone() is not None:
+            if cursor.fetchone() is not None and not preserve_chat:
                 seed = _seed_workspace_history(cursor)
                 cursor.execute("UPDATE forge_agent.ide_workspace_history SET transcripts = %s WHERE owner_id = %s",
                                (Json(seed), OWNER))
-        history = _workspace_history(cursor)
+        history = _workspace_history_marker(cursor) if preserve_chat else _workspace_history(cursor)
         previous = _workspace_tab(cursor, tab)
         base_revision = history["revision"]
-        base_fingerprint = _history_fingerprint(history["transcripts"])
+        base_fingerprint = _history_fingerprint([] if preserve_chat else history["transcripts"])
         snapshot = previous["snapshot"] if previous else None
-        if history["chat_history_active"]:
+        if preserve_chat:
+            # The retired Chat is opaque tab-owned state: do not hydrate shared
+            # history, normalize a checkpoint, or turn pending hints into work.
+            if snapshot is not None and (not valid_workspace(snapshot)
+                    or len(json.dumps(snapshot, ensure_ascii=True)) > WORKSPACE_MAX_BYTES):
+                raise Rejected(503, "invalid_workspace_snapshot")
+            if previous:
+                base_revision = previous["base_history_revision"]
+                base_fingerprint = previous["base_history_fingerprint"]
+        elif history["chat_history_active"]:
             if snapshot is None:
                 snapshot = chat_history_store.dao.latest_checkpoint(cursor)
             else:
@@ -1030,12 +1048,12 @@ def restore_workspace(tab, *, history_enabled=False, models=False):
                 touched_at = clock_timestamp()
         """, (OWNER, tab, lease, base_revision, base_fingerprint, Json(snapshot) if snapshot is not None else None,
               history_enabled))
-        if history["chat_history_active"] and not history_enabled and snapshot is not None:
+        if not preserve_chat and history["chat_history_active"] and not history_enabled and snapshot is not None:
             snapshot["chat"].pop("pending_run", None)
             for conversation in snapshot["chat"]["conversations"]:
                 conversation.pop("chat_id", None)
                 conversation.pop("revision", None)
-        if snapshot is not None and not models:
+        if not preserve_chat and snapshot is not None and not models:
             chat = snapshot["chat"]
             chat.pop("model_id", None)
             pending = chat.get("pending_run")
@@ -1048,22 +1066,30 @@ def restore_workspace(tab, *, history_enabled=False, models=False):
     return {"lease": lease, "snapshot": snapshot}
 
 
-def save_workspace(tab, lease, revision, snapshot):
+def save_workspace(tab, lease, revision, snapshot, *, preserve_chat=False):
     if (not isinstance(tab, str) or not re.fullmatch(r"[0-9a-f]{32}", tab)
             or not isinstance(lease, str) or not re.fullmatch(r"[0-9a-f]{64}", lease)
+            or type(preserve_chat) is not bool
             or type(revision) is not int or not 0 < revision <= 4294967295 or not valid_workspace(snapshot)
             or len(json.dumps(snapshot, ensure_ascii=True)) > WORKSPACE_MAX_BYTES):
         raise Rejected(400, "invalid_workspace")
     with transaction() as cursor:
-        history = _workspace_history(cursor)
+        history = _workspace_history_marker(cursor) if preserve_chat else _workspace_history(cursor)
         current = _workspace_tab(cursor, tab)
         if history is None or current is None or not secrets.compare_digest(current["lease"], lease):
             raise Rejected(401, "workspace_lease")
+        if (preserve_chat and current["snapshot"] is not None
+                and snapshot["chat"] != current["snapshot"]["chat"]):
+            raise Rejected(409, "workspace_chat_changed")
         if revision <= current["revision"]:
             return {}
         base_revision = current["base_history_revision"]
         base_fingerprint = current["base_history_fingerprint"]
-        if history["chat_history_active"]:
+        if preserve_chat:
+            # Only workspace fields may change after the first inert save.
+            # Preserve the shared-history publication baseline as well as Chat.
+            pass
+        elif history["chat_history_active"]:
             if not current["chat_history_enabled"]:
                 raise Rejected(409, "workspace_upgrade")
             snapshot = chat_history_store.dao.normalize_checkpoint(cursor, snapshot, current["snapshot"])

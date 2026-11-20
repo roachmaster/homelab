@@ -95,14 +95,16 @@ const localActions = ['select_entry', 'toggle_entry', 'select_declaration', 'sel
 async function observe(context) {
   const counts = new Map();
   const inspectionIds = new Set();
-  const business = { mail: 0, work: 0, usage: 0 };
+  const business = { mail: 0, work: 0, usage: 0, chat: 0, proposal: 0 };
   let catalogMailEnabled = null;
   context.on('request', request => {
     if (new URL(request.url()).pathname !== '/forge/v1/dispatch') return;
     let kind;
     try { kind = request.postDataJSON()?.kind; } catch { kind = 'invalid'; }
     if (typeof kind === 'string') {
-      for (const prefix of Object.keys(business)) if (kind.startsWith(prefix + '_')) business[prefix]++;
+      for (const prefix of ['mail', 'work', 'usage']) if (kind.startsWith(prefix + '_')) business[prefix]++;
+      if (kind === 'chat' || kind.startsWith('chat_')) business.chat++;
+      if (kind === 'propose_edit') business.proposal++;
     }
     if (!['resume', 'pair', 'inspect', 'source', 'chat_history_retention_set', 'chat_run_submit'].includes(kind)) kind = 'other';
     counts.set(kind, (counts.get(kind) || 0) + 1);
@@ -174,7 +176,7 @@ async function observe(context) {
     businessCalls: () => ({ ...business }), catalogMailEnabled: () => catalogMailEnabled };
 }
 const beforeForgeUrl = 'data:text/html,<!doctype html><title>Forge QA previous page</title>';
-const retainedChatDraft = 'Draft for the other conversation';
+const retiredChatDraft = 'Keep this dormant Chat draft for a future return';
 
 async function connect(context, fixture, autoLoad = false, beforeWorkbench) {
   report.ensureActive();
@@ -206,7 +208,8 @@ async function connect(context, fixture, autoLoad = false, beforeWorkbench) {
   await page.locator('#pair-code').fill(fixture.code);
   await page.locator('#pair').click();
   fixture.code = '';
-  await check(page.locator('#chat')).toBeVisible();
+  await check(page.locator('#agents')).toBeVisible();
+  await assertRetiredChat(page);
   await check(page.locator('#workbench')).toBeHidden();
   await check(page.locator('#workbench-context')).toBeHidden();
   if (beforeWorkbench) await beforeWorkbench(page, respondToLeaveWarning);
@@ -229,9 +232,6 @@ function checkpointSaved(page, matches) {
     const command = response.request().postDataJSON();
     return command?.operation === 'save' && matches(command.snapshot);
   }, { timeout: 10000 });
-}
-function checkpointHasDraft(snapshot, draft) {
-  return snapshot?.chat?.conversations?.some(conversation => conversation.draft === draft) === true;
 }
 function fileRow(page, name) {
   return page.locator('#files [role="treeitem"]').filter({ has: page.getByText(name, { exact: true }) });
@@ -387,24 +387,32 @@ async function disclosure(page, id, open) {
     throw error;
   }
 }
-async function openChatHistory(page) {
-  const drawer = page.locator('#chat-history-panel');
-  if (!await drawer.evaluate(node => node.open)) {
-    await page.locator('#chat-history-toggle').click();
+async function assertRetiredChat(page, traffic) {
+  await check(page.locator('#chat,#open-chat,#chat-header-actions,#workbench-chat,#send-chat,#propose-workbench-edit')).toHaveCount(0);
+  if (traffic) {
+    assert.equal(traffic.businessCalls().chat, 0, 'retired Chat emits no inference, history, model or run request');
+    assert.equal(traffic.businessCalls().proposal, 0, 'retired Chat cannot be reached through a file proposal');
   }
-  await check(drawer).toBeVisible();
-  await check(drawer).toHaveJSProperty('open', true);
-  return drawer;
 }
-async function selectChat(page, value) {
-  await openChatHistory(page);
-  await page.locator('#chat-conversation').selectOption(value);
-  await check(page.locator('#chat-history-panel')).toBeHidden();
+function dormantChat() {
+  return {
+    selected: 1, model_id: 'qwen2.5-coder-7b',
+    conversations: [
+      { chat_id: '11111111-1111-4111-8111-111111111111', revision: 3,
+        messages: [{ role: 'user', content: 'A retained saved question' }, { role: 'assistant', content: 'A retained saved answer' }], draft: 'First dormant draft' },
+      { chat_id: '22222222-2222-4222-8222-222222222222', revision: 4,
+        messages: [], draft: retiredChatDraft },
+    ],
+    pending_run: { chat_id: '22222222-2222-4222-8222-222222222222',
+      idempotency_key: '33333333-3333-4333-8333-333333333333',
+      run_id: '44444444-4444-4444-8444-444444444444', expected_revision: 4,
+      model_id: 'qwen2.5-coder-7b' },
+  };
 }
-async function openChatOptions(page) {
-  await check(page.locator('#chat')).toBeVisible();
-  await check(page.locator('#chat-options > summary')).toBeVisible();
-  await disclosure(page, 'chat-options', true);
+async function retiredEvent(page, event) {
+  const before = await page.evaluate(() => window.__forgeBrowserProbe.receivedViews());
+  await page.workers()[0].evaluate(event => self.onmessage({ data: event }), event);
+  await check.poll(() => page.evaluate(() => window.__forgeBrowserProbe.receivedViews())).toBeGreaterThan(before);
 }
 
 async function checkRefreshPlacement(page) {
@@ -1060,7 +1068,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   const rows = await page.locator('#files [role="treeitem"]').count();
   const target = fileRow(page, 'README <safe>.md');
   const saved = checkpointSaved(page, snapshot => snapshot.workbench_open &&
-    checkpointHasDraft(snapshot, retainedChatDraft) && snapshot.workbench?.entry?.path.at(-1)?.value === 'README <safe>.md');
+    snapshot.workbench?.entry?.path.at(-1)?.value === 'README <safe>.md');
   for (let i = 0; i < 3; i += 1) {
     await target.click();
     await check(target).toBeFocused();
@@ -1099,11 +1107,9 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
       contextHidden: document.getElementById('workbench-context').closest('[hidden]') !== null,
       contextText: document.getElementById('workbench-context').textContent,
       sheetsClosed: ['project-options', 'workspace-options'].every(id => !document.getElementById(id).open),
-      threadTitleCleared: document.getElementById('chat-history-toggle').textContent === 'Previous chats',
       source: document.getElementById('source-view').textContent,
       markdown: document.getElementById('source-preview').textContent,
-      transcript: document.getElementById('chat-transcript').textContent,
-      draft: document.getElementById('chat-draft').value,
+      retiredChatAbsent: document.querySelectorAll('#chat,#open-chat,#chat-draft').length === 0,
     };
   });
   assert.equal(cleared.options, 0, 'teardown synchronously clears protected catalog DOM');
@@ -1116,11 +1122,9 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   assert.equal(cleared.contextHidden, true, 'teardown hides project context before resume');
   assert.equal(cleared.contextText.includes('Local fixture'), false, 'teardown clears the projected project context before resume');
   assert.equal(cleared.sheetsClosed, true, 'teardown closes both presentation sheets before resume');
-  assert.equal(cleared.threadTitleCleared, true, 'teardown clears the protected active thread title before resume');
   assert.equal(cleared.source, '', 'teardown clears verified source before resume');
   assert.equal(cleared.markdown, '', 'teardown clears displayed Markdown before resume');
-  assert.equal(cleared.transcript, '', 'teardown clears the transcript before resume');
-  assert.equal(cleared.draft, '', 'teardown clears the draft before resume');
+  assert.equal(cleared.retiredChatAbsent, true, 'retired Chat has no protected DOM during teardown');
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
@@ -1144,15 +1148,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   before = requestCounts();
   await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
   await checkRestoredWorkbench(before);
-  await page.locator('#open-chat').click();
-  await check(page.locator('#chat')).toBeVisible();
-  const conversations = page.locator('#chat-conversation');
-  await check(conversations).toHaveValue('1');
-  await check(page.locator('#chat-draft')).toHaveValue(retainedChatDraft);
-  await selectChat(page, '0');
-  await check(page.locator('#chat-transcript')).toContainText('Original conversation');
-  await check(page.locator('#chat-transcript [data-role="assistant"]')).toHaveCount(2);
-  await page.locator('#open-workbench').click();
+  await assertRetiredChat(page, traffic);
   assert.equal(await page.evaluate(() => localStorage.length === 0 && sessionStorage.length === 1 &&
     /^[0-9a-f]{32}$/.test(sessionStorage.getItem('forge-workspace-tab') ?? '')), true,
   'browser storage contains only the opaque same-tab checkpoint identifier');
@@ -1171,16 +1167,14 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
     }), { times: 1 });
     await otherTab.goto(staleUrl, { waitUntil: 'domcontentloaded' });
     await otherTab.goto(portalUrl, { waitUntil: 'domcontentloaded' });
-    await check(otherTab.locator('#chat')).toBeVisible();
-    const draft = otherTab.locator('#chat-draft');
-    await check(draft).toHaveValue('');
-    await check(otherTab.locator('#chat-conversation option')).toHaveCount(1);
+    await check(otherTab.locator('#agents')).toBeVisible();
+    await assertRetiredChat(otherTab, traffic);
     await noReport(otherTab);
-
-    const staleHistoryDraft = 'Keep this draft when Back reaches an old Forge page';
-    const saved = checkpointSaved(otherTab, snapshot => checkpointHasDraft(snapshot, staleHistoryDraft));
-    await draft.click();
-    await draft.fill(staleHistoryDraft);
+    await otherTab.locator('#open-workbench').click();
+    const saved = checkpointSaved(otherTab, snapshot => snapshot.workbench_open &&
+      snapshot.workbench?.entry?.path.at(-1)?.value === 'README <safe>.md');
+    await inspect(otherTab, 'workspace');
+    await fileRow(otherTab, 'README <safe>.md').click();
     await saved;
     process.stderr.write('QA_CHECK stale_portal_back\n');
     const documentResponse = otherTab.waitForResponse(response =>
@@ -1197,8 +1191,9 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
     assert.equal(redirect.status(), 302);
     assert.equal(redirect.headers().location, '/');
     await check(otherTab).toHaveURL(portalUrl);
-    await check(otherTab.locator('#chat')).toBeVisible();
-    await check(draft).toHaveValue(staleHistoryDraft);
+    await check(otherTab.locator('#workbench')).toBeVisible();
+    await check(otherTab.locator('#selection-title')).toContainText('README <safe>.md');
+    await assertRetiredChat(otherTab, traffic);
   } finally {
     await otherTab.close();
   }
@@ -1206,7 +1201,7 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   report.pass('probe.page.lifecycle');
 }
 
-const portalViewNames = ['Chat', 'Agents', 'Workbench', 'Home', 'Design'];
+const portalViewNames = ['Agents', 'Workbench', 'Home', 'Design'];
 
 function legacyMailNavigation() {
   return { active: true, archived: false, composing: true, thread_id: null,
@@ -1242,7 +1237,7 @@ async function assertNativeViews(page, active) {
   const views = page.getByRole('navigation', { name: 'Forge views' });
   await check(views.getByRole('link')).toHaveText(portalViewNames);
   await check(views.getByRole('link', { name: active, exact: true })).toHaveAttribute('aria-current', 'page');
-  for (const [name, href] of [['Chat', '/#chat'], ['Agents', '/#agents'], ['Workbench', '/#workbench'], ['Home', '/home'], ['Design', '/design']]) {
+  for (const [name, href] of [['Agents', '/#agents'], ['Workbench', '/#workbench'], ['Home', '/home'], ['Design', '/design']]) {
     const link = views.getByRole('link', { name, exact: true });
     await check(link).toHaveAttribute('href', href);
     await check(link).not.toHaveAttribute('target', /.+/);
@@ -1252,31 +1247,20 @@ async function assertNativeViews(page, active) {
 
 async function unconfiguredAgentsNavigationJourney(page, desktop, traffic, origin) {
   process.stderr.write('QA_CHECK unconfigured_agents_navigation\n');
-  // This durable fixture deliberately advertises mail_enabled=true. Retiring
-  // the browser screen must not depend on disabling its preserved backend flag.
   await check.poll(traffic.catalogMailEnabled).toBe(true);
-  assert.deepEqual(traffic.businessCalls(), { mail: 0, work: 0, usage: 0 });
-  const draft = page.locator('#chat-draft');
-  const originalDraft = await draft.inputValue();
-  const retained = 'Keep the Chat draft across the replacement Agents tab.';
+  assert.deepEqual(traffic.businessCalls(), { mail: 0, work: 0, usage: 0, chat: 0, proposal: 0 });
   const pages = page.context().pages();
-  await draft.fill(retained);
   for (const width of [320, 375, 390]) {
     await page.setViewportSize({ width, height: 844 });
-    await page.locator('#open-agents').focus();
-    await page.keyboard.press('Enter');
     await check(page.locator('#agents')).toBeVisible();
     await assertApplicationViews(page, 'Agents');
+    await assertRetiredChat(page, traffic);
     await check(page.locator('#agents-unsupported')).toContainText('not configured');
     await check(page.locator('#agents-new')).toBeHidden();
-    await check(page.locator('#agents-compose')).toBeHidden();
     const tab = await page.locator('#open-agents').boundingBox();
-    assert(tab && tab.width >= 44 && tab.height >= 44, 'the replacement Agents tab preserves a mobile touch target');
+    assert(tab && tab.width >= 44 && tab.height >= 44, 'Agents keeps a mobile touch target');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
-      'the fixed five-view navigation fits unconfigured phone viewports');
-    await page.locator('#open-chat').click();
-    await check(page.locator('#chat')).toBeVisible();
-    await check(draft).toHaveValue(retained);
+      'the four-view navigation fits unconfigured phone viewports');
   }
   await page.locator('#forge-home').click();
   await check(page).toHaveURL(origin + '/home');
@@ -1285,49 +1269,37 @@ async function unconfiguredAgentsNavigationJourney(page, desktop, traffic, origi
   await page.evaluate(mail => {
     const key = 'forge-workspace-navigation';
     const cache = JSON.parse(sessionStorage.getItem(key));
-    if (!cache?.snapshot) throw new Error('Expected genuine Chat handoff');
+    if (!cache?.snapshot) throw new Error('Expected genuine workspace handoff');
     cache.mail = mail;
     sessionStorage.setItem(key, JSON.stringify(cache));
   }, retiredMail);
   const legacyRedirect = await page.request.get(origin + '/mail', { maxRedirects: 0 });
-  assert.equal(legacyRedirect.status(), 302, 'the retired native Mail route redirects');
+  assert.equal(legacyRedirect.status(), 302);
   assert.equal(legacyRedirect.headers().location, '/#agents');
   await legacyRedirect.dispose();
-  // Entry fragments are applied once after authenticated recovery, then stripped.
-  // Start from the static Home document so this is a genuine application boot.
-  await page.goto(origin + '/#mail', { waitUntil: 'domcontentloaded' });
-  await check(page.locator('#agents')).toBeVisible();
-  await check(page).toHaveURL(origin + '/');
-  await assertApplicationViews(page, 'Agents');
-  await check(page.locator('#agents-unsupported')).toContainText('not configured');
-  await page.locator('#open-chat').click();
-  await check(draft).toHaveValue(retained);
-  await draft.fill(originalDraft);
-  await page.locator('#forge-home').click();
-  await check(page).toHaveURL(origin + '/home');
+  for (const fragment of ['mail', 'chat']) {
+    await page.goto(origin + '/#' + fragment, { waitUntil: 'domcontentloaded' });
+    await check(page.locator('#agents')).toBeVisible();
+    await check(page).toHaveURL(origin + '/');
+    await assertApplicationViews(page, 'Agents');
+    await assertRetiredChat(page, traffic);
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(origin + '/home');
+  }
   const inertMail = await page.evaluate(() => JSON.parse(sessionStorage.getItem('forge-workspace-navigation'))?.mail);
-  assert.deepEqual(inertMail, { ...retiredMail, active: false },
-    'a Mail-enabled host retains legacy recovery data without activating it');
+  assert.deepEqual(inertMail, { ...retiredMail, active: false });
   await page.locator('.home-launcher-ide').click();
-  await check(page.locator('#chat')).toBeVisible();
-  await check(draft).toHaveValue(originalDraft);
-  assert.deepEqual(traffic.businessCalls(), { mail: 0, work: 0, usage: 0 },
-    'unconfigured Agents and the legacy Mail entry issue no Work, Usage or Mail requests');
-  assert.deepEqual(page.context().pages(), pages, 'replacement navigation retains one browser page');
+  await check(page.locator('#agents')).toBeVisible();
+  assert.deepEqual(traffic.businessCalls(), { mail: 0, work: 0, usage: 0, chat: 0, proposal: 0 });
+  assert.deepEqual(page.context().pages(), pages);
   await page.setViewportSize(desktop);
 }
 
 async function durableHostRestartJourney() {
-  const prompt = 'Keep this submitted conversation';
-  const reply = '## Durable fixture reply\n\n**Ready after restart.**';
-  const privateDraft = 'Keep this unsent text in its original tab';
-  const cancelledDraft = 'Keep this message when the queued run is cancelled';
-  const file = 'README <safe>.md';
-  const source = 'Fixture <script> text is never HTML.';
   const viewport = { width: 1440, height: 1000 };
-  const contexts = [];
+  const context = await browser.newContext({ viewport });
   let fixture;
-  durableRelayOwner = acquireOwned(() => startDurableRelay(prompt, reply), relay => relay.close());
+  durableRelayOwner = acquireOwned(() => startDurableRelay('', ''), relay => relay.close());
   try {
     const relay = await durableRelayOwner.ready;
     async function restart() {
@@ -1338,207 +1310,85 @@ async function durableHostRestartJourney() {
         endpoint: relay.endpoint, tokenFile: relay.tokenFile,
       } });
       report.setStage('scenario');
-      if (previous) assert.equal(fixture.origin, previous.origin, 'new host owns the same browser origin');
+      if (previous) assert.equal(fixture.origin, previous.origin);
     }
-    async function startPage() {
-      const context = await browser.newContext({ viewport });
-      contexts.push(context);
-      const traffic = await observe(context);
-      const page = await context.newPage();
-      fixture.page = page;
-      await page.goto(fixture.origin, { waitUntil: 'domcontentloaded' });
-      return { page, traffic };
-    }
-    async function pair(page) {
-      await check(page.locator('#pair')).toBeEnabled();
-      await check(page.locator('#chat')).toBeHidden();
-      await check(page.locator('#chat-transcript [data-role]')).toHaveCount(0);
-      await check(page.locator('#chat-draft')).toHaveValue('');
-      await check(page.locator('#workbench')).toBeHidden();
-      await page.locator('#pair-code').fill(fixture.code);
-      await page.locator('#pair').click();
-      fixture.code = '';
-      await check(page.locator('#pair-panel')).toBeHidden();
-    }
-    function tabIdentifier(page) {
-      return page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
-    }
-    async function reloadQueuedChat(page) {
-      await page.locator('#chat-status').click();
-      const leave = page.waitForEvent('dialog', { predicate: dialog => dialog.type() === 'beforeunload', timeout: 5000 })
-        .then(dialog => dialog.accept());
-      await Promise.all([leave, page.reload({ waitUntil: 'domcontentloaded' })]);
-      await openChatOptions(page);
-      await check(page.locator('#chat-run-cancel')).toBeVisible();
-      await check(page.locator('#chat-status')).toHaveText('Waiting for Forge…');
-    }
-    async function checkTranscript(page) {
-      const transcript = page.locator('#chat-transcript');
-      await check(transcript.locator('[data-role="user"]')).toHaveCount(1);
-      await check(transcript.locator('[data-role="user"]')).toContainText(prompt);
-      await check(transcript.locator('[data-role="assistant"]')).toHaveCount(1);
-      await check(transcript.getByRole('heading', { name: 'Durable fixture reply' })).toBeVisible();
-      await check(transcript.locator('strong').filter({ hasText: /^Ready after restart\.$/ })).toBeVisible();
-    }
-
-    process.stderr.write('QA_CHECK durable_chat_save\n');
     await restart();
-    const { page, traffic } = await startPage();
-    await pair(page);
+    const traffic = await observe(context);
+    const page = await context.newPage();
+    fixture.page = page;
+    await page.goto(fixture.origin, { waitUntil: 'domcontentloaded' });
+    await page.locator('#pair-code').fill(fixture.code);
+    await page.locator('#pair').click();
+    fixture.code = '';
+    await check(page.locator('#agents')).toBeVisible();
+    const tab = await page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
+    const chat = dormantChat();
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin + '/home');
+    relay.seedWorkspace(tab, { chat, workbench: null, workbench_open: false });
+    await page.locator('.home-launcher-ide').click();
+    await check(page.locator('#agents')).toBeVisible();
+    await assertRetiredChat(page, traffic);
     await unconfiguredAgentsNavigationJourney(page, viewport, traffic, fixture.origin);
-    await check(page.locator('#chat')).toBeVisible();
-    const model = page.locator('#chat-model');
-    await openChatOptions(page);
-    await check(model).toHaveValue('gpt-oss-20b');
-    await check(model.locator('option[value="qwen2.5-coder-7b"]')).toHaveText(/Qwen2.5-Coder 7B.*loads on request$/);
-    await model.selectOption('qwen2.5-coder-7b');
-    const tab = await tabIdentifier(page);
-    assert.ok(/^[0-9a-f]{32}$/.test(tab ?? ''), 'first document uses an opaque tab key');
-    const draft = page.locator('#chat-draft');
-    await draft.fill(prompt);
-    await page.locator('#send-chat').click();
-    await check(page.locator('#chat-run-retry')).toBeVisible();
-    assert.equal(relay.submitted(), 1, 'the queue committed the job before the acknowledgement was lost');
-    const accepted = checkpointSaved(page, snapshot => !!snapshot.chat.pending_run?.run_id &&
-      snapshot.chat.pending_run.model_id === 'qwen2.5-coder-7b');
-    await reloadQueuedChat(page);
-    await accepted;
-    await check(model).toHaveValue('qwen2.5-coder-7b');
-    await check(model).toBeDisabled();
-    assert.equal(relay.submitted(), 1, 'reloading with no run ID reuses the submitted intent');
-    await reloadQueuedChat(page);
-    assert.equal(traffic.count('chat_run_submit'), 2, 'reloading with a run ID polls without submitting');
-    relay.finish();
-    await checkTranscript(page);
-    await check(model).toBeEnabled();
-    await check(model.locator('option[value="qwen2.5-coder-7b"]')).toHaveText(/ · loaded$/);
-    await page.locator('#new-chat').click();
-    // Input events carry the accepted conversation identity from the view.
-    // Wait for New chat's Rust acknowledgement before entering its draft.
-    await check(page.locator('#chat-conversation')).toHaveValue('1');
-    await draft.fill(privateDraft);
-    const persisted = checkpointSaved(page, snapshot => snapshot.workbench_open &&
-      snapshot.workbench?.entry?.path.at(-1)?.value === file && snapshot.chat.selected === 1 &&
-      snapshot.chat.conversations[1]?.draft === privateDraft &&
-      snapshot.chat.conversations[0]?.messages.some(message => message.role === 'assistant' && message.content === reply));
+    for (const event of [
+      {kind:'open_chat'}, {kind:'show_chat_history'}, {kind:'retry_chat_submit'},
+      {kind:'cancel_chat_run'}, {kind:'send_chat'},
+      {kind:'set_chat_draft',conversation:1,value:'Must not overwrite the dormant draft'},
+    ]) await retiredEvent(page,event);
+    await check(page.locator('#agents')).toBeVisible();
+    await assertRetiredChat(page, traffic);
     await page.locator('#open-workbench').click();
+    const saved = checkpointSaved(page, snapshot => snapshot.workbench_open &&
+      snapshot.workbench?.entry?.path.at(-1)?.value === 'README <safe>.md');
     await inspect(page, 'workspace');
-    await fileRow(page, file).click();
-    await check(page.locator('#source-view')).toContainText(source);
-    await persisted;
-
-    process.stderr.write('QA_CHECK durable_chat_same_tab_restart\n');
-    const inspectCalls = traffic.count('inspect');
-    const sourceCalls = traffic.count('source');
+    await fileRow(page, 'README <safe>.md').click();
+    await saved;
+    assert.deepEqual(relay.workspaceSnapshot(tab).chat, chat,
+      'workspace save preserves every dormant draft, message, model and pending-run identity');
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin + '/home');
+    assert.deepEqual(relay.workspaceSnapshot(tab).chat, chat);
     await restart();
     fixture.page = page;
-    const leave = page.waitForEvent('dialog', { predicate: dialog => dialog.type() === 'beforeunload', timeout: 5000 })
-      .then(dialog => dialog.accept());
-    await Promise.all([leave, page.reload({ waitUntil: 'domcontentloaded' })]);
-    await pair(page);
+    await page.locator('.home-launcher-ide').click();
+    // A host restart needs its new session pairing, never the old admission.
+    await check(page.locator('#pair')).toBeEnabled();
+    await noReport(page);
+    await page.locator('#pair-code').fill(fixture.code);
+    await page.locator('#pair').click();
+    fixture.code = '';
     await check(page.locator('#workbench')).toBeVisible();
-    await check(page.locator('#selection-title')).toContainText(file);
-    await check(page.locator('#source-view')).toContainText(source);
-    assert.equal(traffic.count('inspect'), inspectCalls + 1, 'new host performs a fresh authenticated inspection');
-    assert.equal(traffic.count('source'), sourceCalls + 1, 'new host authorizes the source from the fresh report');
-    assert.ok(await tabIdentifier(page) === tab, 'reload retains the opaque tab key');
-    await page.locator('#open-chat').click();
-    await check(page.locator('#chat-conversation')).toHaveValue('1');
-    await check(draft).toHaveValue(privateDraft);
-    await selectChat(page, '0');
-    await checkTranscript(page);
-
-    process.stderr.write('QA_CHECK durable_chat_new_context\n');
-    await restart();
-    const fresh = await startPage();
-    await pair(fresh.page);
-    await check(fresh.page.locator('#chat')).toBeVisible();
-    await checkTranscript(fresh.page);
-    await check(fresh.page.locator('#chat-draft')).toHaveValue('');
-    await check(fresh.page.locator('#chat-conversation option')).toHaveCount(1);
-    await check(fresh.page.locator('#workbench')).toBeHidden();
-    await noReport(fresh.page);
-    assert.ok(await tabIdentifier(fresh.page) !== tab, 'independent browser context gets a new tab key');
-    assert.equal(fresh.traffic.count('inspect'), 0, 'the previous tab Workbench bookmark does not transfer');
-    assert.equal(fresh.traffic.count('source'), 0);
-    assert.equal(relay.completions(), 1, 'reopening the transcript does not replay inference');
-
-    process.stderr.write('QA_CHECK durable_chat_history_retention_and_delete\n');
-    const freshPage = fresh.page;
-    await freshPage.setViewportSize({ width: 390, height: 664 });
-    const previousChats = freshPage.getByRole('button', { name: 'Previous chats' });
-    const manage = freshPage.getByRole('button', { name: 'Manage current chat', exact: true });
-    const savedChats = freshPage.getByRole('tree', { name: 'Saved chats' });
-    await previousChats.click();
-    const savedChat = savedChats.getByRole('treeitem', { name: prompt });
-    await check(savedChat).toBeVisible();
-    await check(savedChat).toContainText('Kept through 2026-12-16 (UTC)');
-    const search = freshPage.getByRole('searchbox', { name: 'Search saved chats on this page', exact: true });
-    const beforeSearch = fresh.traffic.count('other');
-    await search.fill('No matching saved conversation');
-    await check(savedChats.getByRole('treeitem')).toHaveCount(0);
-    await search.fill('KEEP THIS');
-    await check(savedChat).toBeVisible();
-    assert.equal(fresh.traffic.count('other'), beforeSearch, 'filtering the current history page stays local to WASM');
-    await search.fill('');
-    await screenshot(freshPage, 'ide-chat-history-phone.png');
-    await savedChat.click();
-    await check(previousChats).toHaveAttribute('aria-expanded', 'false');
-    await checkTranscript(freshPage);
-    await openChatHistory(freshPage);
-    await manage.click();
-    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept through 2026-12-16 (UTC)');
-    assert.equal(fresh.traffic.count('chat_history_retention_set'), 0, 'the default date needs no browser mutation');
-    await freshPage.getByRole('button', { name: 'Set expiration', exact: true }).click();
-    const expiration = freshPage.getByRole('dialog', { name: 'Set expiration' });
-    await expiration.getByLabel('Keep through').fill('2099-05-12');
-    await expiration.getByRole('button', { name: 'Save expiration' }).click();
-    await check(expiration).toBeHidden();
-    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept through 2099-05-12 (UTC)');
-    await freshPage.getByRole('button', { name: 'Keep long term', exact: true }).click();
-    await check(freshPage.locator('#chat-retention-label')).toHaveText('Kept long term');
-    assert.equal(fresh.traffic.count('chat_history_retention_set'), 2, 'only explicit changes update retention');
-    const deleteButton = freshPage.locator('#chat-show-delete');
-    const deletion = freshPage.getByRole('dialog', { name: 'Delete chat' });
-    await deleteButton.click();
-    await check(deletion).toContainText(prompt);
-    await check(deletion.getByRole('button', { name: 'Cancel' })).toBeFocused();
-    await deletion.getByRole('button', { name: 'Cancel' }).click();
-    await check(deletion).toBeHidden();
-    await checkTranscript(freshPage);
-    await check(freshPage.locator('#chat-history-panel')).toBeVisible();
-    await deleteButton.click();
-    await deletion.getByRole('button', { name: 'Delete chat', exact: true }).click();
-    await check(deletion).toBeHidden();
-    await check(freshPage.locator('#chat-history-status')).toHaveText('Chat deleted.');
-    await check(freshPage.locator('#chat-history-panel')).toBeHidden();
-    await openChatHistory(freshPage);
-    await check(savedChats).toHaveText('No saved chats yet.');
-    await check(freshPage.locator('#chat-transcript [data-role]')).toHaveCount(0);
-    assert.equal(await freshPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
-    assert.equal(relay.completions(), 1, 'retention and deletion do not call inference');
-    await freshPage.locator('#chat-history-close').click();
-    await check(freshPage.locator('#chat-history-panel')).toBeHidden();
-    await freshPage.locator('#new-chat').click();
-    await check(freshPage.locator('#chat-conversation')).toHaveValue('1');
-    const cancelled = freshPage.locator('#chat-draft');
-    await cancelled.fill(cancelledDraft);
-    await freshPage.locator('#send-chat').click();
-    await openChatOptions(freshPage);
-    await check(freshPage.locator('#chat-run-cancel')).toBeVisible();
-    await freshPage.locator('#chat-run-cancel').click();
-    await check(freshPage.locator('#chat-status')).toContainText('Run cancelled');
-    await check(cancelled).toHaveValue(cancelledDraft);
-    await check(freshPage.locator('#chat-transcript [data-role]')).toHaveCount(0);
-
+    await check(page.locator('#selection-title')).toContainText('README <safe>.md');
+    await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
+    await page.locator('#source-display').click();
+    await page.locator('#source-raw').click();
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin + '/home');
+    // Successful navigation acknowledges the current saved checkpoint. Pure
+    // presentation changes need not create another identical save request.
+    assert.equal(relay.workspaceSnapshot(tab).workbench_open, true);
+    assert.equal(relay.workspaceSnapshot(tab).workbench.entry.path.at(-1).value, 'README <safe>.md');
+    assert.deepEqual(relay.workspaceSnapshot(tab).chat, chat);
+    assert.equal(relay.submitted(), 0, 'a dormant saved run is never submitted again');
+    assert.equal(relay.completions(), 0, 'retirement does not manufacture a completion');
+    assert.ok(relay.workspaceRestores().length >= 3);
+    assert.ok(relay.workspaceRestores().every(request => request.preserve_chat && !request.history && !request.models),
+      'all workspace restores preserve dormant Chat without history/model hydration');
+    await assertRetiredChat(page, traffic);
+    const fresh = await context.newPage();
+    try {
+      await fresh.goto(fixture.origin, { waitUntil: 'domcontentloaded' });
+      await check(fresh.locator('#agents')).toBeVisible();
+      await assertRetiredChat(fresh, traffic);
+      await noReport(fresh);
+    } finally { await fresh.close(); }
   } finally {
-    try { await Promise.all(contexts.map(context => context.close())); }
-    finally {
-      try { if (fixture) await stopFixture(fixture); }
-      finally { await durableRelayOwner.close(); }
-    }
+    await context.close();
+    try { if (fixture) await stopFixture(fixture); }
+    finally { await durableRelayOwner.close(); }
   }
 }
+
 async function noSelectedFileFromPriorReport(page) {
   await check(page.locator('#selection-title')).not.toContainText(LONG_FILE_NAME);
   await check(page.locator('#details')).not.toContainText(LONG_FILE_NAME);
@@ -1650,79 +1500,10 @@ async function sourceSearchJourney() {
     assert.equal(traffic.count('inspect'), 1, 'opening source does not repeat inspection');
     await check(page.locator('#source-format')).toBeHidden();
     await assertVisibleFocus(page);
-    const contextualRequests = [];
-    const gateway = '**/forge/v1/dispatch';
-    let releasePreview;
-    const deferredPreview = new Promise(resolve => { releasePreview = resolve; });
-    const contextualChat = async route => {
-      const body = route.request().postDataJSON();
-      if (body?.kind === 'propose_edit') {
-        if (body.request.messages.at(-1).content === 'Delay this preview.') await deferredPreview;
-        return route.fulfill({ json: {
-          protocol_version: 1,
-          event: { kind: 'edit_result', request_id: body.request.request_id,
-            outcome: { kind: 'preview', preview: {
-              base_sha256: body.request.file_context.sha256,
-              lines: [
-                { old_line: 6, new_line: null, text: 'pub fn inspect_me() {}' },
-                { old_line: null, new_line: 6, text: 'pub fn inspect_me() { /* <script> */ }' },
-              ],
-            } } },
-        } });
-      }
-      if (body?.kind !== 'chat' || !body.request.file_context) return route.continue();
-      contextualRequests.push(body.request);
-      await route.fulfill({ json: {
-        protocol_version: 1,
-        event: { kind: 'chat_result', request_id: body.request.request_id,
-          outcome: { kind: 'answer', content: 'The selected Rust fixture contains inspect_me.' } },
-      } });
-    };
-    await context.route(gateway, contextualChat);
-    try {
-      const dock = page.locator('#workbench-chat');
-      const prompt = dock.getByRole('textbox', { name: 'Ask Forge about this file' });
-      await check(dock.locator('#workbench-chat-context')).toHaveText(/^Lines 1–6 · rev [0-9a-f]{8}$/);
-      await prompt.fill('What is defined here?');
-      await dock.getByRole('button', { name: 'Send' }).click();
-      await check(dock.getByRole('status')).toHaveText('Reply ready in Chat.');
-      assert.equal(contextualRequests.length, 1);
-      assert.equal(contextualRequests[0].file_context.byte_start, 0);
-      assert.match(contextualRequests[0].file_context.sha256, /^[0-9a-f]{64}$/);
-      assert.deepEqual(contextualRequests[0].messages, [{ role: 'user', content: 'What is defined here?' }]);
-      await page.locator('#open-chat').click();
-      await check(page.locator('#chat-transcript')).toContainText('The selected Rust fixture contains inspect_me.');
-      await page.locator('#open-workbench').click();
-      await check(dock).toBeVisible();
-      const readsBeforePreview = traffic.count('source');
-      await prompt.fill('Add a comment to inspect_me.');
-      await dock.getByRole('button', { name: 'Propose edit' }).click();
-      const diff = page.getByRole('region', { name: 'Proposed diff' });
-      await check(diff.locator('[data-change=removed]')).toContainText('−');
-      await check(diff.locator('[data-change=added]')).toContainText('<script>');
-      await check(diff.locator('script')).toHaveCount(0);
-      await check(page.locator('#source-view')).toBeHidden();
-      await page.getByRole('button', { name: 'Wrap', exact: true }).click();
-      await check(page.locator('#source-view')).toHaveAttribute('data-wrap', 'true');
-      await page.getByRole('button', { name: 'Wrap', exact: true }).click();
-      await dock.getByRole('button', { name: 'Discard' }).click();
-      await check(diff).toBeHidden();
-      await check(page.locator('#source-view [data-line="6"] .fg-source-text')).toHaveText('pub fn inspect_me() {}');
-      assert.equal(traffic.count('source'), readsBeforePreview, 'preview and discard leave verified source intact');
-      await prompt.fill('Delay this preview.');
-      await dock.getByRole('button', { name: 'Propose edit' }).click();
-      await check(dock.locator('#workbench-chat-status')).toHaveText('Preparing proposal…');
-      await checkPhoneFileBack(page);
-      await searchProject(page, 'README <safe>');
-      await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'README <safe>.md' }).click();
-      await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
-      releasePreview();
-      await check(dock.locator('#workbench-chat-status')).toHaveText('Reply ready in Chat.');
-      await check(diff).toBeHidden();
-    } finally {
-      releasePreview();
-      await context.unroute(gateway, contextualChat);
-    }
+    await assertRetiredChat(page, traffic);
+    await checkPhoneFileBack(page);
+    await searchProject(page, 'README <safe>');
+    await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'README <safe>.md' }).click();
     await check(page.locator('#workspace-panel')).toBeVisible();
     await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
     await check(page.locator('#source-view script, #source-view img, #source-view svg')).toHaveCount(0);
@@ -1782,10 +1563,6 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     assert.equal(traffic.count('inspect'), beforeReload + 1, 'reload obtains a fresh single-project report');
     assert.equal(traffic.count('source'), sourceBeforeReload + 1, 'reload re-verifies the bookmarked declaration source');
-    const designDraft = 'Keep this draft while I read the Forge design';
-    await page.locator('#open-chat').click();
-    await page.locator('#chat-draft').fill(designDraft);
-    await page.locator('#open-workbench').click();
     await homeJourney(page, traffic);
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     const beforeDesign = ['resume', 'inspect', 'source'].map(traffic.count);
@@ -1793,13 +1570,10 @@ async function sourceSearchJourney() {
     await check(page.locator('#source-view [data-line="301"] .fg-source-text')).toHaveText('    42');
     assert.deepEqual(['resume', 'inspect', 'source'].map(traffic.count), beforeDesign.map(count => count + 1),
       'returning from Design authenticates and re-verifies the bookmarked source');
-    await page.locator('#open-chat').click();
-    await check(page.locator('#chat-draft')).toHaveValue(designDraft);
+    await assertRetiredChat(page, traffic);
     if (managedWrites) {
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.locator('#open-workbench').click();
       await managedWriteJourney(page, context, respondToLeaveWarning);
-      await page.locator('#open-chat').click();
     }
     await designLocalRestoreJourney(page);
     assert.deepEqual(errors, []);
@@ -1818,82 +1592,46 @@ async function managedWriteJourney(page, context, respondToLeaveWarning) {
   await searchProject(page, 'managed.txt');
   await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'managed.txt' }).click();
   const source = page.locator('#source-view');
-  const dock = page.locator('#workbench-chat');
   await check(source).toContainText('old line');
-  await dock.getByRole('textbox', { name: 'Ask Forge about this file' }).fill('Update the second line.');
-  await dock.getByRole('button', { name: 'Propose edit' }).click();
-  const diff = page.getByRole('region', { name: 'Proposed diff' });
-  await check(diff).toContainText('extra line');
-  await screenshot(page, 'ide-workbench-managed-preview.png');
-
-  // Let the real host and mTLS agent complete the write, then drop the reply
-  // before it reaches the browser. Status must recover the same operation.
+  await assertRetiredChat(page);
+  await page.getByRole('button', { name: 'Edit file', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'File contents' });
+  const original = await editor.inputValue();
+  const edited = original.replace('old line', 'saved with direct editor');
+  await editor.fill(edited);
+  await check(page.locator('#document-status')).toHaveText('Unsaved changes');
+  await page.locator('#open-agents').click();
+  await check(page.locator('#agents')).toBeVisible();
+  await page.locator('#open-workbench').click();
+  await check(editor).toHaveValue(edited);
   const gateway = '**/forge/v1/dispatch';
   const operations = [];
-  const loseApplyReply = async route => {
+  const loseSaveReply = async route => {
     const body = route.request().postDataJSON();
     if (body?.kind !== 'edit_write') return route.continue();
     operations.push([body.request.intent.kind, body.request.operation]);
-    if (body.request.intent.kind !== 'apply') return route.continue();
+    if (body.request.intent.kind !== 'save_document') return route.continue();
     const response = await route.fetch();
     assert.equal((await response.json()).event.outcome.kind, 'applied');
     return route.abort('failed');
   };
-  await context.route(gateway, loseApplyReply);
+  await context.route(gateway, loseSaveReply);
   try {
-    await dock.getByRole('button', { name: 'Apply', exact: true }).click();
-    await check(dock.locator('#workbench-write-status')).toContainText('Write outcome unknown');
-    await dock.getByRole('button', { name: 'Check status', exact: true }).click();
-    await check(source.locator('[data-line="3"]')).toContainText('extra line');
-    assert.deepEqual(operations.map(([kind]) => kind), ['apply', 'status']);
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    await check(page.locator('#workbench-write-status')).toContainText('Write outcome unknown');
+    await page.getByRole('button', { name: 'Check status', exact: true }).click();
+    await check(source).toContainText('saved with direct editor');
+    assert.deepEqual(operations.map(([kind]) => kind), ['save_document', 'status']);
     assert.equal(operations[0][1], operations[1][1]);
     await screenshot(page, 'ide-workbench-managed-applied.png');
-  } finally {
-    await context.unroute(gateway, loseApplyReply);
-  }
-
-  await page.locator('#open-chat').click();
-  await check(page.locator('#chat-transcript')).toContainText(/Applied · rev [0-9a-f]{8}/);
-  await page.locator('#chat-draft').fill('What changed in the file?');
-  await openChatOptions(page);
-  await page.getByRole('button', { name: 'Send with file', exact: true }).click();
-  await check(page.locator('#chat-transcript')).toContainText('The verified excerpt contains the updated and extra lines.');
+  } finally { await context.unroute(gateway, loseSaveReply); }
   await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
-  await check(page.locator('#chat')).toBeVisible();
-  await page.locator('#open-workbench').click();
-  // Refresh the already-selected project before reopening the edited file.
-  // The resumed tab can also be restoring focus to a bookmarked file.
-  await Promise.all([
-    page.waitForResponse(response => response.request().headers()['forge-destination'] === 'ide.inspect'
-      && response.status() === 200),
-    page.getByRole('button', { name: 'Refresh project', exact: true }).click(),
-  ]);
-  await check(page.locator('#status')).toContainText('Partial inspection:');
-  await ensurePane(page, 'explorer-panel');
-  await searchProject(page, 'managed.txt');
-  await page.locator('#search-results [role="treeitem"]').filter({ hasText: 'managed.txt' }).click();
-  await check(source.locator('[data-line="3"]')).toContainText('extra line');
-  await check(dock.locator('#workbench-write-status')).toContainText(/Applied · rev [0-9a-f]{8}/);
-  await dock.getByRole('button', { name: 'Undo edit', exact: true }).click();
-  await check(source.locator('[data-line="2"]')).toContainText('old line');
-  await check(source.locator('[data-line="3"]')).toContainText('omega');
-  await check(dock.locator('#workbench-write-status')).toContainText(/Reverted · rev [0-9a-f]{8}/);
-
-  await page.getByRole('button', { name: 'Edit file', exact: true }).click();
-  const editor = page.getByRole('textbox', { name: 'File contents' });
-  const original = await editor.inputValue();
-  assert.match(original, /old line/);
-  const edited = original.replace('old line', 'saved with direct editor');
-  await editor.fill(edited);
-  await check(page.locator('#document-status')).toHaveText('Unsaved changes');
-  await page.locator('#open-chat').click();
-  await page.locator('#open-workbench').click();
-  await check(editor).toHaveValue(edited);
-  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  await check(page.locator('#workbench')).toBeVisible();
   await check(source).toContainText('saved with direct editor');
-  await check(dock.locator('#workbench-write-status')).toContainText(/Saved · rev [0-9a-f]{8}/);
+  await check(page.locator('#workbench-write-status')).toContainText(/Applied · rev [0-9a-f]{8}/);
   await page.getByRole('button', { name: 'Undo edit', exact: true }).click();
   await check(source.locator('[data-line="2"]')).toContainText('old line');
+  await check(page.locator('#workbench-write-status')).toContainText(/Reverted · rev [0-9a-f]{8}/);
 }
 
 async function homeJourney(page, traffic) {
@@ -1906,7 +1644,6 @@ async function homeJourney(page, traffic) {
   const tabKey = () => page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
   const originalTab = await tabKey();
   assert.match(originalTab, /^[a-f0-9]{32}$/);
-  const originalDraft = await page.locator('#chat-draft').inputValue();
   const counts = () => ['resume', 'pair', 'inspect', 'source', 'other'].map(traffic.count);
   const before = counts();
   const brandLink = page.locator('header').getByRole('link', { name: 'Forge IDE', exact: true });
@@ -2040,7 +1777,7 @@ async function homeJourney(page, traffic) {
     ['Room One playtest', '/playtest'],
     ['Forge plug-and-play', '/design/forge-providers'],
     ['Forge foundations', '/design#forge-foundations'],
-    ['Chat and Mail', '/design#chat-and-mail'],
+    ['Conversation storage', '/design#chat-and-mail'],
     ['Game development', '/design#game-development'],
     ['Wireframes & IDE screens', '/design#wireframes-and-workspace'],
     ['Coding-agent dispatch design', '/design/coding-agents'],
@@ -2074,13 +1811,13 @@ async function homeJourney(page, traffic) {
   await open('/', () => primary.click());
   await check(page).toHaveURL(ideUrl);
   await check(page.locator('#workspace-panel')).toBeVisible();
-  await check(page.locator('#chat-draft')).toHaveValue(originalDraft);
+  await assertRetiredChat(page, traffic);
   assert.equal(await tabKey(), originalTab, 'returning from Home restores the same tab workspace');
   assert.equal(page.workers().length, 1, 'returning from Home starts one Forge worker');
   await open('/home', () => brandLink.click());
   await open('/', () => primary.click());
   await check(page.locator('#workspace-panel')).toBeVisible();
-  await check(page.locator('#chat-draft')).toHaveValue(originalDraft);
+  await assertRetiredChat(page, traffic);
   assert.equal(await tabKey(), originalTab, 'clicking the Forge name preserves the workspace');
 }
 
@@ -2093,7 +1830,6 @@ async function designJourney(page, traffic) {
   const pages = context.pages();
   const tabKey = () => page.evaluate(() => sessionStorage.getItem('forge-workspace-tab'));
   const originalTab = await tabKey();
-  const originalDraft = await page.locator('#chat-draft').inputValue();
   assert.match(originalTab, /^[a-f0-9]{32}$/);
   const designUrl = new URL('/design', originalUrl).href;
   const styleUrl = new URL('/design/style.css', originalUrl).href;
@@ -2124,7 +1860,7 @@ async function designJourney(page, traffic) {
   const topics = page.getByRole('navigation', { name: 'Design topics' });
   await check(views.getByRole('link')).toHaveText(portalViewNames);
   await check(views.getByRole('link', { name: 'Design', exact: true })).toHaveAttribute('aria-current', 'page');
-  for (const [name, href] of [['Chat', '/#chat'], ['Agents', '/#agents'], ['Workbench', '/#workbench']]) {
+  for (const [name, href] of [['Agents', '/#agents'], ['Workbench', '/#workbench']]) {
     await check(views.getByRole('link', { name, exact: true })).toHaveAttribute('href', href);
   }
   await check(topics.getByRole('link')).toHaveCount(4);
@@ -2189,11 +1925,10 @@ async function designJourney(page, traffic) {
   await gameEngineDesignJourney(page, designUrl);
   assert.deepEqual(counts(), before, 'Design does not send requests through the Forge gateway');
   if (originalViewport) await page.setViewportSize(originalViewport);
-  await page.getByRole('navigation', { name: 'Forge views' }).getByRole('link', { name: 'Chat', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Forge views' }).getByRole('link', { name: 'Workbench', exact: true }).click();
   await check(page).toHaveURL(new URL('/', originalUrl).href);
-  await check(page.locator('#chat-draft')).toBeVisible();
-  await check(page.locator('#chat-draft')).toHaveValue(originalDraft);
-  await page.locator('#open-workbench').click();
+  await check(page.locator('#workbench')).toBeVisible();
+  await assertRetiredChat(page, traffic);
   assert.equal(await tabKey(), originalTab, 'the IDE returns to the same tab workspace');
   assert.deepEqual(context.pages(), pages, 'returning from Design uses the existing page');
   await check(page.locator('#workspace-panel')).toBeVisible();
@@ -2431,67 +2166,33 @@ async function wireframesDesignJourney(page, designUrl) {
 async function designLocalRestoreJourney(page) {
   process.stderr.write('QA_CHECK design_local_workspace_restore\n');
   const originalUrl = page.url();
-  const designUrl = new URL('/design', originalUrl).href;
-  const draft = page.locator('#chat-draft');
-  const transcript = page.locator('#chat-transcript');
-  const prompt = 'This sent prompt belongs in the remote workspace';
-  const reply = 'This completed reply belongs in the remote workspace';
+  const title = await page.locator('#selection-title').textContent();
   const context = page.context();
-  const gateway = '**/forge/v1/dispatch';
-  const replyToChat = async route => {
-    const body = route.request().postDataJSON();
-    if (body?.kind !== 'chat') return route.continue();
-    await route.fulfill({ json: {
-      protocol_version: 1,
-      event: {
-        kind: 'chat_result', request_id: body.request.request_id,
-        outcome: { kind: 'answer', content: reply },
-      },
-    } });
-  };
-  await context.route(gateway, replyToChat);
-  try {
-    await draft.fill(prompt);
-    await page.locator('#send-chat').click();
-    await check(transcript).toContainText(prompt);
-    await check(transcript).toContainText(reply);
-  } finally {
-    await context.unroute(gateway, replyToChat);
-  }
-
-  const text = 'Restore this updated draft when the remote checkpoint is unavailable';
-  await draft.fill(text);
   await page.getByRole('link', { name: 'Design', exact: true }).click();
-  await check(page).toHaveURL(designUrl);
+  await check(page).toHaveURL(new URL('/design', originalUrl).href);
   const handoff = await page.evaluate(() => JSON.parse(sessionStorage.getItem('forge-workspace-navigation')));
   assert.equal(handoff?.version, 1);
   assert.equal(handoff.tab, await page.evaluate(() => sessionStorage.getItem('forge-workspace-tab')));
-  assert.equal(checkpointHasDraft(handoff.snapshot, text), true);
-  assert.ok(handoff.snapshot.chat.conversations.every(conversation => conversation.messages.length === 0),
-    'the local checkpoint excludes completed transcript bodies');
-  assert.equal(handoff.snapshot.chat.pending_run ?? null, null);
-
+  assert.equal(handoff.snapshot.workbench_open, true);
+  assert.ok(handoff.snapshot.workbench?.entry, 'the local checkpoint retains the selected-file bookmark');
   const workspaceRoute = '**/forge/v1/dispatch/workspace';
   let rejectedRestore = false;
   const rejectRestore = async route => {
     if (route.request().postDataJSON()?.operation === 'restore') {
       rejectedRestore = true;
       await route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
-    } else {
-      await route.continue();
-    }
+    } else await route.continue();
   };
   await context.route(workspaceRoute, rejectRestore);
   try {
     await page.goBack({ waitUntil: 'domcontentloaded' });
     await check(page).toHaveURL(originalUrl);
-    await check(draft).toBeVisible();
-    await check(draft).toHaveValue(text);
-    await check(transcript).not.toContainText(reply);
-    assert.equal(rejectedRestore, true, 'browser Back restores the local draft despite a failed workspace request');
-  } finally {
-    await context.unroute(workspaceRoute, rejectRestore);
-  }
+    await check(page.locator('#workbench')).toBeVisible();
+    await check(page.locator('#selection-title')).toHaveText(title);
+    await check(page.locator('#source-view')).not.toHaveText('');
+    await assertRetiredChat(page);
+    assert.equal(rejectedRestore, true, 'browser Back restores the local bookmark and re-verifies its source after remote restore failure');
+  } finally { await context.unroute(workspaceRoute, rejectRestore); }
 }
 
 async function previousChatsDesignJourney(design, designUrl) {
@@ -2959,192 +2660,153 @@ async function gameEngineDesignJourney(page, designUrl) {
   assert.deepEqual(page.context().pages(), pages, 'the game engine report returns in the same tab');
 }
 
-async function themeColor(page, token) {
-  return page.evaluate(name => {
-    const sample = document.createElement('span');
-    sample.style.color = `var(--${name})`;
-    document.body.append(sample);
-    const color = getComputedStyle(sample).color;
-    sample.remove();
-    return color;
-  }, token);
+async function retiredChatJourney(page, traffic) {
+  await assertRetiredChat(page, traffic);
+  for (const event of [
+    {kind:'open_chat'}, {kind:'show_chat_history'}, {kind:'send_chat'},
+    {kind:'new_chat'}, {kind:'cancel_chat_run'}, {kind:'retry_chat_submit'},
+  ]) await retiredEvent(page,event);
+  await check(page.locator('#agents')).toBeVisible();
+  await assertApplicationViews(page,'Agents');
+  await assertRetiredChat(page,traffic);
+  await page.locator('#open-workbench').click();
+  await check(page.locator('#workbench')).toBeVisible();
 }
 
-async function chatJourney(page, context) {
-  const gateway = '**/forge/v1/dispatch';
-  const transcript = page.locator('#chat-transcript');
-  const draft = page.locator('#chat-draft');
-  const select = page.locator('#chat-conversation');
-  const send = page.locator('#send-chat');
-  const replyMarkdown = '## Reply\n\nReply `<img src=x onerror=alert(1)>` with [the guide](https://example.com/guide).\n\n| Topic | Key |\n|---|---|\n| **What** | Virus |';
-  async function assertChatShell() {
-    await check(transcript).toHaveCSS('border-top-width', '0px');
-    await check(transcript).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await check(draft).toHaveAttribute('placeholder', 'Message Forge…');
-    await check(page.getByRole('textbox', { name: 'Message', exact: true })).toBeVisible();
-    await check(send).toHaveAttribute('aria-label', 'Send');
-    const [draftBox, sendBox, transcriptBox, headerBox, tabsBox] = await Promise.all([
-      draft.boundingBox(), send.boundingBox(), transcript.boundingBox(),
-      page.locator('.fg-header').boundingBox(), page.locator('#ide-navigation').boundingBox(),
-    ]);
-    const viewport = page.viewportSize();
-    assert(draftBox && sendBox && sendBox.x >= draftBox.x && sendBox.x + sendBox.width <= draftBox.x + draftBox.width + 1
-      && sendBox.y >= draftBox.y && sendBox.y + sendBox.height <= draftBox.y + draftBox.height + 1,
-    'Send is inside the trailing edge of the composer');
-    assert(sendBox.width >= 44 && sendBox.height >= 44, 'the inline Send target remains usable by touch');
-    assert(draftBox.y + draftBox.height <= viewport.height + 1, 'the composer remains inside the viewport');
-    assert(transcriptBox && transcriptBox.height >= viewport.height * .4,
-      'the open message stream receives the remaining viewport height');
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
-      'the active Chat shell has no horizontal overflow');
-    if (viewport.width < 640) {
-      assert(headerBox && tabsBox && headerBox.height <= 56 && tabsBox.height <= 48
-        && tabsBox.y + tabsBox.height <= 110,
-      'mobile Chat has only two compact header/navigation bars');
-      assert(transcriptBox.y >= tabsBox.y + tabsBox.height - 1
-        && transcriptBox.y <= tabsBox.y + tabsBox.height + 20,
-      'the conversation begins immediately below the two-bar chrome');
-      for (const id of ['forge-home', 'chat-history-toggle', 'new-chat']) {
-        const control = page.locator('#' + id);
-        await check(control).toBeVisible();
-        const box = await control.boundingBox();
-        assert(box && box.width >= 44 && box.height >= 44, id + ' retains its mobile touch target');
-      }
-      for (const id of ['open-chat', 'open-agents', 'open-workbench', 'open-home', 'open-design']) {
-        await check(page.locator('#' + id)).toBeVisible();
-      }
-      const visibleTabs = page.locator('#ide-navigation > :is(button,a):visible');
-      const tabCount = await visibleTabs.count();
-      assert.equal(tabCount, 5, 'the connected portal exposes Chat, Agents, Workbench, Home and Design');
-      await assertApplicationViews(page, 'Chat');
-      for (const control of await visibleTabs.all()) {
-        const box = await control.boundingBox();
-        assert(box && box.width >= 44 && box.height >= 44,
-          (await control.getAttribute('id')) + ' retains its mobile touch target');
-      }
-    }
-    assert.equal(await draft.evaluate(node => {
-      const channels = color => color.match(/[\d.]+/g).map(Number);
-      const luminance = values => values.slice(0, 3).map(channel => {
-        const value = channel / 255;
-        return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
-      }).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
-      const style = getComputedStyle(node);
-      let surrounding = node.parentElement;
-      while (surrounding && getComputedStyle(surrounding).backgroundColor === 'rgba(0, 0, 0, 0)') surrounding = surrounding.parentElement;
-      const colors = [style.borderTopColor, style.backgroundColor,
-        surrounding ? getComputedStyle(surrounding).backgroundColor : 'rgb(0, 0, 0)'];
-      return colors.slice(1).every(background => {
-        const lights = [luminance(channels(colors[0])), luminance(channels(background))].sort((a, b) => b - a);
-        return (lights[0] + .05) / (lights[1] + .05) >= 3;
-      });
-    }), true, 'the idle composer boundary has at least 3:1 contrast against its adjacent fills');
-  }
-  const sent = [];
-  let release;
-  const hold = new Promise(resolve => { release = resolve; });
-  const routeChat = async route => {
-    const body = route.request().postDataJSON();
-    if (body?.kind !== 'chat') return route.continue();
-    sent.push(body.request.messages);
-    if (sent.length === 1) await hold;
-    await route.fulfill({ json: {
-      protocol_version: 1,
-      event: {
-        kind: 'chat_result', request_id: body.request.request_id,
-        outcome: { kind: 'answer', content: sent.length === 1 ? replyMarkdown : replyMarkdown + '\n\n' + 'A longer controlled reply keeps the message stream scrolling while the composer stays reachable.\n\n'.repeat(40) },
-      },
-    } });
+// Controlled workspace fixture: real UI/WASM and admitted Work relay remain in
+// use; only workspace restore/save is overridden with owned boundary-size data.
+async function oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic) {
+  process.stderr.write('QA_CHECK oversized_dormant_workspace\n');
+  const conversation = {
+    messages: [{role:'user',content:'\\'.repeat(2048)},{role:'assistant',content:'\\'.repeat(4096)}],
+    draft:'\\'.repeat(2048),
   };
-  await page.locator('#open-chat').click();
-  await check(page.locator('#chat')).toBeVisible();
-  await check(page.locator('#ide-navigation').getByRole('link', { name: 'Design', exact: true })).toBeVisible();
-  await check(page.locator('#workbench-context')).toBeHidden();
-  const historyTrigger = page.getByRole('button', { name: 'Previous chats', exact: true });
-  await historyTrigger.focus();
-  await page.keyboard.press('Enter');
-  await check(page.getByRole('dialog', { name: 'Conversations', exact: true })).toBeVisible();
-  await check(select).toBeFocused();
-  await page.keyboard.press('Escape');
-  await check(page.locator('#chat-history-panel')).toBeHidden();
-  await check(historyTrigger).toBeFocused();
-  await draft.fill('Retry this draft');
-  await send.click();
-  await check(page.locator('#chat-status')).toContainText('inference is unavailable');
-  await check(draft).toHaveValue('Retry this draft');
-  await context.route(gateway, routeChat);
-  try {
-    await draft.fill('Original conversation');
-    await send.click();
-    await check(transcript).toContainText('Original conversation');
-    await page.locator('#new-chat').click();
-    await check(select).toHaveValue('1');
-    await check(transcript).not.toContainText('Original conversation');
-    await draft.fill(retainedChatDraft);
-    release();
-    await check(send).toBeEnabled();
-    await check(transcript).not.toContainText('Reply');
-    await selectChat(page, '0');
-    await check(historyTrigger).toContainText('Original conversation');
-    await check(transcript).toContainText('Reply <img src=x onerror=alert(1)>');
-    await check(transcript.locator('img,script')).toHaveCount(0);
-    const heading = transcript.getByRole('heading', { name: 'Reply', exact: true });
-    const table = transcript.getByRole('table');
-    await check(heading).toHaveText('Reply');
-    await check(table.getByRole('columnheader')).toHaveText(['Topic', 'Key']);
-    await check(table.getByRole('cell')).toHaveText(['What', 'Virus']);
-    await check(table.locator('strong')).toHaveText('What');
-    await check(transcript.locator('code')).toHaveText('<img src=x onerror=alert(1)>');
-    const guide = transcript.getByRole('link', { name: 'the guide', exact: true });
-    await check(guide).toHaveAttribute('href', 'https://example.com/guide');
-    await check(guide).toHaveAttribute('target', '_blank');
-    await check(guide).toHaveAttribute('rel', 'noopener noreferrer');
-    await check(transcript).not.toContainText('## Reply');
-    await check(transcript).not.toContainText('| Topic |');
-    await assertChatShell();
-    await screenshot(page, 'ide-chat-rendered.png');
-    await page.setViewportSize({ width: 390, height: 664 });
-    await check(select).toHaveValue('0');
-    await check(heading).toBeInViewport();
-    await check(table).toBeInViewport();
-    await check(table.getByRole('cell')).toHaveText(['What', 'Virus']);
-    await assertChatShell();
-    await screenshot(page, 'ide-chat-rendered-phone.png');
-    await page.setViewportSize({ width: 375, height: 667 });
-    await assertChatShell();
-    await page.setViewportSize({ width: 844, height: 390 });
-    await assertChatShell();
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await draft.fill('Follow-up');
-    await send.click();
-    await check(transcript.locator('[data-role=assistant]')).toHaveCount(2);
-    assert.deepEqual(sent[1].map(message => message.content), [
-      'Original conversation', replyMarkdown, 'Follow-up',
-    ]);
-    await page.setViewportSize({ width: 390, height: 664 });
-    await assertChatShell();
-    assert.equal(await transcript.evaluate(node => node.scrollHeight > node.clientHeight + 100), true,
-      'a long reply scrolls within the open message stream');
-    await check(draft).toBeInViewport();
-    await check(send).toBeInViewport();
-    await selectChat(page, '1');
-    await check(draft).toHaveValue(retainedChatDraft);
-    await draft.focus();
-    await page.keyboard.press('Tab');
-    await check(send).toBeFocused();
-    await assertVisibleFocus(page);
-    await page.setViewportSize({ width: 1440, height: 1000 });
-    await screenshot(page, 'ide-chat-desktop.png');
-    await page.setViewportSize({ width: 390, height: 664 });
-    await check(page.locator('#new-chat')).toBeInViewport();
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
-    await screenshot(page, 'ide-chat-phone.png');
-    await page.setViewportSize({ width: 1440, height: 1000 });
-  } finally {
-    release();
-    await context.unroute(gateway, routeChat);
+  const chat = {
+    selected:0,model_id:'qwen2.5-coder-7b',
+    conversations:Array.from({length:16},()=>structuredClone(conversation)),
+    pending_run:{chat_id:'11111111-1111-4111-8111-111111111111',
+      idempotency_key:'22222222-2222-4222-8222-222222222222',
+      run_id:'33333333-3333-4333-8333-333333333333',expected_revision:4,model_id:'qwen2.5-coder-7b'},
+  };
+  chat.conversations[0].chat_id=chat.pending_run.chat_id;
+  chat.conversations[0].revision=4;
+  assert(Buffer.byteLength(JSON.stringify(chat))>256*1024,
+    'valid escaped Chat fields exceed the navigation-cache budget');
+  let durable={chat:structuredClone(chat),workbench:null,workbench_open:false};
+  let restores=0,unavailableRestores=0,savesDuringOutage=0,restoreUnavailable=false,submitted=null;
+  const workspaceUrl=fixture.origin+'/forge/v1/dispatch/workspace';
+  const gatewayUrl=fixture.origin+'/forge/v1/dispatch';
+  const workspace=async route=>{
+    const body=route.request().postDataJSON();
+    assert.equal(body.preserve_chat,true);
+    if(body.operation==='restore'){
+      assert.equal('history' in body || 'models' in body,false);
+      if(restoreUnavailable){
+        unavailableRestores++;
+        await route.fulfill({status:503,contentType:'application/json',body:'{}'});
+      }else{
+        restores++;
+        await route.fulfill({json:{lease:'a'.repeat(64),snapshot:structuredClone(durable)}});
+      }
+    }else{
+      assert.equal(body.operation,'save');
+      if(restoreUnavailable)savesDuringOutage++;
+      assert.deepEqual(body.snapshot.chat,chat,'saving active work cannot truncate dormant Chat');
+      durable=structuredClone(body.snapshot);
+      await route.fulfill({json:{}});
+    }
+  };
+  const observeSubmission=async route=>{
+    const body=route.request().postDataJSON();
+    if(body.kind==='work_submit'){
+      const cache=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('forge-workspace-navigation')));
+      assert.equal(cache.snapshot,null,'oversized duplicate data is omitted from the bounded local cache');
+      assert.deepEqual(cache.agents.retry_intent,body,'the complete task intent is cached before Work I/O');
+      submitted=structuredClone(body);
+    }
+    await route.fallback();
+  };
+  // Leave the prior small snapshot before installing the large restored data.
+  await page.locator('#forge-home').click();
+  await check(page).toHaveURL(fixture.origin+'/home');
+  await context.route(workspaceUrl,workspace);
+  await context.route(gatewayUrl,observeSubmission);
+  try{
+    await page.locator('.home-launcher-agents').click();
+    await check(page.locator('#agents')).toBeVisible();
+    await check(page.locator('#agents-new')).toBeEnabled();
+    await assertRetiredChat(page,traffic);
+    await page.locator('#agents-new').click();
+    const prompt='Boundary-size dormant Chat must not block this new assignment.';
+    await page.locator('#agents-prompt').fill(prompt);
+    await page.locator('#agents-criteria').fill('Preserve full dormant data and exact task retry identity.');
+    await check(page.locator('#agents-send')).toBeEnabled();
+    await page.locator('#agents-send').click();
+    await check.poll(()=>submitted!==null).toBe(true);
+    await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-prompt')).toHaveText(prompt);
+    assert.equal(relay.workflowSubmissions.at(-1).idempotency_key,submitted.idempotency_key);
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin+'/home');
+    const cache=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('forge-workspace-navigation')));
+    assert.equal(cache.snapshot,null);
+    assert.equal(cache.agents.task_id,relay.latestWorkflowTaskId);
+    await page.getByRole('link',{name:'Browse design docs',exact:true}).click();
+    await check(page).toHaveURL(fixture.origin+'/design');
+    await assertNativeViews(page,'Design');
+    // The server now refuses restoration. A cache with no workspace body must
+    // not synthesize a lease or write an empty replacement over durable Chat.
+    restoreUnavailable=true;
+    await page.getByRole('navigation',{name:'Forge views'}).getByRole('link',{name:'Agents',exact:true}).click();
+    await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-prompt')).toHaveText(prompt);
+    assert.equal(unavailableRestores,1);
+    assert.equal(savesDuringOutage,0,'unavailable restore cannot admit a workspace write');
+    assert.ok(restores>=1);
+    assert.deepEqual(durable.chat,chat,'the full retained Chat snapshot remains unchanged');
+    await assertRetiredChat(page,traffic);
+  }finally{
+    await context.unroute(workspaceUrl,workspace);
+    await context.unroute(gatewayUrl,observeSubmission);
   }
-  await page.locator('#open-workbench').click();
+}
+
+async function museEmailDirectoryJourney(page) {
+  process.stderr.write('QA_CHECK muse_email_directory\n');
+  const viewport=page.viewportSize();
+  const card=page.locator('#agents-overview #agents-external-agents > #agents-muse-email');
+  await check(card).toBeVisible();
+  await check(card.getByRole('heading',{name:'Muse Email',exact:true})).toBeVisible();
+  await check(card).toContainText('Email · manual contact');
+  await check(card).toContainText('To: roachmaster@muse.ai');
+  await check(card.locator('#agents-muse-email-sender')).toHaveText('Your verified Gmail sender');
+  await check(card).not.toContainText(/@gmail\.com/i);
+  await check(card).toContainText('Manual email contact. Sender identity verified; sending, replies and background task tracking are not integrated with Forge.');
+  await check(card.locator('button,a,input,textarea,select,[contenteditable],[data-action]')).toHaveCount(0);
+  await check(card.locator('meter,progress,.fg-quota,.fg-metric,[data-card-id]')).toHaveCount(0);
+  await check(card).not.toContainText(/\b(?:Idle|Ready|Quota|Tokens?)\b/i);
+  await check(page.locator('#agents-providers #agents-muse-email')).toHaveCount(0);
+  await check(page.locator('#agents-profile option').filter({hasText:/muse/i})).toHaveCount(0);
+  for(const width of [320,390,1440]){
+    await page.setViewportSize({width,height:844});
+    await card.scrollIntoViewIfNeeded();
+    await check(card).toBeInViewport();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,
+      'the external contact directory fits phone and desktop viewports');
+    assert.equal(await card.evaluate(node=>{
+      const bounds=node.getBoundingClientRect();
+      if(bounds.left< -1 || bounds.right>innerWidth+1)return false;
+      const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);
+      for(let text=walker.nextNode();text;text=walker.nextNode()){
+        if(!text.textContent.trim())continue;
+        const range=document.createRange();range.selectNodeContents(text);
+        if([...range.getClientRects()].some(rect=>rect.left< -1 || rect.right>innerWidth+1))return false;
+      }
+      return true;
+    }),true,'both contact addresses wrap without clipped text');
+  }
+  if(viewport)await page.setViewportSize(viewport);
+  await page.locator('#agents-heading').scrollIntoViewIfNeeded();
 }
 
 async function agentsJourney() {
@@ -3166,8 +2828,8 @@ async function agentsJourney() {
     await check(page.locator('#agents')).toBeVisible();
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
     await assertApplicationViews(page, 'Agents');
-    await page.locator('#open-chat').click();
-    await check(page.locator('#chat')).toBeVisible();
+    await page.locator('#open-workbench').click();
+    await check(page.locator('#workbench')).toBeVisible();
     await page.locator('#open-agents').click();
     await check(page.locator('#agents')).toBeVisible();
     await assertApplicationViews(page, 'Agents');
@@ -3178,14 +2840,15 @@ async function agentsJourney() {
     await page.keyboard.press('Enter');
     await check(page.locator('#agents')).toBeVisible();
     await check(page.locator('#agents-worker')).toHaveText('Worker ready');
-    await check(page.locator('#open-chat')).toBeEnabled();
+    await assertRetiredChat(page, traffic);
     await assertApplicationViews(page, 'Agents');
-    await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(5);
+    await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(4);
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
     await check(cards).toHaveCount(2);
+    await museEmailDirectoryJourney(page);
     await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
     await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
     await check(geminiCard.locator('.fg-quota-unavailable')).toContainText('does not expose account allowance');
@@ -3224,6 +2887,7 @@ async function agentsJourney() {
     // persisted public plan/history rather than waiting for a state revision.
     await seed.locator('.fg-row-select').click();
     await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-muse-email')).toBeHidden();
     await check(page.locator('#agents-task-status')).toContainText('Ready for review');
     await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
     await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
@@ -3233,6 +2897,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-overview')).toBeVisible();
 
     await page.locator('#agents-new').click();
+    await check(page.locator('#agents-muse-email')).toBeHidden();
     // Keep the existing result-acceptance journey on a Review task. Finished
     // Plan tasks now use the explicit artifact-bound decision flow below.
     await page.locator('#agents-mode').selectOption('review');
@@ -3625,6 +3290,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
+    await oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic);
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);
@@ -3654,25 +3320,17 @@ async function realJourney() {
     await page.goBack({ waitUntil: 'domcontentloaded' });
     await check(page).toHaveURL(beforeForgeUrl);
     await page.goForward({ waitUntil: 'domcontentloaded' });
-    await check(page.locator('#chat')).toBeVisible();
+    await check(page.locator('#agents')).toBeVisible();
+    await assertRetiredChat(page,traffic);
     assert.equal(traffic.count('resume'), 2, 'clean Forward reconnects once');
-    const draft = page.locator('#chat-draft');
-    await draft.click();
-    await page.keyboard.type('Unsent Back draft');
-    await check(page.locator('#send-chat')).toBeEnabled();
-    await withWarning(() => page.evaluate(() => history.back()), 'stay');
-    await check(page).toHaveURL(forgeUrl);
-    await check(draft).toHaveValue('Unsent Back draft');
-    await draft.fill('');
-    await check(page.locator('#send-chat')).toBeDisabled();
   });
   assert.deepEqual(errors, [], 'clean Back does not prompt and native draft warning only occurs when expected');
   assert.equal(traffic.count('pair'), 1, 'one explicit pairing request');
   await projectOptionsJourney(page, traffic);
-  await chatJourney(page, context);
+  await retiredChatJourney(page, traffic);
   await inspect(page, 'workspace');
   await check(page.locator('#workspace-panel .fg-pane-body textarea:visible, #workbench [contenteditable="true"]:visible')).toHaveCount(0);
-  await check(page.locator('#workbench-chat')).toBeHidden();
+  await check(page.locator('#workbench-chat')).toHaveCount(0);
   await check(page.getByRole('button', { name: /^(Run|Debug|Terminal|Save file)$/i })).toHaveCount(0);
   await check(page.locator('#source-shape-panel')).toHaveJSProperty('open', false);
   await check(page.locator('#inspection-details')).toHaveJSProperty('open', false);
@@ -3905,14 +3563,8 @@ async function controlledLifecycleJourney() {
   report.pass('injected.requests.refresh_focus');
   report.start('injected.failures.unavailable_timeout');
 
-  const recoveryDraft = 'Keep this draft through explicit reload';
-  await page.locator('#open-chat').click();
-  const reloadDraft = page.locator('#chat-draft');
-  await reloadDraft.fill(recoveryDraft);
-  await check(page.locator('#send-chat')).toBeEnabled();
-  await page.locator('#open-workbench').click();
   const reloadBookmark = checkpointSaved(page, snapshot => snapshot.workbench_open &&
-    snapshot.workbench?.project === 'unavailable' && checkpointHasDraft(snapshot, recoveryDraft));
+    snapshot.workbench?.project === 'unavailable');
   await inspect(page, 'unavailable', 'node observation unavailable');
   await noReport(page);
   await check(page.locator('#inspect')).toBeEnabled();
@@ -3943,11 +3595,7 @@ async function controlledLifecycleJourney() {
   await check(page.locator('#workbench')).toBeVisible();
   await check(page.locator('#status')).toContainText('node observation unavailable');
   assert.equal(traffic.count('resume'), beforeRecovery + 1, 'Leave reloads once without a native double prompt');
-  await page.locator('#open-chat').click();
-  await check(reloadDraft).toHaveValue(recoveryDraft);
-  await reloadDraft.fill('');
-  await check(page.locator('#send-chat')).toBeDisabled();
-  await page.locator('#open-workbench').click();
+  await assertRetiredChat(page,traffic);
   await inspect(page, 'timeout', 'Deadline expired');
   await check(page.locator('#inspect')).toBeEnabled();
   await noReport(page);
@@ -4056,7 +3704,7 @@ const passed = await runHarness({
     if (report.frozen) throw new Error('Journey stopped before launch');
     report.setStage('browser_launch');
     // Sandbox remains mandatory. No security overrides, fake WASM, deployment or
-    // user profile. Native durable Chat uses the test relay on loopback.
+    // user profile. Dormant workspace persistence uses the owned relay on loopback.
     browserOwner = acquireOwned(
       () => chromium.launch({ headless: true, chromiumSandbox: true, channel }),
       ownedBrowser => ownedBrowser.close(),

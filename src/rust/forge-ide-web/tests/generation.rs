@@ -185,37 +185,40 @@ fn guarded_edit_controls_share_the_generated_workbench_with_markdown_formats() {
     assert!(source.contains("id=\"source-pagination\""));
     let (_, review) = source.split_once("id=\"workbench-edit-diff\"").unwrap();
     assert!(review.contains("data-diff-view"));
-    assert!(html.contains("<footer class=\"fg-pane-footer\" id=\"workbench-chat\" hidden>"));
-    assert!(html.contains("id=\"send-chat-with-file\" data-action=\"send_chat_with_file\""));
+    assert!(html.contains("<footer class=\"fg-pane-footer\" id=\"workbench-write-footer\" hidden>"));
+    assert!(!html.contains("id=\"send-chat-with-file\""));
     let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
     assert!(css.contains(".fg-source[data-wrap=true] .fg-source-line{"));
     assert!(css.contains(".fg-diff-line[data-change=removed]{"));
 
     let transport = ide_transport();
-    for (kind, destination, result) in [
-        ("propose_edit", "ide.propose_edit", "edit_result"),
-        ("edit_write", "ide.edit_write", "edit_write_result"),
-    ] {
-        let request = transport
-            .bindings
-            .iter()
-            .find(|binding| binding.kind == kind)
-            .unwrap();
-        assert!(request.csrf);
-        assert_eq!(request.request_id, "request.request_id");
-        assert_eq!(request.accept_events, [result]);
-        assert!(request
-            .headers
-            .iter()
-            .any(|header| header.name == "Forge-Destination"
-                && header.literal.as_deref() == Some(destination)));
-    }
+    let (kind, destination, result) = ("edit_write", "ide.edit_write", "edit_write_result");
+    let request = transport
+        .bindings
+        .iter()
+        .find(|binding| binding.kind == kind)
+        .unwrap();
+    assert!(request.csrf);
+    assert_eq!(request.request_id, "request.request_id");
+    assert_eq!(request.accept_events, [result]);
+    assert!(request
+        .headers
+        .iter()
+        .any(|header| header.name == "Forge-Destination"
+            && header.literal.as_deref() == Some(destination)));
 }
 
 #[test]
 fn application_can_change_worker_policy_without_changing_its_adapter() {
-    let original = build(config());
+    let mut original_config = config();
+    original_config.transport = forge_ide_web::generate::application::ide_transport_with_policy(
+        forge_ide_ui::PresentationPolicy { chat: true },
+    );
+    let original = build(original_config);
     let mut updated = config();
+    updated.transport = forge_ide_web::generate::application::ide_transport_with_policy(
+        forge_ide_ui::PresentationPolicy { chat: true },
+    );
     updated
         .transport
         .timers
@@ -312,6 +315,7 @@ fn unrelated_widget_fixture_exercises_real_macro_and_public_registrar() {
     // A distinct consumer supplies its own typed transport declarations too.
     c.transport = Transport {
         initial_event: "mount_collection".into(),
+        preserve_workspace_chat: false,
         entry_actions: Default::default(),
         bindings: vec![RequestBinding {
             kind: "load_collection".into(),
@@ -427,9 +431,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==8"));
+    assert!(worker.contains("wasm.abi_version()!==9"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 8);
+    assert_eq!(manifest["abi_version"], 9);
 }
 
 #[test]
@@ -705,7 +709,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
     assert!(main.contains("navigation_checkpoint_saved"));
     assert!(worker.contains("!await localCheckpoint.pending"));
     assert!(worker.contains("restore_agents_navigation"));
-    assert!(worker.contains("wasm.abi_version()!==8"));
+    assert!(worker.contains("wasm.abi_version()!==9"));
 }
 
 #[test]
@@ -795,4 +799,105 @@ fn autonomous_workflow_uses_typed_regions_and_protected_same_tab_document_link()
     let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
     assert!(!main.contains("workflow_policy_digest"));
     assert!(!main.contains("code_review"));
+}
+
+#[test]
+fn portal_chat_retirement_removes_entry_controls_and_transport_but_preserves_workspace_contract() {
+    let config = config();
+    assert!(config.transport.preserve_workspace_chat);
+    assert_eq!(
+        config
+            .transport
+            .entry_actions
+            .get("chat")
+            .map(String::as_str),
+        Some("open_agents")
+    );
+    assert!(config
+        .transport
+        .bindings
+        .iter()
+        .all(|b| b.kind != "chat" && !b.kind.starts_with("chat_") && b.kind != "propose_edit"));
+    let assets = build(config);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    for retired in [
+        "chat",
+        "open-chat",
+        "chat-header-actions",
+        "chat-draft",
+        "workbench-chat",
+        "send-workbench-chat",
+        "propose-workbench-edit",
+    ] {
+        assert!(
+            !html.contains(&format!("id=\"{retired}\"")),
+            "retired control {retired}"
+        );
+    }
+    for retained in [
+        "open-agents",
+        "open-workbench",
+        "open-home",
+        "open-design",
+        "document-text",
+        "save-document",
+        "workbench-write-footer",
+        "check-workbench-write",
+        "undo-workbench-edit",
+    ] {
+        assert!(
+            html.contains(&format!("id=\"{retained}\"")),
+            "retained control {retained}"
+        );
+    }
+    let (wire, _) = worker_parts(&assets);
+    assert_eq!(wire["preserve_workspace_chat"], true);
+}
+
+#[test]
+fn muse_email_directory_is_contact_data_without_native_actions_or_usage_metrics() {
+    let config = config();
+    let bindings = config
+        .transport
+        .bindings
+        .iter()
+        .map(|b| b.kind.clone())
+        .collect::<Vec<_>>();
+    let assets = build(config);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    let card = html
+        .split_once("id=\"agents-muse-email\"")
+        .unwrap()
+        .1
+        .split_once("</section>")
+        .unwrap()
+        .0;
+    for text in [
+        "Muse Email",
+        "Email · manual contact",
+        "roachmaster@muse.ai",
+        "Your verified Gmail sender",
+        "not integrated with Forge",
+    ] {
+        assert!(card.contains(text), "contact detail {text}");
+    }
+    for unsupported in [
+        "<button",
+        "<meter",
+        "data-action",
+        "Idle",
+        "Ready",
+        "Token",
+        "Quota",
+    ] {
+        assert!(
+            !card.contains(unsupported),
+            "directory must not imply {unsupported}"
+        );
+    }
+    assert!(bindings
+        .iter()
+        .all(|b| !b.contains("email") && !b.contains("muse")));
+    assert!(bindings.iter().any(|b| b == "work_submit"));
+    assert!(bindings.iter().any(|b| b == "usage_overview"));
 }

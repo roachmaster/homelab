@@ -250,7 +250,12 @@ Bodies are tagged `pair {request_id, code}`, `resume {request_id}`, or
 transport plumbing, not the Rust domain model or DOM. HTTP failures use a bounded
 `{error:...}` response; application errors can be typed events with HTTP 200.
 
-## Chat relay
+## Retained Chat relay
+
+Chat is temporarily inactive in the portal. These native backend APIs remain
+configured and preserved; removing the portal view does not delete conversations
+or retention data. The active UI uses `preserve_chat: true` workspace restore/save
+to retain dormant snapshots without Chat hydration, model discovery or run replay.
 
 The optional host configuration enables chat against the private Forge llama.cpp
 adapter. The endpoint must be loopback, such as a local SSH forward to Forge GPU.
@@ -319,7 +324,7 @@ animation clips from the existing rig and illustrated skin. The sample
 Previous chats sandbox is at `/design/previous-chats`, layout snapshots are at
 `/design/wireframes`, and recovery notes are at `/design/workspace`. The chat
 history contracts and sequence diagrams are at `/design/chat-history`.
-The shared docs navigation returns to Chat, Mail, or Workbench in the same tab;
+The shared docs navigation returns to Agents or Workbench in the same tab;
 the admitted worker applies the declared entry action after restoring the workspace. The PostgreSQL inference dispatch design and
 sequence diagram are at `/design/chat-dispatch`. The design pages use fixed
 asset paths.

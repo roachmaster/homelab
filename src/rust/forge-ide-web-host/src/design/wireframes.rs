@@ -20,7 +20,7 @@ macro_rules! capture {
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "reader-intro"];
         element!(H1; text("IDE wireframes")),
-        element!(P; text("Current implementation captures for Chat, Mail and Workbench.")),
+        element!(P; text("Historical Chat and Mail captures, plus Workbench layout references. Chat and Mail are inactive in the live portal; retained images are design history.")),
         element!(P [Class = "wireframe-note"]; text("Captured from the generated UI in disposable acceptance fixtures on 18 November 2026. Editable controls are masked. Some fixtures intentionally disable Mail or contain partial reports and long strings. Historical light schematics remain in the repository as archived design references.")),
     ),
     element!(Section [Id = "phone", Class = "design-section", AriaLabelledby = "phone-title"];
