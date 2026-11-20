@@ -30,7 +30,7 @@ TARGET_FIELDS = frozenset({
     "reviewer_task_id", "author_profile", "reviewer_profile", "source_task_id",
     "source_attempt_id", "source_result_sha256", "source_revision", "base_revision",
     "plan_revision", "plan_decision_id", "review_id", "candidate_commit",
-    "gate_manifest_sha256", "workspace_digest", "source_text", "acceptance_criteria",
+    "gate_manifest_sha256", "workspace_digest", "integration_base", "source_text", "acceptance_criteria",
     "findings", "verification", "approved_plan",
 })
 VERDICT_FIELDS = frozenset({
@@ -116,11 +116,12 @@ def validate_review_target(value):
         if value["target_kind"] == "plan":
             _require(all(value[field] is None for field in (
                 "review_id", "candidate_commit", "gate_manifest_sha256", "workspace_digest",
-                "verification", "approved_plan")))
+                "verification", "approved_plan", "integration_base")))
         else:
             _uuid(value["review_id"])
             _uuid(value["plan_decision_id"])
             _pattern(value["candidate_commit"], _COMMIT)
+            _pattern(value["integration_base"], _COMMIT)
             for field in ("gate_manifest_sha256", "workspace_digest"):
                 _pattern(value[field], _DIGEST)
             _require(value["base_revision"] == value["candidate_commit"])
