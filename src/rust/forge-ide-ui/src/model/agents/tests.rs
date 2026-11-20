@@ -520,6 +520,99 @@ fn usage_unknowns_keep_precision_and_refresh_is_one_explicit_profile() {
 }
 
 #[test]
+fn grok_catalog_and_usage_use_the_same_admitted_provider_path() {
+    let mut agents = ready();
+    let catalog = agents.catalog.as_mut().unwrap();
+    let profile = &mut catalog.profiles[0];
+    profile.alias = "grok-primary".into();
+    profile.label = "Grok".into();
+    profile.backend = WorkBackend::Grok;
+    profile.model = "grok-4.7".into();
+    profile.modes = vec![WorkMode::Review];
+    assert!(catalog.is_valid());
+    let wire = serde_json::to_value(&catalog).unwrap();
+    assert_eq!(wire["profiles"][0]["backend"], "grok");
+    assert_eq!(
+        serde_json::from_value::<WorkCatalog>(wire).unwrap(),
+        *catalog
+    );
+    agents.profile = "grok-primary".into();
+    agents.mode = Some(WorkMode::Review);
+
+    let mut observation = provider();
+    observation.alias = "grok-primary".into();
+    observation.label = "Grok".into();
+    observation.provider = WorkBackend::Grok;
+    observation.model = "grok-4.7".into();
+    observation.allowance.state = UsageAllowanceState::Unknown;
+    observation.allowance.reason = Some("Not reported".into());
+    let request = UsageRequest::UsageOverview {
+        request_id: "grok-usage".into(),
+        project_alias: "workspace".into(),
+    };
+    let reply = UsageResponse::UsageOverview {
+        request_id: "grok-usage".into(),
+        project_alias: "workspace".into(),
+        providers: vec![observation.clone()],
+    };
+    let wire = serde_json::to_value(&reply).unwrap();
+    assert_eq!(wire["providers"][0]["provider"], "grok");
+    let round_trip = serde_json::from_value::<UsageResponse>(wire).unwrap();
+    assert_eq!(round_trip, reply);
+    assert!(round_trip.valid_for(&request, 200));
+    assert!(!round_trip.valid_for(&request, 202));
+    let card = provider_card(&observation, true, 0, false, "workspace");
+    assert_eq!(card.state, badge("Unknown", BadgeTone::Neutral));
+    assert_eq!(
+        card.quota_state,
+        Some(badge("Not reported", BadgeTone::Neutral))
+    );
+    assert!(card.quotas.is_empty());
+    assert!(card.metrics.iter().all(|metric| metric.value == "Unknown"));
+    assert!(card
+        .details
+        .iter()
+        .any(|detail| detail.value == "Grok / fixture"));
+    agents.providers = vec![observation];
+    agents.selected_usage = Some("grok-primary".into());
+    let effects = step(&mut agents, UiEvent::RefreshAgentUsage {}, "refresh-grok");
+    assert!(
+        matches!(&effects[0], UiEffect::Usage(UsageRequest::UsageRefresh {
+        agent_profile: Some(alias), ..
+    }) if alias == "grok-primary")
+    );
+
+    // The catalog determines selectable modes; naming a backend grants nothing.
+    agents.pending_usage = None;
+    draft(&mut agents);
+    assert!(agents.can_submit());
+    let effects = step(
+        &mut agents,
+        UiEvent::SendAgentTask {
+            idempotency_key: KEY.into(),
+        },
+        "submit-grok",
+    );
+    assert!(
+        matches!(&effects[0], UiEffect::Work(WorkRequest::WorkSubmit {
+        agent_profile, mode: WorkMode::Review, ..
+    }) if agent_profile == "grok-primary")
+    );
+    let mut no_grant = ready();
+    no_grant.profile = "grok-primary".into();
+    draft(&mut no_grant);
+    assert!(!no_grant.can_submit());
+    assert!(step(
+        &mut no_grant,
+        UiEvent::SendAgentTask {
+            idempotency_key: KEY.into(),
+        },
+        "unconfigured-grok"
+    )
+    .is_empty());
+}
+
+#[test]
 fn active_agents_remove_retained_tab_selection_and_only_lock_during_uncertain_mutations() {
     let mut agents = ready();
     let retained = || ViewModel {

@@ -21,6 +21,7 @@ const digest = createHash('sha256').update(bytes).digest('hex');
 const profiles = [
   { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'] },
   { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'] },
+  { alias: 'grok-primary', label: 'Grok', backend: 'grok', model: 'grok-4.7', modes: ['review'] },
 ];
 
 function task(status, number, input = {}) {
@@ -84,12 +85,13 @@ function usage(alias, tasks) {
   const p = profiles.find(item => item.alias === alias);
   const active = [...tasks.values()].find(t => t.agent_profile === alias && ['running', 'cancel_requested'].includes(t.status));
   const codex = p.backend === 'codex';
+  const grok = p.backend === 'grok';
   return {
-    alias, label: p.label, provider: p.backend, model: p.model, worker_state: active ? 'running' : 'idle', active_task_id: active?.task_id ?? null,
+    alias, label: p.label, provider: p.backend, model: p.model, worker_state: active ? 'running' : grok ? 'unknown' : 'idle', active_task_id: active?.task_id ?? null,
     snapshot_state: codex ? 'fresh' : 'unknown', observed_at: codex ? time : null, source: 'owned-browser-fixture', version: '1', last_error: null, refresh_pending: false,
-    allowance: { state: codex ? 'available' : 'unsupported', reason: codex ? null : 'Headless allowance unavailable', ordinary_usage_allowed: codex ? true : null,
+    allowance: { state: codex ? 'available' : grok ? 'unknown' : 'unsupported', reason: codex ? null : grok ? 'Not reported' : 'Headless allowance unavailable', ordinary_usage_allowed: codex ? true : null,
       buckets: codex ? [{ key: 'fixture-window', label: 'Provider window', used_percent: 12.5, window_minutes: 90, resets_at: '2026-11-19T19:30:00Z' }] : [] },
-    jobs: { scope: 'forge_project', input_tokens: codex ? '9007199254740993' : null, output_tokens: codex ? '5' : null, cached_input_tokens: codex ? '2' : null, total_tokens: codex ? '9007199254740998' : null, known_attempts: codex ? 1 : 0, unknown_attempts: codex ? 0 : 1, elapsed_ms: codex ? '1000' : null },
+    jobs: { scope: 'forge_project', input_tokens: codex ? '9007199254740993' : null, output_tokens: codex ? '5' : null, cached_input_tokens: codex ? '2' : null, total_tokens: codex ? '9007199254740998' : null, known_attempts: codex ? 1 : 0, unknown_attempts: codex || grok ? 0 : 1, elapsed_ms: codex ? '1000' : null },
     account_activity: { state: 'unknown', lifetime_tokens: null, daily: [] },
   };
 }

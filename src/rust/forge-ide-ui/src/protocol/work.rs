@@ -384,12 +384,14 @@ impl WorkPublication {
 pub enum WorkBackend {
     Antigravity,
     Codex,
+    Grok,
 }
 impl WorkBackend {
     pub fn label(self) -> &'static str {
         match self {
             Self::Antigravity => "Gemini / Antigravity",
             Self::Codex => "Codex",
+            Self::Grok => "Grok",
         }
     }
 }
@@ -1687,6 +1689,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn configured_backends_have_stable_wire_names_and_labels() {
+        for (backend, wire, label) in [
+            (
+                WorkBackend::Antigravity,
+                "antigravity",
+                "Gemini / Antigravity",
+            ),
+            (WorkBackend::Codex, "codex", "Codex"),
+            (WorkBackend::Grok, "grok", "Grok"),
+        ] {
+            assert_eq!(serde_json::to_value(backend).unwrap(), wire);
+            assert_eq!(
+                serde_json::from_value::<WorkBackend>(wire.into()).unwrap(),
+                backend
+            );
+            assert_eq!(backend.label(), label);
+        }
+        assert!(serde_json::from_str::<WorkBackend>("\"unconfigured\"").is_err());
+    }
     #[test]
     fn timestamps_and_cursors_are_canonical_and_bounded() {
         assert!(valid_work_timestamp("2024-02-29T12:00:00.100Z"));
