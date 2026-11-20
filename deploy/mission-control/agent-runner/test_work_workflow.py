@@ -50,6 +50,18 @@ class AutonomousWorkflowTest(unittest.TestCase):
   self.assertTrue(self.coordinator.run_once());critic=self.claim('codex-v2');self.assertIsNotNone(critic)
   text=self.verdict(critic,decision);self.publish(critic,text);self.assertTrue(self.coordinator.run_once())
   return author,critic
+ def test_reviewer_title_is_bounded_for_maximum_ascii_and_multibyte_author_titles(self):
+  for title in ('A'*128,'😀'*128):
+   with self.subTest(title_kind='ascii' if title.isascii() else 'multibyte'):
+    self.setUp()
+    policy=self.config.project_workflows['homelab'].summary(self.config.catalog(),self.config.repair_policy)
+    command=replace(make_submit(agent_profile='agy-v2',prompt=title+'\nImplement the scoped provider.',idempotency_key=str(uuid4())),workflow_policy_digest=policy['policy_digest'])
+    admitted=self.service.submit(command);author=self.claim('agy-v2');self.publish(author,'A coherent source-bound Plan.')
+    self.assertEqual(self.get(admitted['task_id'])['title'],title)
+    self.assertTrue(self.coordinator.run_once());critic=self.claim('codex-v2');self.assertIsNotNone(critic)
+    detail=self.get(critic.task_id);self.assertTrue(detail['title'].startswith('Review '));self.assertLessEqual(len(detail['title']),128);self.assertLessEqual(len(detail['title'].encode('utf-8')),512)
+    target=self.db.read_review_target(critic);self.assertEqual(parse_review_target(target['target_json'],target['target_sha256'])['request_prompt'],command.prompt)
+
  def test_plan_approval_automatically_resumes_author_and_context_is_lease_bound(self):
   command,admitted=self.submit();author,critic=self.finish_plan_round()
   detail=self.get(admitted['task_id']);self.assertEqual(detail['mode'],'implement');self.assertEqual(detail['workflow']['phase'],'implement')
