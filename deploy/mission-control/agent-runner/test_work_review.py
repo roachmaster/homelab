@@ -8,7 +8,8 @@ from uuid import uuid4
 
 from test_work_publication import fixture, git
 from work_publication_checks import VerificationFailure
-from work_review import ReviewedCandidateProvider, ReviewWorker
+from work_review import ReviewedCandidateProvider, ReviewWorker, protected_gate_path
+from work_executor import WorkspaceLease
 from work_publication_clients import WorkspaceSnapshotProvider
 from work_verification import project_verification
 from work_hosted_checks import HostedCheckReport
@@ -138,6 +139,30 @@ class ReviewWorkerTest(unittest.TestCase):
             ReviewWorker(config, store, WorkspaceSnapshotProvider(workspaces), repository,
                 ForgedChecks(config, False), ReviewedCandidateProvider(config, repository)).process(job)
             self.assertEqual(store.outcomes[0][1]["verified_finding_ids"], [])
+
+    def test_build_selection_changes_cannot_automatically_close_test_failures(self):
+        for path in ("Cargo.toml", "nested/Cargo.lock", "src/rust/crate/Cargo.toml",
+                     "rust-toolchain.toml", "rust-toolchain", "crate/build.rs",
+                     ".cargo/config.toml", "crate/.cargo/config", ".config/nextest.toml",
+                     "tests/consumer_contract.rs"):
+            with self.subTest(path=path):
+                self.assertTrue(protected_gate_path(path))
+        with fixture() as values:
+            _, config, source, workspaces, accepted, _, repository, *_ = values
+            # Disabling Cargo's automatic integration-test discovery can make
+            # an unchanged failing test disappear from a green check run.
+            (accepted / "Cargo.toml").write_text('[package]\nname="fixture"\nversion="0.1.0"\nautotests=false\n')
+            source["workspace_digest"] = WorkspaceLease(accepted, config.worker.projects["homelab"],
+                accepted / ".git", source["task_id"], source["base_revision"]).digest()
+            job = review_job(source, open_findings=[{"finding_id": "unfixed-test", "check_id": "make-ci"}])
+            store = ReviewStore()
+            ReviewWorker(config, store, WorkspaceSnapshotProvider(workspaces), repository,
+                ReviewChecks(config, True), ReviewedCandidateProvider(config, repository)).process(job)
+            outcome = store.outcomes[-1][1]
+            self.assertTrue(outcome["verification"]["checks_passed"])
+            self.assertTrue(outcome["verification"]["gate_changes_require_review"])
+            self.assertEqual(outcome["verified_finding_ids"], [])
+            self.assertEqual(outcome["disposition"], "awaiting_review")
 
     def test_hosted_pending_pass_and_failure_never_rerun_a_native_agent(self):
         for status, expected in (("pending", "awaiting_review"), ("passed", "awaiting_review"),
