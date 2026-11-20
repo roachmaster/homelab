@@ -475,6 +475,11 @@ class WorkflowStore:
                 or q['verification'].get('cleanup_confirmed') is not True
                 or q['infrastructure_retries']>=p['repair_policy']['max_infrastructure_retries']):
                 raise Rejected(409,'not_reviewable')
+            failure=q['finish_receipt'] or {};outcome=failure.get('outcome',{});verified=outcome.get('verification',{})
+            if (q['finish_token'] is None or failure.get('review_id')!=str(review_id) or failure.get('status')!='handoff'
+                or outcome.get('reason')!='publication_command_failed' or outcome.get('candidate_commit') is not None
+                or verified.get('checks_passed') is not False or verified.get('checks')!=[]
+                or verified.get('cleanup_confirmed') is not True):raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s',(task['repair_source_review_id'],));parent=cursor.fetchone()
             if (not parent or parent['owner_id']!=self.store.owner or parent['project_alias']!=project_alias
                 or parent['task_id']!=task['parent_task_id'] or parent['candidate_commit']!=task['base_revision']
@@ -517,6 +522,8 @@ class WorkflowStore:
               AND q.status='handoff' AND q.phase='local' AND q.reason='publication_command_failed' AND q.candidate_commit IS NULL
               AND q.verification->'checks_passed'='false'::jsonb AND q.verification->'checks'='[]'::jsonb
               AND q.verification->'cleanup_confirmed'='true'::jsonb AND q.source_revision=t.revision
+              AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff'
+              AND q.finish_receipt->'outcome'->>'reason'='publication_command_failed'
               AND q.infrastructure_retries<(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer
               ORDER BY q.updated_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects)));rows=cursor.fetchall()
         for row in rows:
