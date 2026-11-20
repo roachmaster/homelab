@@ -215,7 +215,8 @@ class WorkService:
         self._require_project(command.project_alias)
         if command.mode not in self._config.allowed_modes:
             raise Rejected(403, "denied")
-        if command.agent_profile not in self._config.profiles:
+        if (command.agent_profile not in self._config.profiles
+                or not self._config.profiles[command.agent_profile].execution_enabled):
             raise Rejected(403, "denied")
 
         def resolve_recipe():
@@ -303,7 +304,8 @@ class WorkService:
 
     def resume(self, command):
         self._require_project(command.project_alias)
-        if command.agent_profile not in self._config.profiles:
+        if (command.agent_profile not in self._config.profiles
+                or not self._config.profiles[command.agent_profile].execution_enabled):
             raise Rejected(403, "denied")
 
         def resolve_recipe(mode):

@@ -8,11 +8,15 @@ import hashlib
 import json
 from types import MappingProxyType
 
-POLICY_ID = "forge-coding-v8"
+POLICY_ID = "forge-coding-v9"
 _POLICY = {
     "id": POLICY_ID,
-    "adapter_versions": {"antigravity": "1.5.12", "codex": "0.160.0"},
+    "adapter_versions": {"antigravity": "1.5.12", "codex": "0.160.0", "grok": "1.0.92"},
     "antigravity_tool_policy": "workspace-elevated-v1",
+    "grok_session_policy": "fresh-attempt-session-id-v1",
+    "grok_execution_policy": "dontask-explicit-tools-supervised-v1",
+    "grok_state_policy": "isolated-home-no-shared-leader-auth-only-v1",
+    "grok_binary_sha256": "add4d201dbf2c0bd6077a36feb55a76939de30bae48dbb06f16b2307d38ceacb",
     "max_wall_seconds": 1800,
     "max_stream_bytes": 67108864,
     "max_result_bytes": 16777216,

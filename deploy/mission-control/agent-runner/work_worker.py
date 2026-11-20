@@ -364,6 +364,9 @@ class CodingWorker:
     def run_once(self):
         self.reconcile_pending()
         self.advertise()
+        if not self.config.allowed_profiles:
+            self.collect_usage()
+            return False
         lease = self.store.claim(self.config.worker_id, self.incarnation, list(self.config.allowed_profiles))
         if lease is not None:
             self.process(lease)

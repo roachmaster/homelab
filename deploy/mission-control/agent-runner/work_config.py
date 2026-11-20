@@ -22,7 +22,7 @@ MAX_LABEL_BYTES = 128
 MAX_TITLE_CHARS = 128
 MAX_TITLE_BYTES = 512
 VALID_MODES = frozenset({"plan", "review", "implement"})
-VALID_BACKENDS = frozenset({"antigravity", "codex"})
+VALID_BACKENDS = frozenset({"antigravity", "codex", "grok"})
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
@@ -31,7 +31,7 @@ DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
 CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
-PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label"}
+PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled"}
 
 
 def canonical_json_bytes(value):
@@ -120,6 +120,7 @@ class WorkProfile:
     model: str
     resource_profile: str
     label: str | None = None
+    execution_enabled: bool | None = None
 
     def __post_init__(self):
         validate_identifier(self.alias, "profile alias")
@@ -129,6 +130,10 @@ class WorkProfile:
         validate_identifier(self.resource_profile, "resource profile")
         if self.label is not None:
             validate_label(self.label, "profile label")
+        enabled = self.backend != "grok" if self.execution_enabled is None else self.execution_enabled
+        if type(enabled) is not bool:
+            raise ValueError("Invalid work execution capability")
+        object.__setattr__(self, "execution_enabled", enabled)
 
     @property
     def display_label(self):
@@ -201,7 +206,7 @@ class WorkCatalog:
 
     @property
     def allowed_profiles(self):
-        return frozenset(self._profiles)
+        return frozenset(alias for alias, profile in self._profiles.items() if profile.execution_enabled)
 
     def has_profile(self, alias):
         return isinstance(alias, str) and alias in self._profiles
@@ -213,8 +218,8 @@ class WorkCatalog:
         if mode not in VALID_MODES:
             raise ValueError("Invalid work mode")
         profile = self._profiles.get(profile_alias)
-        if profile is None:
-            raise KeyError("Unknown work profile")
+        if profile is None or not profile.execution_enabled:
+            raise KeyError("Unavailable work profile")
         if profile.resource_profile == POLICY_ID:
             payload = {
                 "version": 2,
@@ -434,12 +439,15 @@ def parse_work_config(raw):
         if (not isinstance(spec, dict)
                 or not PROFILE_REQUIRED_KEYS <= set(spec.keys()) <= PROFILE_ALLOWED_KEYS):
             raise ValueError("Invalid work profile definition")
+        if "execution_enabled" in spec and type(spec["execution_enabled"]) is not bool:
+            raise ValueError("Invalid work execution capability")
         profiles[alias] = WorkProfile(
             alias=alias,
             backend=spec["backend"],
             model=spec["model"],
             resource_profile=spec["resource_profile"],
             label=spec.get("label"),
+            execution_enabled=spec.get("execution_enabled"),
         )
     raw_project_labels = raw.get("project_labels", {})
     if not isinstance(raw_project_labels, dict):

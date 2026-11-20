@@ -672,3 +672,17 @@ This transport adds no PostgreSQL outbox, background reply worker, new coding
 backend or automatic workflow stage. The design distinguishes the implemented
 receipt boundary from that future integration, with sequence diagrams and
 failure semantics: [Muse email transport](../../../docs/architecture/muse-email-transport.md).
+
+### Grok opt-in provider (policy9 / migration0018)
+
+The Grok1.0.92 adapter follows the existing selected worker factory, scoped
+workspace, lease, supervision and independent review path. Source support does
+not enable execution: Grok `execution_enabled` defaults false in both API and
+worker profiles. Qualify the actual account/allowance, controlled config and
+nested/outer sandbox before an operator explicitly enables matching profiles.
+Antigravity/Codex remain unchanged. Usage-only listing is independent of that
+execution grant and reports Not reported, with no consumer OAuth polling.
+
+See [the Grok provider design](../../../docs/architecture/grok-coding-provider.md)
+for exact documented flags, isolated state, fresh-session policy, terminal-only
+cache accounting, cancellation semantics and additive migration coverage.

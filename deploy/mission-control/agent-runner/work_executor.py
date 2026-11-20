@@ -19,6 +19,7 @@ import subprocess
 import time
 from uuid import UUID
 
+from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
 from work_policy import POLICY
 from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
@@ -339,7 +340,7 @@ def _blocked_outcomes(message):
     found = set()
     if any(code in text for code in ("usage_limit_reached", "insufficient_quota", "quota_exhausted", "quota_exceeded")):
         found.add("quota_blocked")
-    if any(code in text for code in ("unauthorized", "authentication_required", "invalid_grant", "not logged in")):
+    if any(code in text for code in ("unauthorized", "authentication_required", "invalid_grant", "not logged in", "not_logged_in")):
         found.add("blocked_auth")
     if any(code in text for code in ("permission_denied", "permission denied", "approval required")):
         found.add("blocked_permission")
@@ -499,7 +500,7 @@ class CliParser:
     """Incremental bounded machine-event parser, retaining no tool arguments/thoughts."""
 
     def __init__(self, backend, *, expected_conversation_id=None):
-        if backend not in {"antigravity", "codex"}:
+        if backend not in {"antigravity", "codex", "grok"}:
             raise ValueError("Invalid CLI backend")
         self.backend = backend
         self.buffer = bytearray()
@@ -517,6 +518,7 @@ class CliParser:
         self._stderr_scan_tail = bytearray()
         self._stderr_blocked = set()
         self._stderr_denied = False
+        self._grok_events = GrokEvents(expected_conversation_id) if backend == "grok" else None
         if expected_conversation_id is not None:
             self._session(expected_conversation_id)
 
@@ -578,6 +580,18 @@ class CliParser:
             raise ExecutionError("failed", "The coding agent returned malformed machine output.") from None
         if self.backend == "antigravity":
             self._antigravity(value)
+        elif self.backend == "grok":
+            try:
+                self._grok_events.record(value)
+            except (ValueError, TypeError, AttributeError):
+                raise ExecutionError("failed", "The coding agent returned malformed Grok machine output.") from None
+            parsed = self._grok_events
+            if parsed.session is not None:
+                self._session(parsed.session)
+            self.response, self.usage, self.complete = parsed.response, parsed.usage, parsed.complete
+            self.saw_work = parsed.saw_work
+            if parsed.failure is not None:
+                self._record_failure_text(parsed.failure)
         else:
             self._codex(value)
 
@@ -677,6 +691,9 @@ class CliParser:
         if interrupted:
             return CliOutcome("cancelled", "", self.conversation_id, self.usage,
                               "Agent scope stopped after an interruption request.", proof)
+        if self._grok_events is not None and self._grok_events.cancelled:
+            return CliOutcome("cancelled", "", self.conversation_id, self.usage,
+                              "Grok cancelled the run and its process scope stopped.", proof)
         if returncode != 0 or self.failure is not None:
             for status in self._stderr_blocked:
                 self._record_failure(status)
@@ -734,21 +751,27 @@ class SystemdSupervisor:
         if not UNIT_RE.fullmatch(unit) or unit != unit_name(lease["attempt_id"]):
             raise ExecutionError("failed", "Invalid attempt supervision identity.")
         account = self.config.account
-        if invocation.backend not in {"antigravity", "codex", "verification"}:
+        if invocation.backend not in {"antigravity", "codex", "grok", "verification"}:
             raise ExecutionError("failed", "The selected process scope is unavailable.")
         if type(invocation.external_sandbox) is not bool or invocation.external_sandbox and invocation.backend != "codex":
             raise ExecutionError("failed", "The external execution boundary is unavailable.")
         if invocation.backend == "codex":
             _validate_codex_argv(lease, invocation)
+        if invocation.backend == "grok":
+            expected = grok_argv(invocation.argv[0], lease["recipe"]["model"], CHILD_WORKSPACE,
+                CHILD_STATE / "prompt.txt", lease["attempt_id"], CHILD_STATE / "grok-leader.sock",
+                implement=invocation.implement)
+            if invocation.argv != expected or invocation.session is not None or invocation.external_sandbox:
+                raise ExecutionError("failed", "The Grok execution boundary does not match its pinned policy.")
         verification = invocation.backend == "verification"
-        native_state = (None if verification else account.home /
+        native_state = (None if verification or invocation.backend == "grok" else account.home /
                         (".gemini" if invocation.backend == "antigravity" else ".codex"))
         binary = Path(invocation.argv[0])
         readonly = [invocation.workspace.repository, binary]
         for ancestor in (account.home / "repos/AGENTS.md", account.home / "repos/mission-control/AGENTS.md"):
             if ancestor.is_file():
                 readonly.append(ancestor)
-        hidden = [Path("/etc/homelab-forge"), Path("/run/credentials"), self.config.database.host,
+        hidden = [Path("/etc/homelab-forge"), Path("/etc/grok"), Path("/run/credentials"), self.config.database.host,
                   Path("/run/postgresql"), Path("/var/run/postgresql"),
                   Path("/run/dbus/system_bus_socket"), Path(f"/run/user/{account.uid}/bus"),
                   self.config.state_root, self.config.workspace_root]
@@ -766,6 +789,11 @@ class SystemdSupervisor:
         if native_state is not None:
             bindings.append(str(native_state))
         readonly_bindings = [str(path) for path in readonly]
+        if invocation.backend == "grok":
+            for relative in ("prompt.txt", "home/.grok/config.toml", "home/.grok/auth.json"):
+                source = invocation.scratch / relative
+                if source.is_file():
+                    readonly_bindings.append(str(source) + ":" + str(CHILD_STATE / relative))
         if invocation.plan_file is not None:
             if (invocation.plan_file.parent != invocation.scratch
                     or invocation.plan_file.name not in {"approved-plan.md", "previous-plan.md"}
@@ -841,7 +869,7 @@ class SystemdSupervisor:
             immutable_native.append(CHILD_WORKSPACE)
         properties.append("ReadOnlyPaths=" + " ".join("-" + str(path) for path in immutable_native))
         environment = {
-            "HOME": str(CHILD_STATE / "home") if verification else str(account.home),
+            "HOME": str(CHILD_STATE / "home") if verification or invocation.backend == "grok" else str(account.home),
             "USER": account.user, "LOGNAME": account.user,
             "PATH": ":".join([*(str(path) for path in stable_tools), "/usr/local/bin", "/usr/bin", "/bin"]),
             "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
@@ -851,6 +879,12 @@ class SystemdSupervisor:
             "RUSTUP_TOOLCHAIN": "stable",
             "GIT_OPTIONAL_LOCKS": "1" if invocation.implement else "0",
         }
+        if invocation.backend == "grok":
+            environment.update({"GROK_HOME": str(CHILD_STATE / "home/.grok"),
+                "GROK_CONFIG_PATH": str(CHILD_STATE / "home/.grok/config.toml"),
+                "GROK_LOG_FILE": str(CHILD_STATE / "grok-native.log"),
+                "GROK_SHARED_DAEMON": "0", "GROK_SESSION_REGISTRY": "0", "GROK_DISABLE_AUTOUPDATER": "1",
+                "GROK_MEMORY": "0", "GROK_WORKFLOWS": "0", "GROK_EXTERNAL_OTEL": "0"})
         return self._root(
             "/usr/bin/systemd-run", "--quiet", "--wait", "--pipe", "--collect",
             "--expand-environment=no", "--unit=" + unit, "--uid=0", "--gid=0",
@@ -927,6 +961,8 @@ class CommandRunnerProvider:
             if not actual.is_file() or not os.access(actual, os.X_OK):
                 raise ValueError("Configured coding program is not executable")
             self._binary_hashes[backend] = (actual, hashlib.sha256(actual.read_bytes()).digest())
+            if backend == "grok" and self._binary_hashes[backend][1].hex() != GROK_BINARY_SHA256:
+                raise ValueError("Configured Grok executable does not match its pinned version")
 
     def invocation(self, lease, workspace, *, progress=False, plan_context=None, feedback_context=None, peer_context=None,
                    peer_feedback_context=None):
@@ -942,7 +978,7 @@ class CommandRunnerProvider:
                            if self.sessions is not None and lease.get("workflow_review_id") is None else None)
             except (OSError, SessionError):
                 raise ExecutionError("needs_reconcile", "Antigravity continuation metadata is unavailable; review is required.") from None
-        else:
+        elif backend == "codex":
             codex_warm_eligible = (
                 self.codex_sessions is not None
                 and getattr(self.codex_sessions, "ttl_seconds", self.config.codex_session_ttl_seconds) > 0
@@ -954,6 +990,8 @@ class CommandRunnerProvider:
                            if codex_warm_eligible else None)
             except (OSError, SessionError):
                 raise ExecutionError("needs_reconcile", "Codex continuation metadata is unavailable; review is required.") from None
+        else:
+            session = None
         attempt = _uuid(lease["attempt_id"])
         scratch = self.config.state_root / "attempts" / attempt
         scratch.mkdir(mode=0o700, exist_ok=True)
@@ -1141,6 +1179,24 @@ class CommandRunnerProvider:
                 argv += ("--conversation", session.conversation_id)
             payload = json.dumps({"event": "user", "message": {"content": prompt}},
                                  ensure_ascii=False).encode("utf-8") + b"\n"
+        elif backend == "grok":
+            if getattr(self.supervisor, "enforces_coding_sandbox", False) is not True:
+                raise ExecutionError("failed", "Grok requires the approved outer execution boundary.")
+            native = scratch / "home/.grok"
+            native.mkdir(parents=True, mode=0o700, exist_ok=True)
+            try:
+                if not stage_grok_auth(self.config.account, native / "auth.json"):
+                    raise ValueError("Grok account is not authenticated")
+                (native / "config.toml").write_text(GROK_CONFIG, encoding="utf-8")
+                (native / "config.toml").chmod(0o400)
+                descriptor = os.open(scratch / "prompt.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(prompt.encode("utf-8"))
+            except (OSError, ValueError):
+                raise ExecutionError("blocked_auth", "The approved Grok native state is unavailable.") from None
+            argv = grok_argv(actual, lease["recipe"]["model"], CHILD_WORKSPACE, CHILD_STATE / "prompt.txt",
+                lease["attempt_id"], CHILD_STATE / "grok-leader.sock", implement=implement)
+            payload = b""
         else:
             external_sandbox = (getattr(self.supervisor, "enforces_coding_sandbox", False) is True
                                 and POLICY.get("codex_sandbox") == "supervised-external-v1")
@@ -1210,7 +1266,7 @@ class CommandRunnerProvider:
                                  else None)
             deadline = self.clock() + POLICY["max_wall_seconds"] + 15
             while True:
-                parser = CliParser(active_invocation.backend, expected_conversation_id=conversation)
+                parser = CliParser(active_invocation.backend, expected_conversation_id=(lease["attempt_id"] if active_invocation.backend == "grok" else conversation))
                 errors = []
                 interrupted = False
                 reaped = False
