@@ -164,8 +164,26 @@ impl Agents {
         aux: String,
         effects: &mut Vec<UiEffect>,
     ) {
-        if !snapshot.is_valid() || self.has_work() {
+        // The portal may open the default view before its saved navigation is
+        // delivered. Replace only that pristine, read-only bootstrap; genuine
+        // drafts, selections and uncertain mutations retain the existing fence.
+        let bootstrap = self.active
+            && self.catalog.is_none()
+            && self.pane == Pane::List
+            && !self.has_workspace_work()
+            && self
+                .pending
+                .as_ref()
+                .is_none_or(|r| matches!(r, WorkRequest::WorkCatalog { .. }));
+        if !snapshot.is_valid() || self.has_work() && !bootstrap {
             return;
+        }
+        if bootstrap {
+            self.pending = None;
+            self.pending_usage = None;
+            self.watch = None;
+            self.clock_watch = None;
+            self.active = false;
         }
         self.project = snapshot.project_alias;
         self.profile = snapshot.agent_profile;

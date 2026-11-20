@@ -1360,15 +1360,14 @@ async function durableHostRestartJourney() {
     await check(page.locator('#workbench')).toBeVisible();
     await check(page.locator('#selection-title')).toContainText('README <safe>.md');
     await check(page.locator('#source-view')).toContainText('Fixture <script> text is never HTML.');
-    const resaved = checkpointSaved(page, snapshot => snapshot.workbench_open &&
-      snapshot.workbench?.entry?.path.at(-1)?.value === 'README <safe>.md');
     await page.locator('#source-display').click();
     await page.locator('#source-raw').click();
     await page.locator('#forge-home').click();
     await check(page).toHaveURL(fixture.origin + '/home');
-    // Navigation flush is itself a completed durable save; do not require a
-    // periodic save for presentation-only raw/display toggles.
-    await resaved;
+    // Successful navigation acknowledges the current saved checkpoint. Pure
+    // presentation changes need not create another identical save request.
+    assert.equal(relay.workspaceSnapshot(tab).workbench_open, true);
+    assert.equal(relay.workspaceSnapshot(tab).workbench.entry.path.at(-1).value, 'README <safe>.md');
     assert.deepEqual(relay.workspaceSnapshot(tab).chat, chat);
     assert.equal(relay.submitted(), 0, 'a dormant saved run is never submitted again');
     assert.equal(relay.completions(), 0, 'retirement does not manufacture a completion');

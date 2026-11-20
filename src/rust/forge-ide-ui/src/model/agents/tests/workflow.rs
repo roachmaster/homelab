@@ -406,3 +406,48 @@ fn autonomous_list_continues_existing_polling_until_the_workflow_is_terminal() {
     agents.tasks[0].workflow_phase = Some(WorkWorkflowPhase::Completed);
     assert!(!agents.processing());
 }
+
+#[test]
+fn default_readonly_bootstrap_accepts_saved_navigation_without_overwriting_genuine_work() {
+    let mut source = ready();
+    draft(&mut source);
+    let saved = source.snapshot().unwrap();
+    let mut agents = Agents::default();
+    agents.open(
+        "workspace",
+        true,
+        false,
+        "bootstrap".into(),
+        "usage".into(),
+        &mut vec![],
+    );
+    assert!(matches!(
+        agents.pending,
+        Some(WorkRequest::WorkCatalog { .. })
+    ));
+    let mut effects = vec![];
+    agents.restore(
+        saved.clone(),
+        true,
+        false,
+        "restore".into(),
+        "restore-usage".into(),
+        &mut effects,
+    );
+    assert_eq!(agents.prompt, saved.prompt);
+    assert_eq!(agents.pane, Pane::Compose);
+    assert!(
+        matches!(&agents.pending,Some(WorkRequest::WorkCatalog{request_id})if request_id=="restore")
+    );
+    let mut old = saved;
+    old.prompt = "Must not replace current work".into();
+    agents.restore(
+        old,
+        true,
+        false,
+        "stale".into(),
+        "stale-usage".into(),
+        &mut effects,
+    );
+    assert_ne!(agents.prompt, "Must not replace current work");
+}
