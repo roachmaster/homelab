@@ -764,6 +764,7 @@ impl UiModel {
             (self.navigation_revision > 0 && key.is_some()).then_some(self.navigation_revision);
 
         let mut view = ViewModel {
+            checks: vec![],
             document_dirty: false,
             panes: vec![
                 PaneBinding {

@@ -3102,6 +3102,52 @@
         - ["display", "inline-flex"]
         - ["align-items", "center"]
         - ["min-height", "44px"]
+    - selector: "#agents .fg-checkbox"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["gap", "10px"]
+        - ["min-height", "44px"]
+        - ["font-size", ".875rem"]
+        - ["cursor", "pointer"]
+    - selector: "#agents .fg-checkbox input"
+      declarations:
+        - ["width", "20px"]
+        - ["height", "20px"]
+        - ["min-width", "20px"]
+        - ["min-height", "20px"]
+        - ["margin", "0"]
+        - ["flex", "0 0 auto"]
+    - selector: "#agents-verification"
+      declarations:
+        - ["display", "grid"]
+        - ["gap", "8px"]
+        - ["padding-block", "12px"]
+        - ["border-block-start", "1px solid rgba(255,255,255,.08)"]
+        - ["min-width", "0"]
+    - selector: "#agents-verification-heading"
+      declarations:
+        - ["margin-inline-end", "auto"]
+    - selector: "#agents-verification-source,#agents-verification-handoff"
+      declarations:
+        - ["overflow-wrap", "anywhere"]
+        - ["min-width", "0"]
+    - selector: "#agents-verification-findings"
+      declarations:
+        - ["border", "0"]
+        - ["background", "transparent"]
+        - ["padding", "0"]
+        - ["min-height", "0"]
+        - ["max-height", "none"]
+    - selector: "#agents-verification-findings .fg-message"
+      declarations:
+        - ["border", "0"]
+        - ["background", "transparent"]
+        - ["padding", "8px 0"]
+        - ["max-width", "100%"]
+    - selector: "#agents-verification-handoff:empty"
+      declarations:
+        - ["display", "none"]
     - selector: "#agents-publication-summary:empty,#agents-publication-reference:empty"
       declarations:
         - ["display", "none"]

@@ -1963,7 +1963,7 @@ async function homeJourney(page, traffic) {
   const primary = page.getByRole('link', { name: 'Open Forge IDE', exact: true });
   const secondary = page.getByRole('link', { name: 'Browse design docs', exact: true });
   await check(launchers).toHaveCount(4);
-  await check(docs).toHaveCount(7);
+  await check(docs).toHaveCount(8);
   await check(launchers.locator('svg[aria-hidden="true"]')).toHaveCount(4);
   await check(page.locator('.home-launcher-agents')).toHaveAttribute('href','/agents');
   await primary.focus();
@@ -3479,11 +3479,13 @@ async function agentsJourney() {
     const approvedPlan = await openFinishedPlan('awaiting_review', 'Plan approval and PR fixture');
     relay.faults.dropNextPlanDecision = true;
     relay.faults.holdPublication = true;
+    await page.locator('#agents-plan-auto-repair').check();
     await page.locator('#agents-plan-resume').click();
     await check(page.locator('#agents-retry')).toBeVisible();
     await check(page.locator('#open-agents')).toBeDisabled();
     const originalDecision = relay.planDecisions.at(-1);
     assert.equal(originalDecision.decision, 'resume');
+    assert.equal(originalDecision.auto_repair,true);
     assert.equal(originalDecision.task_id, approvedPlan);
     assert.match(originalDecision.plan_sha256, /^[0-9a-f]{64}$/);
     await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
@@ -3492,7 +3494,18 @@ async function agentsJourney() {
     await page.locator('#agents-retry').click();
     await check(page.locator('#agents-retry')).toBeHidden();
     await check(page.locator('#agents-plan-actions')).toBeHidden();
+    await check(page.locator('#agents-verification-status')).toHaveText('Awaiting independent review');
+    await check(page.locator('#agents-review-approve')).toBeDisabled();
+    await page.locator('#agents-verification-details summary').click();
+    await check(page.locator('#agents-verification-findings')).toContainText('compiler-fixture');
+    await page.locator('#agent-finding-0').check();
+    await check(page.locator('#agents-review-approve')).toBeDisabled();
+    await page.locator('#agents-review-note').fill('I independently verified the required compiler check on this exact candidate.');
+    await check(page.locator('#agents-review-approve')).toBeEnabled();
+    await page.locator('#agents-review-approve').click();
     await check(page.locator('#agents-publication-status')).toContainText('Publication pending');
+    assert.deepEqual(relay.reviewDecisions.at(-1).verified_finding_ids,['compiler-fixture']);
+
     await check(page.locator('#agents-task-mode')).toHaveText('Mode · Implement');
     await check(page.locator('#agents-accept')).toBeHidden();
       await check(page.locator('#agents-resume')).toBeHidden();
@@ -3503,9 +3516,12 @@ async function agentsJourney() {
       assert.equal(value.expected_revision, originalDecision.expected_revision);
       assert.equal(value.plan_attempt_id, originalDecision.plan_attempt_id);
       assert.equal(value.plan_sha256, originalDecision.plan_sha256);
+      assert.equal(value.auto_repair,true);
     }
     relay.faults.holdPublication = false;
     await check(page.locator('#agents-publication-status')).toHaveText('Pull request published', { timeout: 15000 });
+    await check(page.locator('#agents-accept')).toBeVisible();
+    await check(page.locator('#agents-accept')).toBeEnabled();
     const pullRequest = page.locator('#agents-publication-link a');
     await check(pullRequest).toHaveAttribute('href', 'https://github.com/roachmaster/homelab/pull/42');
     await check(pullRequest).toHaveAttribute('rel', 'noopener noreferrer');

@@ -192,7 +192,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('.fg-screen:not([data-protected])'))n.hidden=false;
   for(const [n,text] of initialText){n.textContent=text;delete n.dataset.tone;}
   for(const n of document.querySelectorAll('select[data-action]')){n.replaceChildren();n.value='';n.removeAttribute('title');delete n.dataset.options;n.disabled=true;}
-  for(const n of document.querySelectorAll('input,textarea')){n.value='';n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
+  for(const n of document.querySelectorAll('input,textarea')){n.value='';if(n.type==='checkbox')n.checked=false;n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
   for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
   for(const n of document.querySelectorAll('[data-diff-view]')){n.replaceChildren();n.scrollTop=0;}
@@ -352,6 +352,15 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
     const pending=sameContext&&(draft.composing||draft.invalid||!Number.isSafeInteger(acknowledgedSequence)||acknowledgedSequence<draft.sequence);
     if(!pending){if(n.value!==b.value)n.value=b.value;inputDrafts.delete(n);n.setCustomValidity('');n.removeAttribute('aria-invalid');}
     n.disabled=b.disabled;actionByElement.set(n,b.action);n.dataset.maxBytes=String(b.max_bytes);
+  }
+  for(const b of view.checks||[]){
+    const n=element(b.id);if(n?.type!=='checkbox')continue;
+    const context=JSON.stringify(b.action);const draft=inputDrafts.get(n);
+    const pending=draft&&draft.context===context&&!b.disabled&&(!Number.isSafeInteger(acknowledgedSequence)||acknowledgedSequence<draft.sequence);
+    if(!pending){n.checked=b.checked===true;inputDrafts.delete(n);}
+    n.disabled=b.disabled;actionByElement.set(n,b.action);
+    const container=n.closest('label');if(container)container.hidden=b.visible===false;
+    if(typeof b.label==='string'){const label=n.closest('label')?.querySelector('span');if(label)label.textContent=b.label;}
   }
   workspaceWork=hasWorkspaceWork===true;
   documentDirty=view.document_dirty===true;
@@ -671,7 +680,14 @@ for(const n of document.querySelectorAll('button[data-action]'))n.addEventListen
   const check=n.dataset.checkInput;
   if(!check||element(check)?.reportValidity())sendAction(n);
 });
-for(const n of document.querySelectorAll('input[data-action],textarea[data-action]')){
+for(const n of document.querySelectorAll('input[type=checkbox][data-action]'))n.addEventListener('change',()=>{
+  if(!visible(n)||n.disabled||!actionByElement.get(n))return;
+  if(presentationSequence>=2147483647){fatal('The presentation message limit was reached. Reload to retry.');return;}
+  const sequence=++presentationSequence;
+  inputDrafts.set(n,{context:JSON.stringify(actionByElement.get(n)),sequence,invalid:false});
+  sendAction(n,n.checked,sequence);
+});
+for(const n of document.querySelectorAll('input[data-action]:not([type=checkbox]),textarea[data-action]')){
   function updateInput(){
     if(!visible(n)||n.disabled||!actionByElement.get(n))return;
     const context=JSON.stringify(actionByElement.get(n));
@@ -1143,7 +1159,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==7 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==8 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

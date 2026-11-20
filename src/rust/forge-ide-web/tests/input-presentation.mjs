@@ -23,6 +23,12 @@ const input = {
   setCustomValidity(value) { this.validity = value; },
   reportValidity() { return !this.validity; },
 };
+const checkboxHandlers = new Map();
+const checkboxLabel = {hidden:false, textContent:'',querySelector(){return this;}};
+const checkbox = { ...input, id:'fixture-checkbox',type:'checkbox',checked:false,dataset:{action:'set_enabled'},
+  closest(selector){return selector==='label'?checkboxLabel:null;},
+  addEventListener(name,fn){checkboxHandlers.set(name,fn);},
+};
 const status = { id: 'collection-status', textContent: 'Starting', dataset: {} };
 // Existing row fixture rejects unnecessary moves. Real selection/filter/page
 // changes remain covered by the actual-browser suite, not this minimal DOM.
@@ -64,9 +70,9 @@ const document = {
   body, activeElement: body, visibilityState: 'visible',
   addEventListener(name, fn) { documentLifecycle.set(name, fn); },
   createElement(tag) { return sourceNode(tag); },
-  querySelectorAll(selector) { if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; return selector === 'input,textarea' || selector === 'input[data-action],textarea[data-action]' ? [input] : []; },
+  querySelectorAll(selector) { if (selector.includes('[data-source-view]')) return sourceElements; if (selector === '[data-bind-text]') return [status]; if(selector === 'input,textarea')return [input,checkbox]; if(selector === 'input[type=checkbox][data-action]')return [checkbox]; return selector === 'input[data-action]:not([type=checkbox]),textarea[data-action]' ? [input] : []; },
   querySelector() { return null; },
-  getElementById(id) { return id === input.id ? input : id === status.id ? status : id === tree.id ? tree : extraElements.get(id) ?? null; },
+  getElementById(id) { return id === checkbox.id ? checkbox : id === input.id ? input : id === status.id ? status : id === tree.id ? tree : extraElements.get(id) ?? null; },
 };
 const context = vm.createContext({
   document, TextEncoder, location: { hash: '' },
@@ -426,3 +432,21 @@ sourceView({ ...sourceBinding, text: 'last window', first_line: 400, target_span
 assert.equal(document.activeElement, sourceMount.children[0].children[0], 'exhausted paging control moves focus to visible source');
 vm.runInContext("layouts.delete('collection-layout')", context);
 console.log('Source presentation: safe text, line spans, continuation, stable scroll, narrow reveal and teardown passed.');
+
+function checkboxView(checked, sequence, token='candidate-A', disabled=false, visible=true){
+  workers.at(-1).onmessage({data:{kind:'view',presentation_sequence:sequence,view:{checks:[{id:checkbox.id,checked,disabled,visible,label:'I verified '+token,action:{kind:'set_enabled',candidate:token}}]}}});
+}
+checkboxView(false,null);
+checkbox.checked=true;checkboxHandlers.get('change')();
+const checkboxEvent=workers.at(-1).sent.at(-1);
+assert.equal(checkboxEvent.event.value,true,'native checkboxes send typed booleans');
+const checkboxSequence=checkboxEvent.presentation_sequence;
+checkboxView(false,checkboxSequence-1);assert.equal(checkbox.checked,true,'stale same-candidate view preserves pending choice');
+checkboxView(true,checkboxSequence);assert.equal(checkbox.checked,true);
+checkboxView(false,null,'candidate-B');assert.equal(checkbox.checked,false,'candidate change clears an unacknowledged verification');
+checkboxView(false,null,'candidate-B',true);const sentBefore=workers.at(-1).sent.length;
+checkbox.checked=true;checkboxHandlers.get('change')();assert.equal(workers.at(-1).sent.length,sentBefore,'disabled checkboxes cannot submit');
+checkboxView(false,null,'candidate-B',false,false);assert.equal(checkboxLabel.hidden,true,'unused finding controls have no empty label');
+checkboxView(true,null,'candidate-B',false,true);assert.equal(checkboxLabel.textContent,'I verified candidate-B');
+lifecycle.get('pagehide')({persisted:false});assert.equal(checkbox.checked,false);assert.equal(checkbox.disabled,true);
+console.log('Checkbox presentation: boolean actions, acknowledgements, source changes and protected teardown passed.');

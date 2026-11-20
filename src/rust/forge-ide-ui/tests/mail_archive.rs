@@ -52,6 +52,7 @@ fn agent(retry: bool) -> AgentsNavigationSnapshot {
         mode: WorkMode::Plan,
         prompt: prompt.clone(),
         acceptance_criteria: criteria.clone(),
+        auto_repair: false,
         review_note: String::new(),
         task_id: None,
         retry_intent: retry.then(|| WorkRequest::WorkSubmit {
@@ -62,6 +63,7 @@ fn agent(retry: bool) -> AgentsNavigationSnapshot {
             agent_profile: "agy-primary".into(),
             prompt,
             acceptance_criteria: criteria,
+            auto_repair: false,
             idempotency_key: "same-saved-key".into(),
         }),
     }

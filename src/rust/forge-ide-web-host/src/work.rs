@@ -59,6 +59,22 @@ impl WorkConfig {
                 WorkRequest::WorkResume { agent_profile, .. } => {
                     self.allowed_profiles.contains(agent_profile)
                 }
+                WorkRequest::WorkReviewDecide {
+                    decision,
+                    agent_profile,
+                    ..
+                } => {
+                    !decision.starts_work()
+                        || self.allowed_modes.contains(&WorkMode::Implement)
+                            && self.allowed_profiles.contains(agent_profile)
+                }
+                WorkRequest::WorkRepair { agent_profile, .. } => {
+                    self.allowed_modes.contains(&WorkMode::Implement)
+                        && self.allowed_profiles.contains(agent_profile)
+                }
+                WorkRequest::WorkPublicationRetry { .. } => {
+                    self.allowed_modes.contains(&WorkMode::Implement)
+                }
                 WorkRequest::WorkPlanDecide {
                     decision,
                     agent_profile,
@@ -160,17 +176,17 @@ impl WorkRelay {
         }
         // Resume starts another execution: check the saved mode independently of
         // the runner's broader grants before sending the mutation.
-        if let WorkRequest::WorkResume {
-            request_id,
-            project_alias,
-            task_id,
-            ..
-        } = &request
-        {
+        let inspect_source = matches!(
+            &request,
+            WorkRequest::WorkResume { .. }
+                | WorkRequest::WorkRepair { .. }
+                | WorkRequest::WorkPublicationRetry { .. }
+        ) || matches!(&request, WorkRequest::WorkReviewDecide { decision, .. } if decision.starts_work());
+        if inspect_source {
             let get = WorkRequest::WorkGet {
-                request_id: request_id.clone(),
-                project_alias: project_alias.clone(),
-                task_id: task_id.clone(),
+                request_id: request.request_id().into(),
+                project_alias: request.project_alias().unwrap_or_default().into(),
+                task_id: request.task_id().unwrap_or_default().into(),
             };
             let encoded = serde_json::to_vec(&get).map_err(|_| Rejection::Unavailable)?;
             let Some((status, raw, detail)) = self.call(&get, encoded, deadline) else {
@@ -178,6 +194,16 @@ impl WorkRelay {
             };
             if let WorkReply::WorkOpened { task, .. } = detail.event {
                 if !self.grants.allowed_modes.contains(&task.mode) {
+                    return failed(header, Failure::Denied);
+                }
+                if !matches!(&request, WorkRequest::WorkResume { .. })
+                    && task.mode != WorkMode::Implement
+                {
+                    return failed(header, Failure::Denied);
+                }
+                if matches!(&request, WorkRequest::WorkPublicationRetry { .. })
+                    && !self.grants.allowed_profiles.contains(&task.agent_profile)
+                {
                     return failed(header, Failure::Denied);
                 }
             } else {
