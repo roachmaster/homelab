@@ -333,11 +333,20 @@ $fn$;
 REVOKE ALL ON FUNCTION forge_agent.coding_workflow_merge_authorized(uuid) FROM PUBLIC;
 
 CREATE FUNCTION forge_coding_reconciler_api.merge_claim(p_worker text) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
-DECLARE a forge_agent.coding_workflow_actions%ROWTYPE;w forge_agent.coding_workflows%ROWTYPE;p forge_agent.coding_publications%ROWTYPE;q forge_agent.coding_reviews%ROWTYPE;
+DECLARE candidate record;a forge_agent.coding_workflow_actions%ROWTYPE;w forge_agent.coding_workflows%ROWTYPE;p forge_agent.coding_publications%ROWTYPE;q forge_agent.coding_reviews%ROWTYPE;
 BEGIN
  IF p_worker IS NULL OR p_worker!~'^[A-Za-z0-9_.-]{1,64}$' THEN RAISE EXCEPTION 'Invalid merge worker' USING ERRCODE='22023';END IF;
- SELECT * INTO a FROM forge_agent.coding_workflow_actions x WHERE x.owner_id=current_setting('forge.coding_owner',true) AND x.kind='merge' AND(x.status='pending' OR(x.status='leased' AND x.lease_expires_at<=clock_timestamp())) AND forge_agent.coding_workflow_merge_authorized(x.action_id) ORDER BY x.created_at,x.action_id FOR UPDATE SKIP LOCKED LIMIT 1;
- IF NOT FOUND THEN RETURN NULL;END IF;
+ FOR candidate IN SELECT x.action_id,x.owner_id,x.project_alias FROM forge_agent.coding_workflow_actions x
+ WHERE x.owner_id=current_setting('forge.coding_owner',true) AND x.kind='merge' AND(x.status='pending' OR(x.status='leased' AND x.lease_expires_at<=clock_timestamp()))
+ AND forge_agent.coding_workflow_merge_authorized(x.action_id) ORDER BY x.created_at,x.action_id LOOP
+  -- Same project lock order as owner/coordinator admission; acquire before row locks.
+  IF NOT pg_try_advisory_xact_lock(hashtextextended(candidate.owner_id||E'\n'||candidate.project_alias,2026111901)) THEN CONTINUE;END IF;
+  IF EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions other WHERE other.owner_id=candidate.owner_id AND other.project_alias=candidate.project_alias AND other.kind='merge' AND other.status IN('leased','needs_reconcile') AND other.action_id<>candidate.action_id) THEN CONTINUE;END IF;
+  SELECT * INTO a FROM forge_agent.coding_workflow_actions x WHERE x.action_id=candidate.action_id
+   AND(x.status='pending' OR(x.status='leased' AND x.lease_expires_at<=clock_timestamp())) AND forge_agent.coding_workflow_merge_authorized(x.action_id) FOR UPDATE SKIP LOCKED;
+  IF FOUND THEN EXIT;END IF;
+ END LOOP;
+ IF a.action_id IS NULL THEN RETURN NULL;END IF;
  UPDATE forge_agent.coding_workflow_actions SET status='leased',worker_id=p_worker,lease_token=gen_random_uuid(),lease_expires_at=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp() WHERE action_id=a.action_id RETURNING * INTO a;
  SELECT * INTO w FROM forge_agent.coding_workflows WHERE workflow_id=a.workflow_id;
  SELECT * INTO p FROM forge_agent.coding_publications WHERE publication_id=a.source_publication_id;
@@ -559,3 +568,14 @@ BEGIN
  RETURN jsonb_build_object('feedback',f.feedback_json::jsonb,'feedback_json',f.feedback_json,'legacy_resume_note',a.legacy_resume_note);
 END;$fn$;
 
+
+CREATE FUNCTION forge_coding_worker_api.project_revisions() RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
+ SELECT coalesce(jsonb_object_agg(head.project_alias,head.merge_commit),'{}'::jsonb) FROM(
+ SELECT DISTINCT ON(a.project_alias) a.project_alias,a.finish_receipt->'receipt'->>'merge_commit' AS merge_commit
+ FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING(workflow_id)
+ WHERE a.owner_id=current_setting('forge.coding_owner',true) AND a.kind='merge' AND a.status='completed' AND a.finish_receipt->>'status'='merged'
+ AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
+ AND EXISTS(SELECT 1 FROM forge_agent.coding_worker_grants g WHERE g.worker_role=session_user AND g.owner_id=a.owner_id AND g.project_alias=a.project_alias)
+ ORDER BY a.project_alias,a.updated_at DESC,a.action_id DESC)head
+$fn$;
+REVOKE ALL ON FUNCTION forge_coding_worker_api.project_revisions() FROM PUBLIC;

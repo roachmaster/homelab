@@ -64,6 +64,13 @@ class WorkflowStore:
         self.config=config;self.catalog=catalog;self.store=store
 
     @contextmanager
+    def _transaction(self):
+        with self.store._transaction() as cursor:
+            cursor.execute("SET LOCAL lock_timeout='5s'")
+            cursor.execute("SET LOCAL statement_timeout='10s'")
+            yield cursor
+
+    @contextmanager
     def listen(self):
         connection=self.store._connect_factory()
         try:
@@ -152,7 +159,7 @@ class WorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('code_review' if q else 'plan_review',w['workflow_id']))
 
     def claim(self,worker_id):
-        with self.store._transaction() as cursor:
+        with self._transaction() as cursor:
             for project in sorted(self.store.allowed_projects):self._project_lock(cursor,project)
             self.recover(cursor)
             cursor.execute("""SELECT a.* FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w ON w.workflow_id=a.workflow_id WHERE a.owner_id=%s AND a.kind IN('review','decide') AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated') AND(a.status='pending' OR(a.status='leased' AND a.lease_expires_at<=clock_timestamp())) ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(self.store.owner,))
@@ -169,7 +176,7 @@ class WorkflowStore:
 
     def process(self,job):
         from work_peer_review import validate_review_target,parse_review_target,parse_review_verdict
-        with self.store._transaction() as cursor:
+        with self._transaction() as cursor:
             self._project_lock(cursor,job["project_alias"])
             # Task -> peer review -> action is shared with owner/cancel paths.
             cursor.execute("SELECT r.source_task_id,w.root_task_id FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING(workflow_id) WHERE r.workflow_review_id=%s",(job['workflow_review_id'],));identity=cursor.fetchone()
@@ -195,7 +202,7 @@ class WorkflowStore:
                     receipt=self._apply_verdict(cursor,w,review,task,action,target,parse_review_verdict)
             except (Rejected,ValueError,KeyError) as error:
                 cursor.execute('ROLLBACK TO SAVEPOINT workflow_action')
-                if isinstance(error,Rejected) and error.code=='reconcile_required':return
+                if isinstance(error,Rejected) and (error.code=='reconcile_required' or error.status>=500):return
                 self._escalate(cursor,w,'Peer review could not safely continue: '+(getattr(error,'code',None) or type(error).__name__))
                 cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
                 return
@@ -204,12 +211,14 @@ class WorkflowStore:
     def _admit_reviewer(self,cursor,w,review,task,validate_target):
         p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
         source=self._artifact(cursor,task['id'],review['source_attempt_id']);reviewer_id=uuid4()
+        cursor.execute("SELECT prompt,acceptance_criteria FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",(self.store.owner,w['project_alias'],w['root_task_id']));assignment=cursor.fetchone()
+        if assignment is None:raise Rejected(409,'result_mismatch')
         target={'version':1,'workflow_id':str(w['workflow_id']),'workflow_review_id':str(review['workflow_review_id']),'policy_digest':w['policy_digest'],
             'target_kind':review['target_kind'],'reviewer_task_id':str(reviewer_id),'author_profile':p['author_profile'],'reviewer_profile':p['reviewer_profile'],
             'source_task_id':str(task['id']),'source_attempt_id':str(review['source_attempt_id']),'source_result_sha256':review['source_result_sha256'],
             'source_revision':review['source_revision'],'base_revision':review['candidate_commit'] or task['base_revision'],'plan_revision':w['plan_revisions'],
             'plan_decision_id':None,'review_id':str(review['source_review_id']) if review['source_review_id'] else None,'candidate_commit':review['candidate_commit'],
-            'gate_manifest_sha256':review['gate_manifest_sha256'],'integration_base':None,'workspace_digest':None,'source_text':source['content'],'acceptance_criteria':task['acceptance_criteria'],
+            'gate_manifest_sha256':review['gate_manifest_sha256'],'integration_base':None,'workspace_digest':None,'source_text':source['content'],'request_prompt':assignment['prompt'],'acceptance_criteria':assignment['acceptance_criteria'],
             'findings':[],'verification':None,'approved_plan':None}
         if review['target_kind']=='code':
             cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE",(review['source_review_id'],));q=cursor.fetchone()
