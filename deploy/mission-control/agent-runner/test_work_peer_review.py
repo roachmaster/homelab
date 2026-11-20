@@ -24,7 +24,8 @@ def target(kind="plan", *, source="A concrete plan with acceptance checks."):
         "source_result_sha256": sha(source), "source_revision": 3,
         "base_revision": "b" * 40, "plan_revision": 0, "plan_decision_id": None,
         "review_id": None, "candidate_commit": None, "gate_manifest_sha256": None,
-        "workspace_digest": None, "integration_base": None, "source_text": source, "acceptance_criteria": "Tests pass.",
+        "workspace_digest": None, "integration_base": None, "source_text": source,
+        "request_prompt": "Implement the requested capability using selected providers.", "acceptance_criteria": "Tests pass.",
         "findings": [], "verification": None, "approved_plan": None,
     }
     if kind == "code":
@@ -66,6 +67,7 @@ class PeerReviewContractTest(unittest.TestCase):
         result = parse_review_verdict(json.dumps(verdict(parsed)), parsed)
         self.assertEqual(result["decision"], "approve")
         self.assertEqual(parsed["source_text"], value["source_text"])
+        self.assertEqual(parsed["request_prompt"], value["request_prompt"])
 
     def test_large_plan_is_reviewed_whole_without_feedback_sized_truncation(self):
         text = "Full plan line.\n" * 6000
