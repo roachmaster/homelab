@@ -249,6 +249,8 @@ impl UiModel {
                 | UiEvent::SetAgentPrompt { .. }
                 | UiEvent::SetAgentCriteria { .. }
                 | UiEvent::SetAgentReviewNote { .. }
+                | UiEvent::SetAgentAutoRepair { .. }
+                | UiEvent::SetAgentFindingVerified { .. }
                 | UiEvent::SendAgentTask { .. }
                 | UiEvent::RetryAgentRequest {}
                 | UiEvent::OpenAgentTask { .. }
@@ -256,6 +258,9 @@ impl UiModel {
                 | UiEvent::AcceptAgentTask { .. }
                 | UiEvent::ResumeAgentTask { .. }
                 | UiEvent::DecideAgentPlan { .. }
+                | UiEvent::DecideAgentReview { .. }
+                | UiEvent::RepairAgentTask { .. }
+                | UiEvent::RetryAgentPublication { .. }
                 | UiEvent::NextAgentResult {}
                 | UiEvent::PreviousAgentResult {}
                 | UiEvent::RefreshAgentUsage {}
@@ -753,6 +758,8 @@ impl UiModel {
             | UiEvent::SetAgentPrompt { .. }
             | UiEvent::SetAgentCriteria { .. }
             | UiEvent::SetAgentReviewNote { .. }
+            | UiEvent::SetAgentAutoRepair { .. }
+            | UiEvent::SetAgentFindingVerified { .. }
             | UiEvent::SendAgentTask { .. }
             | UiEvent::RetryAgentRequest {}
             | UiEvent::OpenAgentTask { .. }
@@ -760,6 +767,9 @@ impl UiModel {
             | UiEvent::AcceptAgentTask { .. }
             | UiEvent::ResumeAgentTask { .. }
             | UiEvent::DecideAgentPlan { .. }
+            | UiEvent::DecideAgentReview { .. }
+            | UiEvent::RepairAgentTask { .. }
+            | UiEvent::RetryAgentPublication { .. }
             | UiEvent::NextAgentResult {}
             | UiEvent::PreviousAgentResult {}
             | UiEvent::RefreshAgentUsage {}

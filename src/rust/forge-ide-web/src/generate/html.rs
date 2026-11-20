@@ -370,6 +370,9 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(text)
             );
         }
+        Component::Checkbox { id, label, action } => {
+            let _ = write!(out, "<label class=\"fg-checkbox\" for=\"{}\"><input type=\"checkbox\" id=\"{}\" data-action=\"{}\" disabled><span>{}</span></label>", escape(id), escape(id), escape(action), escape(label));
+        }
         Component::Select { id, label, action } => {
             let _=write!(out,"<label class=\"fg-field\" for=\"{id}\"><span>{}</span><select id=\"{id}\" data-action=\"{}\" disabled><option value=\"\">Not connected</option></select></label>",escape(label),escape(action));
         }

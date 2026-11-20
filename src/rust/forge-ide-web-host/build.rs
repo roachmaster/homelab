@@ -36,6 +36,7 @@ fn main() -> io::Result<()> {
         ("forge-workers-studio.html", DesignPage::ForgeWorkersStudio),
         ("coding-agents.html", DesignPage::CodingAgents),
         ("agent-usage.html", DesignPage::AgentUsage),
+        ("agent-feedback-loop.html", DesignPage::AgentFeedback),
         ("playtest.html", DesignPage::Playtest),
         ("studio.html", DesignPage::Studio),
     ] {

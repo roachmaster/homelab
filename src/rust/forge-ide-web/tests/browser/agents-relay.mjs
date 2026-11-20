@@ -31,7 +31,7 @@ function task(status, number, input = {}) {
     created_at: `2026-11-19T18:00:${String(number).padStart(2, '0')}Z`,
     title: input.prompt ? Array.from(input.prompt.split('\n')[0]).slice(0, 128).join('').replace(/[\r\t]/g, ' ') : 'Fixture existing report',
     prompt: input.prompt ?? 'Review the fixture', acceptance_criteria: input.acceptance_criteria ?? 'Return the complete report',
-    attempt_id: randomUUID(), sequence: 0, events: [], progress_emitted: false,
+    auto_repair: input.auto_repair===true, attempt_id: randomUUID(), sequence: 0, events: [], progress_emitted: false,
   };
   event(item, 'queued');
   if (status !== 'queued') {
@@ -65,6 +65,7 @@ function detail(t) {
     result: ['awaiting_review', 'completed'].includes(t.status) ? { attempt_id: t.attempt_id, sha256: digest, byte_count: bytes.length, chunk_count: Math.ceil(bytes.length / 16384) } : null,
     reconciliation_receipt_id: null,
     ...(t.publication ? { publication: t.publication } : {}),
+    ...(t.review ? { review:t.review } : {}),
   };
 }
 function usage(alias, tasks) {
@@ -93,7 +94,7 @@ export async function startAgentsRelay() {
   const calls = [];
   const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
     dropNextPlanDecision: false, holdPublication: false };
-  const planDecisions = [], publicationRevisions = [];
+  const planDecisions = [], reviewDecisions = [], publicationRevisions = [];
   let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
     try {
@@ -151,6 +152,8 @@ export async function startAgentsRelay() {
             if (selected.publication.status === 'published') {
               selected.publication.commit_sha = 'e'.repeat(40);
               selected.publication.pr_url = 'https://github.com/roachmaster/homelab/pull/42';
+              selected.review.stage='approved';selected.review.required_hosted_green=true;selected.review.can_accept=true;
+
             }
           }
         }
@@ -163,14 +166,25 @@ export async function startAgentsRelay() {
         else if (selected.status === 'running' && !faults.holdProgressCompletion) {
           selected.status = 'awaiting_review'; selected.revision++; event(selected, 'awaiting_review');
           if (selected.mode === 'implement') {
-            selected.publication = { status: 'pending', branch: 'forge/task-fixture', summary: 'Waiting for required checks.' };
-            selected.publication_step = -1;
+            selected.review={auto_repair:selected.auto_repair,stage:'awaiting_decision',review_id:randomUUID(),feedback_id:randomUUID(),round:1,max_rounds:3,open_findings:1,verified_findings:0,latest_check_status:'passed',toolchain:'rustc fixture',handoff_reason:null,source_attempt_id:selected.attempt_id,candidate_commit:'e'.repeat(40),workspace_digest:'f'.repeat(64),gate_manifest_sha256:'c'.repeat(64),required_hosted_green:false,can_accept:false,can_repair:true,can_retry:false,
+              findings:[{finding_id:'compiler-fixture',category:'source',summary:'Required compiler fixture finding',expected:'Required check passes',actual:'Local rerun passed; owner review required',status:'open'}]};
+
           }
         } else if (selected.status === 'cancel_requested') {
           selected.status = 'cancelled'; selected.revision++; event(selected, 'cancelled');
         }
         const events = selected.events.filter(item => item.sequence > (input.after_sequence ?? 0)).slice(0, input.limit ?? 50);
         send(200, 'work_events', { project_alias: project, task_id: selected.task_id, revision: selected.revision, status: selected.status, events, next_sequence: events.at(-1)?.sequence ?? input.after_sequence ?? 0 }); return;
+      }
+      if(input.kind==='work_review_decide'){
+        if(request.headers['forge-destination']!=='ide.work.review.decide')throw new Error('fixture review destination');
+        reviewDecisions.push({...input});
+        if(input.expected_revision!==selected.revision||input.review_id!==selected.review?.review_id){failed(409,'revision_conflict');return;}
+        if(input.decision!=='approve'||!input.note?.trim()||JSON.stringify(input.verified_finding_ids)!==JSON.stringify(['compiler-fixture'])){failed(400,'invalid_request');return;}
+        const before=selected.revision;selected.revision++;
+        selected.review.findings[0].status='verified';selected.review.open_findings=0;selected.review.verified_findings=1;selected.review.stage='waiting_hosted';selected.review.can_repair=false;
+        selected.publication={publication_id:randomUUID(),status:'pending',branch:'forge/task-fixture',summary:'Waiting for required hosted checks.'};selected.publication_step=-1;
+        send(200,'work_review_decided',{project_alias:project,task_id:selected.task_id,base_revision:before,revision:selected.revision,status:selected.status,review_id:selected.review.review_id});return;
       }
       if (input.kind === 'work_plan_decide') {
         if (request.headers['forge-destination'] !== 'ide.work.plan.decide') throw new Error('fixture plan destination');
@@ -191,6 +205,8 @@ export async function startAgentsRelay() {
           selected.status = input.decision === 'cancel' ? 'cancelled' : 'queued';
           if (input.decision !== 'cancel') {
             selected.agent_profile = input.agent_profile;
+            selected.auto_repair=input.decision==='resume' && input.auto_repair===true;
+            selected.review=null;
             selected.attempt_id = randomUUID(); selected.progress_emitted = false;
             selected.publication = null;
             if (input.decision === 'revise') selected.prompt += '\nReview feedback: ' + input.note;
@@ -231,7 +247,7 @@ export async function startAgentsRelay() {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
-    planDecisions, publicationRevisions,
+    planDecisions, reviewDecisions, publicationRevisions,
     addPlan(status, title) {
       if (!['awaiting_review', 'completed'].includes(status)) throw new Error('fixture plan state');
       const next = task(status, tasks.size, { mode: 'plan', prompt: title }); tasks.set(next.task_id, next); return next.task_id;

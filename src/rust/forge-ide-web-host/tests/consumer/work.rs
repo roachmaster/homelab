@@ -157,8 +157,11 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
                 request["request_id"].as_str().unwrap()
             );
             let kind = request["kind"].as_str().unwrap();
-            let expected = if kind == "work_plan_decide" {
-                "ide.work.plan.decide".into()
+            let expected = if matches!(
+                kind,
+                "work_plan_decide" | "work_review_decide" | "work_publication_retry"
+            ) {
+                format!("ide.{}", kind.replace('_', "."))
             } else if let Some(suffix) = kind.strip_prefix("work_") {
                 format!("ide.work.{suffix}")
             } else {
@@ -1186,4 +1189,68 @@ fn work_publication_projection_rejects_an_arbitrary_href_before_returning_it_to_
         safe,
     );
     assert_eq!(worker.join().unwrap().len(), 2);
+}
+
+fn review_decision(decision: &str) -> Value {
+    let mut value = task_request("work_review_decide");
+    value["expected_revision"] = json!(4);
+    value["review_id"] = json!(OTHER);
+    value["decision"] = json!(decision);
+    value["agent_profile"] = json!("agy-plan-v1");
+    value["note"] = json!("Owner-reviewed compiler evidence");
+    value["idempotency_key"] = json!("review-intent");
+    value
+}
+#[test]
+fn review_approval_requires_implementation_grants_but_handoff_remains_available() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        review_decision("approve"),
+        &auth,
+        403,
+        failure("denied"),
+    );
+    no_calls(&upstream);
+    let receipt = reply(
+        "work_review_decided",
+        json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,"status":"awaiting_review","review_id":OTHER}),
+    );
+    let worker = backend(upstream, vec![(200, receipt.clone())]);
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        review_decision("escalate"),
+        &auth,
+        200,
+        receipt,
+    );
+    assert_eq!(worker.join().unwrap().len(), 1);
+}
+#[test]
+fn review_approval_rechecks_the_saved_implementation_mode_before_mutation() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut value = config(&files);
+    let mut grants = settings(&files, &upstream);
+    grants.allowed_modes.push(WorkMode::Implement);
+    value.work = Some(grants);
+    let host = host_with_config(value).0;
+    let auth = authenticate(&host);
+    let worker = backend(upstream, vec![(200, opened())]);
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        review_decision("approve"),
+        &auth,
+        403,
+        failure("denied"),
+    );
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["kind"], "work_get");
 }

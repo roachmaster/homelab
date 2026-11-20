@@ -136,6 +136,12 @@ pub enum Component {
         label: String,
         action: String,
     },
+    /// Native boolean input; the application owns its accepted value.
+    Checkbox {
+        id: String,
+        label: String,
+        action: String,
+    },
     TextArea {
         id: String,
         label: String,
@@ -304,6 +310,7 @@ macro_rules! component {
         }
     };
     (text_field $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextField{id:$id.into(),label:$label.into(),action:$action.into()} };
+    (checkbox $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::Checkbox{id:$id.into(),label:$label.into(),action:$action.into()} };
     (textarea $id:expr, $label:expr, $action:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:None} };
     (textarea $id:expr, $label:expr, $action:expr, $placeholder:expr) => { $crate::generate::Component::TextArea{id:$id.into(),label:$label.into(),action:$action.into(),placeholder:Some($placeholder.into())} };
     (toolbar [$($child:expr),* $(,)?]) => { $crate::generate::Component::Toolbar(vec![$($child),*]) };
@@ -429,6 +436,7 @@ impl Document {
                     id, label, action, ..
                 }
                 | Component::TextField { id, label, action }
+                | Component::Checkbox { id, label, action }
                 | Component::TextArea {
                     id, label, action, ..
                 }

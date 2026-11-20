@@ -134,6 +134,10 @@ pub fn ide_document() -> Document {
                         component!(caption "agents-base", "Waiting for a project revision…"),
                         component!(textarea "agents-prompt", "Assignment", "set_agent_prompt", "Describe the task or question…"),
                         component!(textarea "agents-criteria", "Acceptance criteria", "set_agent_criteria", "What should the result include or verify?"),
+                        component!(region "agents-compose-repair-policy"; [
+                            component!(checkbox "agents-auto-repair", "Allow up to 3 repair rounds", "set_agent_auto_repair"),
+                            component!(caption "agents-auto-repair-help", "The agent may repair verified findings within this assignment. Required checks and final review still apply."),
+                        ]),
                         component!(caption "agents-compose-limit", "This draft is too large to submit. Shorten the assignment or acceptance criteria."),
                         component!(row [
                             component!(uuid_button "agents-send", "Send assignment", "send_agent_task", "agents-prompt", "idempotency_key"),
@@ -146,6 +150,25 @@ pub fn ide_document() -> Document {
                         component!(status "agents-task-status", ""),
                         component!(caption "agents-task-mode", ""),
                         component!(caption "agents-attempt", ""),
+                        component!(region "agents-verification"; [
+                            component!(row [
+                                component!(heading "agents-verification-heading", "Review and repair"),
+                                component!(badge "agents-verification-status", "Verification"),
+                            ]),
+                            component!(caption "agents-verification-counts", ""),
+                            component!(text "agents-verification-check", ""),
+                            component!(text "agents-verification-handoff", ""),
+                            component!(disclosure "agents-verification-details", "Findings and source details"; [
+                                component!(caption "agents-verification-source", ""),
+                                component!(caption "agents-verification-policy", ""),
+                                component!(transcript "agents-verification-findings", "Review findings", "You", "Review", "No open findings were supplied."),
+                                finding_verification_fields(),
+                                component!(row [
+                                    component!(button "agents-parent-task", "Open parent task", "open_agent_task"),
+                                    component!(button "agents-repair-task", "Open linked repair", "open_agent_task"),
+                                ]),
+                            ]),
+                        ]),
                         component!(row [
                             component!(uuid_action "agents-cancel", "Cancel task", "cancel_agent_task", "idempotency_key"),
                             component!(uuid_action "agents-resume", "Resume this agent", "resume_agent_task", "idempotency_key"),
@@ -180,6 +203,7 @@ pub fn ide_document() -> Document {
                             component!(text_field "agents-review-note", "Review note", "set_agent_review_note"),
                             component!(region "agents-plan-actions"; [
                                 component!(caption "agents-plan-decision-help", "Resume approves this saved plan for implementation. To request a revised plan, add your changes in Review note and choose Revise."),
+                                component!(checkbox "agents-plan-auto-repair", "Allow up to 3 repair rounds", "set_agent_auto_repair"),
                                 component!(row [
                                     component!(uuid_button "agents-plan-resume", "Resume", "decide_agent_plan", "agents-review-note", "idempotency_key"),
                                     component!(uuid_action "agents-plan-revise", "Revise", "decide_agent_plan", "idempotency_key"),
@@ -187,7 +211,18 @@ pub fn ide_document() -> Document {
                                 ]),
                                 component!(caption "agents-plan-unavailable", "Implementation is not enabled for this agent and project. You can revise or cancel this plan."),
                             ]),
-                            component!(text "agents-accept-help", "Acceptance records your review. It does not merge or publish code."),
+                            component!(region "agents-verification-actions"; [
+                                component!(caption "agents-verification-action-help", "Review the candidate and findings. Repair feedback goes to the agent before coordinator takeover."),
+                                component!(row [
+                                    component!(uuid_button "agents-review-approve", "Approve verified result", "decide_agent_review", "agents-review-note", "idempotency_key"),
+                                    component!(uuid_action "agents-review-repair", "Request repair", "decide_agent_review", "idempotency_key"),
+                                    component!(uuid_action "agents-review-escalate", "Hand off to coordinator", "decide_agent_review", "idempotency_key"),
+                                    component!(uuid_action "agents-review-retry", "Retry verification", "decide_agent_review", "idempotency_key"),
+                                    component!(uuid_action "agents-completed-repair", "Start linked repair", "repair_agent_task", "idempotency_key"),
+                                    component!(uuid_action "agents-publication-retry", "Retry publication", "retry_agent_publication", "idempotency_key"),
+                                ]),
+                            ]),
+                            component!(text "agents-accept-help", "Accept after the required checks on this candidate pass. Merge remains a separate review decision."),
                             component!(uuid_button "agents-accept", "Accept result", "accept_agent_task", "agents-review-note", "idempotency_key"),
                         ]),
                     ]),
@@ -599,6 +634,27 @@ pub fn ide_transport() -> Transport {
             true,
         ),
         (
+            "work_review_decide",
+            "ide.work.review.decide",
+            "work_review_decided",
+            "work_failed",
+            true,
+        ),
+        (
+            "work_repair",
+            "ide.work.repair",
+            "work_repair_submitted",
+            "work_failed",
+            true,
+        ),
+        (
+            "work_publication_retry",
+            "ide.work.publication.retry",
+            "work_publication_retry_queued",
+            "work_failed",
+            true,
+        ),
+        (
             "usage_overview",
             "ide.usage.overview",
             "usage_overview",
@@ -667,3 +723,19 @@ pub fn ide_transport() -> Transport {
     }
 }
 pub const IDE_THEME: &str = include_str!("../../ui/theme.yaml");
+
+fn finding_verification_fields() -> super::Component {
+    super::Component::Region {
+        id: "agents-finding-attestations".into(),
+        children: forge_ide_ui::view::AGENT_FINDING_CHECKBOX_IDS
+            .iter()
+            .map(|id| {
+                component!(
+                    checkbox * id,
+                    "I verified this finding",
+                    "set_agent_finding_verified"
+                )
+            })
+            .collect(),
+    }
+}

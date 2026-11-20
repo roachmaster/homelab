@@ -427,9 +427,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==7"));
+    assert!(worker.contains("wasm.abi_version()!==8"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 7);
+    assert_eq!(manifest["abi_version"], 8);
 }
 
 #[test]
@@ -677,6 +677,9 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
         "work_accept",
         "work_resume",
         "work_plan_decide",
+        "work_review_decide",
+        "work_repair",
+        "work_publication_retry",
     ] {
         let binding = c
             .transport
@@ -702,7 +705,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
     assert!(main.contains("navigation_checkpoint_saved"));
     assert!(worker.contains("!await localCheckpoint.pending"));
     assert!(worker.contains("restore_agents_navigation"));
-    assert!(worker.contains("wasm.abi_version()!==7"));
+    assert!(worker.contains("wasm.abi_version()!==8"));
 }
 
 #[test]
@@ -753,4 +756,25 @@ fn agents_replace_mail_without_generating_mail_controls_or_requests() {
     assert!(!css.contains("#mail"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
     assert!(worker.contains("if(matchesCache)savedMail=cache.mail??null;"));
+}
+
+#[test]
+fn native_checkbox_uses_generic_escaped_presentation_contract() {
+    let mut c = config();
+    c.document = Document {
+        title: "Checkbox".into(),
+        subtitle: String::new(),
+        children: vec![
+            component!(checkbox "owner-opt-in","Allow <repairs> & verify", "set_enabled"),
+        ],
+    };
+    let assets = build(c);
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    assert!(html.contains("type=\"checkbox\""));
+    assert!(html.contains("Allow &lt;repairs&gt; &amp; verify"));
+    assert!(!html.contains("onclick="));
+    let js = std::str::from_utf8(&assets.files["main.js"]).unwrap();
+    assert!(js.contains("view.checks||[]"));
+    assert!(js.contains("sendAction(n,n.checked,sequence)"));
+    assert!(js.contains("container.hidden=b.visible===false"));
 }
