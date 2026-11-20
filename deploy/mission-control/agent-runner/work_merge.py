@@ -77,7 +77,7 @@ class GitHubExactTreeMergeProvider:
                 or len(required) != len(set(required)) or self.hosted.observe(job).status != "passed"):
             raise PublicationError("merge_hosted_checks_not_green")
 
-    def _candidate_tree(self, job):
+    def _candidate(self, job):
         manifest = self.candidates.read(job["review_id"])
         if manifest.get("task_id") != job["task_id"]:
             raise PublicationError("merge_review_identity_changed")
@@ -87,19 +87,20 @@ class GitHubExactTreeMergeProvider:
         commit = self.client._api("GET", self._prefix(job) + "/git/commits/" + head)
         if commit.get("sha") != head or commit.get("tree", {}).get("sha") != tree:
             raise PublicationError("merge_remote_candidate_changed")
-        return tree
+        return repository, head, tree
 
     def prepare(self, job):
         """Read and freeze the exact approved source; no remote mutation."""
         self._pr(job)
         self._checks(job)
-        head, tree = job["candidate_commit"], self._candidate_tree(job)
+        repository, head, tree = self._candidate(job)
         main = self._main(job)
-        comparison = self.client._api("GET", self._prefix(job) + "/compare/" + main + "..." + head)
-        if (comparison.get("status") not in {"ahead", "identical"}
-                or comparison.get("base_commit", {}).get("sha") != main
-                or comparison.get("merge_base_commit", {}).get("sha") != main):
-            raise PublicationError("merge_main_requires_reverification")
+        try:
+            # An ancestor's objects must already be in the exact candidate
+            # clone. Avoid downloading a potentially huge comparison patch.
+            self.git._git(repository, "merge-base", "--is-ancestor", main, head)
+        except PublicationError:
+            raise PublicationError("merge_main_requires_reverification") from None
         date = self.now().astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
         identity = {"name": self.config.commit_name, "email": self.config.commit_email, "date": date}
         payload = {"tree": tree, "parents": [main, head],
@@ -149,7 +150,7 @@ class GitHubExactTreeMergeProvider:
         require_lease()
         self._pr(job)
         self._checks(job)
-        if self._candidate_tree(job) != intent["candidate_tree"]:
+        if self._candidate(job)[2] != intent["candidate_tree"]:
             raise PublicationError("merge_intent_source_changed")
         if self._main(job) != intent["expected_main"]:
             raise PublicationError("merge_main_requires_reverification")

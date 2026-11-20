@@ -8,6 +8,7 @@ import unicodedata
 from uuid import UUID
 
 from work_feedback import validate_feedback
+from work_candidate_source import linked_candidate_input
 
 MAX_FEEDBACK_BYTES = 64 * 1024
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -98,12 +99,32 @@ def validate_context(lease, workspace, envelope):
     expected_plan = lease.get("plan_decision_id") or lease.get("scope_plan_decision_id")
     if expected_plan is not None:
         _require(typed["plan_decision_id"] == expected_plan)
+    digest_kind = typed.get("workspace_digest_kind")
+    candidate_input = linked_candidate_input(lease, typed["candidate_commit"])
+    if digest_kind == "candidate_tree":
+        _require(candidate_input)
+        actual_digest = workspace.source_digest()
+    elif digest_kind == "native_receipt":
+        actual_digest = workspace.digest()
+    else:
+        _require(digest_kind is None)
+        # Legacy immutable packets have no explicit provenance. Retain the
+        # narrow initial linked-candidate proof; native receipts never try two
+        # algorithms or silently change their historical bytes.
+        actual_digest = workspace.source_digest() if candidate_input else workspace.digest()
     _require(workspace.task_id == lease["task_id"]
              and workspace.base_revision == lease["base_revision"]
-             and workspace.digest() == typed["workspace_digest"])
+             and actual_digest == typed["workspace_digest"])
     if lease.get("resume_attempt_id") is not None:
-        _require(typed["parent_attempt_id"] == lease["resume_attempt_id"]
-                 and typed["workspace_digest"] == lease.get("resume_workspace_digest"))
+        if digest_kind == "candidate_tree":
+            # A fresh/current native reconciliation receipt was already
+            # verified by WorkspaceProvider. The immutable candidate input can
+            # still originate from the parent's older author attempt; only
+            # unchanged source bytes, proven above, permit that continuation.
+            _require(candidate_input)
+        else:
+            _require(typed["parent_attempt_id"] == lease["resume_attempt_id"]
+                     and typed["workspace_digest"] == lease.get("resume_workspace_digest"))
     # The shared DTO validator is the schema authority. Additional secrecy
     # checks protect the read-only model artifact, without reserializing it.
     pending = [typed]

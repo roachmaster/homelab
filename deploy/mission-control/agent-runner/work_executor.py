@@ -25,7 +25,7 @@ from work_progress import ProgressError, ProgressReader, ProgressSinkError, prov
 from work_sessions import SessionError, SessionSelection
 from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext
 from work_consumer_cache import ConsumerCacheError
-from work_candidate_source import CandidateSourceError
+from work_candidate_source import CandidateSourceError, linked_candidate_input
 from work_peer_context import PeerReviewContext, WorkflowFeedbackContext
 from work_peer_review import MAX_VERDICT_BYTES
 from work_worker_config import WorkerConfig, verify_recipe
@@ -93,9 +93,23 @@ class WorkspaceLease:
     def digest(self):
         """Hash actual bounded workspace bytes, including ignored/untracked files.
 
-        Git administrative data lives outside this tree and is excluded. Symlinks
-        are hashed as link text; they are never followed to another repository.
+        Preserve the historical receipt format, including a worktree's root
+        .git file (clone .git directories are not traversed). Cross-workspace
+        comparisons use source_digest() instead. Symlinks are hashed as link
+        text; they are never followed to another repository.
         """
+        return self._digest()
+
+    def source_digest(self):
+        """Cross-workspace source identity, excluding only root Git metadata.
+
+        Native receipt digest() intentionally retains its historical algorithm.
+        This separate comparison lets a verified clone and its fresh worktree
+        agree without treating a path-specific .git file as authored source.
+        """
+        return self._digest(source_only=True)
+
+    def _digest(self, *, source_only=False):
         digest = hashlib.sha256(b"forge-workspace-v1\0")
         digest.update(self.base_revision.encode("ascii"))
         total = count = 0
@@ -107,6 +121,10 @@ class WorkspaceLease:
             for name in names:
                 path = Path(directory) / name
                 relative = path.relative_to(self.path).as_posix()
+                if source_only and relative == ".git":
+                    if path.is_symlink() or not path.is_file():
+                        raise ExecutionError("needs_reconcile", "The root Git metadata is unavailable.")
+                    continue
                 count += 1
                 if count > MAX_FILES:
                     raise ExecutionError("needs_reconcile", "Workspace inspection exceeded its declared resource bound.")
@@ -181,7 +199,8 @@ class WorkspaceProvider:
                             "repository": str(repository), "base_revision": lease["base_revision"]}
                 if path.is_symlink() or metadata_path.is_symlink():
                     raise ExecutionError("needs_reconcile", "Task workspace identity could not be verified.")
-                if not path.exists():
+                materialized = not path.exists()
+                if materialized:
                     if not create or metadata_path.exists():
                         raise ExecutionError("needs_reconcile", "The preserved task workspace is unavailable.")
                     if lease.get("repair_source_review_id") is not None or lease.get("repair_candidate_commit") is not None:
@@ -218,8 +237,10 @@ class WorkspaceProvider:
                     raise ExecutionError("needs_reconcile", "The task Git directory is not the approved isolated worktree.")
                 workspace = WorkspaceLease(path, repository, git_directory, task, lease["base_revision"])
                 resumed = lease.get("resume_workspace_digest")
+                actual_digest = (workspace.source_digest if materialized and linked_candidate_input(lease)
+                                 else workspace.digest)
                 if create and resumed is not None and (not isinstance(resumed, str)
-                        or not DIGEST_RE.fullmatch(resumed) or workspace.digest() != resumed):
+                        or not DIGEST_RE.fullmatch(resumed) or actual_digest() != resumed):
                     raise ExecutionError("needs_reconcile", "The workspace changed after its reconciliation receipt.")
                 yield workspace
             finally:
@@ -691,7 +712,8 @@ class CommandRunnerProvider:
                 raise ExecutionError("needs_reconcile", "The immutable peer review target could not be prepared.") from None
             prompt += ("\n\nINDEPENDENT PEER REVIEW: Read the complete immutable target at "
                 + str(CHILD_STATE / peer_file.name) + ". Its exact context_sha256 is " + peer_context.sha256
-                + ". Review the author's full result, accepted scope and source without editing any repository file. "
+                + ". Review the author's full result against the target's original request_prompt and "
+                "acceptance_criteria, without editing any repository file. "
                 "For code review, inspect the complete Git diff from the target's explicit integration_base to "
                 "candidate_commit, including added/deleted files, against the full approved_plan. Do not guess "
                 "HEAD^, review only the final response, or treat a claimed fix as verified. "
