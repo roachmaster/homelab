@@ -453,6 +453,7 @@ impl Agents {
             UiEvent::AgentsNewTask {} if work => {
                 self.auto_repair = false;
                 self.pending = None;
+                self.choose_mode();
                 self.selected = None;
                 self.task = None;
                 self.clear_progress();
@@ -975,6 +976,20 @@ impl Agents {
             .as_deref()
     }
     fn choose_mode(&mut self) {
+        // An uncertain admission must keep the exact saved form identity even
+        // when the current catalog changes author roles or removes a profile.
+        if let Some(WorkRequest::WorkSubmit {
+            agent_profile,
+            mode,
+            auto_repair,
+            ..
+        }) = self.retry.as_ref().or(self.pending.as_ref())
+        {
+            self.profile = agent_profile.clone();
+            self.mode = Some(*mode);
+            self.auto_repair = *auto_repair;
+            return;
+        }
         if let Some(policy) = self.workflow_policy() {
             self.profile = policy.author_profile.clone();
             self.mode = Some(WorkMode::Plan);
