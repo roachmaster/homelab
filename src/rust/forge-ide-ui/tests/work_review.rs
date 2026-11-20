@@ -180,3 +180,22 @@ fn linked_repair_receipt_has_no_task_identity_until_source_import_completes() {
     }
     assert!(response.valid_for(&request, 202));
 }
+
+#[test]
+fn zero_repair_budget_keeps_initial_review_readable_without_authorizing_rounds() {
+    let value = serde_json::json!({"auto_repair":false,"stage":"awaiting_decision","review_id":REVIEW,
+        "round":0,"max_rounds":0,"open_findings":0,"verified_findings":0,
+        "latest_check_status":"passed","candidate_commit":"c".repeat(40),
+        "required_hosted_green":false,"can_accept":false,"can_repair":false,"can_retry":false});
+    let mut review: WorkReviewSummary = serde_json::from_value(value).unwrap();
+    assert!(review.is_valid());
+    assert!(!review.is_processing());
+    review.round = 1;
+    assert!(
+        !review.is_valid(),
+        "zero authorized rounds cannot contain a repair round"
+    );
+    review.round = 0;
+    review.max_rounds = 11;
+    assert!(!review.is_valid(), "the upper policy bound remains ten");
+}

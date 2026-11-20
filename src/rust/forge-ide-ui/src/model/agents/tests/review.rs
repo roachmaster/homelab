@@ -379,3 +379,26 @@ fn source_import_receipt_keeps_parent_until_a_real_linked_task_is_projected() {
     assert!(view.buttons.iter().any(|b| b.id == "agents-repair-task"
         && matches!(&b.action,Some(RowAction::OpenAgentTask {task_id}) if task_id==child)));
 }
+
+#[test]
+fn zero_repair_policy_projects_initial_review_and_keeps_owner_approval_separate() {
+    let mut agents = implementation(WorkStatus::AwaitingReview);
+    let review = agents.task.as_mut().unwrap().review.as_mut().unwrap();
+    review.round = 0;
+    review.max_rounds = 0;
+    review.can_repair = false;
+    assert!(review.is_valid());
+    assert!(agents.can_decide_review(WorkReviewDecision::Approve));
+    assert!(!agents.can_decide_review(WorkReviewDecision::Repair));
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert!(view
+        .texts
+        .iter()
+        .any(|text| text.id == "agents-verification-counts"
+            && text.text == "Initial review · 0 open · 2 verified"));
+    assert!(
+        !agents.can_accept(),
+        "local approval does not bypass hosted checks"
+    );
+}

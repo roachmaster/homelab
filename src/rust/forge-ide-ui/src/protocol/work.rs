@@ -234,7 +234,7 @@ pub struct WorkReviewSummary {
 impl WorkReviewSummary {
     pub fn is_valid(&self) -> bool {
         valid_work_name(&self.stage, 64)
-            && (1..=10).contains(&self.max_rounds)
+            && self.max_rounds <= 10
             && self.round <= self.max_rounds
             && self.review_id.as_deref().is_none_or(valid_chat_id)
             && self.feedback_id.as_deref().is_none_or(valid_chat_id)
