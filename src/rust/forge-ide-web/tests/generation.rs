@@ -192,21 +192,20 @@ fn guarded_edit_controls_share_the_generated_workbench_with_markdown_formats() {
     assert!(css.contains(".fg-diff-line[data-change=removed]{"));
 
     let transport = ide_transport();
-    for (kind, destination, result) in [("edit_write", "ide.edit_write", "edit_write_result")] {
-        let request = transport
-            .bindings
-            .iter()
-            .find(|binding| binding.kind == kind)
-            .unwrap();
-        assert!(request.csrf);
-        assert_eq!(request.request_id, "request.request_id");
-        assert_eq!(request.accept_events, [result]);
-        assert!(request
-            .headers
-            .iter()
-            .any(|header| header.name == "Forge-Destination"
-                && header.literal.as_deref() == Some(destination)));
-    }
+    let (kind, destination, result) = ("edit_write", "ide.edit_write", "edit_write_result");
+    let request = transport
+        .bindings
+        .iter()
+        .find(|binding| binding.kind == kind)
+        .unwrap();
+    assert!(request.csrf);
+    assert_eq!(request.request_id, "request.request_id");
+    assert_eq!(request.accept_events, [result]);
+    assert!(request
+        .headers
+        .iter()
+        .any(|header| header.name == "Forge-Destination"
+            && header.literal.as_deref() == Some(destination)));
 }
 
 #[test]
