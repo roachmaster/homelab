@@ -22,7 +22,7 @@ MAX_LABEL_BYTES = 128
 MAX_TITLE_CHARS = 128
 MAX_TITLE_BYTES = 512
 VALID_MODES = frozenset({"plan", "review", "implement"})
-VALID_BACKENDS = frozenset({"antigravity", "codex"})
+VALID_BACKENDS = frozenset({"antigravity", "codex", "muse"})
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")

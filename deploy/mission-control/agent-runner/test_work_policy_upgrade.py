@@ -64,6 +64,11 @@ EXTERNAL_SANDBOX_POLICY={
     "codex_external_io":"host-network-staged-native-state-v1",
 }
 EXTERNAL_SANDBOX_POLICY_DIGEST=sha256_canonical(EXTERNAL_SANDBOX_POLICY)
+WARM_POLICY_ID="forge-coding-v8"
+WARM_POLICY={**EXTERNAL_SANDBOX_POLICY,"id":WARM_POLICY_ID,
+ "codex_session_policy":"fresh-unless-receipt-owned-author-resume-ttl-v1",
+ "codex_feature_controls":"no-user-config-no-multi-agent-no-fast-mode-v1"}
+WARM_POLICY_DIGEST=sha256_canonical(WARM_POLICY)
 
 
 
@@ -90,10 +95,11 @@ def historical_registry(root, maximum):
 
 class PolicyIdentityTest(unittest.TestCase):
     def test_session_policy_is_versioned_without_changing_historical_digest_identity(self):
+        self.assertEqual(WARM_POLICY_DIGEST,"03af7fd6e897a67254bd780a44536366b8dc11fdce307a44a29ddfb5a958cb33")
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v8")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v9")
         self.assertEqual(PEER_POLICY_DIGEST,"78d8f96280b9b75597e2b10276e1854f64026ff8f359f0f2abb65113774a8e5e")
         self.assertEqual(EXTERNAL_SANDBOX_POLICY_DIGEST,"40b4e50c9acf64a835fc477a8748fb1cf266188c46f6ac943dd075d506df6124")
         self.assertEqual(work_policy.POLICY["codex_sandbox"],"supervised-external-v1")
@@ -107,7 +113,8 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertNotIn("fresh_session", work_policy.POLICY)
         self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST, EXTERNAL_SANDBOX_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "codex_feature_controls", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
+                      if not key.startswith("muse_") and key not in {"id", "antigravity_session_policy", "codex_session_policy", "codex_feature_controls", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
+        comparable["adapter_versions"] = {k:v for k,v in comparable["adapter_versions"].items() if k != "muse"}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 
@@ -175,6 +182,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
             FEEDBACK_POLICY_ID: FEEDBACK_POLICY_DIGEST,
             PEER_POLICY_ID: PEER_POLICY_DIGEST,
             EXTERNAL_SANDBOX_POLICY_ID: EXTERNAL_SANDBOX_POLICY_DIGEST,
+            WARM_POLICY_ID: WARM_POLICY_DIGEST,
         }[policy]
         payload = {
             "version": 2, "backend": "codex", "model": "gpt-5.4",
@@ -293,7 +301,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 17)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -432,7 +440,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 17)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -456,7 +464,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 v8_inc = self.advertise(cluster, db, "v8-worker", work_policy.POLICY_DIGEST)
                 v8_lease = db.claim("v8-worker", v8_inc, ["codex-v2"])
                 self.assertEqual(v8_lease.task_id, v8_queued["task_id"])
-                self.assertEqual(v8_lease.recipe["resource_profile"], "forge-coding-v8")
+                self.assertEqual(v8_lease.recipe["resource_profile"], work_policy.POLICY_ID)
                 self.assertIsNone(db.claim("v8-worker", v8_inc, ["codex-v2"]))
                 v7_inc2 = self.advertise(cluster, db, "v7-worker", EXTERNAL_SANDBOX_POLICY_DIGEST)
                 v7_lease = db.claim("v7-worker", v7_inc2, ["codex-v2"])

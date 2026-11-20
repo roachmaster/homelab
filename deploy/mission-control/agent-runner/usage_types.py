@@ -173,7 +173,7 @@ class ProviderUsage:
         exact(value, cls.__dataclass_fields__)
         identifier(value["alias"])
         text(value["label"])
-        enum(value["provider"], {"antigravity", "codex"})
+        enum(value["provider"], {"antigravity", "codex", "muse"})
         text(value["model"])
         enum(value["worker_state"], {"idle", "running", "offline", "unknown"})
         task = value["active_task_id"]
@@ -232,20 +232,20 @@ def normalize_attempt_usage(provider, raw_usage, *, fresh_session=True):
     Resumed processes without that baseline keep counters unknown. Cached-token
     aliases describe the same metric and must not be summed or added to totals.
     """
-    enum(provider, {"antigravity", "codex"})
+    enum(provider, {"antigravity", "codex", "muse"})
     fresh_session = fresh_session is True
     values = {"input_tokens": None, "output_tokens": None, "cached_input_tokens": None, "total_tokens": None}
-    source = "agy-result-v1" if provider == "antigravity" else "codex-exec-turn-v1"
+    source = {"antigravity": "agy-result-v1", "codex": "codex-exec-turn-v1", "muse": "muse-run-usage-v1"}[provider]
     if fresh_session and isinstance(raw_usage, dict):
         cache_fields = (("cache_read_tokens", "cached_tokens") if provider == "antigravity"
-                        else ("cached_input_tokens",))
+                        else ("cached_tokens",) if provider == "muse" else ("cached_input_tokens",))
         for output, fields in (("input_tokens", ("input_tokens",)),
                                ("output_tokens", ("output_tokens",)),
                                ("cached_input_tokens", cache_fields)):
             values[output] = _attempt_counter(raw_usage, fields)
         if provider == "antigravity":
             values["total_tokens"] = _attempt_counter(raw_usage, ("total_tokens",))
-        elif values["input_tokens"] is not None and values["output_tokens"] is not None:
+        elif provider == "codex" and values["input_tokens"] is not None and values["output_tokens"] is not None:
             total = int(values["input_tokens"]) + int(values["output_tokens"])
             values["total_tokens"] = str(total) if total <= MAX_COUNTER else None
     primary = [values[key] for key in ("input_tokens", "output_tokens", "total_tokens")]
