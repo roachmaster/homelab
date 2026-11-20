@@ -1,6 +1,7 @@
 """Actual candidate Git identity with owned verifier/store substitutes."""
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import unittest
 from unittest.mock import Mock
 from uuid import uuid4
@@ -139,7 +140,8 @@ class ReviewWorkerTest(unittest.TestCase):
             self.assertEqual(store.outcomes[0][1]["verified_finding_ids"], [])
 
     def test_hosted_pending_pass_and_failure_never_rerun_a_native_agent(self):
-        for status, expected in (("pending", "awaiting_review"), ("passed", "awaiting_review"), ("failed", "repair")):
+        for status, expected in (("pending", "awaiting_review"), ("passed", "awaiting_review"),
+                                 ("failed", "repair"), ("expired", "handoff")):
             with self.subTest(status=status), fixture() as values:
                 _, config, source, workspaces, _, _, repository, *_ = values
                 local_job = review_job(source)
@@ -153,6 +155,8 @@ class ReviewWorkerTest(unittest.TestCase):
                     source_publication_id=str(uuid4()), target_publication_id=str(uuid4()),
                     candidate_commit=local["candidate_commit"], gate_manifest_sha256=local["gate_manifest_sha256"],
                     pr_url="https://github.com/fixture/project/pull/1",
+                    hosted_deadline_at=(datetime.now(timezone.utc) +
+                        timedelta(hours=-1 if status == "expired" else 1)).isoformat(),
                     open_findings=[{"finding_id": "hosted-witness", "check_id": "check"},
                                    {"finding_id": "critic-only", "check_id": "independent-critic"}])
                 rows = tuple({"name": name, "status": "success" if status == "passed" else
@@ -169,8 +173,12 @@ class ReviewWorkerTest(unittest.TestCase):
                 outcome = store.outcomes[-1][1]
                 self.assertEqual(outcome["disposition"], expected, outcome)
                 self.assertTrue(outcome["verification"]["hosted"])
-                self.assertEqual(outcome["verification"]["hosted_status"], status)
+                self.assertEqual(outcome["verification"]["hosted_status"], "failed" if status == "expired" else status)
                 self.assertEqual(outcome["verified_finding_ids"], ["hosted-witness"] if status == "passed" else [])
+                if status == "expired":
+                    hosted.observe.assert_not_called()
+                    self.assertEqual(outcome["reason"], "hosted_wait_exhausted")
+                    self.assertEqual(candidates.read(host_job["review_id"])["candidate_commit"], local["candidate_commit"])
                 self.assertEqual(checks.calls, 1, "Hosted observations do not rerun local checks")
                 snapshots.create.assert_not_called()
 

@@ -5,6 +5,7 @@ review approval; the admitted owner/reviewer decision authorizes publication.
 """
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -63,6 +64,7 @@ def validate_review(config, job):
         if job.get("phase") == "hosted":
             uuid(job["source_publication_id"])
             uuid(job["target_publication_id"])
+            hosted_deadline(job)
         if job.get("phase") == "source" and (job.get("owner_source_authorized") is not True
                 or not SHA.fullmatch(job.get("candidate_commit", ""))):
             raise PublicationError("invalid_owner_repair_source")
@@ -78,6 +80,19 @@ def verification_job(job):
 def repair_policy(job):
     return RepairPolicy(**{key: job["policy"][key] for key in
         ("max_rounds", "max_stagnant_rounds", "max_infrastructure_retries")})
+
+
+def hosted_deadline(job):
+    value = job.get("hosted_deadline_at")
+    if not isinstance(value, str) or len(value) > 64:
+        raise PublicationError("invalid_hosted_deadline")
+    try:
+        deadline = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if deadline.tzinfo is None or deadline.utcoffset().total_seconds() != 0:
+            raise ValueError()
+        return deadline
+    except (ValueError, AttributeError, OverflowError):
+        raise PublicationError("invalid_hosted_deadline") from None
 
 
 def _source_map(files):
@@ -464,6 +479,20 @@ class ReviewWorker:
                 if (prior.get("checks_passed") is not True or head != job.get("candidate_commit")
                         or prior.get("gate_manifest_sha256") != job.get("gate_manifest_sha256")):
                     raise PublicationError("hosted_review_source_changed")
+                if datetime.now(timezone.utc) >= hosted_deadline(job):
+                    self.candidates.record(job, {**prior, "review_id": job["review_id"]})
+                    decision = self.policy_decider(RepairObservation("infrastructure", budget_exhausted=True),
+                                                   repair_policy(job))
+                    require_lease()
+                    self._finish(job, {"disposition": decision.disposition, "reason": "hosted_wait_exhausted",
+                        "candidate_commit": head, "gate_manifest_sha256": prior["gate_manifest_sha256"],
+                        "findings": [], "verified_finding_ids": [], "fingerprint": None,
+                        "summary": "The required hosted checks exceeded their persisted wait budget.",
+                        "verification": {"hosted": True, "hosted_status": "failed", "checks_passed": False,
+                            "candidate_workspace_digest": prior["candidate_workspace_digest"],
+                            "repair_requires_new_workspace": True, "toolchain": "Not reported",
+                            "integration_base": prior["integration_base"], "cleanup_confirmed": True, "checks": []}})
+                    return
                 report = self.hosted_checks.observe(job)
                 self.git.verify(repository, head)
                 require_lease()

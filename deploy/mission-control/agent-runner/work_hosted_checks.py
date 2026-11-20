@@ -74,10 +74,35 @@ class GitHubHostedChecksProvider:
             matching = [run for run in runs if run.get("path") == path]
             by_workflow[path] = max(matching, key=lambda run: (run["id"], run.get("run_attempt", 1))) if matching else None
         jobs_by_run = {}
+        validation_failures = {}
+        missing = {path for path, run in by_workflow.items() if run is None}
+        if missing:
+            # Invalid workflow files can fail on PUSH before GitHub can create
+            # their pull-request jobs. Such a run is diagnostic failure only;
+            # a successful PUSH never satisfies required PR verification.
+            query = urlencode({"head_sha": head, "per_page": 100})
+            extra = self.client._api("GET", f"repos/{repository}/actions/runs?{query}")
+            if (not isinstance(extra, dict) or not isinstance(extra.get("workflow_runs"), list)
+                    or len(extra["workflow_runs"]) > 100 or extra.get("total_count", 0) > 100):
+                raise PublicationError("hosted_run_history_unavailable")
+            for path in missing:
+                matches = [run for run in extra["workflow_runs"] if isinstance(run, dict)
+                    and run.get("path") == path and run.get("event") == "push"
+                    and run.get("head_sha") == head and run.get("repository", {}).get("full_name") == repository
+                    and run.get("status") == "completed" and run.get("conclusion") == "failure"
+                    and type(run.get("id")) is int and run["id"] > 0]
+                if not matches:
+                    continue
+                failed = max(matches, key=lambda run: (run["id"], run.get("run_attempt", 1)))
+                payload = self.client._api("GET", f"repos/{repository}/actions/runs/{failed['id']}/jobs?filter=latest&per_page=100")
+                if isinstance(payload, dict) and payload.get("jobs") == [] and payload.get("total_count", 0) == 0:
+                    validation_failures[path] = failed
+                    jobs_by_run[failed["id"]] = []
         observations, findings, evidence = [], [], []
         toolchain = "Not reported"
         for path, workflow_name, check_name in self.config.required_hosted_checks:
-            run = by_workflow[path]
+            validation_failure = path in validation_failures
+            run = by_workflow[path] or validation_failures.get(path)
             observed = {"name": check_name, "status": "pending", "head_sha": head}
             selected = None
             invalid_workflow = False
@@ -108,6 +133,8 @@ class GitHubHostedChecksProvider:
                     observed["status"] = "failure"
                 if invalid_workflow:
                     observed["status"] = "failure"
+                if validation_failure:
+                    observed["status"] = "failure"
             observations.append(observed)
             evidence.append({**observed, "run_id": run["id"] if run else None,
                              "job_id": selected["id"] if selected else None})
@@ -126,6 +153,12 @@ class GitHubHostedChecksProvider:
                 if invalid_workflow or selected is None:
                     finding.update(diagnostic_code="required_workflow_identity", summary="The required hosted workflow/job is missing or changed.",
                                    actual="The required hosted workflow/job is missing or changed.")
+                if validation_failure:
+                    summary = "GitHub rejected the required workflow before pull-request jobs could start."
+                    finding.update(diagnostic_code="workflow_validation_failed", path=path,
+                        summary=summary, actual=summary,
+                        reproduction="Validate " + path + " against GitHub Actions syntax and context rules. "
+                            + f"Run: https://github.com/{repository}/actions/runs/{run['id']}")
                 findings.append(finding)
         statuses = {item["status"] for item in observations}
         status = "failed" if statuses - {"pending", "success"} else "passed" if statuses == {"success"} else "pending"
