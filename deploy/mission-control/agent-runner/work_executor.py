@@ -268,6 +268,7 @@ class Invocation:
     session: SessionSelection | None = None
     plan_file: Path | None = None
     readonly_files: tuple[Path, ...] = ()
+    external_sandbox: bool = False
 
 
 @dataclass(frozen=True)
@@ -466,6 +467,11 @@ class SystemdSupervisor:
         self.cgroup_root = Path(cgroup_root)
         self.consumer_caches = consumer_cache_provider
 
+    @property
+    def enforces_coding_sandbox(self):
+        """Ready execution-boundary capability, selected by worker bootstrap."""
+        return True
+
     def _root(self, *args):
         return [*(["/usr/bin/sudo", "-n", "--"] if os.geteuid() != 0 else []), *args]
 
@@ -476,6 +482,16 @@ class SystemdSupervisor:
         account = self.config.account
         if invocation.backend not in {"antigravity", "codex", "verification"}:
             raise ExecutionError("failed", "The selected process scope is unavailable.")
+        if type(invocation.external_sandbox) is not bool or invocation.external_sandbox and invocation.backend != "codex":
+            raise ExecutionError("failed", "The external execution boundary is unavailable.")
+        if invocation.backend == "codex":
+            try:
+                sandbox = invocation.argv[invocation.argv.index("--sandbox") + 1]
+            except (ValueError, IndexError):
+                raise ExecutionError("failed", "The Codex execution boundary is unavailable.") from None
+            if ((sandbox == "danger-full-access") != invocation.external_sandbox
+                    or invocation.external_sandbox and POLICY.get("codex_sandbox") != "supervised-external-v1"):
+                raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
         verification = invocation.backend == "verification"
         native_state = (None if verification else account.home /
                         (".gemini" if invocation.backend == "antigravity" else ".codex"))
@@ -849,13 +865,17 @@ class CommandRunnerProvider:
             payload = json.dumps({"event": "user", "message": {"content": prompt}},
                                  ensure_ascii=False).encode("utf-8") + b"\n"
         else:
+            external_sandbox = (getattr(self.supervisor, "enforces_coding_sandbox", False) is True
+                                and POLICY.get("codex_sandbox") == "supervised-external-v1")
             argv = (str(actual), "--no-daemon", "--ask-for-approval", "never", "exec",
                     "--ignore-user-config", "--ignore-rules", "--sandbox",
-                    "workspace-write" if implement else "read-only", "--model", lease["recipe"]["model"],
+                    "danger-full-access" if external_sandbox else "workspace-write" if implement else "read-only",
+                    "--model", lease["recipe"]["model"],
                     "--json", "--color", "never", "--ephemeral", "-")
             payload = prompt.encode("utf-8")
         return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file,
-                          tuple(path for path in (feedback_file, peer_file, peer_feedback_file) if path is not None))
+                          tuple(path for path in (feedback_file, peer_file, peer_feedback_file) if path is not None),
+                          external_sandbox if backend == "codex" else False)
 
     def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None, peer_context=None,
             peer_feedback_context=None):
