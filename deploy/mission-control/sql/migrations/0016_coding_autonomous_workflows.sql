@@ -172,6 +172,7 @@ BEGIN
          AND g.agent_profile = t.agent_profile
          AND g.mode = t.mode
         WHERE t.status = 'queued'
+          AND(t.workflow_id IS NULL OR EXISTS(SELECT 1 FROM forge_agent.coding_workflows w WHERE w.workflow_id=t.workflow_id AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated')))
           AND t.owner_id = pg_catalog.current_setting('forge.coding_owner', true)
           AND t.agent_profile = ANY(p_allowed_profiles)
           AND (t.pinned_recipe->'version') = '2'::jsonb
@@ -194,6 +195,7 @@ BEGIN
           AND t.project_alias = v_candidate.project_alias
           AND t.id = v_candidate.id
           AND t.status = 'queued'
+          AND(t.workflow_id IS NULL OR EXISTS(SELECT 1 FROM forge_agent.coding_workflows w WHERE w.workflow_id=t.workflow_id AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated')))
         FOR UPDATE SKIP LOCKED;
         IF NOT FOUND THEN
             CONTINUE;
@@ -380,10 +382,12 @@ BEGIN
 END;$fn$;
 
 CREATE FUNCTION forge_coding_reconciler_api.merge_finish(p_id uuid,p_token uuid,p_status text,p_receipt jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
-DECLARE a forge_agent.coding_workflow_actions%ROWTYPE;p forge_agent.coding_publications%ROWTYPE;task uuid;
+DECLARE a forge_agent.coding_workflow_actions%ROWTYPE;p forge_agent.coding_publications%ROWTYPE;task uuid;root uuid;
 BEGIN
  SELECT x.task_id INTO task FROM forge_agent.coding_publications x JOIN forge_agent.coding_workflow_actions y ON y.source_publication_id=x.publication_id WHERE y.action_id=p_id AND y.owner_id=current_setting('forge.coding_owner',true);
  IF task IS NULL THEN RAISE EXCEPTION 'Unknown merge' USING ERRCODE='42501';END IF;
+ SELECT w.root_task_id INTO root FROM forge_agent.coding_workflows w JOIN forge_agent.coding_workflow_actions x USING(workflow_id) WHERE x.action_id=p_id;
+ IF root<>task THEN PERFORM 1 FROM forge_agent.coding_tasks WHERE id=root AND owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;END IF;
  PERFORM 1 FROM forge_agent.coding_tasks WHERE id=task AND owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;
  SELECT * INTO a FROM forge_agent.coding_workflow_actions WHERE action_id=p_id AND owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;
  IF a.finish_receipt IS NOT NULL AND a.finish_token=p_token THEN
@@ -440,7 +444,7 @@ END;$upgrade$;
 
 CREATE FUNCTION forge_agent.coding_workflow_role_granted(p_workflow uuid,p_profile text,p_mode text) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
  SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflows w JOIN forge_agent.coding_worker_grants g ON(g.owner_id,g.project_alias)=(w.owner_id,w.project_alias)
- WHERE w.workflow_id=p_workflow AND w.owner_id=current_setting('forge.coding_owner',true) AND w.enabled
+ WHERE w.workflow_id=p_workflow AND w.owner_id=current_setting('forge.coding_owner',true) AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated')
  AND g.agent_profile=p_profile AND g.mode=p_mode AND((p_mode='review' AND p_profile=w.snapshot->>'reviewer_profile') OR(p_mode IN('plan','implement') AND p_profile=w.snapshot->>'author_profile')))
 $fn$;
 REVOKE ALL ON FUNCTION forge_agent.coding_workflow_role_granted(uuid,text,text) FROM PUBLIC;
@@ -452,3 +456,106 @@ BEGIN
 END;$fn$;
 CREATE TRIGGER coding_tasks_clear_peer_feedback BEFORE UPDATE ON forge_agent.coding_tasks FOR EACH ROW EXECUTE FUNCTION forge_agent.coding_workflow_clear_feedback();
 REVOKE ALL ON FUNCTION forge_agent.coding_workflow_clear_feedback() FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION forge_coding_worker_api.renew(
+    p_attempt_id uuid,
+    p_attempt_token uuid
+)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+AS $fn$
+DECLARE
+    v_attempt forge_agent.coding_attempts%ROWTYPE;
+    v_task_status text;
+    v_now timestamptz;
+BEGIN
+    v_attempt := forge_coding_worker_api._lock_task_and_attempt(p_attempt_id, p_attempt_token);
+    v_now := clock_timestamp();
+    IF v_attempt.attempt_id IS NULL THEN
+        RETURN false;
+    END IF;
+
+    SELECT t.status
+    INTO v_task_status
+    FROM forge_agent.coding_tasks t
+    WHERE t.owner_id = v_attempt.owner_id
+      AND t.project_alias = v_attempt.project_alias
+      AND t.id = v_attempt.task_id;
+
+    IF(v_attempt.workflow_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflows w WHERE w.workflow_id=v_attempt.workflow_id AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated')))
+       OR v_task_status NOT IN ('running', 'cancel_requested')
+       OR v_attempt.published_at IS NOT NULL
+       OR v_attempt.lease_expires_at IS NULL
+       OR v_attempt.lease_expires_at <= v_now
+       OR v_attempt.deadline_at <= v_now THEN
+        RETURN false;
+    END IF;
+
+    UPDATE forge_agent.coding_attempts
+    SET lease_expires_at = least(deadline_at, v_now + interval '60 seconds'),
+        phase = CASE WHEN phase = 'starting' THEN 'running' ELSE phase END,
+        updated_at = v_now
+    WHERE owner_id = v_attempt.owner_id
+      AND project_alias = v_attempt.project_alias
+      AND task_id = v_attempt.task_id
+      AND attempt_id = v_attempt.attempt_id;
+
+    RETURN true;
+END;
+$fn$;
+
+
+CREATE OR REPLACE FUNCTION forge_agent.coding_make_feedback(p_review uuid,p_task uuid,p_disposition text,p_summary text,p_findings jsonb)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
+DECLARE q forge_agent.coding_reviews%ROWTYPE;t forge_agent.coding_tasks%ROWTYPE;id uuid:=gen_random_uuid();payload jsonb;raw text;digest text;input_digest text;
+BEGIN
+ SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review;
+ SELECT * INTO t FROM forge_agent.coding_tasks WHERE owner_id=q.owner_id AND project_alias=q.project_alias AND coding_tasks.id=p_task;
+ IF q.owner_id IS DISTINCT FROM current_setting('forge.coding_owner',true) OR t.id IS NULL THEN RAISE EXCEPTION 'Feedback scope mismatch' USING ERRCODE='42501';END IF;
+ input_digest:=CASE WHEN t.repair_source_review_id=q.review_id THEN q.verification->>'candidate_workspace_digest' ELSE q.workspace_digest END;
+ IF input_digest IS NULL OR input_digest!~'^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'Candidate input digest missing' USING ERRCODE='P0009';END IF;
+ payload:=jsonb_build_object('version',1,'feedback_id',id,'task_id',t.id,'parent_attempt_id',q.attempt_id,
+ 'plan_decision_id',coalesce(q.plan_decision_id,q.scope_plan_decision_id),'source_revision',q.source_revision,'parent_result_sha256',q.parent_result_sha256,
+ 'reconciliation_receipt_id',q.reconciliation_receipt_id,'workspace_digest',input_digest,
+ 'candidate_commit',q.candidate_commit,'integration_base',q.base_revision,'gate_manifest_sha256',q.gate_manifest_sha256,
+ 'round',coalesce((SELECT b.repair_rounds FROM forge_agent.coding_review_budget b WHERE b.owner_id=t.owner_id AND b.project_alias=t.project_alias AND b.root_task_id=coalesce(t.repair_root_task_id,t.id)),q.round)+1,'disposition',p_disposition,'agent_profile',t.agent_profile,'summary',left(p_summary,2048),'findings',(SELECT coalesce(jsonb_agg(x),'[]') FROM(SELECT x FROM jsonb_array_elements(p_findings) WITH ORDINALITY AS items(x,n) WHERE x->>'finding_id' NOT IN(SELECT jsonb_array_elements_text(q.verified_finding_ids)) ORDER BY n LIMIT 3)batch));
+ IF t.pinned_recipe->>'resource_profile'='forge-coding-v6' THEN payload:=payload||jsonb_build_object('workspace_digest_kind',CASE WHEN q.task_id<>t.id THEN 'candidate_tree' ELSE 'native_receipt' END);END IF;
+ raw:=payload::text;digest:=encode(sha256(convert_to(raw,'UTF8')),'hex');
+ INSERT INTO forge_agent.coding_feedback(feedback_id,owner_id,project_alias,task_id,parent_attempt_id,review_id,feedback_json,feedback_sha256)
+ VALUES(id,t.owner_id,t.project_alias,t.id,q.attempt_id,q.review_id,raw,digest);
+ RETURN id;
+END;$fn$;
+
+
+CREATE OR REPLACE FUNCTION forge_coding_worker_api.read_feedback(p_attempt_id uuid,p_attempt_token uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
+DECLARE a forge_agent.coding_attempts%ROWTYPE;f forge_agent.coding_feedback%ROWTYPE;
+BEGIN
+ a:=forge_coding_worker_api._lock_task_and_attempt(p_attempt_id,p_attempt_token);
+ IF a.attempt_id IS NULL THEN RAISE EXCEPTION 'Invalid attempt ownership' USING ERRCODE='42501'; END IF;
+ IF a.lease_expires_at IS NULL OR a.lease_expires_at<=clock_timestamp() OR a.deadline_at<=clock_timestamp()
+ OR NOT EXISTS(SELECT 1 FROM forge_agent.coding_tasks t WHERE t.owner_id=a.owner_id AND t.project_alias=a.project_alias
+ AND t.id=a.task_id AND t.latest_attempt_id=a.attempt_id AND t.status='running') THEN
+ RAISE EXCEPTION 'Attempt lease is not active' USING ERRCODE='P0008'; END IF;
+ IF a.feedback_id IS NULL THEN
+  IF a.legacy_resume_note='' THEN RETURN NULL; END IF;
+  RETURN jsonb_build_object('feedback',NULL,'feedback_json',NULL,'legacy_resume_note',a.legacy_resume_note);
+ END IF;
+ SELECT * INTO f FROM forge_agent.coding_feedback x WHERE x.feedback_id=a.feedback_id
+ AND x.owner_id=a.owner_id AND x.project_alias=a.project_alias AND x.task_id=a.task_id;
+ IF NOT FOUND OR f.feedback_sha256 IS DISTINCT FROM a.feedback_sha256
+ OR encode(sha256(convert_to(f.feedback_json,'UTF8')),'hex')<>a.feedback_sha256
+ THEN
+ RAISE EXCEPTION 'Feedback artifact no longer matches' USING ERRCODE='P0006'; END IF;
+ IF f.feedback_json::jsonb->>'workspace_digest_kind'='candidate_tree' THEN
+  IF NOT EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_attempts source ON source.attempt_id=f.parent_attempt_id
+   WHERE q.review_id=f.review_id AND q.attempt_id=f.parent_attempt_id AND source.task_id<>a.task_id AND a.repair_source_review_id=q.review_id
+   AND a.repair_candidate_commit=q.candidate_commit AND EXISTS(SELECT 1 FROM forge_agent.coding_tasks t WHERE(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id) AND t.base_revision=q.candidate_commit)
+   AND f.feedback_json::jsonb->>'workspace_digest'=q.verification->>'candidate_workspace_digest')
+   THEN RAISE EXCEPTION 'Candidate feedback source mismatch' USING ERRCODE='P0006';END IF;
+ ELSE
+  IF f.feedback_json::jsonb->>'workspace_digest' IS DISTINCT FROM a.resume_workspace_digest THEN RAISE EXCEPTION 'Native feedback receipt mismatch' USING ERRCODE='P0006';END IF;
+ END IF;
+ RETURN jsonb_build_object('feedback',f.feedback_json::jsonb,'feedback_json',f.feedback_json,'legacy_resume_note',a.legacy_resume_note);
+END;$fn$;
+

@@ -3,16 +3,20 @@
 Native tasks run through the ordinary worker. This coordinator owns delegated
 state transitions; it has no process, filesystem-source or GitHub ports.
 """
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import json
 import logging
+import select
+import time
 import threading
 from uuid import UUID,uuid4
 from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import PinnedRecipe,sha256_canonical,prepare_title
 from work_policy import POLICY_ID,POLICY_DIGEST
+from work_store import ADVISORY_LOCK_SALT
 
 LOG=logging.getLogger('forge-workflow')
 MAX_TARGET_BYTES=64*1024*1024+65536
@@ -59,6 +63,29 @@ class WorkflowStore:
     def __init__(self,config,catalog,store):
         self.config=config;self.catalog=catalog;self.store=store
 
+    @contextmanager
+    def listen(self):
+        connection=self.store._connect_factory()
+        try:
+            connection.autocommit=True
+            with connection.cursor() as cursor:cursor.execute("LISTEN forge_coding_jobs")
+            yield connection
+        finally:connection.close()
+
+    @staticmethod
+    def wait(listener,timeout,stop):
+        deadline=time.monotonic()+max(0,timeout)
+        while not stop.is_set():
+            remaining=deadline-time.monotonic()
+            if remaining<=0:return False
+            if select.select([listener],[],[],min(1,remaining))[0]:
+                listener.poll();notified=bool(listener.notifies);listener.notifies.clear()
+                if notified:return True
+        return False
+
+    def _project_lock(self,cursor,project):
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",(self.store.owner+"\n"+project,ADVISORY_LOCK_SALT))
+
     def _current_policy(self,workflow):
         policy=self.config.project_workflows.get(workflow['project_alias'])
         if policy is None or policy.snapshot(self.catalog,self.config.repair_policy)['policy_digest']!=workflow['policy_digest']:
@@ -76,7 +103,8 @@ class WorkflowStore:
 
     def _escalate(self,cursor,w,reason):
         reason=reason[:2048]
-        cursor.execute("UPDATE forge_agent.coding_workflows SET phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
+        cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
+        cursor.execute("UPDATE forge_agent.coding_tasks SET cancelled_at=CASE WHEN status='queued' THEN clock_timestamp() ELSE NULL END,status=CASE WHEN status='queued' THEN 'cancelled' ELSE 'cancel_requested' END,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('queued','running')",(w['workflow_id'],))
         cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='handoff',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(w['workflow_id'],))
 
     def recover(self,cursor):
@@ -107,7 +135,7 @@ class WorkflowStore:
                     elif q and q['status'] in {'handoff','needs_reconcile','revise_plan'}:self._escalate(cursor,w,q['reason'] or q['status'])
             cursor.execute("""SELECT p.*,q.candidate_commit,q.gate_manifest_sha256 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)
               JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.owner_decision->>'closed_by'='peer_reviewer'
-              AND EXISTS(SELECT 1 FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha AND h.required_green ORDER BY h.observed_at DESC LIMIT 1) ORDER BY p.created_at DESC""",(w['workflow_id'],))
+              AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha ORDER BY h.observed_at DESC,h.observation_id DESC LIMIT 1) IS TRUE ORDER BY p.created_at DESC""",(w['workflow_id'],))
             for p in cursor.fetchall():
                 if not w['snapshot']['auto_merge']:continue
                 cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) VALUES(%s,%s,%s,'merge',%s,%s) ON CONFLICT DO NOTHING",(w['workflow_id'],self.store.owner,w['project_alias'],str(p['publication_id'])+':'+p['commit_sha'],p['publication_id']))
@@ -125,6 +153,7 @@ class WorkflowStore:
 
     def claim(self,worker_id):
         with self.store._transaction() as cursor:
+            for project in sorted(self.store.allowed_projects):self._project_lock(cursor,project)
             self.recover(cursor)
             cursor.execute("""SELECT a.* FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w ON w.workflow_id=a.workflow_id WHERE a.owner_id=%s AND a.kind IN('review','decide') AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated') AND(a.status='pending' OR(a.status='leased' AND a.lease_expires_at<=clock_timestamp())) ORDER BY a.created_at FOR UPDATE OF a SKIP LOCKED LIMIT 1""",(self.store.owner,))
             action=cursor.fetchone()
@@ -141,9 +170,12 @@ class WorkflowStore:
     def process(self,job):
         from work_peer_review import validate_review_target,parse_review_target,parse_review_verdict
         with self.store._transaction() as cursor:
+            self._project_lock(cursor,job["project_alias"])
             # Task -> peer review -> action is shared with owner/cancel paths.
-            cursor.execute("SELECT source_task_id FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s",(job['workflow_review_id'],));identity=cursor.fetchone()
+            cursor.execute("SELECT r.source_task_id,w.root_task_id FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING(workflow_id) WHERE r.workflow_review_id=%s",(job['workflow_review_id'],));identity=cursor.fetchone()
             if not identity:return
+            if identity['root_task_id']!=identity['source_task_id']:
+                cursor.execute("SELECT id FROM forge_agent.coding_tasks WHERE owner_id=%s AND id=%s FOR UPDATE",(self.store.owner,identity['root_task_id']))
             cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND id=%s FOR UPDATE",(self.store.owner,identity['source_task_id']));task=cursor.fetchone()
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s FOR UPDATE",(job['workflow_review_id'],));review=dict(cursor.fetchone())
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE action_id=%s FOR UPDATE",(job['action_id'],));action=cursor.fetchone()
@@ -163,6 +195,7 @@ class WorkflowStore:
                     receipt=self._apply_verdict(cursor,w,review,task,action,target,parse_review_verdict)
             except (Rejected,ValueError,KeyError) as error:
                 cursor.execute('ROLLBACK TO SAVEPOINT workflow_action')
+                if isinstance(error,Rejected) and error.code=='reconcile_required':return
                 self._escalate(cursor,w,'Peer review could not safely continue: '+(getattr(error,'code',None) or type(error).__name__))
                 cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
                 return
@@ -236,7 +269,7 @@ class WorkflowStore:
 
 
 class WorkflowCoordinator:
-    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=1):
+    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=30):
         self.store=store;self.worker_id=worker_id;self.interval_seconds=interval_seconds;self.stop=threading.Event();self._thread=None
     def run_once(self):
         job=self.store.claim(self.worker_id)
@@ -244,9 +277,15 @@ class WorkflowCoordinator:
         return job is not None
     def run(self):
         while not self.stop.is_set():
-            try:busy=self.run_once()
-            except Exception:LOG.exception('Workflow coordination unavailable');busy=False
-            if not busy:self.stop.wait(self.interval_seconds)
+            try:
+                # Subscribe before scanning so a commit cannot fall between scan and wait.
+                with self.store.listen() as listener:
+                    while not self.stop.is_set():
+                        while not self.stop.is_set() and self.run_once():pass
+                        self.store.wait(listener,self.interval_seconds,self.stop)
+            except Exception:
+                LOG.exception('Workflow coordination unavailable')
+                self.stop.wait(1)
     def start(self):
         if self._thread is not None:raise RuntimeError('Workflow coordinator already started')
         self._thread=threading.Thread(target=self.run,name='forge-workflow',daemon=True);self._thread.start()
