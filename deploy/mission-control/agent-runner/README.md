@@ -588,6 +588,67 @@ before a successful result; an already-cancelled task launches no CLI.
 
 Primary contracts: [Headless CLI](https://antigravity.google/docs/cli/headless)
 and [session resumption](https://antigravity.google/docs/cli/commands/resume).
+
+### Codex warm author sessions and feature controls (policy8 / migration 0017)
+
+This implementation is source support; applying migration `0017_coding_codex_warm_sessions.sql`
+and activating `forge-coding-v8` remain explicit deployment steps. Migrations `0001`–`0016`
+and historical `forge-coding-v1`–`v7` recipes, attempts and receipts remain unchanged.
+
+Against verified installed Codex `0.160.0` (`--help`), `CommandRunnerProvider` selects
+two exact headless command shapes (prompts always arrive on stdin via `-`, static
+boundary/task prefix first and dynamic plan/feedback context appended at the end):
+
+```text
+# Fresh exec (author plan/implement omits --ephemeral when warm TTL > 0;
+# independent reviewers, review mode, and ttl == 0 always pass --ephemeral)
+<codex> --no-daemon --ask-for-approval never exec \
+    --ignore-user-config --ignore-rules \
+    --sandbox <danger-full-access|workspace-write|read-only> \
+    --disable fast_mode --disable multi_agent \
+    --model <configured model> \
+    --json --color never [--ephemeral] -
+
+# Explicit warm author continuation (never --last, --all, --worktree or bypass flags)
+<codex> --no-daemon --ask-for-approval never exec \
+    --sandbox <danger-full-access|workspace-write|read-only> --color never \
+    resume \
+    --ignore-user-config --ignore-rules \
+    --disable fast_mode --disable multi_agent \
+    --model <configured model> \
+    --json <verified thread_id UUID> -
+```
+
+Because `codex exec resume --help` does not accept `--sandbox` or `--color` after `resume`,
+those options are placed on parent `codex exec` before `resume` and enforced in
+`SystemdSupervisor.argv()` alongside the existing external-sandbox policy contract.
+Installed `ConfigReadResponse` types `service_tier` as `string|null` with no advertised
+enum; Forge therefore does not invent a `service_tier` value and instead prevents
+accidental user-config, fast-mode or unrequested sub-agent multipliers via
+`--ignore-user-config`, `--ignore-rules`, `--disable fast_mode`, `--disable multi_agent`
+and pinned `--model`.
+
+`CodingWorkerFactory` injects a worker-scoped `CodexSessionProvider` storing parent-private
+hints in `state_root/codex-sessions` (`0700`/`0600`, atomic `os.replace`, `recorded_at` UTC
+epoch seconds). `WorkerConfig.codex_session_ttl_seconds` defaults to `1800` (bounded `0..3600`;
+`0` disables warm reuse and forces `--ephemeral`). Independent peer reviewers
+(`workflow_review_id` set) and `review`-mode tasks always run fresh `--ephemeral` without
+touching the session store. Explicit author continuations reuse a prior `thread_id` only
+when owner, task, workspace/base revision, profile/model/recipe, policy, account, pinned
+binary, immediately preceding attempt, workspace digest and bounded TTL all match.
+A stale/missing-session error before `turn.started` triggers at most one fresh non-ephemeral
+fallback only after confirmed process/cgroup stop and proven zero work (no `turn.started`,
+`item.*`, or `turn.completed` events) with unchanged workspace digest within the original
+attempt wall-time bound.
+
+Fresh and fallback Codex attempts normalize `turn.completed` `input_tokens`,
+`cached_input_tokens`, `output_tokens` and `total_tokens = input_tokens + output_tokens`
+with `session_provenance = "fresh_session"`. Resumed Codex attempts record
+`session_provenance = "unverified_baseline"` and null counters (`unknown_attempts`) so
+cumulative multi-turn usage is never double-counted. Existing one-shot
+`account/rateLimits/read` allowance collection and `SIGTERM`→`SIGKILL` cgroup/process-group
+cleanup remain unchanged.
+
 Tests use owned fake Python children and disposable PostgreSQL16, with no model
 turns or production database changes:
 
