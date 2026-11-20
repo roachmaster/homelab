@@ -285,10 +285,10 @@ Mail, Chat persistence, and GPU flags.
 - Set `FORGE_RUNNER_WORK_CONFIG` to the absolute path of a trusted JSON
   configuration file containing strict keys `owner`, `allowed_projects` (max 64),
   `allowed_modes` (subset of `plan`, `review`, `implement`), optional
-  `max_pending` (default `32`, range `1..256`), optional `project_labels`, and
-  `profiles` (max 64, mapping each profile alias to `{backend, model,
+  `max_pending` (default `32`, range `1..256`), optional `project_labels` and
+  `repair_policy`, plus `profiles` (max 64, mapping each profile alias to `{backend, model,
   resource_profile}` plus optional `label`). Profiles using
-  `resource_profile: "forge-coding-v4"` pin immutable recipe version `2` with
+  `resource_profile: "forge-coding-v5"` pin immutable recipe version `2` with
   `policy_digest` from `work_policy.py`; legacy version `1` fixtures remain
   readable/admissible but are never claimed by workers.
 - Set `FORGE_RUNNER_USAGE_CONFIG` independently to enable `ide.usage.*` through
@@ -331,50 +331,86 @@ Supported `ide.work.*` destinations on authenticated `POST /v1/dispatch`
 | `ide.work.result` | `work_result` | `200` `work_result_page` (UTF-8 boundary-safe, JSON-bounded paging over published immutable full results via `<sha256>.<byte_offset>` cursor; staging unreadable) |
 | `ide.work.accept` | `work_accept` | `200` `work_accepted` (explicit acceptance of confirmed-stopped `awaiting_review` tasks to `completed`; never auto-merges code) |
 | `ide.work.resume` | `work_resume` | `202` `work_resumed` (explicit resume requiring current trusted `reconciliation_receipt_id`, CAS `expected_revision`, and configured grants; pins `resume_workspace_digest`) |
+| `ide.work.plan.decide` | `work_plan_decide` | `work_plan_decided` for artifact-bound Resume, Revise or Cancel; optional explicit `auto_repair` on Resume. |
+| `ide.work.review.decide` | `work_review_decide` | `work_review_decided` for source-bound approval, repair, escalation, infrastructure retry or cancellation; never final acceptance. |
+| `ide.work.repair` | `work_repair` | `202` `work_repair_submitted`; linked completed-task correction, with null child ID while a legacy source import is pending. |
+| `ide.work.publication.retry` | `work_publication_retry` | `202` `work_publication_retry_queued`; append-only retry for an exact failed publication/candidate. |
 
-### Finished plans and verified PR publication
+### Finished plans, feedback and verified PR publication
 
-Apply additive migrations13 and14 and activate policy `forge-coding-v4` in the
-API and coding worker before enabling this lifecycle. Policy4 retains policy3
-session behavior and pins `plan_workflow: artifact-bound-plan-decisions-publication-v1`.
-Historical task recipes remain immutable; the explicit stage decision pins a new
-recipe rather than rewriting the earlier attempt.
+This is source support as of 20 November 2026, **not a deployed capability**.
+Apply and verify additive migrations13,14 and15, then install matching API,
+coding/publication runtime and policy `forge-coding-v5` before enabling this
+lifecycle. Policy5 retains policy3 session isolation and policy4 artifact-bound
+plan decisions, adding `feedback_workflow: lease-bound-immutable-feedback-review-v1`.
+Deploy the portal HTML/CSS/JS/WASM together as ABI8. Historical recipes remain
+immutable; upgrading does not replay or silently re-pin an old attempt.
 
-`ide.work.plan.decide` accepts `work_plan_decide` with the task revision, exact
-published plan attempt and SHA256, profile, stable idempotency key, decision and
-optional feedback. A stopped Plan in Awaiting review or legacy Completed offers:
+`ide.work.plan.decide` binds the expected task revision, published plan attempt
+and SHA256, profile and stable idempotency key. A stopped Plan in Awaiting review
+or legacy Completed offers **Resume**, **Revise** or **Cancel**. Resume approves
+the saved plan and queues Implement; Revise requires feedback and queues another
+read-only Plan; Cancel preserves history without starting an execution. Generic
+Accept/Resume does not advance a finished Plan. Decision replay returns its
+original receipt before current-state checks.
 
-- **Resume:** approve that saved plan and queue Implement on the same task.
-- **Revise:** require feedback and queue another read-only Plan attempt.
-- **Cancel:** retain the plan/history and cancel the workflow without requiring
-  an available worker or an Implement grant.
+Implement submission and Plan Resume accept optional `auto_repair: false`.
+Explicit opt-in freezes a `forge-repair-v1` root-chain budget: by default three
+repair rounds, two successive rounds without independently verified progress
+and one same-artifact infrastructure retry. Linked children and manual repair
+requests share that root budget. A config change cannot expand an existing
+chain. Zero repair rounds still permit review. No coding task inherits Mail or
+llama.cpp completion-token limits; the existing 1,800-second attempt bound stays.
 
-Decision replay returns its original receipt before current-state checks. Generic
-Accept/Resume cannot advance a finished Plan. The worker privately reads the exact
-approved artifact, binds it read-only into the child and delivers revision feedback
-as an instruction. No browser prompt replaces the stored plan.
+After the implementation stops and trusted reconciliation confirms its artifact,
+the worker queues independent review. `CodingWorkerFactory` injects
+`ReviewContextProvider` to read exact lease-bound feedback separately from the
+immutable plan. Feedback is digest/source validated and mounted read-only;
+missing or stale authority prevents execution. Public requests remain bounded
+at 16KiB; private immutable feedback artifacts are bounded at 64KiB. Agent claims
+never close findings or authorize publication, and no DB/GitHub credentials enter
+the agent scope.
 
-After an approved implementation stops and its workspace is reconciled,
-`work_publication.py` claims a durable publication record using the existing
-reconciler role. `PublicationWorkerFactory` injects snapshot, Git, check and GitHub
-providers. It imports the verified workspace into a separate private clone,
-merges current main, runs fixed `make ci`, `make ui-qa` and the full backend test
-suite in a credential-free verification scope with its own network namespace
-(local test fixtures only), then opens a **draft PR to main**
-from a generated `forge/task-<publication-id>` branch. The native agent never gets
-GitHub/DB credentials or permission to commit, push, deploy or merge. The publisher
-never modifies the accepted workspace, pushes main, force-pushes or merges a PR.
-The Agents detail reader polls publication and displays its validated PR link.
+`PublicationWorkerFactory` composes `ReviewWorker`, `ReviewedCandidateProvider`,
+fixed isolated checks, existing workspace/snapshot/Git/GitHub ports and a hosted
+observer in the existing publication process. The check scope has no publication
+credentials; it records the actual toolchain, source/gate manifest, findings and
+cleanup proof. Source failures can return to the selected agent only within the
+owner's frozen policy. Infrastructure, quota, scope and uncertain-stop outcomes
+remain distinct. Workers never query a global registry.
 
-The optional service template is `forge-publication-worker.service`. Its trusted
-`FORGE_PUBLICATION_CONFIG` file contains `worker_config` (absolute existing worker
-config path), `repositories` (approved project alias to `owner/repo`), and
-`github_config_dir` (the worker account's existing `.config/gh`). The service has
-no new credential and does not invoke a model. Install its matching source and
-unit from the verified immutable release; enable it only after schema14 and the
-coordinated policy4 rollout. Publication failures preserve branch/head receipts
-for review; uncertain remote writes are reconciled by reads and never blindly
-replayed. Accept is blocked until publication has a terminal result.
+**A local pass pauses for an independent owner decision.** In Agents, inspect
+the exact candidate and findings; attest each resolved finding explicitly with
+a note, then approve. The API binds the decision to the task revision/review and
+retains the owner receipt privately. Neither model success nor repair opt-in is
+publication approval. Both normal queueing and missed-callback recovery require
+the same reviewed candidate authorization.
+
+Trusted providers publish a nonforce `forge/task-<publication-id>` feature branch
+and **draft PR to main** from the verified candidate; they never push main,
+force-push, deploy or merge. Existing remote-head receipts constrain updates and
+unknown acknowledgements are reconciled by reads. The observer records required
+`check`, `pr-fast-gate` and `real-browser` outcomes under their workflow identities
+on the exact PR head. Missing/pending/failed/stale checks block final acceptance.
+Publication and verification retries append new runs and retain prior failures.
+
+A later correction to a Completed task uses `ide.work.repair` with an explicit
+approved-project candidate. If that legacy parent has no bound review, trusted
+source import verifies the exact project commit/digest before materializing the
+child. `work_repair_submitted.repair_task_id` is nullable during import and
+`review_id` is optional. The portal keeps the parent/result open, polls its
+review and offers linked navigation only after a real child ID exists. Completed
+history and older receipt-bound workspaces remain intact. Private source-import
+authorization is never accepted as a browser command field.
+
+The optional service template remains `forge-publication-worker.service` using
+trusted `FORGE_PUBLICATION_CONFIG`: `worker_config`, approved `repositories`,
+`github_config_dir`, optional fixed `checks` and `required_hosted_checks`. Install
+the verified immutable release and configure the matching trusted providers only
+after schema verification and final CI/backend/28-group actual-browser gates.
+Focused implementation tests are not a deployment or a real-agent repair pilot.
+See [the complete flow and rollout status](../../../docs/architecture/proposals/forge-agent-feedback-loop.md)
+and [the implementation checkpoint](../../../docs/design/implementation-status.md#agent-feedback-loop-source-checkpoint--20-november-2026).
 
 ### Database roles, WorkerDB, and UsageStore
 
