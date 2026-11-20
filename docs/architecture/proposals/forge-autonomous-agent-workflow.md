@@ -44,6 +44,17 @@ workers do not reach into global registries. The API process hosts a DB-only
 coordinator; existing coding and publication workers retain their separate
 process ownership. Construction stays effect-free until validated creation.
 
+The selected supervisor owns execution isolation. Codex 0.160's nested
+Bubblewrap sandbox cannot initialize its loopback interface in Forge's existing
+capability-free process scope. Policy 7 therefore selects Codex's supported
+external-sandbox mode only when the injected supervisor explicitly enforces the
+coding sandbox. The invocation records that selection and the real supervisor
+checks it before launch. Readonly reviewers still receive readonly source and
+context mounts; UID, capability, credential-mask and process-lifetime boundaries
+are unchanged. An unsupervised/custom runner retains Codex's inner sandbox.
+This changes the immutable execution-policy identity rather than reinterpreting
+previous policy receipts.
+
 ```mermaid
 flowchart TD
     U[One user assignment] --> P[Configured project workflow policy]
@@ -167,7 +178,7 @@ stale-base task cannot slip in after the new merged head is recorded.
 
 Three explicit selections enable the flow; installing code alone does not
 silently delegate an existing project. In the admitted Work configuration, use
-current `forge-coding-v6` profiles and add:
+current `forge-coding-v7` profiles and add:
 
 ```json
 {
@@ -190,7 +201,7 @@ configurations. Both role profiles must have the required project/mode grants.
 The existing repair policy bounds code revisions and names required hosted
 checks. Models and account configuration remain explicit profile settings.
 
-Rollout requires the matching M15/M16 database migrations, policy 6 workers and
+Rollout requires the matching M15/M16 database migrations, policy 7 workers and
 atomic ABI 8 host/generated assets. Drain or preserve old active leases before
 switching versions. Verify normal service startup and source selection before
 opening new admission. Preserve historical receipts and native workspaces;
@@ -219,7 +230,7 @@ hash-validated readonly verdict as a separate artifact. The original approved
 Plan and repair feedback remain separate. These are storage/execution bounds;
 they are not llama.cpp generation-token limits.
 
-New mandatory peer context requires the matching policy 6 worker. Prior policy
+New mandatory peer context requires the matching policy 7 worker. Prior policy
 history remains readable. Public Work DTO fields are additive, and the existing
 browser ABI 8 primitives can render the new readonly workflow summary; matching
 host/generated assets still ship atomically.
@@ -252,6 +263,6 @@ projection/context fails closed and cannot re-enable manual approvals by acciden
   merge intent, concurrent main changes, lost acknowledgement and protection denial.
 - Typed Rust/native host/generated asset/browser flows showing automated roles,
   phase polling, no routine manual decisions and truthful escalation/cancellation.
-- A coordinated migration 15/16, policy 6, service and atomic portal rollout, then
+- A coordinated migration 15/16, policy 7, service and atomic portal rollout, then
   a separately identified real-agent pilot. Mocked CLI/GitHub tests are not evidence
   that the new production workflow has run.
