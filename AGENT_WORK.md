@@ -1,5 +1,19 @@
 # Shared Agent Work Checkpoint
 
+- **task_id:** `grok-agent-integration-20261120`
+- **objective:** Add Grok to the Forge agent mix through the existing factory/provider, admission, accounting and independently reviewed workflow boundaries.
+- **authorized_scope:** The user requested Grok and completed its official device authorization. Preserve Gemini author/Codex reviewer defaults, the Muse email choice and retired Chat data. No purchases, API-key fallback, automatic top-ups or account rotation.
+- **phase:** `implementation_in_progress`
+- **ownership:** Root owns integration, account handoff and final release. The backend writer owns Python/SQL/config tests in a separate worktree; the UI writer owns typed Rust protocol and browser coverage. The deployment owner is the sole live infrastructure writer. Preserve all receipt-bound workspaces.
+- **native_capability:** Official Grok Build 1.0.92 is installed and authenticated through grok.com. Native model discovery advertises `grok-4.7`. Exact help and bundled documentation establish headless structured output, explicit session IDs, memory/subagent controls and owned IPC. Local capability evidence and private credentials remain outside Git.
+- **allowance:** Standalone `grok usage --json` rejects plan reporting and directs the operator to `/usage`. A one-time official dashboard inspection reports that `/usage` requires SuperGrok; the dashboard also advertises a limited free preview without numeric allowance. No model session or billing action was started. Execution defaults off; Root asked whether to try one small free-preview task or leave it connected and disabled, and is awaiting the user's answer.
+- **policy_boundary:** A third native backend requires a new immutable policy and additive migration18; migrations1–17 and historical recipes/results/receipts remain unchanged. Parked Muse Code changes are excluded. Backend and portal entries must distinguish supported source from enabled live execution.
+- **delivery_dependency:** The separate Chat retirement/Muse email workflow has passed independent Plan review and is implementing its immutable candidate. Finish its checked automatic merge and atomic rollout independently of Grok development.
+- **next_action:** Complete the bounded Grok provider and real PostgreSQL fences, review the actual changes, run required repository/backend/browser checks and exact-head hosted CI, then activate only qualified capabilities from verified source.
+- **last_updated:** 2026-11-20
+
+## Chat retirement and Muse email checkpoint
+
 - **task_id:** `portal-chat-retirement-muse-20261120`
 - **objective:** Remove Chat from the portal while preserving saved data. Install Muse Code, then follow the user's steering to use their consumer Muse email account as the primary integration.
 - **authorized_scope:** User requested Chat retirement, Muse installation and agent registration, then selected email as the primary Muse transport at `roachmaster@muse.ai`. Investigate and test that email route with an explicitly scoped first message. Prior deployment/publication authority remains; no subscription purchase or pay-as-you-go fallback. Existing Gemini-author/Codex-reviewer defaults and historical workflows remain.
