@@ -7,6 +7,7 @@ import re
 from types import MappingProxyType
 
 from work_worker_config import WorkerConfig, absolute_path, identifier, load_config as load_worker
+from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
 
 CONFIG_ENV = "FORGE_PUBLICATION_CONFIG"
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -27,6 +28,7 @@ class PublicationConfig:
     commit_name: str = "Forge publisher"
     commit_email: str = "forge@thedevex.com"
     source_path: Path | None = None
+    required_hosted_checks: tuple = DEFAULT_REQUIRED_HOSTED_CHECKS
 
     @property
     def state_root(self):
@@ -37,7 +39,7 @@ def parse_config(raw, worker, *, source_path=None):
     if not isinstance(worker, WorkerConfig) or not isinstance(raw, dict):
         raise ValueError("Publisher requires typed worker configuration")
     if not {"worker_config", "repositories", "github_config_dir"} <= raw.keys() <= {
-        "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email"
+        "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -68,9 +70,19 @@ def parse_config(raw, worker, *, source_path=None):
     if any(not isinstance(value, str) or not value.strip() or len(value) > 128
            or any(ord(c) < 32 for c in value) for value in (name, email)):
         raise ValueError("Invalid publisher commit identity")
+    required = raw.get("required_hosted_checks", DEFAULT_REQUIRED_HOSTED_CHECKS)
+    if (not isinstance(required, (tuple, list)) or not 1 <= len(required) <= 8
+            or any(not isinstance(row, (tuple, list)) or len(row) != 3
+                   or any(not isinstance(value, str) or not value or len(value) > 200
+                          or any(ord(char) < 32 for char in value) for value in row)
+                   or not row[0].startswith(".github/workflows/") or ".." in Path(row[0]).parts
+                   for row in required)
+            or len({tuple(row) for row in required}) != len(required)):
+        raise ValueError("Invalid required hosted checks")
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
-                             absolute_path(source_path) if source_path else None)
+                             absolute_path(source_path) if source_path else None,
+                             tuple(tuple(row) for row in required))
 
 
 def _object(pairs):

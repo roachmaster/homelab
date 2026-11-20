@@ -6,6 +6,11 @@ import json
 import re
 
 MAX_DIAGNOSTIC_BYTES = 2048
+DEFAULT_REQUIRED_HOSTED_CHECKS = (
+    (".github/workflows/rust.yml", "Rust CI", "check"),
+    (".github/workflows/rust.yml", "Rust CI", "pr-fast-gate"),
+    (".github/workflows/ide-ui-browser.yml", "IDE browser acceptance", "real-browser"),
+)
 _SECRETS = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----.*?(?:-----END [^-]+-----|$)|"
                       r"gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{70,}|"
                       r"AIza[A-Za-z0-9_-]{35}|ya29\.[A-Za-z0-9_-]{40,}|"
@@ -28,9 +33,11 @@ def check_id(command, index):
     return "fixed-check-" + str(index + 1)
 
 
-def gate_manifest_sha256(commands):
+def gate_manifest_sha256(commands, required_hosted_checks=DEFAULT_REQUIRED_HOSTED_CHECKS, gate_source_sha256=None):
     """Hash operator-selected fixed argv, never a command from diagnostics."""
-    return hashlib.sha256(json.dumps({"version": 1, "checks": commands},
+    return hashlib.sha256(json.dumps({"version": 1, "checks": commands,
+                         "required_hosted_checks": required_hosted_checks,
+                         "gate_source_sha256": gate_source_sha256},
                          sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 

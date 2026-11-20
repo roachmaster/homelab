@@ -14,10 +14,13 @@ from uuid import UUID, uuid4
 from work_executor import (
     CliOutcome, CommandRunnerProvider, ExecutionError, SystemdSupervisor,
     WorkspaceProvider, unit_name, utf8_chunks,
+    _git as _workspace_git,
 )
 from work_policy import POLICY, POLICY_DIGEST
 from work_sessions import AntigravitySessionProvider
 from work_review_context import ReviewContextError, ReviewContextProvider
+from work_consumer_cache import configured_consumer_caches
+from work_candidate_source import ReviewCandidateSourceProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
@@ -35,9 +38,15 @@ def _lease(value):
     for field in ("task_id", "attempt_id", "attempt_token"):
         if str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding lease identity")
-    for field in ("plan_decision_id", "resume_attempt_id"):
+    for field in ("plan_decision_id", "resume_attempt_id", "feedback_id", "repair_source_review_id", "parent_task_id"):
         if result.get(field) is not None and str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding continuation identity")
+    if result.get("feedback_id") is not None and (not isinstance(result.get("feedback_sha256"), str)
+            or len(result["feedback_sha256"]) != 64
+            or any(char not in "0123456789abcdef" for char in result["feedback_sha256"])):
+        raise ValueError("Invalid coding feedback digest")
+    if result.get("feedback_id") is None and result.get("feedback_sha256") is not None:
+        raise ValueError("Unbound coding feedback digest")
     if result["unit_name"] != unit_name(result["attempt_id"]):
         raise ValueError("Invalid coding lease scope")
     return result
@@ -282,8 +291,7 @@ class CodingWorker:
                 if proof["scope_stopped"]:
                     try:
                         receipt = self.store.reconcile(lease, workspace.digest(), proof)
-                        if (lease["mode"] == "implement" and lease.get("plan_decision_id") is not None
-                                and outcome.status == "awaiting_review"):
+                        if lease["mode"] == "implement" and outcome.status == "awaiting_review":
                             self.store.queue_review(lease, receipt)
                     except Exception:
                         LOG.warning("Coding reconciliation or publication handoff unavailable; recovery remains fenced")
@@ -356,8 +364,12 @@ class CodingWorkerFactory:
                                else lambda config, supervisor: CommandRunnerProvider(
                                    config, supervisor, sessions=self.session_factory(config)
                                    if "antigravity" in config.binaries else None))
-        self.workspace_factory = workspace_factory if workspace_factory is not None else WorkspaceProvider
-        self.supervisor_factory = supervisor_factory if supervisor_factory is not None else SystemdSupervisor
+        self.workspace_factory = (workspace_factory if workspace_factory is not None else
+                                  lambda config: WorkspaceProvider(config,
+                                      candidate_source_provider=ReviewCandidateSourceProvider(config, _workspace_git)))
+        self.supervisor_factory = (supervisor_factory if supervisor_factory is not None
+                                   else lambda config: SystemdSupervisor(
+                                       config, consumer_cache_provider=configured_consumer_caches(config)))
         self.collector_factory, self.clock, self.stop = collector_factory, clock, stop
         self.usage_normalizer = usage_normalizer
         self.review_context_factory = (review_context_factory if review_context_factory is not None
