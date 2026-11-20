@@ -2595,11 +2595,19 @@ fn provider_card(
     refresh_disabled: bool,
     project: &str,
 ) -> MetricCard {
-    let state = match p.worker_state {
-        UsageWorkerState::Idle => badge("Idle", BadgeTone::Neutral),
-        UsageWorkerState::Running => badge("Running", BadgeTone::Accent),
-        UsageWorkerState::Offline => badge("Offline", BadgeTone::Warning),
-        UsageWorkerState::Unknown => badge("Unknown", BadgeTone::Neutral),
+    let state = if matches!(
+        p.worker_state,
+        UsageWorkerState::Offline | UsageWorkerState::Unknown
+    ) && p.last_error.as_deref() == Some("setup_required")
+    {
+        badge("Setup required", BadgeTone::Warning)
+    } else {
+        match p.worker_state {
+            UsageWorkerState::Idle => badge("Idle", BadgeTone::Neutral),
+            UsageWorkerState::Running => badge("Running", BadgeTone::Accent),
+            UsageWorkerState::Offline => badge("Offline", BadgeTone::Warning),
+            UsageWorkerState::Unknown => badge("Unknown", BadgeTone::Neutral),
+        }
     };
     let observation = badge(
         p.snapshot_state.label(),

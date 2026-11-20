@@ -1628,7 +1628,7 @@ async function managedWriteJourney(page, context, respondToLeaveWarning) {
   await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
   await check(page.locator('#workbench')).toBeVisible();
   await check(source).toContainText('saved with direct editor');
-  await check(page.locator('#workbench-write-status')).toContainText(/Saved · rev [0-9a-f]{8}/);
+  await check(page.locator('#workbench-write-status')).toContainText(/Applied · rev [0-9a-f]{8}/);
   await page.getByRole('button', { name: 'Undo edit', exact: true }).click();
   await check(source.locator('[data-line="2"]')).toContainText('old line');
   await check(page.locator('#workbench-write-status')).toContainText(/Reverted · rev [0-9a-f]{8}/);
@@ -2809,7 +2809,14 @@ async function agentsJourney() {
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
-    await check(cards).toHaveCount(2);
+    const museCard = page.locator('#agents-providers article[data-card-id="muse-pending"]');
+    await check(cards).toHaveCount(3);
+    await check(museCard.locator('.fg-metric-select')).toHaveText('Muse Code · Muse Spark1.3');
+    await check(museCard.locator('.fg-metric-header > .fg-badge')).toHaveText('Setup required');
+    await check(museCard.locator('.fg-metric-header > .fg-badge')).toHaveAttribute('data-tone','warning');
+    await check(museCard.locator('.fg-quota-unavailable')).toContainText('Not reported');
+    await check(museCard.locator('meter')).toHaveCount(0);
+    await check(page.locator('#agents-profile option[value="muse-pending"]')).toHaveCount(0);
     await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
     await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
     await check(geminiCard.locator('.fg-quota-unavailable')).toContainText('does not expose account allowance');

@@ -994,17 +994,15 @@ async function flushNavigation(id){
     JSON.stringify(latestWorkspace)===json&&(!checkpoint||checkpoint.saved));
   let cache=null;
   if(saved&&workspaceEpoch&&!mailNavigationLocked){
-    const local=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,
-      snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),...(agentsNavigation?{agents:agentsNavigation}:{})});
-    if(encoder.encode(local).length<=NAVIGATION_CACHE_MAX)cache=local;
+    cache=navigationCacheJSON(snapshot);
   }
   const requiresCache=Boolean(mailNavigation?.active||agentsNavigation);
   postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!requiresCache||cache!==null),requires_cache:requiresCache,cache});
 }
 function localNavigationCheckpoint(snapshot){
   if(!agentsNavigation||!workspaceEpoch||!workspaceTab)return null;
-  const cache=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),agents:agentsNavigation});
-  if(encoder.encode(cache).length>NAVIGATION_CACHE_MAX||localCheckpointAcks.size>=64)return {snapshot:agentsNavigation,pending:Promise.resolve(false)};
+  const cache=navigationCacheJSON(snapshot);
+  if(cache===null||localCheckpointAcks.size>=64)return {snapshot:agentsNavigation,pending:Promise.resolve(false)};
   const id=++localCheckpointSequence;
   const pending=new Promise(resolve=>{
     const timer=setTimeout(()=>{localCheckpointAcks.delete(id);resolve(false);},2500);
@@ -1012,6 +1010,17 @@ function localNavigationCheckpoint(snapshot){
   });
   postMessage({kind:'navigation_checkpoint',id,cache});
   return {snapshot:agentsNavigation,pending};
+}
+function navigationCacheJSON(snapshot){
+  const record={version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),...(agentsNavigation?{agents:agentsNavigation}:{})};
+  let cache=JSON.stringify(record);
+  if(encoder.encode(cache).length>NAVIGATION_CACHE_MAX&&CONFIG.preserve_workspace_chat&&workspaceLease){
+    // A successful restore established the durable copy. Retain exact local
+    // request identity without duplicating an oversized immutable snapshot.
+    // With no lease the local snapshot may be the only copy; never discard it.
+    record.snapshot=null;cache=JSON.stringify(record);
+  }
+  return encoder.encode(cache).length<=NAVIGATION_CACHE_MAX?cache:null;
 }
 function navigationSnapshot(snapshot){
   // Keep draft text and selection hints. Rust validates the restored snapshot.

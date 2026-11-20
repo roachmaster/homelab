@@ -1190,3 +1190,20 @@ fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_r
 
 mod review;
 mod workflow;
+
+#[test]
+fn nonexecutable_provider_setup_diagnostic_is_visible_without_invented_quota() {
+    let mut pending = provider();
+    pending.worker_state = UsageWorkerState::Offline;
+    pending.last_error = Some("setup_required".into());
+    pending.allowance.state = UsageAllowanceState::Unsupported;
+    pending.allowance.reason = Some("no_allowance".into());
+    pending.allowance.buckets.clear();
+    let card = provider_card(&pending, false, 0, false, "workspace");
+    assert_eq!(card.state, badge("Setup required", BadgeTone::Warning));
+    assert_eq!(
+        card.quota_state,
+        Some(badge("Not reported", BadgeTone::Neutral))
+    );
+    assert!(card.quotas.is_empty());
+}

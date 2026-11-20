@@ -22,6 +22,9 @@ const profiles = [
   { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'] },
   { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'] },
 ];
+const usageProfiles = [...profiles,
+  {alias:'muse-pending',label:'Muse Code',backend:'muse',model:'Muse Spark1.3'},
+];
 
 function task(status, number, input = {}) {
   const taskId = number === 0 ? '11111111-1111-4111-8111-111111111111' : randomUUID();
@@ -81,13 +84,14 @@ function detail(t) {
   };
 }
 function usage(alias, tasks) {
-  const p = profiles.find(item => item.alias === alias);
+  const p = usageProfiles.find(item => item.alias === alias);
   const active = [...tasks.values()].find(t => t.agent_profile === alias && ['running', 'cancel_requested'].includes(t.status));
   const codex = p.backend === 'codex';
+  const pending = p.backend === 'muse';
   return {
-    alias, label: p.label, provider: p.backend, model: p.model, worker_state: active ? 'running' : 'idle', active_task_id: active?.task_id ?? null,
-    snapshot_state: codex ? 'fresh' : 'unknown', observed_at: codex ? time : null, source: 'owned-browser-fixture', version: '1', last_error: null, refresh_pending: false,
-    allowance: { state: codex ? 'available' : 'unsupported', reason: codex ? null : 'Headless allowance unavailable', ordinary_usage_allowed: codex ? true : null,
+    alias, label: p.label, provider: p.backend, model: p.model, worker_state: pending ? 'offline' : active ? 'running' : 'idle', active_task_id: active?.task_id ?? null,
+    snapshot_state: codex || pending ? 'fresh' : 'unknown', observed_at: codex || pending ? time : null, source: 'owned-browser-fixture', version: '1', last_error: pending ? 'setup_required' : null, refresh_pending: false,
+    allowance: { state: codex ? 'available' : 'unsupported', reason: pending ? 'no_allowance' : codex ? null : 'Headless allowance unavailable', ordinary_usage_allowed: codex ? true : null,
       buckets: codex ? [{ key: 'fixture-window', label: 'Provider window', used_percent: 12.5, window_minutes: 90, resets_at: '2026-11-19T19:30:00Z' }] : [] },
     jobs: { scope: 'forge_project', input_tokens: codex ? '9007199254740993' : null, output_tokens: codex ? '5' : null, cached_input_tokens: codex ? '2' : null, total_tokens: codex ? '9007199254740998' : null, known_attempts: codex ? 1 : 0, unknown_attempts: codex ? 0 : 1, elapsed_ms: codex ? '1000' : null },
     account_activity: { state: 'unknown', lifetime_tokens: null, daily: [] },
@@ -126,11 +130,11 @@ export async function startAgentsRelay() {
       }
       if (input.project_alias !== project) { failed(403, 'denied'); return; }
       if (input.kind === 'usage_overview' || input.kind === 'usage_detail') {
-        const selected = input.kind === 'usage_detail' ? profiles.filter(p => p.alias === input.agent_profile) : profiles;
+        const selected = input.kind === 'usage_detail' ? usageProfiles.filter(p => p.alias === input.agent_profile) : usageProfiles;
         send(200, input.kind, { project_alias: project, providers: selected.map(p => usage(p.alias, tasks)) }); return;
       }
       if (input.kind === 'usage_refresh') {
-        if (!profiles.some(p => p.alias === input.agent_profile)) { failed(403, 'denied'); return; }
+        if (!usageProfiles.some(p => p.alias === input.agent_profile)) { failed(403, 'denied'); return; }
         refreshes++; send(202, 'usage_refresh_queued', { project_alias: project, refresh_id: randomUUID(), profiles: [input.agent_profile], coalesced: false }); return;
       }
       if (input.kind === 'work_list') {
