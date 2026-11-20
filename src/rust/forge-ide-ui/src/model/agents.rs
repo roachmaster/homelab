@@ -309,6 +309,7 @@ impl Agents {
     }
     fn processing(&self) -> bool {
         self.task.as_ref().is_some_and(|t| t.status.is_processing())
+            || self.publication_processing()
             || self.pane == Pane::List && self.tasks.iter().any(|t| t.status.is_processing())
     }
     pub fn network_failed(&mut self, id: &str, watch: String, effects: &mut Vec<UiEffect>) {
@@ -356,7 +357,10 @@ impl Agents {
         if let UiEvent::SendAgentTask { idempotency_key }
         | UiEvent::CancelAgentTask { idempotency_key }
         | UiEvent::AcceptAgentTask { idempotency_key }
-        | UiEvent::ResumeAgentTask { idempotency_key } = &event
+        | UiEvent::ResumeAgentTask { idempotency_key }
+        | UiEvent::DecideAgentPlan {
+            idempotency_key, ..
+        } = &event
         {
             if !valid_work_name(idempotency_key, 128) {
                 return Err(UiError::InvalidAction);
@@ -376,7 +380,11 @@ impl Agents {
                     return Ok(());
                 }
                 self.watch = None;
-                if work
+                if work && self.pending.is_none() && self.publication_processing() {
+                    // Publication can advance without changing the task revision.
+                    // Read its authoritative detail instead of waiting for task events.
+                    self.get(id, effects);
+                } else if work
                     && self.pending.is_none()
                     && self.task.as_ref().is_some_and(|t| {
                         t.status.is_processing() || !self.events_loaded || self.events_more
@@ -602,6 +610,46 @@ impl Agents {
                     );
                 }
             }
+            UiEvent::DecideAgentPlan {
+                task_id,
+                expected_revision,
+                plan_attempt_id,
+                plan_sha256,
+                decision,
+                idempotency_key,
+            } if work => {
+                let current = self.task.as_ref().is_some_and(|t| {
+                    t.task_id == task_id
+                        && t.revision == expected_revision
+                        && t.result.as_ref().is_some_and(|r| {
+                            r.attempt_id == plan_attempt_id && r.sha256 == plan_sha256
+                        })
+                });
+                if self.pending.is_none() && current && self.can_decide_plan(decision) {
+                    let agent_profile = self
+                        .task
+                        .as_ref()
+                        .expect("finished plan")
+                        .agent_profile
+                        .clone();
+                    self.request(
+                        WorkRequest::WorkPlanDecide {
+                            request_id: id,
+                            project_alias: self.project.clone(),
+                            task_id,
+                            expected_revision,
+                            plan_attempt_id,
+                            plan_sha256,
+                            decision,
+                            agent_profile,
+                            idempotency_key,
+                            note: self.review_note.clone(),
+                        },
+                        effects,
+                    );
+                    self.status = "Saving your plan decision…".into();
+                }
+            }
             UiEvent::ResumeAgentTask { idempotency_key } if work => {
                 if self.pending.is_none() && self.can_resume() {
                     let t = self.task.as_ref().expect("stopped task");
@@ -733,21 +781,67 @@ impl Agents {
             + json_text_size(&self.prompt)
             + json_text_size(&self.criteria)
     }
-    fn can_accept(&self) -> bool {
+    fn publication_processing(&self) -> bool {
+        self.task
+            .as_ref()
+            .and_then(|t| t.publication.as_ref())
+            .is_some_and(|p| p.status.is_processing())
+    }
+    fn finished_plan(&self) -> bool {
         self.task.as_ref().is_some_and(|t| {
-            t.status == WorkStatus::AwaitingReview
-                && t.result.is_some()
+            t.mode == WorkMode::Plan
+                && matches!(t.status, WorkStatus::AwaitingReview | WorkStatus::Completed)
                 && t.attempt
                     .as_ref()
-                    .is_some_and(|a| a.phase == WorkAttemptPhase::Stopped)
+                    .zip(t.result.as_ref())
+                    .is_some_and(|(a, r)| {
+                        a.phase == WorkAttemptPhase::Stopped && a.attempt_id == r.attempt_id
+                    })
         })
     }
-    fn can_resume(&self) -> bool {
-        self.task.as_ref().is_some_and(|t| {
-            t.reconciliation_receipt_id.is_some()
-                && !t.status.is_processing()
-                && !matches!(t.status, WorkStatus::Completed | WorkStatus::Cancelled)
+    fn can_decide_plan(&self, decision: WorkPlanDecision) -> bool {
+        self.finished_plan()
+            && !self.publication_processing()
+            && (decision == WorkPlanDecision::Cancel
+                || self.task.as_ref().is_some_and(|t| {
+                    self.catalog.as_ref().is_some_and(|c| {
+                        c.profiles.iter().any(|p| {
+                            p.alias == t.agent_profile && p.modes.contains(&decision.mode())
+                        })
+                    })
+                }))
+            && (decision != WorkPlanDecision::Revise || !self.review_note.trim().is_empty())
+    }
+    fn plan_action(&self, decision: WorkPlanDecision) -> Option<RowAction> {
+        let t = self.task.as_ref().filter(|_| self.finished_plan())?;
+        let result = t.result.as_ref()?;
+        Some(RowAction::DecideAgentPlan {
+            task_id: t.task_id.clone(),
+            expected_revision: t.revision,
+            plan_attempt_id: result.attempt_id.clone(),
+            plan_sha256: result.sha256.clone(),
+            decision,
         })
+    }
+    fn can_accept(&self) -> bool {
+        !self.finished_plan()
+            && !self.publication_processing()
+            && self.task.as_ref().is_some_and(|t| {
+                t.status == WorkStatus::AwaitingReview
+                    && t.result.is_some()
+                    && t.attempt
+                        .as_ref()
+                        .is_some_and(|a| a.phase == WorkAttemptPhase::Stopped)
+            })
+    }
+    fn can_resume(&self) -> bool {
+        !self.finished_plan()
+            && !self.publication_processing()
+            && self.task.as_ref().is_some_and(|t| {
+                t.reconciliation_receipt_id.is_some()
+                    && !t.status.is_processing()
+                    && !matches!(t.status, WorkStatus::Completed | WorkStatus::Cancelled)
+            })
     }
 
     fn complete_work(
@@ -766,7 +860,12 @@ impl Agents {
             return;
         };
         let status = match &response {
-            WorkResponse::WorkSubmitted { .. } | WorkResponse::WorkResumed { .. } => 202,
+            WorkResponse::WorkSubmitted { .. }
+            | WorkResponse::WorkResumed { .. }
+            | WorkResponse::WorkPlanDecided {
+                status: WorkStatus::Queued,
+                ..
+            } => 202,
             WorkResponse::WorkFailed { code, .. } => code.status(),
             _ => 200,
         };
@@ -841,6 +940,7 @@ impl Agents {
                 let manifest = task.result.clone();
                 let changed = self.task.as_ref().is_none_or(|t| {
                     t.task_id != task.task_id
+                        || t.mode != task.mode
                         || (t.status != WorkStatus::Queued && task.status == WorkStatus::Queued)
                         || t.attempt.as_ref().map(|a| &a.attempt_id)
                             != task.attempt.as_ref().map(|a| &a.attempt_id)
@@ -928,6 +1028,23 @@ impl Agents {
                 self.retry = None;
                 self.review_note.clear();
                 self.status = "Result accepted. No code is merged or pushed automatically.".into();
+                self.get(id, effects);
+            }
+            WorkResponse::WorkPlanDecided { status, mode, .. } => {
+                self.retry = None;
+                self.review_note.clear();
+                self.mode = Some(mode);
+                self.task = None;
+                self.clear_progress();
+                self.clear_result();
+                self.status = if status == WorkStatus::Cancelled {
+                    "Plan cancelled."
+                } else if mode == WorkMode::Implement {
+                    "Plan approved. Implementation is queued."
+                } else {
+                    "Plan revision queued with your feedback."
+                }
+                .into();
                 self.get(id, effects);
             }
             WorkResponse::WorkResumed { .. } => {
@@ -1065,6 +1182,13 @@ impl Agents {
     }
     pub fn project(&self, view: &mut ViewModel, connected: bool, work: bool, usage: bool) {
         let active = connected && self.active;
+        view.visibility.push(visible("open-agents", connected));
+        view.buttons.push(ButtonBinding {
+            id: "open-agents",
+            disabled: !connected || (active && self.locked()),
+            pressed: Some(active),
+            action: None,
+        });
         if !active {
             view.visibility.push(visible("agents", false));
             return;
@@ -1143,6 +1267,32 @@ impl Agents {
                         matches!(t.status, WorkStatus::Queued | WorkStatus::Running)
                     }),
             ),
+            visible(
+                "agents-plan-actions",
+                active && reader && self.finished_plan(),
+            ),
+            visible(
+                "agents-plan-unavailable",
+                active
+                    && reader
+                    && self.finished_plan()
+                    && !self.can_decide_plan(WorkPlanDecision::Resume),
+            ),
+            visible(
+                "agents-publication",
+                active && reader && self.task.as_ref().is_some_and(|t| t.publication.is_some()),
+            ),
+            visible(
+                "agents-publication-link",
+                active
+                    && reader
+                    && self
+                        .task
+                        .as_ref()
+                        .and_then(|t| t.publication.as_ref())
+                        .is_some_and(|p| p.pr_url.is_some()),
+            ),
+            visible("agents-accept-help", active && reader && self.can_accept()),
             visible("agents-accept", active && reader && self.can_accept()),
             visible("agents-resume", active && reader && self.can_resume()),
             visible(
@@ -1151,7 +1301,9 @@ impl Agents {
             ),
             visible(
                 "agents-review",
-                active && reader && (self.can_accept() || self.can_resume()),
+                active
+                    && reader
+                    && (self.can_accept() || self.can_resume() || self.finished_plan()),
             ),
             visible("agents-list-pagination", active && !compose && !reader),
             visible("agents-usage", active && usage && !compose && !reader),
@@ -1205,6 +1357,12 @@ impl Agents {
                     .map_or_else(String::new, |t| t.status.label().into()),
             ),
             text(
+                "agents-task-mode",
+                self.task
+                    .as_ref()
+                    .map_or_else(String::new, |t| format!("Mode · {}", t.mode.label())),
+            ),
+            text(
                 "agents-task-prompt",
                 self.task.as_ref().map_or("", |t| t.prompt.as_str()),
             ),
@@ -1253,6 +1411,54 @@ impl Agents {
                 ),
             ),
         ]);
+        let publication = self.task.as_ref().and_then(|t| t.publication.as_ref());
+        view.texts.push(TextBinding {
+            id: "agents-publication-status",
+            text: publication.map_or("", |p| p.status.label()).into(),
+            tone: publication.map_or(Tone::Neutral, |p| {
+                if p.status == WorkPublicationStatus::Failed {
+                    Tone::Error
+                } else if p.status == WorkPublicationStatus::Published {
+                    Tone::Accent
+                } else {
+                    Tone::Neutral
+                }
+            }),
+        });
+        view.texts.push(text(
+            "agents-publication-summary",
+            publication.and_then(|p| p.summary.as_deref()).unwrap_or(""),
+        ));
+        view.texts.push(text(
+            "agents-publication-reference",
+            publication.map_or_else(String::new, |p| {
+                let mut details = Vec::new();
+                if let Some(branch) = &p.branch {
+                    details.push(format!("Branch · {branch}"));
+                }
+                if let Some(commit) = &p.commit_sha {
+                    details.push(format!("Commit · {}", &commit[..12]));
+                }
+                details.join(" · ")
+            }),
+        ));
+        let link = publication
+            .and_then(|p| p.pr_url.as_ref())
+            .map(|url| format!("[View pull request]({url})"));
+        view.transcripts.push(TranscriptBinding {
+            id: "agents-publication-link",
+            conversation: 0,
+            assistant_label: Some("Pull request"),
+            messages: link.map_or_else(Vec::new, |content| {
+                vec![TranscriptMessage {
+                    role: ChatRole::Assistant,
+                    rendered_html: render_markdown(&content),
+                    content,
+                    notice: None,
+                    header: None,
+                }]
+            }),
+        });
         if let Some(binding) = view.texts.iter_mut().find(|b| b.id == "agents-status") {
             binding.tone = if self.warning {
                 Tone::Warning
@@ -1302,6 +1508,18 @@ impl Agents {
                 disabled,
                 action: None,
                 pressed: None,
+            });
+        }
+        for (id, decision) in [
+            ("agents-plan-resume", WorkPlanDecision::Resume),
+            ("agents-plan-revise", WorkPlanDecision::Revise),
+            ("agents-plan-cancel", WorkPlanDecision::Cancel),
+        ] {
+            view.buttons.push(ButtonBinding {
+                id,
+                disabled: !enabled || pending || !self.can_decide_plan(decision),
+                pressed: None,
+                action: self.plan_action(decision),
             });
         }
         view.inputs.extend([
@@ -1560,7 +1778,8 @@ fn rekey(mut request: WorkRequest, id: String) -> WorkRequest {
         | WorkRequest::WorkCancel { request_id, .. }
         | WorkRequest::WorkResult { request_id, .. }
         | WorkRequest::WorkAccept { request_id, .. }
-        | WorkRequest::WorkResume { request_id, .. } => *request_id = id,
+        | WorkRequest::WorkResume { request_id, .. }
+        | WorkRequest::WorkPlanDecide { request_id, .. } => *request_id = id,
     };
     request
 }

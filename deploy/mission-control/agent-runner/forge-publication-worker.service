@@ -1,0 +1,24 @@
+[Unit]
+Description=Forge approved implementation verification and PR publisher
+Requires=postgresql@16-main.service
+After=postgresql@16-main.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=lrocha
+Group=lrocha
+ExecStart=/usr/bin/python3 -B /opt/homelab-forge/coding-worker/work_publication.py
+Environment=FORGE_PUBLICATION_CONFIG=/etc/homelab-forge/coding-worker/publication.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillMode=control-group
+NoNewPrivileges=no
+UMask=0077
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ReadWritePaths=/mnt/data/homelab-coding-worker
+
+[Install]
+WantedBy=multi-user.target

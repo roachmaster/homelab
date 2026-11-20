@@ -157,7 +157,9 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
                 request["request_id"].as_str().unwrap()
             );
             let kind = request["kind"].as_str().unwrap();
-            let expected = if let Some(suffix) = kind.strip_prefix("work_") {
+            let expected = if kind == "work_plan_decide" {
+                "ide.work.plan.decide".into()
+            } else if let Some(suffix) = kind.strip_prefix("work_") {
                 format!("ide.work.{suffix}")
             } else {
                 format!("ide.usage.{}", kind.strip_prefix("usage_").unwrap())
@@ -1020,11 +1022,11 @@ fn usage_grants_and_refresh_scope_are_checked_before_io() {
 }
 
 #[test]
-fn agents_entry_redirects_in_the_same_document_and_usage_is_default_off() {
+fn agents_and_legacy_mail_entries_redirect_in_the_same_document_and_usage_is_default_off() {
     let files = Files::new();
     let (host, _) = host(&files);
     let auth = authenticate(&host);
-    for path in ["/agents", "/agents/"] {
+    for path in ["/agents", "/agents/", "/mail", "/mail/"] {
         for method in ["GET", "HEAD"] {
             let response = exchange(
                 &host,
@@ -1037,6 +1039,16 @@ fn agents_entry_redirects_in_the_same_document_and_usage_is_default_off() {
             assert!(response.contains("Location: /#agents\r\n"));
             assert!(response.ends_with("\r\n\r\n"));
         }
+        let denied = exchange(
+            &host,
+            format!(
+                "POST {path} HTTP/1.1\r\nHost: {}\r\nContent-Length: 0\r\n\r\n",
+                host.local_addr().unwrap()
+            ),
+        );
+        assert!(denied.starts_with("HTTP/1.1 405 "));
+        assert!(denied.contains("Allow: GET, HEAD\r\n"));
+        assert!(!denied.contains("Location:"));
     }
     assert_reply(
         &host,
@@ -1054,4 +1066,124 @@ fn agents_entry_redirects_in_the_same_document_and_usage_is_default_off() {
         404,
         usage_failure("not_found"),
     );
+}
+
+fn plan_decision(decision: &str) -> Value {
+    let mut request = task_request("work_plan_decide");
+    for (key,value) in json!({"expected_revision":4,"plan_attempt_id":OTHER,"plan_sha256":"c".repeat(64),
+        "decision":decision,"agent_profile":"agy-plan-v1","idempotency_key":format!("plan-{decision}"),"note":"Include failure-path tests."}).as_object().unwrap() {
+        request[key]=value.clone();
+    }
+    request
+}
+fn plan_decided(decision: &str) -> Value {
+    reply(
+        "work_plan_decided",
+        json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,
+        "status":if decision=="cancel" {"cancelled"} else {"queued"},
+        "mode":if decision=="resume" {"implement"} else {"plan"}}),
+    )
+}
+#[test]
+fn plan_decision_admission_requires_target_mode_but_cancel_needs_no_profile_execution_grant() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    assert_reply(
+        &host,
+        "ide.work.plan.decide",
+        plan_decision("resume"),
+        &auth,
+        403,
+        failure("denied"),
+    );
+    no_calls(&upstream);
+    let mut invalid = plan_decision("revise");
+    invalid["note"] = json!(" ");
+    assert_reply(
+        &host,
+        "ide.work.plan.decide",
+        invalid,
+        &auth,
+        400,
+        failure("invalid_request"),
+    );
+    no_calls(&upstream);
+    let mut cancel = plan_decision("cancel");
+    cancel["agent_profile"] = json!("removed-profile");
+    let worker = backend(upstream, vec![(200, plan_decided("cancel"))]);
+    assert_reply(
+        &host,
+        "ide.work.plan.decide",
+        cancel,
+        &auth,
+        200,
+        plan_decided("cancel"),
+    );
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["agent_profile"], "removed-profile");
+}
+#[test]
+fn plan_decisions_keep_the_exact_intent_and_replay_without_a_stale_saved_plan_precheck() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut value = config(&files);
+    let mut grants = settings(&files, &upstream);
+    grants.allowed_modes.push(WorkMode::Implement);
+    value.work = Some(grants);
+    let host = host_with_config(value).0;
+    let auth = authenticate(&host);
+    let responses = vec![
+        (202, plan_decided("resume")),
+        (202, plan_decided("resume")),
+        (202, plan_decided("revise")),
+    ];
+    let worker = backend(upstream, responses);
+    for decision in ["resume", "resume", "revise"] {
+        assert_reply(
+            &host,
+            "ide.work.plan.decide",
+            plan_decision(decision),
+            &auth,
+            202,
+            plan_decided(decision),
+        );
+    }
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[0], calls[1]);
+    assert!(calls.iter().all(|r| r["kind"] == "work_plan_decide"));
+    assert_eq!(calls[0]["plan_sha256"], "c".repeat(64));
+}
+#[test]
+fn work_publication_projection_rejects_an_arbitrary_href_before_returning_it_to_the_browser() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut safe = opened();
+    safe["event"]["task"]["publication"] = json!({"status":"published",
+        "pr_url":"https://github.com/roachmaster/homelab/pull/42","commit_sha":"e".repeat(40),"branch":"forge/task-fixture","summary":"Checks passed."});
+    let mut unsafe_reply = safe.clone();
+    unsafe_reply["event"]["task"]["publication"]["pr_url"] = json!("javascript:alert(1)");
+    let worker = backend(upstream, vec![(200, unsafe_reply), (200, safe.clone())]);
+    assert_reply(
+        &host,
+        "ide.work.get",
+        task_request("work_get"),
+        &auth,
+        503,
+        failure("unavailable"),
+    );
+    assert_reply(
+        &host,
+        "ide.work.get",
+        task_request("work_get"),
+        &auth,
+        200,
+        safe,
+    );
+    assert_eq!(worker.join().unwrap().len(), 2);
 }

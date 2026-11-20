@@ -288,7 +288,7 @@ Mail, Chat persistence, and GPU flags.
   `max_pending` (default `32`, range `1..256`), optional `project_labels`, and
   `profiles` (max 64, mapping each profile alias to `{backend, model,
   resource_profile}` plus optional `label`). Profiles using
-  `resource_profile: "forge-coding-v2"` pin immutable recipe version `2` with
+  `resource_profile: "forge-coding-v4"` pin immutable recipe version `2` with
   `policy_digest` from `work_policy.py`; legacy version `1` fixtures remain
   readable/admissible but are never claimed by workers.
 - Set `FORGE_RUNNER_USAGE_CONFIG` independently to enable `ide.usage.*` through
@@ -300,7 +300,8 @@ Mail, Chat persistence, and GPU flags.
   return `503` (`work_failed` / `usage_failed`, `unavailable`) and unsupported
   destinations return `404` (`not_found`).
 
-The `forge-coding-v2` policy pins `antigravity_tool_policy: workspace-elevated-v1`.
+The `forge-coding-v3` policy retains `antigravity_tool_policy: workspace-elevated-v1`
+and adds receipt-owned, task-scoped Antigravity conversation continuation.
 Gemini coding tasks allow shell commands and read-only URL reads without an
 approval prompt (`ask: []`); filesystem tools can read the task workspace and
 attempt scratch area. Implement mode grants file writes only to those two scoped
@@ -308,8 +309,9 @@ paths. Plan/review retain `write_file(*)` denial and a read-only workspace mount
 MCP and browser actuation remain denied; the invocation does not bypass the CLI
 permission system. OS isolation, unprivileged UID/capability drop, canonical/DB
 masks, supervision and `useG1Credits: false` remain unchanged. Apply additive
-migration `0011_coding_elevated_tool_policy.sql` and verify it before activating
-policy2; it preserves policy1 history and exact digest fencing. No new secret is
+migration `0013_coding_task_session_policy.sql` through the migration registry and
+verify it before activating policy3; it preserves policy1/policy2 history and
+exact digest fencing. No new secret is
 needed. Install the new policy in both API admission and
 worker releases and explicitly select its resource profile before accepting new
 work; previous policy IDs/digests retain their identity and are refused by the
@@ -329,6 +331,50 @@ Supported `ide.work.*` destinations on authenticated `POST /v1/dispatch`
 | `ide.work.result` | `work_result` | `200` `work_result_page` (UTF-8 boundary-safe, JSON-bounded paging over published immutable full results via `<sha256>.<byte_offset>` cursor; staging unreadable) |
 | `ide.work.accept` | `work_accept` | `200` `work_accepted` (explicit acceptance of confirmed-stopped `awaiting_review` tasks to `completed`; never auto-merges code) |
 | `ide.work.resume` | `work_resume` | `202` `work_resumed` (explicit resume requiring current trusted `reconciliation_receipt_id`, CAS `expected_revision`, and configured grants; pins `resume_workspace_digest`) |
+
+### Finished plans and verified PR publication
+
+Apply additive migrations13 and14 and activate policy `forge-coding-v4` in the
+API and coding worker before enabling this lifecycle. Policy4 retains policy3
+session behavior and pins `plan_workflow: artifact-bound-plan-decisions-publication-v1`.
+Historical task recipes remain immutable; the explicit stage decision pins a new
+recipe rather than rewriting the earlier attempt.
+
+`ide.work.plan.decide` accepts `work_plan_decide` with the task revision, exact
+published plan attempt and SHA256, profile, stable idempotency key, decision and
+optional feedback. A stopped Plan in Awaiting review or legacy Completed offers:
+
+- **Resume:** approve that saved plan and queue Implement on the same task.
+- **Revise:** require feedback and queue another read-only Plan attempt.
+- **Cancel:** retain the plan/history and cancel the workflow without requiring
+  an available worker or an Implement grant.
+
+Decision replay returns its original receipt before current-state checks. Generic
+Accept/Resume cannot advance a finished Plan. The worker privately reads the exact
+approved artifact, binds it read-only into the child and delivers revision feedback
+as an instruction. No browser prompt replaces the stored plan.
+
+After an approved implementation stops and its workspace is reconciled,
+`work_publication.py` claims a durable publication record using the existing
+reconciler role. `PublicationWorkerFactory` injects snapshot, Git, check and GitHub
+providers. It imports the verified workspace into a separate private clone,
+merges current main, runs fixed `make ci`, `make ui-qa` and the full backend test
+suite in a credential-free verification scope with its own network namespace
+(local test fixtures only), then opens a **draft PR to main**
+from a generated `forge/task-<publication-id>` branch. The native agent never gets
+GitHub/DB credentials or permission to commit, push, deploy or merge. The publisher
+never modifies the accepted workspace, pushes main, force-pushes or merges a PR.
+The Agents detail reader polls publication and displays its validated PR link.
+
+The optional service template is `forge-publication-worker.service`. Its trusted
+`FORGE_PUBLICATION_CONFIG` file contains `worker_config` (absolute existing worker
+config path), `repositories` (approved project alias to `owner/repo`), and
+`github_config_dir` (the worker account's existing `.config/gh`). The service has
+no new credential and does not invoke a model. Install its matching source and
+unit from the verified immutable release; enable it only after schema14 and the
+coordinated policy4 rollout. Publication failures preserve branch/head receipts
+for review; uncertain remote writes are reconciled by reads and never blindly
+replayed. Accept is blocked until publication has a terminal result.
 
 ### Database roles, WorkerDB, and UsageStore
 
@@ -429,3 +475,77 @@ Verified live progress release: `20261119T225400Z-aa2eb1a-agents-dashboard`
 attempt was allowed to finish before activation. No historical task acquired a
 retroactive plan or automatic replay. Configuration and credentials were
 preserved, and the staged/live portal checks passed.
+
+### Antigravity session efficiency and accounting (policy3)
+
+This implementation is source support, not a claim that policy3 is live. Apply
+and verify migration13, install the new runtime modules in both release packages,
+and explicitly select `resource_profile: "forge-coding-v3"` in admission profiles
+alongside a matching worker before submitting new work. Existing policy2 jobs
+retain their pinned policy and require their matching worker or explicit reviewed
+resume; upgrading never automatically replays a task. No browser ABI change or
+new credential is required.
+
+Installed `agy 1.5.12 --help` was checked without generation or account calls.
+`CommandRunnerProvider` uses these fixed headless arguments:
+
+```text
+agy --settings /run/forge-coding-attempt/settings.json
+    --mode plan|accept-edits --model <configured model>
+    --input-format stream-json --output-format stream-json
+    --print-timeout 1800s --disable-slash-commands
+    [--conversation <verified conversation UUID>]
+```
+
+The assignment is one JSON `user` event on stdin, followed by EOF. It is never a
+shell argument or a `-p` prompt. `--resume` is not a supported flag. Never use
+global `--continue`: every isolated child mounts its workspace at the same path,
+so agy's latest-workspace cache could otherwise select another task's context.
+
+`CodingWorkerFactory` injects the selected `AntigravitySessionProvider` into the
+normal runner. A fresh submission always starts fresh. An explicit `ide.work.resume`
+can reuse a conversation only after the existing database reconciliation receipt
+and workspace lock admit it and the parent-private record matches task, project,
+workspace/base revision, profile/model/recipe, local account and pinned binary.
+The claimed lease also identifies the receipt's immediately preceding attempt;
+an older worker's hint cannot match just because workspace bytes stayed unchanged.
+Changed/missing hints start fresh; malformed hints fail closed before execution.
+The parent removes the old hint before starting a child, then remembers only a
+coherent, confirmed-stopped successful result. Interrupted, failed and uncertain
+runs cannot leave an older hint eligible. Records live in private
+`state_root/sessions`, outside the child's native/attempt mounts, with no prompts,
+credentials or account endpoint data. Reusing context permits native caching but
+does not guarantee a cache hit or quota reduction.
+
+Only the validated terminal `result.usage` contributes token accounting. AGY's
+`cache_read_tokens` and compatibility alias `cached_tokens` map to the single
+Forge `cached_input_tokens` field; conflicting aliases leave that metric unknown.
+Cached-only telemetry is partial, including exact zero and wide integer values.
+The provider's explicit `total_tokens` is authoritative: cache/thinking metrics
+are not added, and cached reads are not subtracted from input as if they were a
+Codex input subset. Counters remain exact decimal strings in saved job records.
+
+The official streaming contract makes result counters cumulative within a
+process, but does not establish their baseline across separate processes resumed
+with `--conversation`. Such attempts are therefore recorded with
+`unverified_baseline` and unknown counters; prior totals are never counted again
+or guessed by subtraction. A coherent reply remains reviewable even when usage
+is unavailable. Allowance remains `unsupported_headless` / **Not reported**; no
+consumer OAuth polling, model-based quota probes or credit fallback is added.
+
+Each attempt retains the 1,800-second CLI/systemd wall bound, independent
+nonblocking stdout/stderr reads and output limits. Systemd explicitly uses
+`KillSignal=SIGTERM`, `FinalKillSignal=SIGKILL`, `SendSIGKILL=yes` and
+`KillMode=control-group`. `work_process.terminate_and_reap` separately stops and
+reaps the local launcher group with bounded TERM/KILL waits, including exceptional
+paths. Both launcher cleanup and the independent cgroup stop proof are required
+before a successful result; an already-cancelled task launches no CLI.
+
+Primary contracts: [Headless CLI](https://antigravity.google/docs/cli/headless)
+and [session resumption](https://antigravity.google/docs/cli/commands/resume).
+Tests use owned fake Python children and disposable PostgreSQL16, with no model
+turns or production database changes:
+
+```sh
+python3 -B -m unittest discover -s deploy/mission-control/agent-runner -p 'test*.py' -v
+```

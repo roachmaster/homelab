@@ -13,7 +13,7 @@ from test_work_executor import raw_config
 from test_work_worker import FakeWorkspaces
 from usage_collector import UsageCollector
 from usage_store import UsageStore
-from work_api import WorkGet, WorkResult, WorkServiceFactory
+from work_api import WorkGet, WorkResult, WorkResume, WorkServiceFactory
 from work_executor import CliOutcome
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE
 from work_worker import CodingWorkerFactory
@@ -167,6 +167,55 @@ class AgentsRuntimeIntegrationTest(unittest.TestCase):
         with closing(self.cluster.connect("postgres")) as connection, connection.cursor() as cursor:
             cursor.execute("SELECT status, generation, configuration_epoch FROM forge_agent.coding_usage_refresh_requests WHERE refresh_id = %s", (requested["refresh_id"],))
             self.assertEqual(cursor.fetchone(), ("completed", 1, 1))
+
+    def test_agy_cache_and_resumed_provenance_reach_real_job_rollup_without_replay(self):
+        from usage_types import normalize_attempt_usage
+
+        worker = self.make_worker()
+        worker.usage_normalizer = normalize_attempt_usage
+        raw_usage = {"input_tokens": 100, "output_tokens": 20, "cached_tokens": 80, "total_tokens": 120}
+        self.runner.run.side_effect = lambda lease, workspace, stop, **kwargs: CliOutcome(
+            "awaiting_review", "Fixture result", str(uuid4()), raw_usage,
+            "Fixture ready", make_stop_proof(lease["unit_name"]), fresh_session=True,
+        )
+        submitted = self.service.submit(make_submit(agent_profile="agy-v2", idempotency_key="agy-cache", mode="review"))
+        lease = self.db.claim(worker.config.worker_id, worker.incarnation, ["agy-v2"])
+        with patch.object(self.db, "publish", wraps=self.db.publish) as publication:
+            worker.process(lease)
+            args = publication.call_args.args
+        # Replay is the identical database receipt, never another invocation.
+        self.db.publish(*args)
+        usage = UsageStore(self.config, lambda: self.connect("forge_agent"))
+        jobs = usage.overview("homelab", ("agy-v2",))["providers"][0]["jobs"]
+        self.assertEqual((jobs["input_tokens"], jobs["output_tokens"], jobs["cached_input_tokens"],
+                          jobs["total_tokens"]), ("100", "20", "80", "120"))
+        self.assertEqual((jobs["known_attempts"], jobs["unknown_attempts"]), (1, 0))
+
+        opened = self.service.get(WorkGet("homelab", UUID(submitted["task_id"])))
+        self.service.resume(WorkResume("homelab", UUID(submitted["task_id"]), opened["revision"],
+                                       "agy-resume", "agy-v2", UUID(opened["reconciliation_receipt_id"]),
+                                       "Explicit reviewed continuation"))
+        self.runner.run.side_effect = lambda lease, workspace, stop, **kwargs: CliOutcome(
+            "awaiting_review", "Continued fixture result", str(uuid4()),
+            {"input_tokens": 2000, "output_tokens": 200, "cache_read_tokens": 1800, "total_tokens": 2200},
+            "Fixture continued", make_stop_proof(lease["unit_name"]), fresh_session=False,
+        )
+        continued = self.db.claim(worker.config.worker_id, worker.incarnation, ["agy-v2"])
+        worker.process(continued)
+        jobs = usage.overview("homelab", ("agy-v2",))["providers"][0]["jobs"]
+        self.assertEqual((jobs["known_attempts"], jobs["unknown_attempts"]), (1, 1))
+        self.assertEqual((jobs["total_tokens"], jobs["cached_input_tokens"]), ("120", "80"))
+
+        # A known cached-only metric remains useful partial accounting.
+        self.runner.run.side_effect = lambda lease, workspace, stop, **kwargs: CliOutcome(
+            "awaiting_review", "Cached-only fixture", str(uuid4()), {"cached_tokens": 7},
+            "Fixture cache", make_stop_proof(lease["unit_name"]), fresh_session=True,
+        )
+        self.service.submit(make_submit(agent_profile="agy-v2", idempotency_key="agy-cache-only"))
+        worker.process(self.db.claim(worker.config.worker_id, worker.incarnation, ["agy-v2"]))
+        jobs = usage.overview("homelab", ("agy-v2",))["providers"][0]["jobs"]
+        self.assertEqual((jobs["known_attempts"], jobs["unknown_attempts"]), (2, 1))
+        self.assertEqual((jobs["total_tokens"], jobs["cached_input_tokens"]), ("120", "87"))
 
 
 if __name__ == "__main__":

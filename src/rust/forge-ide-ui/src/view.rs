@@ -1,5 +1,5 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{ChatRole, DiffLine, RequestToken, SourceSpan};
+use crate::protocol::{ChatRole, DiffLine, RequestToken, SourceSpan, WorkPlanDecision};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -305,6 +305,13 @@ pub struct CorrespondenceRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    DecideAgentPlan {
+        task_id: String,
+        expected_revision: u64,
+        plan_attempt_id: String,
+        plan_sha256: String,
+        decision: WorkPlanDecision,
+    },
     RefreshAgentProfile {
         agent_profile: String,
         project_alias: String,

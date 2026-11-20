@@ -51,6 +51,8 @@ BEGIN
           ('coding_tasks',                    ARRAY['SELECT', 'INSERT', 'UPDATE']),
           ('coding_events',                   ARRAY['SELECT', 'INSERT']),
           ('coding_control_receipts',         ARRAY['SELECT', 'INSERT']),
+          ('coding_plan_decisions',           ARRAY['SELECT', 'INSERT']),
+          ('coding_publications',             ARRAY['SELECT']),
           ('coding_worker_grants',            ARRAY[]::text[]),
           ('coding_worker_readiness',         ARRAY['SELECT']),
           ('coding_attempts',                 ARRAY['SELECT']),

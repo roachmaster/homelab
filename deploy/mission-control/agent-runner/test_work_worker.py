@@ -46,13 +46,15 @@ class FakeRunner:
     def __init__(self, events, action=None):
         self.events, self.action = events, action
         self.callbacks = []
+        self.plan_contexts = []
 
     def prepare(self):
         self.events.append("runner-prepare")
 
-    def run(self, lease, workspace, stop, *, report_progress=None):
+    def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None):
         self.events.append("runner")
         self.callbacks.append(report_progress)
+        self.plan_contexts.append(plan_context)
         if report_progress is not None:
             report_progress(1, "plan", "Fixture public plan.")
         if self.action:
@@ -216,6 +218,48 @@ class WorkerLifecycleTest(unittest.TestCase):
             self.assertIs(worker.supervisor, supervisor)
             self.assertEqual(events, ["workspace-prepare", "runner-prepare"])
             self.assertIsNone(default_collector_factory(config, store))
+
+    def test_default_runner_uses_selected_session_provider_without_starting_a_cli(self):
+        with TemporaryDirectory(prefix="forge-session-factory-") as root:
+            config = parse_config(raw_config(root))
+            selected = Mock()
+            sessions = Mock()
+            selected.return_value = sessions
+            factory = CodingWorkerFactory(
+                config, lambda config: FakeStore([]), session_factory=selected,
+                workspace_factory=lambda config: FakeWorkspaces([]),
+                supervisor_factory=lambda config: Mock(),
+            )
+            selected.assert_not_called()
+            with patch("subprocess.Popen", side_effect=AssertionError("Factory must not start agent")):
+                worker = factory.create()
+            selected.assert_called_once_with(factory.config)
+            self.assertIs(worker.runner.sessions, sessions)
+            sessions.prepare.assert_called_once_with()
+
+            # An explicit runner replacement must never construct the default's
+            # unused session provider or acquire its resources.
+            selected.reset_mock()
+            replacement = FakeRunner([])
+            replaced = CodingWorkerFactory(
+                config, lambda config: FakeStore([]), session_factory=selected,
+                runner_factory=lambda config, supervisor: replacement,
+                workspace_factory=lambda config: FakeWorkspaces([]),
+                supervisor_factory=lambda config: Mock(),
+            ).create()
+            self.assertIs(replaced.runner, replacement)
+            selected.assert_not_called()
+
+            raw = raw_config(root)
+            del raw["profiles"]["agy"]
+            del raw["binaries"]["antigravity"]
+            codex_only = CodingWorkerFactory(
+                parse_config(raw), lambda config: FakeStore([]), session_factory=selected,
+                workspace_factory=lambda config: FakeWorkspaces([]),
+                supervisor_factory=lambda config: Mock(),
+            ).create()
+            self.assertIsNone(codex_only.runner.sessions)
+            selected.assert_not_called()
 
     def test_full_result_is_chunked_before_one_explicit_review_publication(self):
         with TemporaryDirectory(prefix="forge-worker-flow-") as root:

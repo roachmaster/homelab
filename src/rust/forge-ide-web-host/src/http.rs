@@ -426,7 +426,7 @@ fn route(host: &Host, r: Request, stop: &AtomicBool, deadline: Instant) -> Respo
     if !r.body.is_empty() {
         return Response::error(400, "unexpected_body");
     }
-    if matches!(r.path.as_str(), "/agents" | "/agents/") {
+    if matches!(r.path.as_str(), "/agents" | "/agents/" | "/mail" | "/mail/") {
         if !matches!(r.method.as_str(), "GET" | "HEAD") {
             let mut response = Response::error(405, "method_not_allowed");
             response.allow = Some("GET, HEAD");

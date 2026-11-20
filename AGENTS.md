@@ -43,3 +43,11 @@ worktree.
 The record coordinates existing authorization; it does not grant new publication,
 deployment or paid-credit authority. The coordinator currently manages agent
 switching; no automatic quota controller is configured.
+
+
+## Current portal views
+
+The active portal navigation is Chat, Agents, Workbench, Home and Design. Mail
+was replaced by Agents; preserve its PostgreSQL history and inert legacy local
+draft hints. Reintroduce a Mail UI only when explicitly requested. Current UI
+changes belong in typed Rust/YAML declarations and verified generated assets.

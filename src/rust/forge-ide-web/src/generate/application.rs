@@ -9,7 +9,7 @@ use crate::component;
 pub fn ide_document() -> Document {
     Document {
         title: "Forge IDE".into(),
-        subtitle: "Chat and source workbench".into(),
+        subtitle: "Chat, Agents and source workbench".into(),
         children: vec![
             component!(brand_link "forge-home", "Forge IDE", Home),
             component!(header_actions "ide-header-actions"; [
@@ -31,7 +31,7 @@ pub fn ide_document() -> Document {
             ]),
             component!(navigation "ide-navigation", "Forge IDE views"; [
                 component!(button "open-chat", "Chat", "open_chat"),
-                component!(button "open-mail", "Mail", "open_mail"),
+                component!(button "open-agents", "Agents", "open_agents"),
                 component!(button "open-workbench", "Workbench", "open_workbench"),
                 component!(navigation_link "open-home", "Home", Home),
                 component!(navigation_link "open-design", "Design", Design),
@@ -98,61 +98,6 @@ pub fn ide_document() -> Document {
                     ]),
                 ]),
             ]),
-            component!(screen "mail", "Mail", true; [
-                component!(reading_column [
-                    component!(region "mail-toolbar"; [
-                        component!(toolbar [
-                            component!(navigation "mail-folders", "Mail folders"; [
-                                component!(button "mail-inbox", "Inbox", "mail_inbox"),
-                                component!(button "mail-archive", "Archive", "mail_archive"),
-                            ]),
-                            component!(primary_icon "mail-back", "Back to threads", "mail_back", '←'),
-                            component!(primary_icon "mail-refresh", "Refresh Mail", "mail_refresh", '↻'),
-                            component!(primary_icon "mail-archive-thread", "Archive thread", "mail_archive_thread", '⬇'),
-                        ]),
-                    ]),
-                    component!(status "mail-status", ""),
-                    component!(reader_layout [
-                        component!(region "mail-list-panel"; [
-                            component!(stacked_tree "mail-threads", "Mail threads"),
-                        ]),
-                        component!(region "mail-detail-panel"; [
-                            component!(region "mail-reader"; [
-                                component!(heading "mail-title", "Thread"),
-                                component!(status "mail-thread-status", ""),
-                                component!(caption "mail-run-failure", ""),
-                                component!(text "mail-archive-reason", "Recall limit reached. There is too little room for another exchange in this thread."),
-                                component!(transcript "mail-transcript", "Mail messages", "You", "Forge",
-                                    "Send a message to start this conversation."),
-                                component!(caption "mail-context", ""),
-                                component!(region "mail-reply-bar"; [
-                                    component!(toggle_panel "mail-follow-up", "Reply to thread…", "mail_follow_up", "mail-composer"),
-                                    component!(uuid_button "mail-retry", "Retry saved message", "retry_mail", "mail-draft", "idempotency_key"),
-                                ]),
-                            ]),
-                            component!(region "mail-composer"; [
-                                component!(region "mail-subject-panel"; [
-                                    component!(heading "mail-compose-title", "New message"),
-                                    component!(caption "mail-recipient", "To · GPT-OSS 120B"),
-                                    component!(text_field "mail-subject", "Subject", "set_mail_subject"),
-                                ]),
-                                component!(textarea "mail-draft", "Message", "set_mail_draft", "Write your message…"),
-                                component!(row [
-                                    component!(uuid_button "mail-send", "Send", "send_mail", "mail-draft", "idempotency_key"),
-                                    component!(button "mail-discard", "Discard draft", "mail_discard_draft"),
-                                ]),
-                            ]),
-                        ]),
-                    ]),
-                    component!(region "mail-page-actions"; [
-                        component!(row [
-                            component!(button "mail-previous", "Previous page", "mail_previous"),
-                            component!(button "mail-next", "Next page", "mail_next"),
-                        ]),
-                    ]),
-                    component!(toggle_panel "mail-new", "Compose", "mail_new_message", "mail-composer"),
-                ]),
-            ]),
             component!(screen "agents", "Agents", true; [
                 component!(reading_column [
                     component!(toolbar [
@@ -199,6 +144,7 @@ pub fn ide_document() -> Document {
                     component!(region "agents-reader"; [
                         component!(heading "agents-task-title", "Task"),
                         component!(status "agents-task-status", ""),
+                        component!(caption "agents-task-mode", ""),
                         component!(caption "agents-attempt", ""),
                         component!(row [
                             component!(uuid_action "agents-cancel", "Cancel task", "cancel_agent_task", "idempotency_key"),
@@ -224,8 +170,23 @@ pub fn ide_document() -> Document {
                                 component!(button "agents-result-next", "Next result page", "next_agent_result"),
                             ]),
                         ]),
+                        component!(region "agents-publication"; [
+                            component!(status "agents-publication-status", ""),
+                            component!(text "agents-publication-summary", ""),
+                            component!(caption "agents-publication-reference", ""),
+                            component!(transcript "agents-publication-link", "Pull request", "You", "Publication", ""),
+                        ]),
                         component!(region "agents-review"; [
                             component!(text_field "agents-review-note", "Review note", "set_agent_review_note"),
+                            component!(region "agents-plan-actions"; [
+                                component!(caption "agents-plan-decision-help", "Resume approves this saved plan for implementation. To request a revised plan, add your changes in Review note and choose Revise."),
+                                component!(row [
+                                    component!(uuid_button "agents-plan-resume", "Resume", "decide_agent_plan", "agents-review-note", "idempotency_key"),
+                                    component!(uuid_action "agents-plan-revise", "Revise", "decide_agent_plan", "idempotency_key"),
+                                    component!(uuid_action "agents-plan-cancel", "Cancel", "decide_agent_plan", "idempotency_key"),
+                                ]),
+                                component!(caption "agents-plan-unavailable", "Implementation is not enabled for this agent and project. You can revise or cancel this plan."),
+                            ]),
                             component!(text "agents-accept-help", "Acceptance records your review. It does not merge or publish code."),
                             component!(uuid_button "agents-accept", "Accept result", "accept_agent_task", "agents-review-note", "idempotency_key"),
                         ]),
@@ -532,16 +493,6 @@ pub fn ide_transport() -> Transport {
             "chat_run_models_listed",
             "chat_run_failed",
         ),
-        ("mail_list", "ide.mail.list", "mail_listed", "mail_failed"),
-        ("mail_open", "ide.mail.open", "mail_opened", "mail_failed"),
-        ("mail_send", "ide.mail.send", "mail_sent", "mail_failed"),
-        ("mail_retry", "ide.mail.retry", "mail_sent", "mail_failed"),
-        (
-            "mail_archive_thread",
-            "ide.mail.archive",
-            "mail_archived",
-            "mail_failed",
-        ),
     ] {
         let mut headers = common.clone();
         headers.push(HeaderBinding::literal("Forge-Destination", destination));
@@ -634,6 +585,13 @@ pub fn ide_transport() -> Transport {
             true,
         ),
         (
+            "work_plan_decide",
+            "ide.work.plan.decide",
+            "work_plan_decided",
+            "work_failed",
+            true,
+        ),
+        (
             "work_resume",
             "ide.work.resume",
             "work_resumed",
@@ -686,19 +644,13 @@ pub fn ide_transport() -> Transport {
         initial_event: "resume".into(),
         entry_actions: [
             ("chat".into(), "open_chat".into()),
-            ("mail".into(), "open_mail".into()),
+            ("mail".into(), "open_agents".into()),
             ("workbench".into(), "open_workbench".into()),
             ("agents".into(), "open_agents".into()),
         ]
         .into(),
         bindings,
         timers: vec![
-            TimerBinding {
-                effect_kind: "mail_watch".into(),
-                event_kind: "poll_mail".into(),
-                argument_field: "watch".into(),
-                delay_ms: 5_000,
-            },
             TimerBinding {
                 effect_kind: "agents_clock".into(),
                 event_kind: "tick_agent_time".into(),

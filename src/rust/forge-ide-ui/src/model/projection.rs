@@ -1190,16 +1190,6 @@ impl UiModel {
             review.and_then(|review| review.preview.proposal_id.as_deref()),
         );
         self.project_editor(&mut view);
-        self.mail.project(
-            &mut view,
-            connected,
-            self.catalog
-                .as_ref()
-                .is_some_and(|catalog| catalog.mail_enabled),
-            self.catalog
-                .as_ref()
-                .is_some_and(|catalog| catalog.mail_archive_enabled),
-        );
         self.agents.project(
             &mut view,
             connected,

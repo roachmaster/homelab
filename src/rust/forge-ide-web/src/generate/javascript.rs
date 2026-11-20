@@ -982,7 +982,8 @@ async function flushNavigation(id){
       snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),...(agentsNavigation?{agents:agentsNavigation}:{})});
     if(encoder.encode(local).length<=NAVIGATION_CACHE_MAX)cache=local;
   }
-  postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!(mailNavigation||agentsNavigation)||cache!==null),requires_cache:Boolean(mailNavigation||agentsNavigation),cache});
+  const requiresCache=Boolean(mailNavigation?.active||agentsNavigation);
+  postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!requiresCache||cache!==null),requires_cache:requiresCache,cache});
 }
 function localNavigationCheckpoint(snapshot){
   if(!agentsNavigation||!workspaceEpoch||!workspaceTab)return null;
@@ -1117,7 +1118,7 @@ async function run(effect,localCheckpoint=null){
       const cache=navigationCache;
       navigationCache=null;
       const matchesCache=cache?.version===1&&cache.tab===workspaceTab&&workspaceEpoch&&cache.epoch===workspaceEpoch;
-      if(matchesCache&&decoded.event.catalog?.mail_enabled===true)savedMail=cache.mail??null;
+      if(matchesCache)savedMail=cache.mail??null;
       if(matchesCache&&(decoded.event.catalog?.work_enabled===true||decoded.event.catalog?.usage_enabled===true))savedAgents=cache.agents??null;
       if(restore.unavailable&&matchesCache){
         saved=navigationSnapshot(cache.snapshot);

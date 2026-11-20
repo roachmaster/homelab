@@ -5,11 +5,12 @@ Assignments are stdin data. No function here connects to the application databas
 """
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import fcntl
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -19,7 +20,9 @@ import time
 from uuid import UUID
 
 from work_policy import POLICY
+from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
+from work_sessions import SessionError, SessionSelection
 from work_worker_config import WorkerConfig, verify_recipe
 
 UNIT_RE = re.compile(r"forge-coding-[0-9a-f]{32}")
@@ -30,6 +33,7 @@ CHILD_WORKSPACE = Path("/run/forge-coding-workspace")
 CHILD_STATE = Path("/run/forge-coding-attempt")
 MAX_FILES = 20_000
 MAX_WORKSPACE_BYTES = 256 * 1024 * 1024
+LOG = logging.getLogger("forge-coding-worker")
 
 
 def utc_now():
@@ -224,6 +228,8 @@ class Invocation:
     scratch: Path
     workspace: WorkspaceLease
     implement: bool
+    session: SessionSelection | None = None
+    plan_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -234,6 +240,7 @@ class CliOutcome:
     usage: dict | None
     summary: str
     stop_proof: dict
+    fresh_session: bool = True
 
 
 def _json_object(pairs):
@@ -259,7 +266,7 @@ def _provider_error(message):
 class CliParser:
     """Incremental bounded machine-event parser, retaining no tool arguments/thoughts."""
 
-    def __init__(self, backend):
+    def __init__(self, backend, *, expected_conversation_id=None):
         if backend not in {"antigravity", "codex"}:
             raise ValueError("Invalid CLI backend")
         self.backend = backend
@@ -272,6 +279,8 @@ class CliParser:
         self.failure = None
         self.denied = False
         self.stderr_tail = bytearray()
+        if expected_conversation_id is not None:
+            self._session(expected_conversation_id)
 
     def feed(self, data, *, stderr=False):
         self.stream_bytes += len(data)
@@ -314,6 +323,9 @@ class CliParser:
         self.conversation_id = value
 
     def _antigravity(self, event):
+        if event.get("event") == "init":
+            self._session(event.get("conversation_id"))
+            return
         if event.get("event") == "step_update":
             update = event.get("step_update")
             if isinstance(update, dict) and update.get("conversation_id") is not None:
@@ -422,7 +434,11 @@ class SystemdSupervisor:
         if not UNIT_RE.fullmatch(unit) or unit != unit_name(lease["attempt_id"]):
             raise ExecutionError("failed", "Invalid attempt supervision identity.")
         account = self.config.account
-        native_state = account.home / (".gemini" if invocation.backend == "antigravity" else ".codex")
+        if invocation.backend not in {"antigravity", "codex", "verification"}:
+            raise ExecutionError("failed", "The selected process scope is unavailable.")
+        verification = invocation.backend == "verification"
+        native_state = (None if verification else account.home /
+                        (".gemini" if invocation.backend == "antigravity" else ".codex"))
         binary = Path(invocation.argv[0])
         readonly = [invocation.workspace.repository, binary]
         for ancestor in (account.home / "repos/AGENTS.md", account.home / "repos/mission-control/AGENTS.md"):
@@ -436,11 +452,22 @@ class SystemdSupervisor:
                      self.config.usage.hmac_key_file if self.config.usage else None):
             if path is not None:
                 hidden.append(path)
-        bindings = [str(native_state), str(invocation.scratch) + ":" + str(CHILD_STATE)]
+        bindings = [str(invocation.scratch) + ":" + str(CHILD_STATE)]
+        if native_state is not None:
+            bindings.append(str(native_state))
         readonly_bindings = [str(path) for path in readonly]
+        if invocation.plan_file is not None:
+            if (invocation.plan_file.parent != invocation.scratch
+                    or invocation.plan_file.name not in {"approved-plan.md", "previous-plan.md"}
+                    or invocation.plan_file.is_symlink() or not invocation.plan_file.is_file()):
+                raise ExecutionError("failed", "The saved plan artifact is unavailable.")
+            readonly_bindings.append(str(invocation.plan_file) + ":" + str(CHILD_STATE / invocation.plan_file.name))
         if invocation.implement:
-            bindings.extend([str(invocation.cwd) + ":" + str(CHILD_WORKSPACE),
-                             str(invocation.workspace.git_directory)])
+            bindings.append(str(invocation.cwd) + ":" + str(CHILD_WORKSPACE))
+            if verification:
+                readonly_bindings.append(str(invocation.workspace.git_directory) + ":" + str(CHILD_WORKSPACE / ".git"))
+            else:
+                bindings.append(str(invocation.workspace.git_directory))
         else:
             readonly_bindings.append(str(invocation.cwd) + ":" + str(CHILD_WORKSPACE))
         toolchains = account.home / ".rustup/toolchains"
@@ -450,8 +477,22 @@ class SystemdSupervisor:
             readonly_bindings.append(str(toolchains))
         if registry.is_dir():
             readonly_bindings.append(str(registry) + ":" + str(CHILD_STATE / "cargo-home/registry"))
+        if verification:
+            browser = Path("src/rust/forge-ide-web/tests/browser")
+            dependencies = invocation.workspace.repository / browser / "node_modules"
+            if dependencies.is_dir():
+                target = invocation.cwd / browser / "node_modules"
+                lock = invocation.cwd / browser / "package-lock.json"
+                source_lock = invocation.workspace.repository / browser / "package-lock.json"
+                if (target.is_symlink() or not target.is_dir()
+                        or not target.resolve().is_relative_to(invocation.cwd.resolve())
+                        or not lock.is_file() or lock.read_bytes() != source_lock.read_bytes()):
+                    raise ExecutionError("failed", "Verification browser dependencies do not match the committed lockfile.")
+                readonly_bindings.append(str(dependencies) + ":" + str(CHILD_WORKSPACE / browser / "node_modules"))
         properties = [
-            "Type=exec", "KillMode=control-group", "TimeoutStopSec=10", "RuntimeMaxSec=1800",
+            "Type=exec", "KillMode=control-group", "KillSignal=SIGTERM",
+            "FinalKillSignal=SIGKILL", "SendSIGKILL=yes", "TimeoutStopSec=10",
+            "RuntimeMaxSec=" + str(POLICY["max_wall_seconds"]),
             # Only the fixed system unshare/setpriv launcher executes before the
             # UID/capability drop. The actual CLI has NNP=1 and zero capabilities.
             "NoNewPrivileges=no", "PrivateTmp=yes", "PrivateDevices=yes", "ProtectSystem=strict",
@@ -461,18 +502,30 @@ class SystemdSupervisor:
             "BindPaths=" + " ".join(bindings),
             "InaccessiblePaths=" + " ".join("-" + str(path) for path in dict.fromkeys(hidden)),
         ]
+        if verification:
+            # Repository checks are untrusted code. Their loopback fixtures
+            # share this private namespace; the host's trusted-proxy gateway,
+            # runner API and all external account endpoints remain unreachable.
+            properties.append("PrivateNetwork=yes")
         writable = [CHILD_STATE]
         if invocation.implement:
-            writable.extend([CHILD_WORKSPACE, invocation.workspace.git_directory])
+            writable.append(CHILD_WORKSPACE)
+            if not verification:
+                writable.append(invocation.workspace.git_directory)
         properties.append("ReadWritePaths=" + " ".join(map(str, writable)))
-        immutable_native = [native_state / "config.toml", native_state / "rules", native_state / "plugins",
-                            native_state / "packages", native_state / "antigravity-cli/settings.json",
-                            native_state / "antigravity-cli/forge-settings.json"]
+        immutable_native = ([native_state / "config.toml", native_state / "rules", native_state / "plugins",
+                             native_state / "packages", native_state / "antigravity-cli/settings.json",
+                             native_state / "antigravity-cli/forge-settings.json"] if native_state is not None else [])
+        if verification:
+            immutable_native.append(CHILD_WORKSPACE / ".git")
+        if invocation.plan_file is not None:
+            immutable_native.append(CHILD_STATE / invocation.plan_file.name)
         if not invocation.implement:
             immutable_native.append(CHILD_WORKSPACE)
         properties.append("ReadOnlyPaths=" + " ".join("-" + str(path) for path in immutable_native))
         environment = {
-            "HOME": str(account.home), "USER": account.user, "LOGNAME": account.user,
+            "HOME": str(CHILD_STATE / "home") if verification else str(account.home),
+            "USER": account.user, "LOGNAME": account.user,
             "PATH": ":".join([*(str(path) for path in stable_tools), "/usr/local/bin", "/usr/bin", "/bin"]),
             "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
             "TMPDIR": str(CHILD_STATE / "tmp"),
@@ -502,7 +555,7 @@ class SystemdSupervisor:
                 "/usr/bin/systemctl", "show", unit + ".service",
                 "--property=LoadState,ActiveState,SubState,MainPID,ControlGroup"),
                 capture_output=True, timeout=10, check=False)
-            if result.returncode == 0:
+            if result.returncode in (0, 4):
                 fields = dict(line.split("=", 1) for line in result.stdout.decode().splitlines() if "=" in line)
                 expected_group = "/system.slice/" + unit + ".service"
                 group = fields.get("ControlGroup") or expected_group
@@ -533,25 +586,33 @@ class SystemdSupervisor:
 class CommandRunnerProvider:
     """Selected factory that creates a fresh adapter/process scope per attempt."""
 
-    def __init__(self, config, supervisor, *, popen=subprocess.Popen, clock=time.monotonic):
+    def __init__(self, config, supervisor, *, sessions=None, popen=subprocess.Popen, clock=time.monotonic):
         self.config, self.supervisor, self.popen, self.clock = config, supervisor, popen, clock
+        self.sessions = sessions
         self._binary_hashes = {}
 
     def prepare(self):
         (self.config.state_root / "attempts").mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.sessions is not None:
+            self.sessions.prepare()
         for backend, path in self.config.binaries.items():
             actual = path.resolve(strict=True)
             if not actual.is_file() or not os.access(actual, os.X_OK):
                 raise ValueError("Configured coding program is not executable")
             self._binary_hashes[backend] = (actual, hashlib.sha256(actual.read_bytes()).digest())
 
-    def invocation(self, lease, workspace, *, progress=False):
+    def invocation(self, lease, workspace, *, progress=False, plan_context=None):
         if not verify_recipe(self.config, lease):
             raise ExecutionError("failed", "Assignment execution policy is unavailable or changed.")
         backend = lease["recipe"]["backend"]
         actual, pinned_hash = self._binary_hashes[backend]
         if hashlib.sha256(actual.read_bytes()).digest() != pinned_hash:
             raise ExecutionError("failed", "Configured coding program changed after worker startup.")
+        try:
+            session = (self.sessions.select(lease, workspace, pinned_hash.hex())
+                       if backend == "antigravity" and self.sessions is not None else None)
+        except (OSError, SessionError):
+            raise ExecutionError("needs_reconcile", "Antigravity continuation metadata is unavailable; review is required.") from None
         attempt = _uuid(lease["attempt_id"])
         scratch = self.config.state_root / "attempts" / attempt
         scratch.mkdir(mode=0o700, exist_ok=True)
@@ -582,6 +643,38 @@ class CommandRunnerProvider:
                        "Plan/review mode may invoke this helper through the allowed command tool; "
                        "keep the repository read-only. Do not edit or replace report files or the helper.")
         implement = lease["mode"] == "implement"
+        plan_file = None
+        if lease.get("plan_decision_id") is not None:
+            if not isinstance(plan_context, dict) or plan_context.get("decision_id") != lease["plan_decision_id"]:
+                raise ExecutionError("failed", "The persisted plan decision is unavailable.")
+            decision = plan_context.get("decision")
+            text, note = plan_context.get("text"), plan_context.get("note")
+            try:
+                encoded = text.encode("utf-8") if isinstance(text, str) else b""
+                valid = (decision in {"resume", "revise"} and isinstance(note, str)
+                         and len(note.encode("utf-8")) <= 2048
+                         and bool(encoded) and len(encoded) <= POLICY["max_result_bytes"]
+                         and (decision != "revise" or bool(note.strip()))
+                         and hashlib.sha256(encoded).hexdigest() == plan_context.get("plan_sha256")
+                         and (decision == "resume") == implement)
+                _uuid(plan_context.get("plan_attempt_id"))
+            except (UnicodeError, ValueError, TypeError, AttributeError):
+                valid = False
+            if not valid:
+                raise ExecutionError("failed", "The saved plan does not match the admitted decision.")
+            plan_file = scratch / ("approved-plan.md" if implement else "previous-plan.md")
+            try:
+                descriptor = os.open(plan_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(encoded)
+            except OSError:
+                raise ExecutionError("needs_reconcile", "The saved plan artifact could not be prepared safely.") from None
+            instruction = ("Implement the approved plan and verify the changes in the current task workspace. "
+                           if implement else
+                           "Revise the previous plan using the feedback, return a complete updated plan, and wait for a new decision. Do not implement code changes. ")
+            prompt += ("\n\nEXPLICIT PLAN DECISION: " + decision.upper() + ". " + instruction
+                       + "The original assignment above is retained context. Read the exact saved plan at "
+                       + str(CHILD_STATE / plan_file.name) + ".\nREVIEW FEEDBACK:\n" + note)
         if backend == "antigravity":
             prompt += ("\n\nAgent tools: filesystem tools, shell commands, and read-only URL reads "
                        "are provisioned within the approved coding scope. MCP and browser "
@@ -608,7 +701,9 @@ class CommandRunnerProvider:
             settings.chmod(0o600)
             argv = (str(actual), "--settings", str(CHILD_STATE / "settings.json"), "--mode", "accept-edits" if implement else "plan",
                     "--model", lease["recipe"]["model"], "--input-format", "stream-json", "--output-format",
-                    "stream-json", "--print-timeout", "1800s", "--disable-slash-commands")
+                    "stream-json", "--print-timeout", str(POLICY["max_wall_seconds"]) + "s", "--disable-slash-commands")
+            if session is not None and session.conversation_id is not None:
+                argv += ("--conversation", session.conversation_id)
             payload = json.dumps({"event": "user", "message": {"content": prompt}},
                                  ensure_ascii=False).encode("utf-8") + b"\n"
         else:
@@ -617,16 +712,49 @@ class CommandRunnerProvider:
                     "workspace-write" if implement else "read-only", "--model", lease["recipe"]["model"],
                     "--json", "--color", "never", "--ephemeral", "-")
             payload = prompt.encode("utf-8")
-        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement)
+        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file)
 
-    def run(self, lease, workspace, stop, *, report_progress=None):
-        invocation = self.invocation(lease, workspace, progress=report_progress is not None)
-        parser = CliParser(invocation.backend)
+    def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None):
+        invocation = self.invocation(lease, workspace, progress=report_progress is not None, plan_context=plan_context)
+        conversation = invocation.session.conversation_id if invocation.session is not None else None
+        parser = CliParser(invocation.backend, expected_conversation_id=conversation)
         progress = ProgressReader(invocation.scratch / "progress", report_progress) if report_progress is not None else None
         process = None
         errors = []
         interrupted = False
+        scope_settled = False
+
+        def settled(outcome):
+            nonlocal scope_settled
+            scope_settled = True
+            # systemd owns the model's cgroup; this is the separate local
+            # systemd-run launcher. Both lifetimes must be confirmed stopped.
+            if not terminate_and_reap(process) or not outcome.stop_proof.get("scope_stopped"):
+                outcome = replace(outcome, status="needs_reconcile", text="",
+                                  summary="Agent or launcher stop could not be verified; review is required.")
+            if (outcome.status == "awaiting_review" and not stop.is_set()
+                    and invocation.session is not None):
+                try:
+                    self.sessions.remember(invocation.session, workspace, outcome.conversation_id)
+                except (OSError, SessionError, ExecutionError):
+                    # Losing an optional cache hint cannot discard completed
+                    # work. The old hint was removed before process startup.
+                    LOG.warning("Antigravity continuation cache unavailable")
+            # A separate process resumed with --conversation has no verified
+            # zero usage baseline. Never label its cumulative totals fresh.
+            return replace(outcome, fresh_session=conversation is None)
+
         try:
+            if stop.is_set():
+                return settled(CliOutcome("cancelled", "", None, None,
+                                          "The assignment stopped before execution.",
+                                          self.supervisor.stop(lease["unit_name"])))
+            if invocation.session is not None:
+                self.sessions.invalidate(invocation.session)
+            if stop.is_set():
+                return settled(CliOutcome("cancelled", "", None, None,
+                                          "The assignment stopped before execution.",
+                                          self.supervisor.stop(lease["unit_name"])))
             process = self.popen(self.supervisor.argv(lease, invocation), stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
                                  start_new_session=True, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
@@ -687,8 +815,9 @@ class CommandRunnerProvider:
             try:
                 returncode = process.wait(timeout=15)
             except subprocess.TimeoutExpired:
-                process.kill()
-                returncode = process.wait(timeout=5)
+                terminate_and_reap(process)
+                returncode = process.poll()
+                errors.append(ExecutionError("failed", "The approved agent launcher did not exit within its bound."))
             proof = self.supervisor.stop(lease["unit_name"])
             if progress is not None and not errors and not interrupted:
                 try:
@@ -698,24 +827,36 @@ class CommandRunnerProvider:
                 except ProgressSinkError:
                     errors.append(ExecutionError("needs_reconcile", "Agent progress persistence is uncertain; review is required."))
             if errors:
-                return CliOutcome("needs_reconcile" if not proof["scope_stopped"] else errors[0].outcome,
-                                  "", parser.conversation_id, parser.usage, errors[0].summary, proof)
+                return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else errors[0].outcome,
+                                          "", parser.conversation_id, parser.usage, errors[0].summary, proof))
             outcome = parser.finish(returncode, proof, interrupted=interrupted)
             if outcome.status == "awaiting_review" and progress is not None and not progress.accepted:
-                return CliOutcome("failed", "", parser.conversation_id, parser.usage,
-                                  "Agent returned a result without a persisted public plan; submit a new attempt that reports its plan first.", proof)
-            return outcome
-        except (OSError, subprocess.SubprocessError):
+                return settled(CliOutcome("failed", "", parser.conversation_id, parser.usage,
+                                          "Agent returned a result without a persisted public plan; submit a new attempt that reports its plan first.", proof))
+            return settled(outcome)
+        except (OSError, subprocess.SubprocessError, SessionError):
             proof = self.supervisor.stop(lease["unit_name"])
-            return CliOutcome("needs_reconcile" if not proof["scope_stopped"] else "failed", "", None, None,
-                              "The approved agent process could not be started or stopped.", proof)
+            return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else "failed", "", None, None,
+                                      "The approved agent process could not be started or stopped.", proof))
         finally:
-            if progress is not None:
-                progress.close()
-            if process is not None:
-                for stream in (process.stdin, process.stdout, process.stderr):
-                    if stream is not None:
-                        stream.close()
+            try:
+                try:
+                    if process is not None and not scope_settled:
+                        self.supervisor.stop(lease["unit_name"])
+                finally:
+                    terminate_and_reap(process)
+            finally:
+                try:
+                    if process is not None:
+                        for stream in (process.stdin, process.stdout, process.stderr):
+                            if stream is not None:
+                                try:
+                                    stream.close()
+                                except OSError:
+                                    LOG.warning("Agent pipe cleanup unavailable")
+                finally:
+                    if progress is not None:
+                        progress.close()
 
 
 def utf8_chunks(content, maximum=CHUNK_BYTES):

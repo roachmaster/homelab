@@ -52,6 +52,7 @@ def lease(config, *, backend="antigravity", mode="plan"):
         "incarnation": str(uuid4()), "lease_expires_at": "2026-11-19T19:00:00Z",
         "deadline_at": "2026-11-19T19:30:00Z", "unit_name": unit_name(attempt),
         "resume_workspace_digest": None,
+        "resume_attempt_id": None,
     }
 
 
@@ -121,7 +122,7 @@ class WorkerConfigTest(unittest.TestCase):
 
     def test_elevated_policy_is_versioned_and_refuses_previous_recipes(self):
         previous_digest = "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44"
-        self.assertEqual(POLICY_ID, "forge-coding-v2")
+        self.assertEqual(POLICY_ID, "forge-coding-v4")
         self.assertEqual(POLICY["antigravity_tool_policy"], "workspace-elevated-v1")
         self.assertNotEqual(POLICY_DIGEST, previous_digest)
         config = parse_config(raw_config("/tmp/forge-config-fixture"))
@@ -130,6 +131,8 @@ class WorkerConfigTest(unittest.TestCase):
             ("forge-coding-v1", POLICY_DIGEST),
             (POLICY_ID, previous_digest),
             ("forge-coding-v1", previous_digest),
+            ("forge-coding-v2", "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58"),
+            ("forge-coding-v3", "e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075"),
         ):
             with self.subTest(resource=resource, digest=digest):
                 previous = lease(config)
@@ -251,6 +254,9 @@ class SupervisorContractTest(unittest.TestCase):
             self.assertIn("--bounding-set=-all", command)
             self.assertIn("--reuid=1000", command)
             self.assertIn("--property=KillMode=control-group", command)
+            self.assertIn("--property=KillSignal=SIGTERM", command)
+            self.assertIn("--property=FinalKillSignal=SIGKILL", command)
+            self.assertIn("--property=SendSIGKILL=yes", command)
             masked = next(arg for arg in command if arg.startswith("--property=InaccessiblePaths="))
             self.assertIn(str(config.database.host), masked)
             self.assertIn("/run/user/1000/bus", masked)
@@ -327,6 +333,19 @@ class SupervisorContractTest(unittest.TestCase):
             self.assertFalse(supervisor.proof(unit)["scope_stopped"])
             with self.assertRaises(ValueError):
                 supervisor.stop("postgresql.service")
+
+    def test_absent_unit_stop_is_confirmed_only_with_no_remaining_cgroup(self):
+        with TemporaryDirectory(prefix="forge-absent-scope-") as root:
+            config = parse_config(raw_config(root))
+            unit = "forge-coding-" + "b" * 32
+            command = Mock(return_value=subprocess.CompletedProcess([], 4,
+                b"LoadState=not-found\nActiveState=inactive\nMainPID=0\nControlGroup=\n"))
+            supervisor = SystemdSupervisor(config, command=command, cgroup_root=Path(root) / "cgroups")
+            self.assertTrue(supervisor.proof(unit)["scope_stopped"])
+            group = Path(root) / "cgroups/system.slice" / (unit + ".service")
+            group.mkdir(parents=True)
+            (group / "cgroup.events").write_text("populated 1\n")
+            self.assertFalse(supervisor.proof(unit)["scope_stopped"])
 
 
 class WorkspaceProviderTest(unittest.TestCase):

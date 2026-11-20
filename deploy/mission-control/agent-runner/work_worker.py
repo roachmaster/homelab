@@ -1,7 +1,7 @@
 """Factory-wired native coding worker; PostgreSQL remains the queue authority."""
 
 from contextlib import nullcontext
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 import hashlib
 import logging
 import os
@@ -16,6 +16,7 @@ from work_executor import (
     WorkspaceProvider, unit_name, utf8_chunks,
 )
 from work_policy import POLICY, POLICY_DIGEST
+from work_sessions import AntigravitySessionProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
@@ -33,6 +34,9 @@ def _lease(value):
     for field in ("task_id", "attempt_id", "attempt_token"):
         if str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding lease identity")
+    for field in ("plan_decision_id", "resume_attempt_id"):
+        if result.get(field) is not None and str(UUID(str(result[field]))) != str(result[field]):
+            raise ValueError("Invalid coding continuation identity")
     if result["unit_name"] != unit_name(result["attempt_id"]):
         raise ValueError("Invalid coding lease scope")
     return result
@@ -112,7 +116,8 @@ class CodingWorker:
             if normalizer is None:
                 from usage_provider import normalize_attempt_usage
                 normalizer = normalize_attempt_usage
-            return normalizer(lease["recipe"]["backend"], outcome.usage, fresh_session=True)
+            return normalizer(lease["recipe"]["backend"], outcome.usage,
+                              fresh_session=outcome.fresh_session)
         except Exception:
             # Missing telemetry never changes a coherent coding result.
             LOG.warning("Coding usage observation unavailable")
@@ -123,8 +128,8 @@ class CodingWorker:
         if outcome.status == "awaiting_review":
             chunks = list(utf8_chunks(outcome.text))
             if len(chunks) > 1024:
-                outcome = CliOutcome("failed", "", outcome.conversation_id, outcome.usage,
-                                     "Agent response exceeded its declared chunk resource bound.", outcome.stop_proof)
+                outcome = replace(outcome, status="failed", text="",
+                                  summary="Agent response exceeded its declared chunk resource bound.")
             else:
                 encoded = outcome.text.encode("utf-8")
                 manifest = {"sha256": hashlib.sha256(encoded).hexdigest(), "byte_count": len(encoded),
@@ -243,23 +248,32 @@ class CodingWorker:
                     # scratch writes in plan mode. Codex read-only sandbox
                     # stays unchanged and retains terminal-result reporting.
                     reporter = report_progress if lease["recipe"]["backend"] == "antigravity" else None
-                    outcome = self.runner.run(lease, workspace, stop, report_progress=reporter)
+                    arguments = {"report_progress": reporter}
+                    if lease.get("plan_decision_id") is not None:
+                        try:
+                            arguments["plan_context"] = self.store.read_plan(lease)
+                        except Exception:
+                            raise ExecutionError("needs_reconcile", "The saved plan could not be verified; review is required before execution.") from None
+                    outcome = self.runner.run(lease, workspace, stop, **arguments)
                     proof = outcome.stop_proof
                 if self.stop.is_set() and not cancelled.is_set():
-                    outcome = CliOutcome("needs_reconcile", "", outcome.conversation_id, outcome.usage,
-                                         "Worker shutdown requires review before any replacement attempt.", proof)
+                    outcome = replace(outcome, status="needs_reconcile", text="", stop_proof=proof,
+                                      summary="Worker shutdown requires review before any replacement attempt.")
                 if lost.is_set():
                     self.store.record_stop(lease, proof, "Prior agent scope stopped after its lease was lost.")
                     return
                 if not proof["scope_stopped"]:
-                    outcome = CliOutcome("needs_reconcile", "", outcome.conversation_id, outcome.usage,
-                                         "Agent scope stop could not be verified.", proof)
+                    outcome = replace(outcome, status="needs_reconcile", text="", stop_proof=proof,
+                                      summary="Agent scope stop could not be verified.")
                 self._publish(lease, outcome, usage=self._normalize_usage(lease, outcome))
                 if proof["scope_stopped"]:
                     try:
-                        self.store.reconcile(lease, workspace.digest(), proof)
+                        receipt = self.store.reconcile(lease, workspace.digest(), proof)
+                        if (lease["mode"] == "implement" and lease.get("plan_decision_id") is not None
+                                and outcome.status == "awaiting_review"):
+                            self.store.queue_publication(lease, receipt)
                     except Exception:
-                        LOG.warning("Coding reconciliation receipt unavailable; takeover remains disabled")
+                        LOG.warning("Coding reconciliation or publication handoff unavailable; recovery remains fenced")
         except ExecutionError as error:
             proof = proof or self.supervisor.stop(lease["unit_name"])
             if lost.is_set():
@@ -319,13 +333,16 @@ class CodingWorkerFactory:
     """Effect-free selection; explicit create validates then acquires ready ports."""
 
     def __init__(self, config, store_factory, *, runner_factory=None, workspace_factory=None,
-                 supervisor_factory=None, collector_factory=None, clock=time.monotonic, stop=None,
+                 supervisor_factory=None, session_factory=None, collector_factory=None, clock=time.monotonic, stop=None,
                  usage_normalizer=None):
         if not isinstance(config, WorkerConfig) or not callable(store_factory):
             raise TypeError("Coding worker requires frozen configuration and a store factory")
         self.config, self.store_factory = validated_copy(config), store_factory
+        self.session_factory = session_factory if session_factory is not None else AntigravitySessionProvider
         self.runner_factory = (runner_factory if runner_factory is not None
-                               else lambda config, supervisor: CommandRunnerProvider(config, supervisor))
+                               else lambda config, supervisor: CommandRunnerProvider(
+                                   config, supervisor, sessions=self.session_factory(config)
+                                   if "antigravity" in config.binaries else None))
         self.workspace_factory = workspace_factory if workspace_factory is not None else WorkspaceProvider
         self.supervisor_factory = supervisor_factory if supervisor_factory is not None else SystemdSupervisor
         self.collector_factory, self.clock, self.stop = collector_factory, clock, stop

@@ -27,7 +27,7 @@ BEGIN
         'coding_worker_grants', 'coding_worker_readiness', 'coding_attempts',
         'coding_result_chunks', 'coding_reconciliation_receipts',
         'coding_provider_usage', 'coding_provider_usage_identities',
-        'coding_usage_refresh_requests'
+        'coding_usage_refresh_requests', 'coding_plan_decisions', 'coding_publications'
     ] LOOP
         IF pg_catalog.to_regclass('forge_agent.' || relation) IS NULL THEN
             RAISE EXCEPTION 'Missing relation forge_agent.%', relation;
@@ -116,6 +116,11 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Forge coding progress migration 0012 is missing';
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM forge_agent.schema_migrations WHERE version = 13 AND name = 'coding_task_session_policy'
+    ) THEN
+        RAISE EXCEPTION 'Forge coding task session policy migration 0013 is missing';
+    END IF;
     FOR expected IN
         SELECT * FROM (VALUES ('progress_attempt_id', 'uuid'), ('progress_sequence', 'integer')) AS columns(name, type)
     LOOP
@@ -145,16 +150,46 @@ BEGIN
           AND p.prosecdef
           AND 'search_path=pg_catalog, pg_temp' = ANY(p.proconfig)
           AND position(
-              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2')$predicate$
+              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2','forge-coding-v3','forge-coding-v4')$predicate$
               IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
           ) > 0
           AND position(
               $predicate$(t.pinned_recipe->>'policy_digest')=r.policy_digest$predicate$
               IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
           ) > 0
+          AND position(
+              $predicate$'plan_decision_id',v_task.plan_decision_id$predicate$
+              IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
+          ) > 0
+          AND position(
+              $predicate$'resume_attempt_id',CASEWHENv_resume_digestISNOTNULLTHENv_task.latest_attempt_idELSENULLEND$predicate$
+              IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
+          ) > 0
     ) THEN
-        RAISE EXCEPTION 'Missing or unexpected migration 0011 claim policy predicates';
+        RAISE EXCEPTION 'Missing or unexpected migration 0013 claim policy predicates';
     END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=14 AND name='coding_plan_workflow') THEN
+        RAISE EXCEPTION 'Forge coding Plan workflow migration 0014 is missing';
+    END IF;
+    FOR expected IN SELECT * FROM (VALUES
+        ('forge_coding_worker_api.read_plan(uuid,uuid)'),
+        ('forge_coding_worker_api.queue_publication(uuid,uuid,uuid)'),
+        ('forge_coding_reconciler_api.publication_claim(text)'),
+        ('forge_coding_reconciler_api.publication_renew(uuid,uuid)'),
+        ('forge_coding_reconciler_api.publication_finish(uuid,uuid,text,text,text,text,text)')
+    ) AS functions(signature) LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid=expected.signature::regprocedure
+                       AND p.prosecdef AND 'search_path=pg_catalog, pg_temp'=ANY(p.proconfig)) THEN
+            RAISE EXCEPTION 'Missing or unsafe Plan workflow function %',expected.signature;
+        END IF;
+    END LOOP;
+    FOR expected IN SELECT * FROM (VALUES ('coding_tasks'),('coding_attempts')) AS tables(name) LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=('forge_agent.'||expected.name)::regclass
+                       AND a.attname='plan_decision_id' AND a.atttypid='uuid'::regtype AND NOT a.attnotnull AND NOT a.attisdropped) THEN
+            RAISE EXCEPTION 'Missing nullable Plan decision pointer %',expected.name;
+        END IF;
+    END LOOP;
 
     SELECT attnum INTO att_archive_reason
     FROM pg_catalog.pg_attribute
@@ -361,7 +396,7 @@ BEGIN
             ('coding_control_receipts', 'coding_control_receipts_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, action, idempotency_key)$def$),
             ('coding_control_receipts', 'coding_control_receipts_task_key_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, idempotency_key)$def$),
             ('coding_control_receipts', 'coding_control_receipts_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
-            ('coding_control_receipts', 'coding_control_receipts_action_check', 'c', $def$CHECK ((action = ANY (ARRAY['cancel'::text, 'accept'::text, 'resume'::text])))$def$),
+            ('coding_control_receipts', 'coding_control_receipts_action_check', 'c', $def$CHECK ((action = ANY (ARRAY['cancel'::text, 'accept'::text, 'resume'::text, 'plan_decide'::text])))$def$),
             ('coding_control_receipts', 'coding_control_receipts_idempotency_key_check', 'c', $def$CHECK ((idempotency_key ~ '^[A-Za-z0-9_.-]{1,128}$'::text))$def$),
             ('coding_control_receipts', 'coding_control_receipts_intent_digest_check', 'c', $def$CHECK ((intent_digest ~ '^[0-9a-f]{64}$'::text))$def$),
             ('coding_control_receipts', 'coding_control_receipts_base_revision_check', 'c', $def$CHECK (((base_revision >= 1)
@@ -383,7 +418,7 @@ BEGIN
                  AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text)
                  AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1)
                  AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128))
-                 AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text]))
+                 AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text, 'forge-coding-v3'::text, 'forge-coding-v4'::text]))
                  AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text]))
                  AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text)
                  AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),
@@ -418,7 +453,35 @@ BEGIN
             ('coding_provider_usage_identities', 'coding_provider_usage_identities_pkey', 'p', $def$PRIMARY KEY (owner_id, profile_alias)$def$),
             ('coding_provider_usage_identities', 'coding_provider_usage_identities_usage_fk', 'f', $def$FOREIGN KEY (owner_id, profile_alias) REFERENCES forge_agent.coding_provider_usage(owner_id, profile_alias)$def$),
             ('coding_usage_refresh_requests', 'coding_usage_refresh_requests_pkey', 'p', $def$PRIMARY KEY (owner_id, profile_alias, refresh_id)$def$),
-            ('coding_usage_refresh_requests', 'coding_usage_refresh_requests_status_check', 'c', $def$CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'failed'::text])))$def$)
+            ('coding_usage_refresh_requests', 'coding_usage_refresh_requests_status_check', 'c', $def$CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'completed'::text, 'failed'::text])))$def$),
+            ('coding_attempts', 'coding_attempts_plan_decision_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id, plan_decision_id) REFERENCES forge_agent.coding_plan_decisions(owner_id, project_alias, task_id, decision_id)$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_agent_profile_check', 'c', $def$CHECK ((agent_profile ~ '^[A-Za-z0-9_.-]{1,64}$'::text))$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_attempt_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id, plan_attempt_id) REFERENCES forge_agent.coding_attempts(owner_id, project_alias, task_id, attempt_id)$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_base_revision_check', 'c', $def$CHECK ((base_revision ~ '^[0-9a-f]{40}$'::text))$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_check', 'c', $def$CHECK (((octet_length(note) <= 2048) AND ((decision <> 'revise'::text) OR (btrim(note) <> ''::text))))$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_decision_check', 'c', $def$CHECK ((decision = ANY (ARRAY['resume'::text, 'revise'::text, 'cancel'::text])))$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_idempotency_key_check', 'c', $def$CHECK ((idempotency_key ~ '^[A-Za-z0-9_.-]{1,128}$'::text))$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_intent_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, idempotency_key)$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_pkey', 'p', $def$PRIMARY KEY (decision_id)$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_plan_sha256_check', 'c', $def$CHECK ((plan_sha256 ~ '^[0-9a-f]{64}$'::text))$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_receipt_json_check', 'c', $def$CHECK ((jsonb_typeof(receipt_json) = 'object'::text))$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_scope_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, decision_id)$def$),
+            ('coding_plan_decisions', 'coding_plan_decisions_source_revision_check', 'c', $def$CHECK (((source_revision >= 1) AND (source_revision <= '9007199254740990'::bigint)))$def$),
+            ('coding_publications', 'coding_publications_attempt_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id, attempt_id) REFERENCES forge_agent.coding_attempts(owner_id, project_alias, task_id, attempt_id)$def$),
+            ('coding_publications', 'coding_publications_attempt_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, attempt_id)$def$),
+            ('coding_publications', 'coding_publications_base_revision_check', 'c', $def$CHECK ((base_revision ~ '^[0-9a-f]{40}$'::text))$def$),
+            ('coding_publications', 'coding_publications_branch_check', 'c', $def$CHECK (((branch IS NULL) OR ((octet_length(branch) <= 128) AND (branch ~ '^forge/[A-Za-z0-9][A-Za-z0-9._/-]*$'::text) AND (branch !~ '(\.\.|//|/$|\.lock$)'::text))))$def$),
+            ('coding_publications', 'coding_publications_commit_sha_check', 'c', $def$CHECK (((commit_sha IS NULL) OR (commit_sha ~ '^[0-9a-f]{40}$'::text)))$def$),
+            ('coding_publications', 'coding_publications_decision_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id, plan_decision_id) REFERENCES forge_agent.coding_plan_decisions(owner_id, project_alias, task_id, decision_id)$def$),
+            ('coding_publications', 'coding_publications_lease_check', 'c', $def$CHECK (((((status = ANY (ARRAY['checking'::text, 'publishing'::text])) AND (worker_id IS NOT NULL) AND (lease_token IS NOT NULL) AND (lease_expires_at IS NOT NULL)) OR ((status <> ALL (ARRAY['checking'::text, 'publishing'::text])) AND (lease_token IS NULL) AND (lease_expires_at IS NULL))) IS TRUE))$def$),
+            ('coding_publications', 'coding_publications_pkey', 'p', $def$PRIMARY KEY (publication_id)$def$),
+            ('coding_publications', 'coding_publications_pr_url_check', 'c', $def$CHECK (((pr_url IS NULL) OR ((octet_length(pr_url) <= 512) AND (pr_url ~ '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*$'::text))))$def$),
+            ('coding_publications', 'coding_publications_published_check', 'c', $def$CHECK ((((status <> 'published'::text) OR ((branch IS NOT NULL) AND (commit_sha IS NOT NULL) AND (pr_url IS NOT NULL))) IS TRUE))$def$),
+            ('coding_publications', 'coding_publications_reconciliation_receipt_id_fkey', 'f', $def$FOREIGN KEY (reconciliation_receipt_id) REFERENCES forge_agent.coding_reconciliation_receipts(receipt_id)$def$),
+            ('coding_publications', 'coding_publications_status_check', 'c', $def$CHECK ((status = ANY (ARRAY['pending'::text, 'checking'::text, 'publishing'::text, 'published'::text, 'failed'::text])))$def$),
+            ('coding_publications', 'coding_publications_summary_check', 'c', $def$CHECK ((octet_length(summary) <= 4096))$def$),
+            ('coding_publications', 'coding_publications_workspace_digest_check', 'c', $def$CHECK ((workspace_digest ~ '^[0-9a-f]{64}$'::text))$def$),
+            ('coding_tasks', 'coding_tasks_plan_decision_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, id, plan_decision_id) REFERENCES forge_agent.coding_plan_decisions(owner_id, project_alias, task_id, decision_id)$def$)
         ) AS req(relname, conname, contype, definition)
     LOOP
         SELECT pg_catalog.pg_get_constraintdef(c.oid, false), c.conindid
@@ -468,7 +531,7 @@ BEGIN
             'coding_worker_grants', 'coding_worker_readiness', 'coding_attempts',
             'coding_result_chunks', 'coding_reconciliation_receipts',
             'coding_provider_usage', 'coding_provider_usage_identities',
-            'coding_usage_refresh_requests'
+            'coding_usage_refresh_requests', 'coding_plan_decisions', 'coding_publications'
         ]) AS relname
         WHERE has_table_privilege(
                   'public',
@@ -541,6 +604,8 @@ BEGIN
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.renew(uuid,uuid)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.checkpoint(uuid,uuid,text)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.report_progress(uuid,uuid,integer,text,text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.read_plan(uuid,uuid)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.queue_publication(uuid,uuid,uuid)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.append_result(uuid,uuid,integer,text)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.publish(uuid,uuid,text,jsonb,jsonb,text,jsonb)', 'EXECUTE')
            AND has_function_privilege('forge_coding_worker', 'forge_coding_worker_api.record_stop(uuid,uuid,jsonb,text)', 'EXECUTE')
@@ -579,6 +644,9 @@ BEGIN
            has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.expire_leases()', 'EXECUTE')
            AND has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.pending_reconciliations(integer)', 'EXECUTE')
            AND has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.reconcile(uuid,uuid,text,jsonb)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.publication_claim(text)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.publication_renew(uuid,uuid)', 'EXECUTE')
+           AND has_function_privilege('forge_coding_reconciler', 'forge_coding_reconciler_api.publication_finish(uuid,uuid,text,text,text,text,text)', 'EXECUTE')
        )
        OR EXISTS (
            SELECT FROM pg_catalog.pg_class rel

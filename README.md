@@ -4,7 +4,7 @@ A professional engineering portfolio: lessons from the Forge experiments, a grow
 
 ## Current implementation
 
-[Current design and deployment status](docs/design/implementation-status.md) is the starting point: generated Chat/Mail/Workbench, saved PostgreSQL conversations and queued inference, optional managed editing, typed providers and durable jobs, game runtime/assets/replay and the static-web Studio service. The live portal publishes the same reference at [Design](https://portal.thedevex.com/design/implementation). Repository support and live enablement are recorded separately; the current host has no Studio relay and its source project is read-only.
+[Current design and deployment status](docs/design/implementation-status.md) is the starting point: generated Chat/Agents/Workbench, saved PostgreSQL conversations and queued inference, optional managed editing, typed providers and durable jobs, game runtime/assets/replay and the static-web Studio service. The live portal publishes the same reference at [Design](https://portal.thedevex.com/design/implementation). Repository support and live enablement are recorded separately; the current host has no Studio relay and its source project is read-only.
 
 ## Forge framework portfolio
 

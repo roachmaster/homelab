@@ -11,7 +11,7 @@ import { acquireOwned, bounded, cleanupResources, runHarness } from './report.mj
 import { captureFailureScreenshot, screenshotEligibility, SCREENSHOT_MASK } from './diagnostics.mjs';
 import { VIEWPORTS, verifyViewportProfiles } from './viewports.mjs';
 import { requireRunningFixtureLeader } from './fixture-lifecycle.mjs';
-import { mailPreview, mailSubject, startDurableRelay } from './durable-relay.mjs';
+import { startDurableRelay } from './durable-relay.mjs';
 import { startAgentsRelay } from './agents-relay.mjs';
 
 let assets, agent, fixtureBinary, output, browser, browserOwner, durableRelayOwner, agentsRelayOwner, check, report;
@@ -95,13 +95,28 @@ const localActions = ['select_entry', 'toggle_entry', 'select_declaration', 'sel
 async function observe(context) {
   const counts = new Map();
   const inspectionIds = new Set();
+  const business = { mail: 0, work: 0, usage: 0 };
+  let catalogMailEnabled = null;
   context.on('request', request => {
     if (new URL(request.url()).pathname !== '/forge/v1/dispatch') return;
     let kind;
     try { kind = request.postDataJSON()?.kind; } catch { kind = 'invalid'; }
+    if (typeof kind === 'string') {
+      for (const prefix of Object.keys(business)) if (kind.startsWith(prefix + '_')) business[prefix]++;
+    }
     if (!['resume', 'pair', 'inspect', 'source', 'chat_history_retention_set', 'chat_run_submit'].includes(kind)) kind = 'other';
     counts.set(kind, (counts.get(kind) || 0) + 1);
     if (kind === 'inspect') inspectionIds.add(request.headers()['forge-request-id']);
+  });
+  context.on('response', async response => {
+    // Keep only this fixture capability bit, never its token/catalog body.
+    if (!response.ok() || new URL(response.url()).pathname !== '/forge/v1/dispatch') return;
+    try {
+      if (!['resume', 'pair'].includes(response.request().postDataJSON()?.kind)) return;
+      const catalog = (await response.json()).event?.catalog;
+      // Catalog serializes a false capability by omitting its default value.
+      if (catalog && typeof catalog === 'object') catalogMailEnabled = catalog.mail_enabled === true;
+    } catch { /* The real application owns response validation. */ }
   });
   await context.addInitScript(kinds => {
     const allowed = new Set(kinds);
@@ -155,7 +170,8 @@ async function observe(context) {
       clear() { probe.actions.clear(); probe.saved.clear(); probe.worker = null; },
     };
   }, localActions);
-  return { count: kind => counts.get(kind) || 0, uniqueInspections: () => inspectionIds.size };
+  return { count: kind => counts.get(kind) || 0, uniqueInspections: () => inspectionIds.size,
+    businessCalls: () => ({ ...business }), catalogMailEnabled: () => catalogMailEnabled };
 }
 const beforeForgeUrl = 'data:text/html,<!doctype html><title>Forge QA previous page</title>';
 const retainedChatDraft = 'Draft for the other conversation';
@@ -359,7 +375,7 @@ async function disclosure(page, id, open) {
     const sample = await page.evaluate(ids => {
       const active = document.activeElement;
       const summary = active?.matches('summary') ? active.parentElement?.id : null;
-      const controls = ['chat-draft', 'chat-model', 'send-chat', 'open-chat', 'open-mail',
+      const controls = ['chat-draft', 'chat-model', 'send-chat', 'open-chat', 'open-agents',
         'open-workbench', 'chat-history-toggle', 'chat-conversation', 'chat-run-cancel', 'chat-run-retry'];
       return active === document.body ? 'body' : ids.includes(summary) ? summary + '-summary'
         : controls.includes(active?.id) ? active.id : 'other';
@@ -1190,187 +1206,115 @@ async function reportAndPageLifecycle(page, traffic, respondToLeaveWarning) {
   report.pass('probe.page.lifecycle');
 }
 
-async function mailLayoutJourney(page, desktop) {
-  process.stderr.write('QA_CHECK mail_folder_layout\n');
-  const mail = page.locator('#mail');
-  const inbox = page.locator('#mail-inbox');
-  const archive = page.locator('#mail-archive');
-  const archiveThread = page.getByRole('button', { name: 'Archive thread', exact: true });
-  const refresh = page.getByRole('button', { name: 'Refresh Mail', exact: true });
-  const compose = page.getByRole('button', { name: 'Compose', exact: true });
-  const back = page.getByRole('button', { name: 'Back to threads', exact: true });
-  const row = page.locator('#mail-threads [role="treeitem"]').filter({ hasText: mailSubject });
-  const draft = page.locator('#mail-draft');
-  const subject = page.locator('#mail-subject');
-  const transcript = page.locator('#mail-transcript');
-  const reply = page.getByRole('button', { name: 'Reply to thread…', exact: true });
-  const discard = page.getByRole('button', { name: 'Discard draft', exact: true });
-  async function noOverflow() {
+const portalViewNames = ['Chat', 'Agents', 'Workbench', 'Home', 'Design'];
+
+function legacyMailNavigation() {
+  return { active: true, archived: false, composing: true, thread_id: null,
+    subject: 'Retained legacy Mail subject', draft: 'Retained legacy Mail draft, never replayed.' };
+}
+
+async function assertNoRetiredMail(page) {
+  await check(page.locator('#mail,#open-mail')).toHaveCount(0);
+}
+
+async function assertApplicationViews(page, active) {
+  await assertNoRetiredMail(page);
+  const navigation = page.locator('#ide-navigation');
+  await check(navigation.locator(':scope > :is(button,a)')).toHaveText(portalViewNames);
+  await check(page.locator('#open-agents')).toBeVisible();
+  if (active === 'Agents') {
+    await check(page.locator('#open-agents')).toHaveAttribute('aria-current', 'page');
+    await check(page.locator('#open-agents')).toHaveAttribute('aria-pressed', 'true');
+    await check(navigation.locator('[aria-current="page"]')).toHaveCount(1);
+  } else {
+    await check(page.locator('#open-agents')).not.toHaveAttribute('aria-current', 'page');
+  }
+}
+
+async function assertNativeViews(page, active) {
+  if (active === 'Home') {
+    // Home is the launcher rather than a workspace; its header intentionally
+    // has no duplicate IDE tab strip.
+    await check(page.locator('.home-launcher-agents')).toHaveAttribute('href', '/agents');
+    await check(page.locator('a[href="/#mail"],a[href="/mail"]')).toHaveCount(0);
+    return;
+  }
+  const views = page.getByRole('navigation', { name: 'Forge views' });
+  await check(views.getByRole('link')).toHaveText(portalViewNames);
+  await check(views.getByRole('link', { name: active, exact: true })).toHaveAttribute('aria-current', 'page');
+  for (const [name, href] of [['Chat', '/#chat'], ['Agents', '/#agents'], ['Workbench', '/#workbench'], ['Home', '/home'], ['Design', '/design']]) {
+    const link = views.getByRole('link', { name, exact: true });
+    await check(link).toHaveAttribute('href', href);
+    await check(link).not.toHaveAttribute('target', /.+/);
+  }
+  await check(views.locator('a[href="/#mail"]')).toHaveCount(0);
+}
+
+async function unconfiguredAgentsNavigationJourney(page, desktop, traffic, origin) {
+  process.stderr.write('QA_CHECK unconfigured_agents_navigation\n');
+  // This durable fixture deliberately advertises mail_enabled=true. Retiring
+  // the browser screen must not depend on disabling its preserved backend flag.
+  await check.poll(traffic.catalogMailEnabled).toBe(true);
+  assert.deepEqual(traffic.businessCalls(), { mail: 0, work: 0, usage: 0 });
+  const draft = page.locator('#chat-draft');
+  const originalDraft = await draft.inputValue();
+  const retained = 'Keep the Chat draft across the replacement Agents tab.';
+  const pages = page.context().pages();
+  await draft.fill(retained);
+  for (const width of [320, 375, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.locator('#open-agents').focus();
+    await page.keyboard.press('Enter');
+    await check(page.locator('#agents')).toBeVisible();
+    await assertApplicationViews(page, 'Agents');
+    await check(page.locator('#agents-unsupported')).toContainText('not configured');
+    await check(page.locator('#agents-new')).toBeHidden();
+    await check(page.locator('#agents-compose')).toBeHidden();
+    const tab = await page.locator('#open-agents').boundingBox();
+    assert(tab && tab.width >= 44 && tab.height >= 44, 'the replacement Agents tab preserves a mobile touch target');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true,
-      'Mail does not add horizontal page scrolling');
+      'the fixed five-view navigation fits unconfigured phone viewports');
+    await page.locator('#open-chat').click();
+    await check(page.locator('#chat')).toBeVisible();
+    await check(draft).toHaveValue(retained);
   }
-  async function touchTarget(control) {
-    const box = await control.boundingBox();
-    assert(box && box.width >= 44 && box.height >= 44, 'Mail controls preserve a 44px touch target');
-  }
-  await page.setViewportSize({ width: 320, height: 720 });
-  await page.locator('#open-mail').click();
-  await check(mail).toBeVisible();
-  await check(inbox).toHaveAttribute('aria-current', 'page');
-  await check(inbox).toHaveCSS('border-bottom-color', await themeColor(page, 'accent'));
-  await check(archive).not.toHaveAttribute('aria-current', 'page');
-  await check(row.locator('.fg-row-label')).toHaveText(mailSubject);
-  await check(row.locator('.fg-correspondence-sender')).toHaveText('GPT-OSS 120B');
-  await check(row.locator('.fg-correspondence-time')).toHaveText('Nov 16');
-  await check(row.locator('.fg-correspondence-preview')).toHaveText(mailPreview);
-  await check(row).toHaveAttribute('data-ready', 'true');
-  await check(row.locator('.fg-correspondence-dot')).toHaveAttribute('title', 'Reply ready');
-  await check(row.locator('.fg-correspondence-dot')).toHaveCSS('background-color', await themeColor(page, 'accent'));
-  assert.doesNotMatch(await row.getAttribute('aria-label'), /unread/i, 'reply readiness is not invented read tracking');
-  await check(row.locator('.fg-glyph')).toBeHidden();
-  await check(row).toHaveCSS('border-top-width', '0px');
-  await check(row).toHaveCSS('border-bottom-width', '1px');
-  await check(row).toHaveCSS('border-top-left-radius', '0px');
-
-  for (const width of [320, 375, 390]) {
-    await page.setViewportSize({ width, height: 720 });
-    const [bounds, metadata, title, snippet, icon, folders, action] = await Promise.all([
-      row.boundingBox(), row.locator('.fg-correspondence-meta').boundingBox(),
-      row.locator('.fg-row-label').boundingBox(), row.locator('.fg-correspondence-preview').boundingBox(),
-      refresh.boundingBox(), page.locator('#mail-folders').boundingBox(), compose.boundingBox(),
-    ]);
-    assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width + 1, 'the inbox row fits the phone');
-    assert(metadata && title && snippet && metadata.y + metadata.height <= title.y + 1
-      && title.y + title.height <= snippet.y + 1, 'sender, subject and preview form distinct email rows');
-    assert(icon && folders && Math.abs(icon.y - folders.y) <= 6, 'folders and refresh share the contextual strip');
-    assert(action && action.x + action.width <= width && action.y > 720 * .65
-      && action.y + action.height <= 720, 'Compose sits at the lower right without displacing folder tabs');
-    await check(row.locator('.fg-correspondence-preview')).toHaveCSS('-webkit-line-clamp', '2');
-    assert.equal(await row.locator('.fg-row-label').evaluate(node => node.scrollWidth <= node.clientWidth + 1), true,
-      'an unbroken subject wraps within its row');
-    for (const control of [inbox, archive, refresh, compose]) await touchTarget(control);
-    await noOverflow();
-  }
-  await screenshot(page, 'ide-mail-inbox-phone.png');
-  await compose.focus();
-  await page.keyboard.press('Enter');
-  await check(subject).toBeFocused();
-  await check(compose).toBeHidden();
-  await check(draft).toHaveAttribute('placeholder', 'Write your message…');
-  await subject.fill('Controlled composition');
-  await draft.fill('This draft is inspected locally and never sent.');
-  await check(page.locator('#mail-send')).toBeEnabled();
-  await discard.click();
-  await check(inbox).toHaveAttribute('aria-current', 'page');
-  await check(row).toBeVisible();
-  await check(subject).toHaveValue('');
-  await check(draft).toHaveValue('');
-
-  await archive.click();
-  await check(archive).toHaveAttribute('aria-current', 'page');
-  await check(inbox).not.toHaveAttribute('aria-current', 'page');
-  const archivedRow = page.locator('#mail-threads [role="treeitem"]').filter({ hasText: 'Archived fixture thread' });
-  await check(archivedRow).toHaveAttribute('data-ready', 'false');
-  await check(archivedRow.locator('.fg-correspondence-dot')).toHaveAttribute('title', 'Archived · Read only');
-  await archivedRow.click();
-  await check(page.locator('#mail-title')).toHaveText('Archived fixture thread');
-  await check(reply).toBeHidden();
-  await check(page.locator('#mail-archive-reason')).toBeVisible();
-  await check(compose).toBeHidden();
-  await back.click();
-  await inbox.click();
-  await check(row).toBeVisible();
-
-  await page.setViewportSize(desktop);
-  await row.click();
-  await check(page.locator('#mail-title')).toHaveText(mailSubject);
-  await check(compose).toBeHidden();
-  await check(page.locator('#mail-folders')).toBeHidden();
-  await check(transcript).toHaveCSS('border-top-width', '0px');
-  await check(transcript.locator('.fg-message')).toHaveCount(2);
-  await check(transcript.locator('.fg-correspondence-header .fg-correspondence-sender')).toHaveText(['You', 'GPT-OSS 120B']);
-  await check(transcript.locator('.fg-correspondence-avatar')).toHaveText(['Y', 'G']);
-  await check(transcript.locator('.fg-correspondence-header .fg-correspondence-time')).toHaveText([
-    'Nov 16, 2026 · 22:10 UTC', 'Nov 16, 2026 · 22:11 UTC',
-  ]);
-  await check(transcript.locator('.fg-message-recipient > summary')).toHaveText(['To GPT-OSS 120B', 'To You']);
-  const recipient = transcript.locator('.fg-message-recipient').first();
-  const recipientsTrigger = recipient.locator(':scope > summary');
-  await recipientsTrigger.focus();
-  await page.keyboard.press('Enter');
-  await check(recipient).toHaveJSProperty('open', true);
-  await check(recipient.locator('dt')).toHaveText(['From', 'To']);
-  await check(recipient.locator('dd')).toHaveText(['You', 'GPT-OSS 120B']);
-  await page.keyboard.press('Enter');
-  await check(recipient).toHaveJSProperty('open', false);
-  const [sidebar, reader] = await Promise.all([
-    page.locator('#mail-list-panel').boundingBox(), page.locator('#mail-reader').boundingBox(),
-  ]);
-  assert(sidebar && reader && sidebar.x + sidebar.width <= reader.x, 'desktop keeps the inbox beside the reader');
-  await screenshot(page, 'ide-mail-thread-desktop.png');
-  for (const width of [320, 375, 390]) {
-    await page.setViewportSize({ width, height: 720 });
-    await check(page.locator('#mail-list-panel')).toBeHidden();
-    await check(page.locator('#mail-reader')).toBeVisible();
-    await check(reply).toBeInViewport();
-    await check(back).toBeInViewport();
-    await check(archiveThread).toBeInViewport();
-    await check(archiveThread).toBeEnabled();
-    for (const control of [back, refresh, reply, archiveThread]) await touchTarget(control);
-    await noOverflow();
-  }
-  await page.setViewportSize({ width: 390, height: 844 });
-  await screenshot(page, 'ide-mail-thread-phone.png');
-  await reply.focus();
-  await page.keyboard.press('Enter');
-  await check(draft).toBeFocused();
-  await check(reply).toBeHidden();
-  await check(page.locator('#mail-subject-panel')).toBeHidden();
-  await draft.fill('A controlled follow-up draft, preserved while switching screens.');
-  await check(page.locator('#mail-send')).toBeEnabled();
-  await check(archiveThread).toBeDisabled();
+  await page.locator('#forge-home').click();
+  await check(page).toHaveURL(origin + '/home');
+  await assertNativeViews(page, 'Home');
+  const retiredMail = legacyMailNavigation();
+  await page.evaluate(mail => {
+    const key = 'forge-workspace-navigation';
+    const cache = JSON.parse(sessionStorage.getItem(key));
+    if (!cache?.snapshot) throw new Error('Expected genuine Chat handoff');
+    cache.mail = mail;
+    sessionStorage.setItem(key, JSON.stringify(cache));
+  }, retiredMail);
+  const legacyRedirect = await page.request.get(origin + '/mail', { maxRedirects: 0 });
+  assert.equal(legacyRedirect.status(), 302, 'the retired native Mail route redirects');
+  assert.equal(legacyRedirect.headers().location, '/#agents');
+  await legacyRedirect.dispose();
+  // Entry fragments are applied once after authenticated recovery, then stripped.
+  // Start from the static Home document so this is a genuine application boot.
+  await page.goto(origin + '/#mail', { waitUntil: 'domcontentloaded' });
+  await check(page.locator('#agents')).toBeVisible();
+  await check(page).toHaveURL(origin + '/');
+  await assertApplicationViews(page, 'Agents');
+  await check(page.locator('#agents-unsupported')).toContainText('not configured');
   await page.locator('#open-chat').click();
+  await check(draft).toHaveValue(retained);
+  await draft.fill(originalDraft);
+  await page.locator('#forge-home').click();
+  await check(page).toHaveURL(origin + '/home');
+  const inertMail = await page.evaluate(() => JSON.parse(sessionStorage.getItem('forge-workspace-navigation'))?.mail);
+  assert.deepEqual(inertMail, { ...retiredMail, active: false },
+    'a Mail-enabled host retains legacy recovery data without activating it');
+  await page.locator('.home-launcher-ide').click();
   await check(page.locator('#chat')).toBeVisible();
-  await page.locator('#open-mail').click();
-  await check(mail).toBeVisible();
-  await check(draft).toHaveValue('A controlled follow-up draft, preserved while switching screens.');
-  await check(page.locator('#mail-title')).toHaveText(mailSubject);
-  await discard.click();
-  await check(draft).toHaveValue('');
-  await check(reply).toBeVisible();
-  await check(page.locator('#mail-composer')).toBeHidden();
-
-  await reply.focus();
-  await page.keyboard.press('Enter');
-  await check(draft).toBeFocused();
-  await check(draft).toHaveValue('');
-  await check(page.locator('#mail-composer')).toBeVisible();
-  await check(archiveThread).toBeEnabled();
-  await archiveThread.focus();
-  await check(archiveThread).toBeFocused();
-  await page.keyboard.press('Enter');
-  await check(page.locator('#mail-status')).toHaveText('Thread archived.');
-  await check(refresh).toBeEnabled();
-  await check(page.locator('#mail-composer')).toBeHidden();
-  await check(draft).toBeDisabled();
-  await check(reply).toBeHidden();
-  await check(back).toBeEnabled();
-  await back.click();
-  await check(row).toBeHidden();
-  await archive.click();
-  await check(row).toBeVisible();
-  await row.click();
-  await check(page.locator('#mail-archive-reason')).toHaveText('This thread was archived manually.');
-  await check(refresh).toBeEnabled();
-  await check(transcript.locator('.fg-message')).toHaveCount(2);
-  await check(page.locator('#mail-composer')).toBeHidden();
-  await check(draft).toBeDisabled();
-  await check(reply).toBeHidden();
-  await check(archiveThread).toBeHidden();
-  await check(back).toBeEnabled();
-
+  await check(draft).toHaveValue(originalDraft);
+  assert.deepEqual(traffic.businessCalls(), { mail: 0, work: 0, usage: 0 },
+    'unconfigured Agents and the legacy Mail entry issue no Work, Usage or Mail requests');
+  assert.deepEqual(page.context().pages(), pages, 'replacement navigation retains one browser page');
   await page.setViewportSize(desktop);
-  await page.locator('#open-chat').click();
 }
 
 async function durableHostRestartJourney() {
@@ -1441,7 +1385,7 @@ async function durableHostRestartJourney() {
     await restart();
     const { page, traffic } = await startPage();
     await pair(page);
-    await mailLayoutJourney(page, viewport);
+    await unconfiguredAgentsNavigationJourney(page, viewport, traffic, fixture.origin);
     await check(page.locator('#chat')).toBeVisible();
     const model = page.locator('#chat-model');
     await openChatOptions(page);
@@ -2178,9 +2122,9 @@ async function designJourney(page, traffic) {
   await check(page.getByRole('heading', { level: 1, name: 'Forge IDE design', exact: true })).toBeVisible();
   const views = page.getByRole('navigation', { name: 'Forge views' });
   const topics = page.getByRole('navigation', { name: 'Design topics' });
-  await check(views.getByRole('link')).toHaveText(['Chat', 'Mail', 'Workbench', 'Home', 'Design']);
+  await check(views.getByRole('link')).toHaveText(portalViewNames);
   await check(views.getByRole('link', { name: 'Design', exact: true })).toHaveAttribute('aria-current', 'page');
-  for (const [name, href] of [['Chat', '/#chat'], ['Mail', '/#mail'], ['Workbench', '/#workbench']]) {
+  for (const [name, href] of [['Chat', '/#chat'], ['Agents', '/#agents'], ['Workbench', '/#workbench']]) {
     await check(views.getByRole('link', { name, exact: true })).toHaveAttribute('href', href);
   }
   await check(topics.getByRole('link')).toHaveCount(4);
@@ -2428,6 +2372,8 @@ async function wireframesDesignJourney(page, designUrl) {
   await check(page.locator('#previous-chat-menu')).toHaveCount(0);
   await check(page.locator('.wireframe-note')).toContainText('18 November 2026');
   await check(page.locator('.wireframe-note')).toContainText('generated UI');
+  // Dated reference captures include retired Mail screens; image decoding here
+  // is documentation coverage, not acceptance of a live Mail application.
   const names = ['chat-phone', 'chat-history-phone', 'workbench-phone', 'workbench-explorer-phone', 'workbench-project-options', 'mail-inbox-phone', 'mail-thread-phone', 'chat-desktop', 'workbench-desktop', 'mail-thread-desktop'];
   const images = page.locator('figure.wireframe img');
   await check(images).toHaveCount(names.length);
@@ -3059,12 +3005,13 @@ async function chatJourney(page, context) {
         const box = await control.boundingBox();
         assert(box && box.width >= 44 && box.height >= 44, id + ' retains its mobile touch target');
       }
-      for (const id of ['open-chat', 'open-workbench', 'open-home', 'open-design']) {
+      for (const id of ['open-chat', 'open-agents', 'open-workbench', 'open-home', 'open-design']) {
         await check(page.locator('#' + id)).toBeVisible();
       }
       const visibleTabs = page.locator('#ide-navigation > :is(button,a):visible');
       const tabCount = await visibleTabs.count();
-      assert(tabCount >= 4 && tabCount <= 5, 'the admitted catalog exposes the four core tabs and optional Mail');
+      assert.equal(tabCount, 5, 'the connected portal exposes Chat, Agents, Workbench, Home and Design');
+      await assertApplicationViews(page, 'Chat');
       for (const control of await visibleTabs.all()) {
         const box = await control.boundingBox();
         assert(box && box.width >= 44 && box.height >= 44,
@@ -3204,15 +3151,29 @@ async function agentsJourney() {
     const relay = await agentsRelayOwner.ready;
     fixture = await startFixture(false, false, { agents: relay });
     context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const traffic = await observe(context);
     const { page, errors, respondToLeaveWarning } = await connect(context, fixture);
+    await check.poll(traffic.catalogMailEnabled).toBe(false);
+    await assertApplicationViews(page, 'Workbench');
+    await page.locator('#open-agents').focus();
+    await page.keyboard.press('Enter');
+    await check(page.locator('#agents')).toBeVisible();
+    await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
+    await assertApplicationViews(page, 'Agents');
+    await page.locator('#open-chat').click();
+    await check(page.locator('#chat')).toBeVisible();
+    await page.locator('#open-agents').click();
+    await check(page.locator('#agents')).toBeVisible();
+    await assertApplicationViews(page, 'Agents');
     await page.locator('#forge-home').click();
     await check(page).toHaveURL(fixture.origin + '/home');
+    await assertNativeViews(page, 'Home');
     await page.locator('.home-launcher-agents').focus();
     await page.keyboard.press('Enter');
     await check(page.locator('#agents')).toBeVisible();
     await check(page.locator('#agents-worker')).toHaveText('Worker ready');
     await check(page.locator('#open-chat')).toBeEnabled();
-    await check(page.locator('#ide-navigation [aria-current="page"]')).toHaveCount(0);
+    await assertApplicationViews(page, 'Agents');
     await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(5);
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
     const cards = page.locator('#agents-providers article.fg-metric-card');
@@ -3266,6 +3227,9 @@ async function agentsJourney() {
     await check(page.locator('#agents-overview')).toBeVisible();
 
     await page.locator('#agents-new').click();
+    // Keep the existing result-acceptance journey on a Review task. Finished
+    // Plan tasks now use the explicit artifact-bound decision flow below.
+    await page.locator('#agents-mode').selectOption('review');
     const prompt = page.locator('#agents-prompt');
     const criteria = page.locator('#agents-criteria');
     const retained = 'Keep this local Agents draft. A long task title preserves useful context across the dashboard without pushing status or timestamps out of view.';
@@ -3274,10 +3238,38 @@ async function agentsJourney() {
     await check(page.locator('#agents-send')).toBeEnabled();
     await page.locator('#forge-home').click();
     await check(page).toHaveURL(fixture.origin + '/home');
+    await assertNativeViews(page, 'Home');
+    const retiredMail = legacyMailNavigation();
+    await page.evaluate(({ mail, draft }) => {
+      const key = 'forge-workspace-navigation';
+      const cache = JSON.parse(sessionStorage.getItem(key));
+      if (cache?.agents?.prompt !== draft || cache.agents.active !== true) throw new Error('Expected genuine Agents handoff');
+      cache.mail = mail;
+      sessionStorage.setItem(key, JSON.stringify(cache));
+    }, { mail: retiredMail, draft: retained });
+    // The legacy entry resolves to Agents without activating/polling old Mail.
+    await page.goto(fixture.origin + '/#mail', { waitUntil: 'domcontentloaded' });
+    await check(page.locator('#agents-compose')).toBeVisible();
+    await check(page).toHaveURL(fixture.origin + '/');
+    await assertApplicationViews(page, 'Agents');
+    await check(prompt).toHaveValue(retained);
+    await check(criteria).toHaveValue('Recover the draft after portal navigation.');
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin + '/home');
+    const inertMail = await page.evaluate(() => JSON.parse(sessionStorage.getItem('forge-workspace-navigation'))?.mail);
+    assert.deepEqual(inertMail, { ...retiredMail, active: false },
+      'Rust retains valid legacy subject/draft as inert recovery data');
     await page.locator('.home-launcher-agents').click();
     await check(page.locator('#agents-compose')).toBeVisible();
     await check(prompt).toHaveValue(retained);
+    await respondToLeaveWarning(() => page.goBack({ waitUntil: 'domcontentloaded' }), 'leave');
+    await check(page).toHaveURL(fixture.origin + '/home');
+    await page.goForward({ waitUntil: 'domcontentloaded' });
+    await check(page.locator('#agents-compose')).toBeVisible();
+    await assertApplicationViews(page, 'Agents');
+    await check(prompt).toHaveValue(retained);
     await check(criteria).toHaveValue('Recover the draft after portal navigation.');
+    assert.equal(traffic.businessCalls().mail, 0, 'legacy cached Mail never emits a Mail gateway request');
 
     // The main thread acknowledges opaque Rust recovery data before Work IO.
     let checkpoints = 0;
@@ -3292,7 +3284,7 @@ async function agentsJourney() {
         usageOverviewHeld = true;
         await usageOverviewGate;
       }
-      if (['work_submit', 'work_cancel', 'work_accept', 'work_resume'].includes(request.kind)) {
+      if (['work_submit', 'work_cancel', 'work_accept', 'work_resume', 'work_plan_decide'].includes(request.kind)) {
         const saved = await page.evaluate(intent => {
           const cache = JSON.parse(sessionStorage.getItem('forge-workspace-navigation'));
           return cache?.agents?.retry_intent?.kind === intent.kind
@@ -3316,6 +3308,7 @@ async function agentsJourney() {
     const progressRefetches = relay.progressRefetches;
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-retry')).toBeVisible();
+    await check(page.locator('#open-agents')).toBeDisabled();
     await check(prompt).toBeDisabled();
     assert.equal(relay.taskCount, 2);
     await page.locator('#forge-home').click();
@@ -3466,7 +3459,84 @@ async function agentsJourney() {
       await page.locator('#agents').evaluate(node => { node.scrollTop = 0; });
       await screenshot(page, `ide-agents-overview-${name}.png`);
     }
-    assert(checkpoints >= 5, 'submission, retry, acceptance and cancellation all checkpoint before IO');
+    process.stderr.write('QA_CHECK plan_decision_lifecycle\n');
+    await page.setViewportSize({ width: 390, height: 844 });
+    async function openFinishedPlan(status, title) {
+      const taskId = relay.addPlan(status, title);
+      await page.locator('#agents-refresh').click();
+      const row = page.locator(`#agents-tasks [data-row-id="${taskId}"] .fg-row-select`);
+      await check(row).toBeVisible(); await row.click();
+      await check(page.locator('#agents-plan-actions')).toBeVisible();
+      await check(page.locator('#agents-plan-resume')).toBeEnabled();
+      await check(page.locator('#agents-plan-resume')).toHaveText('Resume');
+      await check(page.locator('#agents-plan-revise')).toHaveText('Revise');
+      await check(page.locator('#agents-plan-cancel')).toHaveText('Cancel');
+      await check(page.locator('#agents-accept')).toBeHidden();
+      await check(page.locator('#agents-resume')).toBeHidden();
+      await check(page.locator('#agents-plan-revise')).toBeDisabled();
+      return taskId;
+    }
+    const approvedPlan = await openFinishedPlan('awaiting_review', 'Plan approval and PR fixture');
+    relay.faults.dropNextPlanDecision = true;
+    relay.faults.holdPublication = true;
+    await page.locator('#agents-plan-resume').click();
+    await check(page.locator('#agents-retry')).toBeVisible();
+    await check(page.locator('#open-agents')).toBeDisabled();
+    const originalDecision = relay.planDecisions.at(-1);
+    assert.equal(originalDecision.decision, 'resume');
+    assert.equal(originalDecision.task_id, approvedPlan);
+    assert.match(originalDecision.plan_sha256, /^[0-9a-f]{64}$/);
+    await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+    await check(page.locator('#agents-retry')).toBeVisible();
+    await check(page.locator('#agents-retry')).toBeEnabled();
+    await page.locator('#agents-retry').click();
+    await check(page.locator('#agents-retry')).toBeHidden();
+    await check(page.locator('#agents-plan-actions')).toBeHidden();
+    await check(page.locator('#agents-publication-status')).toContainText('Publication pending');
+    await check(page.locator('#agents-task-mode')).toHaveText('Mode · Implement');
+    await check(page.locator('#agents-accept')).toBeHidden();
+      await check(page.locator('#agents-resume')).toBeHidden();
+    const retriedDecisions = relay.planDecisions.filter(value => value.task_id === approvedPlan);
+    assert.equal(retriedDecisions.length, 2);
+    for (const value of retriedDecisions) {
+      assert.equal(value.idempotency_key, originalDecision.idempotency_key);
+      assert.equal(value.expected_revision, originalDecision.expected_revision);
+      assert.equal(value.plan_attempt_id, originalDecision.plan_attempt_id);
+      assert.equal(value.plan_sha256, originalDecision.plan_sha256);
+    }
+    relay.faults.holdPublication = false;
+    await check(page.locator('#agents-publication-status')).toHaveText('Pull request published', { timeout: 15000 });
+    const pullRequest = page.locator('#agents-publication-link a');
+    await check(pullRequest).toHaveAttribute('href', 'https://github.com/roachmaster/homelab/pull/42');
+    await check(pullRequest).toHaveAttribute('rel', 'noopener noreferrer');
+    await check(pullRequest).toHaveAttribute('target', '_blank');
+    assert(relay.publicationRevisions.length >= 4);
+    assert.equal(new Set(relay.publicationRevisions).size, 1, 'publication polling observes same-revision changes');
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+      const box = await pullRequest.boundingBox(); assert(box && box.height >= 44);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#agents-back').click();
+    await openFinishedPlan('completed', 'Legacy completed plan revision fixture');
+    const feedback = 'Add concrete failure-path tests before implementation.';
+    await page.locator('#agents-review-note').fill(feedback);
+    await check(page.locator('#agents-plan-revise')).toBeEnabled();
+    await page.locator('#agents-plan-revise').click();
+    await check(page.locator('#agents-plan-actions')).toBeHidden();
+    await check(page.locator('#agents-task-status')).toHaveText('Ready for review');
+    await check(page.locator('#agents-plan-actions')).toBeVisible();
+    assert.equal(relay.planDecisions.at(-1).decision, 'revise');
+    assert.equal(relay.planDecisions.at(-1).note, feedback);
+    await page.locator('#agents-plan-cancel').click();
+    await check(page.locator('#agents-task-status')).toHaveText('Cancelled');
+    await check(page.locator('#agents-plan-actions')).toBeHidden();
+    assert.equal(relay.planDecisions.at(-1).decision, 'cancel');
+    await page.locator('#agents-back').click();
+    assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
+    assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
+    await assertNoRetiredMail(page);
     assert.deepEqual(errors, []);
     assert.equal(context.pages().length, 1, 'the Agents workflow uses one browser page');
   } finally {

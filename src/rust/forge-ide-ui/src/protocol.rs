@@ -739,6 +739,14 @@ pub enum UiEvent {
     ResumeAgentTask {
         idempotency_key: String,
     },
+    DecideAgentPlan {
+        task_id: String,
+        expected_revision: u64,
+        plan_attempt_id: String,
+        plan_sha256: String,
+        decision: WorkPlanDecision,
+        idempotency_key: String,
+    },
     NextAgentResult {},
     PreviousAgentResult {},
     RefreshAgentUsage {},

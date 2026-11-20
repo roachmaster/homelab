@@ -1314,9 +1314,11 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
             assert!(response.contains("aria-label=\"Design topics\""));
             assert!(response.contains("href=\"/design/docs.css\""));
             assert!(!response.contains("target=\"_blank\""));
-            for href in ["/#chat", "/#mail", "/#workbench", "/home", "/design"] {
+            for href in ["/#chat", "/#agents", "/#workbench", "/home", "/design"] {
                 assert!(response.contains(&format!("href=\"{href}\"")));
             }
+            assert!(response.contains(">Agents</a>"));
+            assert!(!response.contains("href=\"/#mail\""));
             assert_eq!(
                 response.contains("src=\"/design/previous-chats.js\""),
                 path == "/design/previous-chats"
@@ -1476,6 +1478,12 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
         let response = request("GET", path);
         assert!(response.starts_with("HTTP/1.1 200 OK"));
         assert!(response.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(response.contains("Retired portal view"));
+        assert!(
+            response.contains("Saved PostgreSQL Mail threads and backend contracts are preserved.")
+        );
+        assert!(response.contains("href=\"/#agents\""));
+        assert!(!response.contains("href=\"/#mail\""));
         assert!(response.contains("href=\"/design/forge-ide-mail-wireframe.svg\""));
         assert!(response.contains("href=\"/design/mail-dispatch-sequence.svg\""));
     }
@@ -3007,6 +3015,8 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
         assert!(home.contains(&format!("aria-label=\"{label}\"")), "{label}");
     }
     assert!(home.contains("href=\"/agents\""));
+    assert!(home.contains("Chat, Agents, and the source workbench."));
+    assert!(!home.contains("Chat, Mail, and the source workbench."));
 
     let index = request("GET", "/design");
     assert!(index.starts_with("HTTP/1.1 200 OK"));
@@ -3108,12 +3118,14 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
                 response.contains("class=\"wordmark return-link\" href=\"/home\""),
                 "{target}"
             );
-            for href in ["/#chat", "/#mail", "/#workbench", "/home", "/design"] {
+            for href in ["/#chat", "/#agents", "/#workbench", "/home", "/design"] {
                 assert!(
                     response.contains(&format!("href=\"{href}\"")),
                     "{target}: {href}"
                 );
             }
+            assert!(response.contains(">Agents</a>"), "{target}");
+            assert!(!response.contains("href=\"/#mail\""), "{target}");
             for marker in markers {
                 assert!(response.contains(marker), "{target}: {marker}");
             }

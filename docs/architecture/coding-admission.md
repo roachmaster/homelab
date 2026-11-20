@@ -1,6 +1,6 @@
 # Coding-agent workflow
 
-**Source checkpoint: 19 November 2026.** The repository now implements durable
+**Source checkpoint: 20 November 2026.** The repository now implements durable
 coding work, native CLI execution, result paging, explicit review/resume, provider
 usage collection and the generated Agents view. Work and Usage remain independent,
 optional capabilities. The ABI7 portal, API runner and coding worker were deployed
@@ -63,6 +63,7 @@ event sequence is independent of task revision.
 | `ide.work.result` | `200 work_result_page` | Manifest-bound UTF-8 page of a published immutable result. |
 | `ide.work.accept` | `200 work_accepted` | Explicitly accepts stopped `awaiting_review` work as `completed`; never merges code automatically. |
 | `ide.work.resume` | `202 work_resumed` | Explicit user action requiring revision, selected admitted profile and a current trusted reconciliation receipt. |
+| `ide.work.plan.decide` | `202 work_plan_decided` / `200` for Cancel | Resume approves the exact saved Plan for implementation; Revise queues a new Plan with feedback; Cancel preserves history and ends the workflow. |
 
 Prompt limit is 8,192 UTF-8 bytes; acceptance criteria 2,048; raw request ceiling
 16,384 including JSON escaping. Lists default to 20/max 50; event pages default
@@ -70,6 +71,63 @@ to 50/max 100. Disabled supported routes return sanitized `503 unavailable`;
 unsupported destinations return `404`. Cross-owner/project reads are `404`,
 denied grants `403`, invalid input `400`, and replay/revision/review conflicts
 `409`. The host validates upstream reply shape, scope and correlation.
+
+## Plan decisions and checked PR publication
+
+A stopped, published result from a task in **Plan** mode offers **Resume**,
+**Revise**, and **Cancel**. A previously accepted Plan remains actionable so the
+old Accept button does not strand existing work. The decision binds the current
+task revision, exact plan attempt and SHA-256, selected profile, idempotency key
+and review note. Resume independently requires implementation grants; Revise
+requires planning grants and nonempty feedback. Cancel requires project/owner
+authority without a live model or fresh worker advertisement.
+
+The decision ledger preserves the source plan and old attempt recipes. Resume
+queues a new implementation attempt on the same owned task workspace; Revise
+queues planning again. The trusted parent loads the immutable source plan into
+a read-only scratch file, verifies its digest, and supplies the current decision
+and feedback as agent instructions. Feedback is not merely an audit note.
+Generic recovery Resume does not promote a completed plan, and result acceptance
+does not silently approve implementation. A public plan milestone during an
+already-running implementation is progress, not another approval gate.
+
+```mermaid
+flowchart LR
+  Plan[Plan ready] -->|Resume| Code[Implementation]
+  Plan -->|Revise with feedback| Revision[Updated plan]
+  Revision --> Plan
+  Plan -->|Cancel| History[Cancelled; history retained]
+  Code --> Verify[Isolated checks]
+  Verify --> PR[Feature branch and PR to main]
+  PR --> Review[User reviews merge]
+```
+
+Implementation runs with no GitHub publication authority. After a coherent
+result, confirmed scope stop and trusted workspace reconciliation, an idempotent
+publication job identifies the approved plan, implementation attempt and exact
+workspace digest. The publication store can repair a missed queue handoff from
+these committed records; it cannot rerun the model.
+
+The selected publication factory injects workspace-snapshot, Git, verification,
+GitHub and persistence ports. It inspects the locked receipt-bound workspace,
+imports actual tracked/new source into a separate private checkout, creates a
+generated feature branch, and checks the committed candidate against current
+main. Conflicts, missing changes or failed checks block publication. Checks run
+in their own PID/mount/network scope with a scratch HOME, no CLI/GitHub/DB
+credentials, and read-only Git administration. Its private loopback supports
+owned test fixtures without exposing the host portal/API or external endpoints. Only the trusted parent may push the generated
+branch and create its PR. It cannot push directly to main, force-push or merge.
+
+The job stores its branch, exact commit and PR URL. Read-first reconciliation
+checks the expected remote branch/head before any retry; ambiguous publication
+does not cause blind duplicate writes. The portal displays the actual pending,
+checking, publishing, published or failed state and polls active publication even
+when the model's result is already ready. Merging remains a separate decision.
+
+This workflow is explicitly versioned by policy4 and additive migration14;
+schema13/session-policy support is a prerequisite. A rollout must coordinate the
+matching admission profile, coding worker, publication service and atomic browser
+bundle. Prior policies and immutable plans/results/receipts remain preserved.
 
 ## Durable execution and explicit recovery
 
@@ -82,11 +140,11 @@ prompt and only wake work discovery; committed rows are authoritative.
 Execution-capable profiles pin recipe **version 2**, including backend, explicit
 model, mode, resource profile, `generation_token_limit: null` and immutable
 `policy_digest`. The worker validates the complete canonical recipe against
-`forge-coding-v2` before workspace creation or CLI spawn. This explicitly versioned
+`forge-coding-v3` before workspace creation or CLI spawn. This explicitly versioned
 policy approves Gemini commands, scoped implementation writes and read-only
 documentation URLs without headless approval prompts. Plan/review remains
 read-only; OS isolation and database/canonical-source masks remain unchanged.
-Migration11 permits policy1 and policy2 history while exact advertised policy
+Migration13 permits policy1, policy2 and policy3 history while exact advertised policy
 digests keep claims separate. Previous attempts retain their original policy.
 Admission-era version-1
 recipes remain readable and are never silently upgraded or executed.
@@ -98,12 +156,40 @@ an isolated Git worktree at the approved base. Plan/review mounts it read-only;
 implement can write only the approved isolated tree and its Git metadata.
 
 Only the configured real CLI binary is invoked with fixed argument structure,
-`shell=False`, sanitized environment and a fresh session. Native provider/model
+`shell=False` and a sanitized environment. Unrelated submissions start fresh;
+Antigravity may reuse an explicitly resumed task's parent-verified conversation
+through `--conversation UUID`. Never use the global latest `--continue`, because
+all child scopes share the same mounted workspace pathname. Codex stays ephemeral.
+Native provider/model
 limits apply. No Chat/Mail/llama.cpp completion cap is inherited, and no purchased
 credit fallback, automatic account rotation or implicit conversation continuation
 is enabled. A successful exit alone is insufficient: the parser requires a
 coherent owned final result, nonempty text, no unresolved permission/error state
 and confirmed process-scope stop.
+
+The selected worker factory injects an Antigravity session provider. A private
+bounded hint binds task/project/workspace/base revision/profile/model/recipe,
+local account and binary identity. It is reusable only with the existing trusted
+workspace reconciliation digest and the receipt's immediately preceding attempt,
+is invalidated before execution, and is saved
+again only after a coherent stopped result. It cannot grant a lease, replay an
+assignment or choose another task's CLI history. The child cannot access the
+parent's session records.
+
+AGY output remains `stream-json`; one stdin JSON user event and EOF bound each
+attempt. Only terminal usage is normalized. `cache_read_tokens` / `cached_tokens`
+are aliases, not additive metrics, and cache-only observations are partial.
+Cross-process resumed counters have no verified zero baseline, so they remain
+unknown with `unverified_baseline` provenance instead of double-counting earlier
+usage. Unsupported headless allowance stays **Not reported**, with no OAuth
+polling or generation-based quota probe. Context reuse is an opportunity for
+native cache hits, not a measured quota saving.
+
+The local launcher has separate bounded SIGTERM → SIGKILL/reap cleanup on normal
+and exceptional paths. A successful task requires both this cleanup and the
+independent systemd cgroup stop proof. The source policy3 requires migration13
+and coordinated admission/worker configuration; dated policy2 deployment records
+do not establish that it is already enabled.
 
 A root-managed supervisor launches a fixed namespace/privilege-drop wrapper.
 The outer launcher needs namespace authority; it is not the agent process.
