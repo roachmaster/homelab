@@ -1,6 +1,6 @@
 # Autonomous agent author and reviewer workflow
 
-**Status: implementation in progress; not deployed.** This extends the source
+**Status: implemented in source; rollout pending verification.** This extends the source
 [review and repair lifecycle](forge-agent-feedback-loop.md). The earlier manual
 approval path remains for legacy/manual tasks. The intended new default for a
 configured project delegates ordinary planning, review, execution and merge to
@@ -141,6 +141,60 @@ update makes the nonforce ref update fail; it cannot introduce an unreviewed bas
 merge. Existing branch protections are respected. If they deny the operation,
 record the block rather than bypass them. A lost write acknowledgement triggers
 read-only reconciliation of the persisted intent and remote refs.
+
+The merge stage is a committed operation boundary: cancellation is unavailable
+once the workflow enters `merging`. Earlier stages can still be cancelled as one
+workflow. This avoids reporting cancellation while an already admitted remote
+main update is being confirmed.
+
+## Starting the next task from merged code
+
+The trusted merger imports the confirmed merge commit's objects and advances
+only `refs/forge/verified-main` with a compare-and-swap. It does not move the
+operator's local main branch, reset files or write `FETCH_HEAD`. Only after that
+source synchronization succeeds does it record the durable merged-head receipt.
+An uncertain remote update or source-sync failure stays in reconciliation.
+
+For an opted-in project, the coding worker's selected source provider requires
+the private ref to match the scoped database receipt. The next advertised base
+and task workspace use that exact commit. Missing or conflicting evidence blocks
+new acquisition. First use may bootstrap from the canonical checkout when both
+the receipt and private ref are absent. Legacy projects keep their existing HEAD
+selection. New admission and merge acknowledgement share a project lock so a
+stale-base task cannot slip in after the new merged head is recorded.
+
+## Configuration and rollout
+
+Three explicit selections enable the flow; installing code alone does not
+silently delegate an existing project. In the admitted Work configuration, use
+current `forge-coding-v6` profiles and add:
+
+```json
+{
+  "project_workflows": {
+    "homelab": {
+      "author_profile": "agy-primary",
+      "reviewer_profile": "codex-primary",
+      "max_plan_revisions": 3,
+      "auto_merge": true,
+      "merge_method": "merge"
+    }
+  }
+}
+```
+
+The coding-worker configuration also selects
+`"autonomous_projects": ["homelab"]`; the publication configuration selects
+`"merge_enabled": true`. These are additions to their existing validated
+configurations. Both role profiles must have the required project/mode grants.
+The existing repair policy bounds code revisions and names required hosted
+checks. Models and account configuration remain explicit profile settings.
+
+Rollout requires the matching M15/M16 database migrations, policy 6 workers and
+atomic ABI 8 host/generated assets. Drain or preserve old active leases before
+switching versions. Verify normal service startup and source selection before
+opening new admission. Preserve historical receipts and native workspaces;
+the new workflow does not retroactively approve or merge old manual tasks.
 
 ## Persisted contracts
 
