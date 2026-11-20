@@ -8,7 +8,7 @@ from uuid import uuid4
 from queue_store import Rejected
 from test_work_api import runner_server, work_post, REQUEST_ID, TASK_ID
 from test_work_execution_and_usage import make_v2_config,make_submit
-from work_api import WorkService,WorkRepair,WorkPlanDecide,WorkReviewDecide,Destination
+from work_api import WorkService,WorkRepair,WorkResume,WorkPlanDecide,WorkReviewDecide,Destination
 from work_config import WorkCatalog,WorkProfile
 from work_policy import POLICY_ID
 
@@ -53,3 +53,13 @@ class DisabledProfileApiTest(unittest.TestCase):
     (service.review_decide,WorkReviewDecide('homelab',TASK_ID,2,uuid4(),'repair','grok-off','Follow review.','review-key'))):
    with self.assertRaises(Rejected)as context:operation(command)
    self.assertEqual(context.exception.status,403)
+ def test_unconfigured_profile_denied_before_store_across_submit_resume_and_repair(self):
+  cfg=config();store=Mock();service=WorkService(cfg,cfg.catalog(),store)
+  for operation,command in (
+    (service.submit,make_submit(agent_profile='unconfigured-profile')),
+    (service.resume,WorkResume('homelab',TASK_ID,2,'resume-key','unconfigured-profile',uuid4(),'Continue.')),
+    (service.repair,WorkRepair('homelab',TASK_ID,2,'a'*40,'unconfigured-profile','Fix.',(),'repair-key')),
+  ):
+   with self.subTest(operation=operation.__name__),self.assertRaises(Rejected)as context:operation(command)
+   self.assertEqual((context.exception.status,context.exception.code),(403,'denied'))
+  store.submit.assert_not_called();store.resume.assert_not_called();store.repair.assert_not_called()
