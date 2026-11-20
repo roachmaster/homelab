@@ -108,7 +108,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             node.client.create().map_err(|e| e.to_string())?,
         ));
         let provider = Singleton::new(server.create().map_err(|e| e.to_string())?);
-        let service = provider.acquire().map_err(|e| e.to_string())?;
+        let service = provider.acquire().unwrap_or_else(|never| match never {});
         let destination = Destination::new(
             server_target,
             observation,
