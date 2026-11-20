@@ -56,6 +56,14 @@ FEEDBACK_POLICY_DIGEST=sha256_canonical(FEEDBACK_POLICY)
 PEER_POLICY_ID="forge-coding-v6"
 PEER_POLICY={**FEEDBACK_POLICY,"id":PEER_POLICY_ID,"peer_review_workflow":"source-bound-readonly-peer-review-v1"}
 PEER_POLICY_DIGEST=sha256_canonical(PEER_POLICY)
+EXTERNAL_SANDBOX_POLICY_ID="forge-coding-v7"
+EXTERNAL_SANDBOX_POLICY={
+    **PEER_POLICY,
+    "id":EXTERNAL_SANDBOX_POLICY_ID,
+    "codex_sandbox":"supervised-external-v1",
+    "codex_external_io":"host-network-staged-native-state-v1",
+}
+EXTERNAL_SANDBOX_POLICY_DIGEST=sha256_canonical(EXTERNAL_SANDBOX_POLICY)
 
 
 
@@ -85,19 +93,21 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v7")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v8")
         self.assertEqual(PEER_POLICY_DIGEST,"78d8f96280b9b75597e2b10276e1854f64026ff8f359f0f2abb65113774a8e5e")
+        self.assertEqual(EXTERNAL_SANDBOX_POLICY_DIGEST,"40b4e50c9acf64a835fc477a8748fb1cf266188c46f6ac943dd075d506df6124")
         self.assertEqual(work_policy.POLICY["codex_sandbox"],"supervised-external-v1")
         self.assertEqual(work_policy.POLICY["codex_external_io"],"host-network-staged-native-state-v1")
         self.assertEqual(PLAN_POLICY_DIGEST,"b541291edbadf6390f1a46f1f8f82d5b090f9942aaf2b57ced50ef3f779ab5e4")
         self.assertEqual(work_policy.POLICY["feedback_workflow"],"lease-bound-immutable-feedback-review-v1")
         self.assertEqual(work_policy.POLICY["plan_workflow"], "artifact-bound-plan-decisions-publication-v1")
         self.assertEqual(work_policy.POLICY["antigravity_session_policy"], "fresh-unless-receipt-owned-task-resume-v1")
-        self.assertEqual(work_policy.POLICY["codex_session_policy"], "ephemeral-v1")
+        self.assertEqual(work_policy.POLICY["codex_session_policy"], "fresh-unless-receipt-owned-author-resume-ttl-v1")
+        self.assertEqual(work_policy.POLICY["codex_feature_controls"], "no-user-config-no-multi-agent-no-fast-mode-v1")
         self.assertNotIn("fresh_session", work_policy.POLICY)
-        self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST))
+        self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST, EXTERNAL_SANDBOX_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
+                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "codex_feature_controls", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 
@@ -157,7 +167,15 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         return incarnation
 
     def old_recipe(self, policy=OLD_POLICY_ID):
-        digest = {OLD_POLICY_ID: OLD_POLICY_DIGEST, PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST, SESSION_POLICY_ID: SESSION_POLICY_DIGEST, PLAN_POLICY_ID: PLAN_POLICY_DIGEST,FEEDBACK_POLICY_ID:FEEDBACK_POLICY_DIGEST,PEER_POLICY_ID:PEER_POLICY_DIGEST}[policy]
+        digest = {
+            OLD_POLICY_ID: OLD_POLICY_DIGEST,
+            PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST,
+            SESSION_POLICY_ID: SESSION_POLICY_DIGEST,
+            PLAN_POLICY_ID: PLAN_POLICY_DIGEST,
+            FEEDBACK_POLICY_ID: FEEDBACK_POLICY_DIGEST,
+            PEER_POLICY_ID: PEER_POLICY_DIGEST,
+            EXTERNAL_SANDBOX_POLICY_ID: EXTERNAL_SANDBOX_POLICY_DIGEST,
+        }[policy]
         payload = {
             "version": 2, "backend": "codex", "model": "gpt-5.4",
             "resource_profile": policy, "mode": "plan", "generation_token_limit": None,
@@ -275,7 +293,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 16)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 17)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -387,6 +405,66 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         old=self.advertise(self.cluster,db,'v6-peer-worker',PEER_POLICY_DIGEST)
         self.assertEqual(db.claim('v6-peer-worker',old,['codex-v2']).task_id,queued['task_id'])
 
+    def test_schema16_v7_tasks_attempts_and_receipts_survive_migration_17_and_isolate_v8(self):
+        with TemporaryDirectory(prefix="forge-v7-codex-warm-upgrade-", dir="/tmp") as temporary:
+            legacy_sql = Path(temporary) / "sql"
+            historical_registry(legacy_sql, 16)
+            cluster = PreUpgradeCluster(legacy_sql).start()
+            try:
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 16)
+                db = self.worker(cluster)
+                v7_inc = self.advertise(cluster, db, "v7-worker", EXTERNAL_SANDBOX_POLICY_DIGEST)
+                admitted = self.admit_old(cluster, "v7-before-codex-warm", EXTERNAL_SANDBOX_POLICY_ID)
+                lease = db.claim("v7-worker", v7_inc, ["codex-v2"])
+                self.assertEqual(lease.task_id, admitted["task_id"])
+                text, manifest = self.stage(db, lease)
+                proof = make_stop_proof(lease.unit_name)
+                published = db.publish(lease, "awaiting_review", manifest, None, "V7 result", proof)
+                receipt = db.reconcile(lease, "d" * 64, proof)
+                reconciliation = self.rows(
+                    cluster, "SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s",
+                    (UUID(receipt),),
+                )
+                before = self.rows(
+                    cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
+                    (UUID(lease.task_id),),
+                )
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 17)
+                self.assertEqual(
+                    self.rows(cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
+                              "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
+                              (UUID(lease.task_id),)),
+                    before,
+                )
+                self.assertEqual(
+                    self.rows(cluster, "SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s",
+                              (UUID(receipt),)),
+                    reconciliation,
+                )
+                self.assertEqual(self.admit_old(cluster, "v7-before-codex-warm", EXTERNAL_SANDBOX_POLICY_ID), admitted)
+                self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V7 result", proof), published)
+                self.assertEqual(
+                    self.store(cluster).result(project_alias="homelab", task_id=UUID(lease.task_id),
+                                               attempt_id=UUID(lease.attempt_id))["content"],
+                    text,
+                )
+                v7_queued = self.admit_old(cluster, "v7-queued-after-m17", EXTERNAL_SANDBOX_POLICY_ID)
+                v8_queued = self.service(cluster).submit(make_submit(idempotency_key="v8-queued-after-m17"))
+                v8_inc = self.advertise(cluster, db, "v8-worker", work_policy.POLICY_DIGEST)
+                v8_lease = db.claim("v8-worker", v8_inc, ["codex-v2"])
+                self.assertEqual(v8_lease.task_id, v8_queued["task_id"])
+                self.assertEqual(v8_lease.recipe["resource_profile"], "forge-coding-v8")
+                self.assertIsNone(db.claim("v8-worker", v8_inc, ["codex-v2"]))
+                v7_inc2 = self.advertise(cluster, db, "v7-worker", EXTERNAL_SANDBOX_POLICY_DIGEST)
+                v7_lease = db.claim("v7-worker", v7_inc2, ["codex-v2"])
+                self.assertEqual(v7_lease.task_id, v7_queued["task_id"])
+                self.assertEqual(v7_lease.recipe["resource_profile"], "forge-coding-v7")
+            finally:
+                cluster.stop()
+
     def test_v1_v2_and_current_workers_claim_only_their_exact_policy_digest(self):
         old = self.admit_old(self.cluster, "old-queued-first")
         previous = self.admit_old(self.cluster, "previous-queued-second", PREVIOUS_POLICY_ID)
@@ -450,10 +528,22 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         finally:
             self.cluster.admin_exec(
                 "UPDATE forge_agent.schema_migrations SET name='coding_task_session_policy' WHERE version=13")
+        self.assertEqual(self.rows(self.cluster,
+            "SELECT count(*) FROM forge_agent.schema_migrations "
+            "WHERE version=17 AND name='coding_codex_warm_sessions'")[0][0], 1)
+        try:
+            self.cluster.admin_exec(
+                "UPDATE forge_agent.schema_migrations SET name='unexpected-codex-warm' WHERE version=17")
+            result = self.cluster.run_sql_script(script)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("migration 0017 is missing", result.stderr)
+        finally:
+            self.cluster.admin_exec(
+                "UPDATE forge_agent.schema_migrations SET name='coding_codex_warm_sessions' WHERE version=17")
         original = self.rows(self.cluster,
             "SELECT pg_get_constraintdef(oid,false) FROM pg_constraint "
             "WHERE conrelid='forge_agent.coding_attempts'::regclass AND conname='coding_attempts_pinned_recipe_check'")[0][0]
-        for policy in (OLD_POLICY_ID, PREVIOUS_POLICY_ID, SESSION_POLICY_ID, work_policy.POLICY_ID):
+        for policy in (OLD_POLICY_ID, PREVIOUS_POLICY_ID, SESSION_POLICY_ID, EXTERNAL_SANDBOX_POLICY_ID, work_policy.POLICY_ID):
             self.assertIn(f"'{policy}'::text", original)
             drift = original.replace(f"'{policy}'::text", "'removed-policy'::text")
             try:
@@ -470,7 +560,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
         function = self.rows(self.cluster,
             "SELECT pg_get_functiondef('forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure)")[0][0]
-        no_new_policy = function.replace("'forge-coding-v5'", "'removed-policy'")
+        no_new_policy = function.replace("'forge-coding-v8'", "'removed-policy'")
         no_digest, replacements = re.subn(
             r"\(t\.pinned_recipe->>'policy_digest'\)\s*=\s*r\.policy_digest", "true", function,
         )

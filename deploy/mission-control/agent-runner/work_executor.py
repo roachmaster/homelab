@@ -40,6 +40,34 @@ MAX_FILES = 20_000
 MAX_WORKSPACE_BYTES = 256 * 1024 * 1024
 LOG = logging.getLogger("forge-coding-worker")
 
+FORBIDDEN_CODEX_FLAGS = frozenset({
+    "--last", "--all", "--worktree",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+    "--approve-for-me",
+})
+_CODEX_VALUE_FLAGS = frozenset({
+    "--sandbox", "--color", "--model", "-m", "--config", "-c",
+    "--disable", "--enable", "--ask-for-approval",
+    "--output-schema", "--thread-source", "-o", "--output-last-message",
+})
+STALE_CODEX_SESSION_MARKERS = (
+    "session not found",
+    "thread not found",
+    "no recorded session",
+    "no session found",
+    "no rollout found",
+    "rollout not found",
+    "session does not exist",
+    "thread does not exist",
+    "session expired",
+    "stale session",
+    "conversation not found",
+    "failed to resume session",
+    "failed to load session",
+    "failed to load rollout",
+)
+
 
 def utc_now():
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -302,6 +330,147 @@ def _provider_error(message):
     return "failed"
 
 
+def _codex_argv(binary, *, model, sandbox_mode, conversation_id=None, ephemeral=False):
+    if sandbox_mode not in {"read-only", "workspace-write", "danger-full-access"}:
+        raise ExecutionError("failed", "The Codex execution boundary is unavailable.")
+    if conversation_id is not None:
+        if ephemeral:
+            raise ExecutionError("failed", "Invalid Codex session continuation options.")
+        try:
+            session_id = _uuid(conversation_id)
+        except (ValueError, TypeError, AttributeError):
+            raise ExecutionError("failed", "Invalid Codex session continuation identity.") from None
+        return (
+            str(binary), "--no-daemon", "--ask-for-approval", "never", "exec",
+            "--sandbox", sandbox_mode, "--color", "never",
+            "resume",
+            "--ignore-user-config", "--ignore-rules",
+            "--disable", "fast_mode", "--disable", "multi_agent",
+            "--model", model,
+            "--json", session_id, "-",
+        )
+    argv = (
+        str(binary), "--no-daemon", "--ask-for-approval", "never", "exec",
+        "--ignore-user-config", "--ignore-rules",
+        "--sandbox", sandbox_mode,
+        "--disable", "fast_mode", "--disable", "multi_agent",
+        "--model", model,
+        "--json", "--color", "never",
+    )
+    if ephemeral:
+        argv += ("--ephemeral",)
+    return argv + ("-",)
+
+
+def _is_stale_codex_session(parser):
+    diagnostics = [message.lower() for message in parser.error_messages]
+    stderr = parser.stderr_tail.decode("utf-8", errors="replace").lower()
+    if stderr:
+        diagnostics.append(stderr)
+    return any(marker in text for text in diagnostics for marker in STALE_CODEX_SESSION_MARKERS)
+
+
+def _validate_codex_argv(lease, invocation):
+    args = invocation.argv
+    if len(args) < 3:
+        raise ExecutionError("failed", "The Codex execution boundary is unavailable.")
+    exec_idx = None
+    i = 1
+    while i < len(args):
+        token = args[i]
+        if token == "exec":
+            exec_idx = i
+            break
+        if token.startswith("-"):
+            flag = token.split("=", 1)[0]
+            if flag in FORBIDDEN_CODEX_FLAGS:
+                raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
+            if flag in _CODEX_VALUE_FLAGS and "=" not in token:
+                i += 2
+                continue
+        i += 1
+    if exec_idx is None:
+        raise ExecutionError("failed", "The Codex execution boundary is unavailable.")
+
+    resume_idx = None
+    pre_resume_flags = {}
+    post_resume_flags = {}
+    all_flags = set()
+    positionals = []
+    i = exec_idx + 1
+    while i < len(args):
+        token = args[i]
+        if token == "-":
+            positionals.append(token)
+            i += 1
+            continue
+        if token.startswith("-"):
+            if "=" in token:
+                flag, value = token.split("=", 1)
+                step = 1
+            elif token in _CODEX_VALUE_FLAGS:
+                if i + 1 >= len(args):
+                    raise ExecutionError("failed", "The Codex execution boundary is unavailable.")
+                flag, value = token, args[i + 1]
+                step = 2
+            else:
+                flag, value = token, None
+                step = 1
+            if flag in FORBIDDEN_CODEX_FLAGS:
+                raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
+            all_flags.add(flag)
+            bucket = pre_resume_flags if resume_idx is None else post_resume_flags
+            bucket.setdefault(flag, []).append(value)
+            i += step
+            continue
+        if resume_idx is None and token == "resume":
+            resume_idx = i
+        else:
+            positionals.append(token)
+        i += 1
+
+    if "--ignore-user-config" not in all_flags or "--ignore-rules" not in all_flags:
+        raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
+    if "--sandbox" in post_resume_flags or len(pre_resume_flags.get("--sandbox", ())) != 1:
+        raise ExecutionError("failed", "The Codex execution boundary is unavailable.")
+    sandbox = pre_resume_flags["--sandbox"][0]
+    if sandbox not in {"read-only", "workspace-write", "danger-full-access"}:
+        raise ExecutionError("failed", "The Codex execution boundary is unavailable.")
+    if ((sandbox == "danger-full-access") != invocation.external_sandbox
+            or invocation.external_sandbox and POLICY.get("codex_sandbox") != "supervised-external-v1"):
+        raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
+
+    is_reviewer = lease.get("workflow_review_id") is not None or lease.get("mode") == "review"
+    if resume_idx is not None:
+        if is_reviewer:
+            raise ExecutionError("failed", "Independent review tasks cannot resume a Codex session.")
+        if "--color" in post_resume_flags or len(pre_resume_flags.get("--color", ())) != 1:
+            raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
+        if "--ephemeral" in all_flags:
+            raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
+        if invocation.session is None or invocation.session.conversation_id is None:
+            raise ExecutionError("failed", "The Codex session continuation identity is missing.")
+        try:
+            expected_session = _uuid(invocation.session.conversation_id)
+        except (ValueError, TypeError, AttributeError):
+            raise ExecutionError("failed", "The Codex session continuation identity is invalid.") from None
+        if positionals != [expected_session, "-"]:
+            raise ExecutionError("failed", "The Codex session continuation target does not match.")
+    elif is_reviewer and "--ephemeral" not in all_flags:
+        raise ExecutionError("failed", "Independent review tasks require an ephemeral Codex session.")
+
+
+def _close_pipes(process):
+    if process is None:
+        return
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                LOG.warning("Agent pipe cleanup unavailable")
+
+
 class CliParser:
     """Incremental bounded machine-event parser, retaining no tool arguments/thoughts."""
 
@@ -317,9 +486,15 @@ class CliParser:
         self.complete = False
         self.failure = None
         self.denied = False
+        self.saw_work = False
+        self.error_messages = []
         self.stderr_tail = bytearray()
         if expected_conversation_id is not None:
             self._session(expected_conversation_id)
+
+    def _remember_error(self, message):
+        if isinstance(message, str) and message.strip() and len(self.error_messages) < 16:
+            self.error_messages.append(message[:1024])
 
     def feed(self, data, *, stderr=False):
         self.stream_bytes += len(data)
@@ -394,6 +569,8 @@ class CliParser:
 
     def _codex(self, event):
         kind = event.get("type")
+        if isinstance(kind, str) and (kind == "turn.started" or kind.startswith("item.")):
+            self.saw_work = True
         if kind == "thread.started":
             self._session(event.get("thread_id"))
         elif kind == "item.completed":
@@ -408,12 +585,17 @@ class CliParser:
                 self.denied = True
         elif kind == "turn.failed":
             error = event.get("error")
-            self.failure = _provider_error(error.get("message") if isinstance(error, dict) else "")
+            message = error.get("message") if isinstance(error, dict) else ""
+            self._remember_error(message)
+            self.failure = _provider_error(message)
         elif kind == "error":
-            self.failure = _provider_error(event.get("message"))
+            message = event.get("message")
+            self._remember_error(message)
+            self.failure = _provider_error(message)
         elif kind == "turn.completed":
             if self.complete:
                 raise ExecutionError("failed", "The coding agent returned multiple completed turns.")
+            self.saw_work = True
             self.usage = event.get("usage") if isinstance(event.get("usage"), dict) else None
             self.complete = True
 
@@ -485,13 +667,7 @@ class SystemdSupervisor:
         if type(invocation.external_sandbox) is not bool or invocation.external_sandbox and invocation.backend != "codex":
             raise ExecutionError("failed", "The external execution boundary is unavailable.")
         if invocation.backend == "codex":
-            try:
-                sandbox = invocation.argv[invocation.argv.index("--sandbox") + 1]
-            except (ValueError, IndexError):
-                raise ExecutionError("failed", "The Codex execution boundary is unavailable.") from None
-            if ((sandbox == "danger-full-access") != invocation.external_sandbox
-                    or invocation.external_sandbox and POLICY.get("codex_sandbox") != "supervised-external-v1"):
-                raise ExecutionError("failed", "The Codex execution boundary does not match its pinned policy.")
+            _validate_codex_argv(lease, invocation)
         verification = invocation.backend == "verification"
         native_state = (None if verification else account.home /
                         (".gemini" if invocation.backend == "antigravity" else ".codex"))
@@ -655,15 +831,25 @@ class SystemdSupervisor:
 class CommandRunnerProvider:
     """Selected factory that creates a fresh adapter/process scope per attempt."""
 
-    def __init__(self, config, supervisor, *, sessions=None, popen=subprocess.Popen, clock=time.monotonic):
+    def __init__(self, config, supervisor, *, sessions=None, codex_sessions=None, popen=subprocess.Popen, clock=time.monotonic):
         self.config, self.supervisor, self.popen, self.clock = config, supervisor, popen, clock
         self.sessions = sessions
+        self.codex_sessions = codex_sessions
         self._binary_hashes = {}
+
+    def _session_provider(self, backend):
+        if backend == "antigravity":
+            return self.sessions
+        if backend == "codex":
+            return self.codex_sessions
+        return None
 
     def prepare(self):
         (self.config.state_root / "attempts").mkdir(parents=True, exist_ok=True, mode=0o700)
         if self.sessions is not None:
             self.sessions.prepare()
+        if self.codex_sessions is not None:
+            self.codex_sessions.prepare()
         for backend, path in self.config.binaries.items():
             actual = path.resolve(strict=True)
             if not actual.is_file() or not os.access(actual, os.X_OK):
@@ -678,12 +864,24 @@ class CommandRunnerProvider:
         actual, pinned_hash = self._binary_hashes[backend]
         if hashlib.sha256(actual.read_bytes()).digest() != pinned_hash:
             raise ExecutionError("failed", "Configured coding program changed after worker startup.")
-        try:
-            session = (self.sessions.select(lease, workspace, pinned_hash.hex())
-                       if backend == "antigravity" and self.sessions is not None
-                       and lease.get("workflow_review_id") is None else None)
-        except (OSError, SessionError):
-            raise ExecutionError("needs_reconcile", "Antigravity continuation metadata is unavailable; review is required.") from None
+        if backend == "antigravity":
+            try:
+                session = (self.sessions.select(lease, workspace, pinned_hash.hex())
+                           if self.sessions is not None and lease.get("workflow_review_id") is None else None)
+            except (OSError, SessionError):
+                raise ExecutionError("needs_reconcile", "Antigravity continuation metadata is unavailable; review is required.") from None
+        else:
+            codex_warm_eligible = (
+                self.codex_sessions is not None
+                and getattr(self.codex_sessions, "ttl_seconds", self.config.codex_session_ttl_seconds) > 0
+                and lease.get("workflow_review_id") is None
+                and lease["mode"] in {"plan", "implement"}
+            )
+            try:
+                session = (self.codex_sessions.select(lease, workspace, pinned_hash.hex())
+                           if codex_warm_eligible else None)
+            except (OSError, SessionError):
+                raise ExecutionError("needs_reconcile", "Codex continuation metadata is unavailable; review is required.") from None
         attempt = _uuid(lease["attempt_id"])
         scratch = self.config.state_root / "attempts" / attempt
         scratch.mkdir(mode=0o700, exist_ok=True)
@@ -867,11 +1065,15 @@ class CommandRunnerProvider:
         else:
             external_sandbox = (getattr(self.supervisor, "enforces_coding_sandbox", False) is True
                                 and POLICY.get("codex_sandbox") == "supervised-external-v1")
-            argv = (str(actual), "--no-daemon", "--ask-for-approval", "never", "exec",
-                    "--ignore-user-config", "--ignore-rules", "--sandbox",
-                    "danger-full-access" if external_sandbox else "workspace-write" if implement else "read-only",
-                    "--model", lease["recipe"]["model"],
-                    "--json", "--color", "never", "--ephemeral", "-")
+            sandbox_mode = ("danger-full-access" if external_sandbox
+                            else "workspace-write" if implement else "read-only")
+            argv = _codex_argv(
+                actual,
+                model=lease["recipe"]["model"],
+                sandbox_mode=sandbox_mode,
+                conversation_id=session.conversation_id if session is not None else None,
+                ephemeral=session is None,
+            )
             payload = prompt.encode("utf-8")
         return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file,
                           tuple(path for path in (feedback_file, peer_file, peer_feedback_file) if path is not None),
@@ -882,12 +1084,13 @@ class CommandRunnerProvider:
         invocation = self.invocation(lease, workspace, progress=report_progress is not None,
                                      plan_context=plan_context, feedback_context=feedback_context, peer_context=peer_context,
                                      peer_feedback_context=peer_feedback_context)
-        conversation = invocation.session.conversation_id if invocation.session is not None else None
-        parser = CliParser(invocation.backend, expected_conversation_id=conversation)
+        session_provider = self._session_provider(invocation.backend)
+        active_invocation = invocation
+        conversation = active_invocation.session.conversation_id if active_invocation.session is not None else None
         progress = ProgressReader(invocation.scratch / "progress", report_progress) if report_progress is not None else None
         process = None
-        errors = []
-        interrupted = False
+        reaped = False
+        used_fallback = False
         scope_settled = False
 
         def settled(outcome):
@@ -895,19 +1098,21 @@ class CommandRunnerProvider:
             scope_settled = True
             # systemd owns the model's cgroup; this is the separate local
             # systemd-run launcher. Both lifetimes must be confirmed stopped.
-            if not terminate_and_reap(process) or not outcome.stop_proof.get("scope_stopped"):
+            launcher_stopped = reaped if process is not None and reaped else terminate_and_reap(process)
+            if not launcher_stopped or not outcome.stop_proof.get("scope_stopped"):
                 outcome = replace(outcome, status="needs_reconcile", text="",
                                   summary="Agent or launcher stop could not be verified; review is required.")
             if (outcome.status == "awaiting_review" and not stop.is_set()
-                    and invocation.session is not None):
+                    and active_invocation.session is not None and session_provider is not None):
                 try:
-                    self.sessions.remember(invocation.session, workspace, outcome.conversation_id)
+                    session_provider.remember(active_invocation.session, workspace, outcome.conversation_id)
                 except (OSError, SessionError, ExecutionError):
                     # Losing an optional cache hint cannot discard completed
                     # work. The old hint was removed before process startup.
-                    LOG.warning("Antigravity continuation cache unavailable")
-            # A separate process resumed with --conversation has no verified
-            # zero usage baseline. Never label its cumulative totals fresh.
+                    LOG.warning("%s continuation cache unavailable",
+                                "Codex" if active_invocation.backend == "codex" else "Antigravity")
+            # A separate resumed process has no verified zero usage baseline.
+            # Never label its cumulative totals fresh.
             return replace(outcome, fresh_session=conversation is None)
 
         try:
@@ -915,91 +1120,149 @@ class CommandRunnerProvider:
                 return settled(CliOutcome("cancelled", "", None, None,
                                           "The assignment stopped before execution.",
                                           self.supervisor.stop(lease["unit_name"])))
-            if invocation.session is not None:
-                self.sessions.invalidate(invocation.session)
+            if active_invocation.session is not None and session_provider is not None:
+                session_provider.invalidate(active_invocation.session)
             if stop.is_set():
                 return settled(CliOutcome("cancelled", "", None, None,
                                           "The assignment stopped before execution.",
                                           self.supervisor.stop(lease["unit_name"])))
-            process = self.popen(self.supervisor.argv(lease, invocation), stdin=subprocess.PIPE,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
-                                 start_new_session=True, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
+            pre_resume_digest = (workspace.digest()
+                                 if active_invocation.backend == "codex" and conversation is not None
+                                 else None)
             deadline = self.clock() + POLICY["max_wall_seconds"] + 15
-            cleanup_deadline = None
-            next_progress = self.clock()
-            with selectors.DefaultSelector() as selected:
-                for stream, label in ((process.stdin, "input"), (process.stdout, "output"),
-                                      (process.stderr, "error")):
-                    os.set_blocking(stream.fileno(), False)
-                    selected.register(stream, selectors.EVENT_WRITE if label == "input" else selectors.EVENT_READ, label)
-                pending = memoryview(invocation.stdin)
-                reads = 2
-                while reads:
-                    if progress is not None and not errors and not stop.is_set() and self.clock() >= next_progress:
-                        try:
-                            progress.poll()
-                        except ProgressError:
-                            errors.append(ExecutionError("failed", "Agent public progress reports were malformed or unavailable."))
-                        except ProgressSinkError:
-                            errors.append(ExecutionError("needs_reconcile", "Agent progress persistence is uncertain; review is required."))
-                        next_progress = self.clock() + 1
-                    if self.clock() >= deadline and not errors:
-                        errors.append(ExecutionError("failed", "Agent exceeded its declared wall-time resource bound."))
-                    if (stop.is_set() or errors) and not interrupted:
-                        interrupted = True
-                        self.supervisor.stop(lease["unit_name"])
-                        cleanup_deadline = self.clock() + 20
-                    if cleanup_deadline is not None and self.clock() >= cleanup_deadline:
-                        break
-                    for key, _mask in selected.select(.2):
-                        if key.data == "input":
+            while True:
+                parser = CliParser(active_invocation.backend, expected_conversation_id=conversation)
+                errors = []
+                interrupted = False
+                reaped = False
+                process = self.popen(self.supervisor.argv(lease, active_invocation), stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
+                                     start_new_session=True, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
+                cleanup_deadline = None
+                next_progress = self.clock()
+                with selectors.DefaultSelector() as selected:
+                    for stream, label in ((process.stdin, "input"), (process.stdout, "output"),
+                                          (process.stderr, "error")):
+                        os.set_blocking(stream.fileno(), False)
+                        selected.register(stream, selectors.EVENT_WRITE if label == "input" else selectors.EVENT_READ, label)
+                    pending = memoryview(active_invocation.stdin)
+                    reads = 2
+                    while reads:
+                        if progress is not None and not errors and not stop.is_set() and self.clock() >= next_progress:
                             try:
-                                written = os.write(key.fd, pending)
-                                pending = pending[written:]
-                            except BlockingIOError:
-                                continue
-                            except OSError:
-                                pending = pending[:0]
-                                errors.append(ExecutionError("failed", "Agent input could not be delivered."))
-                            if not pending:
-                                selected.unregister(key.fileobj)
-                                key.fileobj.close()
-                        else:
-                            try:
-                                chunk = os.read(key.fd, 64 * 1024)
-                            except BlockingIOError:
-                                continue
-                            if not chunk:
-                                selected.unregister(key.fileobj)
-                                key.fileobj.close()
-                                reads -= 1
-                            elif not errors:
+                                progress.poll()
+                            except ProgressError:
+                                errors.append(ExecutionError("failed", "Agent public progress reports were malformed or unavailable."))
+                            except ProgressSinkError:
+                                errors.append(ExecutionError("needs_reconcile", "Agent progress persistence is uncertain; review is required."))
+                            next_progress = self.clock() + 1
+                        if self.clock() >= deadline and not errors:
+                            errors.append(ExecutionError("failed", "Agent exceeded its declared wall-time resource bound."))
+                        if (stop.is_set() or errors) and not interrupted:
+                            interrupted = True
+                            self.supervisor.stop(lease["unit_name"])
+                            cleanup_deadline = self.clock() + 20
+                        if cleanup_deadline is not None and self.clock() >= cleanup_deadline:
+                            break
+                        for key, _mask in selected.select(.2):
+                            if key.data == "input":
                                 try:
-                                    parser.feed(chunk, stderr=key.data == "error")
-                                except ExecutionError as error:
-                                    errors.append(error)
-            try:
-                returncode = process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                terminate_and_reap(process)
-                returncode = process.poll()
-                errors.append(ExecutionError("failed", "The approved agent launcher did not exit within its bound."))
-            proof = self.supervisor.stop(lease["unit_name"])
-            if progress is not None and not errors and not interrupted:
+                                    written = os.write(key.fd, pending)
+                                    pending = pending[written:]
+                                except BlockingIOError:
+                                    continue
+                                except OSError:
+                                    pending = pending[:0]
+                                    errors.append(ExecutionError("failed", "Agent input could not be delivered."))
+                                if not pending:
+                                    selected.unregister(key.fileobj)
+                                    key.fileobj.close()
+                            else:
+                                try:
+                                    chunk = os.read(key.fd, 64 * 1024)
+                                except BlockingIOError:
+                                    continue
+                                if not chunk:
+                                    selected.unregister(key.fileobj)
+                                    key.fileobj.close()
+                                    reads -= 1
+                                elif not errors:
+                                    try:
+                                        parser.feed(chunk, stderr=key.data == "error")
+                                    except ExecutionError as error:
+                                        errors.append(error)
                 try:
-                    progress.poll()
-                except ProgressError:
-                    errors.append(ExecutionError("failed", "Agent public progress reports were malformed or unavailable."))
-                except ProgressSinkError:
-                    errors.append(ExecutionError("needs_reconcile", "Agent progress persistence is uncertain; review is required."))
-            if errors:
-                return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else errors[0].outcome,
-                                          "", parser.conversation_id, parser.usage, errors[0].summary, proof))
-            outcome = parser.finish(returncode, proof, interrupted=interrupted)
-            if outcome.status == "awaiting_review" and progress is not None and not progress.accepted:
-                return settled(CliOutcome("failed", "", parser.conversation_id, parser.usage,
-                                          "Agent returned a result without a persisted public plan; submit a new attempt that reports its plan first.", proof))
-            return settled(outcome)
+                    returncode = process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    reaped = terminate_and_reap(process)
+                    returncode = process.poll()
+                    errors.append(ExecutionError("failed", "The approved agent launcher did not exit within its bound."))
+                proof = self.supervisor.stop(lease["unit_name"])
+                if not reaped:
+                    reaped = terminate_and_reap(process)
+                if progress is not None and not errors and not interrupted:
+                    try:
+                        progress.poll()
+                    except ProgressError:
+                        errors.append(ExecutionError("failed", "Agent public progress reports were malformed or unavailable."))
+                    except ProgressSinkError:
+                        errors.append(ExecutionError("needs_reconcile", "Agent progress persistence is uncertain; review is required."))
+                if errors:
+                    return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else errors[0].outcome,
+                                              "", parser.conversation_id, parser.usage, errors[0].summary, proof))
+                outcome = parser.finish(returncode, proof, interrupted=interrupted)
+                can_fallback = (
+                    active_invocation.backend == "codex"
+                    and conversation is not None
+                    and not used_fallback
+                    and not stop.is_set()
+                    and not interrupted
+                    and not errors
+                    and reaped
+                    and proof.get("scope_stopped") is True
+                    and returncode != 0
+                    and outcome.status not in {"quota_blocked", "blocked_auth", "blocked_permission"}
+                    and not parser.denied
+                    and not parser.saw_work
+                    and not parser.complete
+                    and not parser.response
+                    and self.clock() < deadline - 15
+                    and _is_stale_codex_session(parser)
+                )
+                if can_fallback:
+                    try:
+                        unchanged = workspace.digest() == pre_resume_digest
+                    except ExecutionError:
+                        unchanged = False
+                    if unchanged:
+                        _close_pipes(process)
+                        process = None
+                        reaped = False
+                        used_fallback = True
+                        sandbox_mode = ("danger-full-access" if active_invocation.external_sandbox
+                                        else "workspace-write" if active_invocation.implement else "read-only")
+                        fresh_argv = _codex_argv(
+                            active_invocation.argv[0],
+                            model=lease["recipe"]["model"],
+                            sandbox_mode=sandbox_mode,
+                            conversation_id=None,
+                            ephemeral=False,
+                        )
+                        active_invocation = replace(
+                            active_invocation,
+                            argv=fresh_argv,
+                            session=replace(active_invocation.session, conversation_id=None),
+                        )
+                        conversation = None
+                        if stop.is_set():
+                            return settled(CliOutcome("cancelled", "", None, None,
+                                                      "The assignment stopped before execution.",
+                                                      self.supervisor.stop(lease["unit_name"])))
+                        continue
+                if outcome.status == "awaiting_review" and progress is not None and not progress.accepted:
+                    return settled(CliOutcome("failed", "", parser.conversation_id, parser.usage,
+                                              "Agent returned a result without a persisted public plan; submit a new attempt that reports its plan first.", proof))
+                return settled(outcome)
         except (OSError, subprocess.SubprocessError, SessionError):
             proof = self.supervisor.stop(lease["unit_name"])
             return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else "failed", "", None, None,
@@ -1010,16 +1273,11 @@ class CommandRunnerProvider:
                     if process is not None and not scope_settled:
                         self.supervisor.stop(lease["unit_name"])
                 finally:
-                    terminate_and_reap(process)
+                    if process is not None and not reaped:
+                        terminate_and_reap(process)
             finally:
                 try:
-                    if process is not None:
-                        for stream in (process.stdin, process.stdout, process.stderr):
-                            if stream is not None:
-                                try:
-                                    stream.close()
-                                except OSError:
-                                    LOG.warning("Agent pipe cleanup unavailable")
+                    _close_pipes(process)
                 finally:
                     if progress is not None:
                         progress.close()

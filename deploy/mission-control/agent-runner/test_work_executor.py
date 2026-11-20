@@ -19,7 +19,8 @@ from work_executor import (
     WorkspaceLease, WorkspaceProvider, unit_name, utf8_chunks,
 )
 from work_policy import POLICY, POLICY_DIGEST, POLICY_ID
-from work_worker_config import parse_config, load_config, verify_recipe
+from work_sessions import CodexSessionProvider, SessionSelection
+from work_worker_config import parse_config, load_config, validated_copy, verify_recipe
 
 
 def raw_config(root):
@@ -90,11 +91,23 @@ class WorkerConfigTest(unittest.TestCase):
             lambda raw: raw.update(state_root="/tmp/unsafe%h"),
             lambda raw: raw["database"].update(password="secret"),
             lambda raw: raw["profiles"]["agy"].update(modes=["plan", "plan"]),
+            lambda raw: raw.update(codex_session_ttl_seconds=-1),
+            lambda raw: raw.update(codex_session_ttl_seconds=3601),
+            lambda raw: raw.update(codex_session_ttl_seconds=True),
+            lambda raw: raw.update(codex_session_ttl_seconds="1800"),
+            lambda raw: raw.update(codex_session_ttl_seconds=1800.0),
         ):
             raw = raw_config("/tmp/forge-configuration-fixture")
             mutate(raw)
             with self.assertRaises(ValueError):
                 parse_config(raw)
+        self.assertEqual(config.codex_session_ttl_seconds, 1800)
+        for valid_ttl in (0, 1500, 1800, 3600):
+            raw = raw_config("/tmp/forge-configuration-fixture")
+            raw["codex_session_ttl_seconds"] = valid_ttl
+            parsed = parse_config(raw)
+            self.assertEqual(parsed.codex_session_ttl_seconds, valid_ttl)
+            self.assertEqual(validated_copy(parsed).codex_session_ttl_seconds, valid_ttl)
 
     def test_secret_or_malformed_configuration_never_appears_in_errors(self):
         with TemporaryDirectory(prefix="forge-coding-config-") as root:
@@ -122,8 +135,10 @@ class WorkerConfigTest(unittest.TestCase):
 
     def test_elevated_policy_is_versioned_and_refuses_previous_recipes(self):
         previous_digest = "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44"
-        self.assertEqual(POLICY_ID, "forge-coding-v7")
+        self.assertEqual(POLICY_ID, "forge-coding-v8")
         self.assertEqual(POLICY["antigravity_tool_policy"], "workspace-elevated-v1")
+        self.assertEqual(POLICY["codex_session_policy"], "fresh-unless-receipt-owned-author-resume-ttl-v1")
+        self.assertEqual(POLICY["codex_feature_controls"], "no-user-config-no-multi-agent-no-fast-mode-v1")
         self.assertNotEqual(POLICY_DIGEST, previous_digest)
         config = parse_config(raw_config("/tmp/forge-config-fixture"))
         self.assertTrue(verify_recipe(config, lease(config)))
@@ -133,6 +148,7 @@ class WorkerConfigTest(unittest.TestCase):
             ("forge-coding-v1", previous_digest),
             ("forge-coding-v2", "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58"),
             ("forge-coding-v3", "e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075"),
+            ("forge-coding-v7", "40b4e50c9acf64a835fc477a8748fb1cf266188c46f6ac943dd075d506df6124"),
         ):
             with self.subTest(resource=resource, digest=digest):
                 previous = lease(config)
@@ -276,6 +292,7 @@ class SupervisorContractTest(unittest.TestCase):
             self.assertTrue(codex.external_sandbox)
             self.assertEqual(codex.argv, (str(Path("/usr/bin/python3").resolve()), "--no-daemon", "--ask-for-approval", "never", "exec",
                                          "--ignore-user-config", "--ignore-rules", "--sandbox", "danger-full-access",
+                                         "--disable", "fast_mode", "--disable", "multi_agent",
                                          "--model", "fixture-model", "--json", "--color", "never", "--ephemeral", "-"))
             self.assertFalse((codex.scratch / "report_progress.py").exists())
             guarded = provider.supervisor.argv(value, codex)
@@ -284,6 +301,91 @@ class SupervisorContractTest(unittest.TestCase):
             from dataclasses import replace
             with self.assertRaises(ExecutionError):
                 provider.supervisor.argv(value, replace(codex, external_sandbox=False))
+
+    def test_supervisor_enforces_codex_fresh_and_resume_argv_contracts(self):
+        from dataclasses import replace
+        with TemporaryDirectory(prefix="forge-supervisor-codex-") as root:
+            config = parse_config(raw_config(root))
+            supervisor = SystemdSupervisor(config)
+            codex_sessions = CodexSessionProvider(config, clock=lambda: 1_700_000_000)
+            provider = CommandRunnerProvider(config, supervisor, codex_sessions=codex_sessions)
+            provider.prepare()
+            author_lease = lease(config, backend="codex", mode="plan")
+            task_dir = Path(root) / "task"
+            task_dir.mkdir()
+            (task_dir / "file.txt").write_text("fixture")
+            workspace = WorkspaceLease(task_dir, config.projects["homelab"],
+                                       config.projects["homelab"] / ".git/worktrees/fixture",
+                                       author_lease["task_id"], author_lease["base_revision"])
+            fresh = provider.invocation(author_lease, workspace)
+            self.assertNotIn("--ephemeral", fresh.argv)
+            self.assertEqual(fresh.argv, (
+                str(Path("/usr/bin/python3").resolve()), "--no-daemon", "--ask-for-approval", "never", "exec",
+                "--ignore-user-config", "--ignore-rules", "--sandbox", "danger-full-access",
+                "--disable", "fast_mode", "--disable", "multi_agent",
+                "--model", "fixture-model", "--json", "--color", "never", "-",
+            ))
+            supervisor.argv(author_lease, fresh)
+
+            # Seed a verified session and build a warm resume invocation.
+            thread_id = str(uuid4())
+            codex_sessions.remember(fresh.session, workspace, thread_id)
+            resumed_lease = {
+                **author_lease,
+                "attempt_id": str(uuid4()),
+                "attempt_token": str(uuid4()),
+                "resume_attempt_id": author_lease["attempt_id"],
+                "resume_workspace_digest": workspace.digest(),
+            }
+            resumed_lease["unit_name"] = unit_name(resumed_lease["attempt_id"])
+            resumed = provider.invocation(resumed_lease, workspace)
+            self.assertEqual(resumed.argv, (
+                str(Path("/usr/bin/python3").resolve()), "--no-daemon", "--ask-for-approval", "never", "exec",
+                "--sandbox", "danger-full-access", "--color", "never", "resume",
+                "--ignore-user-config", "--ignore-rules",
+                "--disable", "fast_mode", "--disable", "multi_agent",
+                "--model", "fixture-model", "--json", thread_id, "-",
+            ))
+            supervisor.argv(resumed_lease, resumed)
+
+            binary = resumed.argv[0]
+            invalid_cases = [
+                ("sandbox-after-resume", resumed_lease, replace(resumed, argv=(
+                    binary, "--no-daemon", "--ask-for-approval", "never", "exec", "--color", "never",
+                    "resume", "--sandbox", "danger-full-access", "--ignore-user-config", "--ignore-rules",
+                    "--model", "fixture-model", "--json", thread_id, "-"))),
+                ("color-after-resume", resumed_lease, replace(resumed, argv=(
+                    binary, "--no-daemon", "--ask-for-approval", "never", "exec", "--sandbox", "danger-full-access",
+                    "resume", "--color", "never", "--ignore-user-config", "--ignore-rules",
+                    "--model", "fixture-model", "--json", thread_id, "-"))),
+                ("ephemeral-on-resume", resumed_lease, replace(resumed, argv=(
+                    *resumed.argv[:-2], "--ephemeral", thread_id, "-"))),
+                ("missing-ignore-user-config", resumed_lease, replace(resumed, argv=tuple(
+                    a for a in resumed.argv if a != "--ignore-user-config"))),
+                ("missing-ignore-rules", author_lease, replace(fresh, argv=tuple(
+                    a for a in fresh.argv if a != "--ignore-rules"))),
+                ("external-sandbox-mismatch-resume", resumed_lease, replace(resumed, external_sandbox=False)),
+                ("mismatched-session-uuid", resumed_lease, replace(resumed, argv=(
+                    *resumed.argv[:-2], str(uuid4()), "-"))),
+                ("missing-session-selection", resumed_lease, replace(resumed, session=None)),
+                ("resume-on-review-mode", {**resumed_lease, "mode": "review"}, resumed),
+                ("resume-on-peer-reviewer", {**resumed_lease, "workflow_review_id": str(uuid4())}, resumed),
+                ("non-ephemeral-fresh-on-review-mode", {**author_lease, "mode": "review"}, fresh),
+                ("non-ephemeral-fresh-on-peer-reviewer", {**author_lease, "workflow_review_id": str(uuid4())}, fresh),
+            ]
+            for forbidden in (
+                "--last", "--all", "--worktree",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--dangerously-bypass-hook-trust", "--approve-for-me",
+            ):
+                invalid_cases.append(("forbidden-" + forbidden, resumed_lease, replace(
+                    resumed, argv=(*resumed.argv[:-2], forbidden, thread_id, "-"))))
+                invalid_cases.append(("forbidden-fresh-" + forbidden, author_lease, replace(
+                    fresh, argv=(*fresh.argv[:-1], forbidden, "-"))))
+            for label, target_lease, bad in invalid_cases:
+                with self.subTest(case=label):
+                    with self.assertRaises(ExecutionError):
+                        supervisor.argv(target_lease, bad)
 
     def test_an_unadvertised_supervisor_does_not_get_external_codex_execution(self):
         with TemporaryDirectory(prefix="forge-nested-codex-") as root:

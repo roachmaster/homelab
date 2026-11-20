@@ -231,41 +231,74 @@ class WorkerLifecycleTest(unittest.TestCase):
             selected = Mock()
             sessions = Mock()
             selected.return_value = sessions
+            selected_codex = Mock()
+            codex_sessions = Mock()
+            selected_codex.return_value = codex_sessions
             factory = CodingWorkerFactory(
                 config, lambda config: FakeStore([]), session_factory=selected,
+                codex_session_factory=selected_codex,
                 workspace_factory=lambda config: FakeWorkspaces([]),
                 supervisor_factory=lambda config: Mock(),
             )
             selected.assert_not_called()
+            selected_codex.assert_not_called()
             with patch("subprocess.Popen", side_effect=AssertionError("Factory must not start agent")):
                 worker = factory.create()
             selected.assert_called_once_with(factory.config)
+            selected_codex.assert_called_once_with(factory.config)
             self.assertIs(worker.runner.sessions, sessions)
+            self.assertIs(worker.runner.codex_sessions, codex_sessions)
             sessions.prepare.assert_called_once_with()
+            codex_sessions.prepare.assert_called_once_with()
 
             # An explicit runner replacement must never construct the default's
-            # unused session provider or acquire its resources.
+            # unused session providers or acquire their resources.
             selected.reset_mock()
+            selected_codex.reset_mock()
             replacement = FakeRunner([])
             replaced = CodingWorkerFactory(
                 config, lambda config: FakeStore([]), session_factory=selected,
+                codex_session_factory=selected_codex,
                 runner_factory=lambda config, supervisor: replacement,
                 workspace_factory=lambda config: FakeWorkspaces([]),
                 supervisor_factory=lambda config: Mock(),
             ).create()
             self.assertIs(replaced.runner, replacement)
             selected.assert_not_called()
+            selected_codex.assert_not_called()
 
             raw = raw_config(root)
             del raw["profiles"]["agy"]
             del raw["binaries"]["antigravity"]
-            codex_only = CodingWorkerFactory(
+            codex_only_factory = CodingWorkerFactory(
                 parse_config(raw), lambda config: FakeStore([]), session_factory=selected,
+                codex_session_factory=selected_codex,
                 workspace_factory=lambda config: FakeWorkspaces([]),
                 supervisor_factory=lambda config: Mock(),
-            ).create()
+            )
+            selected_codex.assert_not_called()
+            codex_only = codex_only_factory.create()
             self.assertIsNone(codex_only.runner.sessions)
+            self.assertIs(codex_only.runner.codex_sessions, codex_sessions)
             selected.assert_not_called()
+            selected_codex.assert_called_once_with(codex_only_factory.config)
+
+            selected.reset_mock()
+            selected_codex.reset_mock()
+            agy_raw = raw_config(root)
+            del agy_raw["profiles"]["codex"]
+            del agy_raw["binaries"]["codex"]
+            agy_only_factory = CodingWorkerFactory(
+                parse_config(agy_raw), lambda config: FakeStore([]), session_factory=selected,
+                codex_session_factory=selected_codex,
+                workspace_factory=lambda config: FakeWorkspaces([]),
+                supervisor_factory=lambda config: Mock(),
+            )
+            agy_only = agy_only_factory.create()
+            self.assertIs(agy_only.runner.sessions, sessions)
+            self.assertIsNone(agy_only.runner.codex_sessions)
+            selected.assert_called_once_with(agy_only_factory.config)
+            selected_codex.assert_not_called()
 
     def test_full_result_is_chunked_before_one_explicit_review_publication(self):
         with TemporaryDirectory(prefix="forge-worker-flow-") as root:

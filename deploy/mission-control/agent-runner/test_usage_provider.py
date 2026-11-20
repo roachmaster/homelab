@@ -67,12 +67,25 @@ def provider_row():
 
 class AccountingTest(unittest.TestCase):
     def test_codex_per_turn_total_excludes_overlapping_categories(self):
-        observed = normalize_attempt_usage("codex", {"input_tokens": 100, "output_tokens": 20,
-                  "cached_input_tokens": 80, "cache_write_input_tokens": 10, "reasoning_output_tokens": 12})
+        raw = {"input_tokens": 100, "output_tokens": 20,
+               "cached_input_tokens": 80, "cache_write_input_tokens": 10, "reasoning_output_tokens": 12}
+        observed = normalize_attempt_usage("codex", raw)
+        self.assertEqual(observed["input_tokens"], "100")
+        self.assertEqual(observed["output_tokens"], "20")
         self.assertEqual(observed["total_tokens"], "120")
         self.assertEqual(observed["cached_input_tokens"], "80")
         self.assertEqual(observed["coverage"], "complete")
         self.assertEqual(observed["source"], "codex-exec-turn-v1")
+        self.assertEqual(observed["session_provenance"], "fresh_session")
+
+        for provenance in (False, None, 1, "fresh_session"):
+            with self.subTest(provenance=provenance):
+                resumed = normalize_attempt_usage("codex", raw, fresh_session=provenance)
+                self.assertEqual(resumed["source"], "codex-exec-turn-v1")
+                self.assertEqual(resumed["coverage"], "unknown")
+                self.assertEqual(resumed["session_provenance"], "unverified_baseline")
+                self.assertTrue(all(resumed[key] is None for key in (
+                    "input_tokens", "output_tokens", "cached_input_tokens", "total_tokens")))
 
     def test_agy_cumulative_final_is_not_added_to_step_or_cache_usage(self):
         raw = {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120,

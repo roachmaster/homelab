@@ -182,4 +182,11 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=16)
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(16,'coding_autonomous_workflows');
 \endif
 
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=17) AS apply_0017
+\gset
+\if :apply_0017
+\ir migrations/0017_coding_codex_warm_sessions.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(17,'coding_codex_warm_sessions');
+\endif
+
 COMMIT;

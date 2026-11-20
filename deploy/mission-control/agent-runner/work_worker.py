@@ -17,7 +17,7 @@ from work_executor import (
     _git as _workspace_git,
 )
 from work_policy import POLICY, POLICY_DIGEST
-from work_sessions import AntigravitySessionProvider
+from work_sessions import AntigravitySessionProvider, CodexSessionProvider
 from work_review_context import ReviewContextError, ReviewContextProvider
 from work_consumer_cache import configured_consumer_caches
 from work_candidate_source import ReviewCandidateSourceProvider
@@ -401,17 +401,23 @@ class CodingWorkerFactory:
     """Effect-free selection; explicit create validates then acquires ready ports."""
 
     def __init__(self, config, store_factory, *, runner_factory=None, workspace_factory=None,
-                 supervisor_factory=None, session_factory=None, collector_factory=None, clock=time.monotonic, stop=None,
+                 supervisor_factory=None, session_factory=None, codex_session_factory=None,
+                 collector_factory=None, clock=time.monotonic, stop=None,
                  usage_normalizer=None, review_context_factory=None, peer_context_factory=None,
                  source_revision_factory=SelectedSourceRevisionProvider):
         if not isinstance(config, WorkerConfig) or not callable(store_factory):
             raise TypeError("Coding worker requires frozen configuration and a store factory")
         self.config, self.store_factory = validated_copy(config), store_factory
         self.session_factory = session_factory if session_factory is not None else AntigravitySessionProvider
+        self.codex_session_factory = (codex_session_factory if codex_session_factory is not None
+                                      else CodexSessionProvider)
         self.runner_factory = (runner_factory if runner_factory is not None
                                else lambda config, supervisor: CommandRunnerProvider(
-                                   config, supervisor, sessions=self.session_factory(config)
-                                   if "antigravity" in config.binaries else None))
+                                   config, supervisor,
+                                   sessions=self.session_factory(config)
+                                   if "antigravity" in config.binaries else None,
+                                   codex_sessions=self.codex_session_factory(config)
+                                   if "codex" in config.binaries else None))
         self.workspace_factory = workspace_factory
         self.source_revision_factory = source_revision_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None

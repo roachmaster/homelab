@@ -96,6 +96,7 @@ class WorkerConfig:
     usage: UsageConfig | None = None
     source_path: Path | None = field(default=None, compare=False)
     autonomous_projects: frozenset[str] = frozenset()
+    codex_session_ttl_seconds: int = 1800
 
     @property
     def allowed_profiles(self):
@@ -113,7 +114,7 @@ class WorkerConfig:
 def parse_config(raw, *, source_path=None):
     raw = _object(raw, {"worker_id", "owner", "database", "account", "workspace_root",
                         "state_root", "projects", "profiles", "binaries"},
-                  {"allow_implement", "usage", "autonomous_projects"})
+                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds"})
     worker_id = identifier(raw["worker_id"])
     owner = raw["owner"]
     if (not isinstance(owner, str) or not owner.strip() or len(owner) > 128
@@ -181,11 +182,14 @@ def parse_config(raw, *, source_path=None):
         if type(interval) is not int or not 30 <= interval <= 3600:
             raise ValueError("Invalid coding usage poll interval")
         usage = UsageConfig(absolute_path(usage["hmac_key_file"]), interval)
+    codex_session_ttl_seconds = raw.get("codex_session_ttl_seconds", 1800)
+    if type(codex_session_ttl_seconds) is not int or not 0 <= codex_session_ttl_seconds <= 3600:
+        raise ValueError("Invalid coding Codex session TTL")
     return WorkerConfig(
         worker_id, owner, database, account, workspace_root, state_root,
         MappingProxyType(projects), MappingProxyType(frozen_profiles), MappingProxyType(binaries),
         allow_implement, usage, absolute_path(source_path) if source_path is not None else None,
-        frozenset(autonomous),
+        frozenset(autonomous), codex_session_ttl_seconds,
     )
 
 
@@ -249,6 +253,7 @@ def validated_copy(config):
         "binaries": {key: str(value) for key, value in config.binaries.items()},
         "allow_implement": config.allow_implement,
         "autonomous_projects": sorted(config.autonomous_projects),
+        "codex_session_ttl_seconds": config.codex_session_ttl_seconds,
     }
     if config.usage is not None:
         raw["usage"] = {"hmac_key_file": str(config.usage.hmac_key_file),
