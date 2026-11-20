@@ -51,6 +51,8 @@ pub struct Output {
 /// idempotency store. The host independently authorizes every request.
 #[derive(Debug)]
 pub struct UiModel {
+    presentation: crate::PresentationPolicy,
+    dormant_chat: Option<ChatSnapshot>,
     catalog: Option<Catalog>,
     chats: chat::Chats,
     pending_edit: Option<edit::PendingEdit>,
@@ -94,6 +96,8 @@ pub struct UiModel {
 impl Default for UiModel {
     fn default() -> Self {
         Self {
+            presentation: crate::PORTAL_PRESENTATION,
+            dormant_chat: None,
             catalog: None,
             chats: chat::Chats::default(),
             pending_edit: None,
@@ -137,6 +141,14 @@ impl Default for UiModel {
     }
 }
 impl UiModel {
+    /// Native composition may retain an explicitly enabled legacy client. The
+    /// portal and its WASM use the shared policy; cache data cannot override it.
+    pub fn with_presentation_policy(presentation: crate::PresentationPolicy) -> Self {
+        Self {
+            presentation,
+            ..Self::default()
+        }
+    }
     pub fn phase(&self) -> Phase {
         self.phase
     }
@@ -214,8 +226,13 @@ impl UiModel {
         self.agents.now_ms = input.now_ms;
         // Old entry links/actions navigate to the replacement capability. Do
         // this before normal editor/lifecycle guards; no Mail intent is replayed.
-        if matches!(input.event, UiEvent::OpenMail {}) {
+        if matches!(input.event, UiEvent::OpenMail {})
+            || !self.presentation.chat && matches!(input.event, UiEvent::OpenChat {})
+        {
             input.event = UiEvent::OpenAgents {};
+        }
+        if !self.presentation.chat && retired_chat_event(&input.event) {
+            return Ok(self.output(None));
         }
         let mut effects = Vec::new();
         if self.editor_blocks(&input.event) {
@@ -667,6 +684,7 @@ impl UiModel {
                 {
                     self.invalidate(&mut effects)?;
                     self.chats = chat::Chats::default();
+                    self.dormant_chat = None;
                     self.pending_edit = None;
                     self.edit_review = None;
                     self.write = edit::WriteState::default();
@@ -699,7 +717,9 @@ impl UiModel {
                 self.chats.history.enabled = catalog.chat_history;
                 self.chats.async_chat = catalog.async_chat;
                 self.catalog = Some(catalog);
-                self.chats.open();
+                if self.presentation.chat {
+                    self.chats.open();
+                }
                 if let Some(recent) = recent_write {
                     self.restore_write(recent);
                 }
@@ -719,19 +739,34 @@ impl UiModel {
                 if sole.len() == 1 {
                     self.begin_inspection(input.now_ms, &mut effects)?;
                 }
-                if self.chats.async_chat {
+                if self.presentation.chat && self.chats.async_chat {
                     let request_id = self.next_id(input.now_ms)?;
                     if let Some(request) = self.chats.request_models(request_id) {
                         effects.push(UiEffect::ChatRun(request));
                     }
+                }
+                if !self.presentation.chat {
+                    let catalog = self.catalog.as_ref().expect("paired catalog");
+                    let (work, usage) = (catalog.work_enabled, catalog.usage_enabled);
+                    let id = self.next_id(input.now_ms)?;
+                    let aux = self.next_id(input.now_ms)?;
+                    self.agents
+                        .open(&self.project, work, usage, id, aux, &mut effects);
                 }
             }
             UiEvent::RestoreWorkspace { snapshot } => {
                 if self.catalog.is_none() || self.workspace_restored || !snapshot.is_valid() {
                     return Ok(self.output(None));
                 }
-                self.chats.restore_snapshot(snapshot.chat)?;
-                if self.chats.async_chat {
+                if self.presentation.chat {
+                    self.chats.restore_snapshot(snapshot.chat)?;
+                } else {
+                    self.dormant_chat = Some(snapshot.chat);
+                    if snapshot.workbench_open {
+                        self.agents.close();
+                    }
+                }
+                if self.presentation.chat && self.chats.async_chat {
                     let request_id = self.next_id(input.now_ms)?;
                     if let Some(request) = self.chats.resume_run(request_id) {
                         effects.push(UiEffect::ChatRun(request));
@@ -1267,4 +1302,40 @@ fn failure_label(kind: FailureKind) -> &'static str {
         FailureKind::Limit => "Limit exceeded",
         FailureKind::Cancelled => "Stopped locally",
     }
+}
+
+fn retired_chat_event(event: &UiEvent) -> bool {
+    matches!(
+        event,
+        UiEvent::NewChat {}
+            | UiEvent::SelectChat { .. }
+            | UiEvent::SelectChatModel { .. }
+            | UiEvent::SetChatDraft { .. }
+            | UiEvent::SendChat {}
+            | UiEvent::SendWorkbenchChat { .. }
+            | UiEvent::SendChatWithFile { .. }
+            | UiEvent::ProposeEdit { .. }
+            | UiEvent::DiscardEdit {}
+            | UiEvent::ApplyEdit { .. }
+            | UiEvent::EditResult { .. }
+            | UiEvent::SendPersistentChat { .. }
+            | UiEvent::CancelChatRun {}
+            | UiEvent::RetryChatSubmit {}
+            | UiEvent::ShowChatHistory {}
+            | UiEvent::SetChatHistoryQuery { .. }
+            | UiEvent::MoreChatHistory {}
+            | UiEvent::NewerChatHistory {}
+            | UiEvent::OpenSavedChat { .. }
+            | UiEvent::ManageSavedChat {}
+            | UiEvent::ShowChatExpiry {}
+            | UiEvent::SetChatExpiry { .. }
+            | UiEvent::ConfirmChatExpiry {}
+            | UiEvent::KeepChatLongTerm {}
+            | UiEvent::ShowChatDelete {}
+            | UiEvent::ConfirmChatDelete {}
+            | UiEvent::CloseChatDialog {}
+            | UiEvent::ChatHistory(_)
+            | UiEvent::ChatRun(_)
+            | UiEvent::ChatResult { .. }
+    )
 }

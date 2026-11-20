@@ -2,14 +2,14 @@
 
 The real browser application is built from **typed Rust components/macros and
 YAML style declarations and validated theme tokens**, not handwritten application HTML, CSS or JS.
-It opens to Chat after admission and includes a read-only source workbench. The worker runs the actual compiled
+It opens to Agents after admission and includes a source workbench. Chat is temporarily inactive; its saved PostgreSQL history and full dormant tab snapshots remain preserved. The worker runs the actual compiled
 [`forge-ide-ui`](../forge-ide-ui/README.md) Rust model through the bounded WASM ABI.
 The [native host](../forge-ide-web-host/README.md) supplies protected selectors and
 adapts inspection and bounded source reads to the remote agent; native credentials stay there.
 
 The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
 project-wide file/symbol search, numbered source windows, Outline, Problems and
-reversible keyboard/narrow panes. Chat uses the local ABI 8 bundle.
+reversible keyboard/narrow panes. The current atomic portal bundle uses local ABI 9.
 
 ## Authoring and build boundary
 
@@ -74,17 +74,17 @@ Open its printed loopback origin and enter the one-use console pairing code.
 Never publish that code or put it in a URL. The prototype is single-local-operator,
 not an internet service or a general relay.
 
-After admission, use **New chat** to start a separate conversation and use
-**Conversation** to switch between open conversations and drafts in this tab.
-When the host is configured with a PostgreSQL-backed runner, **Previous chats**
-lists saved conversations across tabs. Open one to read its committed transcript
-or send a follow-up. Forge automatically keeps a chat through the UTC date
-30 days after its first saved turn. **Manage** lets you change that date,
-choose **Keep long term** to clear it, or confirm deletion. The runner
-commits accepted replies, chat history and retention to PostgreSQL. A new browser
-tab opens the most recent saved chat. Reopening the original tab after Back or
-reload also restores its unsent drafts and Workbench location. An interrupted or
-failed send leaves a draft ready to retry.
+After admission, **Agents** is the default view. The active navigation is Agents,
+Workbench, Home and Design. Legacy `#chat` and `OpenChat` intents lead to Agents;
+Chat and model-assisted Workbench question/proposal controls are absent. Backend
+Chat APIs, PostgreSQL conversations and retention remain available to authorized
+native clients. The portal issues no Chat, history, model-discovery or run requests.
+
+Workspace restore/save uses explicit `preserve_chat: true` with normal ownership,
+lease, revision and size checks. It retains the full dormant Chat snapshot,
+including drafts, messages, saved identities, model choice and pending-run hints.
+These hints are never resumed, polled or cancelled by the portal. Explicit or
+restored Workbench selection remains usable, including managed direct editing.
 
 Browsers that support the native leave warning can show it when a draft,
 conversation or Workbench context is open. The browser supplies the wording.
@@ -114,14 +114,14 @@ project again. No file writes, editing, process commands or remote jobs are expo
 
 Open **Design** beside **Workbench** for the wireframes and workspace recovery
 diagram. Forge saves the current workspace before opening `/design` in the same
-tab. Use the docs' **Chat**, **Agents**, or **Workbench** navigation, or the browser's
+tab. Use the docs' **Agents** or **Workbench** navigation, or the browser's
 Back button, to restore the workspace. Declarative transport `entry_actions`
 map bounded URL fragments to existing Rust events after session admission and
 workspace restoration. The generated adapter consumes the fragment after dispatch,
 so later browser returns retain the saved view.
 The tab keeps a temporary JSON copy of its drafts and Workbench bookmark as a
-fallback for an unavailable checkpoint service. The server supplies saved chat
-replies and queued runs, and Forge verifies Workbench source again when you return.
+fallback for an unavailable checkpoint service. The server retains dormant Chat data without hydrating history or discovering
+models, and Forge verifies Workbench source again when you return.
 
 ## Runtime ownership
 

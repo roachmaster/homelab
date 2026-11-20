@@ -929,9 +929,9 @@ async function restoreWorkspace(chatHistory,chatModels){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),2500);
   try{
-    const request={operation:'restore',tab:workspaceTab,...(chatHistory?{history:true}:{}),...(chatModels?{models:true}:{})};
+    const request={operation:'restore',tab:workspaceTab,...(CONFIG.preserve_workspace_chat?{preserve_chat:true}:{...(chatHistory?{history:true}:{}),...(chatModels?{models:true}:{})})};
     let response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
-    if(chatModels&&response.status===400){
+    if(request.models&&response.status===400){
       await response.body?.cancel();
       delete request.models;
       response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
@@ -965,7 +965,7 @@ function checkpointWorkspace(snapshot){
   if(!workspaceLease||!csrf||!snapshot)return;
   const json=JSON.stringify(snapshot);
   if(json===workspaceJSON)return;
-  const body=JSON.stringify({operation:'save',tab:workspaceTab,lease:workspaceLease,revision:++workspaceRevision,snapshot});
+  const body=JSON.stringify({operation:'save',tab:workspaceTab,lease:workspaceLease,revision:++workspaceRevision,snapshot,...(CONFIG.preserve_workspace_chat?{preserve_chat:true}:{})});
   const bytes=encoder.encode(body).length;
   if(bytes>WORKSPACE_MAX)return;
   workspaceJSON=json;
@@ -1017,6 +1017,7 @@ function navigationSnapshot(snapshot){
   // Keep draft text and selection hints. Rust validates the restored snapshot.
   const chat=snapshot?.chat;
   if(!Array.isArray(chat?.conversations)||chat.conversations.length>16)return null;
+  if(CONFIG.preserve_workspace_chat)return snapshot;
   const conversations=chat.conversations.map(item=>({draft:typeof item?.draft==='string'?item.draft:'',messages:[]}));
   return {chat:{selected:chat.selected,model_id:chat.model_id,conversations},
     workbench:snapshot.workbench,workbench_open:snapshot.workbench_open};
@@ -1159,7 +1160,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==8 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==9 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

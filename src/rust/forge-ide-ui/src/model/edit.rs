@@ -805,6 +805,18 @@ impl UiModel {
             .filter(|applied| file.as_ref() == Some(&applied.file));
         let can_apply = proposal_id.is_some() && pending.is_none();
         let check = pending.is_some_and(|pending| pending.request_id.is_none());
+        view.visibility.push(VisibilityBinding {
+            id: "workbench-write-footer",
+            visible: !self.presentation.chat
+                && self.chats.workbench
+                && (pending.is_some()
+                    || undo.is_some()
+                    || self
+                        .write
+                        .status_file
+                        .as_ref()
+                        .is_some_and(|target| file.as_ref() == Some(target))),
+        });
         if pending.is_some() && self.chats.workbench {
             if let Some(dock) = view
                 .visibility
@@ -833,7 +845,11 @@ impl UiModel {
                 }
             }
         }
-        let followup = self.fresh_chat_file();
+        let followup = self
+            .presentation
+            .chat
+            .then(|| self.fresh_chat_file())
+            .flatten();
         view.visibility.push(VisibilityBinding {
             id: "send-chat-with-file",
             visible: followup.is_some(),

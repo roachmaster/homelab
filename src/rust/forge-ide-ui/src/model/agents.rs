@@ -96,6 +96,9 @@ impl Agents {
     pub fn has_work(&self) -> bool {
         self.active || self.has_draft()
     }
+    pub(super) fn has_workspace_work(&self) -> bool {
+        self.has_draft() || self.selected.is_some()
+    }
     pub fn snapshot(&self) -> Option<AgentsNavigationSnapshot> {
         self.has_work().then(|| AgentsNavigationSnapshot {
             active: self.active,
