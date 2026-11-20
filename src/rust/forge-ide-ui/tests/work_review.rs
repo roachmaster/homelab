@@ -217,3 +217,16 @@ fn legacy_review_requirement_is_optional_typed_and_never_defaults_to_false() {
     untyped["review_required"] = "false".into();
     assert!(serde_json::from_value::<WorkTaskDetail>(untyped).is_err());
 }
+
+#[test]
+fn only_repair_review_decision_starts_model_execution() {
+    assert!(WorkReviewDecision::Repair.begins_execution());
+    for decision in [
+        WorkReviewDecision::Approve,
+        WorkReviewDecision::RetryInfrastructure,
+        WorkReviewDecision::Escalate,
+        WorkReviewDecision::Cancel,
+    ] {
+        assert!(!decision.begins_execution());
+    }
+}

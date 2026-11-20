@@ -1047,9 +1047,7 @@ impl Agents {
                     && self.implementation_enabled()
                     && !self.review_note.trim().is_empty()
             }
-            WorkReviewDecision::RetryInfrastructure => {
-                review.can_retry && self.implementation_enabled()
-            }
+            WorkReviewDecision::RetryInfrastructure => review.can_retry,
             WorkReviewDecision::Escalate => {
                 review.stage != "handoff" && !self.review_note.trim().is_empty()
             }
@@ -1079,15 +1077,14 @@ impl Agents {
             })
     }
     fn can_retry_publication(&self) -> bool {
-        self.implementation_enabled()
-            && self.task.as_ref().is_some_and(|t| {
-                t.publication.as_ref().is_some_and(|p| {
-                    p.status == WorkPublicationStatus::Failed && p.publication_id.is_some()
-                }) && t
-                    .review
-                    .as_ref()
-                    .is_some_and(|r| r.can_retry && r.candidate_commit.is_some())
-            })
+        self.task.as_ref().is_some_and(|t| {
+            t.publication.as_ref().is_some_and(|p| {
+                p.status == WorkPublicationStatus::Failed && p.publication_id.is_some()
+            }) && t
+                .review
+                .as_ref()
+                .is_some_and(|r| r.can_retry && r.candidate_commit.is_some())
+        })
     }
     fn finished_plan(&self) -> bool {
         self.task.as_ref().is_some_and(|t| {

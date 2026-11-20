@@ -64,7 +64,7 @@ impl WorkConfig {
                     agent_profile,
                     ..
                 } => {
-                    !decision.starts_work()
+                    !decision.begins_execution()
                         || self.allowed_modes.contains(&WorkMode::Implement)
                             && self.allowed_profiles.contains(agent_profile)
                 }
@@ -72,9 +72,9 @@ impl WorkConfig {
                     self.allowed_modes.contains(&WorkMode::Implement)
                         && self.allowed_profiles.contains(agent_profile)
                 }
-                WorkRequest::WorkPublicationRetry { .. } => {
-                    self.allowed_modes.contains(&WorkMode::Implement)
-                }
+                // The scoped Work service rechecks the exact publication,
+                // candidate and owner authority. No model starts on this path.
+                WorkRequest::WorkPublicationRetry { .. } => true,
                 WorkRequest::WorkPlanDecide {
                     decision,
                     agent_profile,
@@ -174,14 +174,12 @@ impl WorkRelay {
         if !self.grants.admits(&request) {
             return failed(header, Failure::Denied);
         }
-        // Resume starts another execution: check the saved mode independently of
+        // Resume and repair start execution: check the saved mode independently of
         // the runner's broader grants before sending the mutation.
         let inspect_source = matches!(
             &request,
-            WorkRequest::WorkResume { .. }
-                | WorkRequest::WorkRepair { .. }
-                | WorkRequest::WorkPublicationRetry { .. }
-        ) || matches!(&request, WorkRequest::WorkReviewDecide { decision, .. } if decision.starts_work());
+            WorkRequest::WorkResume { .. } | WorkRequest::WorkRepair { .. }
+        ) || matches!(&request, WorkRequest::WorkReviewDecide { decision, .. } if decision.begins_execution());
         if inspect_source {
             let get = WorkRequest::WorkGet {
                 request_id: request.request_id().into(),
@@ -198,11 +196,6 @@ impl WorkRelay {
                 }
                 if !matches!(&request, WorkRequest::WorkResume { .. })
                     && task.mode != WorkMode::Implement
-                {
-                    return failed(header, Failure::Denied);
-                }
-                if matches!(&request, WorkRequest::WorkPublicationRetry { .. })
-                    && !self.grants.allowed_profiles.contains(&task.agent_profile)
                 {
                     return failed(header, Failure::Denied);
                 }

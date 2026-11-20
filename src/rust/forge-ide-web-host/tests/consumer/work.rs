@@ -1202,15 +1202,28 @@ fn review_decision(decision: &str) -> Value {
     value
 }
 #[test]
-fn review_approval_requires_implementation_grants_but_handoff_remains_available() {
+fn nonexecution_review_controls_survive_removed_profile_and_implementation_grant() {
     let files = Files::new();
     let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
     let host = configured(&files, &upstream);
     let auth = authenticate(&host);
+    let mut repair = review_decision("repair");
+    repair["agent_profile"] = json!("removed-profile");
     assert_reply(
         &host,
         "ide.work.review.decide",
-        review_decision("approve"),
+        repair,
+        &auth,
+        403,
+        failure("denied"),
+    );
+    no_calls(&upstream);
+    let mut foreign = review_decision("approve");
+    foreign["project_alias"] = json!("ungranted-project");
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        foreign,
         &auth,
         403,
         failure("denied"),
@@ -1220,19 +1233,50 @@ fn review_approval_requires_implementation_grants_but_handoff_remains_available(
         "work_review_decided",
         json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,"status":"awaiting_review","review_id":OTHER}),
     );
-    let worker = backend(upstream, vec![(200, receipt.clone())]);
+    let publication = reply(
+        "work_publication_retry_queued",
+        json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,"status":"awaiting_review","publication_id":OTHER}),
+    );
+    let worker = backend(
+        upstream,
+        vec![
+            (200, receipt.clone()),
+            (200, receipt.clone()),
+            (200, receipt.clone()),
+            (202, publication.clone()),
+        ],
+    );
+    for decision in ["approve", "retry_infrastructure", "escalate"] {
+        let mut request = review_decision(decision);
+        request["agent_profile"] = json!("removed-profile");
+        assert_reply(
+            &host,
+            "ide.work.review.decide",
+            request,
+            &auth,
+            200,
+            receipt.clone(),
+        );
+    }
+    let mut retry = task_request("work_publication_retry");
+    for (key,value) in json!({"expected_revision":4,"publication_id":OTHER,"candidate_commit":"e".repeat(40),"note":"Retry the same artifact","idempotency_key":"publication-retry"}).as_object().unwrap() { retry[key]=value.clone(); }
     assert_reply(
         &host,
-        "ide.work.review.decide",
-        review_decision("escalate"),
+        "ide.work.publication.retry",
+        retry,
         &auth,
-        200,
-        receipt,
+        202,
+        publication,
     );
-    assert_eq!(worker.join().unwrap().len(), 1);
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 4);
+    assert!(
+        calls.iter().all(|call| call["kind"] != "work_get"),
+        "nonexecution controls do not perform a model-grant precheck"
+    );
 }
 #[test]
-fn review_approval_rechecks_the_saved_implementation_mode_before_mutation() {
+fn review_repair_rechecks_the_saved_implementation_mode_before_mutation() {
     let files = Files::new();
     let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
     let mut value = config(&files);
@@ -1245,7 +1289,7 @@ fn review_approval_rechecks_the_saved_implementation_mode_before_mutation() {
     assert_reply(
         &host,
         "ide.work.review.decide",
-        review_decision("approve"),
+        review_decision("repair"),
         &auth,
         403,
         failure("denied"),
