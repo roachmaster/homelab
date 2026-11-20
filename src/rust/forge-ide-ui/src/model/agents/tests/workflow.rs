@@ -254,3 +254,62 @@ fn autonomous_cancel_uses_admitted_capability_even_while_parent_awaits_review() 
     )
     .is_empty());
 }
+
+#[test]
+fn new_assignment_cannot_discard_an_inflight_initial_or_refreshed_catalog() {
+    for keep_cached_catalog in [false, true] {
+        let mut agents = ready();
+        configure(&mut agents);
+        let mut incoming = agents.catalog.clone().unwrap();
+        incoming.projects[0]
+            .workflow
+            .as_mut()
+            .unwrap()
+            .author_profile = "refreshed-author".into();
+        incoming.profiles[0].alias = "refreshed-author".into();
+        incoming.profiles[0].label = "Refreshed author".into();
+        if !keep_cached_catalog {
+            agents.catalog = None;
+        }
+        agents.pending = Some(WorkRequest::WorkCatalog {
+            request_id: "loading-catalog".into(),
+        });
+        let mut view = ViewModel::default();
+        agents.project(&mut view, true, true, true);
+        assert!(view
+            .buttons
+            .iter()
+            .any(|b| b.id == "agents-new" && b.disabled));
+        assert!(step(&mut agents, UiEvent::AgentsNewTask {}, "premature-new").is_empty());
+        assert_eq!(agents.pane, Pane::List);
+        assert!(
+            matches!(&agents.pending,Some(WorkRequest::WorkCatalog {request_id}) if request_id=="loading-catalog")
+        );
+        let effects = step(
+            &mut agents,
+            UiEvent::Work(WorkResponse::WorkCatalog {
+                request_id: "loading-catalog".into(),
+                projects: incoming.projects,
+                profiles: incoming.profiles,
+                worker_status: incoming.worker_status,
+                observed_at: incoming.observed_at,
+            }),
+            "loaded",
+        );
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkList { .. }))));
+        assert!(agents.assignment_catalog_ready());
+        step(&mut agents, UiEvent::AgentsNewTask {}, "new-after-catalog");
+        assert_eq!(agents.pane, Pane::Compose);
+        assert_eq!(agents.profile, "refreshed-author");
+        let mut view = ViewModel::default();
+        agents.project(&mut view, true, true, true);
+        assert!(view.texts.iter().any(|b| b.id == "agents-assignment-roles"
+            && b.text == "Refreshed author authors · Codex reviews"));
+        assert!(view
+            .visibility
+            .iter()
+            .any(|b| b.id == "agents-manual-assignment" && !b.visible));
+    }
+}
