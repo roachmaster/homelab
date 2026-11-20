@@ -3152,6 +3152,7 @@ async function agentsJourney() {
   agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
   let fixture, context;
   let releaseUsageOverview = () => {};
+  let releaseAssignmentCatalog = () => {};
   try {
     const relay = await agentsRelayOwner.ready;
     fixture = await startFixture(false, false, { agents: relay });
@@ -3281,9 +3282,15 @@ async function agentsJourney() {
     const refreshedProfiles = [];
     let holdUsageOverview = false, usageOverviewHeld = false;
     const usageOverviewGate = new Promise(resolve => { releaseUsageOverview = resolve; });
+    let holdAssignmentCatalog=false, assignmentCatalogHeld=false;
+    const assignmentCatalogGate=new Promise(resolve=>{releaseAssignmentCatalog=resolve;});
     await context.route(fixture.origin + '/forge/v1/dispatch', async route => {
       const request = route.request().postDataJSON();
       if (request.kind === 'usage_refresh') refreshedProfiles.push({ profile: request.agent_profile, project: request.project_alias });
+      if(request.kind==='work_catalog' && holdAssignmentCatalog){
+        holdAssignmentCatalog=false;assignmentCatalogHeld=true;
+        await assignmentCatalogGate;
+      }
       if (request.kind === 'usage_overview' && holdUsageOverview) {
         holdUsageOverview = false;
         usageOverviewHeld = true;
@@ -3556,9 +3563,13 @@ async function agentsJourney() {
     assert.equal(relay.planDecisions.at(-1).decision, 'cancel');
     await page.locator('#agents-back').click();
     process.stderr.write('QA_CHECK autonomous_agent_workflow\n');
-    relay.enableAutonomy();
+    relay.enableAutonomy();holdAssignmentCatalog=true;
     await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
     await check(page.locator('#agents')).toBeVisible();
+    await check.poll(()=>assignmentCatalogHeld).toBe(true);
+    await check(page.locator('#agents-new')).toBeDisabled();
+    await check(page.locator('#agents-compose')).toBeHidden();
+    releaseAssignmentCatalog();
     await page.locator('#agents-new').click();
     await check(page.locator('#agents-manual-assignment')).toBeHidden();
     await check(page.locator('#agents-compose-repair-policy')).toBeHidden();
@@ -3601,6 +3612,7 @@ async function agentsJourney() {
     assert.deepEqual(errors, []);
     assert.equal(context.pages().length, 1, 'the Agents workflow uses one browser page');
   } finally {
+    releaseAssignmentCatalog();
     releaseUsageOverview();
     try { if (context) await context.close(); }
     finally { try { if (fixture) await stopFixture(fixture); } finally { await agentsRelayOwner.close(); } }

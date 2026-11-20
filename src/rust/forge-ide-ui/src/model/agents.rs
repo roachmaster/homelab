@@ -450,7 +450,7 @@ impl Agents {
                 self.status = "Finish checking the saved request before changing this task.".into();
                 self.warning = true;
             }
-            UiEvent::AgentsNewTask {} if work => {
+            UiEvent::AgentsNewTask {} if work && self.assignment_catalog_ready() => {
                 self.auto_repair = false;
                 self.pending = None;
                 self.choose_mode();
@@ -1000,6 +1000,9 @@ impl Agents {
         if self.mode.is_none_or(|m| !modes.contains(&m)) {
             self.mode = modes.first().copied();
         }
+    }
+    fn assignment_catalog_ready(&self) -> bool {
+        self.catalog.is_some() && !matches!(self.pending, Some(WorkRequest::WorkCatalog { .. }))
     }
     fn can_submit(&self) -> bool {
         self.workflow_submission_ready()
@@ -2073,7 +2076,7 @@ impl Agents {
                 self.usage_page + USAGE_PAGE >= self.providers.len(),
             ),
             ("agents-back", !enabled),
-            ("agents-new", !enabled),
+            ("agents-new", !enabled || !self.assignment_catalog_ready()),
             ("agents-refresh", !enabled || pending),
             ("agents-send", !enabled || pending || !self.can_submit()),
             ("agents-discard", !enabled),
