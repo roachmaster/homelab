@@ -3,12 +3,14 @@
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import unittest
+import subprocess
 from unittest.mock import Mock
 from uuid import uuid4
 
 from test_work_publication import fixture, git
 from work_publication_checks import VerificationFailure
-from work_review import ReviewedCandidateProvider, ReviewWorker, protected_gate_path
+from work_review import ReviewedCandidateProvider, ReviewWorker, protected_gate_path, validate_review
+from work_publication_clients import PublicationError
 from work_executor import WorkspaceLease
 from work_publication_clients import WorkspaceSnapshotProvider
 from work_verification import project_verification
@@ -57,6 +59,75 @@ def review_job(job, **changes):
 
 
 class ReviewWorkerTest(unittest.TestCase):
+    def test_missing_candidate_retry_requires_local_consumed_retry_and_exact_previous_review(self):
+        with fixture() as values:
+            _, config, source, *_ = values
+            previous = str(uuid4())
+            fresh = review_job(source, phase="local", infrastructure_retries=1,
+                source_review_id=previous, previous_review_id=previous, candidate_commit=None)
+            validate_review(config, fresh)
+            for change in ({"infrastructure_retries": 0}, {"phase": "hosted"},
+                           {"phase": "source"}, {"phase": None},
+                           {"previous_review_id": str(uuid4())}, {"candidate_commit": ""}):
+                with self.subTest(change=change), self.assertRaises(PublicationError):
+                    validate_review(config, {**fresh, **change})
+
+    def test_unreferenced_linked_base_and_preparation_retry_run_fresh_full_checks(self):
+        with fixture() as values:
+            root, config, source, workspaces, _, bare, repository, *_ = values
+            canonical = config.worker.projects["homelab"]
+            original_head = git(canonical, "rev-parse", "HEAD")
+            original_refs = git(canonical, "show-ref")
+            candidate_source = root / "private-reviewed-candidate"
+            git(canonical, "clone", "--quiet", "--no-local", str(canonical), str(candidate_source))
+            git(candidate_source, "config", "user.name", "Fixture")
+            git(candidate_source, "config", "user.email", "fixture@localhost")
+            (candidate_source / "candidate-only.py").write_text("reviewed main integration\n")
+            git(candidate_source, "add", ".")
+            git(candidate_source, "commit", "--quiet", "-m", "private reviewed candidate")
+            base = git(candidate_source, "rev-parse", "HEAD").decode().strip()
+            git(canonical, "fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "--", str(candidate_source), base)
+            self.assertEqual(git(canonical, "for-each-ref", "--contains=" + base), b"")
+            self.assertFalse((canonical / ".git" / "FETCH_HEAD").exists())
+            # Reproduce the old command failure with a genuine no-local clone.
+            legacy_clone = root / "legacy-publication-clone"
+            git(canonical, "clone", "--quiet", "--no-local", "--no-checkout", str(canonical), str(legacy_clone))
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                git(legacy_clone, "checkout", "--quiet", "--detach", base)
+            self.assertEqual(caught.exception.returncode, 128)
+            task, attempt = str(uuid4()), str(uuid4())
+            assignment = {"task_id": task, "attempt_id": attempt, "project_alias": "homelab", "base_revision": base}
+            with workspaces.acquire(assignment) as workspace:
+                (workspace.path / "app.py").write_text("repair completed\n")
+                digest, native_path = workspace.digest(), workspace.path
+            previous = str(uuid4())
+            job = review_job(source, task_id=task, attempt_id=attempt, base_revision=base,
+                workspace_digest=digest, plan_decision_id=None, parent_task_id=source["task_id"], feedback_id=str(uuid4()),
+                phase="local", infrastructure_retries=1, source_review_id=previous, previous_review_id=previous,
+                candidate_commit=None)
+            store, checks = ReviewStore(), ReviewChecks(config, True)
+            candidates = ReviewedCandidateProvider(config, repository)
+            candidates.retry = Mock(side_effect=AssertionError("No candidate exists before preparation"))
+            ReviewWorker(config, store, WorkspaceSnapshotProvider(workspaces), repository, checks, candidates).process(job)
+            self.assertEqual(checks.calls, 1)
+            outcome = store.outcomes[-1][1]
+            self.assertEqual(outcome["disposition"], "awaiting_review", outcome)
+            self.assertTrue(outcome["verification"]["checks_passed"])
+            head = outcome["candidate_commit"]
+            private = config.state_root / job["review_id"] / "repository"
+            self.assertEqual(git(private, "rev-parse", base + "^{commit}").decode().strip(), base)
+            self.assertEqual((private / "candidate-only.py").read_text(), "reviewed main integration\n")
+            self.assertEqual((private / "app.py").read_text(), "repair completed\n")
+            self.assertEqual(candidates.read(job["review_id"])["candidate_commit"], head)
+            candidates.retry.assert_not_called()
+            self.assertEqual(git(canonical, "rev-parse", "HEAD"), original_head)
+            self.assertEqual(git(canonical, "show-ref"), original_refs)
+            self.assertFalse((canonical / ".git" / "FETCH_HEAD").exists())
+            self.assertEqual(git(bare, "rev-parse", "refs/heads/main"), original_head)
+            with workspaces.inspect(assignment) as workspace:
+                self.assertEqual(workspace.digest(), digest)
+            self.assertEqual((native_path / "app.py").read_text(), "repair completed\n")
+
     def test_verified_failure_repairs_but_success_waits_for_independent_owner_review(self):
         for passed, expected in ((False, "repair"), (True, "awaiting_review")):
             with self.subTest(passed=passed), fixture() as values:

@@ -89,6 +89,28 @@ class BoundNativeRetryAuthority:
             raise Rejected(403,'denied')
 
 
+@dataclass(frozen=True)
+class BoundPreparationRetryAuthority:
+    """One existing-budget check retry; never code-review approval authority."""
+    store:object
+    cursor:object
+    workflow_id:object
+    task_id:object
+    attempt_id:object
+    revision:int
+    review_id:object
+
+    def validate(self,cursor,task,kind):
+        if (cursor is not self.cursor or kind!='code' or task['id']!=self.task_id
+            or task.get('workflow_id')!=self.workflow_id or task['latest_attempt_id']!=self.attempt_id
+            or task['revision']!=self.revision or task['mode']!='implement' or task['status']!='awaiting_review'):
+            raise Rejected(403,'denied')
+
+    def validate_review_decision(self,decision,review_id):
+        if decision!='retry_infrastructure' or review_id!=self.review_id:
+            raise Rejected(403,'denied')
+
+
 class WorkflowStore:
     def __init__(self,config,catalog,store):
         self.config=config;self.catalog=catalog;self.store=store
@@ -411,6 +433,104 @@ class WorkflowStore:
                 target_sha256=row['target_sha256'],idempotency_key='peer-wire-'+str(row['workflow_review_id']))
             except Rejected:pass
 
+    def retry_preparation(self,*,project_alias,task_id,expected_revision,review_id,
+                          reconciliation_receipt_id,idempotency_key):
+        """Retry the known linked-base preparation defect using existing infra budget."""
+        self.store._require_project(project_alias)
+        if (any(not isinstance(value,UUID) for value in (task_id,review_id,reconciliation_receipt_id))
+            or type(expected_revision) is not int or expected_revision<1
+            or not isinstance(idempotency_key,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',idempotency_key)):
+            raise Rejected(400,'invalid_request')
+        note='Retry exact stopped candidate preparation after the linked-base import fix; reconciliation='+str(reconciliation_receipt_id)
+        intent=sha256_canonical({'action':'review_decide','project_alias':project_alias,'task_id':str(task_id),
+            'expected_revision':expected_revision,'review_id':str(review_id),'decision':'retry_infrastructure',
+            'agent_profile':None,'note':note,'findings':[],'verified_finding_ids':[]})
+        with self._transaction() as cursor:
+            self._project_lock(cursor,project_alias)
+            cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE',
+                           (self.store.owner,project_alias,task_id));task=cursor.fetchone()
+            if not task:raise Rejected(404,'not_found')
+            cursor.execute('SELECT * FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND idempotency_key=%s',
+                           (self.store.owner,project_alias,task_id,idempotency_key));prior=cursor.fetchone()
+            if prior:
+                if prior['action']!='review_decide' or prior['intent_digest']!=intent:raise Rejected(409,'idempotency_conflict')
+                return dict(prior['receipt_json'])
+            cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE',
+                           (self.store.owner,project_alias,task_id,review_id));q=cursor.fetchone()
+            cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR UPDATE',
+                           (self.store.owner,project_alias,task['workflow_id']));w=cursor.fetchone()
+            if not w:raise Rejected(409,'not_reviewable')
+            self._current_policy(w);p=w['snapshot'];recipe=recipe_from_snapshot(p,'author_implement')
+            if (w['phase']!='escalated' or w['enabled'] or w['escalation_reason']!='publication_command_failed'
+                or task['revision']!=expected_revision or task['status']!='awaiting_review' or task['mode']!='implement'
+                or not task['workflow_required'] or task['workflow_review_id'] is not None or task['cancelled_at'] is not None
+                or task['agent_profile']!=p['author_profile'] or task['pinned_recipe']!=recipe.to_dict() or task['recipe_digest']!=recipe.digest
+                or not task['parent_task_id'] or not task['repair_source_review_id'] or not task['scope_plan_decision_id']
+                or not q or q['attempt_id']!=task['latest_attempt_id'] or q['source_revision']!=task['revision']
+                or q['base_revision']!=task['base_revision'] or q['plan_decision_id']!=task['plan_decision_id']
+                or q['scope_plan_decision_id']!=task['scope_plan_decision_id']
+                or q['phase']!='local' or q['status']!='handoff' or q['reason']!='publication_command_failed'
+                or q['candidate_commit'] is not None or q['reconciliation_receipt_id']!=reconciliation_receipt_id
+                or q['verification'].get('checks_passed') is not False or q['verification'].get('checks')!=[]
+                or q['verification'].get('cleanup_confirmed') is not True
+                or q['infrastructure_retries']>=p['repair_policy']['max_infrastructure_retries']):
+                raise Rejected(409,'not_reviewable')
+            failure=q['finish_receipt'] or {};outcome=failure.get('outcome',{});verified=outcome.get('verification',{})
+            if (q['finish_token'] is None or failure.get('review_id')!=str(review_id) or failure.get('status')!='handoff'
+                or outcome.get('reason')!='publication_command_failed' or outcome.get('candidate_commit') is not None
+                or verified.get('checks_passed') is not False or verified.get('checks')!=[]
+                or verified.get('cleanup_confirmed') is not True):raise Rejected(409,'not_reviewable')
+            cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s',(task['repair_source_review_id'],));parent=cursor.fetchone()
+            if (not parent or parent['owner_id']!=self.store.owner or parent['project_alias']!=project_alias
+                or parent['task_id']!=task['parent_task_id'] or parent['candidate_commit']!=task['base_revision']
+                or task['repair_candidate_commit']!=task['base_revision']):raise Rejected(409,'result_mismatch')
+            cursor.execute('SELECT * FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND receipt_id=%s',
+                           (self.store.owner,project_alias,task_id,reconciliation_receipt_id));rec=cursor.fetchone()
+            cursor.execute('SELECT * FROM forge_agent.coding_attempts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s',
+                           (self.store.owner,project_alias,task_id,task['latest_attempt_id']));attempt=cursor.fetchone()
+            if (not rec or rec['attempt_id']!=task['latest_attempt_id'] or rec['task_revision']!=task['revision']
+                or rec['workspace_digest']!=q['workspace_digest'] or not attempt or attempt['phase']!='stopped'
+                or attempt['reservation_active'] or attempt['lease_expires_at'] is not None or not attempt['published_at']
+                or attempt['result_sha256']!=q['parent_result_sha256'] or attempt['pinned_recipe']!=recipe.to_dict()
+                or attempt['recipe_digest']!=recipe.digest or rec['stop_proof'].get('scope_stopped') is not True
+                or rec['stop_proof'].get('source')!='systemd' or rec['stop_proof'].get('unit_name')!=attempt['unit_name']):
+                raise Rejected(409,'reconcile_required')
+            self._artifact(cursor,task_id,task['latest_attempt_id'])
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s AND p.status IN('pending','checking','publishing')) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",(w['workflow_id'],)*5)
+            if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
+            cursor.execute('SELECT max(review_no) AS latest FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s',
+                           (self.store.owner,project_alias,task_id))
+            if cursor.fetchone()['latest']!=q['review_no']:raise Rejected(409,'not_reviewable')
+            cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
+            self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
+            cursor.execute("SELECT projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,POLICY_DIGEST));ready=cursor.fetchall()
+            for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
+                required=recipe_from_snapshot(p,entry)
+                if not any(any(x.get('alias')==project_alias for x in row['projects']) and any(x.get('alias')==profile and x.get('backend')==required.backend and x.get('model')==required.model and mode in x.get('modes',[]) for x in row['profiles']) for row in ready):raise Rejected(503,'unavailable')
+            authority=BoundPreparationRetryAuthority(self.store,cursor,w['workflow_id'],task_id,task['latest_attempt_id'],task['revision'],review_id)
+            return self.store.review_decide(project_alias=project_alias,task_id=task_id,expected_revision=expected_revision,
+                review_id=review_id,decision='retry_infrastructure',agent_profile=None,note=note,idempotency_key=idempotency_key,_authority=authority)
+
+    def _recover_preparations(self):
+        with self.store._transaction(read_only=True) as cursor:
+            cursor.execute("""SELECT t.project_alias,t.id,t.revision,q.review_id,q.reconciliation_receipt_id FROM forge_agent.coding_tasks t
+              JOIN forge_agent.coding_workflows w USING(workflow_id) JOIN forge_agent.coding_reviews q
+              ON(q.owner_id,q.project_alias,q.task_id,q.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)
+              WHERE t.owner_id=%s AND t.project_alias=ANY(%s) AND t.workflow_required AND t.parent_task_id IS NOT NULL
+              AND t.mode='implement' AND t.status='awaiting_review' AND t.cancelled_at IS NULL
+              AND w.phase='escalated' AND NOT w.enabled AND w.escalation_reason='publication_command_failed'
+              AND q.status='handoff' AND q.phase='local' AND q.reason='publication_command_failed' AND q.candidate_commit IS NULL
+              AND q.verification->'checks_passed'='false'::jsonb AND q.verification->'checks'='[]'::jsonb
+              AND q.verification->'cleanup_confirmed'='true'::jsonb AND q.source_revision=t.revision
+              AND q.finish_token IS NOT NULL AND q.finish_receipt->>'status'='handoff'
+              AND q.finish_receipt->'outcome'->>'reason'='publication_command_failed'
+              AND q.infrastructure_retries<(w.snapshot->'repair_policy'->>'max_infrastructure_retries')::integer
+              ORDER BY q.updated_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects)));rows=cursor.fetchall()
+        for row in rows:
+            try:self.retry_preparation(project_alias=row['project_alias'],task_id=row['id'],expected_revision=row['revision'],
+                review_id=row['review_id'],reconciliation_receipt_id=row['reconciliation_receipt_id'],idempotency_key='prepare-retry-'+str(row['review_id']))
+            except Rejected:pass
+
     def recover(self,cursor):
         """Authoritative replay fills missed callbacks using immutable source keys."""
         cursor.execute("SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND phase NOT IN('completed','cancelled','escalated') ORDER BY created_at",(self.store.owner,))
@@ -473,6 +593,7 @@ class WorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('code_review' if q else 'plan_review',w['workflow_id']))
 
     def claim(self,worker_id):
+        self._recover_preparations()
         self._recover_peer_verdicts()
         self._recover_native_timeouts()
         with self._transaction() as cursor:
@@ -604,6 +725,8 @@ class WorkflowCoordinator:
         return self.store.retry_native_timeout(**request)
     def retry_peer_verdict(self,**request):
         return self.store.retry_peer_verdict(**request)
+    def retry_preparation(self,**request):
+        return self.store.retry_preparation(**request)
     def run(self):
         while not self.stop.is_set():
             try:

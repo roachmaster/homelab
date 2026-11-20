@@ -1147,8 +1147,8 @@ class WorkStore:
         if authority is None:
             with self._transaction() as cursor:yield cursor
         else:
-            from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority)) or authority.store is not self:
+            from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 
@@ -1400,6 +1400,8 @@ class WorkStore:
         with self._transition_transaction(_authority) as cursor:
             task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'review_decide',intent)
             if old:return old
+            validator=getattr(_authority,'validate_review_decision',None)
+            if validator is not None:validator(decision,review_id)
             self._require_transition_authority(cursor,task,_authority,"code")
             if task['status']!='awaiting_review':
                 raise Rejected(409,'not_reviewable')
@@ -1457,9 +1459,9 @@ class WorkStore:
         policy=cursor.fetchone()
         if not policy or review['infrastructure_retries']>=policy['max_infrastructure_retries']:
             raise Rejected(409,'not_reviewable')
-        cursor.execute("""INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,task_id,attempt_id,plan_decision_id,reconciliation_receipt_id,
+        cursor.execute("""INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,task_id,attempt_id,plan_decision_id,scope_plan_decision_id,reconciliation_receipt_id,
             base_revision,workspace_digest,parent_result_sha256,source_revision,review_no,round,stagnant_rounds,infrastructure_retries,previous_review_id,candidate_commit,summary,phase,owner_decision,verification,target_publication_id,source_publication_id,gate_manifest_sha256)
-            SELECT owner_id,project_alias,task_id,attempt_id,plan_decision_id,reconciliation_receipt_id,base_revision,workspace_digest,parent_result_sha256,%s,
+            SELECT owner_id,project_alias,task_id,attempt_id,plan_decision_id,scope_plan_decision_id,reconciliation_receipt_id,base_revision,workspace_digest,parent_result_sha256,%s,
              (SELECT coalesce(max(review_no),0)+1 FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s),round,stagnant_rounds,infrastructure_retries+1,review_id,candidate_commit,%s,phase,owner_decision,verification,target_publication_id,source_publication_id,gate_manifest_sha256
             FROM forge_agent.coding_reviews WHERE review_id=%s RETURNING review_id""",
             (task['revision']+1,self._owner,task['project_alias'],task['id'],note,review['review_id']))
