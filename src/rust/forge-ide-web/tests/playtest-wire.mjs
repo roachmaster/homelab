@@ -42,7 +42,7 @@ function tap(exports, action) {
   exports.forge_playtest_input(action, 0);
 }
 
-assert.equal(w.abi_version(), 9, 'the current atomic UI bundle ABI is used');
+assert.equal(w.abi_version(), 10, 'the current atomic UI bundle ABI is used');
 const initial = snapshot();
 const snapshotAddress = initial.byteOffset;
 const traceAddress = trace().byteOffset;
