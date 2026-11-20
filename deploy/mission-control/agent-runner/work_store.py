@@ -3,6 +3,7 @@
 from contextlib import closing, contextmanager
 from datetime import UTC
 import json
+import psycopg2
 import re
 import unicodedata
 from uuid import UUID, uuid4
@@ -224,13 +225,20 @@ class WorkStore:
 
     @contextmanager
     def _transaction(self, *, read_only=False):
-        with closing(self._connect_factory()) as connection:
-            with connection:
-                with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                    if read_only:
-                        cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                    cursor.execute("SELECT pg_catalog.set_config('forge.coding_owner',%s,true)",(self._owner,))
-                    yield cursor
+        try:
+            with closing(self._connect_factory()) as connection:
+                with connection:
+                    with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+                        if read_only:
+                            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                        cursor.execute("SELECT pg_catalog.set_config('forge.coding_owner',%s,true)",(self._owner,))
+                        yield cursor
+        except psycopg2.Error as error:
+            mapped={'22023':(400,'invalid_request'),'42501':(403,'denied'),'P0002':(404,'not_found'),
+                    'P0006':(409,'result_mismatch'),'P0008':(409,'reconcile_required'),'P0009':(409,'not_reviewable')}
+            if error.pgcode in mapped:
+                raise Rejected(*mapped[error.pgcode]) from None
+            raise
 
     def catalog(self, *, config):
         if not isinstance(config, WorkConfig) or config.owner != self._owner:
@@ -962,6 +970,11 @@ class WorkStore:
 
             if self._publication_busy(cursor,task):
                 raise Rejected(409,"reconcile_required")
+            if task['review_required'] and task['mode']=='implement':
+                cursor.execute("SELECT 1 FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s",
+                    (self._owner,project_alias,task_id,task['latest_attempt_id']))
+                if cursor.fetchone() is not None:
+                    raise Rejected(409,'not_reviewable')
             if (task["mode"] == "plan" and task["status"] == "awaiting_review"
                     or task["status"] in NON_RESUMABLE_STATUSES or task["latest_attempt_id"] is None):
                 raise Rejected(409, "reconcile_required")
@@ -1190,7 +1203,7 @@ class WorkStore:
         return bool(value and value['required_green'])
 
     def _review_projection(self,cursor,task):
-        cursor.execute("SELECT review_required,auto_repair FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",
+        cursor.execute("SELECT review_required,auto_repair,parent_task_id FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",
                        (self._owner,task['project_alias'],task['id']))
         flags=cursor.fetchone()
         if not flags or not flags['review_required']:
@@ -1205,11 +1218,14 @@ class WorkStore:
             'open_findings':0,'verified_findings':0,'latest_check_status':None,'toolchain':None,'handoff_reason':None,
             'source_attempt_id':str(task['latest_attempt_id']) if task['latest_attempt_id'] else None,
             'candidate_commit':None,'workspace_digest':None,'gate_manifest_sha256':None,'required_hosted_green':green,
-            'can_accept':False,'can_repair':False,'can_retry':False,'auto_repair':flags['auto_repair']}
+            'can_accept':False,'can_repair':False,'can_retry':False,'auto_repair':flags['auto_repair'],
+            'repair_task_id':None,'parent_task_id':None}
+        value['parent_task_id']=str(flags['parent_task_id']) if flags['parent_task_id'] else None
         if row:
+            value['repair_task_id']=str(row['repair_task_id']) if row['repair_task_id'] else None
             verified=set(row['verified_finding_ids'])|set((row['owner_decision'] or {}).get('verified_finding_ids',[]))
             findings=row['findings'];open_ids={item['finding_id'] for item in findings if item.get('status','open')=='open'}-verified
-            stage='awaiting_decision' if row['status']=='awaiting_review' else row['status']
+            stage='waiting_hosted' if row['phase']=='hosted' and row['status'] in {'pending','checking'} else ('awaiting_decision' if row['status']=='awaiting_review' else row['status'])
             if row['status']=='approved' and not green:
                 stage='waiting_hosted'
             value.update(stage=stage,review_id=str(row['review_id']),feedback_id=str(row['feedback_id']) if row['feedback_id'] else None,

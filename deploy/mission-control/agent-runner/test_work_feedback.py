@@ -93,3 +93,52 @@ class FeedbackStoreTest(unittest.TestCase):
         lease,receipt=self.task();self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
         result=self.db.review_finish(job,self.outcome(disposition='repair',findings=[{'finding_id':'source-1','category':'source','summary':'Fix source.'}],fingerprint='1'*64))
         self.assertIsNone(result['repair_task_id']);self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))
+
+    def test_hosted_poll_is_exact_head_delayed_and_does_not_republish(self):
+        lease,receipt=self.task();review=self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+        self.db.review_finish(job,self.outcome());detail=self.get(lease)
+        self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(review),'approve','codex-v2','Reviewed.','approve-hosted'))
+        publication=self.db.publication_claim('publisher')
+        self.db.publication_finish(publication,'publishing','Passed',branch='forge/hosted',commit_sha='d'*40)
+        self.db.publication_finish(publication,'published','PR',branch='forge/hosted',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/2')
+        observer=self.db.review_claim('observer');self.assertEqual(observer['phase'],'hosted');self.assertEqual(observer['target_publication_id'],publication['publication_id'])
+        checks=[{'name':name,'status':'pending','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')]
+        outcome=self.outcome(verification={'hosted':True,'hosted_status':'pending','checks':checks})
+        self.assertEqual(self.db.review_finish(observer,outcome)['status'],'waiting_hosted')
+        self.assertIsNone(self.db.review_claim('observer'))
+        self.cluster.admin_exec("UPDATE forge_agent.coding_reviews SET next_poll_at=clock_timestamp()-interval '1 second' WHERE phase='hosted'")
+        observer=self.db.review_claim('observer')
+        checks=[{**value,'status':'success'} for value in checks]
+        outcome=self.outcome(verification={'hosted':True,'hosted_status':'passed','checks':checks})
+        self.assertEqual(self.db.review_finish(observer,outcome)['status'],'hosted_green')
+        self.assertIsNone(self.db.publication_claim('publisher'))
+        self.assertTrue(self.get(lease)['review']['can_accept'])
+        with self.assertRaises(ValueError):
+            self.db.record_hosted_checks(publication['publication_id'],'x'*40,checks)
+        with self.assertRaises(Exception):
+            self.db.record_hosted_checks(publication['publication_id'],'d'*40,checks+[checks[0]])
+
+    def test_linked_repair_preserves_parent_and_inherits_exact_source_and_round(self):
+        lease,receipt=self.task(auto=True);self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+        result=self.db.review_finish(job,self.outcome(disposition='repair',findings=[{'finding_id':'parse-1','category':'source','summary':'Fix candidate.'}],
+            fingerprint='1'*64,verification={'checks_passed':False,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':True}))
+        self.assertNotEqual(result['repair_task_id'],lease.task_id)
+        child=self.db.claim('feedback-worker',self.incarnation,['codex-v2'])
+        self.assertEqual(child.base_revision,'d'*40);self.assertEqual(child.repair_candidate_commit,'d'*40)
+        self.assertEqual(child.repair_source_review_id,job['review_id']);self.assertEqual(child.resume_attempt_id,lease.attempt_id)
+        self.assertEqual(child.resume_workspace_digest,'f'*64)
+        context=self.db.read_feedback(child);payload=parse_feedback_json(context['feedback_json'],child.feedback_sha256)
+        self.assertEqual(payload['round'],1);self.assertEqual(payload['task_id'],child.task_id);self.assertEqual(payload['parent_attempt_id'],lease.attempt_id)
+        self.assertEqual(self.get(lease)['base_revision'],'a'*40)
+        self.assertEqual(self.get(lease)['review']['repair_task_id'],child.task_id)
+
+    def test_owner_can_return_manual_findings_even_when_checks_pass_and_cannot_forge_closure(self):
+        lease,receipt=self.task();rid=self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+        finding={'finding_id':'manual-edge','category':'source','summary':'Unhandled input still corrupts text.'}
+        self.db.review_finish(job,self.outcome(findings=[finding]));detail=self.get(lease)
+        with self.assertRaises(Rejected):
+            self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),'approve','codex-v2','','approve-unclosed'))
+        with self.assertRaises(Rejected):
+            self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),'approve','codex-v2','Attested','approve-forged',verified_finding_ids=('unseen-id',)))
+        result=self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),'repair','codex-v2','Fix the independently audited case.','manual-repair',findings=(finding,)))
+        self.assertEqual(result['status'],'queued')
