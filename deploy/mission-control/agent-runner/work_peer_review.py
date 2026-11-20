@@ -30,7 +30,7 @@ TARGET_FIELDS = frozenset({
     "reviewer_task_id", "author_profile", "reviewer_profile", "source_task_id",
     "source_attempt_id", "source_result_sha256", "source_revision", "base_revision",
     "plan_revision", "plan_decision_id", "review_id", "candidate_commit",
-    "gate_manifest_sha256", "workspace_digest", "integration_base", "source_text", "acceptance_criteria",
+    "gate_manifest_sha256", "workspace_digest", "integration_base", "source_text", "request_prompt", "acceptance_criteria",
     "findings", "verification", "approved_plan",
 })
 VERDICT_FIELDS = frozenset({
@@ -111,6 +111,7 @@ def validate_review_target(value):
                  and value["target_kind"] in ("plan", "code"))
         source = _text(value["source_text"], MAX_ARTIFACT_BYTES)
         _require(hashlib.sha256(source).hexdigest() == value["source_result_sha256"])
+        _text(value["request_prompt"], 8192)
         _text(value["acceptance_criteria"], 2048, empty=True)
         findings = validate_findings(value["findings"])
         if value["target_kind"] == "plan":
