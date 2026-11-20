@@ -622,6 +622,10 @@ pub struct WorkTaskDetail {
     pub reconciliation_receipt_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication: Option<WorkPublication>,
+    /// Only an explicit backend false admits the pre-feedback acceptance path.
+    /// Missing metadata never establishes that a task is legacy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_required: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<WorkReviewSummary>,
 }

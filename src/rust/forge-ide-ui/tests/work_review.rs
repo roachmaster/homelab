@@ -199,3 +199,21 @@ fn zero_repair_budget_keeps_initial_review_readable_without_authorizing_rounds()
     review.max_rounds = 11;
     assert!(!review.is_valid(), "the upper policy bound remains ten");
 }
+
+#[test]
+fn legacy_review_requirement_is_optional_typed_and_never_defaults_to_false() {
+    let value = serde_json::json!({"task_id":TASK,"project_alias":"homelab","base_revision":"a".repeat(40),"mode":"implement","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),"status":"awaiting_review","revision":7,"created_at":"2026-11-20T12:00:00Z","prompt":"Approved implementation","acceptance_criteria":"Run required checks"});
+    let task: WorkTaskDetail = serde_json::from_value(value.clone()).unwrap();
+    assert!(task.is_valid());
+    assert_eq!(task.review_required, None);
+    for flag in [false, true] {
+        let mut explicit = value.clone();
+        explicit["review_required"] = flag.into();
+        let task: WorkTaskDetail = serde_json::from_value(explicit).unwrap();
+        assert_eq!(task.review_required, Some(flag));
+        assert!(task.is_valid());
+    }
+    let mut untyped = value;
+    untyped["review_required"] = "false".into();
+    assert!(serde_json::from_value::<WorkTaskDetail>(untyped).is_err());
+}
