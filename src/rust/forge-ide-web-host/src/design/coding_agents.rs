@@ -39,6 +39,7 @@ pub(super) const DISPATCH: &[Node] = &[
             element!(A [Href = "#contracts"]; text("Implemented contracts")),
             element!(A [Href = "#rollout"]; text("Rollout")),
             element!(A [Href = "/design/agent-usage"]; text("Agent usage and limits")),
+            element!(A [Href = "/design/agent-feedback-loop"]; text("Feedback and repair")),
         ),
     ),
     element!(Section [Id = "flow", Class = "design-section", AriaLabelledby = "flow-title"];

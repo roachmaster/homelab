@@ -121,6 +121,187 @@ impl WorkPlanDecision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum WorkReviewDecision {
+    Approve,
+    Repair,
+    Escalate,
+    RetryInfrastructure,
+    Cancel,
+}
+impl WorkReviewDecision {
+    /// Only repair starts a coding CLI. Approval and retries use trusted
+    /// verification/publication providers without a model execution grant.
+    pub fn begins_execution(self) -> bool {
+        self == Self::Repair
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkFindingCategory {
+    Source,
+    Infrastructure,
+    Quota,
+    Authentication,
+    Permission,
+    Scope,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkFindingStatus {
+    #[default]
+    Open,
+    Verified,
+}
+/// Review evidence is data. Reproduction text never becomes a shell command.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkFinding {
+    pub finding_id: String,
+    pub category: WorkFindingCategory,
+    pub summary: String,
+    #[serde(default)]
+    pub check_id: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub diagnostic_code: String,
+    #[serde(default)]
+    pub reproduction: String,
+    #[serde(default)]
+    pub expected: String,
+    #[serde(default)]
+    pub actual: String,
+    #[serde(default)]
+    pub evidence_digest: String,
+    #[serde(default)]
+    pub status: WorkFindingStatus,
+}
+impl WorkFinding {
+    pub fn is_valid(&self) -> bool {
+        valid_work_name(&self.finding_id, 64)
+            && valid_chat_text(&self.summary, 2048)
+            && optional_text(&self.check_id, 128)
+            && optional_text(&self.path, 1024)
+            && optional_text(&self.diagnostic_code, 128)
+            && optional_text(&self.reproduction, 2048)
+            && optional_text(&self.expected, 2048)
+            && optional_text(&self.actual, 2048)
+            && (self.evidence_digest.is_empty() || valid_work_hex(&self.evidence_digest, 64))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkReviewSummary {
+    #[serde(default)]
+    pub auto_repair: bool,
+    pub stage: String,
+    #[serde(default)]
+    pub review_id: Option<String>,
+    #[serde(default)]
+    pub feedback_id: Option<String>,
+    #[serde(default)]
+    pub repair_task_id: Option<String>,
+    #[serde(default)]
+    pub parent_task_id: Option<String>,
+    pub round: u32,
+    pub max_rounds: u32,
+    pub open_findings: u32,
+    pub verified_findings: u32,
+    #[serde(default)]
+    pub latest_check_status: Option<String>,
+    #[serde(default)]
+    pub toolchain: Option<String>,
+    #[serde(default)]
+    pub handoff_reason: Option<String>,
+    #[serde(default)]
+    pub source_attempt_id: Option<String>,
+    #[serde(default)]
+    pub candidate_commit: Option<String>,
+    #[serde(default)]
+    pub workspace_digest: Option<String>,
+    #[serde(default)]
+    pub gate_manifest_sha256: Option<String>,
+    pub required_hosted_green: bool,
+    pub can_accept: bool,
+    pub can_repair: bool,
+    pub can_retry: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<WorkFinding>,
+}
+impl WorkReviewSummary {
+    pub fn is_valid(&self) -> bool {
+        valid_work_name(&self.stage, 64)
+            && self.max_rounds <= 10
+            && self.round <= self.max_rounds
+            && self.review_id.as_deref().is_none_or(valid_chat_id)
+            && self.feedback_id.as_deref().is_none_or(valid_chat_id)
+            && self.repair_task_id.as_deref().is_none_or(valid_chat_id)
+            && self.parent_task_id.as_deref().is_none_or(valid_chat_id)
+            && self.source_attempt_id.as_deref().is_none_or(valid_chat_id)
+            && self
+                .candidate_commit
+                .as_deref()
+                .is_none_or(|v| valid_work_hex(v, 40))
+            && self
+                .workspace_digest
+                .as_deref()
+                .is_none_or(|v| valid_work_hex(v, 64))
+            && self
+                .gate_manifest_sha256
+                .as_deref()
+                .is_none_or(|v| valid_work_hex(v, 64))
+            && self
+                .latest_check_status
+                .as_deref()
+                .is_none_or(|v| valid_work_label(v, 128))
+            && self
+                .toolchain
+                .as_deref()
+                .is_none_or(|v| valid_work_label(v, 256))
+            && self
+                .handoff_reason
+                .as_deref()
+                .is_none_or(|v| optional_text(v, 2048))
+            && (!self.can_accept || self.required_hosted_green && self.candidate_commit.is_some())
+            && (!self.can_repair || self.candidate_commit.is_some())
+            && self.findings.len() <= 32
+            && self.findings.iter().all(WorkFinding::is_valid)
+            && self
+                .findings
+                .iter()
+                .map(|f| &f.finding_id)
+                .collect::<BTreeSet<_>>()
+                .len()
+                == self.findings.len()
+    }
+    pub fn is_processing(&self) -> bool {
+        if self.can_accept {
+            return false;
+        }
+        matches!(
+            self.stage.as_str(),
+            "waiting_for_result"
+                | "queued"
+                | "pending"
+                | "running"
+                | "checking"
+                | "verifying"
+                | "verification_pending"
+                | "repair_queued"
+                | "repairing"
+                | "hosted_pending"
+                | "waiting_hosted"
+                | "repair"
+                | "retry_infrastructure"
+                | "approved"
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkPublicationStatus {
     Pending,
     Checking,
@@ -165,6 +346,8 @@ pub fn valid_work_pr_url(value: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkPublication {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_id: Option<String>,
     pub status: WorkPublicationStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
@@ -177,9 +360,11 @@ pub struct WorkPublication {
 }
 impl WorkPublication {
     pub fn is_valid(&self) -> bool {
-        self.branch
-            .as_deref()
-            .is_none_or(|s| valid_work_label(s, 128))
+        self.publication_id.as_deref().is_none_or(valid_chat_id)
+            && self
+                .branch
+                .as_deref()
+                .is_none_or(|s| valid_work_label(s, 128))
             && self
                 .commit_sha
                 .as_deref()
@@ -436,6 +621,12 @@ pub struct WorkTaskDetail {
     pub reconciliation_receipt_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication: Option<WorkPublication>,
+    /// Only an explicit backend false admits the pre-feedback acceptance path.
+    /// Missing metadata never establishes that a task is legacy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<WorkReviewSummary>,
 }
 impl WorkTaskDetail {
     pub fn summary(&self) -> WorkTaskSummary {
@@ -454,6 +645,7 @@ impl WorkTaskDetail {
     }
     pub fn is_valid(&self) -> bool {
         self.summary().is_valid()
+            && self.review.as_ref().is_none_or(WorkReviewSummary::is_valid)
             && self
                 .publication
                 .as_ref()
@@ -530,6 +722,8 @@ pub enum WorkRequest {
         prompt: String,
         acceptance_criteria: String,
         idempotency_key: String,
+        #[serde(default)]
+        auto_repair: bool,
     },
     WorkGet {
         request_id: String,
@@ -593,6 +787,8 @@ pub enum WorkRequest {
         idempotency_key: String,
         #[serde(default)]
         note: String,
+        #[serde(default)]
+        auto_repair: bool,
     },
     WorkResume {
         request_id: String,
@@ -604,6 +800,46 @@ pub enum WorkRequest {
         reconciliation_receipt_id: String,
         #[serde(default)]
         note: String,
+    },
+    WorkReviewDecide {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        expected_revision: u64,
+        review_id: String,
+        decision: WorkReviewDecision,
+        agent_profile: String,
+        #[serde(default)]
+        note: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        findings: Vec<WorkFinding>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        verified_finding_ids: Vec<String>,
+        idempotency_key: String,
+    },
+    WorkRepair {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        expected_revision: u64,
+        candidate_commit: String,
+        agent_profile: String,
+        #[serde(default)]
+        note: String,
+        #[serde(default)]
+        findings: Vec<WorkFinding>,
+        idempotency_key: String,
+    },
+    WorkPublicationRetry {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        expected_revision: u64,
+        publication_id: String,
+        candidate_commit: String,
+        #[serde(default)]
+        note: String,
+        idempotency_key: String,
     },
 }
 const fn list_limit() -> usize {
@@ -627,7 +863,10 @@ impl WorkRequest {
             | Self::WorkResult { request_id, .. }
             | Self::WorkAccept { request_id, .. }
             | Self::WorkResume { request_id, .. }
-            | Self::WorkPlanDecide { request_id, .. } => request_id,
+            | Self::WorkPlanDecide { request_id, .. }
+            | Self::WorkReviewDecide { request_id, .. }
+            | Self::WorkRepair { request_id, .. }
+            | Self::WorkPublicationRetry { request_id, .. } => request_id,
         }
     }
     pub fn project_alias(&self) -> Option<&str> {
@@ -641,7 +880,10 @@ impl WorkRequest {
             | Self::WorkResult { project_alias, .. }
             | Self::WorkAccept { project_alias, .. }
             | Self::WorkResume { project_alias, .. }
-            | Self::WorkPlanDecide { project_alias, .. } => Some(project_alias),
+            | Self::WorkPlanDecide { project_alias, .. }
+            | Self::WorkReviewDecide { project_alias, .. }
+            | Self::WorkRepair { project_alias, .. }
+            | Self::WorkPublicationRetry { project_alias, .. } => Some(project_alias),
         }
     }
     pub fn task_id(&self) -> Option<&str> {
@@ -652,7 +894,10 @@ impl WorkRequest {
             | Self::WorkResult { task_id, .. }
             | Self::WorkAccept { task_id, .. }
             | Self::WorkResume { task_id, .. }
-            | Self::WorkPlanDecide { task_id, .. } => Some(task_id),
+            | Self::WorkPlanDecide { task_id, .. }
+            | Self::WorkReviewDecide { task_id, .. }
+            | Self::WorkRepair { task_id, .. }
+            | Self::WorkPublicationRetry { task_id, .. } => Some(task_id),
             _ => None,
         }
     }
@@ -668,6 +913,9 @@ impl WorkRequest {
             Self::WorkAccept { .. } => "ide.work.accept",
             Self::WorkResume { .. } => "ide.work.resume",
             Self::WorkPlanDecide { .. } => "ide.work.plan.decide",
+            Self::WorkReviewDecide { .. } => "ide.work.review.decide",
+            Self::WorkRepair { .. } => "ide.work.repair",
+            Self::WorkPublicationRetry { .. } => "ide.work.publication.retry",
         }
     }
     pub fn is_destination(value: &str) -> bool {
@@ -683,6 +931,9 @@ impl WorkRequest {
                 | "ide.work.accept"
                 | "ide.work.resume"
                 | "ide.work.plan.decide"
+                | "ide.work.review.decide"
+                | "ide.work.repair"
+                | "ide.work.publication.retry"
         )
     }
     pub fn is_mutation(&self) -> bool {
@@ -693,6 +944,9 @@ impl WorkRequest {
                 | Self::WorkAccept { .. }
                 | Self::WorkResume { .. }
                 | Self::WorkPlanDecide { .. }
+                | Self::WorkReviewDecide { .. }
+                | Self::WorkRepair { .. }
+                | Self::WorkPublicationRetry { .. }
         )
     }
     pub fn is_valid(&self) -> bool {
@@ -702,6 +956,8 @@ impl WorkRequest {
             && match self {
                 Self::WorkCatalog { .. } | Self::WorkGet { .. } => true,
                 Self::WorkSubmit {
+                    mode,
+                    auto_repair,
                     base_revision,
                     agent_profile,
                     prompt,
@@ -710,6 +966,7 @@ impl WorkRequest {
                     ..
                 } => {
                     valid_work_hex(base_revision, 40)
+                        && (!auto_repair || *mode == WorkMode::Implement)
                         && valid_work_name(agent_profile, 64)
                         && valid_chat_text(prompt, MAX_WORK_PROMPT_BYTES)
                         && valid_chat_text(acceptance_criteria, MAX_WORK_CRITERIA_BYTES)
@@ -760,6 +1017,7 @@ impl WorkRequest {
                     agent_profile,
                     idempotency_key,
                     note,
+                    auto_repair,
                     ..
                 } => {
                     valid_work_revision(*expected_revision)
@@ -768,6 +1026,7 @@ impl WorkRequest {
                         && valid_work_name(agent_profile, 64)
                         && valid_work_name(idempotency_key, 128)
                         && optional_text(note, 2048)
+                        && (!auto_repair || *decision == WorkPlanDecision::Resume)
                         && (*decision != WorkPlanDecision::Revise || !note.trim().is_empty())
                 }
                 Self::WorkResume {
@@ -783,6 +1042,81 @@ impl WorkRequest {
                         && valid_work_name(agent_profile, 64)
                         && valid_chat_id(reconciliation_receipt_id)
                         && optional_text(note, 2048)
+                }
+                Self::WorkReviewDecide {
+                    expected_revision,
+                    review_id,
+                    agent_profile,
+                    note,
+                    findings,
+                    verified_finding_ids,
+                    idempotency_key,
+                    decision,
+                    ..
+                } => {
+                    valid_work_revision(*expected_revision)
+                        && valid_chat_id(review_id)
+                        && valid_work_name(agent_profile, 64)
+                        && optional_text(note, 2048)
+                        && findings.len() <= 32
+                        && findings
+                            .iter()
+                            .all(|f| f.is_valid() && f.status == WorkFindingStatus::Open)
+                        && findings
+                            .iter()
+                            .map(|f| &f.finding_id)
+                            .collect::<BTreeSet<_>>()
+                            .len()
+                            == findings.len()
+                        && (verified_finding_ids.is_empty()
+                            || *decision == WorkReviewDecision::Approve && !note.trim().is_empty())
+                        && verified_finding_ids.len() <= 32
+                        && verified_finding_ids
+                            .iter()
+                            .all(|id| valid_work_name(id, 64))
+                        && verified_finding_ids.iter().collect::<BTreeSet<_>>().len()
+                            == verified_finding_ids.len()
+                        && valid_work_name(idempotency_key, 128)
+                }
+                Self::WorkRepair {
+                    expected_revision,
+                    candidate_commit,
+                    agent_profile,
+                    note,
+                    findings,
+                    idempotency_key,
+                    ..
+                } => {
+                    valid_work_revision(*expected_revision)
+                        && valid_work_hex(candidate_commit, 40)
+                        && valid_work_name(agent_profile, 64)
+                        && optional_text(note, 2048)
+                        && (!note.trim().is_empty() || !findings.is_empty())
+                        && findings.len() <= 32
+                        && findings.iter().all(|finding| {
+                            finding.is_valid() && finding.status == WorkFindingStatus::Open
+                        })
+                        && findings
+                            .iter()
+                            .map(|finding| &finding.finding_id)
+                            .collect::<BTreeSet<_>>()
+                            .len()
+                            == findings.len()
+                        && valid_work_name(idempotency_key, 128)
+                }
+                Self::WorkPublicationRetry {
+                    expected_revision,
+                    publication_id,
+                    candidate_commit,
+                    note,
+                    idempotency_key,
+                    ..
+                } => {
+                    valid_work_revision(*expected_revision)
+                        && valid_chat_id(publication_id)
+                        && valid_work_hex(candidate_commit, 40)
+                        && optional_text(note, 2048)
+                        && valid_work_name(idempotency_key, 128)
                 }
             }
     }
@@ -916,6 +1250,38 @@ pub enum WorkResponse {
         status: WorkStatus,
         recipe_digest: String,
     },
+    WorkReviewDecided {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        base_revision: u64,
+        revision: u64,
+        status: WorkStatus,
+        review_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repair_task_id: Option<String>,
+    },
+    WorkRepairSubmitted {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        base_revision: u64,
+        revision: u64,
+        status: WorkStatus,
+        #[serde(default)]
+        repair_task_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review_id: Option<String>,
+    },
+    WorkPublicationRetryQueued {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        base_revision: u64,
+        revision: u64,
+        status: WorkStatus,
+        publication_id: String,
+    },
     WorkFailed {
         request_id: String,
         code: WorkFailure,
@@ -935,6 +1301,9 @@ impl WorkResponse {
             | Self::WorkAccepted { request_id, .. }
             | Self::WorkResumed { request_id, .. }
             | Self::WorkPlanDecided { request_id, .. }
+            | Self::WorkReviewDecided { request_id, .. }
+            | Self::WorkRepairSubmitted { request_id, .. }
+            | Self::WorkPublicationRetryQueued { request_id, .. }
             | Self::WorkFailed { request_id, .. } => request_id,
         }
     }
@@ -1153,6 +1522,85 @@ impl WorkResponse {
                     && valid_work_hex(recipe_digest, 64)
             }
             (
+                Self::WorkReviewDecided {
+                    project_alias,
+                    task_id,
+                    base_revision,
+                    revision,
+                    status,
+                    review_id,
+                    repair_task_id,
+                    ..
+                },
+                WorkRequest::WorkReviewDecide {
+                    expected_revision,
+                    review_id: expected_review,
+                    decision,
+                    ..
+                },
+            ) => {
+                matches!(http_status, 200 | 202)
+                    && project(project_alias)
+                    && task(task_id)
+                    && base_revision == expected_revision
+                    && step(*base_revision, *revision)
+                    && review_id == expected_review
+                    && repair_task_id
+                        .as_deref()
+                        .is_none_or(|id| valid_chat_id(id) && id != task_id)
+                    && (repair_task_id.is_none() || *decision == WorkReviewDecision::Repair)
+                    && if *decision == WorkReviewDecision::Cancel {
+                        *status == WorkStatus::Cancelled
+                    } else {
+                        *status != WorkStatus::Completed
+                    }
+            }
+            (
+                Self::WorkRepairSubmitted {
+                    project_alias,
+                    task_id,
+                    base_revision,
+                    revision,
+                    repair_task_id,
+                    review_id,
+                    ..
+                },
+                WorkRequest::WorkRepair {
+                    expected_revision, ..
+                },
+            ) => {
+                http_status == 202
+                    && project(project_alias)
+                    && task(task_id)
+                    && base_revision == expected_revision
+                    && step(*base_revision, *revision)
+                    && repair_task_id
+                        .as_deref()
+                        .is_none_or(|id| valid_chat_id(id) && id != task_id)
+                    && review_id.as_deref().is_none_or(valid_chat_id)
+                    && (repair_task_id.is_some() || review_id.is_some())
+            }
+            (
+                Self::WorkPublicationRetryQueued {
+                    project_alias,
+                    task_id,
+                    base_revision,
+                    revision,
+                    publication_id,
+                    ..
+                },
+                WorkRequest::WorkPublicationRetry {
+                    expected_revision, ..
+                },
+            ) => {
+                http_status == 202
+                    && project(project_alias)
+                    && task(task_id)
+                    && base_revision == expected_revision
+                    && step(*base_revision, *revision)
+                    && valid_chat_id(publication_id)
+            }
+            (
                 Self::WorkResultPage {
                     project_alias,
                     task_id,
@@ -1298,6 +1746,7 @@ mod plan_lifecycle_tests {
                 agent_profile: "agy-primary".into(),
                 idempotency_key: "same-intent".into(),
                 note: "Refine the tests".into(),
+                auto_repair: false,
             };
             assert!(request.is_valid());
             assert!(request.is_mutation());
@@ -1367,6 +1816,7 @@ mod plan_lifecycle_tests {
             assert!(!valid_work_pr_url(bad), "{bad}");
         }
         let mut publication = WorkPublication {
+            publication_id: None,
             status: WorkPublicationStatus::Published,
             branch: Some("forge/task-fixture".into()),
             commit_sha: Some("a".repeat(40)),

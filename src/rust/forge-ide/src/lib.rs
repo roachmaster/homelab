@@ -1,6 +1,7 @@
 //! Read-only project inspection: typed tree and Rust declaration syntax summary.
 //! No compiler type checking, macro execution, editor, watcher or remote service.
 pub mod assembly;
+pub mod ast_graph;
 #[cfg(feature = "cli")]
 pub mod cli;
 pub mod filesystem;

@@ -56,6 +56,9 @@ class Destination(Enum):
     ACCEPT = "ide.work.accept"
     RESUME = "ide.work.resume"
     PLAN_DECIDE = "ide.work.plan.decide"
+    REVIEW_DECIDE = "ide.work.review.decide"
+    REPAIR = "ide.work.repair"
+    PUBLICATION_RETRY = "ide.work.publication.retry"
 
 
 @dataclass(frozen=True)
@@ -72,6 +75,7 @@ class WorkSubmit:
     prompt: str
     acceptance_criteria: str
     idempotency_key: str
+    auto_repair: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,6 +148,44 @@ class WorkPlanDecide:
     agent_profile: str
     idempotency_key: str
     note: str = ""
+    auto_repair: bool = False
+
+
+@dataclass(frozen=True)
+class WorkReviewDecide:
+    project_alias: str
+    task_id: UUID
+    expected_revision: int
+    review_id: UUID
+    decision: str
+    agent_profile: str
+    note: str
+    idempotency_key: str
+    findings: tuple = ()
+    verified_finding_ids: tuple = ()
+
+
+@dataclass(frozen=True)
+class WorkRepair:
+    project_alias: str
+    task_id: UUID
+    expected_revision: int
+    candidate_commit: str
+    agent_profile: str
+    note: str
+    findings: tuple
+    idempotency_key: str
+
+
+@dataclass(frozen=True)
+class WorkPublicationRetry:
+    project_alias: str
+    task_id: UUID
+    expected_revision: int
+    publication_id: UUID
+    candidate_commit: str
+    note: str
+    idempotency_key: str
 
 
 class WorkService:
@@ -191,6 +233,7 @@ class WorkService:
             acceptance_criteria=command.acceptance_criteria,
             idempotency_key=command.idempotency_key,
             resolve_recipe=resolve_recipe,
+            auto_repair=command.auto_repair,
         )
 
     def get(self, command):
@@ -281,6 +324,28 @@ class WorkService:
 
         return self._store.plan_decide(**vars(command), resolve_recipe=resolve_recipe)
 
+    def review_decide(self, command):
+        self._require_project(command.project_alias)
+        def resolve_recipe():
+            if "implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
+                raise Rejected(403,"denied")
+            try:
+                return self._catalog.resolve(command.agent_profile,"implement")
+            except KeyError:
+                raise Rejected(503,"unavailable") from None
+        return self._store.review_decide(**vars(command),resolve_recipe=resolve_recipe)
+
+    def repair(self, command):
+        self._require_project(command.project_alias)
+        if "implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
+            raise Rejected(403,"denied")
+        recipe=self._catalog.resolve(command.agent_profile,"implement")
+        return self._store.repair(**vars(command),recipe=recipe)
+
+    def publication_retry(self, command):
+        self._require_project(command.project_alias)
+        return self._store.publication_retry(**vars(command))
+
 
 class WorkServiceFactory:
     """Effect-free startup factory producing a ready WorkService or None when unconfigured."""
@@ -305,6 +370,7 @@ class WorkServiceFactory:
             self._config.allowed_projects,
             self._connect_factory,
             max_pending=self._config.max_pending,
+            repair_policy=self._config.repair_policy,
         )
         return WorkService(self._config, catalog, store)
 
@@ -319,6 +385,12 @@ def destination(headers):
         return Destination(value)
     except ValueError:
         raise Rejected(404, "not_found") from None
+
+
+def _boolean(value):
+    if type(value) is not bool:
+        raise Rejected(400,"invalid_request")
+    return value
 
 
 def _identifier(value):
@@ -400,7 +472,7 @@ def decode(route, correlation, body):
     project_alias = _identifier(body["project_alias"])
 
     if (route is Destination.SUBMIT and kind == "work_submit"
-            and body.keys() == base | {
+            and body.keys() - {"auto_repair"} == base | {
                 "base_revision", "mode", "agent_profile",
                 "prompt", "acceptance_criteria", "idempotency_key",
             }):
@@ -412,6 +484,7 @@ def decode(route, correlation, body):
             prompt=_text(body["prompt"], MAX_PROMPT_BYTES),
             acceptance_criteria=_text(body["acceptance_criteria"], MAX_ACCEPTANCE_BYTES),
             idempotency_key=_idempotency_key(body["idempotency_key"]),
+            auto_repair=_boolean(body.get("auto_repair",False)),
         )
 
     if route is Destination.GET and kind == "work_get" and body.keys() == base | {"task_id"}:
@@ -490,7 +563,7 @@ def decode(route, correlation, body):
     if route is Destination.PLAN_DECIDE and kind == "work_plan_decide":
         required = base | {"task_id", "expected_revision", "plan_attempt_id", "plan_sha256",
                            "decision", "agent_profile", "idempotency_key"}
-        if required <= body.keys() <= required | {"note"}:
+        if required <= body.keys() <= required | {"note", "auto_repair"}:
             decision = body["decision"]
             digest = body["plan_sha256"]
             if (not isinstance(decision, str) or decision not in {"resume", "revise", "cancel"}
@@ -499,7 +572,41 @@ def decode(route, correlation, body):
             return WorkPlanDecide(project_alias, _uuid(body["task_id"]),
                 _int_range(body["expected_revision"], 1, MAX_REVISION), _uuid(body["plan_attempt_id"]),
                 digest, decision, _identifier(body["agent_profile"]), _idempotency_key(body["idempotency_key"]),
-                _text(body.get("note", ""), MAX_NOTE_BYTES, allow_empty=decision != "revise"))
+                _text(body.get("note", ""), MAX_NOTE_BYTES, allow_empty=decision != "revise"),
+                _boolean(body.get("auto_repair",False)))
+
+    if route in {Destination.REVIEW_DECIDE,Destination.REPAIR,Destination.PUBLICATION_RETRY}:
+        required=base|{"task_id","expected_revision","idempotency_key","note"}
+        values=dict(project_alias=project_alias,task_id=_uuid(body.get("task_id")),
+                    expected_revision=_int_range(body.get("expected_revision"),1,MAX_REVISION),
+                    idempotency_key=_idempotency_key(body.get("idempotency_key")),
+                    note=_text(body.get("note"),MAX_NOTE_BYTES,allow_empty=True))
+        from work_feedback import validate_findings
+        try:
+            if route is Destination.REVIEW_DECIDE and kind=="work_review_decide":
+                required|={"review_id","decision","agent_profile"}
+                if not required<=body.keys()<=required|{"findings","verified_finding_ids"}:
+                    raise ValueError()
+                decision=body["decision"]
+                if not isinstance(decision,str) or decision not in {"approve","repair","escalate","retry_infrastructure","cancel"}:
+                    raise ValueError()
+                ids=body.get("verified_finding_ids",[])
+                if not isinstance(ids,list) or len(ids)>32 or any(not isinstance(x,str) or not IDENTIFIER_RE.fullmatch(x) for x in ids) or len(set(ids))!=len(ids):
+                    raise ValueError()
+                return WorkReviewDecide(**values,review_id=_uuid(body["review_id"]),decision=decision,
+                    agent_profile=_identifier(body["agent_profile"]),findings=tuple(validate_findings(body.get("findings",[]),public=True)),verified_finding_ids=tuple(ids))
+            if route is Destination.REPAIR and kind=="work_repair":
+                required|={"candidate_commit","agent_profile","findings"}
+                if body.keys()!=required or not isinstance(body["candidate_commit"],str) or not SHA1_HEX_RE.fullmatch(body["candidate_commit"]):
+                    raise ValueError()
+                return WorkRepair(**values,candidate_commit=body["candidate_commit"],agent_profile=_identifier(body["agent_profile"]),findings=tuple(validate_findings(body["findings"],public=True)))
+            if route is Destination.PUBLICATION_RETRY and kind=="work_publication_retry":
+                required|={"publication_id","candidate_commit"}
+                if body.keys()!=required or not isinstance(body["candidate_commit"],str) or not SHA1_HEX_RE.fullmatch(body["candidate_commit"]):
+                    raise ValueError()
+                return WorkPublicationRetry(**values,publication_id=_uuid(body["publication_id"]),candidate_commit=body["candidate_commit"])
+        except (ValueError,TypeError,UnicodeError):
+            raise Rejected(400,"invalid_request") from None
 
     raise Rejected(400, "invalid_request")
 
@@ -557,4 +664,11 @@ def dispatch(route, correlation, command, service):
         receipt = service.plan_decide(command)
         status = HTTPStatus.OK if receipt["status"] == "cancelled" else HTTPStatus.ACCEPTED
         return status, common.envelope("work_plan_decided", correlation, **receipt)
+    if route is Destination.REVIEW_DECIDE and isinstance(command,WorkReviewDecide):
+        return HTTPStatus.ACCEPTED,common.envelope("work_review_decided",correlation,**service.review_decide(command))
+    if route is Destination.REPAIR and isinstance(command,WorkRepair):
+        return HTTPStatus.ACCEPTED,common.envelope("work_repair_submitted",correlation,**service.repair(command))
+    if route is Destination.PUBLICATION_RETRY and isinstance(command,WorkPublicationRetry):
+        return HTTPStatus.ACCEPTED,common.envelope("work_publication_retry_queued",correlation,**service.publication_retry(command))
+
     raise Rejected(400, "invalid_request")

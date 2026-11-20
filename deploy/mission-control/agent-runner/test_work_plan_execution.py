@@ -71,6 +71,17 @@ class PlanExecutionTest(unittest.TestCase):
             with self.assertRaises(ExecutionError):
                 runner.invocation(value, workspace)
 
+    def test_linked_repair_reads_the_original_scope_plan_without_rebinding_its_task_fk(self):
+        with TemporaryDirectory(prefix="forge-linked-scope-plan-") as root:
+            value, workspace, runner = self.configured(root)
+            saved = context()
+            value["plan_decision_id"] = None
+            value["scope_plan_decision_id"] = saved["decision_id"]
+            invocation = runner.invocation(value, workspace, plan_context=saved)
+            self.assertEqual(invocation.plan_file.read_text(), saved["text"])
+            self.assertIn(saved["note"], json.loads(invocation.stdin)["message"]["content"])
+            self.assertIsNone(value["plan_decision_id"])
+
     def test_plan_file_cannot_overwrite_a_preexisting_symlink(self):
         with TemporaryDirectory(prefix="forge-plan-file-") as root:
             value, workspace, runner = self.configured(root)
@@ -85,7 +96,7 @@ class PlanExecutionTest(unittest.TestCase):
                 runner.invocation(value, workspace, plan_context=saved)
             self.assertEqual(protected.read_text(), "Preserve these bytes")
 
-    def test_parent_loads_plan_before_cli_and_queues_publication_only_after_reconciliation(self):
+    def test_parent_loads_plan_before_cli_and_queues_review_only_after_reconciliation(self):
         for mode, decision in (("implement", "resume"), ("plan", "revise")):
             with self.subTest(mode=mode), TemporaryDirectory(prefix="forge-plan-handoff-") as root:
                 worker, value, store, events = worker_fixtures.WorkerLifecycleTest()._worker(root)
@@ -97,16 +108,18 @@ class PlanExecutionTest(unittest.TestCase):
                 saved = context(decision)
                 value["plan_decision_id"] = saved["decision_id"]
                 store.read_plan = Mock(side_effect=lambda lease: (events.append("read-plan") or saved))
-                store.queue_publication = Mock(side_effect=lambda *args: events.append("queue-publication"))
+                store.queue_review = Mock(side_effect=lambda *args: events.append("queue-review"))
+                store.queue_publication = Mock()
                 worker.process(value)
                 self.assertEqual(worker.runner.plan_contexts, [saved])
                 self.assertLess(events.index("read-plan"), events.index("runner"))
                 if mode == "implement":
                     self.assertLess(events.index("publish"), events.index("reconcile"))
-                    self.assertLess(events.index("reconcile"), events.index("queue-publication"))
-                    store.queue_publication.assert_called_once_with(value, "fixture-receipt")
+                    self.assertLess(events.index("reconcile"), events.index("queue-review"))
+                    store.queue_review.assert_called_once_with(value, "fixture-receipt")
                 else:
-                    store.queue_publication.assert_not_called()
+                    store.queue_review.assert_not_called()
+                store.queue_publication.assert_not_called()
 
     def test_unavailable_plan_has_zero_cli_or_publication_effects(self):
         with TemporaryDirectory(prefix="forge-plan-unavailable-") as root:

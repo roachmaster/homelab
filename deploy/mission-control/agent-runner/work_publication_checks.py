@@ -11,6 +11,14 @@ import time
 from work_executor import CHILD_STATE, Invocation, WorkspaceLease, unit_name
 from work_process import terminate_and_reap
 from work_publication_clients import PublicationError, uuid
+from work_verification_init import verification_argv
+from work_verification import VerificationMetadata, project_verification
+
+
+class VerificationFailure(PublicationError):
+    def __init__(self, code, report):
+        super().__init__(code)
+        self.report = report
 
 
 def _exclusive_output(path):
@@ -53,22 +61,37 @@ class IsolatedCheckRunner:
                 raise PublicationError("verification_dependencies_changed")
             support.mkdir(exist_ok=True)
         script = directory / "verify.py"
-        script.write_text("import os,subprocess\n"
+        script.write_text("import os,shutil,subprocess,sys\n"
                           "os.environ['GIT_CONFIG_NOSYSTEM']='1'\n"
                           "os.environ['GIT_CONFIG_GLOBAL']='/dev/null'\n"
                           "os.environ['GIT_OPTIONAL_LOCKS']='0'\n"
                           "os.environ['PYTHONDONTWRITEBYTECODE']='1'\n"
                           "os.environ['QA_OUTPUT_ROOT']='/run/forge-coding-attempt/qa'\n"
+                          "if shutil.which('rustc'):\n"
+                          " version=subprocess.run(['rustc','--version'],capture_output=True,text=True,check=False)\n"
+                          " print('FORGE_VERIFIER_TOOLCHAIN '+version.stdout.strip()[:128],flush=True)\n"
                           "commands=" + repr(self.config.checks) + "\n"
-                          "for command in commands:\n"
-                          " subprocess.run(command,stdin=subprocess.DEVNULL,check=True,timeout=1800)\n")
+                          "for index,command in enumerate(commands):\n"
+                          " print('FORGE_CHECK_START '+str(index),flush=True)\n"
+                          " try:\n"
+                          "  result=subprocess.run(command,stdin=subprocess.DEVNULL,check=False,timeout=1800)\n"
+                          " except OSError:\n"
+                          "  print('Required fixed verification executable is unavailable.',flush=True);sys.exit(127)\n"
+                          " if result.returncode:\n"
+                          "  sys.exit(result.returncode if result.returncode>0 else 128-result.returncode)\n"
+                          " print('FORGE_CHECK_PASS '+str(index),flush=True)\n")
         script.chmod(0o444)
         workspace = WorkspaceLease(repository, self.config.worker.projects[job["project_alias"]],
                                    repository / ".git", job["task_id"], job["base_revision"])
-        invocation = Invocation(("/usr/bin/python3", "-B", str(CHILD_STATE / "verify.py")), b"",
-                                "verification", repository, directory, workspace, True)
+        invocation = Invocation(verification_argv(("/usr/bin/python3", "-B", str(CHILD_STATE / "verify.py"))), b"",
+                                "verification", repository, directory, workspace, True,
+                                readonly_files=(script,))
         lease = {"attempt_id": job["publication_id"], "unit_name": unit_name(job["publication_id"])}
-        process, total, complete, log = None, 0, False, None
+        process, total, log = None, 0, None
+        captured = bytearray()
+        metadata = VerificationMetadata(len(self.config.checks))
+        evidence = hashlib.sha256()
+        failure, returncode, cleanup = None, None, False
         try:
             if stop.is_set():
                 raise PublicationError("publication_lease_lost")
@@ -98,26 +121,23 @@ class IsolatedCheckRunner:
                             if total > 64 * 1024 * 1024:
                                 raise PublicationError("verification_output_limit")
                             log.write(data)
-            if process.wait(timeout=15):
+                            evidence.update(data)
+                            metadata.feed(key.fd, data)
+                            captured.extend(data)
+                            if len(captured) > 32768:
+                                del captured[:-32768]
+            returncode = process.wait(timeout=15)
+            if returncode:
                 raise PublicationError("verification_failed")
-            proof = self.supervisor.stop(lease["unit_name"])
-            if not terminate_and_reap(process) or not proof["scope_stopped"]:
-                raise PublicationError("verification_scope_unstopped")
-            # The receipt belongs outside the child-visible scratch. Exclusive
-            # NOFOLLOW creation also rejects a planted path if isolation fails.
-            report = repository.parent / ("checks-" + job["lease_token"] + ".json")
-            with _exclusive_output(report) as receipt:
-                receipt.write((json.dumps({"status": "passed", "commands": self.config.checks,
-                                          "publication_id": job["publication_id"]}, indent=2) + "\n").encode())
-            complete = True
+        except PublicationError as error:
+            failure = error
         except (OSError, subprocess.SubprocessError):
-            raise PublicationError("verification_process_unavailable") from None
+            failure = PublicationError("verification_process_unavailable")
         finally:
             try:
-                if not complete:
-                    self.supervisor.stop(lease["unit_name"])
+                proof = self.supervisor.stop(lease["unit_name"])
+                cleanup = terminate_and_reap(process) and bool(proof.get("scope_stopped"))
             finally:
-                terminate_and_reap(process)
                 if log is not None:
                     log.close()
                 if process is not None:
@@ -126,3 +146,23 @@ class IsolatedCheckRunner:
                             stream.close()
                         except OSError:
                             pass
+        if not cleanup:
+            failure = PublicationError("verification_scope_unstopped")
+        outcome = project_verification(self.config.checks, code=failure.code if failure else None,
+            returncode=returncode, output=bytes(captured), evidence_digest=evidence.hexdigest(),
+            cleanup_confirmed=cleanup, metadata=metadata)
+        # The receipt is parent-owned and outside the child-visible scratch.
+        # Never reopen a child-controlled log path to construct diagnostics.
+        report_path = repository.parent / ("checks-" + job["lease_token"] + ".json")
+        try:
+            with _exclusive_output(report_path) as receipt:
+                receipt.write((json.dumps({"status": "passed" if outcome.checks_passed else "failed",
+                    "commands": self.config.checks, "publication_id": job["publication_id"],
+                    "verification": outcome.to_dict()}, indent=2) + "\n").encode())
+        except OSError:
+            raise VerificationFailure("verification_receipt_unavailable", project_verification(
+                self.config.checks, code="verification_receipt_unavailable", returncode=returncode,
+                output=b"", evidence_digest=evidence.hexdigest(), cleanup_confirmed=cleanup)) from None
+        if failure:
+            raise VerificationFailure(failure.code, outcome)
+        return outcome

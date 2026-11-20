@@ -1,0 +1,232 @@
+use forge_ide_ui::protocol::*;
+
+const TASK: &str = "11111111-1111-4111-8111-111111111111";
+const REVIEW: &str = "22222222-2222-4222-8222-222222222222";
+
+fn finding() -> WorkFinding {
+    WorkFinding {
+        finding_id: "compiler-infallible".into(),
+        category: WorkFindingCategory::Source,
+        summary: "An impossible error is formatted.".into(),
+        check_id: "clippy".into(),
+        path: "examples/loopback.rs".into(),
+        diagnostic_code: "unreachable_code".into(),
+        reproduction: "Run the admitted compiler check.".into(),
+        expected: "No warnings under the required compiler".into(),
+        actual: "Denied unreachable code warning".into(),
+        evidence_digest: "a".repeat(64),
+        status: WorkFindingStatus::Open,
+    }
+}
+
+#[test]
+fn public_repair_cannot_claim_verified_findings_or_duplicate_their_identity() {
+    let mut request = WorkRequest::WorkRepair {
+        request_id: "repair".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        expected_revision: 11,
+        candidate_commit: "c".repeat(40),
+        agent_profile: "agy-primary".into(),
+        note: "Reproduce under the hosted compiler.".into(),
+        findings: vec![finding()],
+        idempotency_key: "same-repair-intent".into(),
+    };
+    assert!(request.is_valid());
+    assert_eq!(request.destination(), "ide.work.repair");
+    if let WorkRequest::WorkRepair { findings, .. } = &mut request {
+        findings[0].status = WorkFindingStatus::Verified;
+    }
+    assert!(!request.is_valid());
+    if let WorkRequest::WorkRepair { findings, .. } = &mut request {
+        *findings = vec![finding(), finding()];
+    }
+    assert!(!request.is_valid());
+    if let WorkRequest::WorkRepair { findings, .. } = &mut request {
+        findings.clear();
+    }
+    assert!(
+        request.is_valid(),
+        "the server may derive persisted findings for a note-only repair"
+    );
+}
+
+#[test]
+fn review_decision_receipt_binds_the_review_and_cannot_complete_the_task() {
+    let request = WorkRequest::WorkReviewDecide {
+        request_id: "review".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        expected_revision: 7,
+        review_id: REVIEW.into(),
+        decision: WorkReviewDecision::Approve,
+        agent_profile: "agy-primary".into(),
+        note: "Reviewed matching evidence.".into(),
+        findings: vec![],
+        verified_finding_ids: vec![],
+        idempotency_key: "approval".into(),
+    };
+    let mut response = WorkResponse::WorkReviewDecided {
+        request_id: "review".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        base_revision: 7,
+        revision: 8,
+        status: WorkStatus::AwaitingReview,
+        review_id: REVIEW.into(),
+        repair_task_id: None,
+    };
+    assert!(response.valid_for(&request, 200));
+    if let WorkResponse::WorkReviewDecided { status, .. } = &mut response {
+        *status = WorkStatus::Completed;
+    }
+    assert!(!response.valid_for(&request, 200));
+    if let WorkResponse::WorkReviewDecided {
+        status, review_id, ..
+    } = &mut response
+    {
+        *status = WorkStatus::AwaitingReview;
+        *review_id = TASK.into();
+    }
+    assert!(!response.valid_for(&request, 200));
+}
+
+#[test]
+fn final_acceptance_projection_requires_matching_hosted_evidence() {
+    let value = serde_json::json!({
+        "auto_repair":true,"stage":"waiting_hosted","review_id":REVIEW,"feedback_id":null,
+        "round":1,"max_rounds":3,"open_findings":0,"verified_findings":1,
+        "latest_check_status":"passed","toolchain":"rustc 1.100.0","handoff_reason":null,
+        "source_attempt_id":TASK,"candidate_commit":"c".repeat(40),
+        "workspace_digest":"d".repeat(64),"gate_manifest_sha256":"e".repeat(64),
+        "required_hosted_green":false,"can_accept":false,"can_repair":false,"can_retry":false,
+        "findings":[]
+    });
+    let mut review: WorkReviewSummary = serde_json::from_value(value.clone()).unwrap();
+    assert!(review.is_valid());
+    assert!(review.is_processing());
+    review.can_accept = true;
+    assert!(!review.is_valid());
+    review.required_hosted_green = true;
+    assert!(review.is_valid());
+    assert!(!review.is_processing());
+    review.candidate_commit = None;
+    assert!(!review.is_valid());
+    let mut unknown = value;
+    unknown["lease_token"] = "private".into();
+    assert!(serde_json::from_value::<WorkReviewSummary>(unknown).is_err());
+}
+
+#[test]
+fn automatic_repair_is_an_explicit_implementation_only_choice() {
+    let mut request = WorkRequest::WorkSubmit {
+        request_id: "submit".into(),
+        project_alias: "homelab".into(),
+        base_revision: "b".repeat(40),
+        mode: WorkMode::Implement,
+        agent_profile: "agy-primary".into(),
+        prompt: "Implement the approved task.".into(),
+        acceptance_criteria: "Verify the checks.".into(),
+        idempotency_key: "task".into(),
+        auto_repair: true,
+    };
+    assert!(request.is_valid());
+    if let WorkRequest::WorkSubmit { mode, .. } = &mut request {
+        *mode = WorkMode::Review;
+    }
+    assert!(!request.is_valid());
+    if let WorkRequest::WorkSubmit { auto_repair, .. } = &mut request {
+        *auto_repair = false;
+    }
+    assert!(request.is_valid());
+}
+
+#[test]
+fn linked_repair_receipt_has_no_task_identity_until_source_import_completes() {
+    let request = WorkRequest::WorkRepair {
+        request_id: "import".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        expected_revision: 11,
+        candidate_commit: "c".repeat(40),
+        agent_profile: "agy-primary".into(),
+        note: "Import the approved source first".into(),
+        findings: vec![],
+        idempotency_key: "source-import".into(),
+    };
+    let mut response = WorkResponse::WorkRepairSubmitted {
+        request_id: "import".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        base_revision: 11,
+        revision: 12,
+        status: WorkStatus::Completed,
+        repair_task_id: None,
+        review_id: Some(REVIEW.into()),
+    };
+    assert!(response.valid_for(&request, 202));
+    let encoded = serde_json::to_value(&response).unwrap();
+    assert!(encoded["repair_task_id"].is_null());
+    assert_eq!(encoded["review_id"], REVIEW);
+    if let WorkResponse::WorkRepairSubmitted { repair_task_id, .. } = &mut response {
+        *repair_task_id = Some(TASK.into());
+    }
+    assert!(
+        !response.valid_for(&request, 202),
+        "the completed parent cannot become its own repair child"
+    );
+    if let WorkResponse::WorkRepairSubmitted { repair_task_id, .. } = &mut response {
+        *repair_task_id = Some("33333333-3333-4333-8333-333333333333".into());
+    }
+    assert!(response.valid_for(&request, 202));
+}
+
+#[test]
+fn zero_repair_budget_keeps_initial_review_readable_without_authorizing_rounds() {
+    let value = serde_json::json!({"auto_repair":false,"stage":"awaiting_decision","review_id":REVIEW,
+        "round":0,"max_rounds":0,"open_findings":0,"verified_findings":0,
+        "latest_check_status":"passed","candidate_commit":"c".repeat(40),
+        "required_hosted_green":false,"can_accept":false,"can_repair":false,"can_retry":false});
+    let mut review: WorkReviewSummary = serde_json::from_value(value).unwrap();
+    assert!(review.is_valid());
+    assert!(!review.is_processing());
+    review.round = 1;
+    assert!(
+        !review.is_valid(),
+        "zero authorized rounds cannot contain a repair round"
+    );
+    review.round = 0;
+    review.max_rounds = 11;
+    assert!(!review.is_valid(), "the upper policy bound remains ten");
+}
+
+#[test]
+fn legacy_review_requirement_is_optional_typed_and_never_defaults_to_false() {
+    let value = serde_json::json!({"task_id":TASK,"project_alias":"homelab","base_revision":"a".repeat(40),"mode":"implement","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),"status":"awaiting_review","revision":7,"created_at":"2026-11-20T12:00:00Z","prompt":"Approved implementation","acceptance_criteria":"Run required checks"});
+    let task: WorkTaskDetail = serde_json::from_value(value.clone()).unwrap();
+    assert!(task.is_valid());
+    assert_eq!(task.review_required, None);
+    for flag in [false, true] {
+        let mut explicit = value.clone();
+        explicit["review_required"] = flag.into();
+        let task: WorkTaskDetail = serde_json::from_value(explicit).unwrap();
+        assert_eq!(task.review_required, Some(flag));
+        assert!(task.is_valid());
+    }
+    let mut untyped = value;
+    untyped["review_required"] = "false".into();
+    assert!(serde_json::from_value::<WorkTaskDetail>(untyped).is_err());
+}
+
+#[test]
+fn only_repair_review_decision_starts_model_execution() {
+    assert!(WorkReviewDecision::Repair.begins_execution());
+    for decision in [
+        WorkReviewDecision::Approve,
+        WorkReviewDecision::RetryInfrastructure,
+        WorkReviewDecision::Escalate,
+        WorkReviewDecision::Cancel,
+    ] {
+        assert!(!decision.begins_execution());
+    }
+}

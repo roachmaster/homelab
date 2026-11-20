@@ -21,6 +21,8 @@ from work_publication_checks import IsolatedCheckRunner
 from work_publication_clients import (GitHubPullRequestClient, GitRepositoryProvider,
                                       PublicationError, WorkspaceSnapshotProvider, artifact_guard, branch_name, command)
 from work_publication_config import DEFAULT_CHECKS, parse_config
+from work_review import ReviewedCandidateProvider, gate_source_digest
+from work_verification import gate_manifest_sha256
 from work_worker_config import parse_config as parse_worker
 
 
@@ -151,8 +153,35 @@ class PublicationTest(unittest.TestCase):
     def _worker(self, values, *, checks=None):
         _root, config, job, workspaces, _accepted, _bare, client, gh, _state, _calls = values
         store = Store(job)
+        checks = checks or Checks()
+        candidates = ReviewedCandidateProvider(config, client)
+        job.update(review_id=str(uuid4()), candidate_commit="0" * 40,
+                   gate_manifest_sha256=gate_manifest_sha256(config.checks))
+        # This fixture represents the independently completed/approved review.
+        # Publication must reuse it, never rebuild or silently merge new main.
+        review_job = {**job, "publication_id": job["review_id"]}
+        try:
+            snapshot = WorkspaceSnapshotProvider(workspaces).create(review_job)
+            repository, head = client.prepare(review_job, snapshot)
+            checks.run(review_job, repository, threading.Event())
+            client.verify(repository, head)
+            job["candidate_commit"] = head
+            gate_source = gate_source_digest(client, repository, head)
+            job["gate_manifest_sha256"] = gate_manifest_sha256(config.checks, config.required_hosted_checks, gate_source)
+            candidates.record(job, {"review_id": job["review_id"], "task_id": job["task_id"],
+                "attempt_id": job["attempt_id"], "workspace_digest": job["workspace_digest"],
+                "candidate_commit": head, "gate_manifest_sha256": job["gate_manifest_sha256"],
+                "gate_source_sha256": gate_source,
+                "checks_passed": True})
+        except PublicationError as error:
+            # A rejected independent review has no publishable candidate.
+            code = error.code
+            class RejectedCandidates:
+                def acquire(self, _job):
+                    raise PublicationError(code)
+            candidates = RejectedCandidates()
         return PublicationWorker(config, store, WorkspaceSnapshotProvider(workspaces), client,
-                                 checks or Checks(), gh), store
+                                 checks, gh, candidates=candidates), store
 
     def test_checked_snapshot_pushes_feature_branch_and_opens_one_pr_without_touching_main_or_accepted_workspace(self):
         with fixture() as values:
@@ -166,7 +195,7 @@ class PublicationTest(unittest.TestCase):
             self.assertEqual(git(bare, "rev-parse", "refs/heads/main").decode().strip(), job["base_revision"])
             head = git(bare, "rev-parse", "refs/heads/" + branch_name(job)).decode().strip()
             self.assertEqual(head, store.records[-1]["commit_sha"])
-            clone = config.state_root / job["publication_id"] / "repository"
+            clone = config.state_root / job["review_id"] / "repository"
             self.assertEqual((clone / "new.py").read_text(), "new source\n")
             self.assertFalse((clone / "deleted.py").exists())
             self.assertFalse((clone / "temporary.ignored").exists())
@@ -359,6 +388,29 @@ class PublicationTest(unittest.TestCase):
             self.assertGreater(supervisor.stops, 0)
             self.assertIsNotNone(processes[0].poll())
             self.assertTrue(all(stream.closed for stream in (processes[0].stdout, processes[0].stderr)))
+
+    def test_large_verification_output_retains_toolchain_and_active_check(self):
+        class Supervisor:
+            def stop(self, _unit):
+                return {"scope_stopped": True}
+
+            def argv(self, _lease, _invocation):
+                return [sys.executable, "-B", "-c",
+                    "import sys;print('FORGE_VERIFIER_TOOLCHAIN rustc 1.100.0');"
+                    "print('FORGE_CHECK_START 1');print('x'*70000);"
+                    "print('error: fixture failure');sys.exit(1)"]
+
+        with fixture() as values:
+            config, job = values[1:3]
+            config = type(config)(config.worker, config.repositories, config.github_config_dir,
+                                  checks=(("/usr/bin/true",), ("/usr/bin/false",)))
+            repository = config.state_root / job["publication_id"] / "repository"
+            repository.mkdir(parents=True)
+            with self.assertRaises(PublicationError) as failed:
+                IsolatedCheckRunner(config, Supervisor()).run(job, repository, threading.Event())
+            self.assertEqual(failed.exception.report.toolchain, "rustc 1.100.0")
+            self.assertEqual(failed.exception.report.findings[0]["check_id"], "fixed-check-2")
+            self.assertFalse(failed.exception.report.checks_passed)
 
     def test_child_log_and_scratch_report_symlinks_cannot_redirect_parent_writes(self):
         class Supervisor:

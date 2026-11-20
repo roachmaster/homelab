@@ -157,8 +157,11 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
                 request["request_id"].as_str().unwrap()
             );
             let kind = request["kind"].as_str().unwrap();
-            let expected = if kind == "work_plan_decide" {
-                "ide.work.plan.decide".into()
+            let expected = if matches!(
+                kind,
+                "work_plan_decide" | "work_review_decide" | "work_publication_retry"
+            ) {
+                format!("ide.{}", kind.replace('_', "."))
             } else if let Some(suffix) = kind.strip_prefix("work_") {
                 format!("ide.work.{suffix}")
             } else {
@@ -1186,4 +1189,112 @@ fn work_publication_projection_rejects_an_arbitrary_href_before_returning_it_to_
         safe,
     );
     assert_eq!(worker.join().unwrap().len(), 2);
+}
+
+fn review_decision(decision: &str) -> Value {
+    let mut value = task_request("work_review_decide");
+    value["expected_revision"] = json!(4);
+    value["review_id"] = json!(OTHER);
+    value["decision"] = json!(decision);
+    value["agent_profile"] = json!("agy-plan-v1");
+    value["note"] = json!("Owner-reviewed compiler evidence");
+    value["idempotency_key"] = json!("review-intent");
+    value
+}
+#[test]
+fn nonexecution_review_controls_survive_removed_profile_and_implementation_grant() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut repair = review_decision("repair");
+    repair["agent_profile"] = json!("removed-profile");
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        repair,
+        &auth,
+        403,
+        failure("denied"),
+    );
+    no_calls(&upstream);
+    let mut foreign = review_decision("approve");
+    foreign["project_alias"] = json!("ungranted-project");
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        foreign,
+        &auth,
+        403,
+        failure("denied"),
+    );
+    no_calls(&upstream);
+    let receipt = reply(
+        "work_review_decided",
+        json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,"status":"awaiting_review","review_id":OTHER}),
+    );
+    let publication = reply(
+        "work_publication_retry_queued",
+        json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,"status":"awaiting_review","publication_id":OTHER}),
+    );
+    let worker = backend(
+        upstream,
+        vec![
+            (200, receipt.clone()),
+            (200, receipt.clone()),
+            (200, receipt.clone()),
+            (202, publication.clone()),
+        ],
+    );
+    for decision in ["approve", "retry_infrastructure", "escalate"] {
+        let mut request = review_decision(decision);
+        request["agent_profile"] = json!("removed-profile");
+        assert_reply(
+            &host,
+            "ide.work.review.decide",
+            request,
+            &auth,
+            200,
+            receipt.clone(),
+        );
+    }
+    let mut retry = task_request("work_publication_retry");
+    for (key,value) in json!({"expected_revision":4,"publication_id":OTHER,"candidate_commit":"e".repeat(40),"note":"Retry the same artifact","idempotency_key":"publication-retry"}).as_object().unwrap() { retry[key]=value.clone(); }
+    assert_reply(
+        &host,
+        "ide.work.publication.retry",
+        retry,
+        &auth,
+        202,
+        publication,
+    );
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 4);
+    assert!(
+        calls.iter().all(|call| call["kind"] != "work_get"),
+        "nonexecution controls do not perform a model-grant precheck"
+    );
+}
+#[test]
+fn review_repair_rechecks_the_saved_implementation_mode_before_mutation() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut value = config(&files);
+    let mut grants = settings(&files, &upstream);
+    grants.allowed_modes.push(WorkMode::Implement);
+    value.work = Some(grants);
+    let host = host_with_config(value).0;
+    let auth = authenticate(&host);
+    let worker = backend(upstream, vec![(200, opened())]);
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        review_decision("repair"),
+        &auth,
+        403,
+        failure("denied"),
+    );
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["kind"], "work_get");
 }

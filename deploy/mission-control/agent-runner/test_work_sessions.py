@@ -99,6 +99,13 @@ class AntigravitySessionTest(unittest.TestCase):
         self.assertEqual(selected.task_id, resumed["task_id"])
         self.assertEqual(selected.attempt_id, resumed["attempt_id"])
 
+    def test_changed_approved_scope_does_not_reuse_an_old_conversation(self):
+        self.task["scope_plan_decision_id"] = str(uuid4())
+        self._seed()
+        resumed = self._resume()
+        resumed["scope_plan_decision_id"] = str(uuid4())
+        self.assertIsNone(self.provider.select(resumed, self.workspace, self.binary_sha).conversation_id)
+
     def test_one_offs_do_not_consult_hints_even_when_the_workspace_path_is_shared(self):
         self._seed()
         other = lease(self.config)

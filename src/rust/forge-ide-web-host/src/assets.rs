@@ -83,6 +83,8 @@ const FORGE_WORKERS_STUDIO: &[u8] = include_bytes!(
     "../../../../docs/architecture/diagrams/mermaid/images/forge-studio-worker-lease.svg"
 );
 const CODING_AGENTS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/coding-agents.html"));
+const AGENT_FEEDBACK_HTML: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/agent-feedback-loop.html"));
 const AGENT_USAGE_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/agent-usage.html"));
 const CODING_AGENT_OWNERSHIP: &[u8] = include_bytes!(
     "../../../../docs/architecture/diagrams/mermaid/images/coding-agent-ownership.svg"
@@ -255,6 +257,9 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/coding-agents/lifecycle.svg" => Some(("image/svg+xml", CODING_AGENT_LIFECYCLE)),
         "/design/coding-agents/completion.svg" => Some(("image/svg+xml", CODING_AGENT_COMPLETION)),
         "/design/coding-agents/takeover.svg" => Some(("image/svg+xml", CODING_AGENT_TAKEOVER)),
+        "/design/agent-feedback-loop" | "/design/agent-feedback-loop/" => {
+            Some(("text/html; charset=utf-8", AGENT_FEEDBACK_HTML))
+        }
         "/design/agent-usage" | "/design/agent-usage/" => {
             Some(("text/html; charset=utf-8", AGENT_USAGE_HTML))
         }
@@ -429,7 +434,7 @@ impl Assets {
         };
         let m: Manifest = serde_json::from_slice(&read("manifest.json", 16384)?)
             .map_err(|_| HostError::Configuration("asset manifest"))?;
-        if m.format_version != 1 || m.abi_version != 7 || m.files.len() != 5 {
+        if m.format_version != 1 || m.abi_version != 8 || m.files.len() != 5 {
             return Err(HostError::Configuration("asset versions/count"));
         }
         let mut loaded = BTreeMap::new();
@@ -612,7 +617,7 @@ mod tests {
                 .collect();
             fs::write(
                 path.join("manifest.json"),
-                serde_json::to_vec(&json!({"format_version": 1, "abi_version": 7, "files": files}))
+                serde_json::to_vec(&json!({"format_version": 1, "abi_version": 8, "files": files}))
                     .unwrap(),
             )
             .unwrap();

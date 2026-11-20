@@ -601,6 +601,8 @@ pub struct AgentsNavigationSnapshot {
     pub prompt: String,
     pub acceptance_criteria: String,
     pub review_note: String,
+    #[serde(default)]
+    pub auto_repair: bool,
     pub task_id: Option<String>,
     pub retry_intent: Option<WorkRequest>,
 }
@@ -625,12 +627,15 @@ impl AgentsNavigationSnapshot {
                             acceptance_criteria,
                             agent_profile,
                             mode,
+                            auto_repair,
                             ..
                         } => {
                             prompt == &self.prompt
                                 && acceptance_criteria == &self.acceptance_criteria
                                 && agent_profile == &self.agent_profile
                                 && *mode == self.mode
+                                && *auto_repair
+                                    == (self.auto_repair && self.mode == WorkMode::Implement)
                         }
                         _ => r.task_id() == self.task_id.as_deref(),
                     }
@@ -722,6 +727,40 @@ pub enum UiEvent {
     },
     SetAgentReviewNote {
         value: String,
+    },
+    SetAgentAutoRepair {
+        value: bool,
+        task_id: Option<String>,
+        expected_revision: Option<u64>,
+    },
+    SetAgentFindingVerified {
+        value: bool,
+        task_id: String,
+        expected_revision: u64,
+        review_id: String,
+        candidate_commit: String,
+        finding_id: String,
+    },
+    DecideAgentReview {
+        task_id: String,
+        expected_revision: u64,
+        review_id: String,
+        candidate_commit: Option<String>,
+        decision: WorkReviewDecision,
+        idempotency_key: String,
+    },
+    RepairAgentTask {
+        task_id: String,
+        expected_revision: u64,
+        candidate_commit: String,
+        idempotency_key: String,
+    },
+    RetryAgentPublication {
+        task_id: String,
+        expected_revision: u64,
+        publication_id: String,
+        candidate_commit: String,
+        idempotency_key: String,
     },
     SendAgentTask {
         idempotency_key: String,

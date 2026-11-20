@@ -10,7 +10,7 @@ remote = ["dep:forge-remote", "dep:forge-ingress-contract"]
 yaml = ["dep:serde", "dep:serde_yaml_ng"]
 write-contract = ["dep:serde"]
 managed-writes = ["write-contract", "dep:nix", "dep:serde_json"]
-cli = ["yaml", "dep:forge-bridge", "dep:forge-ingress-contract", "dep:forge-command"]
+cli = ["yaml", "dep:serde_json", "dep:forge-bridge", "dep:forge-ingress-contract", "dep:forge-command"]
 
 [dependencies]
 forge-remote = { path = "../forge-remote", optional = true }

@@ -1,5 +1,7 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{ChatRole, DiffLine, RequestToken, SourceSpan, WorkPlanDecision};
+use crate::protocol::{
+    ChatRole, DiffLine, RequestToken, SourceSpan, WorkPlanDecision, WorkReviewDecision,
+};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -9,6 +11,7 @@ pub struct ViewModel {
     pub choices: Vec<SelectBinding>,
     pub buttons: Vec<ButtonBinding>,
     pub inputs: Vec<InputBinding>,
+    pub checks: Vec<CheckboxBinding>,
     pub lists: Vec<ListBinding>,
     pub tables: Vec<TableBinding>,
     pub visibility: Vec<VisibilityBinding>,
@@ -135,6 +138,50 @@ pub struct InputBinding {
     pub max_bytes: usize,
     pub action: Option<FilterAction>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CheckboxBinding {
+    pub visible: bool,
+    pub id: &'static str,
+    pub checked: bool,
+    pub disabled: bool,
+    pub action: Option<FilterAction>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+pub const AGENT_FINDING_CHECKBOX_IDS: [&str; 32] = [
+    "agent-finding-0",
+    "agent-finding-1",
+    "agent-finding-2",
+    "agent-finding-3",
+    "agent-finding-4",
+    "agent-finding-5",
+    "agent-finding-6",
+    "agent-finding-7",
+    "agent-finding-8",
+    "agent-finding-9",
+    "agent-finding-10",
+    "agent-finding-11",
+    "agent-finding-12",
+    "agent-finding-13",
+    "agent-finding-14",
+    "agent-finding-15",
+    "agent-finding-16",
+    "agent-finding-17",
+    "agent-finding-18",
+    "agent-finding-19",
+    "agent-finding-20",
+    "agent-finding-21",
+    "agent-finding-22",
+    "agent-finding-23",
+    "agent-finding-24",
+    "agent-finding-25",
+    "agent-finding-26",
+    "agent-finding-27",
+    "agent-finding-28",
+    "agent-finding-29",
+    "agent-finding-30",
+    "agent-finding-31",
+];
 /// The generic input primitive attaches the entered `value`; context is supplied
 /// by the accepted model view, not inferred from a mutable DOM selection.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -157,6 +204,17 @@ pub enum FilterAction {
     SetAgentPrompt {},
     SetAgentCriteria {},
     SetAgentReviewNote {},
+    SetAgentAutoRepair {
+        task_id: Option<String>,
+        expected_revision: Option<u64>,
+    },
+    SetAgentFindingVerified {
+        task_id: String,
+        expected_revision: u64,
+        review_id: String,
+        candidate_commit: String,
+        finding_id: String,
+    },
     SetFileFilter {
         report: RequestToken,
     },
@@ -305,6 +363,24 @@ pub struct CorrespondenceRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    DecideAgentReview {
+        task_id: String,
+        expected_revision: u64,
+        review_id: String,
+        candidate_commit: Option<String>,
+        decision: WorkReviewDecision,
+    },
+    RepairAgentTask {
+        task_id: String,
+        expected_revision: u64,
+        candidate_commit: String,
+    },
+    RetryAgentPublication {
+        task_id: String,
+        expected_revision: u64,
+        publication_id: String,
+        candidate_commit: String,
+    },
     DecideAgentPlan {
         task_id: String,
         expected_revision: u64,

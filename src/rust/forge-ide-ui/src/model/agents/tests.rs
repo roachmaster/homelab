@@ -73,6 +73,8 @@ fn detail(status: WorkStatus) -> WorkTaskDetail {
         result: None,
         reconciliation_receipt_id: None,
         publication: None,
+        review_required: None,
+        review: None,
     }
 }
 fn draft(agents: &mut Agents) {
@@ -852,6 +854,32 @@ fn plan_event(decision: WorkPlanDecision) -> UiEvent {
         idempotency_key: KEY.into(),
     }
 }
+fn review_summary(green: bool) -> WorkReviewSummary {
+    WorkReviewSummary {
+        auto_repair: false,
+        stage: if green { "passed" } else { "awaiting_decision" }.into(),
+        review_id: Some(KEY.into()),
+        feedback_id: None,
+        repair_task_id: None,
+        parent_task_id: None,
+        round: 1,
+        max_rounds: 3,
+        open_findings: 0,
+        verified_findings: 2,
+        latest_check_status: Some("passed".into()),
+        toolchain: Some("rustc 1.100.0".into()),
+        handoff_reason: None,
+        source_attempt_id: Some(ATTEMPT.into()),
+        candidate_commit: Some("e".repeat(40)),
+        workspace_digest: Some("f".repeat(64)),
+        gate_manifest_sha256: Some("b".repeat(64)),
+        required_hosted_green: green,
+        can_accept: green,
+        can_repair: true,
+        can_retry: false,
+        findings: vec![],
+    }
+}
 #[test]
 fn finished_and_legacy_completed_plans_have_three_guarded_decisions_instead_of_acceptance() {
     for status in [WorkStatus::AwaitingReview, WorkStatus::Completed] {
@@ -995,6 +1023,7 @@ fn publication_polling_reads_same_revision_details_and_blocks_generic_recovery_u
     let task = agents.task.as_mut().unwrap();
     task.mode = WorkMode::Implement;
     task.publication = Some(WorkPublication {
+        publication_id: None,
         status: WorkPublicationStatus::Checking,
         branch: Some("forge/task-fixture".into()),
         commit_sha: None,
@@ -1019,12 +1048,14 @@ fn publication_polling_reads_same_revision_details_and_blocks_generic_recovery_u
     ));
     let mut settled = agents.task.clone().unwrap();
     settled.publication = Some(WorkPublication {
+        publication_id: None,
         status: WorkPublicationStatus::Published,
         branch: Some("forge/task-fixture".into()),
         commit_sha: Some("e".repeat(40)),
         pr_url: Some("https://github.com/roachmaster/homelab/pull/42".into()),
         summary: Some("Required checks passed.".into()),
     });
+    settled.review = Some(review_summary(true));
     assert!(settled.is_valid());
     step(
         &mut agents,
@@ -1064,13 +1095,14 @@ fn failed_publication_keeps_the_result_reviewable_without_inventing_a_pull_reque
     let task = agents.task.as_mut().unwrap();
     task.mode = WorkMode::Implement;
     task.publication = Some(WorkPublication {
+        publication_id: None,
         status: WorkPublicationStatus::Failed,
         branch: Some("forge/task-fixture".into()),
         commit_sha: None,
         pr_url: None,
         summary: Some("Required checks failed. Review the saved result.".into()),
     });
-    assert!(agents.can_accept());
+    assert!(!agents.can_accept());
     assert!(agents.can_resume());
     assert!(!agents.publication_processing());
     let mut view = ViewModel::default();
@@ -1152,3 +1184,5 @@ fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_r
         matches!(&effects[0],UiEffect::Work(WorkRequest::WorkGet { task_id, .. }) if task_id == TASK)
     );
 }
+
+mod review;

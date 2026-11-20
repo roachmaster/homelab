@@ -71,6 +71,7 @@ mod characters;
 mod coding_agents;
 mod dispatch;
 mod docs;
+mod feedback_loop;
 mod forge_providers;
 mod forge_workers;
 mod game_asset_pipeline;
@@ -181,6 +182,7 @@ pub enum DesignPage {
     ForgeWorkersStudio,
     CodingAgents,
     AgentUsage,
+    AgentFeedback,
     Playtest,
     Studio,
 }
@@ -194,7 +196,8 @@ impl DesignPage {
             | Self::ForgeWorkersPlaytest
             | Self::ForgeWorkersStudio
             | Self::CodingAgents
-            | Self::AgentUsage => Some("forge-foundations"),
+            | Self::AgentUsage
+            | Self::AgentFeedback => Some("forge-foundations"),
             Self::PreviousChats | Self::ChatHistory | Self::ChatDispatch | Self::Mail => {
                 Some("chat-and-mail")
             }
@@ -306,6 +309,12 @@ impl DesignPage {
                 "/design#forge-foundations",
                 "Back to Design",
                 coding_agents::DISPATCH,
+            ),
+            Self::AgentFeedback => (
+                "Agent feedback and repair · Forge IDE",
+                "/design#forge-foundations",
+                "Back to Design",
+                feedback_loop::BODY,
             ),
             Self::AgentUsage => (
                 "Agent usage and token limits · Forge IDE",

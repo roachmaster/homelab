@@ -4,6 +4,7 @@ use crate::markdown::render_markdown;
 mod presentation;
 use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
 const USAGE_PAGE: usize = 6;
+use std::collections::BTreeSet;
 
 fn visible(id: &'static str, visible: bool) -> VisibilityBinding {
     VisibilityBinding { id, visible }
@@ -43,6 +44,8 @@ pub(super) struct Agents {
     prompt: String,
     criteria: String,
     review_note: String,
+    auto_repair: bool,
+    verified_finding_ids: BTreeSet<String>,
     tasks: Vec<WorkTaskSummary>,
     list_cursor: Option<String>,
     list_history: Vec<Option<String>>,
@@ -86,6 +89,7 @@ impl Agents {
         !self.prompt.is_empty()
             || !self.criteria.is_empty()
             || !self.review_note.is_empty()
+            || self.auto_repair
             || self.locked()
     }
     pub fn has_work(&self) -> bool {
@@ -100,6 +104,7 @@ impl Agents {
             prompt: self.prompt.clone(),
             acceptance_criteria: self.criteria.clone(),
             review_note: self.review_note.clone(),
+            auto_repair: self.auto_repair,
             task_id: self.selected.clone(),
             retry_intent: self
                 .retry
@@ -164,6 +169,7 @@ impl Agents {
         self.prompt = snapshot.prompt;
         self.criteria = snapshot.acceptance_criteria;
         self.review_note = snapshot.review_note;
+        self.auto_repair = snapshot.auto_repair;
         self.selected = snapshot.task_id;
         self.retry = snapshot.retry_intent;
         if self.retry.is_some() {
@@ -310,6 +316,7 @@ impl Agents {
     fn processing(&self) -> bool {
         self.task.as_ref().is_some_and(|t| t.status.is_processing())
             || self.publication_processing()
+            || self.review_processing()
             || self.pane == Pane::List && self.tasks.iter().any(|t| t.status.is_processing())
     }
     pub fn network_failed(&mut self, id: &str, watch: String, effects: &mut Vec<UiEffect>) {
@@ -360,6 +367,15 @@ impl Agents {
         | UiEvent::ResumeAgentTask { idempotency_key }
         | UiEvent::DecideAgentPlan {
             idempotency_key, ..
+        }
+        | UiEvent::DecideAgentReview {
+            idempotency_key, ..
+        }
+        | UiEvent::RepairAgentTask {
+            idempotency_key, ..
+        }
+        | UiEvent::RetryAgentPublication {
+            idempotency_key, ..
         } = &event
         {
             if !valid_work_name(idempotency_key, 128) {
@@ -380,7 +396,10 @@ impl Agents {
                     return Ok(());
                 }
                 self.watch = None;
-                if work && self.pending.is_none() && self.publication_processing() {
+                if work
+                    && self.pending.is_none()
+                    && (self.publication_processing() || self.review_processing())
+                {
                     // Publication can advance without changing the task revision.
                     // Read its authoritative detail instead of waiting for task events.
                     self.get(id, effects);
@@ -425,6 +444,7 @@ impl Agents {
                 self.warning = true;
             }
             UiEvent::AgentsNewTask {} if work => {
+                self.auto_repair = false;
                 self.pending = None;
                 self.selected = None;
                 self.task = None;
@@ -456,6 +476,7 @@ impl Agents {
                 self.prompt.clear();
                 self.criteria.clear();
                 self.review_note.clear();
+                self.auto_repair = false;
                 self.retry = None;
                 self.pane = Pane::List;
                 self.status = "Draft discarded.".into();
@@ -557,6 +578,7 @@ impl Agents {
                             prompt: self.prompt.clone(),
                             acceptance_criteria: self.criteria.clone(),
                             idempotency_key,
+                            auto_repair: self.auto_repair && self.mode == Some(WorkMode::Implement),
                         },
                         effects,
                     );
@@ -564,7 +586,16 @@ impl Agents {
                 }
             }
             UiEvent::OpenAgentTask { task_id } if work => {
-                if self.tasks.iter().any(|t| t.task_id == task_id) {
+                if self.tasks.iter().any(|t| t.task_id == task_id)
+                    || self
+                        .task
+                        .as_ref()
+                        .and_then(|t| t.review.as_ref())
+                        .is_some_and(|r| {
+                            r.parent_task_id.as_ref() == Some(&task_id)
+                                || r.repair_task_id.as_ref() == Some(&task_id)
+                        })
+                {
                     self.pending = None;
                     self.selected = Some(task_id);
                     self.task = None;
@@ -644,6 +675,7 @@ impl Agents {
                             agent_profile,
                             idempotency_key,
                             note: self.review_note.clone(),
+                            auto_repair: self.auto_repair && decision == WorkPlanDecision::Resume,
                         },
                         effects,
                     );
@@ -666,6 +698,178 @@ impl Agents {
                                 .clone()
                                 .unwrap_or_default(),
                             note: self.review_note.clone(),
+                        },
+                        effects,
+                    );
+                }
+            }
+            UiEvent::SetAgentAutoRepair {
+                value,
+                task_id,
+                expected_revision,
+            } if work => {
+                let current = match (task_id, expected_revision) {
+                    (None, None) => {
+                        self.pane == Pane::Compose && self.mode == Some(WorkMode::Implement)
+                    }
+                    (Some(task_id), Some(revision)) => {
+                        self.finished_plan()
+                            && self
+                                .task
+                                .as_ref()
+                                .is_some_and(|t| t.task_id == task_id && t.revision == revision)
+                    }
+                    _ => false,
+                };
+                if self.pending.is_none() && current {
+                    self.auto_repair = value;
+                }
+            }
+            UiEvent::SetAgentFindingVerified {
+                value,
+                task_id,
+                expected_revision,
+                review_id,
+                candidate_commit,
+                finding_id,
+            } if work => {
+                let current = self.task.as_ref().is_some_and(|t| {
+                    t.task_id == task_id
+                        && t.revision == expected_revision
+                        && t.review.as_ref().is_some_and(|r| {
+                            r.review_id.as_deref() == Some(&review_id)
+                                && r.candidate_commit.as_deref() == Some(&candidate_commit)
+                                && r.stage == "awaiting_decision"
+                                && r.latest_check_status.as_deref() == Some("passed")
+                                && r.findings.iter().any(|f| {
+                                    f.finding_id == finding_id
+                                        && f.status == WorkFindingStatus::Open
+                                })
+                        })
+                });
+                if current && self.pending.is_none() {
+                    if value {
+                        self.verified_finding_ids.insert(finding_id);
+                    } else {
+                        self.verified_finding_ids.remove(&finding_id);
+                    }
+                }
+            }
+            UiEvent::DecideAgentReview {
+                task_id,
+                expected_revision,
+                review_id,
+                candidate_commit,
+                decision,
+                idempotency_key,
+            } if work => {
+                let current = self.task.as_ref().is_some_and(|task| {
+                    task.task_id == task_id
+                        && task.revision == expected_revision
+                        && task.review.as_ref().is_some_and(|review| {
+                            review.review_id.as_deref() == Some(&review_id)
+                                && review.candidate_commit == candidate_commit
+                        })
+                });
+                if self.pending.is_none() && current && self.can_decide_review(decision) {
+                    let profile = self
+                        .task
+                        .as_ref()
+                        .expect("review source")
+                        .agent_profile
+                        .clone();
+                    self.request(
+                        WorkRequest::WorkReviewDecide {
+                            request_id: id,
+                            project_alias: self.project.clone(),
+                            task_id,
+                            expected_revision,
+                            review_id,
+                            decision,
+                            agent_profile: profile,
+                            note: self.review_note.clone(),
+                            findings: vec![],
+                            verified_finding_ids: if decision == WorkReviewDecision::Approve {
+                                self.verified_finding_ids.iter().cloned().collect()
+                            } else {
+                                vec![]
+                            },
+                            idempotency_key,
+                        },
+                        effects,
+                    );
+                }
+            }
+            UiEvent::RepairAgentTask {
+                task_id,
+                expected_revision,
+                candidate_commit,
+                idempotency_key,
+            } if work => {
+                let current = self.task.as_ref().is_some_and(|task| {
+                    task.task_id == task_id
+                        && task.revision == expected_revision
+                        && task
+                            .review
+                            .as_ref()
+                            .and_then(|r| r.candidate_commit.as_ref())
+                            == Some(&candidate_commit)
+                });
+                if self.pending.is_none() && current && self.can_start_repair() {
+                    let profile = self
+                        .task
+                        .as_ref()
+                        .expect("completed parent")
+                        .agent_profile
+                        .clone();
+                    self.request(
+                        WorkRequest::WorkRepair {
+                            request_id: id,
+                            project_alias: self.project.clone(),
+                            task_id,
+                            expected_revision,
+                            candidate_commit,
+                            agent_profile: profile,
+                            note: self.review_note.clone(),
+                            findings: vec![],
+                            idempotency_key,
+                        },
+                        effects,
+                    );
+                }
+            }
+            UiEvent::RetryAgentPublication {
+                task_id,
+                expected_revision,
+                publication_id,
+                candidate_commit,
+                idempotency_key,
+            } if work => {
+                let current = self.task.as_ref().is_some_and(|task| {
+                    task.task_id == task_id
+                        && task.revision == expected_revision
+                        && task
+                            .publication
+                            .as_ref()
+                            .and_then(|p| p.publication_id.as_deref())
+                            == Some(&publication_id)
+                        && task
+                            .review
+                            .as_ref()
+                            .and_then(|r| r.candidate_commit.as_ref())
+                            == Some(&candidate_commit)
+                });
+                if self.pending.is_none() && current && self.can_retry_publication() {
+                    self.request(
+                        WorkRequest::WorkPublicationRetry {
+                            request_id: id,
+                            project_alias: self.project.clone(),
+                            task_id,
+                            expected_revision,
+                            publication_id,
+                            candidate_commit,
+                            note: self.review_note.clone(),
+                            idempotency_key,
                         },
                         effects,
                     );
@@ -787,6 +991,101 @@ impl Agents {
             .and_then(|t| t.publication.as_ref())
             .is_some_and(|p| p.status.is_processing())
     }
+    fn review_processing(&self) -> bool {
+        self.task.as_ref().is_some_and(|task| {
+            task.review.as_ref().is_some_and(|review| {
+                !(task.status == WorkStatus::Completed && review.repair_task_id.is_some())
+                    && review.is_processing()
+            })
+        })
+    }
+    fn implementation_enabled(&self) -> bool {
+        self.task.as_ref().is_some_and(|task| {
+            self.catalog.as_ref().is_some_and(|catalog| {
+                catalog.profiles.iter().any(|profile| {
+                    profile.alias == task.agent_profile
+                        && profile.modes.contains(&WorkMode::Implement)
+                })
+            })
+        })
+    }
+    fn can_decide_review(&self, decision: WorkReviewDecision) -> bool {
+        let Some(task) = self.task.as_ref().filter(|t| {
+            t.mode == WorkMode::Implement
+                && !t.status.is_processing()
+                && !matches!(t.status, WorkStatus::Completed | WorkStatus::Cancelled)
+        }) else {
+            return false;
+        };
+        let Some(review) = task.review.as_ref().filter(|r| r.review_id.is_some()) else {
+            return false;
+        };
+        if self.publication_processing() || self.review_processing() {
+            return false;
+        }
+        match decision {
+            WorkReviewDecision::Approve => {
+                review.stage == "awaiting_decision"
+                    && review.latest_check_status.as_deref() == Some("passed")
+                    && review.candidate_commit.is_some()
+                    && (review.open_findings == 0
+                        || (!self.review_note.trim().is_empty()
+                            && review
+                                .findings
+                                .iter()
+                                .filter(|f| f.status == WorkFindingStatus::Open)
+                                .count()
+                                == review.open_findings as usize
+                            && review
+                                .findings
+                                .iter()
+                                .filter(|f| f.status == WorkFindingStatus::Open)
+                                .all(|f| self.verified_finding_ids.contains(&f.finding_id))))
+            }
+            WorkReviewDecision::Repair => {
+                review.can_repair
+                    && self.implementation_enabled()
+                    && !self.review_note.trim().is_empty()
+            }
+            WorkReviewDecision::RetryInfrastructure => review.can_retry,
+            WorkReviewDecision::Escalate => {
+                review.stage != "handoff" && !self.review_note.trim().is_empty()
+            }
+            WorkReviewDecision::Cancel => true,
+        }
+    }
+    fn review_action(&self, decision: WorkReviewDecision) -> Option<RowAction> {
+        let task = self.task.as_ref()?;
+        let review = task.review.as_ref()?;
+        Some(RowAction::DecideAgentReview {
+            task_id: task.task_id.clone(),
+            expected_revision: task.revision,
+            review_id: review.review_id.clone()?,
+            candidate_commit: review.candidate_commit.clone(),
+            decision,
+        })
+    }
+    fn can_start_repair(&self) -> bool {
+        !self.publication_processing()
+            && self.implementation_enabled()
+            && !self.review_note.trim().is_empty()
+            && self.task.as_ref().is_some_and(|t| {
+                t.status == WorkStatus::Completed
+                    && t.review
+                        .as_ref()
+                        .is_some_and(|r| r.can_repair && r.candidate_commit.is_some())
+            })
+    }
+    fn can_retry_publication(&self) -> bool {
+        self.task.as_ref().is_some_and(|t| {
+            t.publication.as_ref().is_some_and(|p| {
+                p.status == WorkPublicationStatus::Failed && p.publication_id.is_some()
+            }) && t
+                .review
+                .as_ref()
+                .is_some_and(|r| r.can_retry && r.candidate_commit.is_some())
+        })
+    }
     fn finished_plan(&self) -> bool {
         self.task.as_ref().is_some_and(|t| {
             t.mode == WorkMode::Plan
@@ -828,6 +1127,11 @@ impl Agents {
             && !self.publication_processing()
             && self.task.as_ref().is_some_and(|t| {
                 t.status == WorkStatus::AwaitingReview
+                    && (t.mode != WorkMode::Implement
+                        || (t.review_required == Some(false) && t.review.is_none())
+                        || t.review.as_ref().is_some_and(|r| {
+                            r.can_accept && r.required_hosted_green && r.open_findings == 0
+                        }))
                     && t.result.is_some()
                     && t.attempt
                         .as_ref()
@@ -839,6 +1143,8 @@ impl Agents {
             && !self.publication_processing()
             && self.task.as_ref().is_some_and(|t| {
                 t.reconciliation_receipt_id.is_some()
+                    && (t.mode != WorkMode::Implement
+                        || t.review.as_ref().is_none_or(|r| r.review_id.is_none()))
                     && !t.status.is_processing()
                     && !matches!(t.status, WorkStatus::Completed | WorkStatus::Cancelled)
             })
@@ -862,6 +1168,8 @@ impl Agents {
         let status = match &response {
             WorkResponse::WorkSubmitted { .. }
             | WorkResponse::WorkResumed { .. }
+            | WorkResponse::WorkRepairSubmitted { .. }
+            | WorkResponse::WorkPublicationRetryQueued { .. }
             | WorkResponse::WorkPlanDecided {
                 status: WorkStatus::Queued,
                 ..
@@ -945,7 +1253,21 @@ impl Agents {
                         || t.attempt.as_ref().map(|a| &a.attempt_id)
                             != task.attempt.as_ref().map(|a| &a.attempt_id)
                 });
+                if self.task.as_ref().is_none_or(|t| {
+                    t.task_id != task.task_id
+                        || t.revision != task.revision
+                        || t.review
+                            .as_ref()
+                            .map(|r| (&r.review_id, &r.candidate_commit, &r.findings))
+                            != task
+                                .review
+                                .as_ref()
+                                .map(|r| (&r.review_id, &r.candidate_commit, &r.findings))
+                }) {
+                    self.verified_finding_ids.clear();
+                }
                 if changed {
+                    self.auto_repair = task.review.as_ref().is_some_and(|r| r.auto_repair);
                     self.clear_progress();
                 }
                 self.status = task.status.label().into();
@@ -1053,6 +1375,38 @@ impl Agents {
                 self.clear_progress();
                 self.clear_result();
                 self.status = "Task queued after trusted reconciliation.".into();
+                self.get(id, effects);
+            }
+            WorkResponse::WorkReviewDecided { repair_task_id, .. } => {
+                self.retry = None;
+                self.review_note.clear();
+                if let Some(child) = repair_task_id {
+                    self.selected = Some(child);
+                    self.task = None;
+                    self.clear_progress();
+                    self.clear_result();
+                }
+                self.status = "Review decision saved against the verified candidate.".into();
+                self.get(id, effects);
+            }
+            WorkResponse::WorkRepairSubmitted { repair_task_id, .. } => {
+                self.retry = None;
+                self.review_note.clear();
+                if let Some(child) = repair_task_id {
+                    self.selected = Some(child);
+                    self.task = None;
+                    self.clear_progress();
+                    self.clear_result();
+                    self.status = "Linked repair saved. The completed parent is preserved.".into();
+                } else {
+                    self.status = "Verifying the source before creating the linked repair.".into();
+                }
+                self.get(id, effects);
+            }
+            WorkResponse::WorkPublicationRetryQueued { .. } => {
+                self.retry = None;
+                self.review_note.clear();
+                self.status = "A new verification and publication run is queued.".into();
                 self.get(id, effects);
             }
             WorkResponse::WorkResultPage {
@@ -1247,11 +1601,19 @@ impl Agents {
             visible("agents-usage-pagination", self.providers.len() > USAGE_PAGE),
             visible("agents-compose", active && work && compose),
             visible(
+                "agents-compose-repair-policy",
+                active && compose && self.mode == Some(WorkMode::Implement),
+            ),
+            visible(
                 "agents-compose-limit",
                 active && compose && self.request_size() > 16384,
             ),
             visible("agents-overview", active && !compose && !reader),
             visible("agents-reader", active && work && reader),
+            visible(
+                "agents-verification",
+                active && reader && self.task.as_ref().is_some_and(|t| t.review.is_some()),
+            ),
             visible(
                 "agents-progress-panel",
                 active && reader && self.task.as_ref().is_some_and(|t| t.attempt.is_some()),
@@ -1296,6 +1658,70 @@ impl Agents {
             visible("agents-accept", active && reader && self.can_accept()),
             visible("agents-resume", active && reader && self.can_resume()),
             visible(
+                "agents-verification-actions",
+                active && reader && self.task.as_ref().is_some_and(|t| t.review.is_some()),
+            ),
+            visible(
+                "agents-review-approve",
+                active
+                    && reader
+                    && self
+                        .task
+                        .as_ref()
+                        .and_then(|t| t.review.as_ref())
+                        .is_some_and(|r| r.stage == "awaiting_decision"),
+            ),
+            visible(
+                "agents-review-repair",
+                active
+                    && reader
+                    && self.task.as_ref().is_some_and(|t| {
+                        t.status != WorkStatus::Completed
+                            && t.review.as_ref().is_some_and(|r| r.can_repair)
+                    }),
+            ),
+            visible(
+                "agents-review-escalate",
+                active
+                    && reader
+                    && self.task.as_ref().is_some_and(|t| {
+                        !matches!(t.status, WorkStatus::Completed | WorkStatus::Cancelled)
+                            && t.review
+                                .as_ref()
+                                .is_some_and(|r| r.review_id.is_some() && r.stage != "handoff")
+                    }),
+            ),
+            visible(
+                "agents-review-retry",
+                active
+                    && reader
+                    && self.task.as_ref().is_some_and(|t| {
+                        t.publication
+                            .as_ref()
+                            .is_none_or(|p| p.status != WorkPublicationStatus::Failed)
+                            && t.review.as_ref().is_some_and(|r| r.can_retry)
+                    }),
+            ),
+            visible(
+                "agents-completed-repair",
+                active
+                    && reader
+                    && self.task.as_ref().is_some_and(|t| {
+                        t.status == WorkStatus::Completed
+                            && t.review.as_ref().is_some_and(|r| r.can_repair)
+                    }),
+            ),
+            visible(
+                "agents-publication-retry",
+                active
+                    && reader
+                    && self.task.as_ref().is_some_and(|t| {
+                        t.publication.as_ref().is_some_and(|p| {
+                            p.status == WorkPublicationStatus::Failed && p.publication_id.is_some()
+                        }) && t.review.as_ref().is_some_and(|r| r.can_retry)
+                    }),
+            ),
+            visible(
                 "agents-result-panel",
                 active && reader && self.result_digest.is_some(),
             ),
@@ -1303,13 +1729,147 @@ impl Agents {
                 "agents-review",
                 active
                     && reader
-                    && (self.can_accept() || self.can_resume() || self.finished_plan()),
+                    && (self.can_accept()
+                        || self.can_resume()
+                        || self.finished_plan()
+                        || self.task.as_ref().is_some_and(|t| t.review.is_some())),
             ),
             visible("agents-list-pagination", active && !compose && !reader),
             visible("agents-usage", active && usage && !compose && !reader),
             visible("agents-task-list", active && work && !compose && !reader),
             visible("agents-unsupported", active && !work && !usage),
         ]);
+        let review = self.task.as_ref().and_then(|task| task.review.as_ref());
+        view.badges.push(BadgeBinding {
+            id: "agents-verification-status",
+            badge: review.map_or_else(
+                || badge("Review unavailable", BadgeTone::Neutral),
+                |r| {
+                    badge(
+                        if r.can_accept {
+                            "Ready for final review"
+                        } else {
+                            review_stage(&r.stage)
+                        },
+                        match r.stage.as_str() {
+                            "passed" | "ready" | "complete" => BadgeTone::Success,
+                            "handoff"
+                            | "escalated"
+                            | "infrastructure_failed"
+                            | "hosted_failed"
+                            | "failed" => BadgeTone::Warning,
+                            _ => BadgeTone::Neutral,
+                        },
+                    )
+                },
+            ),
+        });
+        view.texts.extend([
+            text(
+                "agents-verification-counts",
+                review.map_or_else(String::new, |r| {
+                    format!(
+                        "{} · {} open · {} verified",
+                        if r.round == 0 {
+                            "Initial review".into()
+                        } else {
+                            format!("Round {} of {}", r.round, r.max_rounds)
+                        },
+                        r.open_findings,
+                        r.verified_findings
+                    )
+                }),
+            ),
+            text(
+                "agents-verification-check",
+                review.map_or_else(String::new, |r| {
+                    let status = r
+                        .latest_check_status
+                        .as_deref()
+                        .map(review_stage)
+                        .unwrap_or("Not reported");
+                    match r.toolchain.as_deref() {
+                        Some(toolchain) => format!("Latest check · {status} · {toolchain}"),
+                        None => format!("Latest check · {status}"),
+                    }
+                }),
+            ),
+            text(
+                "agents-verification-handoff",
+                review
+                    .and_then(|r| r.handoff_reason.as_deref())
+                    .unwrap_or(""),
+            ),
+            text(
+                "agents-verification-source",
+                review.map_or_else(String::new, |r| {
+                    r.candidate_commit.as_deref().map_or_else(
+                        || "Candidate not recorded yet".into(),
+                        |head| format!("Candidate · {head}"),
+                    )
+                }),
+            ),
+            text(
+                "agents-verification-policy",
+                review.map_or("", |r| {
+                    if r.auto_repair {
+                        "Automatic repairs authorized within the task's bounded policy."
+                    } else {
+                        "Each repair requires an explicit owner decision."
+                    }
+                }),
+            ),
+        ]);
+        view.transcripts.push(TranscriptBinding {
+            id: "agents-verification-findings",
+            conversation: 0,
+            assistant_label: Some("Review"),
+            messages: review.map_or_else(Vec::new, |r| {
+                r.findings
+                    .iter()
+                    .map(|finding| TranscriptMessage {
+                        role: ChatRole::Assistant,
+                        content: format!(
+                            "{} · {}\n{}{}{}",
+                            finding.finding_id,
+                            if finding.status == WorkFindingStatus::Verified {
+                                "Verified"
+                            } else {
+                                "Open"
+                            },
+                            {
+                                let mut details = vec![finding.summary.clone()];
+                                for (label, value) in [
+                                    ("Check", &finding.check_id),
+                                    ("Path", &finding.path),
+                                    ("Diagnostic", &finding.diagnostic_code),
+                                    ("Reproduce", &finding.reproduction),
+                                    ("Evidence", &finding.evidence_digest),
+                                ] {
+                                    if !value.is_empty() {
+                                        details.push(format!("{label}: {value}"));
+                                    }
+                                }
+                                details.join("\n")
+                            },
+                            if finding.expected.is_empty() {
+                                String::new()
+                            } else {
+                                format!("\nExpected: {}", finding.expected)
+                            },
+                            if finding.actual.is_empty() {
+                                String::new()
+                            } else {
+                                format!("\nObserved: {}", finding.actual)
+                            }
+                        ),
+                        rendered_html: None,
+                        notice: None,
+                        header: None,
+                    })
+                    .collect()
+            }),
+        });
         view.texts.extend([
             text("agents-status", &self.status),
             text("agents-usage-status", &self.usage_status),
@@ -1520,6 +2080,125 @@ impl Agents {
                 disabled: !enabled || pending || !self.can_decide_plan(decision),
                 pressed: None,
                 action: self.plan_action(decision),
+            });
+        }
+        for (id, decision) in [
+            ("agents-review-approve", WorkReviewDecision::Approve),
+            ("agents-review-repair", WorkReviewDecision::Repair),
+            ("agents-review-escalate", WorkReviewDecision::Escalate),
+            (
+                "agents-review-retry",
+                WorkReviewDecision::RetryInfrastructure,
+            ),
+        ] {
+            view.buttons.push(ButtonBinding {
+                id,
+                disabled: !enabled || pending || !self.can_decide_review(decision),
+                pressed: None,
+                action: self.review_action(decision),
+            });
+        }
+        view.buttons.push(ButtonBinding {
+            id: "agents-completed-repair",
+            disabled: !enabled || pending || !self.can_start_repair(),
+            pressed: None,
+            action: self.task.as_ref().and_then(|task| {
+                Some(RowAction::RepairAgentTask {
+                    task_id: task.task_id.clone(),
+                    expected_revision: task.revision,
+                    candidate_commit: task.review.as_ref()?.candidate_commit.clone()?,
+                })
+            }),
+        });
+        view.buttons.push(ButtonBinding {
+            id: "agents-publication-retry",
+            disabled: !enabled || pending || !self.can_retry_publication(),
+            pressed: None,
+            action: self.task.as_ref().and_then(|task| {
+                Some(RowAction::RetryAgentPublication {
+                    task_id: task.task_id.clone(),
+                    expected_revision: task.revision,
+                    publication_id: task.publication.as_ref()?.publication_id.clone()?,
+                    candidate_commit: task.review.as_ref()?.candidate_commit.clone()?,
+                })
+            }),
+        });
+        for (id, allowed) in [
+            (
+                "agents-auto-repair",
+                compose && self.mode == Some(WorkMode::Implement),
+            ),
+            ("agents-plan-auto-repair", reader && self.finished_plan()),
+        ] {
+            let task = (id == "agents-plan-auto-repair")
+                .then_some(self.task.as_ref())
+                .flatten();
+            view.checks.push(CheckboxBinding {
+                id,
+                visible: true,
+                label: None,
+                checked: self.auto_repair,
+                disabled: !enabled || pending || !allowed,
+                action: Some(FilterAction::SetAgentAutoRepair {
+                    task_id: task.map(|t| t.task_id.clone()),
+                    expected_revision: task.map(|t| t.revision),
+                }),
+            });
+        }
+        for (index, id) in AGENT_FINDING_CHECKBOX_IDS.iter().enumerate() {
+            let finding = review.and_then(|r| {
+                r.findings
+                    .iter()
+                    .filter(|f| f.status == WorkFindingStatus::Open)
+                    .nth(index)
+            });
+            let allowed = reader
+                && review.is_some_and(|r| {
+                    r.stage == "awaiting_decision"
+                        && r.latest_check_status.as_deref() == Some("passed")
+                        && r.candidate_commit.is_some()
+                });
+            view.checks.push(CheckboxBinding {
+                id,
+                visible: allowed && finding.is_some(),
+                checked: finding.is_some_and(|f| self.verified_finding_ids.contains(&f.finding_id)),
+                disabled: !enabled || pending || !allowed,
+                label: finding.map(|f| format!("I independently verified {}", f.finding_id)),
+                action: self
+                    .task
+                    .as_ref()
+                    .zip(review)
+                    .zip(finding)
+                    .and_then(|((t, r), f)| {
+                        Some(FilterAction::SetAgentFindingVerified {
+                            task_id: t.task_id.clone(),
+                            expected_revision: t.revision,
+                            review_id: r.review_id.clone()?,
+                            candidate_commit: r.candidate_commit.clone()?,
+                            finding_id: f.finding_id.clone(),
+                        })
+                    }),
+            });
+        }
+        for (id, linked) in [
+            (
+                "agents-parent-task",
+                review.and_then(|r| r.parent_task_id.as_ref()),
+            ),
+            (
+                "agents-repair-task",
+                review.and_then(|r| r.repair_task_id.as_ref()),
+            ),
+        ] {
+            view.visibility
+                .push(visible(id, reader && linked.is_some()));
+            view.buttons.push(ButtonBinding {
+                id,
+                disabled: !enabled || pending || linked.is_none(),
+                pressed: None,
+                action: linked.map(|task_id| RowAction::OpenAgentTask {
+                    task_id: task_id.clone(),
+                }),
             });
         }
         view.inputs.extend([
@@ -1753,6 +2432,29 @@ fn mode_value(mode: WorkMode) -> &'static str {
         WorkMode::Implement => "implement",
     }
 }
+fn review_stage(stage: &str) -> &str {
+    match stage {
+        "waiting_for_result" => "Waiting for agent result",
+        "queued" | "pending" => "Review queued",
+        "checking" | "running" | "verifying" | "verification_pending" => "Verifying candidate",
+        "repair_queued" | "repair" => "Repair queued",
+        "retry_infrastructure" => "Verification retry queued",
+        "repairing" => "Agent repairing",
+        "awaiting_decision" => "Awaiting independent review",
+        "hosted_pending" | "waiting_hosted" => "Hosted checks pending",
+        "hosted_failed" => "Hosted checks failed",
+        "approved" => "Local review approved",
+        "passed" | "ready" | "complete" => "Passed",
+        "failed" => "Failed",
+        "handoff" | "escalated" => "Coordinator handoff",
+        "infrastructure_failed" => "Verification infrastructure needs attention",
+        "unavailable" => "Unavailable",
+        "needs_reconcile" => "Reconciliation required",
+        "revise_plan" => "Plan revision required",
+        "cancelled" => "Cancelled",
+        _ => stage,
+    }
+}
 fn draft_text(value: &str, max: usize) -> bool {
     value.len() <= max
         && !value
@@ -1779,7 +2481,10 @@ fn rekey(mut request: WorkRequest, id: String) -> WorkRequest {
         | WorkRequest::WorkResult { request_id, .. }
         | WorkRequest::WorkAccept { request_id, .. }
         | WorkRequest::WorkResume { request_id, .. }
-        | WorkRequest::WorkPlanDecide { request_id, .. } => *request_id = id,
+        | WorkRequest::WorkPlanDecide { request_id, .. }
+        | WorkRequest::WorkReviewDecide { request_id, .. }
+        | WorkRequest::WorkRepair { request_id, .. }
+        | WorkRequest::WorkPublicationRetry { request_id, .. } => *request_id = id,
     };
     request
 }
