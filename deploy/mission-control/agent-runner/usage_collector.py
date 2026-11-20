@@ -220,11 +220,14 @@ def create_worker_usage_collector(config, store):
     if os.geteuid() not in (0, account.uid):
         raise ValueError("Usage collection requires the configured signed-in account")
     factories = []
-    for profile in config.profiles.values():
+    selected_profiles = [(profile, config.binaries[profile.backend]) for profile in config.profiles.values()]
+    selected_profiles.extend((profile, profile.binary)
+                             for profile in getattr(config, "usage_only_profiles", {}).values())
+    for profile, binary in selected_profiles:
         process = None
         if profile.backend in {"codex", "muse"}:
             process = MetadataProcessConfig(
-                binary=config.binaries[profile.backend], home=account.home,
+                binary=binary, home=account.home,
                 code_home=account.home / ".codex" if profile.backend == "codex" else None,
                 run_uid=account.uid if os.geteuid() == 0 else None,
                 run_gid=account.gid if os.geteuid() == 0 else None,

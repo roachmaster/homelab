@@ -142,6 +142,36 @@ class MuseProviderTest(unittest.TestCase):
             db.begin_usage_poll.assert_not_called()
 
 
+    def test_usage_only_profile_is_visible_without_execution_registration_or_polling(self):
+        with TemporaryDirectory(prefix="forge-muse-usage-only-") as directory:
+            root = Path(directory)
+            key = root / "hmac"
+            key.write_bytes(b"x" * 32)
+            key.chmod(0o600)
+            profile = SimpleNamespace(alias="muse-primary", backend="muse", model="muse-model",
+                                      binary=root / "pinned-muse-metadata-only")
+            cfg = SimpleNamespace(
+                usage=SimpleNamespace(hmac_key_file=key, interval_seconds=60),
+                account=SimpleNamespace(uid=os.geteuid() or 1000, gid=os.getegid() or 1000, home=root),
+                profiles={"agy": SimpleNamespace(alias="agy", backend="antigravity", model="agy-model")},
+                binaries={"antigravity": root / "not-started-agy"},
+                usage_only_profiles={"muse-primary": profile},
+            )
+            db = store()
+            with patch("subprocess.Popen", side_effect=AssertionError("native process")):
+                collector = create_worker_usage_collector(cfg, db)
+                self.assertEqual(set(collector._providers), {"agy", "muse-primary"})
+                self.assertTrue(collector.run_once())  # AGY's non-native unsupported snapshot.
+                for _ in range(3):
+                    self.assertFalse(collector.run_once())
+            muse = collector._providers["muse-primary"]
+            self.assertEqual(muse.config.process.binary, profile.binary)
+            self.assertTrue(muse.manual_refresh_only)
+            self.assertEqual(set(cfg.profiles), {"agy"})
+            self.assertEqual(set(cfg.binaries), {"antigravity"})
+            db.begin_usage_poll.assert_called_once_with(profile_alias="agy")
+
+
 class MuseProcessTest(unittest.TestCase):
     def setUp(self):
         self.temporary = TemporaryDirectory(prefix="forge-fake-muse-")
