@@ -309,3 +309,56 @@ class FeedbackStoreTest(unittest.TestCase):
                 restricted=WorkServiceFactory(config,lambda:self.cluster.connect('forge_agent')).create()
                 result=restricted.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),decision,'removed-profile','Owner decision without a new CLI.','nonexecution-'+decision))
                 self.assertEqual(result['task_id'],lease.task_id)
+
+    def test_completed_parent_rejects_all_new_review_decisions_without_history_or_recipe_changes(self):
+        from work_api import WorkRepair
+        lease,receipt=self.task();rid=self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+        self.db.review_finish(job,self.outcome())
+        # A completed historical parent can still have a later review record;
+        # generic review decisions must never reopen its accepted work.
+        self.cluster.admin_exec("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1")
+        detail=self.get(lease)
+        def snapshot():
+            with closing(self.cluster.connect('postgres')) as c,c.cursor() as cur:
+                cur.execute('SELECT to_jsonb(t) FROM forge_agent.coding_tasks t WHERE id=%s',(lease.task_id,));task=cur.fetchone()[0]
+                history={}
+                for table in ('coding_attempts','coding_events','coding_control_receipts','coding_feedback','coding_reviews','coding_publications'):
+                    cur.execute('SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY to_jsonb(x)::text),\'[]\'::jsonb) FROM forge_agent.'+table+' x WHERE task_id=%s',(lease.task_id,))
+                    history[table]=cur.fetchone()[0]
+                return task,history
+        before=snapshot()
+        finding={'finding_id':'completed-edge','category':'source','summary':'Repair the exact completed candidate.'}
+        for decision in ('approve','repair','escalate','retry_infrastructure','cancel'):
+            with self.subTest(decision=decision),self.assertRaises(Rejected) as denied:
+                self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),decision,
+                    'agy-v2','Do not mutate completed work.','completed-'+decision,findings=(finding,) if decision=='repair' else ()))
+            self.assertEqual((denied.exception.status,denied.exception.code),(409,'not_reviewable'))
+            self.assertEqual(snapshot(),before)
+        repaired=self.service.repair(WorkRepair('homelab',UUID(lease.task_id),detail['revision'],'d'*40,'agy-v2',
+            'Create a separately owned correction.',(finding,),'dedicated-completed-repair'))
+        self.assertNotEqual(repaired['repair_task_id'],lease.task_id)
+        after,_=snapshot()
+        for field in ('status','accepted_at','agent_profile','pinned_recipe','recipe_digest','base_revision','latest_attempt_id','prompt','acceptance_criteria','created_at'):
+            self.assertEqual(after[field],before[0][field],field)
+        with closing(self.cluster.connect('postgres')) as c,c.cursor() as cur:
+            cur.execute('SELECT parent_task_id,base_revision,agent_profile,status FROM forge_agent.coding_tasks WHERE id=%s',(repaired['repair_task_id'],))
+            self.assertEqual(cur.fetchone(),(UUID(lease.task_id),'d'*40,'agy-v2','queued'))
+
+    def test_matching_old_review_decision_receipt_replays_after_legitimate_completion(self):
+        lease,receipt=self.task();rid=self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer');self.db.review_finish(job,self.outcome())
+        detail=self.get(lease)
+        decision=WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),'approve','codex-v2','Independently reviewed.','replay-after-completion')
+        recorded=self.service.review_decide(decision)
+        publication=self.db.publication_claim('publisher')
+        self.db.publication_finish(publication,'publishing','Passed',branch='forge/completed-replay',commit_sha='d'*40)
+        self.db.publication_finish(publication,'published','PR',branch='forge/completed-replay',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/4')
+        checks=[{'name':name,'status':'success','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')]
+        self.db.record_hosted_checks(publication['publication_id'],'d'*40,checks)
+        detail=self.get(lease);self.service.accept(WorkAccept('homelab',UUID(lease.task_id),detail['revision'],'complete-before-replay'))
+        completed=self.get(lease)
+        with closing(self.cluster.connect('postgres')) as c,c.cursor() as cur:
+            cur.execute('SELECT count(*) FROM forge_agent.coding_events WHERE task_id=%s',(lease.task_id,));events=cur.fetchone()[0]
+        self.assertEqual(self.service.review_decide(decision),recorded)
+        self.assertEqual(self.get(lease),completed)
+        with closing(self.cluster.connect('postgres')) as c,c.cursor() as cur:
+            cur.execute('SELECT count(*) FROM forge_agent.coding_events WHERE task_id=%s',(lease.task_id,));self.assertEqual(cur.fetchone()[0],events)
