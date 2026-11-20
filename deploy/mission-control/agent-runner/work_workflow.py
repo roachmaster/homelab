@@ -108,6 +108,9 @@ class WorkflowStore:
         cursor.execute("SELECT forge_agent.coding_workflow_role_granted(%s,%s,%s) AS allowed",(workflow['workflow_id'],profile,mode))
         if not cursor.fetchone()['allowed']:raise Rejected(403,'denied')
 
+    def _phase(self,cursor,w,phase):
+        cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND enabled AND phase NOT IN('completed','cancelled','escalated') AND phase IS DISTINCT FROM %s",(phase,w['workflow_id'],phase))
+
     def _escalate(self,cursor,w,reason):
         reason=reason[:2048]
         cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=false,phase='escalated',escalation_reason=%s,updated_at=clock_timestamp() WHERE workflow_id=%s AND phase NOT IN('completed','cancelled')",(reason,w['workflow_id']))
@@ -127,6 +130,12 @@ class WorkflowStore:
                     self._escalate(cursor,w,'Agent stopped: '+t['status']);break
                 if t['status']=='cancelled':
                     self._escalate(cursor,w,'Workflow task was cancelled.');break
+                if t['status'] in {'queued','running'}:
+                    if t['workflow_review_id'] is not None:
+                        cursor.execute("SELECT target_kind FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s",(t['workflow_review_id'],));peer=cursor.fetchone()
+                        if peer:self._phase(cursor,w,'code_review' if peer['target_kind']=='code' else 'plan_review')
+                    elif t['mode']=='plan':self._phase(cursor,w,'plan_revision' if w['plan_revisions'] else 'plan')
+                    elif t['mode']=='implement':self._phase(cursor,w,'repair' if t['feedback_id'] else 'implement')
                 if t['status']!='awaiting_review' or t['attempt_phase']!='stopped' or t['reservation_active'] or t['lease_expires_at'] is not None or not t['published_at'] or not t['result_sha256']:continue
                 cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s) AS ready",(self.store.owner,w['project_alias'],t['id'],t['latest_attempt_id']))
                 if not cursor.fetchone()['ready']:continue
@@ -140,6 +149,17 @@ class WorkflowStore:
                     if q and q['status']=='awaiting_review' and q['verification'].get('checks_passed') is True and q['verification'].get('cleanup_confirmed') is True:
                         self._queue_review(cursor,w,t,q)
                     elif q and q['status'] in {'handoff','needs_reconcile','revise_plan'}:self._escalate(cursor,w,q['reason'] or q['status'])
+                    elif q and q['status'] in {'pending','checking','retry_infrastructure'}:self._phase(cursor,w,'checks')
+                    elif q and q['status']=='repair':self._phase(cursor,w,'repair')
+                    elif q and q['status']=='approved':
+                        cursor.execute("SELECT publication_id,status FROM forge_agent.coding_publications WHERE review_id=%s ORDER BY created_at DESC LIMIT 1",(q['review_id'],));publication=cursor.fetchone()
+                        if publication and publication['status']=='published':
+                            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE source_publication_id=%s AND kind='merge' AND status IN('pending','leased')) AS active",(publication['publication_id'],))
+                            self._phase(cursor,w,'merging' if cursor.fetchone()['active'] else 'hosted')
+                        elif publication and publication['status']=='failed':self._escalate(cursor,w,'Trusted publication stopped; retained source and remote metadata require reconciliation.')
+                        else:self._phase(cursor,w,'publishing')
+            cursor.execute("SELECT enabled,phase FROM forge_agent.coding_workflows WHERE workflow_id=%s",(w['workflow_id'],));active=cursor.fetchone()
+            if not active or not active['enabled'] or active['phase'] in {'completed','cancelled','escalated'}:continue
             cursor.execute("""SELECT p.*,q.candidate_commit,q.gate_manifest_sha256 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)
               JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.owner_decision->>'closed_by'='peer_reviewer'
               AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha ORDER BY h.observed_at DESC,h.observation_id DESC LIMIT 1) IS TRUE ORDER BY p.created_at DESC""",(w['workflow_id'],))

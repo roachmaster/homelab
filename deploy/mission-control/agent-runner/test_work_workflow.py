@@ -102,7 +102,7 @@ class AutonomousWorkflowTest(unittest.TestCase):
   self.assertEqual(child.parent_task_id,author.task_id);self.assertEqual(_lease(child)['parent_task_id'],author.task_id)
  def checked_implementation(self,*,linked=False):
   _,admitted=self.submit();self.finish_plan_round();author=self.claim('agy-v2');rec=self.publish(author,'Implemented the reviewed Plan with typed factories.')
-  self.db.queue_review(author,rec);job=self.db.review_claim('checks')
+  self.db.queue_review(author,rec);self.coordinator.run_once();self.assertEqual(self.get(author.task_id)['workflow']['phase'],'checks');job=self.db.review_claim('checks')
   result={'disposition':'awaiting_review','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,'summary':'All local checks passed.','cleanup_confirmed':True,
       'verification':{'checks_passed':True,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':linked,'cleanup_confirmed':True,'integration_base':'a'*40,'toolchain':'fixture','checks':[{'check_id':'make-ci','status':'passed','head_sha':'d'*40}]}}
   self.db.review_finish(job,result);self.coordinator.run_once();critic=self.claim('codex-v2');self.assertIsNotNone(critic)
@@ -115,7 +115,7 @@ class AutonomousWorkflowTest(unittest.TestCase):
   pub=self.db.publication_claim('publisher');self.assertIsNotNone(pub)
   self.db.publication_finish(pub,'publishing','Checked',branch='forge/test',commit_sha='d'*40)
   self.db.publication_finish(pub,'published','Draft PR',branch='forge/test',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/1')
-  self.coordinator.run_once();self.assertIsNone(self.db.merge_claim('merger'))
+  self.coordinator.run_once();self.assertEqual(self.get(author.task_id)['workflow']['phase'],'hosted');self.assertIsNone(self.db.merge_claim('merger'))
   self.db.record_hosted_checks(pub['publication_id'],'d'*40,[{'name':name,'status':'success','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')])
   self.coordinator.run_once();job=self.db.merge_claim('merger');self.assertIsNotNone(job);self.assertEqual(job['policy_digest'],self.config.project_workflows['homelab'].snapshot(self.config.catalog(),self.config.repair_policy)['policy_digest'])
   self.cluster.admin_exec("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,source_publication_id) SELECT workflow_id,owner_id,project_alias,kind,'concurrent-merge-fixture',source_publication_id FROM forge_agent.coding_workflow_actions WHERE action_id='%s'"%job['merge_id'],owner=False)
@@ -125,7 +125,17 @@ class AutonomousWorkflowTest(unittest.TestCase):
   self.assertEqual(self.db.merge_intent(job,intent),intent);self.assertEqual(self.db.merge_intent(job,intent),intent)
   with self.assertRaises(ValueError):self.db.merge_finish(job,'invalid',{})
   outcome={'candidate_commit':'d'*40,'merge_commit':'2'*40,'pr_url':job['pr_url'],'summary':'Merged exact reviewed tree.'}
-  receipt=self.db.merge_finish(job,'merged',outcome);self.assertEqual(self.db.merge_finish(job,'merged',outcome),receipt)
+  import threading,time
+  from work_store import ADVISORY_LOCK_SALT
+  blocker=self.cluster.connect('postgres');blocker.autocommit=False
+  with blocker.cursor() as cursor:cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",('mission-control\nhomelab',ADVISORY_LOCK_SALT))
+  results=[];errors=[]
+  def acknowledge():
+   try:results.append(self.db.merge_finish(job,'merged',outcome))
+   except Exception as error:errors.append(error)
+  thread=threading.Thread(target=acknowledge);thread.start();time.sleep(.1);self.assertTrue(thread.is_alive())
+  blocker.rollback();blocker.close();thread.join(5);self.assertFalse(thread.is_alive());self.assertFalse(errors)
+  receipt=results[0];self.assertEqual(self.db.merge_finish(job,'merged',outcome),receipt)
   self.assertEqual(self.get(admitted['task_id'])['workflow']['phase'],'completed');self.assertEqual(self.get(admitted['task_id'])['status'],'completed')
   self.assertEqual(self.db.project_revisions(),{'homelab':'2'*40})
   catalog=self.service.catalog();self.assertEqual(next(p for p in catalog['projects'] if p['alias']=='homelab')['base_revision'],'2'*40)

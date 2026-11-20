@@ -391,10 +391,11 @@ BEGIN
 END;$fn$;
 
 CREATE FUNCTION forge_coding_reconciler_api.merge_finish(p_id uuid,p_token uuid,p_status text,p_receipt jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
-DECLARE a forge_agent.coding_workflow_actions%ROWTYPE;p forge_agent.coding_publications%ROWTYPE;task uuid;root uuid;
+DECLARE a forge_agent.coding_workflow_actions%ROWTYPE;p forge_agent.coding_publications%ROWTYPE;task uuid;root uuid;project text;
 BEGIN
- SELECT x.task_id INTO task FROM forge_agent.coding_publications x JOIN forge_agent.coding_workflow_actions y ON y.source_publication_id=x.publication_id WHERE y.action_id=p_id AND y.owner_id=current_setting('forge.coding_owner',true);
+ SELECT x.task_id,y.project_alias INTO task,project FROM forge_agent.coding_publications x JOIN forge_agent.coding_workflow_actions y ON y.source_publication_id=x.publication_id WHERE y.action_id=p_id AND y.owner_id=current_setting('forge.coding_owner',true);
  IF task IS NULL THEN RAISE EXCEPTION 'Unknown merge' USING ERRCODE='42501';END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(current_setting('forge.coding_owner',true)||E'\n'||project,2026111901));
  SELECT w.root_task_id INTO root FROM forge_agent.coding_workflows w JOIN forge_agent.coding_workflow_actions x USING(workflow_id) WHERE x.action_id=p_id;
  IF root<>task THEN PERFORM 1 FROM forge_agent.coding_tasks WHERE id=root AND owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;END IF;
  PERFORM 1 FROM forge_agent.coding_tasks WHERE id=task AND owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;
