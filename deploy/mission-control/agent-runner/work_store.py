@@ -1314,6 +1314,8 @@ class WorkStore:
         with self._transaction() as cursor:
             task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'review_decide',intent)
             if old:return old
+            if task['status']!='awaiting_review':
+                raise Rejected(409,'not_reviewable')
             cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE",
                            (self._owner,project_alias,task_id,review_id))
             review=cursor.fetchone()
