@@ -359,3 +359,30 @@ snapshot and runs normal preparation and **all** fixed checks; it cannot reuse a
 missing candidate manifest as approval. Retries with an existing candidate retain
 the existing exact-candidate reuse contract. Source merge conflicts, authentication
 failures and unrelated handoffs are not asserted to be successful preparation.
+
+## Source acquisition and delivery readiness
+
+The workspace provider reports trusted lock contention as `WorkspaceBusyError`.
+The verifier waits at most30 seconds for snapshot acquisition on the same review
+lease, checks cancellation throughout, and rechecks its lease before using the
+snapshot. Lease renewals are bounded separately from the short cancellation wait.
+No check, source preparation or model starts while the source is unavailable.
+Failure receipts contain a stage and exception class only, without raw exceptions
+or credentials.
+
+For a stopped legacy review that failed before any candidate or check, one
+`forge-source-readiness-delivery-v1` receipt per workflow may deliver the checks
+after a **newer trusted reconciliation** confirms the exact same attempt, result,
+workspace digest, current revision and approved Plan. The original immutable
+failure receipt must identify the legacy pre-check failure or an explicit
+snapshot `WorkspaceBusyError`; revoked roles, changed source, cancellation and
+competing work remain blocked. The successor preserves the spent infrastructure
+retry count, code/Plan counts, findings and stagnation. It changes neither the
+task revision nor the original failed receipt, and grants no approval or model
+turn. All fixed checks still run normally from the new source-ready receipt.
+
+Both explicit `queue_review` and implicit `review_claim` admission acquire the
+same owner-scoped transaction advisory lock before their SQL functions. This
+serializes the two initial review producers without new table grants or schema.
+Both coding-worker and publication-service facades must receive this update;
+the lock is not a substitute for the existing scoped SQL checks and task leases.
