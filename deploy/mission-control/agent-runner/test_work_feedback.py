@@ -52,7 +52,7 @@ class FeedbackStoreTest(unittest.TestCase):
     def get(self,lease):return self.service.get(WorkGet('homelab',UUID(lease.task_id)))
 
     def test_local_green_cannot_publish_until_independent_owner_approval_or_accept_before_hosted(self):
-        lease,receipt=self.task();review=self.db.queue_review(lease,receipt)
+        lease,receipt=self.task();self.assertTrue(self.get(lease)['review_required']);review=self.db.queue_review(lease,receipt)
         self.assertIsNone(self.db.queue_publication(lease,receipt));self.assertIsNone(self.db.publication_claim('publisher'))
         job=self.db.review_claim('reviewer');self.assertEqual(job['review_id'],review)
         self.db.review_finish(job,self.outcome())
@@ -242,3 +242,70 @@ class FeedbackStoreTest(unittest.TestCase):
         self.assertEqual((result['status'],result['reason']),('handoff','hosted_wait_exhausted'))
         self.assertIsNone(self.db.review_claim('observer'));self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))
         self.assertFalse(self.get(lease)['review']['can_accept'])
+
+    def test_review_finish_checks_expiry_after_task_lock_and_never_locks_review_first(self):
+        import threading,time
+        from work_worker_store import LeaseExpiredError
+        lease,receipt=self.task();self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+        blocker=self.cluster.connect('postgres');observer=self.cluster.connect('postgres');observer.autocommit=True
+        result={};thread=None
+        try:
+            with blocker.cursor() as cur:
+                cur.execute('SELECT id FROM forge_agent.coding_tasks WHERE id=%s FOR UPDATE',(lease.task_id,))
+            with observer.cursor() as cur:
+                cur.execute("UPDATE forge_agent.coding_reviews SET lease_expires_at=clock_timestamp()+interval '.3 seconds' WHERE review_id=%s",(job['review_id'],))
+            def finish():
+                try:result['receipt']=self.db.review_finish(job,self.outcome())
+                except Exception as error:result['error']=error
+            thread=threading.Thread(target=finish,daemon=True);thread.start()
+            deadline=time.monotonic()+3
+            with observer.cursor() as cur:
+                while True:
+                    cur.execute('SELECT pg_stat_clear_snapshot()')
+                    cur.execute("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE 'SELECT forge_coding_reconciler_api.review_finish(%'")
+                    if cur.fetchone()[0]:break
+                    self.assertLess(time.monotonic(),deadline);time.sleep(.01)
+                # Owner API lock order (task->review) must stay available while
+                # finish waits for task. The old review->task order fails NOWAIT.
+                with blocker.cursor() as held:
+                    held.execute('SELECT review_id FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE NOWAIT',(job['review_id'],))
+                while True:
+                    cur.execute('SELECT clock_timestamp()>lease_expires_at FROM forge_agent.coding_reviews WHERE review_id=%s',(job['review_id'],))
+                    if cur.fetchone()[0]:break
+                    self.assertLess(time.monotonic(),deadline);time.sleep(.01)
+            blocker.commit();thread.join(timeout=3)
+            self.assertFalse(thread.is_alive());self.assertIsInstance(result.get('error'),LeaseExpiredError)
+            with observer.cursor() as cur:
+                cur.execute('SELECT status,finish_receipt FROM forge_agent.coding_reviews WHERE review_id=%s',(job['review_id'],))
+                self.assertEqual(cur.fetchone(),('checking',None))
+                cur.execute('SELECT count(*) FROM forge_agent.coding_feedback');self.assertEqual(cur.fetchone()[0],0)
+        finally:
+            blocker.rollback();blocker.close();observer.close()
+            if thread:thread.join(timeout=3)
+
+    def test_current_implement_grant_is_required_only_for_new_repair_not_receipt_replay(self):
+        from types import MappingProxyType
+        lease,receipt=self.task();rid=self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+        finding={'finding_id':'manual-issue','category':'source','summary':'Fix the independently reviewed issue.'}
+        self.db.review_finish(job,self.outcome(findings=[finding]));detail=self.get(lease)
+        command=WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),'repair','codex-v2','Repair this finding.','permission-repair',findings=(finding,))
+        config=make_v2_config(modes=('plan','review'))
+        restricted=WorkServiceFactory(config,lambda:self.cluster.connect('forge_agent')).create()
+        with self.assertRaises(Rejected) as denied:restricted.review_decide(command)
+        self.assertEqual((denied.exception.status,denied.exception.code),(403,'denied'))
+        self.assertEqual(self.get(lease)['status'],'awaiting_review')
+        accepted=self.service.review_decide(command)
+        config=replace(config,profiles=MappingProxyType({'agy-v2':config.profiles['agy-v2']}))
+        removed=WorkServiceFactory(config,lambda:self.cluster.connect('forge_agent')).create()
+        self.assertEqual(removed.review_decide(command),accepted)
+
+    def test_non_execution_owner_decisions_survive_removed_profile(self):
+        from types import MappingProxyType
+        config=make_v2_config(modes=('plan','review'))
+        config=replace(config,profiles=MappingProxyType({'agy-v2':config.profiles['agy-v2']}))
+        for decision in ('approve','cancel','escalate'):
+            with self.subTest(decision=decision):
+                self.setUp();lease,receipt=self.task();rid=self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer');self.db.review_finish(job,self.outcome());detail=self.get(lease)
+                restricted=WorkServiceFactory(config,lambda:self.cluster.connect('forge_agent')).create()
+                result=restricted.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),decision,'removed-profile','Owner decision without a new CLI.','nonexecution-'+decision))
+                self.assertEqual(result['task_id'],lease.task_id)

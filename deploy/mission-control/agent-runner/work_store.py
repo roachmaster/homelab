@@ -471,6 +471,7 @@ class WorkStore:
 
             detail = {
                 **_summary(row),
+                "review_required":row["review_required"],
                 "prompt": row["prompt"],
                 "acceptance_criteria": row["acceptance_criteria"],
                 "attempt": attempt_dto,
@@ -1240,11 +1241,16 @@ class WorkStore:
             verified=set(row['verified_finding_ids'])|set((row['owner_decision'] or {}).get('verified_finding_ids',[]))
             findings=row['findings'];value['findings']=[{**item,'status':'verified' if item['finding_id'] in verified else item.get('status','open')} for item in findings];open_ids={item['finding_id'] for item in findings if item.get('status','open')=='open'}-verified
             stage='waiting_hosted' if row['phase']=='hosted' and row['status'] in {'pending','checking'} else ('awaiting_decision' if row['status']=='awaiting_review' else row['status'])
+            latest_check_status='passed' if row['verification'].get('checks_passed') is True else ('running' if row['status'] in {'pending','checking'} else 'failed')
+            if row['phase']=='hosted':
+                hosted_status=row['verification'].get('hosted_status')
+                latest_check_status='passed' if green else ('running' if row['status'] in {'pending','checking'} or hosted_status=='pending' else 'failed')
+                if row['reason']=='hosted_wait_exhausted':latest_check_status='failed'
             if row['status']=='approved' and not green:
                 stage='waiting_hosted'
             value.update(stage=stage,review_id=str(row['review_id']),feedback_id=str(row['feedback_id']) if row['feedback_id'] else None,
                 round=row['round'],max_rounds=row['max_rounds'],open_findings=len(open_ids),verified_findings=len(verified),
-                latest_check_status='passed' if row['verification'].get('checks_passed') is True else ('running' if row['status']=='checking' else 'failed'),
+                latest_check_status=latest_check_status,
                 toolchain=row['verification'].get('toolchain'),handoff_reason=row['reason'] or None,
                 source_attempt_id=str(row['attempt_id']),candidate_commit=row['candidate_commit'],workspace_digest=row['workspace_digest'],
                 gate_manifest_sha256=row['gate_manifest_sha256'],can_accept=green and task['status']=='awaiting_review',
@@ -1292,7 +1298,7 @@ class WorkStore:
         cursor.execute("SELECT pg_notify(%s,'')",(NOTIFY_CHANNEL,))
 
     def review_decide(self,*,project_alias,task_id,expected_revision,review_id,decision,agent_profile,note,idempotency_key,
-                      findings=(),verified_finding_ids=(),recipe):
+                      findings=(),verified_finding_ids=(),recipe=None,resolve_recipe=None):
         if not isinstance(review_id,UUID) or not isinstance(decision,str) or decision not in {'approve','repair','escalate','retry_infrastructure','cancel'}:
             raise Rejected(400,'invalid_request')
         try:
@@ -1329,6 +1335,9 @@ class WorkStore:
                 cursor.execute("SELECT forge_agent.coding_queue_approved_review(%s)",(review_id,))
                 if next(iter(cursor.fetchone().values())) is None:raise Rejected(409,'not_reviewable')
             elif decision=='repair':
+                if resolve_recipe is not None:recipe=resolve_recipe()
+                if not isinstance(recipe,PinnedRecipe) or recipe.mode!='implement' or recipe.resource_profile!=POLICY_ID or recipe.policy_digest!=POLICY_DIGEST:
+                    raise Rejected(503,'unavailable')
                 ledger={x['finding_id']:x for x in review['findings'] if x.get('status','open')=='open'}
                 ledger.update({x['finding_id']:x for x in findings})
                 if not ledger:raise Rejected(400,'invalid_request')
