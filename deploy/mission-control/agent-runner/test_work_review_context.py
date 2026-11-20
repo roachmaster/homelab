@@ -45,6 +45,47 @@ def fixture(root):
 
 
 class ReviewContextTest(unittest.TestCase):
+    def test_candidate_tree_feedback_survives_no_edit_native_reconciliation(self):
+        with TemporaryDirectory(prefix="forge-candidate-recovery-") as root:
+            _config, value, workspace, envelope = fixture(root)
+            (workspace.path / ".git").write_text("gitdir: /approved/worktrees/child\n")
+            value.update(parent_task_id=str(uuid4()), repair_source_review_id=str(uuid4()),
+                         repair_candidate_commit=value["base_revision"], resume_attempt_id=str(uuid4()),
+                         resume_workspace_digest=workspace.digest())
+            envelope["feedback"].update(workspace_digest_kind="candidate_tree", candidate_commit=value["base_revision"],
+                                        workspace_digest=workspace.source_digest())
+            def bind_packet():
+                envelope["feedback_json"] = json.dumps(envelope["feedback"])
+                value["feedback_sha256"] = hashlib.sha256(envelope["feedback_json"].encode()).hexdigest()
+            bind_packet()
+            self.assertNotEqual(value["resume_attempt_id"], envelope["feedback"]["parent_attempt_id"])
+            self.assertIsNotNone(validate_context(value, workspace, envelope))
+            envelope["feedback"]["workspace_digest_kind"] = "native_receipt"
+            bind_packet()
+            with self.assertRaises(ReviewContextError):
+                validate_context(value, workspace, envelope)
+            envelope["feedback"]["workspace_digest_kind"] = "candidate_tree"
+            bind_packet()
+            (workspace.path / "source.txt").write_text("partial unrelated source edit\n")
+            with self.assertRaises(ReviewContextError):
+                validate_context(value, workspace, envelope)
+
+    def test_linked_clone_input_then_native_child_receipt_use_distinct_comparisons(self):
+        with TemporaryDirectory(prefix="forge-feedback-digest-") as root:
+            _config, value, workspace, envelope = fixture(root)
+            (workspace.path / ".git").write_text("gitdir: /approved/parent/worktrees/child\n")
+            value.update(parent_task_id=str(uuid4()), repair_source_review_id=str(uuid4()),
+                         repair_candidate_commit=value["base_revision"])
+            for candidate, expected in ((value["base_revision"], workspace.source_digest()),
+                                        ("d" * 40, workspace.digest())):
+                feedback = envelope["feedback"]
+                feedback.update(candidate_commit=candidate, workspace_digest=expected)
+                value["resume_workspace_digest"] = expected
+                envelope["feedback_json"] = json.dumps(feedback)
+                value["feedback_sha256"] = hashlib.sha256(envelope["feedback_json"].encode()).hexdigest()
+                self.assertIsNotNone(validate_context(value, workspace, envelope))
+            self.assertNotEqual(workspace.digest(), workspace.source_digest())
+
     def test_exact_sql_json_bytes_are_hash_bound_and_mounted_readonly(self):
         with TemporaryDirectory(prefix="forge-feedback-") as root:
             config, value, workspace, envelope = fixture(root)

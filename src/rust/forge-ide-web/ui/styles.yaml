@@ -3195,3 +3195,15 @@
     - selector: ".fg-metric-card,.fg-metric-select,.fg-metric-refresh,.fg-metric-details>summary,.fg-metric-details>summary::after,#agents .fg-row-select"
       declarations:
         - ["transition", "none"]
+
+- rules:
+    - selector: "#agents-workflow"
+      declarations:
+        - ["padding", "12px 0"]
+        - ["border-bottom", "1px solid var(--border)"]
+    - selector: "#agents-workflow-roles,#agents-assignment-roles"
+      declarations:
+        - ["margin", "6px 0"]
+    - selector: "#agents-workflow-escalation:empty"
+      declarations:
+        - ["display", "none"]

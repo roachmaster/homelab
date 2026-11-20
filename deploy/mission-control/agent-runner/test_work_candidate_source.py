@@ -20,7 +20,11 @@ class CandidateSourceTest(unittest.TestCase):
             previous_main = git(canonical, "rev-parse", "HEAD")
             child = lease(config.worker, mode="implement")
             child.update(base_revision=head, feedback_id=str(uuid4()), parent_task_id=parent["task_id"],
-                         repair_source_review_id=parent["review_id"], repair_candidate_commit=head)
+                         feedback_sha256="a" * 64, repair_source_review_id=parent["review_id"], repair_candidate_commit=head)
+            private = config.state_root / parent["review_id"] / "repository"
+            from work_executor import WorkspaceLease
+            clone = WorkspaceLease(private, canonical, private / ".git", parent["task_id"], head)
+            child.update(resume_workspace_digest=clone.digest(), resume_attempt_id=parent["attempt_id"])
             workspaces = WorkspaceProvider(config.worker,
                 candidate_source_provider=ReviewCandidateSourceProvider(config.worker, _git))
             workspaces.prepare()
@@ -29,6 +33,12 @@ class CandidateSourceTest(unittest.TestCase):
                 self.assertEqual((workspace.path / "new.py").read_text(), "new source\n")
                 self.assertNotEqual(workspace.path, accepted)
                 self.assertFalse((workspace.path / "deleted.py").exists())
+                self.assertEqual(workspace.source_digest(), clone.digest())
+                legacy_receipt = workspace.digest()
+                self.assertNotEqual(legacy_receipt, workspace.source_digest())
+            resumed = {**child, "resume_workspace_digest": legacy_receipt, "resume_attempt_id": child["attempt_id"]}
+            with workspaces.acquire(resumed) as workspace:
+                self.assertEqual(workspace.digest(), legacy_receipt)
             self.assertEqual(git(canonical, "rev-parse", "HEAD"), previous_main)
             self.assertEqual(git(canonical, "status", "--porcelain"), b"")
             with parents.inspect(parent) as workspace:

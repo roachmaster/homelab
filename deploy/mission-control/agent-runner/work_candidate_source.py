@@ -11,6 +11,21 @@ class CandidateSourceError(ValueError):
     pass
 
 
+def linked_candidate_input(lease, candidate=None):
+    """Only the admitted initial clone input uses a cross-workspace digest."""
+    try:
+        for name in ("parent_task_id", "repair_source_review_id", "feedback_id"):
+            value = lease.get(name)
+            if not isinstance(value, str) or str(UUID(value)) != value:
+                return False
+        digest, head = lease.get("feedback_sha256"), lease.get("repair_candidate_commit")
+        return (isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) is not None
+                and isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) is not None
+                and head == lease.get("base_revision") and (candidate is None or candidate == head))
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 class ReviewCandidateSourceProvider:
     """Bootstrap supplies the fixed Git reader; source paths never come from agents."""
     def __init__(self, config, git):

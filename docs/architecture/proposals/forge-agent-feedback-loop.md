@@ -1,5 +1,11 @@
 # Agent review and repair loop
 
+For configured autonomous projects, the
+[agent author/reviewer workflow](forge-autonomous-agent-workflow.md) delegates
+routine approvals to an independent agent and proceeds through checked automatic
+merge. The owner-operated path below describes manual and legacy tasks; it must
+not be presented as the normal interaction for an autonomous task.
+
 **Status: implemented in source on 20 November 2026; final integration validation
 and deployment are pending.** Migration15, policy `forge-coding-v5`, the review
 worker/DAO flow and browser ABI8 must be rolled out together after the release

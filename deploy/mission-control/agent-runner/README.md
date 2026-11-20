@@ -408,6 +408,15 @@ trusted `FORGE_PUBLICATION_CONFIG`: `worker_config`, approved `repositories`,
 `github_config_dir`, optional fixed `checks` and `required_hosted_checks`. Install
 the verified immutable release and configure the matching trusted providers only
 after schema verification and final CI/backend/28-group actual-browser gates.
+When delegated autonomous merge is enabled, the trusted publisher also needs
+`ReadWritePaths=/home/lrocha/repos/homelab/.git` to import the verified merge
+objects and advance `refs/forge/verified-main` before recording completion.
+The matching service template includes this grant. Add only the canonical
+`.git` administration directory for each additional configured autonomous
+project; do not grant writes to its source tree or worktrees. The native review
+scope continues to mount source and Git metadata read-only. Existing custom
+publication units need the same narrow grant during the matching rollout.
+
 Focused implementation tests are not a deployment or a real-agent repair pilot.
 See [the complete flow and rollout status](../../../docs/architecture/proposals/forge-agent-feedback-loop.md)
 and [the implementation checkpoint](../../../docs/design/implementation-status.md#agent-feedback-loop-source-checkpoint--20-november-2026).

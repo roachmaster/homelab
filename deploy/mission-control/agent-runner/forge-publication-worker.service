@@ -19,6 +19,10 @@ ProtectSystem=strict
 ProtectHome=read-only
 ProtectControlGroups=true
 ReadWritePaths=/mnt/data/homelab-coding-worker
+# Trusted merge completion imports verified objects and advances only its private
+# refs/forge/verified-main source pointer. Extend this narrow Git-admin grant for
+# each configured autonomous project; canonical source/worktrees stay read-only.
+ReadWritePaths=/home/lrocha/repos/homelab/.git
 
 [Install]
 WantedBy=multi-user.target

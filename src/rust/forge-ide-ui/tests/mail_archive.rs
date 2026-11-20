@@ -64,6 +64,7 @@ fn agent(retry: bool) -> AgentsNavigationSnapshot {
             prompt,
             acceptance_criteria: criteria,
             auto_repair: false,
+            workflow_policy_digest: None,
             idempotency_key: "same-saved-key".into(),
         }),
     }
@@ -255,6 +256,7 @@ fn retired_mail_replies_cannot_steal_a_pending_agents_request_or_replay_mutation
                 alias: "workspace".into(),
                 label: "Workspace".into(),
                 base_revision: Some("a".repeat(40)),
+                workflow: None,
             }],
             profiles: vec![WorkProfile {
                 alias: "agy-primary".into(),

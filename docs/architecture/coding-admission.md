@@ -1,5 +1,11 @@
 # Coding-agent workflow
 
+Configured autonomous projects use the
+[cross-agent author/reviewer coordinator](proposals/forge-autonomous-agent-workflow.md).
+One assignment automatically advances through planning, independent agent review,
+bounded revision, implementation, checks and authorized merge. The manual decision
+operations documented below remain available for manual and legacy tasks.
+
 **Source checkpoint: 20 November 2026.** The repository now implements durable
 coding work, native CLI execution, result paging, explicit review/resume, provider
 usage collection and the generated Agents view. Work and Usage remain independent,

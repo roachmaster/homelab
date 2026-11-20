@@ -29,6 +29,8 @@ class PublicationConfig:
     commit_email: str = "forge@thedevex.com"
     source_path: Path | None = None
     required_hosted_checks: tuple = DEFAULT_REQUIRED_HOSTED_CHECKS
+    merge_enabled: bool = False
+    merge_method: str = "merge"
 
     @property
     def state_root(self):
@@ -39,7 +41,8 @@ def parse_config(raw, worker, *, source_path=None):
     if not isinstance(worker, WorkerConfig) or not isinstance(raw, dict):
         raise ValueError("Publisher requires typed worker configuration")
     if not {"worker_config", "repositories", "github_config_dir"} <= raw.keys() <= {
-        "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks"
+        "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks",
+        "merge_enabled", "merge_method"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -70,6 +73,13 @@ def parse_config(raw, worker, *, source_path=None):
     if any(not isinstance(value, str) or not value.strip() or len(value) > 128
            or any(ord(c) < 32 for c in value) for value in (name, email)):
         raise ValueError("Invalid publisher commit identity")
+    merge_enabled, merge_method = raw.get("merge_enabled", False), raw.get("merge_method", "merge")
+    if type(merge_enabled) is not bool or merge_method != "merge":
+        raise ValueError("Invalid trusted merge configuration")
+    if merge_enabled and not repositories.keys() & worker.autonomous_projects:
+        raise ValueError("Trusted merge requires verified project source selection")
+    if merge_enabled and any(char in name + email for char in "<>"):
+        raise ValueError("Invalid trusted merge commit identity")
     required = raw.get("required_hosted_checks", DEFAULT_REQUIRED_HOSTED_CHECKS)
     if (not isinstance(required, (tuple, list)) or not 1 <= len(required) <= 8
             or any(not isinstance(row, (tuple, list)) or len(row) != 3
@@ -83,7 +93,7 @@ def parse_config(raw, worker, *, source_path=None):
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
-                             tuple(tuple(row) for row in required))
+                             tuple(tuple(row) for row in required), merge_enabled, merge_method)
 
 
 def _object(pairs):

@@ -2,7 +2,8 @@
 
 Constructors only select narrow providers. The factory opens configured local
 resources on create; claimed jobs alone trigger verification and publication.
-No method pushes main, force-pushes, merges a PR, invokes a model or rotates auth.
+The optional source-selected merger updates main only from an independently
+approved exact-tree intent. No native agent receives publication authority.
 """
 
 from contextlib import contextmanager, nullcontext
@@ -21,6 +22,8 @@ from work_publication_config import CONFIG_ENV, PublicationConfig, load_config
 from work_review import ReviewedCandidateProvider, ReviewWorker
 from work_consumer_cache import configured_consumer_caches
 from work_hosted_checks import GitHubHostedChecksProvider
+from work_merge import GitHubExactTreeMergeProvider, MergeWorker
+from work_source_revision import VerifiedSourceSyncProvider
 
 LOG = logging.getLogger("forge-publication")
 
@@ -49,10 +52,11 @@ def validate_job(config, job):
 
 
 class PublicationWorker:
-    def __init__(self, config, store, snapshots, git, checks, pull_requests, *, candidates, reviewer=None, stop=None):
+    def __init__(self, config, store, snapshots, git, checks, pull_requests, *, candidates, reviewer=None, merger=None, stop=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.pull_requests = checks, pull_requests
         self.candidates, self.reviewer = candidates, reviewer
+        self.merger = merger
         self.stop = stop if stop is not None else threading.Event()
 
     @contextmanager
@@ -161,6 +165,11 @@ class PublicationWorker:
             if review is not None:
                 self.reviewer.process(review)
                 return True
+        if self.merger is not None:
+            merge = self.store.merge_claim(self.config.worker.worker_id[:54] + "-merger")
+            if merge is not None:
+                self.merger.process(merge)
+                return True
         job = self.store.publication_claim(self.config.worker.worker_id[:54] + "-publisher")
         if job is None:
             return False
@@ -191,9 +200,14 @@ class PublicationWorkerFactory:
                  snapshot_factory=WorkspaceSnapshotProvider, git_factory=GitRepositoryProvider,
                  supervisor_factory=None, checks_factory=IsolatedCheckRunner,
                  pull_request_factory=GitHubPullRequestClient, candidate_factory=ReviewedCandidateProvider,
-                 reviewer_factory=ReviewWorker, hosted_factory=GitHubHostedChecksProvider, stop=None):
+                 reviewer_factory=ReviewWorker, hosted_factory=GitHubHostedChecksProvider,
+                 merge_provider_factory=GitHubExactTreeMergeProvider, merge_worker_factory=MergeWorker,
+                 source_sync_factory=VerifiedSourceSyncProvider, stop=None):
         if not isinstance(config, PublicationConfig) or not callable(store_factory):
             raise TypeError("Publication requires frozen config and a store factory")
+        if (type(config.merge_enabled) is not bool or config.merge_method != "merge"
+                or config.merge_enabled and not config.repositories.keys() & config.worker.autonomous_projects):
+            raise ValueError("Trusted merge requires explicit verified project source selection")
         self.config, self.store_factory, self.stop = config, store_factory, stop
         self.workspace_factory, self.snapshot_factory, self.git_factory = workspace_factory, snapshot_factory, git_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None else
@@ -203,6 +217,8 @@ class PublicationWorkerFactory:
         self.pull_request_factory = pull_request_factory
         self.candidate_factory, self.reviewer_factory = candidate_factory, reviewer_factory
         self.hosted_factory = hosted_factory
+        self.merge_provider_factory, self.merge_worker_factory = merge_provider_factory, merge_worker_factory
+        self.source_sync_factory = source_sync_factory
 
     def create(self):
         self.config.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -218,9 +234,13 @@ class PublicationWorkerFactory:
         hosted = self.hosted_factory(self.config, client=pulls)
         reviewer = self.reviewer_factory(self.config, store, snapshots, git, checks, candidates,
                                         stop=self.stop, hosted_checks=hosted)
+        merger = (self.merge_worker_factory(self.config, store,
+                    self.merge_provider_factory(self.config, pulls, git, candidates, hosted),
+                    source_sync=self.source_sync_factory(self.config, git), stop=self.stop)
+                  if self.config.merge_enabled else None)
         return PublicationWorker(self.config, store, snapshots, git, checks,
                                  pulls, candidates=candidates,
-                                 reviewer=reviewer, stop=self.stop)
+                                 reviewer=reviewer, merger=merger, stop=self.stop)
 
 
 def default_store_factory(config):

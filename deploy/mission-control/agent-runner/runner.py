@@ -690,7 +690,12 @@ def main():
         if not api_only:
             threading.Thread(target=expire_chat_history, daemon=True).start()
         LOG.info("Listening on loopback port %d (api_only=%s)", port, api_only)
-        server.serve_forever()
+        workflow=getattr(work_service,"workflow_worker",None)
+        try:
+            if workflow is not None:workflow.start()
+            server.serve_forever()
+        finally:
+            if workflow is not None:workflow.close()
 
 
 if __name__ == "__main__":

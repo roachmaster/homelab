@@ -458,6 +458,11 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
             id,
             label,
             document,
+        }
+        | Component::DocumentLink {
+            id,
+            label,
+            document,
         } => {
             let _ = write!(
                 out,

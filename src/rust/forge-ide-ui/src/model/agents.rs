@@ -2,6 +2,7 @@
 use super::*;
 use crate::markdown::render_markdown;
 mod presentation;
+mod workflow;
 use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
 const USAGE_PAGE: usize = 6;
 use std::collections::BTreeSet;
@@ -317,6 +318,7 @@ impl Agents {
         self.task.as_ref().is_some_and(|t| t.status.is_processing())
             || self.publication_processing()
             || self.review_processing()
+            || self.workflow_processing()
             || self.pane == Pane::List && self.tasks.iter().any(|t| t.status.is_processing())
     }
     pub fn network_failed(&mut self, id: &str, watch: String, effects: &mut Vec<UiEffect>) {
@@ -361,6 +363,9 @@ impl Agents {
         usage: bool,
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
+        if self.blocks_manual_event(&event) {
+            return Ok(());
+        }
         if let UiEvent::SendAgentTask { idempotency_key }
         | UiEvent::CancelAgentTask { idempotency_key }
         | UiEvent::AcceptAgentTask { idempotency_key }
@@ -398,7 +403,9 @@ impl Agents {
                 self.watch = None;
                 if work
                     && self.pending.is_none()
-                    && (self.publication_processing() || self.review_processing())
+                    && (self.publication_processing()
+                        || self.review_processing()
+                        || self.workflow_processing())
                 {
                     // Publication can advance without changing the task revision.
                     // Read its authoritative detail instead of waiting for task events.
@@ -443,9 +450,10 @@ impl Agents {
                 self.status = "Finish checking the saved request before changing this task.".into();
                 self.warning = true;
             }
-            UiEvent::AgentsNewTask {} if work => {
+            UiEvent::AgentsNewTask {} if work && self.assignment_catalog_ready() => {
                 self.auto_repair = false;
                 self.pending = None;
+                self.choose_mode();
                 self.selected = None;
                 self.task = None;
                 self.clear_progress();
@@ -505,6 +513,7 @@ impl Agents {
                     && value != self.project
                 {
                     self.project = value;
+                    self.choose_mode();
                     self.pending = None;
                     self.pending_usage = None;
                     self.providers.clear();
@@ -578,7 +587,12 @@ impl Agents {
                             prompt: self.prompt.clone(),
                             acceptance_criteria: self.criteria.clone(),
                             idempotency_key,
-                            auto_repair: self.auto_repair && self.mode == Some(WorkMode::Implement),
+                            auto_repair: self.workflow_policy().is_none()
+                                && self.auto_repair
+                                && self.mode == Some(WorkMode::Implement),
+                            workflow_policy_digest: self
+                                .workflow_policy()
+                                .map(|p| p.policy_digest.clone()),
                         },
                         effects,
                     );
@@ -607,11 +621,7 @@ impl Agents {
             }
             UiEvent::CancelAgentTask { idempotency_key } if work => {
                 if self.pending.is_none() {
-                    if let Some(t) = self
-                        .task
-                        .as_ref()
-                        .filter(|t| matches!(t.status, WorkStatus::Queued | WorkStatus::Running))
-                    {
+                    if let Some(t) = self.task.as_ref().filter(|_| self.can_cancel()) {
                         self.request(
                             WorkRequest::WorkCancel {
                                 request_id: id,
@@ -966,13 +976,37 @@ impl Agents {
             .as_deref()
     }
     fn choose_mode(&mut self) {
+        // An uncertain admission must keep the exact saved form identity even
+        // when the current catalog changes author roles or removes a profile.
+        if let Some(WorkRequest::WorkSubmit {
+            agent_profile,
+            mode,
+            auto_repair,
+            ..
+        }) = self.retry.as_ref().or(self.pending.as_ref())
+        {
+            self.profile = agent_profile.clone();
+            self.mode = Some(*mode);
+            self.auto_repair = *auto_repair;
+            return;
+        }
+        if let Some(policy) = self.workflow_policy() {
+            self.profile = policy.author_profile.clone();
+            self.mode = Some(WorkMode::Plan);
+            self.auto_repair = false;
+            return;
+        }
         let modes = self.profile().map(|p| p.modes.clone()).unwrap_or_default();
         if self.mode.is_none_or(|m| !modes.contains(&m)) {
             self.mode = modes.first().copied();
         }
     }
+    fn assignment_catalog_ready(&self) -> bool {
+        self.catalog.is_some() && !matches!(self.pending, Some(WorkRequest::WorkCatalog { .. }))
+    }
     fn can_submit(&self) -> bool {
-        self.base().is_some()
+        self.workflow_submission_ready()
+            && self.base().is_some()
             && self.profile().is_some()
             && self.mode.is_some()
             && valid_chat_text(&self.prompt, MAX_WORK_PROMPT_BYTES)
@@ -1010,6 +1044,9 @@ impl Agents {
         })
     }
     fn can_decide_review(&self, decision: WorkReviewDecision) -> bool {
+        if self.autonomous() {
+            return false;
+        }
         let Some(task) = self.task.as_ref().filter(|t| {
             t.mode == WorkMode::Implement
                 && !t.status.is_processing()
@@ -1066,7 +1103,8 @@ impl Agents {
         })
     }
     fn can_start_repair(&self) -> bool {
-        !self.publication_processing()
+        !self.autonomous()
+            && !self.publication_processing()
             && self.implementation_enabled()
             && !self.review_note.trim().is_empty()
             && self.task.as_ref().is_some_and(|t| {
@@ -1077,26 +1115,28 @@ impl Agents {
             })
     }
     fn can_retry_publication(&self) -> bool {
-        self.task.as_ref().is_some_and(|t| {
-            t.publication.as_ref().is_some_and(|p| {
-                p.status == WorkPublicationStatus::Failed && p.publication_id.is_some()
-            }) && t
-                .review
-                .as_ref()
-                .is_some_and(|r| r.can_retry && r.candidate_commit.is_some())
-        })
+        !self.autonomous()
+            && self.task.as_ref().is_some_and(|t| {
+                t.publication.as_ref().is_some_and(|p| {
+                    p.status == WorkPublicationStatus::Failed && p.publication_id.is_some()
+                }) && t
+                    .review
+                    .as_ref()
+                    .is_some_and(|r| r.can_retry && r.candidate_commit.is_some())
+            })
     }
     fn finished_plan(&self) -> bool {
-        self.task.as_ref().is_some_and(|t| {
-            t.mode == WorkMode::Plan
-                && matches!(t.status, WorkStatus::AwaitingReview | WorkStatus::Completed)
-                && t.attempt
-                    .as_ref()
-                    .zip(t.result.as_ref())
-                    .is_some_and(|(a, r)| {
-                        a.phase == WorkAttemptPhase::Stopped && a.attempt_id == r.attempt_id
-                    })
-        })
+        !self.autonomous()
+            && self.task.as_ref().is_some_and(|t| {
+                t.mode == WorkMode::Plan
+                    && matches!(t.status, WorkStatus::AwaitingReview | WorkStatus::Completed)
+                    && t.attempt
+                        .as_ref()
+                        .zip(t.result.as_ref())
+                        .is_some_and(|(a, r)| {
+                            a.phase == WorkAttemptPhase::Stopped && a.attempt_id == r.attempt_id
+                        })
+            })
     }
     fn can_decide_plan(&self, decision: WorkPlanDecision) -> bool {
         self.finished_plan()
@@ -1123,7 +1163,8 @@ impl Agents {
         })
     }
     fn can_accept(&self) -> bool {
-        !self.finished_plan()
+        !self.autonomous()
+            && !self.finished_plan()
             && !self.publication_processing()
             && self.task.as_ref().is_some_and(|t| {
                 t.status == WorkStatus::AwaitingReview
@@ -1139,7 +1180,8 @@ impl Agents {
             })
     }
     fn can_resume(&self) -> bool {
-        !self.finished_plan()
+        !self.autonomous()
+            && !self.finished_plan()
             && !self.publication_processing()
             && self.task.as_ref().is_some_and(|t| {
                 t.reconciliation_receipt_id.is_some()
@@ -2034,7 +2076,7 @@ impl Agents {
                 self.usage_page + USAGE_PAGE >= self.providers.len(),
             ),
             ("agents-back", !enabled),
-            ("agents-new", !enabled),
+            ("agents-new", !enabled || !self.assignment_catalog_ready()),
             ("agents-refresh", !enabled || pending),
             ("agents-send", !enabled || pending || !self.can_submit()),
             ("agents-discard", !enabled),
@@ -2423,6 +2465,7 @@ impl Agents {
                 vec![]
             },
         });
+        self.project_workflow(view, compose, reader);
     }
 }
 fn mode_value(mode: WorkMode) -> &'static str {

@@ -3152,6 +3152,7 @@ async function agentsJourney() {
   agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
   let fixture, context;
   let releaseUsageOverview = () => {};
+  let releaseAssignmentCatalog = () => {};
   try {
     const relay = await agentsRelayOwner.ready;
     fixture = await startFixture(false, false, { agents: relay });
@@ -3281,9 +3282,15 @@ async function agentsJourney() {
     const refreshedProfiles = [];
     let holdUsageOverview = false, usageOverviewHeld = false;
     const usageOverviewGate = new Promise(resolve => { releaseUsageOverview = resolve; });
+    let holdAssignmentCatalog=false, assignmentCatalogHeld=false;
+    const assignmentCatalogGate=new Promise(resolve=>{releaseAssignmentCatalog=resolve;});
     await context.route(fixture.origin + '/forge/v1/dispatch', async route => {
       const request = route.request().postDataJSON();
       if (request.kind === 'usage_refresh') refreshedProfiles.push({ profile: request.agent_profile, project: request.project_alias });
+      if(request.kind==='work_catalog' && holdAssignmentCatalog){
+        holdAssignmentCatalog=false;assignmentCatalogHeld=true;
+        await assignmentCatalogGate;
+      }
       if (request.kind === 'usage_overview' && holdUsageOverview) {
         holdUsageOverview = false;
         usageOverviewHeld = true;
@@ -3555,12 +3562,57 @@ async function agentsJourney() {
     await check(page.locator('#agents-plan-actions')).toBeHidden();
     assert.equal(relay.planDecisions.at(-1).decision, 'cancel');
     await page.locator('#agents-back').click();
+    process.stderr.write('QA_CHECK autonomous_agent_workflow\n');
+    relay.enableAutonomy();holdAssignmentCatalog=true;
+    await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+    await check(page.locator('#agents')).toBeVisible();
+    await check.poll(()=>assignmentCatalogHeld).toBe(true);
+    await check(page.locator('#agents-new')).toBeDisabled();
+    await check(page.locator('#agents-compose')).toBeHidden();
+    releaseAssignmentCatalog();
+    await page.locator('#agents-new').click();
+    await check(page.locator('#agents-manual-assignment')).toBeHidden();
+    await check(page.locator('#agents-compose-repair-policy')).toBeHidden();
+    await check(page.locator('#agents-assignment-roles')).toHaveText('Gemini authors · Codex reviews');
+    await check(page.locator('#agents-compose-workflow-docs')).toHaveAttribute('href','/design/autonomous-agents');
+    await page.locator('#agents-prompt').fill('Owned autonomous workflow fixture; no real agent is invoked.');
+    await page.locator('#agents-criteria').fill('Keep peer review and automatic merge source-bound.');
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    const autonomousSubmission=relay.workflowSubmissions.at(-1);
+    assert.equal(autonomousSubmission.workflow_policy_digest,'c'.repeat(64));
+    assert.equal(autonomousSubmission.mode,'plan');assert.equal(autonomousSubmission.agent_profile,'agy-primary');
+    const workflowTaskId=relay.latestWorkflowTaskId;
+    for(const id of ['agents-plan-actions','agents-review','agents-accept','agents-resume'])await check(page.locator('#'+id)).toBeHidden();
+    for(const phase of ['code_review','hosted','merging','completed']){
+      relay.workflowPhase(workflowTaskId,phase);await page.locator('#agents-refresh').click();
+      await check(page.locator('#agents-workflow-phase')).toHaveText({code_review:'Reviewing code',hosted:'Hosted checks pending',merging:'Merging',completed:'Merged'}[phase]);
+      await check(page.locator('#agents-accept')).toBeHidden();
+      await check(page.locator('#agents-plan-actions')).toBeHidden();
+      if(['merging','completed'].includes(phase))await check(page.locator('#agents-cancel')).toBeHidden();
+    }
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'workflow roles and counters fit the viewport');
+    }
+    await page.locator('#agents-back').click();await page.locator('#agents-new').click();
+    await page.locator('#agents-prompt').fill('Owned escalation and cancellation fixture.');
+    await page.locator('#agents-criteria').fill('Preserve the source and expose cancellation after escalation.');
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    relay.workflowPhase(relay.latestWorkflowTaskId,'escalated');await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Operator attention');
+    await check(page.locator('#agents-workflow-escalation')).toContainText('Revision budget exhausted');
+    await check(page.locator('#agents-accept')).toBeHidden();await check(page.locator('#agents-plan-actions')).toBeHidden();
+    await page.locator('#agents-cancel').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);
     assert.deepEqual(errors, []);
     assert.equal(context.pages().length, 1, 'the Agents workflow uses one browser page');
   } finally {
+    releaseAssignmentCatalog();
     releaseUsageOverview();
     try { if (context) await context.close(); }
     finally { try { if (fixture) await stopFixture(fixture); } finally { await agentsRelayOwner.close(); } }

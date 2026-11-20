@@ -50,6 +50,12 @@ SESSION_POLICY_DIGEST = sha256_canonical(SESSION_POLICY)
 PLAN_POLICY_ID='forge-coding-v4'
 PLAN_POLICY={**SESSION_POLICY,'id':PLAN_POLICY_ID,'plan_workflow':'artifact-bound-plan-decisions-publication-v1'}
 PLAN_POLICY_DIGEST=sha256_canonical(PLAN_POLICY)
+FEEDBACK_POLICY_ID='forge-coding-v5'
+FEEDBACK_POLICY={**PLAN_POLICY,'id':FEEDBACK_POLICY_ID,'feedback_workflow':'lease-bound-immutable-feedback-review-v1'}
+FEEDBACK_POLICY_DIGEST=sha256_canonical(FEEDBACK_POLICY)
+PEER_POLICY_ID="forge-coding-v6"
+PEER_POLICY={**FEEDBACK_POLICY,"id":PEER_POLICY_ID,"peer_review_workflow":"source-bound-readonly-peer-review-v1"}
+PEER_POLICY_DIGEST=sha256_canonical(PEER_POLICY)
 
 
 
@@ -63,6 +69,7 @@ def historical_registry(root, maximum):
     registry.write_text(script)
     grant=root/"management/grant-runner.sql"
     value=grant.read_text()
+    if maximum<16:value=value.split("-- M16:")[0]
     if maximum<15:value=value.split("-- M15:")[0]
     value=value.replace(",\n    forge_agent.coding_plan_decisions TO forge_agent;"," TO forge_agent;")
     value="\n".join(line for line in value.splitlines() if not any(token in line for token in (
@@ -78,7 +85,10 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v5")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v7")
+        self.assertEqual(PEER_POLICY_DIGEST,"78d8f96280b9b75597e2b10276e1854f64026ff8f359f0f2abb65113774a8e5e")
+        self.assertEqual(work_policy.POLICY["codex_sandbox"],"supervised-external-v1")
+        self.assertEqual(work_policy.POLICY["codex_external_io"],"host-network-staged-native-state-v1")
         self.assertEqual(PLAN_POLICY_DIGEST,"b541291edbadf6390f1a46f1f8f82d5b090f9942aaf2b57ced50ef3f779ab5e4")
         self.assertEqual(work_policy.POLICY["feedback_workflow"],"lease-bound-immutable-feedback-review-v1")
         self.assertEqual(work_policy.POLICY["plan_workflow"], "artifact-bound-plan-decisions-publication-v1")
@@ -87,7 +97,7 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertNotIn("fresh_session", work_policy.POLICY)
         self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow"}}
+                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 
@@ -147,7 +157,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         return incarnation
 
     def old_recipe(self, policy=OLD_POLICY_ID):
-        digest = {OLD_POLICY_ID: OLD_POLICY_DIGEST, PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST, SESSION_POLICY_ID: SESSION_POLICY_DIGEST, PLAN_POLICY_ID: PLAN_POLICY_DIGEST}[policy]
+        digest = {OLD_POLICY_ID: OLD_POLICY_DIGEST, PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST, SESSION_POLICY_ID: SESSION_POLICY_DIGEST, PLAN_POLICY_ID: PLAN_POLICY_DIGEST,FEEDBACK_POLICY_ID:FEEDBACK_POLICY_DIGEST,PEER_POLICY_ID:PEER_POLICY_DIGEST}[policy]
         payload = {
             "version": 2, "backend": "codex", "model": "gpt-5.4",
             "resource_profile": policy, "mode": "plan", "generation_token_limit": None,
@@ -215,7 +225,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 proof = make_stop_proof(lease.unit_name)
                 receipt = db.publish(lease, "awaiting_review", manifest, None, "Old policy result", proof)
                 snapshots = self.rows(
-                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'] FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 )
@@ -224,7 +234,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(self.rows(cluster, "SELECT version FROM forge_agent.schema_migrations WHERE version = 11")[0][0], 11)
                 self.assertEqual(self.rows(
-                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'] FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 ), snapshots)
@@ -256,7 +266,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                                      "v2-accept-before-session-policy", "Reviewed before upgrade")
                 acceptance = self.legacy_accept(cluster,command)
                 snapshot_query = (
-                    "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'], "
+                    "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'], "
                     "(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.idempotency_key) "
                     "FROM forge_agent.coding_control_receipts r WHERE r.task_id=t.id) "
                     "FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
@@ -265,7 +275,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 15)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 16)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -302,7 +312,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 db.reconcile(lease,"c"*64,proof)
                 command=WorkAccept("homelab",UUID(lease.task_id),publication["revision"],"old-v3-accept","Historical approval")
                 acceptance=self.legacy_accept(cluster,command)
-                snapshot="SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'],to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'] FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
+                snapshot="SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'],to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id','workflow_required','workflow_id','workflow_review_id','review_target_sha256','workflow_feedback_review_id','workflow_feedback_sha256'] FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
                 before=self.rows(cluster,snapshot,(UUID(lease.task_id),))
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
@@ -336,6 +346,46 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertEqual(db.publish(lease,'awaiting_review',manifest,None,'V4 Plan',proof),publication)
                 self.assertEqual(self.store(cluster).result(project_alias='homelab',task_id=UUID(lease.task_id),attempt_id=UUID(lease.attempt_id))['content'],text)
             finally:cluster.stop()
+
+    def test_schema15_v5_receipts_and_feedback_history_are_not_rewritten_by_policy6(self):
+        with TemporaryDirectory(prefix='forge-v5-autonomy-upgrade-',dir='/tmp') as temporary:
+            legacy_sql=Path(temporary)/'sql';historical_registry(legacy_sql,15)
+            cluster=PreUpgradeCluster(legacy_sql).start()
+            try:
+                db=self.worker(cluster);inc=self.advertise(cluster,db,'v5-worker',FEEDBACK_POLICY_DIGEST)
+                admitted=self.admit_old(cluster,'v5-before-autonomy',FEEDBACK_POLICY_ID)
+                lease=db.claim('v5-worker',inc,['codex-v2']);text,manifest=self.stage(db,lease);proof=make_stop_proof(lease.unit_name)
+                published=db.publish(lease,'awaiting_review',manifest,None,'V5 Plan',proof);db.reconcile(lease,'c'*64,proof)
+                before=self.rows(cluster,'SELECT pinned_recipe,recipe_digest,review_note FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),))
+                DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
+                self.assertEqual(self.rows(cluster,'SELECT pinned_recipe,recipe_digest,review_note FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),before)
+                self.assertEqual(self.rows(cluster,'SELECT workflow_required,workflow_id FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),[(False,None)])
+                self.assertEqual(self.admit_old(cluster,'v5-before-autonomy',FEEDBACK_POLICY_ID),admitted)
+                self.assertEqual(db.publish(lease,'awaiting_review',manifest,None,'V5 Plan',proof),published)
+                queued=self.admit_old(cluster,'v5-queued-after-upgrade',FEEDBACK_POLICY_ID)
+                current=self.advertise(cluster,db,'v6-worker',work_policy.POLICY_DIGEST)
+                self.assertIsNone(db.claim('v6-worker',current,['codex-v2']))
+                old=self.advertise(cluster,db,'v5-worker',FEEDBACK_POLICY_DIGEST)
+                self.assertEqual(db.claim('v5-worker',old,['codex-v2']).task_id,queued['task_id'])
+            finally:cluster.stop()
+
+    def test_v6_published_receipt_and_recipe_survive_external_sandbox_policy7(self):
+        db=self.worker(self.cluster);inc=self.advertise(self.cluster,db,'v6-peer-worker',PEER_POLICY_DIGEST)
+        admitted=self.admit_old(self.cluster,'v6-published-before-external',PEER_POLICY_ID)
+        lease=db.claim('v6-peer-worker',inc,['codex-v2']);text,manifest=self.stage(db,lease);proof=make_stop_proof(lease.unit_name)
+        published=db.publish(lease,'awaiting_review',manifest,None,'V6 exact artifact',proof);receipt=db.reconcile(lease,'c'*64,proof)
+        reconciliation=self.rows(self.cluster,'SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s',(UUID(receipt),))
+        snapshot=self.rows(self.cluster,'SELECT pinned_recipe,recipe_digest FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),))
+        self.assertEqual(snapshot[0][0]['resource_profile'],'forge-coding-v6');self.assertEqual(snapshot[0][0]['policy_digest'],PEER_POLICY_DIGEST)
+        self.assertEqual(self.admit_old(self.cluster,'v6-published-before-external',PEER_POLICY_ID),admitted)
+        self.assertEqual(db.publish(lease,'awaiting_review',manifest,None,'V6 exact artifact',proof),published)
+        self.assertEqual(self.rows(self.cluster,'SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s',(UUID(receipt),)),reconciliation)
+        self.assertEqual(self.rows(self.cluster,'SELECT pinned_recipe,recipe_digest FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),snapshot)
+        queued=self.admit_old(self.cluster,'v6-queued-before-external',PEER_POLICY_ID)
+        current=self.advertise(self.cluster,db,'v7-external-worker',work_policy.POLICY_DIGEST)
+        self.assertIsNone(db.claim('v7-external-worker',current,['codex-v2']))
+        old=self.advertise(self.cluster,db,'v6-peer-worker',PEER_POLICY_DIGEST)
+        self.assertEqual(db.claim('v6-peer-worker',old,['codex-v2']).task_id,queued['task_id'])
 
     def test_v1_v2_and_current_workers_claim_only_their_exact_policy_digest(self):
         old = self.admit_old(self.cluster, "old-queued-first")

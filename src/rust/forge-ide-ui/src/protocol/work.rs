@@ -2,6 +2,8 @@
 use super::{valid_chat_id, valid_chat_text};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+mod workflow;
+pub use workflow::*;
 
 pub const MAX_WORK_PROMPT_BYTES: usize = 8192;
 pub const MAX_WORK_CRITERIA_BYTES: usize = 2048;
@@ -467,6 +469,8 @@ pub struct WorkProject {
     pub label: String,
     #[serde(deserialize_with = "required_nullable")]
     pub base_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<WorkWorkflowPolicy>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -507,7 +511,8 @@ impl WorkCatalog {
         self.projects.len() <= 64
             && self.profiles.len() <= 64
             && self.projects.iter().all(|p| {
-                valid_work_name(&p.alias, 64)
+                p.workflow.as_ref().is_none_or(WorkWorkflowPolicy::is_valid)
+                    && valid_work_name(&p.alias, 64)
                     && valid_work_label(&p.label, 128)
                     && p.base_revision
                         .as_deref()
@@ -625,6 +630,10 @@ pub struct WorkTaskDetail {
     /// Missing metadata never establishes that a task is legacy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_required: Option<bool>,
+    #[serde(default)]
+    pub workflow_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<WorkWorkflowSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<WorkReviewSummary>,
 }
@@ -645,6 +654,10 @@ impl WorkTaskDetail {
     }
     pub fn is_valid(&self) -> bool {
         self.summary().is_valid()
+            && self
+                .workflow
+                .as_ref()
+                .is_none_or(WorkWorkflowSummary::is_valid)
             && self.review.as_ref().is_none_or(WorkReviewSummary::is_valid)
             && self
                 .publication
@@ -724,6 +737,8 @@ pub enum WorkRequest {
         idempotency_key: String,
         #[serde(default)]
         auto_repair: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workflow_policy_digest: Option<String>,
     },
     WorkGet {
         request_id: String,
@@ -958,6 +973,7 @@ impl WorkRequest {
                 Self::WorkSubmit {
                     mode,
                     auto_repair,
+                    workflow_policy_digest,
                     base_revision,
                     agent_profile,
                     prompt,
@@ -966,6 +982,9 @@ impl WorkRequest {
                     ..
                 } => {
                     valid_work_hex(base_revision, 40)
+                        && workflow_policy_digest.as_deref().is_none_or(|digest| {
+                            valid_work_hex(digest, 64) && *mode == WorkMode::Plan && !auto_repair
+                        })
                         && (!auto_repair || *mode == WorkMode::Implement)
                         && valid_work_name(agent_profile, 64)
                         && valid_chat_text(prompt, MAX_WORK_PROMPT_BYTES)

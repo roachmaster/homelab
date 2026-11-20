@@ -1279,6 +1279,11 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
     assert!(request("GET", "/design/docs.css").contains("Content-Type: text/css; charset=utf-8"));
     for (path, heading, marker) in [
         (
+            "/design/autonomous-agents",
+            "Autonomous agent workflow",
+            "Configure an author and an independent reviewer",
+        ),
+        (
             "/design/agent-feedback-loop",
             "Agent feedback and repair",
             "Authorizing automatic repair never grants automatic approval",

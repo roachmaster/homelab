@@ -103,7 +103,7 @@ def _summary(row):
 
 
 def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
-                          prompt, acceptance_criteria, auto_repair=False):
+                          prompt, acceptance_criteria, auto_repair=False, workflow_policy_digest=None):
     return sha256_canonical({
         "project_alias": project_alias,
         "base_revision": base_revision,
@@ -112,6 +112,7 @@ def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
         "prompt": prompt,
         "acceptance_criteria": acceptance_criteria,
         **({"auto_repair":True} if auto_repair else {}),
+        **({"workflow_policy_digest":workflow_policy_digest} if workflow_policy_digest is not None else {}),
     })
 
 
@@ -297,11 +298,22 @@ class WorkStore:
                 if valid:
                     advertised_profile_modes.setdefault(alias, set()).update(valid)
 
+        with self._transaction(read_only=True) as cursor:
+            cursor.execute("""SELECT DISTINCT ON(a.project_alias) a.project_alias,a.finish_receipt->'receipt'->>'merge_commit' AS merge_commit
+             FROM forge_agent.coding_workflow_actions a JOIN forge_agent.coding_workflows w USING(workflow_id)
+             WHERE a.owner_id=%s AND a.kind='merge' AND a.status='completed' AND a.finish_receipt->>'status'='merged'
+             AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
+             ORDER BY a.project_alias,a.updated_at DESC,a.action_id DESC""",(self._owner,))
+            for merged in cursor.fetchall():
+                if merged['project_alias'] in config.project_workflows:
+                    advertised_revisions[merged['project_alias']]=merged['merge_commit']
+
         projects = [
             {
                 "alias": alias,
                 "label": config.project_label(alias),
                 "base_revision": advertised_revisions.get(alias),
+                "workflow":config.project_workflows[alias].summary(config.catalog(),config.repair_policy) if alias in config.project_workflows else None,
             }
             for alias in sorted(config.allowed_projects)[:MAX_PROJECTS]
         ]
@@ -326,7 +338,8 @@ class WorkStore:
         }
 
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
-               prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False):
+               prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False,
+               workflow_policy_digest=None,resolve_workflow=lambda:None):
         self._require_project(project_alias)
         if type(auto_repair) is not bool:
             raise Rejected(400,"invalid_request")
@@ -338,7 +351,7 @@ class WorkStore:
             agent_profile=agent_profile,
             prompt=prompt,
             acceptance_criteria=acceptance_criteria,
-            auto_repair=auto_repair,
+            auto_repair=auto_repair,workflow_policy_digest=workflow_policy_digest,
         )
         lock_scope = f"{self._owner}\n{project_alias}"
         with self._transaction() as cursor:
@@ -370,6 +383,15 @@ class WorkStore:
             if cursor.fetchone()["pending"] >= self._max_pending:
                 raise Rejected(503, "queue_full")
 
+            workflow=resolve_workflow()
+            if workflow is not None:
+                cursor.execute("""SELECT a.finish_receipt->'receipt'->>'merge_commit' AS head FROM forge_agent.coding_workflow_actions a
+                 JOIN forge_agent.coding_workflows w USING(workflow_id) WHERE a.owner_id=%s AND a.project_alias=%s AND a.kind='merge' AND a.status='completed'
+                 AND a.finish_receipt->>'status'='merged' AND a.finish_receipt->'receipt'->>'merge_commit'=a.intent->>'merge_commit' AND w.phase='completed'
+                 ORDER BY a.updated_at DESC,a.action_id DESC LIMIT 1""",(self._owner,project_alias))
+                merged=cursor.fetchone()
+                if merged and merged['head']!=base_revision:raise Rejected(409,'result_mismatch')
+                auto_repair=True
             recipe = resolve_recipe()
             if (not isinstance(recipe, PinnedRecipe)
                     or recipe.mode != mode
@@ -397,6 +419,10 @@ class WorkStore:
                 Json(recipe.to_dict()), recipe.digest,auto_repair,mode=="implement",
             ))
             self._ensure_review_policy(cursor,project_alias,task_id)
+            if workflow is not None:
+                cursor.execute("INSERT INTO forge_agent.coding_workflows(owner_id,project_alias,root_task_id,policy_digest,snapshot) VALUES(%s,%s,%s,%s,%s) RETURNING workflow_id",(self._owner,project_alias,task_id,workflow["policy_digest"],Json(workflow)))
+                workflow_id=cursor.fetchone()["workflow_id"]
+                cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_required=true,workflow_id=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(workflow_id,self._owner,project_alias,task_id))
             cursor.execute("""
                 INSERT INTO forge_agent.coding_events (
                     owner_id, project_alias, task_id, sequence, event_kind, payload
@@ -414,7 +440,7 @@ class WorkStore:
             cursor.execute("""
                 SELECT id, project_alias, base_revision, mode, agent_profile,
                        recipe_digest, status, revision, created_at,
-                       title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id,review_required
+                       title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id,workflow_review_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
             """, (self._owner, project_alias, task_id))
@@ -472,6 +498,8 @@ class WorkStore:
             detail = {
                 **_summary(row),
                 "review_required":row["review_required"],
+                "workflow_required":row["workflow_required"],
+                "workflow":self._workflow_projection(cursor,row),
                 "prompt": row["prompt"],
                 "acceptance_criteria": row["acceptance_criteria"],
                 "attempt": attempt_dto,
@@ -698,8 +726,13 @@ class WorkStore:
             expected_revision=expected_revision,
         )
         with self._transaction() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",(self._owner+"\n"+project_alias,ADVISORY_LOCK_SALT))
+            cursor.execute("SELECT w.root_task_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id WHERE t.owner_id=%s AND t.project_alias=%s AND t.id=%s",(self._owner,project_alias,task_id))
+            scope=cursor.fetchone()
+            if scope and scope['root_task_id']!=task_id:
+                cursor.execute("SELECT id FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self._owner,project_alias,scope['root_task_id']))
             cursor.execute("""
-                SELECT id, project_alias, status, revision
+                SELECT id, project_alias, status, revision,workflow_required,workflow_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -719,6 +752,20 @@ class WorkStore:
                 if existing["action"] != "cancel" or existing["intent_digest"] != intent_digest:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
+
+            if task["workflow_required"]:
+                if task["revision"]!=expected_revision:raise Rejected(409,"revision_conflict")
+                cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(task["workflow_id"],))
+                workflow=cursor.fetchone()
+                if not workflow or workflow["phase"] in {"completed","cancelled","merging"}:raise Rejected(409,"not_cancellable")
+                cursor.execute("UPDATE forge_agent.coding_workflows SET phase='cancelled',enabled=false,updated_at=clock_timestamp() WHERE workflow_id=%s",(task["workflow_id"],))
+                cursor.execute("UPDATE forge_agent.coding_tasks SET cancelled_at=CASE WHEN status IN('running','cancel_requested') THEN NULL ELSE clock_timestamp() END,status=CASE WHEN status IN('running','cancel_requested') THEN 'cancel_requested' ELSE 'cancelled' END,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND status NOT IN('completed','cancelled')",(task["workflow_id"],))
+                cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='cancelled',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(task["workflow_id"],))
+                target='cancel_requested' if task['status'] in {'running','cancel_requested'} else 'cancelled'
+                receipt={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':target}
+                cursor.execute("INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json) VALUES(%s,%s,%s,'cancel',%s,%s,%s,%s,%s)",(self._owner,project_alias,task_id,idempotency_key,intent_digest,expected_revision,expected_revision+1,Json(receipt)))
+                cursor.execute("SELECT pg_notify(%s,'')",(NOTIFY_CHANNEL,))
+                return receipt
 
             if task["status"] not in ("queued", "running"):
                 raise Rejected(409, "not_cancellable")
@@ -828,7 +875,7 @@ class WorkStore:
         )
         with self._transaction() as cursor:
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -865,6 +912,7 @@ class WorkStore:
                     or attempt["result_sha256"] is None):
                 raise Rejected(409, "not_reviewable")
 
+            if task.get("workflow_required"):raise Rejected(409,"not_reviewable")
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
@@ -946,7 +994,7 @@ class WorkStore:
                 (lock_scope, ADVISORY_LOCK_SALT),
             )
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -969,6 +1017,7 @@ class WorkStore:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
+            if task.get("workflow_required"):raise Rejected(409,"not_reviewable")
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
@@ -1085,8 +1134,35 @@ class WorkStore:
             cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
             return receipt
 
+    @contextmanager
+    def _transition_transaction(self,authority=None):
+        if authority is None:
+            with self._transaction() as cursor:yield cursor
+        else:
+            from work_workflow import BoundDelegatedAuthority
+            if not isinstance(authority,BoundDelegatedAuthority) or authority.store is not self:
+                raise Rejected(403,"denied")
+            yield authority.cursor
+
+    def _require_transition_authority(self,cursor,task,authority,kind):
+        if authority is not None:
+            authority.validate(cursor,task,kind)
+        elif task.get("workflow_required"):
+            raise Rejected(409,"not_reviewable")
+
+    def _workflow_projection(self,cursor,task):
+        if task.get("workflow_id") is None:return None
+        cursor.execute("SELECT w.*,coalesce(b.repair_rounds,0) AS code_revisions FROM forge_agent.coding_workflows w LEFT JOIN forge_agent.coding_review_budget b ON(b.owner_id,b.project_alias,b.root_task_id)=(w.owner_id,w.project_alias,w.root_task_id) WHERE w.owner_id=%s AND w.project_alias=%s AND w.workflow_id=%s",(self._owner,task["project_alias"],task["workflow_id"]))
+        w=cursor.fetchone()
+        if w is None:return None
+        p=w["snapshot"]
+        return {"workflow_id":str(w["workflow_id"]),"policy_digest":w["policy_digest"],"phase":w["phase"],
+            "author_profile":p["author_profile"],"reviewer_profile":p["reviewer_profile"],"plan_revisions":w["plan_revisions"],
+            "max_plan_revisions":p["max_plan_revisions"],"code_revisions":w["code_revisions"],"max_code_revisions":p["max_code_revisions"],
+            "escalation_reason":w["escalation_reason"] or None,"can_cancel":w["phase"] not in {"completed","cancelled","merging"}}
+
     def plan_decide(self, *, project_alias, task_id, expected_revision, plan_attempt_id,
-                    plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe,auto_repair=False):
+                    plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe,auto_repair=False,_authority=None):
         """Atomically decide one exact immutable Plan and pin the next stage."""
         self._require_project(project_alias)
         try:
@@ -1109,7 +1185,7 @@ class WorkStore:
             "plan_attempt_id": str(plan_attempt_id), "plan_sha256": plan_sha256,
             "decision": decision, "agent_profile": agent_profile, "note": note,
             **({"auto_repair":True} if auto_repair else {})})
-        with self._transaction() as cursor:
+        with self._transition_transaction(_authority) as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",
                            (f"{self._owner}\n{project_alias}", ADVISORY_LOCK_SALT))
             cursor.execute("""SELECT * FROM forge_agent.coding_tasks
@@ -1126,6 +1202,7 @@ class WorkStore:
                 if old["action"] != "plan_decide" or old["intent_digest"] != intent:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(old["receipt_json"])
+            self._require_transition_authority(cursor,task,_authority,"plan")
             if task["revision"] != expected_revision:
                 raise Rejected(409, "revision_conflict")
             if task["mode"] != "plan" or task["status"] not in {"awaiting_review", "completed"}:
@@ -1163,6 +1240,7 @@ class WorkStore:
                 if recipe.version != 2 or recipe.resource_profile != POLICY_ID or recipe.policy_digest != POLICY_DIGEST:
                     raise Rejected(503,"unavailable")
                 recipe_json, recipe_digest = recipe.to_dict(), recipe.digest
+            self._require_transition_authority(cursor,task,_authority,"plan")
             decision_id, revision = uuid4(), expected_revision + 1
             receipt = {"project_alias": project_alias, "task_id": str(task_id), "base_revision": expected_revision,
                        "revision": revision, "status": status, "mode": mode}
@@ -1298,7 +1376,7 @@ class WorkStore:
         cursor.execute("SELECT pg_notify(%s,'')",(NOTIFY_CHANNEL,))
 
     def review_decide(self,*,project_alias,task_id,expected_revision,review_id,decision,agent_profile,note,idempotency_key,
-                      findings=(),verified_finding_ids=(),recipe=None,resolve_recipe=None):
+                      findings=(),verified_finding_ids=(),recipe=None,resolve_recipe=None,_authority=None):
         if not isinstance(review_id,UUID) or not isinstance(decision,str) or decision not in {'approve','repair','escalate','retry_infrastructure','cancel'}:
             raise Rejected(400,'invalid_request')
         try:
@@ -1311,9 +1389,10 @@ class WorkStore:
             raise Rejected(400,'invalid_request') from None
         intent=sha256_canonical({'action':'review_decide','project_alias':project_alias,'task_id':str(task_id),'expected_revision':expected_revision,
             'review_id':str(review_id),'decision':decision,'agent_profile':agent_profile,'note':note,'findings':findings,'verified_finding_ids':list(verified_finding_ids)})
-        with self._transaction() as cursor:
+        with self._transition_transaction(_authority) as cursor:
             task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'review_decide',intent)
             if old:return old
+            self._require_transition_authority(cursor,task,_authority,"code")
             if task['status']!='awaiting_review':
                 raise Rejected(409,'not_reviewable')
             cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE",
@@ -1321,6 +1400,7 @@ class WorkStore:
             review=cursor.fetchone()
             if not review or review['attempt_id']!=task['latest_attempt_id'] or review['status'] in {'pending','checking','approved','cancelled'}:
                 raise Rejected(409,'not_reviewable')
+            self._require_transition_authority(cursor,task,_authority,"code")
             result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,
                     'status':task['status'],'review_id':str(review_id)}
             if decision=='approve':
@@ -1331,8 +1411,9 @@ class WorkStore:
                 owner_ids=set(verified_finding_ids)
                 if not owner_ids<=open_ids or open_ids-verified-owner_ids or (owner_ids and not note.strip()) or findings:
                     raise Rejected(409,'not_reviewable')
-                attestation={'closed_by':'owner','owner':self._owner,'candidate_commit':review['candidate_commit'],
+                attestation={'closed_by':'peer_reviewer' if _authority else 'owner','owner':self._owner,'candidate_commit':review['candidate_commit'],
                     'gate_manifest_sha256':review['gate_manifest_sha256'],'verified_finding_ids':list(verified_finding_ids),'note':note}
+                if _authority:attestation.update(_authority.attestation())
                 cursor.execute("UPDATE forge_agent.coding_reviews SET status='approved',owner_decision=%s,updated_at=clock_timestamp() WHERE review_id=%s",(Json(attestation),review_id))
                 cursor.execute("SELECT forge_agent.coding_queue_approved_review(%s)",(review_id,))
                 if next(iter(cursor.fetchone().values())) is None:raise Rejected(409,'not_reviewable')
@@ -1386,6 +1467,7 @@ class WorkStore:
         with self._transaction() as cursor:
             task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'repair',intent)
             if old:return old
+            if task.get("workflow_required"):raise Rejected(409,"not_reviewable")
             if task['status']!='completed' or task['mode']!='implement':raise Rejected(409,'not_reviewable')
             cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND candidate_commit=%s ORDER BY review_no DESC LIMIT 1 FOR UPDATE",
                 (self._owner,project_alias,task_id,candidate_commit))
@@ -1448,6 +1530,7 @@ class WorkStore:
         with self._transaction() as cursor:
             task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'publication_retry',intent)
             if old:return old
+            if task.get("workflow_required"):raise Rejected(409,"not_reviewable")
             cursor.execute("SELECT * FROM forge_agent.coding_publications WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND publication_id=%s FOR UPDATE",
                 (self._owner,project_alias,task_id,publication_id))
             publication=cursor.fetchone()

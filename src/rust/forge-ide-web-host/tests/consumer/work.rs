@@ -1298,3 +1298,29 @@ fn review_repair_rechecks_the_saved_implementation_mode_before_mutation() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0]["kind"], "work_get");
 }
+
+#[test]
+fn autonomous_submission_forwards_exact_policy_without_receipt_stranding_precheck() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut request = submit();
+    request["workflow_policy_digest"] = json!("c".repeat(64));
+    let worker = backend(upstream, vec![(202, receipt()), (202, receipt())]);
+    for _ in 0..2 {
+        assert_reply(
+            &host,
+            "ide.work.submit",
+            request.clone(),
+            &auth,
+            202,
+            receipt(),
+        );
+    }
+    let calls = worker.join().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0], calls[1]);
+    assert_eq!(calls[0]["workflow_policy_digest"], "c".repeat(64));
+    assert!(calls.iter().all(|call| call["kind"] == "work_submit"));
+}
