@@ -259,5 +259,4 @@ class WorkflowCoordinator:
 class WorkflowCoordinatorFactory:
     def __init__(self,config,catalog,store):self.config=config;self.catalog=catalog;self.store=store
     def create(self):
-        if not self.config.project_workflows:return None
         return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store))
