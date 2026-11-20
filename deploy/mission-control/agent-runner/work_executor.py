@@ -155,9 +155,10 @@ class WorkspaceLease:
 class WorkspaceProvider:
     """Worker-owned provider; each task owns one preserved detached Git worktree."""
 
-    def __init__(self, config, *, candidate_source_provider=None):
+    def __init__(self, config, *, candidate_source_provider=None, source_revision_provider=None):
         self.config = config
         self.candidate_sources = candidate_source_provider
+        self.source_revisions = source_revision_provider
 
     def prepare(self):
         self.config.workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -165,6 +166,8 @@ class WorkspaceProvider:
             (self.config.state_root / name).mkdir(parents=True, exist_ok=True, mode=0o700)
 
     def projects(self):
+        if self.source_revisions is not None:
+            return self.source_revisions.projects()
         result = []
         for alias, repository in self.config.projects.items():
             revision = _git(repository, "rev-parse", "--verify", "HEAD^{commit}").decode().strip()

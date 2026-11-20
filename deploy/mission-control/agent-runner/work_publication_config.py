@@ -76,6 +76,8 @@ def parse_config(raw, worker, *, source_path=None):
     merge_enabled, merge_method = raw.get("merge_enabled", False), raw.get("merge_method", "merge")
     if type(merge_enabled) is not bool or merge_method != "merge":
         raise ValueError("Invalid trusted merge configuration")
+    if merge_enabled and not repositories.keys() & worker.autonomous_projects:
+        raise ValueError("Trusted merge requires verified project source selection")
     if merge_enabled and any(char in name + email for char in "<>"):
         raise ValueError("Invalid trusted merge commit identity")
     required = raw.get("required_hosted_checks", DEFAULT_REQUIRED_HOSTED_CHECKS)

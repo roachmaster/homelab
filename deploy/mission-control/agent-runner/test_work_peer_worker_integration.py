@@ -17,6 +17,9 @@ from work_executor import CliOutcome, CommandRunnerProvider, SystemdSupervisor, 
 from work_peer_review import parse_review_target
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE
 from work_publication_clients import GitRepositoryProvider, WorkspaceSnapshotProvider
+from work_publication import PublicationWorkerFactory
+from work_hosted_checks import HostedCheckReport
+from test_work_merge import GitHubGitFixture
 from work_publication_config import parse_config as parse_publication
 from work_review import ReviewedCandidateProvider, ReviewWorker
 from work_worker import CodingWorkerFactory
@@ -72,6 +75,7 @@ class PeerWorkerIntegrationTest(unittest.TestCase):
         with TemporaryDirectory(prefix="forge-peer-worker-") as root:
             raw = raw_config(root)
             raw.update(owner="mission-control", allow_implement=True)
+            raw["autonomous_projects"] = ["homelab"]
             raw["profiles"] = {"agy-v2": {**raw["profiles"]["agy"], "model": "gemini-2.5-pro"},
                                "codex-v2": {**raw["profiles"]["codex"], "model": "gpt-5.4"}}
             config = parse_config(raw)
@@ -103,7 +107,8 @@ class PeerWorkerIntegrationTest(unittest.TestCase):
                                          supervisor_factory=lambda _: Supervisor()).create()
             worker.advertise()
             policy = api_config.project_workflows["homelab"].summary(api_config.catalog(), api_config.repair_policy)
-            service.submit(replace(make_submit(base_revision=base, agent_profile="agy-v2"),
+            request = "Update app.py to enhanced and retain the existing factory boundaries."
+            service.submit(replace(make_submit(base_revision=base, agent_profile="agy-v2", prompt=request),
                                    workflow_policy_digest=policy["policy_digest"]))
             self.assertTrue(worker.run_once())  # Author Plan, normal native receipt.
             self.assertTrue(service.workflow_worker.run_once())
@@ -113,7 +118,8 @@ class PeerWorkerIntegrationTest(unittest.TestCase):
             review = db.review_claim("fixture-checks")
             self.assertIsNotNone(review)
             publication = parse_publication({"worker_config": str(Path(root) / "worker.json"),
-                "repositories": {"homelab": "fixture/project"}, "github_config_dir": str(config.account.home / ".config/gh")}, config)
+                "repositories": {"homelab": "fixture/project"}, "github_config_dir": str(config.account.home / ".config/gh"),
+                "merge_enabled": True}, config)
             publication.state_root.mkdir(mode=0o700)
             source = GitRepositoryProvider(publication, remote_url_factory=lambda _: str(bare))
             candidates = ReviewedCandidateProvider(publication, source)
@@ -122,10 +128,47 @@ class PeerWorkerIntegrationTest(unittest.TestCase):
             self.assertTrue(service.workflow_worker.run_once())
             self.assertTrue(worker.run_once())  # Candidate H imported before normal critic workspace.
             self.assertEqual([target["target_kind"] for target in runner.targets], ["plan", "code"])
+            self.assertTrue(all(target["request_prompt"] == request for target in runner.targets))
             self.assertTrue(service.workflow_worker.run_once())
             queued = db.publication_claim("fixture-publisher")
             self.assertIsNotNone(queued)
             self.assertEqual(queued["candidate_commit"], runner.targets[-1]["candidate_commit"])
+            class GitHub(GitHubGitFixture):
+                published = False
+                def find(self, _job, _head):
+                    return self.job["pr_url"] if self.published else None
+                def create(self, _job, _head):
+                    self.published = True
+                    return self.job["pr_url"]
+            github = GitHub(publication, bare, {**queued, "pr_url": "https://github.com/fixture/project/pull/1"}, queued["candidate_commit"])
+            head = queued["candidate_commit"]
+            class Hosted:
+                def observe(self, _job):
+                    rows = tuple({"name": name, "status": "success", "head_sha": head}
+                                 for name in ("check", "pr-fast-gate", "real-browser"))
+                    return HostedCheckReport("passed", rows, (), "Controlled hosted checks passed.", "fixture", "a" * 64)
+            publisher = PublicationWorkerFactory(publication, lambda _: db,
+                workspace_factory=lambda _: worker.workspaces, git_factory=lambda _: source,
+                checks_factory=lambda *_: ReviewChecks(publication, True),
+                pull_request_factory=lambda _: github, hosted_factory=lambda *_args, **_kwargs: Hosted(),
+                candidate_factory=lambda *_: candidates).create()
+            publisher.process(queued)
+            service.workflow_worker.run_once()  # Scan; merge admission still waits for hosted checks.
+            self.assertTrue(publisher.run_once())  # Independent exact-head hosted observation.
+            service.workflow_worker.run_once()  # Commits merge action; publisher owns its execution.
+            self.assertTrue(publisher.run_once())  # Leased exact-tree merge and private source CAS.
+            known = db.project_revisions()
+            merged = known["homelab"]
+            self.assertEqual(_git(canonical, "rev-parse", "refs/forge/verified-main").decode().strip(), merged)
+            self.assertEqual(worker.workspaces.projects()[0]["base_revision"], merged)
+            worker._last_advertisement = float("-inf")
+            worker.advertise()
+            service.submit(replace(make_submit(base_revision=merged, agent_profile="agy-v2", prompt=request,
+                                              idempotency_key="second-verified-workflow"),
+                                   workflow_policy_digest=policy["policy_digest"]))
+            self.assertTrue(worker.run_once())
+            self.assertEqual(runner.invocations[-1].workspace.base_revision, merged)
+            self.assertEqual((runner.invocations[-1].workspace.path / "app.py").read_text(), "enhanced\n")
             self.assertEqual(git(canonical, "rev-parse", "HEAD").decode().strip(), base)
             for invocation in (value for value in runner.invocations if any(p.name == "agent-review.json" for p in value.readonly_files)):
                 self.assertFalse(invocation.implement)

@@ -183,15 +183,17 @@ class GitHubExactTreeMergeProvider:
 
 
 class MergeWorker:
-    def __init__(self, config, store, provider, *, stop=None):
+    def __init__(self, config, store, provider, *, source_sync, stop=None):
         self.config, self.store, self.provider = config, store, provider
         self.stop = stop if stop is not None else threading.Event()
+        self.source_sync = source_sync
 
     def process(self, job):
         for name in ("merge_id", "workflow_id", "task_id", "review_id", "lease_token", "target_publication_id", "source_publication_id"):
             uuid(job[name])
         if (not self.config.merge_enabled or job.get("merge_method") != "merge"
                 or job.get("project_alias") not in self.config.repositories
+                or job.get("project_alias") not in self.config.worker.autonomous_projects
                 or not SHA.fullmatch(job.get("candidate_commit", ""))
                 or not DIGEST.fullmatch(job.get("gate_manifest_sha256", ""))
                 or not DIGEST.fullmatch(job.get("policy_digest", ""))):
@@ -233,6 +235,8 @@ class MergeWorker:
                 mutable = True
                 self.provider.apply(job, intent, require_lease)
             require_lease()
+            self.source_sync.synchronize(job, intent, require_lease)
+            require_lease()
             self.store.merge_finish(job, "merged", {"candidate_commit": job["candidate_commit"],
                 "merge_commit": intent["merge_commit"], "pr_url": job["pr_url"],
                 "summary": "The independently approved candidate tree was merged without incorporating unreviewed bytes."})
@@ -240,7 +244,14 @@ class MergeWorker:
             if not lost.is_set():
                 try:
                     require_lease()
-                    merged = intent is not None and self.provider.reconcile(job, intent)
+                    remote_merged = intent is not None and self.provider.reconcile(job, intent)
+                    merged = False
+                    if remote_merged:
+                        try:
+                            self.source_sync.synchronize(job, intent, require_lease)
+                            merged = True
+                        except Exception:
+                            mutable = True
                     code = error.code if isinstance(error, PublicationError) else "merge_unavailable"
                     self.store.merge_finish(job, "merged" if merged else "needs_reconcile" if mutable else "handoff",
                         {"candidate_commit": job["candidate_commit"],
