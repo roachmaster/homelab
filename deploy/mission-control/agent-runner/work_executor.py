@@ -20,7 +20,7 @@ import subprocess
 import time
 from uuid import UUID
 
-from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
+from work_grok import AuthCleanupError as GrokAuthCleanupError, AuthLease as GrokAuthLease, GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
 from work_policy import POLICY
 from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
@@ -305,6 +305,7 @@ class Invocation:
     plan_file: Path | None = None
     readonly_files: tuple[Path, ...] = ()
     external_sandbox: bool = False
+    grok_auth: GrokAuthLease | None = None
 
 
 @dataclass(frozen=True)
@@ -965,6 +966,26 @@ class CommandRunnerProvider:
             return self.codex_sessions
         return None
 
+    def _retain_grok_auth_cleanup(self, scratch, identity):
+        """Nonsecret recovery witness outside the child's writable state alias.
+
+        This is evidence for explicit reconciliation, never deletion authority.
+        The native scope cannot access this parent-owned directory.
+        """
+        directory = self.config.state_root / "auth-cleanup"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            data = json.dumps({**identity, "attempt_id": _uuid(scratch.name),
+                "state": "pending_scope_or_inode_cleanup"}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            descriptor = os.open(_uuid(scratch.name) + ".json",
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(data); stream.flush(); os.fsync(stream.fileno())
+            os.fsync(parent)
+        finally:
+            os.close(parent)
+
     def prepare(self):
         (self.config.state_root / "attempts").mkdir(parents=True, exist_ok=True, mode=0o700)
         if self.sessions is not None:
@@ -1143,6 +1164,7 @@ class CommandRunnerProvider:
             if feedback_context.legacy_resume_note:
                 prompt += "\nOWNER RESUME FEEDBACK:\n" + feedback_context.legacy_resume_note
         peer_feedback_file = None
+        grok_auth = None
         if lease.get("workflow_feedback_review_id") is not None:
             if (not isinstance(peer_feedback_context, WorkflowFeedbackContext)
                     or peer_feedback_context.workflow_id != lease.get("workflow_id")
@@ -1205,7 +1227,8 @@ class CommandRunnerProvider:
             native = scratch / "home/.grok"
             native.mkdir(parents=True, mode=0o700, exist_ok=True)
             try:
-                if not stage_grok_auth(self.config.account, native / "auth.json"):
+                grok_auth = stage_grok_auth(self.config.account, native / "auth.json") or None
+                if not grok_auth:
                     raise ValueError("Grok account is not authenticated")
                 (native / "config.toml").write_text(GROK_CONFIG, encoding="utf-8")
                 (native / "config.toml").chmod(0o400)
@@ -1214,8 +1237,22 @@ class CommandRunnerProvider:
                 descriptor = os.open(scratch / "prompt.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
                 with os.fdopen(descriptor, "wb") as stream:
                     stream.write(prompt.encode("utf-8"))
-            except (OSError, ValueError):
-                raise ExecutionError("blocked_auth", "The approved Grok native state is unavailable.") from None
+            except BaseException as error:
+                try:
+                    identity = (error.identity if isinstance(error, GrokAuthCleanupError)
+                                else grok_auth.identity if grok_auth is not None and not grok_auth.cleanup() else None)
+                    if identity is not None:
+                        try:
+                            self._retain_grok_auth_cleanup(scratch, identity)
+                        except OSError:
+                            pass
+                        raise ExecutionError("needs_reconcile", "Copied Grok authentication requires explicit reconciliation.") from None
+                finally:
+                    if grok_auth is not None:
+                        grok_auth.close()
+                if isinstance(error, (OSError, ValueError)):
+                    raise ExecutionError("blocked_auth", "The approved Grok native state is unavailable.") from None
+                raise
             argv = grok_argv(actual, lease["recipe"]["model"], CHILD_WORKSPACE, CHILD_STATE / "prompt.txt",
                 lease["attempt_id"], CHILD_STATE / "grok-leader.sock", implement=implement)
             payload = b""
@@ -1234,7 +1271,7 @@ class CommandRunnerProvider:
             payload = prompt.encode("utf-8")
         return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file,
                           tuple(path for path in (feedback_file, peer_file, peer_feedback_file) if path is not None),
-                          external_sandbox if backend == "codex" else False)
+                          external_sandbox if backend == "codex" else False, grok_auth)
 
     def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None, peer_context=None,
             peer_feedback_context=None):
@@ -1244,11 +1281,26 @@ class CommandRunnerProvider:
         session_provider = self._session_provider(invocation.backend)
         active_invocation = invocation
         conversation = active_invocation.session.conversation_id if active_invocation.session is not None else None
-        progress = ProgressReader(invocation.scratch / "progress", report_progress) if report_progress is not None else None
+        progress = None
         process = None
         reaped = False
         used_fallback = False
         scope_settled = False
+        spawn_attempted = False
+        credential_finalized = False
+
+        def finalize_credential(safe):
+            nonlocal credential_finalized
+            credential_finalized = True
+            if invocation.grok_auth is None:
+                return True
+            if safe and invocation.grok_auth.cleanup():
+                return True
+            try:
+                self._retain_grok_auth_cleanup(invocation.scratch, invocation.grok_auth.identity)
+            except OSError:
+                LOG.warning("Grok copied authentication recovery witness could not be saved")
+            return False
 
         def settled(outcome):
             nonlocal scope_settled
@@ -1259,6 +1311,9 @@ class CommandRunnerProvider:
             if not launcher_stopped or not outcome.stop_proof.get("scope_stopped"):
                 outcome = replace(outcome, status="needs_reconcile", text="",
                                   summary="Agent or launcher stop could not be verified; review is required.")
+            if not finalize_credential(launcher_stopped and outcome.stop_proof.get("scope_stopped") is True):
+                outcome = replace(outcome, status="needs_reconcile", text="",
+                                  summary="Copied Grok authentication requires explicit reconciliation after scope stop.")
             if (outcome.status == "awaiting_review" and not stop.is_set()
                     and active_invocation.session is not None and session_provider is not None):
                 try:
@@ -1273,6 +1328,7 @@ class CommandRunnerProvider:
             return replace(outcome, fresh_session=conversation is None)
 
         try:
+            progress = ProgressReader(invocation.scratch / "progress", report_progress) if report_progress is not None else None
             if stop.is_set():
                 return settled(CliOutcome("cancelled", "", None, None,
                                           "The assignment stopped before execution.",
@@ -1292,7 +1348,9 @@ class CommandRunnerProvider:
                 errors = []
                 interrupted = False
                 reaped = False
-                process = self.popen(self.supervisor.argv(lease, active_invocation), stdin=subprocess.PIPE,
+                command = self.supervisor.argv(lease, active_invocation)
+                spawn_attempted = True
+                process = self.popen(command, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
                                      start_new_session=True, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
                 cleanup_deadline = None
@@ -1425,19 +1483,32 @@ class CommandRunnerProvider:
             return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else "failed", "", None, None,
                                       "The approved agent process could not be started or stopped.", proof))
         finally:
+            final_proof = None
+            launcher_stopped = process is None and not spawn_attempted
             try:
                 try:
                     if process is not None and not scope_settled:
-                        self.supervisor.stop(lease["unit_name"])
+                        final_proof = self.supervisor.stop(lease["unit_name"])
                 finally:
                     if process is not None and not reaped:
-                        terminate_and_reap(process)
+                        launcher_stopped = terminate_and_reap(process)
+                    elif reaped:
+                        launcher_stopped = True
             finally:
                 try:
                     _close_pipes(process)
                 finally:
-                    if progress is not None:
-                        progress.close()
+                    try:
+                        if progress is not None:
+                            progress.close()
+                    finally:
+                        if invocation.grok_auth is not None:
+                            try:
+                                if not credential_finalized and not finalize_credential(
+                                        launcher_stopped and (not spawn_attempted or bool(final_proof and final_proof.get("scope_stopped") is True))):
+                                    raise ExecutionError("needs_reconcile", "Copied Grok authentication requires explicit reconciliation after scope stop.")
+                            finally:
+                                invocation.grok_auth.close()
 
 
 def utf8_chunks(content, maximum=CHUNK_BYTES):
