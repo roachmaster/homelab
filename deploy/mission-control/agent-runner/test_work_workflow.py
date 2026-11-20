@@ -98,3 +98,40 @@ class AutonomousWorkflowTest(unittest.TestCase):
   outcome={'disposition':'repair','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[{'finding_id':'fix-1','category':'source','summary':'Fix parser.'}],'verified_finding_ids':[],'fingerprint':'f'*64,'summary':'Repair source.','cleanup_confirmed':True,'verification':{'checks_passed':False,'candidate_workspace_digest':'c'*64,'repair_requires_new_workspace':True,'cleanup_confirmed':True}}
   result=self.db.review_finish(job,outcome);child=self.claim('agy-v2')
   self.assertEqual(child.parent_task_id,author.task_id);self.assertEqual(_lease(child)['parent_task_id'],author.task_id)
+ def checked_implementation(self,*,linked=False):
+  _,admitted=self.submit();self.finish_plan_round();author=self.claim('agy-v2');rec=self.publish(author,'Implemented the reviewed Plan with typed factories.')
+  self.db.queue_review(author,rec);job=self.db.review_claim('checks')
+  result={'disposition':'awaiting_review','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[],'verified_finding_ids':[],'fingerprint':None,'summary':'All local checks passed.','cleanup_confirmed':True,
+      'verification':{'checks_passed':True,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':linked,'cleanup_confirmed':True,'integration_base':'a'*40,'toolchain':'fixture','checks':[{'check_id':'make-ci','status':'passed','head_sha':'d'*40}]}}
+  self.db.review_finish(job,result);self.coordinator.run_once();critic=self.claim('codex-v2');self.assertIsNotNone(critic)
+  return admitted,author,critic,job
+ def test_code_peer_review_and_exact_head_hosted_gates_queue_immutable_merge(self):
+  admitted,author,critic,checks=self.checked_implementation()
+  self.assertIsNone(self.db.publication_claim('publisher'))
+  self.publish(critic,self.verdict(critic));self.coordinator.run_once()
+  pub=self.db.publication_claim('publisher');self.assertIsNotNone(pub)
+  self.db.publication_finish(pub,'publishing','Checked',branch='forge/test',commit_sha='d'*40)
+  self.db.publication_finish(pub,'published','Draft PR',branch='forge/test',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/1')
+  self.coordinator.run_once();self.assertIsNone(self.db.merge_claim('merger'))
+  self.db.record_hosted_checks(pub['publication_id'],'d'*40,[{'name':name,'status':'success','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')])
+  self.coordinator.run_once();job=self.db.merge_claim('merger');self.assertIsNotNone(job);self.assertEqual(job['policy_digest'],self.config.project_workflows['homelab'].snapshot(self.config.catalog(),self.config.repair_policy)['policy_digest'])
+  intent={'version':1,'merge_id':job['merge_id'],'workflow_id':job['workflow_id'],'task_id':job['task_id'],'repository':'fixture/project','pr_url':job['pr_url'],'candidate_commit':'d'*40,'candidate_tree':'1'*40,'expected_main':'a'*40,'merge_commit':'2'*40,'review_id':job['review_id'],'gate_manifest_sha256':'e'*64,
+      'commit_payload':{'message':'Merge independently reviewed workflow','tree':'1'*40,'parents':['a'*40,'d'*40],'author':{'name':'Forge','email':'forge@example.test','date':'2026-11-20T00:00:00Z'},'committer':{'name':'Forge','email':'forge@example.test','date':'2026-11-20T00:00:00Z'}}}
+  self.assertEqual(self.db.merge_intent(job,intent),intent);self.assertEqual(self.db.merge_intent(job,intent),intent)
+  with self.assertRaises(ValueError):self.db.merge_finish(job,'invalid',{})
+  outcome={'candidate_commit':'d'*40,'merge_commit':'2'*40,'pr_url':job['pr_url'],'summary':'Merged exact reviewed tree.'}
+  receipt=self.db.merge_finish(job,'merged',outcome);self.assertEqual(self.db.merge_finish(job,'merged',outcome),receipt)
+  self.assertEqual(self.get(admitted['task_id'])['workflow']['phase'],'completed');self.assertEqual(self.get(admitted['task_id'])['status'],'completed')
+ def test_peer_code_repair_feedback_delivered_for_same_task_and_linked_child(self):
+  for linked in (False,True):
+   with self.subTest(linked=linked):
+    if linked:self.setUp()
+    _,author,critic,checks=self.checked_implementation(linked=linked)
+    self.publish(critic,self.verdict(critic,'revise'));self.coordinator.run_once();repair=self.claim('agy-v2');self.assertIsNotNone(repair)
+    envelope=self.db.read_workflow_feedback(repair);target=parse_review_target(envelope['target_json'],envelope['target_sha256'])
+    self.assertEqual(parse_review_verdict(envelope['verdict_json'],target)['decision'],'revise');self.assertEqual(target['source_attempt_id'],author.attempt_id)
+    self.assertEqual(_lease(repair)['parent_task_id'],author.task_id if linked else None)
+ def test_removed_project_delegation_escalates_without_auto_effect(self):
+  _,admitted=self.submit();author=self.claim('agy-v2');self.publish(author,'Plan.')
+  removed=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create();self.assertIsNotNone(removed.workflow_worker)
+  removed.workflow_worker.run_once();self.assertEqual(self.get(admitted['task_id'])['workflow']['phase'],'escalated');self.assertIsNone(self.claim('codex-v2'))
