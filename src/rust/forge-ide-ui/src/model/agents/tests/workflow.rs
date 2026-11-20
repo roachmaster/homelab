@@ -99,9 +99,34 @@ fn configured_assignment_uses_pinned_roles_without_manual_selections_and_retries
         .as_mut()
         .unwrap()
         .policy_digest = "d".repeat(64);
+    let catalog = agents.catalog.as_mut().unwrap();
+    let mut replacement = catalog.profiles.remove(0);
+    replacement.alias = "replacement-author".into();
+    catalog.profiles.push(replacement);
+    catalog.projects[0]
+        .workflow
+        .as_mut()
+        .unwrap()
+        .author_profile = "replacement-author".into();
+    agents.choose_mode();
+    assert_eq!(
+        agents.profile, "agy-primary",
+        "uncertain intent retains the original author"
+    );
+    assert!(
+        agents.snapshot().unwrap().is_valid(),
+        "role drift cannot invalidate its saved admission checkpoint"
+    );
     let effects = step(&mut agents, UiEvent::RetryAgentRequest {}, "retry");
     assert!(
         matches!(&effects[0],UiEffect::Work(WorkRequest::WorkSubmit {workflow_policy_digest:Some(digest),..}) if digest==&"c".repeat(64))
+    );
+    agents.pending = None;
+    agents.retry = None;
+    step(&mut agents, UiEvent::AgentsNewTask {}, "new-assignment");
+    assert_eq!(
+        agents.profile, "replacement-author",
+        "a new assignment uses the current configured author"
     );
 }
 #[test]
