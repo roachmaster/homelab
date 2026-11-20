@@ -402,3 +402,83 @@ fn zero_repair_policy_projects_initial_review_and_keeps_owner_approval_separate(
         "local approval does not bypass hosted checks"
     );
 }
+
+#[test]
+fn legacy_implementation_acceptance_requires_explicit_false_and_all_existing_guards() {
+    let mut agents = implementation(WorkStatus::AwaitingReview);
+    let task = agents.task.as_mut().unwrap();
+    task.review = None;
+    task.review_required = Some(false);
+    assert!(agents.can_accept());
+    agents.task.as_mut().unwrap().publication = Some(WorkPublication {
+        publication_id: None,
+        status: WorkPublicationStatus::Pending,
+        branch: None,
+        commit_sha: None,
+        pr_url: None,
+        summary: None,
+    });
+    assert!(!agents.can_accept(), "legacy publication still must settle");
+    agents.task.as_mut().unwrap().publication = None;
+    agents
+        .task
+        .as_mut()
+        .unwrap()
+        .attempt
+        .as_mut()
+        .unwrap()
+        .phase = WorkAttemptPhase::Running;
+    assert!(
+        !agents.can_accept(),
+        "an unfinished scope cannot be accepted"
+    );
+    agents
+        .task
+        .as_mut()
+        .unwrap()
+        .attempt
+        .as_mut()
+        .unwrap()
+        .phase = WorkAttemptPhase::Stopped;
+    agents.task.as_mut().unwrap().result = None;
+    assert!(
+        !agents.can_accept(),
+        "legacy tasks still require a published result"
+    );
+}
+
+#[test]
+fn missing_or_required_review_metadata_and_any_review_cannot_bypass_hosted_gate() {
+    let mut agents = implementation(WorkStatus::AwaitingReview);
+    agents.task.as_mut().unwrap().review = None;
+    for required in [None, Some(true)] {
+        agents.task.as_mut().unwrap().review_required = required;
+        assert!(
+            !agents.can_accept(),
+            "missing v5 review context cannot admit legacy acceptance"
+        );
+    }
+    let task = agents.task.as_mut().unwrap();
+    task.review_required = Some(false);
+    task.review = Some(review_summary(false));
+    assert!(
+        !agents.can_accept(),
+        "an explicit review always retains the hosted gate"
+    );
+    let review = agents.task.as_mut().unwrap().review.as_mut().unwrap();
+    review.can_accept = true;
+    review.required_hosted_green = true;
+    assert!(agents.can_accept());
+    agents
+        .task
+        .as_mut()
+        .unwrap()
+        .review
+        .as_mut()
+        .unwrap()
+        .open_findings = 1;
+    assert!(
+        !agents.can_accept(),
+        "legacy metadata cannot bypass open findings"
+    );
+}

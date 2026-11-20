@@ -1131,6 +1131,7 @@ impl Agents {
             && self.task.as_ref().is_some_and(|t| {
                 t.status == WorkStatus::AwaitingReview
                     && (t.mode != WorkMode::Implement
+                        || (t.review_required == Some(false) && t.review.is_none())
                         || t.review.as_ref().is_some_and(|r| {
                             r.can_accept && r.required_hosted_green && r.open_findings == 0
                         }))

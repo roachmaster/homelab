@@ -73,6 +73,7 @@ fn detail(status: WorkStatus) -> WorkTaskDetail {
         result: None,
         reconciliation_receipt_id: None,
         publication: None,
+        review_required: None,
         review: None,
     }
 }
