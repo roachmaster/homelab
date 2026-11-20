@@ -77,6 +77,7 @@ for (const [statusCode, expected] of [[401, /Access denied/], [403, /Access deni
     await until(() => /Access denied/.test(h.status()), 'unpaired resume');
     await h.send({ kind: 'pair', value: 'b'.repeat(64) });
     await until(() => /Connected/.test(h.status()), 'actual WASM pairing');
+    await h.send({kind:'open_workbench'});
     await h.send({ kind: 'inspect' });
     await until(() => /Project ready/.test(h.status()), 'actual WASM inspection');
     const request = h.requests.find(r => r.body.kind === 'inspect');
@@ -92,6 +93,7 @@ for (const [statusCode, expected] of [[401, /Access denied/], [403, /Access deni
   const h = await harness(request => request.kind === 'resume' ? json(paired(request)) : new Promise(resolve => { complete = () => resolve(json(inspected(request))); }));
   try {
     await until(() => /Connected/.test(h.status()), 'resume success');
+    await h.send({kind:'open_workbench'});
     await h.send({ kind: 'inspect' });
     await until(() => !!complete, 'in-flight simulated fetch');
     await h.send({ kind: 'cancel' });
@@ -107,6 +109,7 @@ for (const mode of ['zero', 'malformed']) {
   const h = await harness(request => json(paired(request)));
   try {
     await until(() => /Connected/.test(h.status()), 'startup before ABI failure');
+    await h.send({kind:'open_workbench'});
     h.corrupt(mode);
     await h.send({ kind: 'inspect' });
     await until(() => h.messages.some(m => m.kind === 'fatal'), `ABI ${mode} fail closed`);
@@ -136,6 +139,7 @@ console.log('Generated worker rejects legacy ABI 1 before session or inspection 
   const h = await harness(request => request.kind === 'resume' ? json(paired(request)) : json(inspected(request)));
   try {
     await until(() => /Connected/.test(h.status()), 'resume before presentation envelope');
+    await h.send({kind:'open_workbench'});
     await h.send({ event: { kind: 'inspect' }, presentation_sequence: 5 });
     await until(() => /Project ready/.test(h.status()), 'enveloped event reaches actual WASM');
     assert.ok(h.messages.some(m => m.kind === 'view' && m.presentation_sequence === 5));
@@ -207,6 +211,7 @@ console.log('Generated worker strips bounded presentation envelopes before actua
   });
   try {
     await until(() => /Project ready/.test(h.status()), 'single project opens automatically');
+    await h.send({kind:'open_workbench'});
     const key = h.requests.find(r => r.body.kind === 'inspect').body.request.token;
     const current = () => h.messages.filter(m => m.kind === 'view').at(-1).view;
     await h.send({ kind: 'select_entry', report: key, value: 1 });
@@ -226,58 +231,31 @@ console.log('Generated worker strips bounded presentation envelopes before actua
 console.log('Generated worker auto-opens one project and sends guarded source effects; source denial retains the inspection and explicit retry succeeds.');
 
 {
-  // Pairing in a single-project installation starts inspection and model
-  // discovery together. Previous chats must still open on the first click.
+  // Retired Chat cannot acquire slots even if the native catalog still enables it.
   const single = copy(catalog);
   single.nodes[0].projects.length = 1;
   single.chat_history = true;
   single.async_chat = true;
-  const savedChat = {
-    chat_id: '8452b258-df30-4985-bfa1-cd98245b2a06',
-    title: 'Saved fixture chat',
-    updated_at: '2026-11-16T12:00:00Z',
-    revision: 1,
-    retention: { kind: 'long_term' },
-  };
-  let releaseInspection, releaseModels;
+  let releaseInspection;
   const h = await harness(request => {
-    const reply = event => json({ protocol_version: 1, event: { request_id: request.request_id, ...event } });
     switch (request.kind) {
       case 'resume': {
-        const response = paired(request);
-        response.event.catalog = single;
-        return json(response);
+        const response = paired(request); response.event.catalog = single; return json(response);
       }
       case 'inspect':
         return new Promise(resolve => { releaseInspection = () => resolve(json(inspected(request))); });
-      case 'chat_run_models':
-        return new Promise(resolve => { releaseModels = () => resolve(reply({
-          kind: 'chat_run_models_listed', default_model_id: 'gpt-oss-20b',
-          models: [{ model_id: 'gpt-oss-20b', label: 'GPT-OSS 20B', ready: true }],
-        })); });
-      case 'chat_history_list':
-        return reply({ kind: 'chat_history_listed', items: [savedChat], next_cursor: null });
-      default:
-        throw new Error('Unexpected transport request in startup overlap fixture');
+      default: throw new Error('Retired Chat must not issue a transport request');
     }
   });
   try {
-    const historyFetches = () => h.requests.filter(request => request.body.kind === 'chat_history_list');
-    const historyStatus = () => h.messages.filter(message => message.kind === 'view').at(-1)
-      ?.view.texts.find(text => text.id === 'chat-history-status')?.text ?? '';
-    await until(() => releaseInspection && releaseModels, 'both startup transport slots occupied');
-    await h.send({ kind: 'show_chat_history' });
-    assert.equal(historyFetches().length, 0, 'history waits without exceeding local concurrency');
-    assert.equal(historyStatus(), 'Checking saved chats…');
-    releaseModels();
-    await until(() => h.messages.some(message => message.kind === 'view'
-      && message.view.lists.some(list => list.id === 'chat-history-list'
-        && list.rows.some(row => row.id === savedChat.chat_id))), 'first history click displays saved chats');
-    assert.equal(historyFetches().length, 1, 'single history request runs after a slot opens');
-    assert.equal(historyFetches()[0].headers['Forge-Destination'], 'ide.chat.history.list');
+    await until(() => releaseInspection, 'automatic inspection starts independently');
+    for(const kind of ['show_chat_history','more_chat_history','manage_saved_chat','cancel_chat_run','retry_chat_submit','new_chat','send_chat'])await h.send({kind});
+    await h.send({kind:'open_chat'});
+    assert.equal(h.requests.some(request=>request.body.kind==='chat'||request.body.kind.startsWith('chat_')||request.body.kind==='propose_edit'),false);
+    assert.equal(h.messages.filter(message=>message.kind==='view').at(-1).view.visibility.some(binding=>binding.id==='agents'&&binding.visible),true);
     releaseInspection();
     await until(() => /Project ready/.test(h.status()), 'original inspection completes independently');
-    assert.equal(h.messages.some(message => message.kind === 'fatal'), false);
+    assert.equal(h.messages.some(message=>message.kind==='fatal'),false);
   } finally { h.close(); }
 }
-console.log('Generated worker waits for a transport slot to open Previous chats during overlapping startup effects.');
+console.log('Generated worker keeps retired Chat inert during startup and maps legacy entry actions to Agents.');

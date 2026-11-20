@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":8,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":9,"files":files})).unwrap(),
         )
         .unwrap();
         Self(p)
@@ -1165,7 +1165,7 @@ fn portal_home_serves_the_fixed_script_free_landing_page() {
             ("/playtest", "Room One playtest"),
             ("/design/forge-providers", "Forge plug-and-play"),
             ("/design#forge-foundations", "Forge foundations"),
-            ("/design#chat-and-mail", "Chat and Mail"),
+            ("/design#chat-and-mail", "Conversation storage"),
             ("/design#game-development", "Game development"),
             (
                 "/design#wireframes-and-workspace",
@@ -1325,7 +1325,7 @@ fn design_reference_serves_only_the_fixed_documents_and_images() {
             assert!(response.contains("aria-label=\"Design topics\""));
             assert!(response.contains("href=\"/design/docs.css\""));
             assert!(!response.contains("target=\"_blank\""));
-            for href in ["/#chat", "/#agents", "/#workbench", "/home", "/design"] {
+            for href in ["/#agents", "/#workbench", "/home", "/design"] {
                 assert!(response.contains(&format!("href=\"{href}\"")));
             }
             assert!(response.contains(">Agents</a>"));
@@ -1757,7 +1757,7 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 9] {
+    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 10] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -3026,7 +3026,7 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
         assert!(home.contains(&format!("aria-label=\"{label}\"")), "{label}");
     }
     assert!(home.contains("href=\"/agents\""));
-    assert!(home.contains("Chat, Agents, and the source workbench."));
+    assert!(home.contains("Agents and the source workbench."));
     assert!(!home.contains("Chat, Mail, and the source workbench."));
 
     let index = request("GET", "/design");
@@ -3129,7 +3129,7 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
                 response.contains("class=\"wordmark return-link\" href=\"/home\""),
                 "{target}"
             );
-            for href in ["/#chat", "/#agents", "/#workbench", "/home", "/design"] {
+            for href in ["/#agents", "/#workbench", "/home", "/design"] {
                 assert!(
                     response.contains(&format!("href=\"{href}\"")),
                     "{target}: {href}"

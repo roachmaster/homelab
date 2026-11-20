@@ -388,10 +388,10 @@ pub(super) const BODY: &[Node] = &[
     element!(Section [Id = "home-tools", Class = "home-section", AriaLabelledby = "home-tools-title"];
         element!(H2 [Id = "home-tools-title"]; text("Tools")),
         element!(Ul [Class = "home-launchers"];
-            launcher!("/", "home-launcher home-launcher-ide", Terminal, "Forge IDE", "Chat, Agents, and the source workbench."),
+            launcher!("/", "home-launcher home-launcher-ide", Terminal, "Forge IDE", "Agents and the source workbench."),
             launcher!("/studio", "home-launcher home-launcher-studio", Studio, "Forge Studio", "Submit a build and open its preview."),
             launcher!("/playtest", "home-launcher home-launcher-playtest", Playtest, "Room One playtest", "Explore the game runtime and replay tools."),
-            launcher!("/agents", "home-launcher home-launcher-agents", Terminal, "Agents", "Assign work to Gemini or Codex, review results, and check usage."),
+            launcher!("/agents", "home-launcher home-launcher-agents", Terminal, "Agents", "Assign work to configured agents, follow progress, and check usage."),
         ),
     ),
     element!(Section [Id = "home-docs", Class = "home-section", AriaLabelledby = "home-design-title"];
@@ -399,7 +399,7 @@ pub(super) const BODY: &[Node] = &[
         element!(Ul [Class = "home-docs"];
             document_link!("/design/forge-providers", "home-doc-link home-doc-featured", "Forge plug-and-play", "Factories, providers, and wiring.", "Start here"),
             document_link!("/design#forge-foundations", "home-doc-link", "Forge foundations", "Ownership across the host and Rust runtime.", "Architecture"),
-            document_link!("/design#chat-and-mail", "home-doc-link", "Chat and Mail", "Conversation storage, dispatch, and replies.", "Inference"),
+            document_link!("/design#chat-and-mail", "home-doc-link", "Conversation storage", "Retained Chat and Mail history; portal views inactive.", "Reference"),
             document_link!("/design#game-development", "home-doc-link", "Game development", "Engine, physics, and the asset pipeline.", "Engine"),
             document_link!("/design#wireframes-and-workspace", "home-doc-link", "Wireframes & IDE screens", "Phone, desktop, and workspace layouts.", "Interface"),
             document_link!("/design/coding-agents", "home-doc-link", "Coding-agent dispatch design", "Proposed PostgreSQL queue, worker leases, and reviewed takeover.", "Proposed"),

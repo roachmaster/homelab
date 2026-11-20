@@ -1,4 +1,5 @@
-from contextlib import closing
+from contextlib import closing, ExitStack
+from copy import deepcopy
 from datetime import UTC, date, datetime, time, timedelta
 import os
 from pathlib import Path
@@ -1040,6 +1041,112 @@ class WorkspaceStoreTest(unittest.TestCase):
         with closing(self.connect("forge_gpu_worker")) as connection, connection, connection.cursor() as cursor:
             with self.assertRaises(psycopg2.errors.InsufficientPrivilege):
                 cursor.execute("SELECT * FROM forge_agent.runs")
+
+    def inert_chat_state(self):
+        state = snapshot((transcript("Saved question", "Saved answer"), "café unsent"))
+        chat_id = str(uuid4())
+        state["chat"]["conversations"][0].update(chat_id=chat_id, revision=7)
+        state["chat"]["model_id"] = "gpt-oss-20b"
+        state["chat"]["pending_run"] = {
+            "chat_id": chat_id, "idempotency_key": str(uuid4()), "run_id": str(uuid4()),
+            "expected_revision": 7, "model_id": "gpt-oss-20b",
+        }
+        return state
+
+    def forbid_chat_hydration(self):
+        stack = ExitStack()
+        for name in ("ensure_active", "latest_checkpoint", "normalize_checkpoint"):
+            stack.enter_context(patch.object(dao, name, side_effect=AssertionError("Chat DAO called")))
+        for name in ("_seed_workspace_history", "_workspace_transcripts", "_merge_workspace"):
+            stack.enter_context(patch.object(store, name, side_effect=AssertionError("Chat hydration called")))
+        return stack
+
+    def test_inert_workspace_preserves_active_chat_exactly_and_changes_only_workspace(self):
+        published = [transcript("Shared", "Historical")]
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute("""INSERT INTO forge_agent.ide_workspace_history
+                              (owner_id, revision, transcripts, chat_history_active)
+                              VALUES (%s, 12, %s, true)""", (store.OWNER, Json(published)))
+        connection.close()
+        original = self.inert_chat_state()
+        with self.forbid_chat_hydration():
+            first = store.restore_workspace(TAB_A, preserve_chat=True)
+            self.assertIsNone(first["snapshot"])
+            store.save_workspace(TAB_A, first["lease"], 1, original, preserve_chat=True)
+            restored = store.restore_workspace(TAB_A, preserve_chat=True)
+            self.assertNotEqual(first["lease"], restored["lease"])
+            self.assertEqual(restored["snapshot"], original)
+            changed = deepcopy(original)
+            changed.update(workbench={"node_key": "lab", "project": "homelab", "entry": None},
+                           workbench_open=True)
+            self.assertEqual(store.save_workspace(TAB_A, restored["lease"], 2, changed, preserve_chat=True), {})
+            self.assertEqual(store.save_workspace(TAB_A, restored["lease"], 1, original, preserve_chat=True), {})
+            self.assertEqual(store.restore_workspace(TAB_A, preserve_chat=True)["snapshot"], changed)
+            self.assertIsNone(store.restore_workspace(TAB_B, preserve_chat=True)["snapshot"])
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT revision, transcripts, chat_history_active FROM forge_agent.ide_workspace_history "
+                           "WHERE owner_id = %s", (store.OWNER,))
+            self.assertEqual(cursor.fetchone(), (12, published, True))
+            cursor.execute("SELECT count(*) FROM forge_agent.ide_chats")
+            self.assertEqual(cursor.fetchone()[0], 0)
+            cursor.execute("SELECT count(*) FROM forge_agent.runs")
+            self.assertEqual(cursor.fetchone()[0], 0)
+        connection.close()
+
+    def test_inert_save_rejects_chat_changes_stale_lease_and_cross_owner_access(self):
+        original = self.inert_chat_state()
+        initial = store.restore_workspace(TAB_A, preserve_chat=True)
+        store.save_workspace(TAB_A, initial["lease"], 1, original, preserve_chat=True)
+        restored = store.restore_workspace(TAB_A, preserve_chat=True)
+        with self.assertRaises(store.Rejected) as rejected:
+            store.save_workspace(TAB_A, initial["lease"], 2, original, preserve_chat=True)
+        self.assertEqual((rejected.exception.status, rejected.exception.code), (401, "workspace_lease"))
+        for mutate in (
+            lambda chat: chat.pop("pending_run"),
+            lambda chat: chat.pop("model_id"),
+            lambda chat: chat["conversations"][0].pop("chat_id"),
+            lambda chat: chat["conversations"][0].update(revision=8),
+            lambda chat: chat["conversations"][0].update(draft="changed"),
+            lambda chat: chat["conversations"][0]["messages"][0].update(content="changed"),
+        ):
+            changed = deepcopy(original)
+            mutate(changed["chat"])
+            if "chat_id" not in changed["chat"]["conversations"][0]:
+                changed["chat"]["conversations"][0].pop("revision")
+                changed["chat"].pop("pending_run")
+            with self.subTest(chat=changed["chat"]), self.assertRaises(store.Rejected) as rejected:
+                store.save_workspace(TAB_A, restored["lease"], 2, changed, preserve_chat=True)
+            self.assertEqual((rejected.exception.status, rejected.exception.code), (409, "workspace_chat_changed"))
+        with patch.object(store, "OWNER", "other-owner"):
+            other = store.restore_workspace(TAB_A, preserve_chat=True)
+            self.assertIsNone(other["snapshot"])
+            with self.assertRaises(store.Rejected) as rejected:
+                store.save_workspace(TAB_A, restored["lease"], 1, original, preserve_chat=True)
+            self.assertEqual(rejected.exception.status, 401)
+        self.assertEqual(store.restore_workspace(TAB_A, preserve_chat=True)["snapshot"], original)
+
+    def test_inert_initial_snapshot_is_bounded_and_never_seeds_or_publishes_history(self):
+        state = self.inert_chat_state()
+        with self.forbid_chat_hydration():
+            restored = store.restore_workspace(TAB_A, preserve_chat=True)
+            store.save_workspace(TAB_A, restored["lease"], 1, state, preserve_chat=True)
+            self.assertEqual(store.restore_workspace(TAB_A, preserve_chat=True)["snapshot"], state)
+        with self.connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT revision, transcripts, chat_history_active FROM forge_agent.ide_workspace_history "
+                           "WHERE owner_id = %s", (store.OWNER,))
+            self.assertEqual(cursor.fetchone(), (0, [], False))
+        connection.close()
+        with patch.object(store, "transaction", side_effect=AssertionError("Unexpected database access")):
+            for options in ({"preserve_chat": True, "history_enabled": True},
+                            {"preserve_chat": True, "models": True}, {"preserve_chat": 1}):
+                with self.subTest(options=options), self.assertRaises(store.Rejected):
+                    store.restore_workspace(TAB_A, **options)
+            oversized = deepcopy(state)
+            oversized["chat"]["conversations"][0]["draft"] = "x" * 2049
+            with self.assertRaises(store.Rejected):
+                store.save_workspace(TAB_A, restored["lease"], 1, oversized, preserve_chat=True)
+            with patch.object(store, "WORKSPACE_MAX_BYTES", 32), self.assertRaises(store.Rejected):
+                store.save_workspace(TAB_A, restored["lease"], 1, state, preserve_chat=True)
 
     def test_shared_history_excludes_foreign_drafts_and_reattaches_the_saved_tab(self):
         older = store.restore_workspace(TAB_B)

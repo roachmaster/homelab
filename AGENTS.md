@@ -47,7 +47,9 @@ switching; no automatic quota controller is configured.
 
 ## Current portal views
 
-The active portal navigation is Chat, Agents, Workbench, Home and Design. Mail
-was replaced by Agents; preserve its PostgreSQL history and inert legacy local
-draft hints. Reintroduce a Mail UI only when explicitly requested. Current UI
+The active portal navigation is Agents, Workbench, Home and Design. Chat is
+temporarily inactive and Mail was replaced by Agents. Preserve their PostgreSQL
+history and inert legacy local drafts, identities and pending-run hints. Legacy
+Chat entry links resolve to Agents without Chat I/O. Reintroduce either UI only
+when explicitly requested. Current UI
 changes belong in typed Rust/YAML declarations and verified generated assets.

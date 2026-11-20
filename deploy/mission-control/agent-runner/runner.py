@@ -110,6 +110,7 @@ class RestoreWorkspace:
     tab: str
     history_enabled: bool = False
     models: bool = False
+    preserve_chat: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ class SaveWorkspace:
     lease: str
     revision: int
     snapshot: dict
+    preserve_chat: bool = False
 
 
 def dispatch(route, command):
@@ -138,12 +140,17 @@ def dispatch(route, command):
         return store.get_events(command.run_id, command.after)
     if route is Route.WORKSPACE:
         if isinstance(command, RestoreWorkspace):
+            if command.preserve_chat:
+                return store.restore_workspace(command.tab, preserve_chat=True)
             if command.models:
                 return store.restore_workspace(command.tab, history_enabled=True, models=True)
             if command.history_enabled:
                 return store.restore_workspace(command.tab, history_enabled=True)
             return store.restore_workspace(command.tab)
         if isinstance(command, SaveWorkspace):
+            if command.preserve_chat:
+                return store.save_workspace(command.tab, command.lease, command.revision, command.snapshot,
+                                            preserve_chat=True)
             return store.save_workspace(command.tab, command.lease, command.revision, command.snapshot)
     raise Rejected(400, "invalid_route_payload")
 
@@ -157,11 +164,15 @@ def workspace_command(body):
     if operation == "restore":
         if body.keys() == {"operation", "tab"}:
             return RestoreWorkspace(tab)
+        if body.keys() == {"operation", "tab", "preserve_chat"} and body["preserve_chat"] is True:
+            return RestoreWorkspace(tab, preserve_chat=True)
         if body.keys() == {"operation", "tab", "history"} and body["history"] is True:
             return RestoreWorkspace(tab, history_enabled=True)
         if body.keys() == {"operation", "tab", "history", "models"} and body["history"] is True and body["models"] is True:
             return RestoreWorkspace(tab, history_enabled=True, models=True)
-    if operation != "save" or body.keys() != {"operation", "tab", "lease", "revision", "snapshot"}:
+    save_keys = {"operation", "tab", "lease", "revision", "snapshot"}
+    preserve_chat = body.keys() == save_keys | {"preserve_chat"} and body["preserve_chat"] is True
+    if operation != "save" or (body.keys() != save_keys and not preserve_chat):
         raise Rejected(400, "invalid_workspace_request")
     lease, revision, snapshot = body["lease"], body["revision"], body["snapshot"]
     if (not isinstance(lease, str) or not re.fullmatch(r"[0-9a-f]{64}", lease)
@@ -169,7 +180,7 @@ def workspace_command(body):
         raise Rejected(400, "invalid_workspace_request")
     if not store.valid_workspace(snapshot):
         raise Rejected(400, "invalid_workspace_snapshot")
-    return SaveWorkspace(tab, lease, revision, snapshot)
+    return SaveWorkspace(tab, lease, revision, snapshot, preserve_chat=preserve_chat)
 
 
 def unique_json_object(pairs):

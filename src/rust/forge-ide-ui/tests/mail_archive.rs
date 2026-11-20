@@ -12,7 +12,7 @@ fn visible(v: &ViewModel, id: &str) -> bool {
     v.visibility.iter().any(|b| b.id == id && b.visible)
 }
 fn ready(work: bool, usage: bool) -> UiModel {
-    let mut m = UiModel::default();
+    let mut m = UiModel::with_presentation_policy(forge_ide_ui::PresentationPolicy { chat: true });
     let UiEffect::Resume { request_id } = event(&mut m, UiEvent::Resume {}).effects.remove(0)
     else {
         panic!("resume")

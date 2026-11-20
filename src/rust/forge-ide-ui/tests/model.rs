@@ -43,8 +43,9 @@ fn event(m: &mut UiModel, e: UiEvent) -> Output {
     })
     .unwrap()
 }
+// Explicit retained legacy client contract; the portal uses the disabled default policy.
 fn connected_chat() -> UiModel {
-    let mut m = UiModel::default();
+    let mut m = UiModel::with_presentation_policy(PresentationPolicy { chat: true });
     let o = event(&mut m, UiEvent::Resume {});
     let UiEffect::Resume { request_id } = &o.effects[0] else {
         panic!("resume")
@@ -532,7 +533,7 @@ fn workspace_restores_source_and_declaration_only_from_fresh_report() {
 
 #[test]
 fn workspace_recovery_reuses_autoload_and_drops_missing_selection() {
-    let mut reopened = UiModel::default();
+    let mut reopened = UiModel::with_presentation_policy(PresentationPolicy { chat: true });
     let resume = event(&mut reopened, UiEvent::Resume {});
     let UiEffect::Resume { request_id } = &resume.effects[0] else {
         panic!("resume")
@@ -2337,7 +2338,8 @@ fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_five_list
         n.projects.clear();
         c.nodes.push(n);
     }
-    let mut m = UiModel::default();
+    // Retain the maximal legacy five-list contract separately from the retired portal.
+    let mut m = UiModel::with_presentation_policy(PresentationPolicy { chat: true });
     let start = event(&mut m, UiEvent::Resume {});
     let UiEffect::Resume { request_id } = &start.effects[0] else {
         panic!()

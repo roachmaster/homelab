@@ -724,8 +724,9 @@ mod tests {
         let mut output = String::new();
         emit(navigation, &mut output);
         assert!(output.starts_with("<nav id=\"ide-navigation\" class=\"fg-toolbar fg-navigation\" aria-label=\"Forge IDE views\" data-protected hidden>"));
-        let (_, after_chat) = output.split_once("id=\"open-chat\"").unwrap();
-        let (_, after_workbench) = after_chat.split_once("id=\"open-workbench\"").unwrap();
+        assert!(!output.contains("id=\"open-chat\""));
+        let (_, after_agents) = output.split_once("id=\"open-agents\"").unwrap();
+        let (_, after_workbench) = after_agents.split_once("id=\"open-workbench\"").unwrap();
         let (_, after_button) = after_workbench.split_once("</button>").unwrap();
         assert_eq!(after_button, concat!(
             "<a id=\"open-home\" class=\"fg-navigation-link\" href=\"/home\" data-workspace-navigation>Home</a>",
