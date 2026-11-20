@@ -227,6 +227,19 @@ class ReviewWorker:
         self.stop = stop if stop is not None else threading.Event()
         self.hosted_checks = hosted_checks
 
+    def _finish(self, job, outcome):
+        try:
+            return self.store.review_finish(job, outcome)
+        except Exception as error:
+            retryable = (isinstance(error, (OSError, TimeoutError))
+                         or type(error).__module__.startswith("psycopg2")
+                         and type(error).__name__ in {"OperationalError", "InterfaceError"})
+            if not retryable:
+                raise
+            # Replay only the identical finish receipt, never a CLI, check,
+            # source import, push or PR creation.
+            return self.store.review_finish(job, outcome)
+
     @contextmanager
     def _locked(self, job):
         path = self.config.state_root / (uuid(job["review_id"]) + ".lock")
@@ -343,19 +356,20 @@ class ReviewWorker:
                         "gate_changes_require_review": gate_changes,
                         "checks": [{**check, "head_sha": head} for check in report.checks]}}
                 require_lease()
-                self.store.review_finish(job, outcome)
+                self._finish(job, outcome)
         except Exception as error:
             if not lost.is_set():
                 code = error.code if isinstance(error, PublicationError) else "review_unavailable"
+                uncertain = code in {"prior_verification_scope_unstopped", "verification_scope_unstopped"}
                 try:
-                    self.store.review_finish(job, {"disposition": "handoff", "reason": code,
+                    self._finish(job, {"disposition": "needs_reconcile" if uncertain else "handoff", "reason": code,
                         "candidate_commit": head, "gate_manifest_sha256": gate_manifest_sha256(
                             self.config.checks, self.config.required_hosted_checks, source_gate_digest),
                         "findings": [], "verified_finding_ids": [], "fingerprint": None,
                         "summary": "Independent review stopped before approval.", "verification": {
                             "checks_passed": False, "candidate_workspace_digest": candidate_digest,
                             "repair_requires_new_workspace": requires_new, "toolchain": "Not reported",
-                            "integration_base": integration_base, "cleanup_confirmed": False, "checks": []}})
+                            "integration_base": integration_base, "cleanup_confirmed": not uncertain, "checks": []}})
                 except Exception:
                     LOG.warning("Review receipt unavailable; no repair or remote action replayed")
         finally:
@@ -398,7 +412,7 @@ class ReviewWorker:
                     "summary": diagnostic_text(job.get("summary") or "Owner requested correction of the delivered candidate.")}]
                 self.git.verify(repository, head)
                 require_lease()
-                self.store.review_finish(job, {"disposition": "repair", "reason": "owner_requested_source_repair",
+                self._finish(job, {"disposition": "repair", "reason": "owner_requested_source_repair",
                     "candidate_commit": head, "gate_manifest_sha256": manifest["gate_manifest_sha256"],
                     "findings": findings, "verified_finding_ids": [], "fingerprint": None,
                     "summary": diagnostic_text(job.get("summary") or "Owner-authorized repair of the exact delivered candidate."),
@@ -411,7 +425,7 @@ class ReviewWorker:
                 return
             code = error.code if isinstance(error, PublicationError) else "owner_repair_import_unavailable"
             try:
-                self.store.review_finish(job, {"disposition": "handoff", "reason": code,
+                self._finish(job, {"disposition": "handoff", "reason": code,
                     "candidate_commit": job.get("candidate_commit"), "gate_manifest_sha256": None,
                     "findings": [], "verified_finding_ids": [], "fingerprint": None,
                     "summary": "The owner-selected candidate could not be imported safely.",
@@ -486,12 +500,12 @@ class ReviewWorker:
                         "integration_base": prior["integration_base"], "cleanup_confirmed": True,
                         "checks": list(report.checks)}}
                 require_lease()
-                self.store.review_finish(job, outcome)
+                self._finish(job, outcome)
         except Exception as error:
             if not lost.is_set():
                 code = error.code if isinstance(error, PublicationError) else "hosted_review_unavailable"
                 try:
-                    self.store.review_finish(job, {"disposition": "handoff", "reason": code,
+                    self._finish(job, {"disposition": "handoff", "reason": code,
                         "candidate_commit": job.get("candidate_commit"),
                         "gate_manifest_sha256": job.get("gate_manifest_sha256"), "findings": [],
                         "verified_finding_ids": [], "fingerprint": None,

@@ -64,7 +64,7 @@ def _git(root, *args):
                    if key in {"PATH", "LANG", "LC_ALL", "SYSTEMROOT"}}
     environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL="/dev/null",
                        GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
-    return subprocess.run(("git", "-C", str(root), *args), stdin=subprocess.DEVNULL,
+    return subprocess.run(("/usr/bin/git", "-C", str(root), *args), stdin=subprocess.DEVNULL,
                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                           env=environment, timeout=15, check=False)
 

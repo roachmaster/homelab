@@ -47,6 +47,11 @@ def _lease(value):
         raise ValueError("Invalid coding feedback digest")
     if result.get("feedback_id") is None and result.get("feedback_sha256") is not None:
         raise ValueError("Unbound coding feedback digest")
+    linked = any(result.get(name) is not None for name in
+                 ("parent_task_id", "repair_source_review_id", "repair_candidate_commit"))
+    if linked and (not result.get("parent_task_id") or not result.get("repair_source_review_id")
+                   or not result.get("feedback_id") or result.get("repair_candidate_commit") != result["base_revision"]):
+        raise ValueError("Incomplete linked repair authority")
     if result["unit_name"] != unit_name(result["attempt_id"]):
         raise ValueError("Invalid coding lease scope")
     return result
