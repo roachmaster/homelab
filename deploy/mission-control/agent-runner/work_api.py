@@ -366,6 +366,7 @@ class WorkServiceFactory:
             self._config.allowed_projects,
             self._connect_factory,
             max_pending=self._config.max_pending,
+            repair_policy=self._config.repair_policy,
         )
         return WorkService(self._config, catalog, store)
 

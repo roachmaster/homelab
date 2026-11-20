@@ -56,7 +56,7 @@ BEGIN
           ('coding_review_policy',ARRAY['SELECT','INSERT','UPDATE']),
           ('coding_reviews',ARRAY['SELECT','INSERT','UPDATE']),
           ('coding_feedback',ARRAY['SELECT','INSERT']),
-          ('coding_review_budget',ARRAY['SELECT']),
+          ('coding_review_budget',ARRAY['SELECT','INSERT']),
           ('coding_hosted_checks',ARRAY['SELECT']),
           ('coding_worker_grants',            ARRAY[]::text[]),
           ('coding_worker_readiness',         ARRAY['SELECT']),

@@ -13,7 +13,8 @@ from test_work_execution_and_usage import BASE_REV, make_stop_proof, make_submit
 from work_api import WorkAccept, WorkGet, WorkResume, WorkPlanDecide, WorkServiceFactory
 from work_config import PinnedRecipe, sha256_canonical
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE, SQL_DIR
-from work_store import WorkStore, _accept_intent_digest
+from work_store import WorkStore, _accept_intent_digest, _submit_intent_digest
+from work_config import prepare_title
 from psycopg2.extras import Json
 from work_worker_store import WorkerDB
 import work_policy
@@ -46,6 +47,10 @@ SESSION_POLICY = {key: value for key, value in PREVIOUS_POLICY.items() if key !=
 SESSION_POLICY.update(id=SESSION_POLICY_ID,
     antigravity_session_policy="fresh-unless-receipt-owned-task-resume-v1",codex_session_policy="ephemeral-v1")
 SESSION_POLICY_DIGEST = sha256_canonical(SESSION_POLICY)
+PLAN_POLICY_ID='forge-coding-v4'
+PLAN_POLICY={**SESSION_POLICY,'id':PLAN_POLICY_ID,'plan_workflow':'artifact-bound-plan-decisions-publication-v1'}
+PLAN_POLICY_DIGEST=sha256_canonical(PLAN_POLICY)
+
 
 
 def historical_registry(root, maximum):
@@ -57,7 +62,9 @@ def historical_registry(root, maximum):
                   lambda match: "" if int(match.group(1))>maximum else match.group(0),script,flags=re.DOTALL)
     registry.write_text(script)
     grant=root/"management/grant-runner.sql"
-    value=grant.read_text().replace(",\n    forge_agent.coding_plan_decisions TO forge_agent;"," TO forge_agent;")
+    value=grant.read_text()
+    if maximum<15:value=value.split("-- M15:")[0]
+    value=value.replace(",\n    forge_agent.coding_plan_decisions TO forge_agent;"," TO forge_agent;")
     value="\n".join(line for line in value.splitlines() if not any(token in line for token in (
         "GRANT SELECT ON forge_agent.coding_publications", "forge_coding_worker_api.read_plan(",
         "forge_coding_worker_api.queue_publication(", "forge_coding_reconciler_api.publication_")))+"\n"
@@ -71,14 +78,16 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v4")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v5")
+        self.assertEqual(PLAN_POLICY_DIGEST,"b541291edbadf6390f1a46f1f8f82d5b090f9942aaf2b57ced50ef3f779ab5e4")
+        self.assertEqual(work_policy.POLICY["feedback_workflow"],"lease-bound-immutable-feedback-review-v1")
         self.assertEqual(work_policy.POLICY["plan_workflow"], "artifact-bound-plan-decisions-publication-v1")
         self.assertEqual(work_policy.POLICY["antigravity_session_policy"], "fresh-unless-receipt-owned-task-resume-v1")
         self.assertEqual(work_policy.POLICY["codex_session_policy"], "ephemeral-v1")
         self.assertNotIn("fresh_session", work_policy.POLICY)
         self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow"}}
+                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow"}}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 
@@ -147,8 +156,26 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         return PinnedRecipe(**payload, digest=sha256_canonical(payload))
 
     def admit_old(self, cluster, key, policy=OLD_POLICY_ID):
-        command = make_submit(idempotency_key=key)
-        return self.store(cluster).submit(**vars(command), resolve_recipe=lambda: self.old_recipe(policy))
+        command=make_submit(idempotency_key=key)
+        version=self.rows(cluster,'SELECT max(version) FROM forge_agent.schema_migrations')[0][0]
+        with closing(cluster.connect('forge_agent')) as connection,connection,connection.cursor() as cursor:
+            # The old application used the pre-M15 columns. This owned fixture
+            # seeds that historic admission surface; the migrated replay below
+            # deliberately exercises the current production store.
+            if version>=15:
+                return self.store(cluster).submit(**vars(command),resolve_recipe=lambda:self.old_recipe(policy))
+            recipe=self.old_recipe(policy);task_id=uuid4()
+            receipt={'task_id':str(task_id),'project_alias':'homelab','revision':1,'status':'queued','recipe_digest':recipe.digest}
+            intent=_submit_intent_digest(project_alias=command.project_alias,base_revision=command.base_revision,mode=command.mode,
+                agent_profile=command.agent_profile,prompt=command.prompt,acceptance_criteria=command.acceptance_criteria)
+            cursor.execute("""INSERT INTO forge_agent.coding_tasks(owner_id,project_alias,id,idempotency_key,intent_digest,base_revision,
+                mode,agent_profile,title,prompt,acceptance_criteria,pinned_recipe,recipe_digest,status,revision)
+                VALUES('mission-control',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'queued',1)""",
+                (command.project_alias,task_id,key,intent,command.base_revision,command.mode,command.agent_profile,prepare_title(command.prompt),
+                 command.prompt,command.acceptance_criteria,Json(recipe.to_dict()),recipe.digest))
+            cursor.execute("""INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
+                VALUES('mission-control',%s,%s,1,'queued',%s)""",(command.project_alias,task_id,Json(receipt)))
+            return receipt
 
     def legacy_accept(self, cluster, command):
         receipt={"project_alias":command.project_alias,"task_id":str(command.task_id),
@@ -188,7 +215,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 proof = make_stop_proof(lease.unit_name)
                 receipt = db.publish(lease, "awaiting_review", manifest, None, "Old policy result", proof)
                 snapshots = self.rows(
-                    cluster, "SELECT to_jsonb(t)-'plan_decision_id', to_jsonb(a)-'plan_decision_id' FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 )
@@ -197,7 +224,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(self.rows(cluster, "SELECT version FROM forge_agent.schema_migrations WHERE version = 11")[0][0], 11)
                 self.assertEqual(self.rows(
-                    cluster, "SELECT to_jsonb(t)-'plan_decision_id', to_jsonb(a)-'plan_decision_id' FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 ), snapshots)
@@ -229,7 +256,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                                      "v2-accept-before-session-policy", "Reviewed before upgrade")
                 acceptance = self.legacy_accept(cluster,command)
                 snapshot_query = (
-                    "SELECT to_jsonb(t)-'plan_decision_id', to_jsonb(a)-'plan_decision_id', "
+                    "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'], "
                     "(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.idempotency_key) "
                     "FROM forge_agent.coding_control_receipts r WHERE r.task_id=t.id) "
                     "FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
@@ -238,7 +265,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 14)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 15)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -275,7 +302,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 db.reconcile(lease,"c"*64,proof)
                 command=WorkAccept("homelab",UUID(lease.task_id),publication["revision"],"old-v3-accept","Historical approval")
                 acceptance=self.legacy_accept(cluster,command)
-                snapshot="SELECT to_jsonb(t)-'plan_decision_id',to_jsonb(a)-'plan_decision_id' FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
+                snapshot="SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'],to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'] FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
                 before=self.rows(cluster,snapshot,(UUID(lease.task_id),))
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
@@ -370,7 +397,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
         function = self.rows(self.cluster,
             "SELECT pg_get_functiondef('forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure)")[0][0]
-        no_new_policy = function.replace("'forge-coding-v4'", "'removed-policy'")
+        no_new_policy = function.replace("'forge-coding-v5'", "'removed-policy'")
         no_digest, replacements = re.subn(
             r"\(t\.pinned_recipe->>'policy_digest'\)\s*=\s*r\.policy_digest", "true", function,
         )

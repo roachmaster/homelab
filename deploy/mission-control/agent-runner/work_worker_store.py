@@ -105,6 +105,7 @@ class Lease:
     feedback_sha256: str | None = None
     repair_source_review_id: str | None = None
     repair_candidate_commit: str | None = None
+    scope_plan_decision_id: str | None = None
 
     def to_dict(self):
         return {
@@ -127,7 +128,7 @@ class Lease:
             "resume_attempt_id": self.resume_attempt_id,
             "plan_decision_id": self.plan_decision_id,
             "feedback_id":self.feedback_id,"feedback_sha256":self.feedback_sha256,
-            "repair_source_review_id":self.repair_source_review_id,"repair_candidate_commit":self.repair_candidate_commit,
+            "repair_source_review_id":self.repair_source_review_id,"repair_candidate_commit":self.repair_candidate_commit,"scope_plan_decision_id":self.scope_plan_decision_id,
         }
 
 
@@ -408,6 +409,7 @@ class WorkerDB:
             feedback_sha256=payload.get("feedback_sha256"),
             repair_source_review_id=str(payload["repair_source_review_id"]) if payload.get("repair_source_review_id") else None,
             repair_candidate_commit=payload.get("repair_candidate_commit"),
+            scope_plan_decision_id=str(payload["scope_plan_decision_id"]) if payload.get("scope_plan_decision_id") else None,
         )
 
     def renew(self, lease):

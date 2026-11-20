@@ -77,7 +77,10 @@ def validate_feedback(value):
             or not isinstance(value['agent_profile'],str) or not IDENTIFIER.fullmatch(value['agent_profile'])):
         raise ValueError('Invalid feedback authority')
     _text(value['summary'],2048)
-    return {**value,'findings':validate_findings(value['findings'])}
+    result={**value,'findings':validate_findings(value['findings'])}
+    if len(json.dumps(result,ensure_ascii=False,allow_nan=False,separators=(',',':')).encode('utf-8'))>65536:
+        raise ValueError('Oversized complete feedback artifact')
+    return result
 
 
 def parse_feedback_json(raw, expected_sha256):
