@@ -311,3 +311,78 @@ It avoids another full cold CI run inside the native turn; the independent
 verifier still runs **all** required checks. A bounded operator note can point to
 an audited outstanding issue without granting commits, pushes, scope changes,
 account rotation or paid-credit fallback. A second deadline stop escalates.
+
+## Saved peer-verdict compatibility recovery
+
+The peer decoder accepts the single wire alias `correctness` as `source`;
+canonical feedback categories and all other unknown values remain strict. The
+stored reviewer bytes, result SHA, target SHA and full author feedback never
+change. Reviewer instructions enumerate categories and field/packet limits.
+
+`WorkflowCoordinator.retry_peer_verdict` is a private factory-owned recovery port;
+the ordinary durable scan invokes the same method automatically. It accepts only
+the precise parser-error escalation for a stopped, reconciled code reviewer whose
+saved decision is `revise` and contains that alias. Current source revision,
+immutable target, approved Plan, candidate, successful local gates, frozen roles,
+recipes, grants, readiness and remaining code budget must still match. Cancelled,
+blocked, concurrent or published work cannot be revived. This path cannot recover
+an approval, fabricate a verdict or accept a generic parser error.
+
+A project lock and one immutable completed recovery ledger entry per workflow
+make concurrent/repeated requests idempotent. Recovery queues the original
+handed-off decision action, then the normal controller validates and applies the
+saved verdict. The usual code repair allowance is consumed by that transition;
+no Plan, native-deadline, verifier retry or code budget is reset. An unchanged
+candidate keeps its existing exact-head local evidence; repaired source goes
+through all normal checks and another independent review before publication.
+
+## Linked candidate preparation retries
+
+A linked repair base can exist only as an immutable canonical Git object, with
+no branch naming it. After cloning, candidate preparation explicitly fetches and
+verifies that exact admitted commit from the configured local canonical source,
+without changing canonical refs, files or `FETCH_HEAD`. No task-supplied source
+path, remote fallback or upload-pack setting is accepted.
+
+The private factory-owned `retry_preparation` port and normal durable scan can
+recover the known pre-candidate `publication_command_failed` handoff. They require
+the latest linked author result, stopped/reconciled matching workspace, approved
+scope, unchanged frozen roles/grants/readiness, no checks or candidate yet, and
+no cancelled, blocked or competing work. They use the existing
+`review_decide(retry_infrastructure)` path and its existing frozen infrastructure
+allowance of one. No author reruns, code repair rounds, Plan revisions or native
+deadline allowances are granted or reset. The failed review receipt stays intact.
+
+The appended review preserves inherited Plan scope and all stopped source hashes.
+A local infrastructure retry without a candidate takes a fresh digest-validated
+snapshot and runs normal preparation and **all** fixed checks; it cannot reuse a
+missing candidate manifest as approval. Retries with an existing candidate retain
+the existing exact-candidate reuse contract. Source merge conflicts, authentication
+failures and unrelated handoffs are not asserted to be successful preparation.
+
+## Source acquisition and delivery readiness
+
+The workspace provider reports trusted lock contention as `WorkspaceBusyError`.
+The verifier waits at most30 seconds for snapshot acquisition on the same review
+lease, checks cancellation throughout, and rechecks its lease before using the
+snapshot. Lease renewals are bounded separately from the short cancellation wait.
+No check, source preparation or model starts while the source is unavailable.
+Failure receipts contain a stage and exception class only, without raw exceptions
+or credentials.
+
+For a stopped legacy review that failed before any candidate or check, one
+`forge-source-readiness-delivery-v1` receipt per workflow may deliver the checks
+after a **newer trusted reconciliation** confirms the exact same attempt, result,
+workspace digest, current revision and approved Plan. The original immutable
+failure receipt must identify the legacy pre-check failure or an explicit
+snapshot `WorkspaceBusyError`; revoked roles, changed source, cancellation and
+competing work remain blocked. The successor preserves the spent infrastructure
+retry count, code/Plan counts, findings and stagnation. It changes neither the
+task revision nor the original failed receipt, and grants no approval or model
+turn. All fixed checks still run normally from the new source-ready receipt.
+
+Both explicit `queue_review` and implicit `review_claim` admission acquire the
+same owner-scoped transaction advisory lock before their SQL functions. This
+serializes the two initial review producers without new table grants or schema.
+Both coding-worker and publication-service facades must receive this update;
+the lock is not a substitute for the existing scoped SQL checks and task leases.
