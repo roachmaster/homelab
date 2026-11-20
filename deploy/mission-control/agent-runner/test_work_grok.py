@@ -28,6 +28,21 @@ def parse(values,**kw):
  for row in values:p.feed(json.dumps(row).encode()+b'\n')
  return p.finish(0,proof(),**kw)
 class GrokParserTest(unittest.TestCase):
+ def test_installed_native_preview_stream_maps_cache_once(self):
+  # Authorized one-turn 1.0.92 preview. IDs/cwd are fixture values; thought
+  # contents/signature are replaced. Tokens, event order and text chunks remain.
+  data=(Path(__file__).with_name('fixtures')/'grok-1.0.92-streaming-json.jsonl').read_bytes()
+  p=CliParser('grok',expected_conversation_id=SID)
+  for offset in range(0,len(data),7):p.feed(data[offset:offset+7])
+  r=p.finish(0,proof())
+  self.assertEqual(r.status,'awaiting_review')
+  self.assertEqual(r.text,'FORGE_GROK_PREVIEW_OK')
+  self.assertEqual(r.conversation_id,SID)
+  self.assertNotIn('reasoning',r.text)
+  u=normalize_attempt_usage('grok',r.usage)
+  self.assertEqual([u[key]for key in ('input_tokens','cached_input_tokens','output_tokens','total_tokens')],['3398','2816','42','3440'])
+  self.assertEqual(u['coverage'],'complete')
+  self.assertEqual(u['source'],'grok-headless-end-v1')
  def test_terminal_only_usage_full_input_and_no_thought_retention(self):
   r=parse(records());self.assertEqual(r.status,'awaiting_review');self.assertEqual(r.text,'Final answer')
   u=normalize_attempt_usage('grok',r.usage)
