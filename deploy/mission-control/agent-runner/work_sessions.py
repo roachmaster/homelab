@@ -110,6 +110,9 @@ class AntigravitySessionProvider:
             "agent_profile": lease["agent_profile"], "recipe": lease["recipe"],
             "plan_decision_id": lease.get("plan_decision_id"),
             "scope_plan_decision_id": lease.get("scope_plan_decision_id"),
+            "workflow_id": lease.get("workflow_id"),
+            "workflow_review_id": lease.get("workflow_review_id"),
+            "review_target_sha256": lease.get("review_target_sha256"),
             "account": [self.config.account.user, self.config.account.uid,
                         self.config.account.gid, str(self.config.account.home)],
             "binary_sha256": binary_sha256,
@@ -118,7 +121,8 @@ class AntigravitySessionProvider:
         selection = SessionSelection(task_id, identity, attempt_id)
         # A one-off never consults agy's global latest-conversation cache, even
         # when an unrelated task uses the same child mount path or project.
-        if lease.get("resume_workspace_digest") is None or lease.get("resume_attempt_id") is None:
+        if (lease.get("workflow_review_id") is not None or lease.get("resume_workspace_digest") is None
+                or lease.get("resume_attempt_id") is None):
             return selection
         previous_attempt = _uuid(lease["resume_attempt_id"])
         record = self._read(task_id)

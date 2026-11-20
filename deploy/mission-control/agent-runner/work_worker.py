@@ -21,6 +21,7 @@ from work_sessions import AntigravitySessionProvider
 from work_review_context import ReviewContextError, ReviewContextProvider
 from work_consumer_cache import configured_consumer_caches
 from work_candidate_source import ReviewCandidateSourceProvider
+from work_peer_context import PeerReviewContextProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
@@ -38,7 +39,8 @@ def _lease(value):
     for field in ("task_id", "attempt_id", "attempt_token"):
         if str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding lease identity")
-    for field in ("plan_decision_id", "scope_plan_decision_id", "resume_attempt_id", "feedback_id", "repair_source_review_id", "parent_task_id"):
+    for field in ("plan_decision_id", "scope_plan_decision_id", "resume_attempt_id", "feedback_id", "repair_source_review_id", "parent_task_id",
+                  "workflow_id", "workflow_review_id", "workflow_feedback_review_id"):
         if result.get(field) is not None and str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding continuation identity")
     if result.get("feedback_id") is not None and (not isinstance(result.get("feedback_sha256"), str)
@@ -47,6 +49,22 @@ def _lease(value):
         raise ValueError("Invalid coding feedback digest")
     if result.get("feedback_id") is None and result.get("feedback_sha256") is not None:
         raise ValueError("Unbound coding feedback digest")
+    if result.get("workflow_review_id") is not None:
+        digest = result.get("review_target_sha256")
+        if (result.get("workflow_id") is None or result["mode"] != "review"
+                or not isinstance(digest, str) or len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)):
+            raise ValueError("Incomplete peer review authority")
+    elif result.get("review_target_sha256") is not None:
+        raise ValueError("Unbound peer review context")
+    if result.get("workflow_feedback_review_id") is not None:
+        digest = result.get("workflow_feedback_sha256")
+        if (result.get("workflow_id") is None or result.get("workflow_review_id") is not None
+                or result["mode"] not in {"plan", "implement"} or not isinstance(digest, str)
+                or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)):
+            raise ValueError("Incomplete workflow feedback authority")
+    elif result.get("workflow_feedback_sha256") is not None:
+        raise ValueError("Unbound workflow feedback context")
     linked = any(result.get(name) is not None for name in
                  ("parent_task_id", "repair_source_review_id", "repair_candidate_commit"))
     if linked and (not result.get("parent_task_id") or not result.get("repair_source_review_id")
@@ -91,13 +109,14 @@ class CodingWorker:
 
     def __init__(self, config, store, runner_provider, workspace_provider, supervisor,
                  *, collector=None, clock=time.monotonic, stop=None, usage_normalizer=None,
-                 review_context_provider=None):
+                 review_context_provider=None, peer_context_provider=None):
         self.config, self.store = config, store
         self.runner, self.workspaces, self.supervisor = runner_provider, workspace_provider, supervisor
         self.collector, self.clock = collector, clock
         self.stop = stop if stop is not None else threading.Event()
         self.usage_normalizer = usage_normalizer
         self.review_contexts = review_context_provider
+        self.peer_contexts = peer_context_provider
         self.incarnation = str(uuid4())
         self._last_advertisement = float("-inf")
 
@@ -266,6 +285,13 @@ class CodingWorker:
                     # stays unchanged and retains terminal-result reporting.
                     reporter = report_progress if lease["recipe"]["backend"] == "antigravity" else None
                     arguments = {"report_progress": reporter}
+                    if lease.get("workflow_review_id") is not None:
+                        try:
+                            if self.peer_contexts is None:
+                                raise ValueError()
+                            arguments["peer_context"] = self.peer_contexts.acquire(lease, workspace)
+                        except Exception:
+                            raise ExecutionError("needs_reconcile", "The current peer review target could not be verified.") from None
                     if lease.get("plan_decision_id") is not None or lease.get("scope_plan_decision_id") is not None:
                         try:
                             arguments["plan_context"] = self.store.read_plan(lease)
@@ -281,6 +307,14 @@ class CodingWorker:
                                 arguments["feedback_context"] = feedback
                         except Exception:
                             raise ExecutionError("needs_reconcile", "The current review feedback could not be verified.") from None
+                    if lease.get("workflow_feedback_review_id") is not None:
+                        try:
+                            if self.peer_contexts is None:
+                                raise ValueError()
+                            arguments["peer_feedback_context"] = self.peer_contexts.acquire_feedback(lease,
+                                plan_context=arguments.get("plan_context"), feedback_context=arguments.get("feedback_context"))
+                        except Exception:
+                            raise ExecutionError("needs_reconcile", "The complete workflow feedback could not be verified.") from None
                     outcome = self.runner.run(lease, workspace, stop, **arguments)
                     proof = outcome.stop_proof
                 if self.stop.is_set() and not cancelled.is_set():
@@ -360,7 +394,7 @@ class CodingWorkerFactory:
 
     def __init__(self, config, store_factory, *, runner_factory=None, workspace_factory=None,
                  supervisor_factory=None, session_factory=None, collector_factory=None, clock=time.monotonic, stop=None,
-                 usage_normalizer=None, review_context_factory=None):
+                 usage_normalizer=None, review_context_factory=None, peer_context_factory=None):
         if not isinstance(config, WorkerConfig) or not callable(store_factory):
             raise TypeError("Coding worker requires frozen configuration and a store factory")
         self.config, self.store_factory = validated_copy(config), store_factory
@@ -379,6 +413,7 @@ class CodingWorkerFactory:
         self.usage_normalizer = usage_normalizer
         self.review_context_factory = (review_context_factory if review_context_factory is not None
                                        else ReviewContextProvider)
+        self.peer_context_factory = peer_context_factory if peer_context_factory is not None else PeerReviewContextProvider
 
     def create(self):
         store = self.store_factory(self.config)
@@ -389,9 +424,10 @@ class CodingWorkerFactory:
         runner.prepare()
         collector = self.collector_factory(self.config, store) if self.collector_factory else None
         review_contexts = self.review_context_factory(store)
+        peer_contexts = self.peer_context_factory(store)
         return CodingWorker(self.config, store, runner, workspaces, supervisor, collector=collector,
                             clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer,
-                            review_context_provider=review_contexts)
+                            review_context_provider=review_contexts, peer_context_provider=peer_contexts)
 
 
 def default_store_factory(config):
