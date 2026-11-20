@@ -313,3 +313,96 @@ fn new_assignment_cannot_discard_an_inflight_initial_or_refreshed_catalog() {
             .any(|b| b.id == "agents-manual-assignment" && !b.visible));
     }
 }
+
+#[test]
+fn task_list_uses_authoritative_phases_and_preserves_explicit_manual_history() {
+    let mut agents = ready();
+    configure(&mut agents);
+    let mut task = detail(WorkStatus::AwaitingReview).summary();
+    task.workflow_required = Some(true);
+    for (phase, label, tone) in [
+        (
+            WorkWorkflowPhase::PlanReview,
+            "Reviewing plan",
+            BadgeTone::Accent,
+        ),
+        (
+            WorkWorkflowPhase::Checks,
+            "Running checks",
+            BadgeTone::Accent,
+        ),
+        (
+            WorkWorkflowPhase::CodeReview,
+            "Reviewing code",
+            BadgeTone::Accent,
+        ),
+        (
+            WorkWorkflowPhase::Hosted,
+            "Hosted checks pending",
+            BadgeTone::Accent,
+        ),
+        (WorkWorkflowPhase::Merging, "Merging", BadgeTone::Accent),
+        (WorkWorkflowPhase::Completed, "Merged", BadgeTone::Success),
+        (
+            WorkWorkflowPhase::Escalated,
+            "Needs attention",
+            BadgeTone::Warning,
+        ),
+    ] {
+        task.workflow_phase = Some(phase);
+        agents.tasks = vec![task.clone()];
+        let mut view = ViewModel::default();
+        agents.project(&mut view, true, true, true);
+        let list = view.lists.iter().find(|b| b.id == "agents-tasks").unwrap();
+        assert_eq!(
+            list.rows[0].summary.as_ref().unwrap().badge,
+            badge(label, tone)
+        );
+    }
+    task.workflow_phase = None;
+    assert_eq!(
+        agents.task_summary_badge(&task).label,
+        "Workflow state unavailable"
+    );
+    task.workflow_required = None;
+    assert_eq!(
+        agents.task_summary_badge(&task).label,
+        "Workflow state unavailable"
+    );
+    task.workflow_required = Some(false);
+    assert_eq!(agents.task_summary_badge(&task).label, "Ready for review");
+    agents.catalog.as_mut().unwrap().projects[0].workflow = None;
+    task.workflow_required = None;
+    assert_eq!(agents.task_summary_badge(&task).label, "Ready for review");
+    task.workflow_required = Some(true);
+    task.workflow_phase = Some(WorkWorkflowPhase::Implement);
+    task.mode = WorkMode::Review;
+    task.status = WorkStatus::Completed;
+    assert_eq!(agents.task_summary_badge(&task).label, "Review complete");
+}
+
+#[test]
+fn autonomous_list_continues_existing_polling_until_the_workflow_is_terminal() {
+    let mut agents = ready();
+    let mut task = detail(WorkStatus::AwaitingReview).summary();
+    task.workflow_required = Some(true);
+    task.workflow_phase = Some(WorkWorkflowPhase::Hosted);
+    agents.tasks = vec![task];
+    assert!(agents.processing());
+    let mut effects = vec![];
+    agents.schedule("list-watch".into(), &mut effects);
+    assert!(matches!(&effects[0], UiEffect::AgentsWatch { .. }));
+    let effects = step(
+        &mut agents,
+        UiEvent::PollAgents {
+            watch: "list-watch".into(),
+        },
+        "phase-list",
+    );
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkList { .. })
+    ));
+    agents.tasks[0].workflow_phase = Some(WorkWorkflowPhase::Completed);
+    assert!(!agents.processing());
+}

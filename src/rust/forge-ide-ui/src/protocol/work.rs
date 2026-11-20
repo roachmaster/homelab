@@ -550,6 +550,11 @@ pub struct WorkTaskSummary {
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Explicit false identifies manual history; missing metadata stays unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_phase: Option<WorkWorkflowPhase>,
 }
 impl WorkTaskSummary {
     pub fn is_valid(&self) -> bool {
@@ -560,6 +565,7 @@ impl WorkTaskSummary {
             && valid_work_hex(&self.recipe_digest, 64)
             && valid_work_revision(self.revision)
             && valid_work_timestamp(&self.created_at)
+            && !(self.workflow_required == Some(false) && self.workflow_phase.is_some())
             && self
                 .title
                 .as_deref()
@@ -650,6 +656,8 @@ impl WorkTaskDetail {
             revision: self.revision,
             created_at: self.created_at.clone(),
             title: self.title.clone(),
+            workflow_required: Some(self.workflow_required || self.workflow.is_some()),
+            workflow_phase: self.workflow.as_ref().map(|w| w.phase),
         }
     }
     pub fn is_valid(&self) -> bool {

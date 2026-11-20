@@ -2,6 +2,28 @@
 use super::*;
 
 impl Agents {
+    pub(super) fn task_summary_badge(&self, task: &WorkTaskSummary) -> BadgeView {
+        if let Some(phase) = task.workflow_phase {
+            if task.mode == WorkMode::Review && task.status == WorkStatus::Completed {
+                return badge("Review complete", BadgeTone::Success);
+            }
+            return badge(
+                phase.label(),
+                match phase {
+                    WorkWorkflowPhase::Completed => BadgeTone::Success,
+                    WorkWorkflowPhase::Escalated => BadgeTone::Warning,
+                    WorkWorkflowPhase::Cancelled => BadgeTone::Neutral,
+                    _ => BadgeTone::Accent,
+                },
+            );
+        }
+        if task.workflow_required == Some(true)
+            || task.workflow_required.is_none() && self.workflow_policy().is_some()
+        {
+            return badge("Workflow state unavailable", BadgeTone::Warning);
+        }
+        task_badge(task.status)
+    }
     pub(super) fn workflow_policy(&self) -> Option<&WorkWorkflowPolicy> {
         self.catalog
             .as_ref()?

@@ -57,7 +57,7 @@ impl WorkWorkflowPhase {
             Self::Merging => "Merging",
             Self::Completed => "Merged",
             Self::Cancelled => "Cancelled",
-            Self::Escalated => "Operator attention",
+            Self::Escalated => "Needs attention",
         }
     }
 }
