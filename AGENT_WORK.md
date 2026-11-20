@@ -1,9 +1,9 @@
 # Shared Agent Work Checkpoint
 
 - **task_id:** `agent-feedback-loop-implementation-20261120`
-- **objective:** Implement the approved source-bound review and repair loop, independent publication and hosted acceptance gates, linked corrections and Agents controls.
-- **authorized_scope:** User approved implementation. Use included Gemini quota for bounded work; no paid fallback, destructive history rewrite or automatic merge to main. Publish a reviewed feature PR.
-- **phase:** `integration_verification`
+- **objective:** Merge all reviewed feature work to main and explain the implemented architecture at a high level.
+- **authorized_scope:** User explicitly requested merging all feature work to main after implementation. Preserve native receipts and linked worktrees. No live deployment or paid fallback is authorized by this merge request.
+- **phase:** `merge_authorized_pending_final_checks`
 - **coordinator:** Codex
 - **worktree/base:** `feature/agent-feedback-loop` at `/mnt/data/homelab-build/agent-feedback-loop-20261120/design`, main base `b054b5f`.
 - **ownership:** Isolated backend, runtime and UI worktrees supplied attributable commits. Root integrates and verifies. Canonical main and receipt-bound native workspaces remain unchanged.
@@ -15,5 +15,5 @@
 - **live_state:** No schema, service binary or live portal deployment has changed in this task. Runner, coding worker and publisher remain active on the existing release. Main is clean at `b054b5f`.
 - **evidence:** `/mnt/data/homelab-build/agent-feedback-loop-20261120/`; earlier recovered CI `/mnt/data/homelab-build/gemini-cicd-execution-20261120/`.
 - **deliverable:** [Design and sequence diagrams](docs/architecture/proposals/forge-agent-feedback-loop.md), implementation and reviewed feature PR.
-- **next_action:** Close audit followups, pass final backend/browser/full CI, publish feature branch and verify all required checks on the delivered head. Record deployment status explicitly.
-- **last_updated:** 2026-11-20T12:24:26.259149+00:00
+- **next_action:** Verify the final completed-task guard, then merge PR2 to main using the exact checked head. The previous5b38e47 head passed all379 backend tests and28 browser groups plus full hosted CI. Branch histories were audited and recorded without changing the verified source tree; all newly actionable completed review decisions now reject in favor of linked WorkRepair, with immutable-history and receipt-replay regressions. Explain architecture and distinguish merged code from live deployment.
+- **last_updated:** 2026-11-20T13:00:55.992932+00:00
