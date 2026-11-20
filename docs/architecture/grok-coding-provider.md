@@ -24,6 +24,11 @@ claims additionally require an exact Grok alias/backend/model/mode in the fresh
 worker advertisement, the actual role grant and the recipe's exact policy
 digest. The flag is configuration authority, not a task or browser override.
 
+Exact immutable receipt replays are resolved before current execution-capability
+checks. Disabling a profile blocks new work while preserving a prior submit,
+resume or repair receipt. The DAO invokes the current recipe resolver only for a
+new admission; owner and project authorization still apply to every request.
+
 A separate usage configuration can include Grok while execution remains off.
 Allowance is **Not reported** / `unsupported_headless`; no numeric quota, free
 usage or unlimited allowance is inferred. Manual refresh does not start a Grok
@@ -174,6 +179,24 @@ unrelated tasks and reviews always start fresh. Related-session reuse can be
 added later only through a receipt-bound session provider with verified native
 storage/continuation semantics.
 
+## Observed preview and qualification limits
+
+An explicitly authorized, isolated one-turn `grok-4.7` preview returned the exact
+test marker with zero tool executions. Native terminal usage reported 582
+uncached input, 2,816 cache-read input, zero cache creation and 42 output tokens:
+3,398 full input and 3,440 total. Reasoning tokens were a subset. The sanitized
+47-event regression fixture retains event order and counters, replaces private
+identities and signatures, and omits reasoning contents. The vendor's calculated
+price is not evidence of an account debit or remaining allowance.
+
+Standalone `grok usage --json` did not support plan reporting on this account;
+the official dashboard requested SuperGrok and advertised a limited free preview
+without a numeric allowance. Offline, network-disabled inspection separately
+qualified instruction loading and enforced managed policies without credentials
+or a model request. Neither observation qualifies the production worker's entire
+repository/sandbox/auth-refresh path. Execution remains explicitly off until
+that path and its account limits are qualified; usage visibility stays separate.
+
 ```mermaid
 sequenceDiagram
     participant API as WorkService
@@ -182,8 +205,13 @@ sequenceDiagram
     participant Runner as CommandRunnerProvider
     participant Scope as SystemdSupervisor
     participant Grok as Pinned Grok CLI
-    API->>API: Require explicit execution capability
-    API->>DB: Admit immutable P9 recipe
+    API->>DB: Authorize and inspect immutable request receipt
+    alt Exact receipt already exists
+        DB-->>API: Return existing receipt without new execution
+    else New request
+        DB->>API: Invoke selected recipe resolver
+        API->>API: Require explicit execution capability
+        API-->>DB: Admit immutable P9 recipe
     Factory->>DB: Claim exact grant, advertised profile and digest
     Factory->>Runner: Inject owned workspace and lease
     Runner->>Runner: Check binary and stage isolated auth/config
@@ -193,6 +221,7 @@ sequenceDiagram
     Runner->>Scope: Stop, reap and verify scope empty
     Runner->>DB: Publish exact result/accounting/stop receipt
     DB-->>API: Existing review, repair and CI workflow events
+    end
 ```
 
 Migration0018 only extends exact backend/policy/provenance fences and current

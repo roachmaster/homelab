@@ -8,7 +8,11 @@ this source change does not itself deploy the new portal.
 
 The typed agent catalog and usage contracts accept Grok when the configured
 backend advertises it. Missing allowance and token observations stay unknown;
-this UI support does not itself configure a runnable provider or verify live quota.
+policy9/migration18 add its supervised native adapter and independent default-off
+execution fences. A usage-only profile does not configure runnable work. The
+one authorized free-preview response verified structured token output, while
+production execution and numerical allowance remain unqualified. See the
+[Grok provider design](../architecture/grok-coding-provider.md).
 
 The preceding runtime checkpoint activated M17 / `forge-coding-v8` from
 `8a1faf496f76ef30dd6f1362a32e5d70f80f012a`, with the prior checked UI assets.
@@ -29,6 +33,7 @@ Earlier observations below are dated history, not current readiness claims.
 | Mail (retired portal view) | Saved PostgreSQL threads and private backend contracts are preserved; old local draft hints stay inert. | No active Mail controls, requests or polling. Legacy Mail URLs lead to Agents; public Mail flags are disabled during rollout. |
 | Workbench | Header project breadcrumb and view sheet; unified search with entry-name mode; Explorer, verified File source, Outline and supplied Problems. Markdown has Raw/Display and source has Wrap. | Search covers the accepted report, not arbitrary filesystem contents or resolved references. Problems are inspection diagnostics, not compiler/test results. |
 | Agents | Catalog-backed autonomous assignments with configured independent author/reviewer roles, bounded revisions/repairs, exact-head checks and trusted automatic publication/merge; legacy assignments retain their manual lifecycle. Task/usage cards use semantic badges, readable times, precise token metrics and scoped refresh. | Independent Work/Usage grants and supervised workers remain required. Quota blocks never automatically rotate accounts or purchase credits. Runtime activation is recorded separately from source UI delivery. |
+| Grok provider | Pinned native 1.0.92 adapter, explicit fresh sessions, bound terminal cache accounting, instruction-only project trust and owned credential cleanup. Typed cards render supplied catalog/usage data. | Execution defaults off in API and worker config. Usage-only visibility reports Not reported; no quota polling, inferred allowance, paid fallback or change to Gemini/Codex roles. Requires additive M18/P9 and matching ABI10 activation. |
 | External agent directory | Agents lists Muse Email as a manual contact, with its recipient and verified sender identity. | It has no native task profile, quota/usage observation or worker-readiness claim. Forge email sending, replies and background task tracking are not integrated. |
 | Editing | Direct textarea editing, Undo and status reconciliation remain available for admitted managed projects. Chat questions and model-generated proposal controls are inactive; backend contracts remain preserved. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. A rendered button is not write authority. |
 
