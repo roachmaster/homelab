@@ -101,6 +101,10 @@ class Lease:
     resume_workspace_digest: str | None = None
     resume_attempt_id: str | None = None
     plan_decision_id: str | None = None
+    feedback_id: str | None = None
+    feedback_sha256: str | None = None
+    repair_source_review_id: str | None = None
+    repair_candidate_commit: str | None = None
 
     def to_dict(self):
         return {
@@ -122,6 +126,8 @@ class Lease:
             "resume_workspace_digest": self.resume_workspace_digest,
             "resume_attempt_id": self.resume_attempt_id,
             "plan_decision_id": self.plan_decision_id,
+            "feedback_id":self.feedback_id,"feedback_sha256":self.feedback_sha256,
+            "repair_source_review_id":self.repair_source_review_id,"repair_candidate_commit":self.repair_candidate_commit,
         }
 
 
@@ -398,6 +404,10 @@ class WorkerDB:
             resume_workspace_digest=payload.get("resume_workspace_digest"),
             resume_attempt_id=str(payload["resume_attempt_id"]) if payload.get("resume_attempt_id") else None,
             plan_decision_id=str(payload["plan_decision_id"]) if payload.get("plan_decision_id") else None,
+            feedback_id=str(payload["feedback_id"]) if payload.get("feedback_id") else None,
+            feedback_sha256=payload.get("feedback_sha256"),
+            repair_source_review_id=str(payload["repair_source_review_id"]) if payload.get("repair_source_review_id") else None,
+            repair_candidate_commit=payload.get("repair_candidate_commit"),
         )
 
     def renew(self, lease):
@@ -606,4 +616,48 @@ class WorkerDB:
         with self._reconcile_cursor() as cursor:
             cursor.execute("SELECT forge_coding_reconciler_api.publication_finish(%s,%s,%s,%s,%s,%s,%s)",
                            (publication,token,status,branch,commit_sha,pr_url,summary))
+            return dict(cursor.fetchone()[0])
+
+    def read_feedback(self,lease):
+        attempt,token=_extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.read_feedback(%s,%s)",(attempt,token))
+            value=cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def queue_review(self,lease,reconciliation_receipt_id):
+        attempt,token=_extract_attempt_creds(lease)
+        receipt=_coerce_uuid(reconciliation_receipt_id,"reconciliation_receipt_id")
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.queue_review(%s,%s,%s)",(attempt,token,receipt))
+            value=cursor.fetchone()[0]
+        return str(value) if value else None
+
+    def review_claim(self,worker_id):
+        validate_identifier(worker_id,"worker_id")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.review_claim(%s)",(worker_id,))
+            value=cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def review_renew(self,job):
+        review=_coerce_uuid(job["review_id"],"review_id");token=_coerce_uuid(job["lease_token"],"lease_token")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.review_renew(%s,%s)",(review,token))
+            return bool(cursor.fetchone()[0])
+
+    def review_finish(self,job,outcome):
+        from work_feedback import validate_findings
+        if not isinstance(outcome,dict):raise ValueError("Invalid review outcome")
+        outcome={**outcome,"findings":validate_findings(outcome.get("findings",[]))}
+        review=_coerce_uuid(job["review_id"],"review_id");token=_coerce_uuid(job["lease_token"],"lease_token")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.review_finish(%s,%s,%s)",(review,token,Json(outcome)))
+            return dict(cursor.fetchone()[0])
+
+    def record_hosted_checks(self,publication_id,candidate_commit,checks):
+        publication=_coerce_uuid(publication_id,"publication_id")
+        if not isinstance(candidate_commit,str) or not SHA1_HEX_RE.fullmatch(candidate_commit):raise ValueError("Invalid hosted source")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.record_hosted_checks(%s,%s,%s)",(publication,candidate_commit,Json(checks)))
             return dict(cursor.fetchone()[0])
