@@ -21,7 +21,7 @@ from work_sessions import AntigravitySessionProvider
 from work_review_context import ReviewContextError, ReviewContextProvider
 from work_consumer_cache import configured_consumer_caches
 from work_candidate_source import ReviewCandidateSourceProvider
-from work_peer_context import PeerReviewContextProvider
+from work_peer_context import PeerReviewContextProvider, PeerReviewCandidateSourceProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
@@ -264,6 +264,13 @@ class CodingWorker:
             if lost.is_set() or not self.store.renew(lease):
                 lost.set()
                 raise ExecutionError("needs_reconcile", "The assignment lease is no longer current.")
+            if lease.get("workflow_review_id") is not None:
+                try:
+                    if self.peer_contexts is None:
+                        raise ValueError()
+                    self.peer_contexts.prepare_source(lease)
+                except Exception:
+                    raise ExecutionError("needs_reconcile", "The read-only reviewer source could not be verified.") from None
             with self.workspaces.acquire(lease) as workspace:
                 if lost.is_set() or not self.store.renew(lease):
                     lost.set()
@@ -413,7 +420,8 @@ class CodingWorkerFactory:
         self.usage_normalizer = usage_normalizer
         self.review_context_factory = (review_context_factory if review_context_factory is not None
                                        else ReviewContextProvider)
-        self.peer_context_factory = peer_context_factory if peer_context_factory is not None else PeerReviewContextProvider
+        self.peer_context_factory = (peer_context_factory if peer_context_factory is not None else
+            lambda store: PeerReviewContextProvider(store, PeerReviewCandidateSourceProvider(self.config, _workspace_git)))
 
     def create(self):
         store = self.store_factory(self.config)

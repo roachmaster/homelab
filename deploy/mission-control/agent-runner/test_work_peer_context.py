@@ -18,6 +18,9 @@ from uuid import uuid4
 from work_peer_review import PeerReviewError
 from work_worker_config import parse_config
 from work_worker import CodingWorkerFactory, _lease
+from work_executor import WorkspaceProvider, _git
+from test_work_merge import merge_fixture
+from work_peer_context import PeerReviewCandidateSourceProvider
 
 
 def fixture(root, kind="plan"):
@@ -41,6 +44,54 @@ def fixture(root, kind="plan"):
 
 
 class PeerContextTest(unittest.TestCase):
+    def test_native_digest_stays_byte_identical_while_source_omits_only_root_git_file(self):
+        with TemporaryDirectory(prefix="forge-digest-compat-") as root:
+            path = Path(root)
+            (path / ".git").write_text("gitdir: /approved/worktrees/fixture\n")
+            (path / "source.txt").write_text("source\n")
+            workspace = WorkspaceLease(path, path, path / "metadata", str(uuid4()), "a" * 40)
+            self.assertEqual(workspace.digest(), "4a6aa9942ac96b177c303f1fec5780d113957e01b42a2e3898467c48fec9c358")
+            normalized = workspace.source_digest()
+            (path / ".git").write_text("gitdir: /another/worktrees/path\n")
+            self.assertEqual(workspace.source_digest(), normalized)
+            self.assertNotEqual(workspace.digest(), "4a6aa9942ac96b177c303f1fec5780d113957e01b42a2e3898467c48fec9c358")
+            (path / "generated.ignored").write_text("still source-accounted\n")
+            self.assertNotEqual(workspace.source_digest(), normalized)
+    def test_normal_code_reviewer_materializes_exact_candidate_without_changing_main(self):
+        with merge_fixture() as (publication, job, _provider, _client, candidates, _hosted):
+            config = publication.worker
+            manifest = candidates.read(job["review_id"])
+            subject = target("code")
+            reviewer = lease(config, backend="codex", mode="review")
+            reviewer["base_revision"] = job["candidate_commit"]
+            subject.update(reviewer_task_id=reviewer["task_id"], author_profile="agy", reviewer_profile="codex",
+                source_task_id=job["task_id"], source_attempt_id=manifest["attempt_id"],
+                base_revision=job["candidate_commit"], candidate_commit=job["candidate_commit"],
+                review_id=job["review_id"], gate_manifest_sha256=job["gate_manifest_sha256"],
+                workspace_digest=manifest["candidate_workspace_digest"], integration_base=manifest["integration_base"])
+            for row in subject["verification"]["checks"]:
+                row["head_sha"] = job["candidate_commit"]
+            raw = json.dumps(subject)
+            digest = hashlib.sha256(raw.encode()).hexdigest()
+            reviewer.update(workflow_id=subject["workflow_id"], workflow_review_id=subject["workflow_review_id"],
+                            review_target_sha256=digest)
+            canonical = config.projects["homelab"]
+            original_main = _git(canonical, "rev-parse", "HEAD")
+            store = Mock()
+            store.read_review_target.return_value = {"target_json": raw, "target_sha256": digest}
+            contexts = PeerReviewContextProvider(store, PeerReviewCandidateSourceProvider(config, _git))
+            contexts.prepare_source(reviewer)
+            workspaces = WorkspaceProvider(config)
+            workspaces.prepare()
+            with workspaces.acquire(reviewer) as workspace:
+                ready = contexts.acquire(reviewer, workspace)
+                self.assertEqual(ready.sha256, digest)
+                self.assertEqual(workspace.source_digest(), manifest["candidate_workspace_digest"])
+                self.assertNotEqual(workspace.digest(), workspace.source_digest())
+            self.assertEqual(_git(canonical, "rev-parse", "HEAD"), original_main)
+            self.assertEqual(_git(candidates.directory(job["review_id"]) / "repository", "rev-parse", "HEAD").decode().strip(),
+                             job["candidate_commit"])
+
     def test_author_receives_full_verdict_separately_from_original_plan(self):
         with TemporaryDirectory(prefix="forge-author-feedback-") as root:
             config, value, workspace, _ = fixture(root)
@@ -88,6 +139,30 @@ class PeerContextTest(unittest.TestCase):
                     envelope = None
                 with self.subTest(changed=changed), self.assertRaises(PeerReviewError):
                     validate_workflow_feedback(value, envelope, plan_context=bad_context)
+
+    def test_approved_plan_survives_a_later_native_resume_receipt(self):
+        with TemporaryDirectory(prefix="forge-plan-resume-") as root:
+            _config, value, _workspace, _ = fixture(root)
+            subject = target()
+            subject.update(source_task_id=value["task_id"], author_profile=value["agent_profile"],
+                           reviewer_profile="independent-critic", base_revision=value["base_revision"])
+            parsed = bind(subject)
+            raw = json.dumps(verdict(parsed, "approve"))
+            value.update(mode="implement", workflow_id=subject["workflow_id"],
+                workflow_feedback_review_id=subject["workflow_review_id"],
+                workflow_feedback_sha256=hashlib.sha256(raw.encode()).hexdigest(), resume_attempt_id=str(uuid4()))
+            value.pop("workflow_review_id")
+            value.pop("review_target_sha256")
+            context = {"plan_attempt_id": subject["source_attempt_id"], "plan_sha256": subject["source_result_sha256"]}
+            envelope = {"target_json": json.dumps(subject), "target_sha256": parsed["_context_sha256"],
+                        "verdict_json": raw, "verdict_sha256": value["workflow_feedback_sha256"]}
+            self.assertEqual(validate_workflow_feedback(value, envelope, plan_context=context).content, raw.encode())
+            # A linked candidate may have a new Git base while preserving the
+            # exact originally approved plan and its independent verdict.
+            linked = {**value, "task_id": str(uuid4()), "parent_task_id": subject["source_task_id"],
+                "repair_source_review_id": str(uuid4()), "feedback_id": str(uuid4()), "feedback_sha256": "e" * 64,
+                "repair_candidate_commit": "c" * 40, "base_revision": "c" * 40}
+            self.assertEqual(validate_workflow_feedback(linked, envelope, plan_context=context).content, raw.encode())
 
     def test_linked_code_author_feedback_requires_original_plan_and_exact_parent(self):
         with TemporaryDirectory(prefix="forge-code-feedback-") as root:
