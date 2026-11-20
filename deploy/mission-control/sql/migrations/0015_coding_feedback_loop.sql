@@ -474,9 +474,10 @@ RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_tem
 DECLARE q forge_agent.coding_reviews%ROWTYPE;t forge_agent.coding_tasks%ROWTYPE;p forge_agent.coding_review_policy%ROWTYPE;
  b forge_agent.coding_review_budget%ROWTYPE;child uuid;fid uuid;f forge_agent.coding_feedback%ROWTYPE;new_revision bigint;root_id uuid;
 BEGIN
- SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review FOR UPDATE;
+ SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review;
  IF q.owner_id IS DISTINCT FROM current_setting('forge.coding_owner',true) THEN RAISE EXCEPTION 'Repair scope mismatch' USING ERRCODE='42501';END IF;
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE owner_id=q.owner_id AND project_alias=q.project_alias AND coding_tasks.id=q.task_id FOR UPDATE;
+ SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review FOR UPDATE;
  IF t.latest_attempt_id<>q.attempt_id OR t.plan_decision_id IS DISTINCT FROM q.plan_decision_id OR t.scope_plan_decision_id IS DISTINCT FROM q.scope_plan_decision_id OR t.status NOT IN('awaiting_review','completed') OR q.candidate_commit IS NULL
  OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a WHERE a.owner_id=t.owner_id AND a.project_alias=t.project_alias AND a.task_id=t.id AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) THEN
  RAISE EXCEPTION 'Repair requires stopped current source' USING ERRCODE='P0009';END IF;
@@ -541,11 +542,15 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_te
 DECLARE q forge_agent.coding_reviews%ROWTYPE;t forge_agent.coding_tasks%ROWTYPE;p forge_agent.coding_review_policy%ROWTYPE;
  previous forge_agent.coding_reviews%ROWTYPE;disposition text;receipt jsonb;id uuid;next_id uuid;stagnant integer;v_candidate text;v_gate text;
 BEGIN
- SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review AND owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;
+ SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review AND owner_id=current_setting('forge.coding_owner',true);
  IF NOT FOUND THEN RAISE EXCEPTION 'Review not found' USING ERRCODE='P0002';END IF;
+ -- Every path acquires task before review. Re-read the review and check the
+ -- wall clock only after both locks; a blocked task lock can outlive a lease.
+ SELECT * INTO t FROM forge_agent.coding_tasks WHERE owner_id=q.owner_id AND project_alias=q.project_alias AND coding_tasks.id=q.task_id FOR UPDATE;
+ SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review AND owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;
+ IF NOT FOUND OR q.task_id IS DISTINCT FROM t.id OR q.project_alias IS DISTINCT FROM t.project_alias OR q.owner_id IS DISTINCT FROM t.owner_id THEN RAISE EXCEPTION 'Review source changed while waiting' USING ERRCODE='P0008';END IF;
  IF q.finish_token=p_token AND q.finish_receipt->'outcome'=p_outcome THEN RETURN q.finish_receipt;END IF;
  IF q.status<>'checking' OR q.lease_token IS DISTINCT FROM p_token OR q.lease_expires_at<=clock_timestamp() THEN RAISE EXCEPTION 'Review lease expired' USING ERRCODE='P0008';END IF;
- SELECT * INTO t FROM forge_agent.coding_tasks WHERE owner_id=q.owner_id AND project_alias=q.project_alias AND coding_tasks.id=q.task_id FOR UPDATE;
  IF t.latest_attempt_id<>q.attempt_id OR t.plan_decision_id IS DISTINCT FROM q.plan_decision_id OR t.scope_plan_decision_id IS DISTINCT FROM q.scope_plan_decision_id OR t.status NOT IN('awaiting_review','completed') THEN RAISE EXCEPTION 'Review source superseded' USING ERRCODE='P0008';END IF;
  IF jsonb_typeof(p_outcome)<>'object' OR octet_length(p_outcome::text)>131072 THEN RAISE EXCEPTION 'Invalid review outcome' USING ERRCODE='22023';END IF;
  disposition:=p_outcome->>'disposition';v_candidate:=p_outcome->>'candidate_commit';v_gate:=p_outcome->>'gate_manifest_sha256';

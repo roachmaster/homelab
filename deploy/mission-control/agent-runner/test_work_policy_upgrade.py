@@ -331,6 +331,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertEqual(self.rows(cluster,'SELECT pinned_recipe,recipe_digest,review_note FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),before)
                 self.assertEqual(self.rows(cluster,'SELECT auto_repair,review_required,feedback_id FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),[(False,False,None)])
                 self.assertEqual(self.service(cluster).accept(command),accepted)
+                self.assertFalse(self.service(cluster).get(WorkGet('homelab',UUID(lease.task_id)))['review_required'])
                 self.assertEqual(self.admit_old(cluster,'v4-before-feedback',PLAN_POLICY_ID),admitted)
                 self.assertEqual(db.publish(lease,'awaiting_review',manifest,None,'V4 Plan',proof),publication)
                 self.assertEqual(self.store(cluster).result(project_alias='homelab',task_id=UUID(lease.task_id),attempt_id=UUID(lease.attempt_id))['content'],text)

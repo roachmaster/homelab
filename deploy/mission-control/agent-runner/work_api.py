@@ -326,10 +326,14 @@ class WorkService:
 
     def review_decide(self, command):
         self._require_project(command.project_alias)
-        if command.agent_profile not in self._config.profiles:
-            raise Rejected(403,"denied")
-        recipe=self._catalog.resolve(command.agent_profile,"implement")
-        return self._store.review_decide(**vars(command),recipe=recipe)
+        def resolve_recipe():
+            if "implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
+                raise Rejected(403,"denied")
+            try:
+                return self._catalog.resolve(command.agent_profile,"implement")
+            except KeyError:
+                raise Rejected(503,"unavailable") from None
+        return self._store.review_decide(**vars(command),resolve_recipe=resolve_recipe)
 
     def repair(self, command):
         self._require_project(command.project_alias)
