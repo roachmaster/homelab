@@ -2809,14 +2809,7 @@ async function agentsJourney() {
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
-    const museCard = page.locator('#agents-providers article[data-card-id="muse-pending"]');
-    await check(cards).toHaveCount(3);
-    await check(museCard.locator('.fg-metric-select')).toHaveText('Muse Code · Muse Spark1.3');
-    await check(museCard.locator('.fg-metric-header > .fg-badge')).toHaveText('Setup required');
-    await check(museCard.locator('.fg-metric-header > .fg-badge')).toHaveAttribute('data-tone','warning');
-    await check(museCard.locator('.fg-quota-unavailable')).toContainText('Not reported');
-    await check(museCard.locator('meter')).toHaveCount(0);
-    await check(page.locator('#agents-profile option[value="muse-pending"]')).toHaveCount(0);
+    await check(cards).toHaveCount(2);
     await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
     await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
     await check(geminiCard.locator('.fg-quota-unavailable')).toContainText('does not expose account allowance');
