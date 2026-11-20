@@ -2,6 +2,7 @@
 from dataclasses import replace
 import hashlib
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -53,8 +54,22 @@ class GrokParserTest(unittest.TestCase):
 class GrokBoundaryTest(unittest.TestCase):
  def raw(self,root,enabled=None):
   raw=raw_config(root);p={'backend':'grok','model':'fixture-model','modes':['plan','review','implement']}
+  # Native-state fixtures belong to the test process, including hosted runners
+  # whose unprivileged account differs from Mission Control's fixed UID1000.
+  raw['account'].update(uid=os.getuid(),gid=os.getgid())
   if enabled is not None:p['execution_enabled']=enabled
   raw['profiles']['grok']=p;raw['binaries']['grok']='/usr/bin/python3';return raw
+ def test_owned_fixture_tracks_process_uid_without_changing_shared_scope_fixture(self):
+  with patch('os.getuid',return_value=1001),patch('os.getgid',return_value=2001):
+   config=parse_config(self.raw('/tmp/grok-owned-config'))
+  self.assertEqual((config.account.uid,config.account.gid),(1001,2001))
+  self.assertEqual((raw_config('/tmp/shared-scope-config')['account']['uid'],raw_config('/tmp/shared-scope-config')['account']['gid']),(1000,1000))
+  with TemporaryDirectory()as root:
+   config=parse_config(self.raw(root,True));auth=config.account.home/'.grok/auth.json'
+   auth.parent.mkdir(parents=True,mode=0o700);auth.write_text('owned fixture');auth.chmod(0o600)
+   target=Path(root)/'staged';target.mkdir()
+   with self.assertRaises(ValueError):stage_auth(replace(config.account,uid=os.getuid()+1),target/'auth.json')
+   self.assertFalse((target/'auth.json').exists());self.assertEqual(auth.read_text(),'owned fixture')
  def test_defaults_disabled_in_both_factories_and_api(self):
   c=parse_config(self.raw('/tmp/grok-config'))
   self.assertFalse(c.profiles['grok'].execution_enabled);self.assertFalse(WorkerProfile('g','grok','x',('plan',)).execution_enabled)
