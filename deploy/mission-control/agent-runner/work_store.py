@@ -977,7 +977,7 @@ class WorkStore:
             return receipt
 
     def resume(self, *, project_alias, task_id, expected_revision, idempotency_key,
-               agent_profile, reconciliation_receipt_id, note="", allowed_modes, resolve_recipe):
+               agent_profile, reconciliation_receipt_id, note="", allowed_modes, resolve_recipe,_authority=None):
         self._require_project(project_alias)
         if (not isinstance(task_id, UUID)
                 or not isinstance(reconciliation_receipt_id, UUID)
@@ -995,14 +995,14 @@ class WorkStore:
             note=note,
         )
         lock_scope = f"{self._owner}\n{project_alias}"
-        with self._transaction() as cursor:
+        with self._transition_transaction(_authority) as cursor:
             cursor.execute(
                 "SELECT pg_catalog.pg_advisory_xact_lock("
                 "pg_catalog.hashtextextended(%s::text, %s::bigint))",
                 (lock_scope, ADVISORY_LOCK_SALT),
             )
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -1025,7 +1025,7 @@ class WorkStore:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
-            if task.get("workflow_required"):raise Rejected(409,"not_reviewable")
+            self._require_transition_authority(cursor,task,_authority,"native_timeout")
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
@@ -1147,8 +1147,8 @@ class WorkStore:
         if authority is None:
             with self._transaction() as cursor:yield cursor
         else:
-            from work_workflow import BoundDelegatedAuthority
-            if not isinstance(authority,BoundDelegatedAuthority) or authority.store is not self:
+            from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 
