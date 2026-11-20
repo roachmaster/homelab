@@ -16,6 +16,7 @@ fn ready() -> Agents {
                 alias: "workspace".into(),
                 label: "Workspace".into(),
                 base_revision: Some("a".repeat(40)),
+                workflow: None,
             }],
             profiles: vec![WorkProfile {
                 alias: "agy-primary".into(),
@@ -74,6 +75,8 @@ fn detail(status: WorkStatus) -> WorkTaskDetail {
         reconciliation_receipt_id: None,
         publication: None,
         review_required: None,
+        workflow_required: false,
+        workflow: None,
         review: None,
     }
 }
@@ -1186,3 +1189,4 @@ fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_r
 }
 
 mod review;
+mod workflow;

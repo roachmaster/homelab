@@ -778,3 +778,21 @@ fn native_checkbox_uses_generic_escaped_presentation_contract() {
     assert!(js.contains("sendAction(n,n.checked,sequence)"));
     assert!(js.contains("container.hidden=b.visible===false"));
 }
+
+#[test]
+fn autonomous_workflow_uses_typed_regions_and_protected_same_tab_document_link() {
+    let assets = build(config());
+    let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
+    for id in [
+        "agents-manual-assignment",
+        "agents-assignment-workflow",
+        "agents-workflow",
+        "agents-workflow-revisions",
+    ] {
+        assert!(html.contains(&format!("id=\"{id}\"")));
+    }
+    assert!(html.contains("href=\"/design/autonomous-agents\" data-workspace-navigation"));
+    let main = std::str::from_utf8(&assets.files["main.js"]).unwrap();
+    assert!(!main.contains("workflow_policy_digest"));
+    assert!(!main.contains("code_review"));
+}

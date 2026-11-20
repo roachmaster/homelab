@@ -9,6 +9,7 @@ import { join } from 'node:path';
 const time = '2026-11-19T18:00:00Z';
 const project = 'workspace';
 const base = 'a'.repeat(40);
+const workflowPolicy={policy_digest:'c'.repeat(64),author_profile:'agy-primary',reviewer_profile:'codex-primary',max_plan_revisions:3,max_code_revisions:3,auto_merge:true};
 const publicPlan = '## Public fixture plan\n\n1. Inspect approved files.\n2. Implement the change.\n3. Verify the result.\n\nLiteral <script>window.__forgeProgressExecuted = true</script> stays text.';
 const publicMilestone = 'Public fixture milestone: implementation complete; running verification. <script>window.__forgeProgressExecuted = true</script>';
 const foreignProgress = 'FOREIGN ATTEMPT PROGRESS MUST NOT APPEAR';
@@ -33,6 +34,10 @@ function task(status, number, input = {}) {
     prompt: input.prompt ?? 'Review the fixture', acceptance_criteria: input.acceptance_criteria ?? 'Return the complete report',
     auto_repair: input.auto_repair===true, attempt_id: randomUUID(), sequence: 0, events: [], progress_emitted: false,
   };
+  if(input.workflow_policy_digest){
+    item.workflow_required=true;
+    item.workflow={workflow_id:randomUUID(),policy_digest:workflowPolicy.policy_digest,phase:'plan_review',author_profile:workflowPolicy.author_profile,reviewer_profile:workflowPolicy.reviewer_profile,plan_revisions:0,max_plan_revisions:3,code_revisions:0,max_code_revisions:3,escalation_reason:null,can_cancel:true};
+  }
   event(item, 'queued');
   if (status !== 'queued') {
     event(item, 'started');
@@ -66,6 +71,7 @@ function detail(t) {
     reconciliation_receipt_id: null,
     ...(t.publication ? { publication: t.publication } : {}),
     ...(t.review ? { review:t.review } : {}),
+    workflow_required:t.workflow_required===true,workflow:t.workflow??null,
   };
 }
 function usage(alias, tasks) {
@@ -93,8 +99,8 @@ export async function startAgentsRelay() {
   const controls = new Map();
   const calls = [];
   const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
-    dropNextPlanDecision: false, holdPublication: false };
-  const planDecisions = [], reviewDecisions = [], publicationRevisions = [];
+    dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false };
+  const planDecisions = [], reviewDecisions = [], publicationRevisions = [], workflowSubmissions=[];
   let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
     try {
@@ -110,7 +116,7 @@ export async function startAgentsRelay() {
       const send = (status, kind, fields = {}) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ protocol_version: 1, event: { kind, request_id: requestId, ...fields } })); };
       const failed = (status, code) => send(status, input.kind.startsWith('usage_') ? 'usage_failed' : 'work_failed', { code });
       if (input.kind === 'work_catalog') {
-        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base }], profiles, worker_status: 'ready', observed_at: time }); return;
+        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time }); return;
       }
       if (input.project_alias !== project) { failed(403, 'denied'); return; }
       if (input.kind === 'usage_overview' || input.kind === 'usage_detail') {
@@ -129,6 +135,10 @@ export async function startAgentsRelay() {
         send(200, 'work_listed', { project_alias: project, tasks: page.map(summary), next_cursor: available.length > page.length ? page.at(-1).task_id : null }); return;
       }
       if (input.kind === 'work_submit') {
+        if(faults.autonomousPolicy){
+          if(input.workflow_policy_digest!==workflowPolicy.policy_digest||input.mode!=='plan'||input.agent_profile!==workflowPolicy.author_profile||input.auto_repair===true){failed(400,'invalid_request');return;}
+          workflowSubmissions.push({...input});
+        }
         if (faults.denyNextSubmit) { faults.denyNextSubmit = false; failed(403, 'denied'); return; }
         let receipt = receipts.get(input.idempotency_key);
         if (!receipt) {
@@ -159,6 +169,9 @@ export async function startAgentsRelay() {
         }
         if (selected.status === 'queued') { selected.status = 'running'; selected.revision++; event(selected, 'started'); }
         else if (selected.status === 'running' && selected.progress_emitted) progressRefetches++;
+        if(selected.workflow && selected.status==='running'){
+          progress(selected);selected.status='awaiting_review';selected.revision++;event(selected,'awaiting_review');
+        }
         send(200, 'work_opened', { task: detail(selected) }); return;
       }
       if (input.kind === 'work_events') {
@@ -226,6 +239,7 @@ export async function startAgentsRelay() {
           const before = selected.revision;
           if (input.kind === 'work_accept' && selected.status !== 'awaiting_review') { failed(409, 'not_reviewable'); return; }
           selected.status = input.kind === 'work_accept' ? 'completed' : selected.status === 'queued' ? 'cancelled' : 'cancel_requested'; selected.revision++;
+          if(selected.workflow && input.kind==='work_cancel'){selected.workflow.phase='cancelled';selected.workflow.can_cancel=false;selected.status='cancelled';}
           event(selected, selected.status);
           receipt = { project_alias: project, task_id: selected.task_id, base_revision: before, revision: selected.revision, status: selected.status };
           controls.set(input.idempotency_key, receipt);
@@ -247,7 +261,16 @@ export async function startAgentsRelay() {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
-    planDecisions, reviewDecisions, publicationRevisions,
+    planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,
+    enableAutonomy(){faults.autonomousPolicy=true;},
+    get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},
+    workflowPhase(taskId,phase){
+      const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
+      selected.workflow.phase=phase;selected.workflow.can_cancel=!['completed','cancelled','merging'].includes(phase);
+      selected.workflow.plan_revisions=1;
+      selected.workflow.escalation_reason=phase==='escalated'?'Revision budget exhausted; artifacts preserved.':null;
+      if(phase==='completed')selected.status='completed';
+    },
     addPlan(status, title) {
       if (!['awaiting_review', 'completed'].includes(status)) throw new Error('fixture plan state');
       const next = task(status, tasks.size, { mode: 'plan', prompt: title }); tasks.set(next.task_id, next); return next.task_id;

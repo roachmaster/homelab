@@ -67,6 +67,7 @@ macro_rules! element {
     };
 }
 
+mod agent_autonomy;
 mod characters;
 mod coding_agents;
 mod dispatch;
@@ -183,6 +184,7 @@ pub enum DesignPage {
     CodingAgents,
     AgentUsage,
     AgentFeedback,
+    AgentAutonomy,
     Playtest,
     Studio,
 }
@@ -197,7 +199,8 @@ impl DesignPage {
             | Self::ForgeWorkersStudio
             | Self::CodingAgents
             | Self::AgentUsage
-            | Self::AgentFeedback => Some("forge-foundations"),
+            | Self::AgentFeedback
+            | Self::AgentAutonomy => Some("forge-foundations"),
             Self::PreviousChats | Self::ChatHistory | Self::ChatDispatch | Self::Mail => {
                 Some("chat-and-mail")
             }
@@ -309,6 +312,12 @@ impl DesignPage {
                 "/design#forge-foundations",
                 "Back to Design",
                 coding_agents::DISPATCH,
+            ),
+            Self::AgentAutonomy => (
+                "Autonomous agent workflow · Forge IDE",
+                "/design#forge-foundations",
+                "Back to Design",
+                agent_autonomy::BODY,
             ),
             Self::AgentFeedback => (
                 "Agent feedback and repair · Forge IDE",

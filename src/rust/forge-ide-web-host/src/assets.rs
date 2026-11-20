@@ -85,6 +85,8 @@ const FORGE_WORKERS_STUDIO: &[u8] = include_bytes!(
 const CODING_AGENTS_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/coding-agents.html"));
 const AGENT_FEEDBACK_HTML: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/agent-feedback-loop.html"));
+const AGENT_AUTONOMY_HTML: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/autonomous-agents.html"));
 const AGENT_USAGE_HTML: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/agent-usage.html"));
 const CODING_AGENT_OWNERSHIP: &[u8] = include_bytes!(
     "../../../../docs/architecture/diagrams/mermaid/images/coding-agent-ownership.svg"
@@ -259,6 +261,9 @@ fn embedded_asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/design/coding-agents/takeover.svg" => Some(("image/svg+xml", CODING_AGENT_TAKEOVER)),
         "/design/agent-feedback-loop" | "/design/agent-feedback-loop/" => {
             Some(("text/html; charset=utf-8", AGENT_FEEDBACK_HTML))
+        }
+        "/design/autonomous-agents" | "/design/autonomous-agents/" => {
+            Some(("text/html; charset=utf-8", AGENT_AUTONOMY_HTML))
         }
         "/design/agent-usage" | "/design/agent-usage/" => {
             Some(("text/html; charset=utf-8", AGENT_USAGE_HTML))
