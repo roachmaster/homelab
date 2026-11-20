@@ -757,7 +757,7 @@ class WorkStore:
                 if task["revision"]!=expected_revision:raise Rejected(409,"revision_conflict")
                 cursor.execute("SELECT phase FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE",(task["workflow_id"],))
                 workflow=cursor.fetchone()
-                if not workflow or workflow["phase"] in {"completed","cancelled"}:raise Rejected(409,"not_cancellable")
+                if not workflow or workflow["phase"] in {"completed","cancelled","merging"}:raise Rejected(409,"not_cancellable")
                 cursor.execute("UPDATE forge_agent.coding_workflows SET phase='cancelled',enabled=false,updated_at=clock_timestamp() WHERE workflow_id=%s",(task["workflow_id"],))
                 cursor.execute("UPDATE forge_agent.coding_tasks SET cancelled_at=CASE WHEN status IN('running','cancel_requested') THEN NULL ELSE clock_timestamp() END,status=CASE WHEN status IN('running','cancel_requested') THEN 'cancel_requested' ELSE 'cancelled' END,revision=revision+1,updated_at=clock_timestamp() WHERE workflow_id=%s AND status NOT IN('completed','cancelled')",(task["workflow_id"],))
                 cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='cancelled',lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('pending','leased')",(task["workflow_id"],))
@@ -1159,7 +1159,7 @@ class WorkStore:
         return {"workflow_id":str(w["workflow_id"]),"policy_digest":w["policy_digest"],"phase":w["phase"],
             "author_profile":p["author_profile"],"reviewer_profile":p["reviewer_profile"],"plan_revisions":w["plan_revisions"],
             "max_plan_revisions":p["max_plan_revisions"],"code_revisions":w["code_revisions"],"max_code_revisions":p["max_code_revisions"],
-            "escalation_reason":w["escalation_reason"] or None,"can_cancel":w["phase"] not in {"completed","cancelled"}}
+            "escalation_reason":w["escalation_reason"] or None,"can_cancel":w["phase"] not in {"completed","cancelled","merging"}}
 
     def plan_decide(self, *, project_alias, task_id, expected_revision, plan_attempt_id,
                     plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe,auto_repair=False,_authority=None):
