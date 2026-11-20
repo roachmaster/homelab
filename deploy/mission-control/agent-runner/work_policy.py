@@ -8,7 +8,7 @@ import hashlib
 import json
 from types import MappingProxyType
 
-POLICY_ID = "forge-coding-v6"
+POLICY_ID = "forge-coding-v7"
 _POLICY = {
     "id": POLICY_ID,
     "adapter_versions": {"antigravity": "1.5.12", "codex": "0.160.0"},
@@ -20,6 +20,8 @@ _POLICY = {
     "renew_seconds": 10,
     "antigravity_session_policy": "fresh-unless-receipt-owned-task-resume-v1",
     "codex_session_policy": "ephemeral-v1",
+    "codex_sandbox": "supervised-external-v1",
+    "codex_external_io": "host-network-staged-native-state-v1",
     "scope": "systemd-root-v1",
     "workspace": "isolated-git-worktree-v1",
     "billing": "included-no-fallback",

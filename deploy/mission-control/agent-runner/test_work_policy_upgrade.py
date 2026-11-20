@@ -53,6 +53,9 @@ PLAN_POLICY_DIGEST=sha256_canonical(PLAN_POLICY)
 FEEDBACK_POLICY_ID='forge-coding-v5'
 FEEDBACK_POLICY={**PLAN_POLICY,'id':FEEDBACK_POLICY_ID,'feedback_workflow':'lease-bound-immutable-feedback-review-v1'}
 FEEDBACK_POLICY_DIGEST=sha256_canonical(FEEDBACK_POLICY)
+PEER_POLICY_ID="forge-coding-v6"
+PEER_POLICY={**FEEDBACK_POLICY,"id":PEER_POLICY_ID,"peer_review_workflow":"source-bound-readonly-peer-review-v1"}
+PEER_POLICY_DIGEST=sha256_canonical(PEER_POLICY)
 
 
 
@@ -82,7 +85,10 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v6")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v7")
+        self.assertEqual(PEER_POLICY_DIGEST,"78d8f96280b9b75597e2b10276e1854f64026ff8f359f0f2abb65113774a8e5e")
+        self.assertEqual(work_policy.POLICY["codex_sandbox"],"supervised-external-v1")
+        self.assertEqual(work_policy.POLICY["codex_external_io"],"host-network-staged-native-state-v1")
         self.assertEqual(PLAN_POLICY_DIGEST,"b541291edbadf6390f1a46f1f8f82d5b090f9942aaf2b57ced50ef3f779ab5e4")
         self.assertEqual(work_policy.POLICY["feedback_workflow"],"lease-bound-immutable-feedback-review-v1")
         self.assertEqual(work_policy.POLICY["plan_workflow"], "artifact-bound-plan-decisions-publication-v1")
@@ -91,7 +97,7 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertNotIn("fresh_session", work_policy.POLICY)
         self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow", "peer_review_workflow"}}
+                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 
@@ -151,7 +157,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         return incarnation
 
     def old_recipe(self, policy=OLD_POLICY_ID):
-        digest = {OLD_POLICY_ID: OLD_POLICY_DIGEST, PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST, SESSION_POLICY_ID: SESSION_POLICY_DIGEST, PLAN_POLICY_ID: PLAN_POLICY_DIGEST,FEEDBACK_POLICY_ID:FEEDBACK_POLICY_DIGEST}[policy]
+        digest = {OLD_POLICY_ID: OLD_POLICY_DIGEST, PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST, SESSION_POLICY_ID: SESSION_POLICY_DIGEST, PLAN_POLICY_ID: PLAN_POLICY_DIGEST,FEEDBACK_POLICY_ID:FEEDBACK_POLICY_DIGEST,PEER_POLICY_ID:PEER_POLICY_DIGEST}[policy]
         payload = {
             "version": 2, "backend": "codex", "model": "gpt-5.4",
             "resource_profile": policy, "mode": "plan", "generation_token_limit": None,
@@ -362,6 +368,24 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 old=self.advertise(cluster,db,'v5-worker',FEEDBACK_POLICY_DIGEST)
                 self.assertEqual(db.claim('v5-worker',old,['codex-v2']).task_id,queued['task_id'])
             finally:cluster.stop()
+
+    def test_v6_published_receipt_and_recipe_survive_external_sandbox_policy7(self):
+        db=self.worker(self.cluster);inc=self.advertise(self.cluster,db,'v6-peer-worker',PEER_POLICY_DIGEST)
+        admitted=self.admit_old(self.cluster,'v6-published-before-external',PEER_POLICY_ID)
+        lease=db.claim('v6-peer-worker',inc,['codex-v2']);text,manifest=self.stage(db,lease);proof=make_stop_proof(lease.unit_name)
+        published=db.publish(lease,'awaiting_review',manifest,None,'V6 exact artifact',proof);receipt=db.reconcile(lease,'c'*64,proof)
+        reconciliation=self.rows(self.cluster,'SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s',(UUID(receipt),))
+        snapshot=self.rows(self.cluster,'SELECT pinned_recipe,recipe_digest FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),))
+        self.assertEqual(snapshot[0][0]['resource_profile'],'forge-coding-v6');self.assertEqual(snapshot[0][0]['policy_digest'],PEER_POLICY_DIGEST)
+        self.assertEqual(self.admit_old(self.cluster,'v6-published-before-external',PEER_POLICY_ID),admitted)
+        self.assertEqual(db.publish(lease,'awaiting_review',manifest,None,'V6 exact artifact',proof),published)
+        self.assertEqual(self.rows(self.cluster,'SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s',(UUID(receipt),)),reconciliation)
+        self.assertEqual(self.rows(self.cluster,'SELECT pinned_recipe,recipe_digest FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),snapshot)
+        queued=self.admit_old(self.cluster,'v6-queued-before-external',PEER_POLICY_ID)
+        current=self.advertise(self.cluster,db,'v7-external-worker',work_policy.POLICY_DIGEST)
+        self.assertIsNone(db.claim('v7-external-worker',current,['codex-v2']))
+        old=self.advertise(self.cluster,db,'v6-peer-worker',PEER_POLICY_DIGEST)
+        self.assertEqual(db.claim('v6-peer-worker',old,['codex-v2']).task_id,queued['task_id'])
 
     def test_v1_v2_and_current_workers_claim_only_their_exact_policy_digest(self):
         old = self.admit_old(self.cluster, "old-queued-first")
