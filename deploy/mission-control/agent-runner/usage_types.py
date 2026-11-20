@@ -20,7 +20,7 @@ TIMESTAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?
 SAFE_ERRORS = frozenset({
     "auth_required", "unavailable", "unsupported_version", "malformed_metadata",
     "response_limit", "timeout", "account_changed", "unsupported_auth_mode",
-    "unsupported_headless", "unknown_profile",
+    "unsupported_headless", "unknown_profile", "setup_required",
 })
 
 
@@ -245,7 +245,10 @@ def normalize_attempt_usage(provider, raw_usage, *, fresh_session=True):
             values[output] = _attempt_counter(raw_usage, fields)
         if provider == "antigravity":
             values["total_tokens"] = _attempt_counter(raw_usage, ("total_tokens",))
-        elif provider == "codex" and values["input_tokens"] is not None and values["output_tokens"] is not None:
+        # Muse is pinned to --provider meta. Meta documents cached_tokens as
+        # an input subset and total=input+output (dev.meta.ai/docs/prompt-caching).
+        # This convention must not be reused for arbitrary Muse providers.
+        elif provider in {"codex", "muse"} and values["input_tokens"] is not None and values["output_tokens"] is not None:
             total = int(values["input_tokens"]) + int(values["output_tokens"])
             values["total_tokens"] = str(total) if total <= MAX_COUNTER else None
     primary = [values[key] for key in ("input_tokens", "output_tokens", "total_tokens")]

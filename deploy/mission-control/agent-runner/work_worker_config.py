@@ -82,6 +82,15 @@ class UsageConfig:
 
 
 @dataclass(frozen=True)
+class UsageOnlyProfile:
+    """A metadata port selection, deliberately without execution modes."""
+    alias: str
+    backend: str
+    model: str
+    binary: Path
+
+
+@dataclass(frozen=True)
 class WorkerConfig:
     worker_id: str
     owner: str
@@ -97,6 +106,7 @@ class WorkerConfig:
     source_path: Path | None = field(default=None, compare=False)
     autonomous_projects: frozenset[str] = frozenset()
     codex_session_ttl_seconds: int = 1800
+    usage_only_profiles: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
 
     @property
     def allowed_profiles(self):
@@ -114,7 +124,7 @@ class WorkerConfig:
 def parse_config(raw, *, source_path=None):
     raw = _object(raw, {"worker_id", "owner", "database", "account", "workspace_root",
                         "state_root", "projects", "profiles", "binaries"},
-                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds"})
+                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds", "usage_only_profiles"})
     worker_id = identifier(raw["worker_id"])
     owner = raw["owner"]
     if (not isinstance(owner, str) or not owner.strip() or len(owner) > 128
@@ -185,11 +195,26 @@ def parse_config(raw, *, source_path=None):
     codex_session_ttl_seconds = raw.get("codex_session_ttl_seconds", 1800)
     if type(codex_session_ttl_seconds) is not int or not 0 <= codex_session_ttl_seconds <= 3600:
         raise ValueError("Invalid coding Codex session TTL")
+    usage_only = raw.get("usage_only_profiles", {})
+    if (not isinstance(usage_only, dict) or len(usage_only) + len(frozen_profiles) > 64
+            or set(usage_only) & frozen_profiles.keys() or usage_only and usage is None):
+        raise ValueError("Invalid usage-only profile selection")
+    selected_usage = {}
+    for alias, value in usage_only.items():
+        alias = identifier(alias)
+        value = _object(value, {"backend", "model", "binary"})
+        if value["backend"] != "muse":
+            raise ValueError("Unsupported usage-only provider")
+        model = value["model"]
+        if (not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 128
+                or any(not 32 <= ord(character) < 127 for character in model)):
+            raise ValueError("Invalid usage-only model")
+        selected_usage[alias] = UsageOnlyProfile(alias, "muse", model, absolute_path(value["binary"]))
     return WorkerConfig(
         worker_id, owner, database, account, workspace_root, state_root,
         MappingProxyType(projects), MappingProxyType(frozen_profiles), MappingProxyType(binaries),
         allow_implement, usage, absolute_path(source_path) if source_path is not None else None,
-        frozenset(autonomous), codex_session_ttl_seconds,
+        frozenset(autonomous), codex_session_ttl_seconds, MappingProxyType(selected_usage),
     )
 
 
@@ -254,6 +279,8 @@ def validated_copy(config):
         "allow_implement": config.allow_implement,
         "autonomous_projects": sorted(config.autonomous_projects),
         "codex_session_ttl_seconds": config.codex_session_ttl_seconds,
+        "usage_only_profiles": {key: {"backend": value.backend, "model": value.model, "binary": str(value.binary)}
+                                for key, value in config.usage_only_profiles.items()},
     }
     if config.usage is not None:
         raw["usage"] = {"hmac_key_file": str(config.usage.hmac_key_file),

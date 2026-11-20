@@ -81,6 +81,7 @@ class MuseEvents:
         self.complete = False
         self.failure = None
         self.saw_work = False
+        self.started = False
         self.linked = False
         self.cancelled = False
 
@@ -123,11 +124,13 @@ class MuseEvents:
                 raise ValueError("Invalid Muse session/run link")
             self.linked = True
         elif kind == "run.lifecycle.started":
-            if not self.linked:
-                raise ValueError("Muse run started without a session link")
+            if (not self.linked or self.started or stream["kind"] != "session"
+                    or payload.get("kind") != "run_started"):
+                raise ValueError("Muse run started without a valid session link")
+            self.started = True
             self.saw_work = True
         elif kind == "run.output.delta":
-            if (stream["kind"] != "session" or not self.linked
+            if (stream["kind"] != "session" or not self.started
                     or payload.get("kind") != "run_output_delta" or not isinstance(payload.get("text"), str)):
                 raise ValueError("Invalid Muse output delta")
             self.saw_work = True
@@ -141,7 +144,7 @@ class MuseEvents:
                     or payload.get("terminal") != terminal or terminal not in {"completed", "failed", "cancelled"}):
                 raise ValueError("Invalid Muse terminal result")
             if terminal == "completed":
-                if not self.linked or not self.saw_work or not isinstance(payload.get("text"), str):
+                if not self.linked or not self.started or not isinstance(payload.get("text"), str):
                     raise ValueError("Invalid Muse final response")
                 self.response = payload["text"]
             else:
@@ -170,4 +173,7 @@ class MuseEvents:
             if total is not None and total > MAX_COUNTER:
                 raise ValueError("Muse usage counter overflow")
             counts[field] = total
+        if (counts["cached_tokens"] is not None and counts["input_tokens"] is not None
+                and counts["cached_tokens"] > counts["input_tokens"]):
+            raise ValueError("Muse Meta cached input exceeds input tokens")
         return counts

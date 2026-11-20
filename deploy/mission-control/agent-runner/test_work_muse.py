@@ -24,12 +24,12 @@ class MuseParserTest(unittest.TestCase):
   for byte in FIXTURE.read_bytes():p.feed(bytes([byte]))
   r=p.finish(0,proof());self.assertEqual(r.status,'awaiting_review');self.assertTrue(r.text.startswith('echo: Offline adapter'))
   self.assertEqual(r.usage,{'input_tokens':0,'output_tokens':0,'cached_tokens':0})
-  u=normalize_attempt_usage('muse',r.usage);self.assertEqual(u['source'],'muse-run-usage-v1');self.assertEqual(u['coverage'],'partial');self.assertIsNone(u['total_tokens'])
+  u=normalize_attempt_usage('muse',r.usage);self.assertEqual(u['source'],'muse-run-usage-v1');self.assertEqual(u['coverage'],'complete');self.assertEqual(u['total_tokens'],'0')
  def test_usage_sum_once(self):
   v=events();u=next(x for x in v if x['payload_type']=='run.usage')['payload']
   u['models']=[{'model':'a','input_tokens':100,'output_tokens':20,'cached_tokens':75},{'model':'b','input_tokens':30,'output_tokens':5,'cached_tokens':10}]
   r=normalize_attempt_usage('muse',parse(v).usage)
-  self.assertEqual([r[k] for k in ('input_tokens','output_tokens','cached_input_tokens','total_tokens')],['130','25','85',None])
+  self.assertEqual([r[k] for k in ('input_tokens','output_tokens','cached_input_tokens','total_tokens')],['130','25','85','155'])
   self.assertIsNone(normalize_attempt_usage('muse',None)['input_tokens'])
  def test_missing_terminal_empty_failed_cancelled_and_exit_never_succeed(self):
   self.assertEqual(parse(events()[:-1]).status,'failed')
@@ -73,5 +73,26 @@ class MuseBoundaryTest(unittest.TestCase):
    with self.assertRaises(ExecutionError):p.invocation(v,w)
    with self.assertRaises(ValueError):CommandRunnerProvider(c,SystemdSupervisor(c)).prepare()
  def test_allowance_no_native_poll(self):
-  c=UsageProviderConfig('muse','Muse Code','muse','configured-model');p=UsageProviderFactory(c,hmac_key=b'x'*32,rpc_factory=lambda _:(_ for _ in ()).throw(AssertionError('No native polling'))).create();s=p.read_snapshot()
-  self.assertEqual(s['allowance']['state'],'unsupported');self.assertEqual(s['allowance']['reason'],'unsupported_headless');self.assertIsNone(s['account_activity']['lifetime_tokens'])
+  from types import SimpleNamespace
+  from usage_rpc import MetadataProcessConfig
+  c=UsageProviderConfig('muse','Muse Code','muse','configured-model', MetadataProcessConfig(Path('/opt/muse-pinned'),Path('/home/fixture')))
+  p=UsageProviderFactory(c,hmac_key=b'x'*32,muse_factory=lambda _: SimpleNamespace(read=lambda:dict(schemaVersion=1,allowance=None,reason='no_allowance',hint=None))).create()
+  s=p.read_snapshot();self.assertEqual(s['allowance']['state'],'unsupported');self.assertEqual(s['allowance']['reason'],'no_allowance');self.assertEqual(s['last_error'],'setup_required');self.assertIsNone(s['account_activity']['lifetime_tokens'])
+ def test_usage_only_profile_cannot_be_executed_or_advertised(self):
+  from unittest.mock import Mock
+  from work_api import WorkService
+  from work_config import WorkCatalog
+  from test_work_execution_and_usage import make_v2_config,make_submit
+  from queue_store import Rejected
+  from work_worker_config import verify_recipe
+  raw=raw_config('/tmp/forge-muse-usage-only');raw['usage']={'hmac_key_file':'/tmp/owned-hmac'}
+  raw['usage_only_profiles']={'muse-primary':{'backend':'muse','model':'verified-catalog-model','binary':'/opt/muse-pinned'}}
+  with patch('pathlib.Path.open',side_effect=AssertionError('pure config')):c=parse_config(raw)
+  self.assertIn('muse-primary',c.usage_only_profiles);self.assertNotIn('muse-primary',c.allowed_profiles)
+  self.assertNotIn('muse-primary',[x['alias'] for x in c.advertised_profiles()]);self.assertNotIn('muse',c.binaries)
+  self.assertEqual(validated_copy(c).usage_only_profiles,c.usage_only_profiles)
+  v=lease(c,backend='muse');v['agent_profile']='muse-primary';self.assertFalse(verify_recipe(c,v))
+  cfg=make_v2_config();store=Mock();service=WorkService(cfg,WorkCatalog(cfg.profiles),store)
+  with patch('work_executor.CommandRunnerProvider',side_effect=AssertionError('no runner')):
+   with self.assertRaises(Rejected):service.submit(make_submit(agent_profile='muse-primary'))
+  store.submit.assert_not_called()

@@ -78,6 +78,18 @@ BEGIN
   definition := replace(previous, '(''antigravity'', ''codex'')', '(''antigravity'', ''codex'', ''muse'')');
   definition := replace(definition, '(''codex-exec-turn-v1'', ''agy-result-v1'')', '(''codex-exec-turn-v1'', ''agy-result-v1'', ''muse-run-usage-v1'')');
   definition := replace(definition, '''forge-coding-v8'')', '''forge-coding-v8'', ''forge-coding-v9'')');
+  IF target='forge_coding_worker_api.claim(text,uuid,text[])' THEN
+   definition := replace(definition,
+    $old$AND (t.pinned_recipe->>'policy_digest') = r.policy_digest$old$,
+    $new$AND (t.pinned_recipe->>'policy_digest') = r.policy_digest
+          AND (t.pinned_recipe->>'backend'<>'muse' OR EXISTS (
+              SELECT 1 FROM jsonb_array_elements(r.profiles) AS configured(profile)
+              WHERE profile->>'alias'=t.agent_profile
+                AND profile->>'backend'='muse'
+                AND profile->>'model'=t.pinned_recipe->>'model'
+                AND profile->'modes' ? t.mode
+          ))$new$);
+  END IF;
   IF definition=previous THEN RAISE EXCEPTION 'M18 predecessor capability missing: %',target;END IF;
   EXECUTE definition;
  END LOOP;

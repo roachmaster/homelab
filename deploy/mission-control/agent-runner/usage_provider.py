@@ -85,7 +85,7 @@ class MuseUsageProvider:
         return validate_snapshot({
             "snapshot_state": "fresh", "observed_at": _now(self._clock),
             "source": "muse-cli/usage-json-v1", "version": POLICY["adapter_versions"]["muse"],
-            "last_error": None, "allowance": _empty_allowance("unsupported", "no_allowance"),
+            "last_error": "setup_required", "allowance": _empty_allowance("unsupported", "no_allowance"),
             "account_activity": _unknown_activity(), "account_identity": None,
         })
 

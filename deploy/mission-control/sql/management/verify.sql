@@ -129,6 +129,11 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=18 AND name='coding_muse_provider') THEN
         RAISE EXCEPTION 'Forge Muse provider migration 0018 is missing';
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_proc WHERE oid='forge_coding_worker_api.claim(text,uuid,text[])'::regprocedure
+        AND position($muse$AND(t.pinned_recipe->>'backend'<>'muse'OREXISTS(SELECT1FROMjsonb_array_elements(r.profiles)ASconfigured(profile)WHEREprofile->>'alias'=t.agent_profileANDprofile->>'backend'='muse'ANDprofile->>'model'=t.pinned_recipe->>'model'ANDprofile->'modes'?t.mode))$muse$
+          IN regexp_replace(prosrc,'[[:space:]]+','','g'))>0
+    ) THEN RAISE EXCEPTION 'Missing Muse execution-readiness fence';END IF;
     FOR expected IN
         SELECT * FROM (VALUES ('progress_attempt_id', 'uuid'), ('progress_sequence', 'integer')) AS columns(name, type)
     LOOP

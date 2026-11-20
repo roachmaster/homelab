@@ -655,3 +655,20 @@ turns or production database changes:
 ```sh
 python3 -B -m unittest discover -s deploy/mission-control/agent-runner -p 'test*.py' -v
 ```
+
+### Muse Code (policy9 / migration0018)
+
+The third native backend is selected by the same typed profile/factory path as
+Antigravity and Codex. It pins Muse1.4.24-R9131.1 and its binary hash, uses fresh
+sessions, fixed `exec --json --provider meta` arguments, a private prompt file,
+isolated native configuration and auth-only state. Both the mandatory outer
+supervisor and Muse's default nested sandbox remain enabled. No consumer OAuth
+polling, paid fallback or implicit role override is added. Existing autonomous
+projects continue to use their configured author and reviewer.
+
+See [the provider design](../../../docs/architecture/muse-code-provider.md) for
+exact CLI arguments, accounting provenance, sequence diagram, rollout gates and
+historical policy preservation. Authentication/model discovery, included account
+allowance and a meaningful shell sandbox probe are activation checks; offline
+echo output alone does not qualify the provider as ready. `no_allowance` is
+rendered as Not reported, never a zero or unlimited quota.
