@@ -29,7 +29,7 @@ pub(super) const DISPATCH: &[Node] = &[
             element!(Strong; text("Implemented; activation is deployment controlled.")),
             text(" Source checkpoint: 20 November 2026. Original design base "),
             element!(Code; text("2e1300a00da92e9f97bdb1a656c2b182d4219a6c")),
-            text(". The source implements the Agents view, durable assignments, native Antigravity/Codex workers, full-result paging, finished-plan decisions and checked PR publication. Work and Usage are independent opt-in capabilities. This reader does not certify deployment of the bundle, migrations or worker. Retained diagrams use original illustrative port names."),
+            text(". The source implements the Agents view, durable assignments, native Antigravity/Codex adapters and an opt-in Grok adapter, full-result paging, finished-plan decisions and checked PR publication. Work and Usage are independent opt-in capabilities. Grok execution defaults off until explicitly qualified; listing a usage profile does not enable tasks. This reader does not certify deployment of the bundle, migrations or worker. Retained diagrams use original illustrative port names."),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Coding-agent dispatch sections"];
             element!(A [Href = "#flow"]; text("End-to-end flow")),
@@ -588,7 +588,7 @@ pub(super) const USAGE: &[Node] = &[
     ),
     element!(Section [Id = "providers", Class = "design-section", AriaLabelledby = "providers-title"];
         element!(H2 [Id = "providers-title"]; text("Provider capability matrix")),
-        element!(P; text("Capabilities follow pinned protocols and implemented adapters. An authenticated metadata-only Codex probe verified allowance and account activity. Antigravity headless allowance remains explicitly unsupported; no model turn is used to poll quota.")),
+        element!(P; text("Capabilities follow pinned protocols and implemented adapters. An authenticated metadata-only Codex probe verified allowance and account activity. Antigravity and Grok headless allowance remain explicitly unsupported; no model turn is used to poll quota. Grok account authentication, advertised models and task execution are separate qualifications.")),
         element!(P [Class = "table-scroll-hint", Id = "provider-scroll"]; text("More columns → Swipe or use arrow keys in the table.")),
         element!(Div [Class = "engine-table", Role = "region", Tabindex = "0", AriaLabel = "Agent provider capability comparison", AriaDescribedby = "provider-scroll"];
             element!(Table;
@@ -612,6 +612,12 @@ pub(super) const USAGE: &[Node] = &[
                         element!(Td; text("Session-cumulative result metadata (usage, turn count, and duration) from headless output.")),
                         element!(Td; text("Headless results do not report remaining quota. Statusline TUI documents bucket "), element!(Code; text("remaining_fraction")), text("/"), element!(Code; text("remaining_amount")), text(" and reset, but no supported headless allowance feed is implemented, so allowance is "), element!(Code; text("unsupported_headless")), text(".")),
                         element!(Td; text("Context and list-price estimates stay separate. No hidden-endpoint scraping, no transcript/email leakage, and no model turns to poll quota.")),
+                    ),
+                    element!(Tr;
+                        element!(Td; text("Grok headless adapter ("), element!(Code; text("grok 1.0.92")), text(")")),
+                        element!(Td; text("One terminal "), element!(Code; text("end.usage")), text(" record per fresh attempt. Forge input includes uncached input plus cache-read and cache-creation buckets; cached input remains a subset. Per-response updates are not added again. Incomplete usage stays unknown.")),
+                        element!(Td; text("Not reported ("), element!(Code; text("unsupported_headless")), text("). The installed standalone usage command cannot return plan allowance; the manual dashboard requests SuperGrok. A free-preview banner supplies no numeric quota.")),
+                        element!(Td; text("Explicit new session, attempt-owned configuration/state and supervised cancellation. Execution defaults off at API, worker and claim boundaries; a usage-only profile can remain visible. No paid fallback or quota polling.")),
                     ),
                     element!(Tr;
                         element!(Td; text("Future registered adapters")),
@@ -651,7 +657,7 @@ pub(super) const USAGE: &[Node] = &[
             element!(Div;
                 element!(Dt; text("Canonical terminal feeds and generation/epoch fences")),
                 element!(Dd;
-                    text("Each fresh attempt records one validated terminal feed: Codex exec turn usage or Antigravity result usage. It never adds step updates, account totals or overlapping cache/thinking subdivisions. Immutable publication prevents replay double counting; missing telemetry stays partial/unknown. Provider metadata allocates generation and configuration epoch before I/O, with private HMAC account binding. No arbitrary historical/cumulative-session import is implemented."),
+                    text("Each fresh attempt records one validated terminal feed: Codex exec turn usage, Antigravity result usage or Grok terminal end usage. It never adds step updates, account totals or overlapping cache/thinking subdivisions. Immutable publication prevents replay double counting; missing telemetry stays partial/unknown. Provider metadata allocates generation and configuration epoch before I/O, with private HMAC account binding. No arbitrary historical/cumulative-session import is implemented."),
                 ),
             ),
             element!(Div;
@@ -815,7 +821,7 @@ pub(super) const USAGE: &[Node] = &[
             ),
             element!(Li;
                 element!(Strong; text("Versioned metadata smoke and explicit deployment.")),
-                text(" Codex allowance/activity metadata capability has been verified without generation. Requalify the release, then explicitly provision/configure/deploy; Antigravity headless allowance stays unsupported and is never inferred from TUI-only hooks."),
+                text(" Codex allowance/activity metadata capability has been verified without generation. Requalify the release, then explicitly provision/configure/deploy; Antigravity and Grok headless allowance stay unsupported and are never inferred from TUI-only hooks. Grok requires the additive policy9/schema18 release and matching ABI10 portal bundle; historical recipes and receipts remain unchanged. Account qualification and explicit execution configuration remain separate from usage visibility."),
             ),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Related agent usage design references"];

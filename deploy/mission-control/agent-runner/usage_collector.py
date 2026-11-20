@@ -118,6 +118,8 @@ class UsageCollector:
             for offset in range(len(self._order)):
                 index = (self._index + offset) % len(self._order)
                 candidate = self._order[index]
+                if getattr(self._providers[candidate], "manual_refresh_only", False):
+                    continue
                 if now >= self._next_due[candidate]:
                     alias = candidate
                     self._index = (index + 1) % len(self._order)

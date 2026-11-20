@@ -12,7 +12,7 @@ CONFIG_ENV = "FORGE_CODING_WORKER_CONFIG"
 MAX_CONFIG_BYTES = 64 * 1024
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 MODES = frozenset({"plan", "review", "implement"})
-BACKENDS = frozenset({"antigravity", "codex"})
+BACKENDS = frozenset({"antigravity", "codex", "grok"})
 
 
 def identifier(value):
@@ -73,6 +73,13 @@ class WorkerProfile:
     backend: str
     model: str
     modes: tuple[str, ...]
+    execution_enabled: bool | None = None
+
+    def __post_init__(self):
+        enabled = self.backend != "grok" if self.execution_enabled is None else self.execution_enabled
+        if type(enabled) is not bool:
+            raise ValueError("Invalid coding execution capability")
+        object.__setattr__(self, "execution_enabled", enabled)
 
 
 @dataclass(frozen=True)
@@ -100,14 +107,14 @@ class WorkerConfig:
 
     @property
     def allowed_profiles(self):
-        return tuple(self.profiles)
+        return tuple(alias for alias, profile in self.profiles.items() if profile.execution_enabled)
 
     def advertised_profiles(self):
         return [
             {"alias": profile.alias, "backend": profile.backend, "model": profile.model,
              "modes": [mode for mode in profile.modes if mode != "implement" or self.allow_implement]}
             for profile in self.profiles.values()
-            if any(mode != "implement" or self.allow_implement for mode in profile.modes)
+            if profile.execution_enabled and any(mode != "implement" or self.allow_implement for mode in profile.modes)
         ]
 
 
@@ -159,7 +166,7 @@ def parse_config(raw, *, source_path=None):
     frozen_profiles = {}
     for alias, value in profiles.items():
         alias = identifier(alias)
-        value = _object(value, {"backend", "model", "modes"})
+        value = _object(value, {"backend", "model", "modes"}, {"execution_enabled"})
         if not isinstance(value["backend"], str) or value["backend"] not in BACKENDS:
             raise ValueError("Invalid coding worker backend")
         model = value["model"]
@@ -170,7 +177,10 @@ def parse_config(raw, *, source_path=None):
         if (not isinstance(modes, list) or not modes or any(not isinstance(mode, str) for mode in modes)
                 or not set(modes) <= MODES or len(set(modes)) != len(modes)):
             raise ValueError("Invalid coding worker modes")
-        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes))
+        enabled = value.get("execution_enabled", value["backend"] != "grok")
+        if type(enabled) is not bool:
+            raise ValueError("Invalid coding execution capability")
+        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes), enabled)
     binaries = raw["binaries"]
     if not isinstance(binaries, dict) or set(binaries) != {profile.backend for profile in frozen_profiles.values()}:
         raise ValueError("Coding binaries must exactly match selected backends")
@@ -222,7 +232,7 @@ def verify_recipe(config, lease):
 
     profile = config.profiles.get(lease["agent_profile"])
     recipe = lease["recipe"]
-    if (profile is None or lease["project_alias"] not in config.projects
+    if (profile is None or not profile.execution_enabled or lease["project_alias"] not in config.projects
             or lease["mode"] not in profile.modes
             or lease["mode"] == "implement" and not config.allow_implement):
         return False
@@ -248,7 +258,7 @@ def validated_copy(config):
                     "gid": config.account.gid, "home": str(config.account.home)},
         "workspace_root": str(config.workspace_root), "state_root": str(config.state_root),
         "projects": {key: str(value) for key, value in config.projects.items()},
-        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes)}
+        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes), "execution_enabled": value.execution_enabled}
                      for key, value in config.profiles.items()},
         "binaries": {key: str(value) for key, value in config.binaries.items()},
         "allow_implement": config.allow_implement,

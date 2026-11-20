@@ -64,6 +64,11 @@ EXTERNAL_SANDBOX_POLICY={
     "codex_external_io":"host-network-staged-native-state-v1",
 }
 EXTERNAL_SANDBOX_POLICY_DIGEST=sha256_canonical(EXTERNAL_SANDBOX_POLICY)
+WARM_POLICY_ID="forge-coding-v8"
+WARM_POLICY={**EXTERNAL_SANDBOX_POLICY,"id":WARM_POLICY_ID,
+ "codex_session_policy":"fresh-unless-receipt-owned-author-resume-ttl-v1",
+ "codex_feature_controls":"no-user-config-no-multi-agent-no-fast-mode-v1"}
+WARM_POLICY_DIGEST=sha256_canonical(WARM_POLICY)
 
 
 
@@ -90,10 +95,11 @@ def historical_registry(root, maximum):
 
 class PolicyIdentityTest(unittest.TestCase):
     def test_session_policy_is_versioned_without_changing_historical_digest_identity(self):
+        self.assertEqual(WARM_POLICY_DIGEST,"03af7fd6e897a67254bd780a44536366b8dc11fdce307a44a29ddfb5a958cb33")
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v8")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v9")
         self.assertEqual(PEER_POLICY_DIGEST,"78d8f96280b9b75597e2b10276e1854f64026ff8f359f0f2abb65113774a8e5e")
         self.assertEqual(EXTERNAL_SANDBOX_POLICY_DIGEST,"40b4e50c9acf64a835fc477a8748fb1cf266188c46f6ac943dd075d506df6124")
         self.assertEqual(work_policy.POLICY["codex_sandbox"],"supervised-external-v1")
@@ -107,7 +113,8 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertNotIn("fresh_session", work_policy.POLICY)
         self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST, EXTERNAL_SANDBOX_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "codex_feature_controls", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
+                      if not key.startswith("grok_") and key not in {"id", "antigravity_session_policy", "codex_session_policy", "codex_feature_controls", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
+        comparable["adapter_versions"] = {k:v for k,v in comparable["adapter_versions"].items() if k != "grok"}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 
@@ -175,6 +182,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
             FEEDBACK_POLICY_ID: FEEDBACK_POLICY_DIGEST,
             PEER_POLICY_ID: PEER_POLICY_DIGEST,
             EXTERNAL_SANDBOX_POLICY_ID: EXTERNAL_SANDBOX_POLICY_DIGEST,
+            WARM_POLICY_ID: WARM_POLICY_DIGEST,
         }[policy]
         payload = {
             "version": 2, "backend": "codex", "model": "gpt-5.4",
@@ -293,7 +301,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 17)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -432,7 +440,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 17)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -456,12 +464,72 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 v8_inc = self.advertise(cluster, db, "v8-worker", work_policy.POLICY_DIGEST)
                 v8_lease = db.claim("v8-worker", v8_inc, ["codex-v2"])
                 self.assertEqual(v8_lease.task_id, v8_queued["task_id"])
-                self.assertEqual(v8_lease.recipe["resource_profile"], "forge-coding-v8")
+                self.assertEqual(v8_lease.recipe["resource_profile"], work_policy.POLICY_ID)
                 self.assertIsNone(db.claim("v8-worker", v8_inc, ["codex-v2"]))
                 v7_inc2 = self.advertise(cluster, db, "v7-worker", EXTERNAL_SANDBOX_POLICY_DIGEST)
                 v7_lease = db.claim("v7-worker", v7_inc2, ["codex-v2"])
                 self.assertEqual(v7_lease.task_id, v7_queued["task_id"])
                 self.assertEqual(v7_lease.recipe["resource_profile"], "forge-coding-v7")
+            finally:
+                cluster.stop()
+
+    def test_schema17_v8_receipts_survive_m18_and_exact_policy_claims(self):
+        with TemporaryDirectory(prefix="forge-v8-grok-upgrade-", dir="/tmp") as temporary:
+            legacy_sql = Path(temporary) / "sql"
+            historical_registry(legacy_sql, 17)
+            cluster = PreUpgradeCluster(legacy_sql).start()
+            try:
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 17)
+                db = self.worker(cluster)
+                v7_inc = self.advertise(cluster, db, "v7-worker", WARM_POLICY_DIGEST)
+                admitted = self.admit_old(cluster, "v7-before-codex-warm", WARM_POLICY_ID)
+                lease = db.claim("v7-worker", v7_inc, ["codex-v2"])
+                self.assertEqual(lease.task_id, admitted["task_id"])
+                text, manifest = self.stage(db, lease)
+                proof = make_stop_proof(lease.unit_name)
+                published = db.publish(lease, "awaiting_review", manifest, None, "V7 result", proof)
+                receipt = db.reconcile(lease, "d" * 64, proof)
+                reconciliation = self.rows(
+                    cluster, "SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s",
+                    (UUID(receipt),),
+                )
+                before = self.rows(
+                    cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
+                    (UUID(lease.task_id),),
+                )
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
+                self.assertEqual(
+                    self.rows(cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
+                              "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
+                              (UUID(lease.task_id),)),
+                    before,
+                )
+                self.assertEqual(
+                    self.rows(cluster, "SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s",
+                              (UUID(receipt),)),
+                    reconciliation,
+                )
+                self.assertEqual(self.admit_old(cluster, "v7-before-codex-warm", WARM_POLICY_ID), admitted)
+                self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V7 result", proof), published)
+                self.assertEqual(
+                    self.store(cluster).result(project_alias="homelab", task_id=UUID(lease.task_id),
+                                               attempt_id=UUID(lease.attempt_id))["content"],
+                    text,
+                )
+                v7_queued = self.admit_old(cluster, "v7-queued-after-m17", WARM_POLICY_ID)
+                v8_queued = self.service(cluster).submit(make_submit(idempotency_key="v8-queued-after-m17"))
+                v8_inc = self.advertise(cluster, db, "v8-worker", work_policy.POLICY_DIGEST)
+                v8_lease = db.claim("v8-worker", v8_inc, ["codex-v2"])
+                self.assertEqual(v8_lease.task_id, v8_queued["task_id"])
+                self.assertEqual(v8_lease.recipe["resource_profile"], work_policy.POLICY_ID)
+                self.assertIsNone(db.claim("v8-worker", v8_inc, ["codex-v2"]))
+                v7_inc2 = self.advertise(cluster, db, "v7-worker", WARM_POLICY_DIGEST)
+                v7_lease = db.claim("v7-worker", v7_inc2, ["codex-v2"])
+                self.assertEqual(v7_lease.task_id, v7_queued["task_id"])
+                self.assertEqual(v7_lease.recipe["resource_profile"], "forge-coding-v8")
             finally:
                 cluster.stop()
 
@@ -510,6 +578,116 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         self.assertEqual(replacement.resume_attempt_id, lease.attempt_id)
         self.assertEqual(replacement.to_dict()["resume_attempt_id"], lease.attempt_id)
         self.assertEqual(db.publish(lease, "quota_blocked", None, None, "Stopped at provider allowance", proof), publication)
+
+    def test_grok_normal_admission_worker_tokens_and_exact_backend_policy_fences(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        from usage_types import normalize_attempt_usage
+        config = make_v2_config()
+        config = replace(config, profiles={**config.profiles,
+            "grok": WorkProfile("grok", "grok", "fixture-grok-model", work_policy.POLICY_ID, execution_enabled=True)})
+        service = WorkServiceFactory(config, lambda: self.cluster.connect("forge_agent")).create()
+        db = self.worker(self.cluster)
+        self.cluster.grant_worker("mission-control", "homelab", "grok", ("plan",))
+        inc = str(uuid4())
+        task = service.submit(make_submit(agent_profile="grok", idempotency_key="real-grok-m18"))
+        # A latent metadata grant cannot claim Grok work while no matching
+        # executable profile is advertised. This models usage-only registration.
+        for profiles in (
+            [{"alias":"codex-v2","backend":"codex","model":"gpt-5.4","modes":["plan"]}],
+            [{"alias":"grok","backend":"grok","model":"wrong-model","modes":["plan"]}],
+            [{"alias":"grok","backend":"grok","model":"fixture-grok-model","modes":["review"]}],
+        ):
+            db.advertise("grok-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],profiles,work_policy.POLICY_DIGEST)
+            self.assertIsNone(db.claim("grok-worker",inc,["grok"]))
+        db.advertise("grok-worker", inc, [{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":"grok","backend":"grok","model":"fixture-grok-model","modes":["plan"]}], work_policy.POLICY_DIGEST)
+        lease = db.claim("grok-worker",inc,["grok"])
+        self.assertEqual(lease.task_id,task["task_id"])
+        self.assertEqual(lease.recipe["backend"],"grok")
+        self.assertEqual(lease.recipe["resource_profile"],"forge-coding-v9")
+        text, manifest = self.stage(db,lease)
+        usage = normalize_attempt_usage("grok", {"input_tokens":20,"output_tokens":25,"cache_read_input_tokens":80,"cache_creation_input_tokens":0,"total_tokens":125})
+        db.publish(lease,"awaiting_review",manifest,usage,"Grok fixture result",make_stop_proof(lease.unit_name))
+        row = self.rows(self.cluster,"SELECT usage_json FROM forge_agent.coding_attempts WHERE attempt_id=%s",(UUID(lease.attempt_id),))[0][0]
+        self.assertEqual(row,usage)
+        self.assertEqual(row["total_tokens"],"125")
+        self.assertEqual(row["cached_input_tokens"],"80")
+        self.assertEqual(self.rows(self.cluster,"SELECT forge_coding_worker_api._validate_usage_json(%s)",(Json({**usage,"source":"unverified-grok-source"}),))[0][0],False)
+        # Existing worker roles cannot mutate migration catalogs or grant their
+        # own authority just because another provider has been selected.
+        self.assertEqual(self.rows(self.cluster,"SELECT has_table_privilege('forge_coding_worker','forge_agent.schema_migrations','UPDATE')")[0][0],False)
+
+    def test_disabled_grok_is_usage_visible_but_never_admitted_from_global_readiness(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        from queue_store import Rejected
+        from usage_store import UsageStore
+        config = make_v2_config()
+        config = replace(config, profiles={**config.profiles,
+            "grok-off":WorkProfile("grok-off","grok","fixture-grok",work_policy.POLICY_ID)})
+        service=WorkServiceFactory(config,lambda:self.cluster.connect("forge_agent")).create()
+        db=self.worker(self.cluster);inc=str(uuid4())
+        self.cluster.grant_worker("mission-control","homelab","grok-off",("review",))
+        db.advertise("ready-other-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":"grok-off","backend":"grok","model":"fixture-grok","modes":["plan"]}],work_policy.POLICY_DIGEST)
+        self.assertNotIn("grok-off",[entry["alias"]for entry in service.catalog()["profiles"]])
+        with self.assertRaises(Rejected):service.submit(make_submit(agent_profile="grok-off",idempotency_key="must-not-admit"))
+        self.assertEqual(self.rows(self.cluster,"SELECT count(*) FROM forge_agent.coding_tasks WHERE agent_profile='grok-off'")[0][0],0)
+        usage=UsageStore(config,lambda:self.cluster.connect("forge_agent")).overview("homelab")
+        self.assertIn("grok-off",[entry["alias"]for entry in usage["providers"]])
+
+    def test_enabled_then_disabled_submit_and_repair_replay_preserve_exact_receipts(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        from work_api import WorkRepair
+        from queue_store import Rejected
+        cfg=make_v2_config()
+        profile=WorkProfile("grok-replay","grok","fixture-grok",work_policy.POLICY_ID,execution_enabled=True)
+        cfg=replace(cfg,profiles={**cfg.profiles,profile.alias:profile})
+        enabled=WorkServiceFactory(cfg,lambda:self.cluster.connect("forge_agent")).create()
+        off=WorkServiceFactory(replace(cfg,profiles={**cfg.profiles,profile.alias:replace(profile,execution_enabled=False)}),lambda:self.cluster.connect("forge_agent")).create()
+        command=make_submit(agent_profile=profile.alias,mode="implement",idempotency_key="grok-replay-submit")
+        admitted=enabled.submit(command)
+        self.assertEqual(off.submit(command),admitted)
+        with self.assertRaises(Rejected)as error:off.submit(replace(command,idempotency_key="fresh-disabled-submit"))
+        self.assertEqual(error.exception.status,403)
+        db=self.worker(self.cluster);inc=str(uuid4())
+        self.cluster.grant_worker("mission-control","homelab",profile.alias,("implement",))
+        db.advertise("grok-replay-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":profile.alias,"backend":"grok","model":profile.model,"modes":["implement"]}],work_policy.POLICY_DIGEST)
+        lease=db.claim("grok-replay-worker",inc,[profile.alias]);_,manifest=self.stage(db,lease)
+        proof=make_stop_proof(lease.unit_name);db.publish(lease,"awaiting_review",manifest,None,"Fixture implementation",proof);db.reconcile(lease,"c"*64,proof)
+        # Owned historical fixture: a completed implementation before source review.
+        self.cluster.admin_exec("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1")
+        revision=self.rows(self.cluster,"SELECT revision FROM forge_agent.coding_tasks WHERE id=%s",(UUID(lease.task_id),))[0][0]
+        repair=WorkRepair("homelab",UUID(lease.task_id),revision,"d"*40,profile.alias,"Inspect this correction.",(),"grok-replay-repair")
+        repaired=enabled.repair(repair)
+        state=self.rows(self.cluster,"SELECT (SELECT count(*) FROM forge_agent.coding_tasks),(SELECT count(*) FROM forge_agent.coding_reviews),(SELECT count(*) FROM forge_agent.coding_control_receipts),(SELECT count(*) FROM forge_agent.coding_events)")
+        self.assertEqual(off.repair(repair),repaired)
+        with self.assertRaises(Rejected)as error:off.repair(replace(repair,idempotency_key="fresh-disabled-repair",expected_revision=repaired["revision"]))
+        self.assertEqual(error.exception.status,403)
+        self.assertEqual(self.rows(self.cluster,"SELECT (SELECT count(*) FROM forge_agent.coding_tasks),(SELECT count(*) FROM forge_agent.coding_reviews),(SELECT count(*) FROM forge_agent.coding_control_receipts),(SELECT count(*) FROM forge_agent.coding_events)"),state)
+
+    def test_enabled_then_disabled_resume_replays_before_current_recipe_resolution(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        profile=WorkProfile("grok-resume","grok","fixture-grok",work_policy.POLICY_ID,execution_enabled=True)
+        cfg=make_v2_config();cfg=replace(cfg,profiles={**cfg.profiles,profile.alias:profile})
+        enabled=WorkServiceFactory(cfg,lambda:self.cluster.connect("forge_agent")).create()
+        off=WorkServiceFactory(replace(cfg,profiles={**cfg.profiles,profile.alias:replace(profile,execution_enabled=False)}),lambda:self.cluster.connect("forge_agent")).create()
+        command=make_submit(agent_profile=profile.alias,mode="review",idempotency_key="grok-resume-submit")
+        admitted=enabled.submit(command);db=self.worker(self.cluster);inc=str(uuid4())
+        self.cluster.grant_worker("mission-control","homelab",profile.alias,("review",))
+        db.advertise("grok-resume-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":profile.alias,"backend":"grok","model":profile.model,"modes":["review"]}],work_policy.POLICY_DIGEST)
+        lease=db.claim("grok-resume-worker",inc,[profile.alias]);proof=make_stop_proof(lease.unit_name)
+        published=db.publish(lease,"quota_blocked",None,None,"Fixture quota boundary",proof);receipt=db.reconcile(lease,"c"*64,proof)
+        resume=WorkResume("homelab",UUID(lease.task_id),published["revision"],"grok-resume-replay",profile.alias,UUID(receipt),"Operator qualified continuation.")
+        admitted=enabled.resume(resume)
+        before=self.rows(self.cluster,"SELECT count(*),max(revision) FROM forge_agent.coding_tasks")
+        self.assertEqual(off.resume(resume),admitted)
+        self.assertEqual(self.rows(self.cluster,"SELECT count(*),max(revision) FROM forge_agent.coding_tasks"),before)
 
     def test_apply_twice_and_verify_policy_membership_and_digest_predicate_drift(self):
         self.cluster.apply_and_verify()
