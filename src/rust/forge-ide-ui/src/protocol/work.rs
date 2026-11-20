@@ -384,12 +384,14 @@ impl WorkPublication {
 pub enum WorkBackend {
     Antigravity,
     Codex,
+    Muse,
 }
 impl WorkBackend {
     pub fn label(self) -> &'static str {
         match self {
             Self::Antigravity => "Gemini / Antigravity",
             Self::Codex => "Codex",
+            Self::Muse => "Muse Code",
         }
     }
 }

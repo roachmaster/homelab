@@ -12,7 +12,7 @@ CONFIG_ENV = "FORGE_CODING_WORKER_CONFIG"
 MAX_CONFIG_BYTES = 64 * 1024
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 MODES = frozenset({"plan", "review", "implement"})
-BACKENDS = frozenset({"antigravity", "codex"})
+BACKENDS = frozenset({"antigravity", "codex", "muse"})
 
 
 def identifier(value):

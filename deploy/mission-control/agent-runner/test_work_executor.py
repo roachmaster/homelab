@@ -135,7 +135,7 @@ class WorkerConfigTest(unittest.TestCase):
 
     def test_elevated_policy_is_versioned_and_refuses_previous_recipes(self):
         previous_digest = "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44"
-        self.assertEqual(POLICY_ID, "forge-coding-v8")
+        self.assertEqual(POLICY_ID, "forge-coding-v9")
         self.assertEqual(POLICY["antigravity_tool_policy"], "workspace-elevated-v1")
         self.assertEqual(POLICY["codex_session_policy"], "fresh-unless-receipt-owned-author-resume-ttl-v1")
         self.assertEqual(POLICY["codex_feature_controls"], "no-user-config-no-multi-agent-no-fast-mode-v1")

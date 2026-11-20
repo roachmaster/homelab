@@ -41,7 +41,7 @@ class UsageProviderConfig:
         identifier(self.alias)
         text(self.label)
         text(self.model)
-        if self.provider not in {"antigravity", "codex"}:
+        if self.provider not in {"antigravity", "codex", "muse"}:
             raise ValueError("Unknown usage provider")
         if self.provider == "codex" and not isinstance(self.process, MetadataProcessConfig):
             raise ValueError("Codex usage requires typed process configuration")
@@ -58,6 +58,24 @@ class AntigravityUsageProvider:
         return validate_snapshot({
             "snapshot_state": "unknown", "observed_at": _now(self._clock),
             "source": "agy-headless/allowance-capability", "version": "unknown",
+            "last_error": None, "allowance": _empty_allowance("unsupported", "unsupported_headless"),
+            "account_activity": _unknown_activity(), "account_identity": None,
+        })
+
+
+class MuseUsageProvider:
+    """Truthful unsupported allowance until an authenticated schema is verified.
+
+    Deliberately performs no native calls or consumer OAuth polling. Attempt
+    counters are accounted separately from source-bound MSP run.usage events.
+    """
+    def __init__(self, config, *, clock=utc_now):
+        self.config, self._clock = config, clock
+
+    def read_snapshot(self):
+        return validate_snapshot({
+            "snapshot_state": "unknown", "observed_at": _now(self._clock),
+            "source": "muse-headless/allowance-capability", "version": POLICY["adapter_versions"]["muse"],
             "last_error": None, "allowance": _empty_allowance("unsupported", "unsupported_headless"),
             "account_activity": _unknown_activity(), "account_identity": None,
         })
@@ -222,6 +240,8 @@ class UsageProviderFactory:
     def create(self):
         if self._config.provider == "antigravity":
             return AntigravityUsageProvider(self._config, clock=self._clock)
+        if self._config.provider == "muse":
+            return MuseUsageProvider(self._config, clock=self._clock)
         try:
             rpc = self._rpc_factory(self._config.process)
             version = rpc.version()
