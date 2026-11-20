@@ -12,7 +12,7 @@ from work_executor import CHILD_STATE, Invocation, WorkspaceLease, unit_name
 from work_process import terminate_and_reap
 from work_publication_clients import PublicationError, uuid
 from work_verification_init import verification_argv
-from work_verification import project_verification
+from work_verification import VerificationMetadata, project_verification
 
 
 class VerificationFailure(PublicationError):
@@ -89,6 +89,7 @@ class IsolatedCheckRunner:
         lease = {"attempt_id": job["publication_id"], "unit_name": unit_name(job["publication_id"])}
         process, total, log = None, 0, None
         captured = bytearray()
+        metadata = VerificationMetadata(len(self.config.checks))
         evidence = hashlib.sha256()
         failure, returncode, cleanup = None, None, False
         try:
@@ -121,6 +122,7 @@ class IsolatedCheckRunner:
                                 raise PublicationError("verification_output_limit")
                             log.write(data)
                             evidence.update(data)
+                            metadata.feed(key.fd, data)
                             captured.extend(data)
                             if len(captured) > 32768:
                                 del captured[:-32768]
@@ -148,7 +150,7 @@ class IsolatedCheckRunner:
             failure = PublicationError("verification_scope_unstopped")
         outcome = project_verification(self.config.checks, code=failure.code if failure else None,
             returncode=returncode, output=bytes(captured), evidence_digest=evidence.hexdigest(),
-            cleanup_confirmed=cleanup)
+            cleanup_confirmed=cleanup, metadata=metadata)
         # The receipt is parent-owned and outside the child-visible scratch.
         # Never reopen a child-controlled log path to construct diagnostics.
         report_path = repository.parent / ("checks-" + job["lease_token"] + ".json")

@@ -23,6 +23,41 @@ def diagnostic_text(value, maximum=MAX_DIAGNOSTIC_BYTES):
     return value.encode("utf-8")[:maximum].decode("utf-8", "ignore")
 
 
+class VerificationMetadata:
+    """Bounded stream diagnostics, independent of the rolling output tail.
+
+    Markers identify diagnostic context only. Process exit and scope cleanup
+    remain the sole inputs that can establish successful verification.
+    """
+    def __init__(self, command_count):
+        self.command_count = command_count
+        self.toolchain, self.active_index = None, None
+        self._streams = {}
+
+    def feed(self, stream, data):
+        partial, discarded = self._streams.get(stream, (b"", False))
+        parts = data.split(b"\n")
+        for index, part in enumerate(parts):
+            if not discarded:
+                if len(partial) + len(part) > 256:
+                    partial, discarded = b"", True
+                else:
+                    partial += part
+            if index < len(parts) - 1:
+                if not discarded:
+                    self._line(partial.rstrip(b"\r"))
+                partial, discarded = b"", False
+        self._streams[stream] = partial, discarded
+
+    def _line(self, line):
+        start = re.fullmatch(rb"FORGE_CHECK_START ([0-9]{1,10})", line)
+        if start and 0 <= int(start[1]) < self.command_count:
+            self.active_index = int(start[1])
+        version = re.fullmatch(rb"FORGE_VERIFIER_TOOLCHAIN (.{1,128})", line)
+        if version and self.toolchain is None:
+            self.toolchain = diagnostic_text(version[1].decode("utf-8", "replace"), 128)
+
+
 def check_id(command, index):
     if tuple(command) == ("/usr/bin/make", "ci"):
         return "make-ci"
@@ -60,17 +95,21 @@ class VerificationReport:
                 "cleanup_confirmed": self.cleanup_confirmed}
 
 
-def project_verification(commands, *, code, returncode, output, evidence_digest, cleanup_confirmed):
+def project_verification(commands, *, code, returncode, output, evidence_digest, cleanup_confirmed, metadata=None):
     """Project evidence conservatively. Only successful checks close witnesses."""
     text = output.decode("utf-8", "replace")
     passed = code is None and returncode == 0 and cleanup_confirmed
     starts = [int(value) for value in re.findall(r"^FORGE_CHECK_START (\d+)$", text, re.M)]
     active = starts[-1] if starts and 0 <= starts[-1] < len(commands) else 0
+    if metadata is not None and metadata.active_index is not None:
+        active = metadata.active_index
     checks = tuple({"check_id": check_id(command, idx),
                     "status": "passed" if passed else "not_run" if idx > active else "failed",
                     "command": list(command)} for idx, command in enumerate(commands))
     versions = re.findall(r"^FORGE_VERIFIER_TOOLCHAIN (.{1,128})$", text, re.M)
     toolchain = diagnostic_text(versions[0], 128) if versions else "Not reported"
+    if metadata is not None and metadata.toolchain is not None:
+        toolchain = metadata.toolchain
     if passed:
         return VerificationReport(True, "pass", "checks_passed", "Independent local checks passed.",
                                   toolchain, checks, (), evidence_digest, True)

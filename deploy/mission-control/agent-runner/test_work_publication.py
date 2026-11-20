@@ -389,6 +389,29 @@ class PublicationTest(unittest.TestCase):
             self.assertIsNotNone(processes[0].poll())
             self.assertTrue(all(stream.closed for stream in (processes[0].stdout, processes[0].stderr)))
 
+    def test_large_verification_output_retains_toolchain_and_active_check(self):
+        class Supervisor:
+            def stop(self, _unit):
+                return {"scope_stopped": True}
+
+            def argv(self, _lease, _invocation):
+                return [sys.executable, "-B", "-c",
+                    "import sys;print('FORGE_VERIFIER_TOOLCHAIN rustc 1.100.0');"
+                    "print('FORGE_CHECK_START 1');print('x'*70000);"
+                    "print('error: fixture failure');sys.exit(1)"]
+
+        with fixture() as values:
+            config, job = values[1:3]
+            config = type(config)(config.worker, config.repositories, config.github_config_dir,
+                                  checks=(("/usr/bin/true",), ("/usr/bin/false",)))
+            repository = config.state_root / job["publication_id"] / "repository"
+            repository.mkdir(parents=True)
+            with self.assertRaises(PublicationError) as failed:
+                IsolatedCheckRunner(config, Supervisor()).run(job, repository, threading.Event())
+            self.assertEqual(failed.exception.report.toolchain, "rustc 1.100.0")
+            self.assertEqual(failed.exception.report.findings[0]["check_id"], "fixed-check-2")
+            self.assertFalse(failed.exception.report.checks_passed)
+
     def test_child_log_and_scratch_report_symlinks_cannot_redirect_parent_writes(self):
         class Supervisor:
             def stop(self, _unit):

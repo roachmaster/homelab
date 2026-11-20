@@ -117,9 +117,13 @@ def _tree_map(git, repository, head):
 
 def protected_gate_path(path):
     name = path.rsplit("/", 1)[-1]
-    return (path == "Makefile" or path.startswith(".github/workflows/")
-            or path.startswith("src/rust/scripts/") or "/tests/" in path
+    return (path.startswith(".github/") or path.startswith(".cargo/") or "/.cargo/" in path
+            or path.startswith("src/rust/scripts/") or path.startswith("tests/") or "/tests/" in path
+            or path.startswith(".config/") or "/.config/" in path
             or name.startswith("test_") or name in {
+                "Makefile", "makefile", "GNUmakefile", "Cargo.toml", "Cargo.lock", "build.rs",
+                "rust-toolchain", "rust-toolchain.toml", "clippy.toml", ".clippy.toml",
+                "rustfmt.toml", ".rustfmt.toml", "deny.toml",
                 "work_publication_checks.py", "work_verification.py", "work_verification_init.py", "work_policy.py"})
 
 
