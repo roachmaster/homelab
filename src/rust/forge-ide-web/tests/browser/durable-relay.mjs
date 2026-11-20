@@ -52,6 +52,7 @@ export async function startDurableRelay(prompt, reply) {
   ])));
   const runs = new Map();
   const submissions = new Map();
+  const workspaceRestores = [];
   let submitted = 0;
   let completions = 0;
   let dropFirstAcknowledgement = true;
@@ -222,17 +223,19 @@ export async function startDurableRelay(prompt, reply) {
       const previous = tabs.get(body.tab);
       if (body.operation === 'restore') {
         const lease = randomBytes(32).toString('hex');
-        if (body.history !== true) { send(400, {}); return; }
+        const preserve = body.preserve_chat === true;
+        workspaceRestores.push({ preserve_chat: preserve, history: body.history === true, models: body.models === true });
+        if (!(preserve || body.history === true) || preserve && ('history' in body || 'models' in body)) { send(400, {}); return; }
         const snapshot = previous?.snapshot ? structuredClone(previous.snapshot) : null;
         function savedConversation(chat, draft = '') {
           const { chat_id, revision } = chat.summary;
           return { chat_id, revision, draft, messages: chat.messages.map(({ role, content }) => ({ role, content })) };
         }
-        const latest = [...history.values()].at(-1);
+        const latest = preserve ? null : [...history.values()].at(-1);
         const restored = snapshot ?? (latest ? {
           chat: { selected: 0, conversations: [savedConversation(latest)] }, workbench: null, workbench_open: false,
         } : null);
-        if (snapshot) {
+        if (snapshot && !preserve) {
           const old = snapshot.chat;
           const kept = old.conversations.slice(0, old.selected).filter(item => !removed.has(item.chat_id)).length;
           old.conversations = old.conversations.filter(item => !removed.has(item.chat_id)).map(item =>
@@ -242,7 +245,7 @@ export async function startDurableRelay(prompt, reply) {
         }
         tabs.set(body.tab, { lease, revision: 0, snapshot: restored });
         const visible = structuredClone(restored);
-        if (visible && body.models !== true) {
+        if (visible && !preserve && body.models !== true) {
           delete visible.chat.model_id;
           if (visible.chat.pending_run) delete visible.chat.pending_run.model_id;
         }
@@ -279,7 +282,14 @@ export async function startDurableRelay(prompt, reply) {
     await once(server, 'listening');
     server.unref();
     return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile,
-      submitted: () => submitted, completions: () => completions, finish, close };
+      submitted: () => submitted, completions: () => completions, finish, close,
+      workspaceRestores: () => structuredClone(workspaceRestores),
+      seedWorkspace(tab, snapshot) {
+        if (!/^[0-9a-f]{32}$/.test(tab) || !tabs.has(tab)) throw new Error('Seed requires an existing test-owned tab');
+        tabs.get(tab).snapshot = structuredClone(snapshot);
+      },
+      workspaceSnapshot(tab) { return structuredClone(tabs.get(tab)?.snapshot ?? null); },
+    };
   } catch (error) {
     await close();
     throw error;
