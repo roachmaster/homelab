@@ -7,19 +7,14 @@ import re
 import unicodedata
 from uuid import UUID
 
+from work_feedback import validate_feedback
+
 MAX_FEEDBACK_BYTES = 64 * 1024
-MAX_FINDINGS = 32
-SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 SECRET = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
                     r"gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{70,}|"
                     r"AIza[A-Za-z0-9_-]{35}|ya29\.[A-Za-z0-9_-]{40,}")
-FIELDS = frozenset({"version", "feedback_id", "task_id", "parent_attempt_id", "source_revision",
-    "parent_result_sha256", "reconciliation_receipt_id", "workspace_digest", "candidate_commit",
-    "integration_base", "gate_manifest_sha256", "round", "disposition", "agent_profile", "summary", "findings",
-    "plan_decision_id"})
-FINDING_FIELDS = frozenset({"finding_id", "category", "check_id", "path", "diagnostic_code", "summary",
-                           "reproduction", "expected", "actual", "evidence_digest", "status"})
+
 
 
 class ReviewContextError(ValueError):
@@ -92,47 +87,35 @@ def validate_context(lease, workspace, envelope):
                             parse_constant=lambda _value: (_ for _ in ()).throw(ReviewContextError()))
     except (ValueError, TypeError, RecursionError):
         raise ReviewContextError() from None
-    _require(parsed == feedback and isinstance(parsed, dict) and set(parsed) == FIELDS)
-    _require(type(parsed["version"]) is int and parsed["version"] == 1
-             and parsed["feedback_id"] == expected_id and parsed["task_id"] == lease["task_id"]
-             and parsed["agent_profile"] == lease["agent_profile"])
-    if parsed["plan_decision_id"] is not None:
-        _uuid(parsed["plan_decision_id"])
-    if lease.get("plan_decision_id") is not None:
-        _require(parsed["plan_decision_id"] == lease["plan_decision_id"])
-    for name in ("feedback_id", "task_id", "parent_attempt_id", "reconciliation_receipt_id"):
-        _uuid(parsed[name])
-    for name in ("parent_result_sha256", "workspace_digest", "gate_manifest_sha256"):
-        _require(isinstance(parsed[name], str) and DIGEST.fullmatch(parsed[name]))
-    for name in ("candidate_commit", "integration_base"):
-        _require(isinstance(parsed[name], str) and SHA.fullmatch(parsed[name]))
-    _require(type(parsed["source_revision"]) is int and parsed["source_revision"] > 0
-             and type(parsed["round"]) is int and 0 <= parsed["round"] <= 32
-             and parsed["disposition"] == "repair"
-             and workspace.task_id == lease["task_id"]
+    _require(isinstance(parsed, dict) and parsed == feedback)
+    try:
+        typed = validate_feedback(parsed)
+    except (ValueError, TypeError, KeyError, UnicodeError):
+        raise ReviewContextError() from None
+    _require(typed["feedback_id"] == expected_id and typed["task_id"] == lease["task_id"]
+             and typed["agent_profile"] == lease["agent_profile"]
+             and typed["disposition"] == "repair")
+    expected_plan = lease.get("plan_decision_id") or lease.get("scope_plan_decision_id")
+    if expected_plan is not None:
+        _require(typed["plan_decision_id"] == expected_plan)
+    _require(workspace.task_id == lease["task_id"]
              and workspace.base_revision == lease["base_revision"]
-             and workspace.digest() == parsed["workspace_digest"])
+             and workspace.digest() == typed["workspace_digest"])
     if lease.get("resume_attempt_id") is not None:
-        _require(parsed["parent_attempt_id"] == lease["resume_attempt_id"]
-                 and parsed["workspace_digest"] == lease.get("resume_workspace_digest"))
-    _text(parsed["summary"], 2048)
-    findings = parsed["findings"]
-    _require(isinstance(findings, list) and 1 <= len(findings) <= MAX_FINDINGS)
-    ids = []
-    for finding in findings:
-        _require(isinstance(finding, dict) and {"finding_id", "category", "summary"} <= set(finding) <= FINDING_FIELDS)
-        _require(isinstance(finding["finding_id"], str)
-                 and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", finding["finding_id"])
-                 and finding["category"] in {"source", "infrastructure", "quota", "authentication", "permission", "scope"})
-        _text(finding["summary"], 2048)
-        for name, maximum in (("check_id", 128), ("path", 1024), ("diagnostic_code", 128),
-                              ("reproduction", 2048), ("expected", 2048), ("actual", 2048)):
-            _text(finding.get(name, ""), maximum, empty=True)
-        evidence = finding.get("evidence_digest", "")
-        _require(finding.get("status", "open") in {"open", "verified"}
-                 and isinstance(evidence, str) and (not evidence or DIGEST.fullmatch(evidence)))
-        _require(finding["finding_id"] not in ids)
-        ids.append(finding["finding_id"])
+        _require(typed["parent_attempt_id"] == lease["resume_attempt_id"]
+                 and typed["workspace_digest"] == lease.get("resume_workspace_digest"))
+    # The shared DTO validator is the schema authority. Additional secrecy
+    # checks protect the read-only model artifact, without reserializing it.
+    pending = [typed]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, str):
+            _require(SECRET.search(value) is None)
+    ids = [finding["finding_id"] for finding in typed["findings"]]
     return ReviewContext(encoded, expected_digest, expected_id, tuple(ids), note)
 
 

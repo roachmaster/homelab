@@ -1,6 +1,5 @@
 """Actual candidate Git identity with owned verifier/store substitutes."""
 
-import threading
 from dataclasses import replace
 import unittest
 from unittest.mock import Mock
@@ -11,6 +10,7 @@ from work_publication_checks import VerificationFailure
 from work_review import ReviewedCandidateProvider, ReviewWorker
 from work_publication_clients import WorkspaceSnapshotProvider
 from work_verification import project_verification
+from work_hosted_checks import HostedCheckReport
 
 
 class ReviewStore:
@@ -69,6 +69,8 @@ class ReviewWorkerTest(unittest.TestCase):
                 outcome = store.outcomes[0][1]
                 self.assertEqual(outcome["disposition"], expected, outcome)
                 self.assertEqual(outcome["verification"]["checks_passed"], passed)
+                self.assertTrue(all(check["head_sha"] == outcome["candidate_commit"]
+                                    for check in outcome["verification"]["checks"]))
                 self.assertFalse(outcome["verification"]["repair_requires_new_workspace"])
                 self.assertEqual(candidates.read(job["review_id"])["candidate_commit"], outcome["candidate_commit"])
                 self.assertEqual((accepted / "app.py").read_text(), "implemented\n")
@@ -135,6 +137,62 @@ class ReviewWorkerTest(unittest.TestCase):
             ReviewWorker(config, store, WorkspaceSnapshotProvider(workspaces), repository,
                 ForgedChecks(config, False), ReviewedCandidateProvider(config, repository)).process(job)
             self.assertEqual(store.outcomes[0][1]["verified_finding_ids"], [])
+
+    def test_hosted_pending_pass_and_failure_never_rerun_a_native_agent(self):
+        for status, expected in (("pending", "awaiting_review"), ("passed", "awaiting_review"), ("failed", "repair")):
+            with self.subTest(status=status), fixture() as values:
+                _, config, source, workspaces, _, _, repository, *_ = values
+                local_job = review_job(source)
+                store = ReviewStore()
+                candidates = ReviewedCandidateProvider(config, repository)
+                checks = ReviewChecks(config, True)
+                ReviewWorker(config, store, WorkspaceSnapshotProvider(workspaces), repository,
+                             checks, candidates).process(local_job)
+                local = store.outcomes[-1][1]
+                host_job = review_job(source, phase="hosted", source_review_id=local_job["review_id"],
+                    source_publication_id=str(uuid4()), target_publication_id=str(uuid4()),
+                    candidate_commit=local["candidate_commit"], gate_manifest_sha256=local["gate_manifest_sha256"],
+                    pr_url="https://github.com/fixture/project/pull/1",
+                    open_findings=[{"finding_id": "hosted-witness", "check_id": "check"},
+                                   {"finding_id": "critic-only", "check_id": "independent-critic"}])
+                rows = tuple({"name": name, "status": "success" if status == "passed" else
+                              "failure" if status == "failed" else "pending",
+                              "head_sha": local["candidate_commit"]} for name in ("check", "pr-fast-gate", "real-browser"))
+                findings = ({"finding_id": "hosted-failure", "category": "source", "check_id": "check",
+                    "diagnostic_code": "compiler", "path": "src/lib.rs", "summary": "Compiler check failed."},) if status == "failed" else ()
+                hosted = Mock()
+                hosted.observe.return_value = HostedCheckReport(status, rows, findings, "Hosted result.", "rustc 1.100.0", "e" * 64)
+                snapshots = Mock()
+                snapshots.create.side_effect = AssertionError("Hosted observation must not resnapshot native source")
+                ReviewWorker(config, store, snapshots, repository, checks, candidates,
+                             hosted_checks=hosted).process(host_job)
+                outcome = store.outcomes[-1][1]
+                self.assertEqual(outcome["disposition"], expected, outcome)
+                self.assertTrue(outcome["verification"]["hosted"])
+                self.assertEqual(outcome["verification"]["hosted_status"], status)
+                self.assertEqual(outcome["verified_finding_ids"], ["hosted-witness"] if status == "passed" else [])
+                self.assertEqual(checks.calls, 1, "Hosted observations do not rerun local checks")
+                snapshots.create.assert_not_called()
+
+    def test_owner_source_import_is_not_verification_or_publication(self):
+        with fixture() as values:
+            _, config, source, _, accepted, _, repository, *_ = values
+            job = review_job(source, phase="source", owner_source_authorized=True, auto_repair=False,
+                             candidate_commit=source["base_revision"],
+                             findings=[{"finding_id": "legacy-ci-failure", "category": "source",
+                                        "summary": "Fix the supplied hosted compiler failure."}])
+            store, checks, snapshots = ReviewStore(), ReviewChecks(config, True), Mock()
+            snapshots.create.side_effect = AssertionError("Legacy source import must not read old native bytes")
+            candidates = ReviewedCandidateProvider(config, repository)
+            ReviewWorker(config, store, snapshots, repository, checks, candidates).process(job)
+            outcome = store.outcomes[-1][1]
+            self.assertEqual(outcome["disposition"], "repair")
+            self.assertTrue(outcome["verification"]["source_import"])
+            self.assertFalse(outcome["verification"]["checks_passed"])
+            self.assertTrue(outcome["verification"]["repair_requires_new_workspace"])
+            self.assertFalse(candidates.read(job["review_id"])["checks_passed"])
+            self.assertEqual(checks.calls, 0)
+            self.assertEqual((accepted / "app.py").read_text(), "implemented\n")
 
 
 if __name__ == "__main__":

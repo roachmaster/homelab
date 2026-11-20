@@ -38,7 +38,7 @@ def _lease(value):
     for field in ("task_id", "attempt_id", "attempt_token"):
         if str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding lease identity")
-    for field in ("plan_decision_id", "resume_attempt_id", "feedback_id", "repair_source_review_id", "parent_task_id"):
+    for field in ("plan_decision_id", "scope_plan_decision_id", "resume_attempt_id", "feedback_id", "repair_source_review_id", "parent_task_id"):
         if result.get(field) is not None and str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding continuation identity")
     if result.get("feedback_id") is not None and (not isinstance(result.get("feedback_sha256"), str)
@@ -261,7 +261,7 @@ class CodingWorker:
                     # stays unchanged and retains terminal-result reporting.
                     reporter = report_progress if lease["recipe"]["backend"] == "antigravity" else None
                     arguments = {"report_progress": reporter}
-                    if lease.get("plan_decision_id") is not None:
+                    if lease.get("plan_decision_id") is not None or lease.get("scope_plan_decision_id") is not None:
                         try:
                             arguments["plan_context"] = self.store.read_plan(lease)
                         except Exception:

@@ -5,7 +5,7 @@ resources on create; claimed jobs alone trigger verification and publication.
 No method pushes main, force-pushes, merges a PR, invokes a model or rotates auth.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import fcntl
 import logging
 import os
@@ -20,6 +20,7 @@ from work_publication_clients import (DIGEST, SHA, GitHubPullRequestClient, GitR
 from work_publication_config import CONFIG_ENV, PublicationConfig, load_config
 from work_review import ReviewedCandidateProvider, ReviewWorker
 from work_consumer_cache import configured_consumer_caches
+from work_hosted_checks import GitHubHostedChecksProvider
 
 LOG = logging.getLogger("forge-publication")
 
@@ -169,8 +170,17 @@ class PublicationWorker:
     def run_forever(self):
         while not self.stop.is_set():
             try:
-                if self.run_once():
-                    continue
+                listener = self.store.listen() if hasattr(self.store, "listen") else nullcontext(None)
+                with listener as committed:
+                    # Subscribe before scanning. Notifications wake this owner;
+                    # leases and source-bound rows still authorize every action.
+                    while not self.stop.is_set():
+                        if self.run_once():
+                            continue
+                        if committed is not None:
+                            self.store.wait(committed, 5)
+                        else:
+                            self.stop.wait(5)
             except Exception:
                 LOG.warning("Publication queue unavailable; no remote action replayed")
             self.stop.wait(5)
@@ -181,7 +191,7 @@ class PublicationWorkerFactory:
                  snapshot_factory=WorkspaceSnapshotProvider, git_factory=GitRepositoryProvider,
                  supervisor_factory=None, checks_factory=IsolatedCheckRunner,
                  pull_request_factory=GitHubPullRequestClient, candidate_factory=ReviewedCandidateProvider,
-                 reviewer_factory=ReviewWorker, stop=None):
+                 reviewer_factory=ReviewWorker, hosted_factory=GitHubHostedChecksProvider, stop=None):
         if not isinstance(config, PublicationConfig) or not callable(store_factory):
             raise TypeError("Publication requires frozen config and a store factory")
         self.config, self.store_factory, self.stop = config, store_factory, stop
@@ -192,6 +202,7 @@ class PublicationWorkerFactory:
         self.checks_factory = checks_factory
         self.pull_request_factory = pull_request_factory
         self.candidate_factory, self.reviewer_factory = candidate_factory, reviewer_factory
+        self.hosted_factory = hosted_factory
 
     def create(self):
         self.config.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -203,9 +214,12 @@ class PublicationWorkerFactory:
         store, snapshots = self.store_factory(self.config), self.snapshot_factory(workspaces)
         git, checks = self.git_factory(self.config), self.checks_factory(self.config, supervisor)
         candidates = self.candidate_factory(self.config, git)
-        reviewer = self.reviewer_factory(self.config, store, snapshots, git, checks, candidates, stop=self.stop)
+        pulls = self.pull_request_factory(self.config)
+        hosted = self.hosted_factory(self.config, client=pulls)
+        reviewer = self.reviewer_factory(self.config, store, snapshots, git, checks, candidates,
+                                        stop=self.stop, hosted_checks=hosted)
         return PublicationWorker(self.config, store, snapshots, git, checks,
-                                 self.pull_request_factory(self.config), candidates=candidates,
+                                 pulls, candidates=candidates,
                                  reviewer=reviewer, stop=self.stop)
 
 

@@ -671,8 +671,9 @@ class CommandRunnerProvider:
                        "keep the repository read-only. Do not edit or replace report files or the helper.")
         implement = lease["mode"] == "implement"
         plan_file = None
-        if lease.get("plan_decision_id") is not None:
-            if not isinstance(plan_context, dict) or plan_context.get("decision_id") != lease["plan_decision_id"]:
+        expected_plan = lease.get("plan_decision_id") or lease.get("scope_plan_decision_id")
+        if expected_plan is not None:
+            if not isinstance(plan_context, dict) or plan_context.get("decision_id") != expected_plan:
                 raise ExecutionError("failed", "The persisted plan decision is unavailable.")
             decision = plan_context.get("decision")
             text, note = plan_context.get("text"), plan_context.get("note")

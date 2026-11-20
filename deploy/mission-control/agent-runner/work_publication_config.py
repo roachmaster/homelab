@@ -77,7 +77,8 @@ def parse_config(raw, worker, *, source_path=None):
                           or any(ord(char) < 32 for char in value) for value in row)
                    or not row[0].startswith(".github/workflows/") or ".." in Path(row[0]).parts
                    for row in required)
-            or len({tuple(row) for row in required}) != len(required)):
+            or len({tuple(row) for row in required}) != len(required)
+            or len({row[2] for row in required}) != len(required)):
         raise ValueError("Invalid required hosted checks")
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
