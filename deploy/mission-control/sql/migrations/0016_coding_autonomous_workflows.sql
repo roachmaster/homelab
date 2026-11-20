@@ -107,7 +107,7 @@ ALTER TABLE forge_agent.coding_attempts
              AND pinned_recipe->>'backend' IN ('antigravity', 'codex')
              AND jsonb_typeof(pinned_recipe->'model') = 'string'
              AND octet_length(pinned_recipe->>'model') BETWEEN 1 AND 128
-             AND pinned_recipe->>'resource_profile' IN ('forge-coding-v1', 'forge-coding-v2', 'forge-coding-v3', 'forge-coding-v4', 'forge-coding-v5', 'forge-coding-v6')
+             AND pinned_recipe->>'resource_profile' IN ('forge-coding-v1', 'forge-coding-v2', 'forge-coding-v3', 'forge-coding-v4', 'forge-coding-v5', 'forge-coding-v6', 'forge-coding-v7')
              AND pinned_recipe->>'mode' IN ('plan', 'review', 'implement')
              AND jsonb_typeof(pinned_recipe->'generation_token_limit') = 'null'
              AND (pinned_recipe->>'policy_digest') ~ '^[0-9a-f]{64}$') IS TRUE
@@ -176,7 +176,7 @@ BEGIN
           AND t.owner_id = pg_catalog.current_setting('forge.coding_owner', true)
           AND t.agent_profile = ANY(p_allowed_profiles)
           AND (t.pinned_recipe->'version') = '2'::jsonb
-          AND (t.pinned_recipe->>'resource_profile') IN ('forge-coding-v1', 'forge-coding-v2', 'forge-coding-v3', 'forge-coding-v4', 'forge-coding-v5', 'forge-coding-v6')
+          AND (t.pinned_recipe->>'resource_profile') IN ('forge-coding-v1', 'forge-coding-v2', 'forge-coding-v3', 'forge-coding-v4', 'forge-coding-v5', 'forge-coding-v6', 'forge-coding-v7')
           AND (t.pinned_recipe->>'policy_digest') = r.policy_digest
           AND NOT EXISTS (
               SELECT 1
@@ -446,7 +446,7 @@ REVOKE ALL ON FUNCTION forge_agent.coding_workflow_signal() FROM PUBLIC;
 DO $upgrade$ DECLARE name text;definition text;BEGIN
  FOREACH name IN ARRAY ARRAY['forge_coding_reconciler_api.review_claim(text)','forge_coding_reconciler_api.publication_claim(text)'] LOOP
   definition:=pg_get_functiondef(name::regprocedure);
-  definition:=replace(definition,'pinned_recipe->>''resource_profile''=''forge-coding-v5''','pinned_recipe->>''resource_profile'' IN(''forge-coding-v5'',''forge-coding-v6'')');
+  definition:=replace(definition,'pinned_recipe->>''resource_profile''=''forge-coding-v5''','pinned_recipe->>''resource_profile'' IN(''forge-coding-v5'',''forge-coding-v6'',''forge-coding-v7'')');
   EXECUTE definition;
  END LOOP;
 END;$upgrade$;
@@ -528,7 +528,7 @@ BEGIN
  'reconciliation_receipt_id',q.reconciliation_receipt_id,'workspace_digest',input_digest,
  'candidate_commit',q.candidate_commit,'integration_base',q.base_revision,'gate_manifest_sha256',q.gate_manifest_sha256,
  'round',coalesce((SELECT b.repair_rounds FROM forge_agent.coding_review_budget b WHERE b.owner_id=t.owner_id AND b.project_alias=t.project_alias AND b.root_task_id=coalesce(t.repair_root_task_id,t.id)),q.round)+1,'disposition',p_disposition,'agent_profile',t.agent_profile,'summary',left(p_summary,2048),'findings',(SELECT coalesce(jsonb_agg(x),'[]') FROM(SELECT x FROM jsonb_array_elements(p_findings) WITH ORDINALITY AS items(x,n) WHERE x->>'finding_id' NOT IN(SELECT jsonb_array_elements_text(q.verified_finding_ids)) ORDER BY n LIMIT 3)batch));
- IF t.pinned_recipe->>'resource_profile'='forge-coding-v6' THEN payload:=payload||jsonb_build_object('workspace_digest_kind',CASE WHEN q.task_id<>t.id THEN 'candidate_tree' ELSE 'native_receipt' END);END IF;
+ IF t.pinned_recipe->>'resource_profile' IN('forge-coding-v6','forge-coding-v7') THEN payload:=payload||jsonb_build_object('workspace_digest_kind',CASE WHEN q.task_id<>t.id THEN 'candidate_tree' ELSE 'native_receipt' END);END IF;
  raw:=payload::text;digest:=encode(sha256(convert_to(raw,'UTF8')),'hex');
  INSERT INTO forge_agent.coding_feedback(feedback_id,owner_id,project_alias,task_id,parent_attempt_id,review_id,feedback_json,feedback_sha256)
  VALUES(id,t.owner_id,t.project_alias,t.id,q.attempt_id,q.review_id,raw,digest);
