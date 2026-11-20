@@ -60,12 +60,18 @@ function progress(t) {
   t.progress_emitted = true;
 }
 function summary(t) {
-  return Object.fromEntries(['task_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]]));
+  return {
+    ...Object.fromEntries(['task_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]])),
+    workflow_required:t.workflow_required===true,
+    workflow_phase:t.workflow?.phase??null,
+  };
 }
 function detail(t) {
   const processing = ['running', 'cancel_requested'].includes(t.status);
+  const fields = summary(t);
+  delete fields.workflow_phase;
   return {
-    ...summary(t), prompt: t.prompt, acceptance_criteria: t.acceptance_criteria,
+    ...fields, prompt: t.prompt, acceptance_criteria: t.acceptance_criteria,
     attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? t.public_summary ?? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
     result: ['awaiting_review', 'completed'].includes(t.status) ? { attempt_id: t.attempt_id, sha256: digest, byte_count: bytes.length, chunk_count: Math.ceil(bytes.length / 16384) } : null,
     reconciliation_receipt_id: null,

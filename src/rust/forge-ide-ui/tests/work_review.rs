@@ -267,3 +267,28 @@ fn autonomous_policy_and_phase_contracts_are_strict_and_request_digest_is_plan_o
     }
     assert!(!request.is_valid());
 }
+
+#[test]
+fn task_summary_workflow_metadata_is_additive_typed_and_consistent() {
+    let value = serde_json::json!({
+        "task_id":TASK,"project_alias":"homelab","base_revision":"a".repeat(40),
+        "mode":"plan","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),
+        "status":"awaiting_review","revision":2,"created_at":"2026-11-20T00:00:00Z"
+    });
+    let legacy: WorkTaskSummary = serde_json::from_value(value.clone()).unwrap();
+    assert!(legacy.is_valid());
+    assert_eq!(legacy.workflow_required, None);
+    let mut autonomous = value.clone();
+    autonomous["workflow_required"] = true.into();
+    autonomous["workflow_phase"] = "plan_review".into();
+    let summary: WorkTaskSummary = serde_json::from_value(autonomous.clone()).unwrap();
+    assert!(summary.is_valid());
+    assert_eq!(summary.workflow_phase, Some(WorkWorkflowPhase::PlanReview));
+    autonomous["workflow_phase"] = "invented".into();
+    assert!(serde_json::from_value::<WorkTaskSummary>(autonomous.clone()).is_err());
+    autonomous["workflow_phase"] = "plan_review".into();
+    autonomous["workflow_required"] = false.into();
+    assert!(!serde_json::from_value::<WorkTaskSummary>(autonomous)
+        .unwrap()
+        .is_valid());
+}

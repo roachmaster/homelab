@@ -6,7 +6,7 @@ import json
 import unittest
 from uuid import UUID,uuid4
 from queue_store import Rejected
-from work_api import WorkServiceFactory,WorkGet,WorkPlanDecide,WorkCancel,WorkAccept,WorkResume
+from work_api import WorkServiceFactory,WorkGet,WorkList,WorkPlanDecide,WorkCancel,WorkAccept,WorkResume
 from work_config import WorkflowPolicy
 from work_peer_review import parse_review_target,parse_review_verdict
 from work_pg_fixture import DisposablePostgresCluster,PG16_AVAILABLE
@@ -50,6 +50,25 @@ class AutonomousWorkflowTest(unittest.TestCase):
   self.assertTrue(self.coordinator.run_once());critic=self.claim('codex-v2');self.assertIsNotNone(critic)
   text=self.verdict(critic,decision);self.publish(critic,text);self.assertTrue(self.coordinator.run_once())
   return author,critic
+ def test_list_projects_workflow_phase_without_reinterpreting_manual_history(self):
+  legacy=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create()
+  manual=legacy.submit(make_submit(agent_profile='agy-v2',idempotency_key='manual-history'))
+  _,admitted=self.submit();author=self.claim('agy-v2')
+  # The older manual task is first in the queue. Preserve its raw manual status.
+  self.assertEqual(author.task_id,manual['task_id']);self.publish(author,'Manual plan.')
+  author=self.claim('agy-v2');self.publish(author,'Autonomous plan.');self.coordinator.run_once()
+  def listed():return {t['task_id']:t for t in self.service.list_tasks(WorkList('homelab',None,50,None))['tasks']}
+  rows=listed();self.assertFalse(rows[manual['task_id']]['workflow_required']);self.assertIsNone(rows[manual['task_id']]['workflow_phase'])
+  self.assertEqual(rows[manual['task_id']]['status'],'awaiting_review')
+  self.assertTrue(rows[admitted['task_id']]['workflow_required']);self.assertEqual(rows[admitted['task_id']]['workflow_phase'],'plan_review')
+  self.assertEqual(rows[admitted['task_id']]['status'],'awaiting_review')
+  critic=self.claim('codex-v2');self.publish(critic,self.verdict(critic));self.coordinator.run_once()
+  rows=listed();self.assertEqual(rows[critic.task_id]['status'],'completed');self.assertEqual(rows[critic.task_id]['workflow_phase'],'implement')
+  revision=rows[admitted['task_id']]['revision']
+  for phase in ('checks','code_review','hosted','merging','completed','escalated'):
+   self.cluster.admin_exec("UPDATE forge_agent.coding_workflows SET phase='%s' WHERE root_task_id='%s'"%(phase,admitted['task_id']),owner=False)
+   row=listed()[admitted['task_id']];self.assertEqual(row['workflow_phase'],phase);self.assertEqual(row['revision'],revision)
+
  def test_reviewer_title_is_bounded_for_maximum_ascii_and_multibyte_author_titles(self):
   for title in ('A'*128,'😀'*128):
    with self.subTest(title_kind='ascii' if title.isascii() else 'multibyte'):

@@ -99,6 +99,10 @@ def _summary(row):
     }
     if row.get("title") is not None:
         item["title"] = row["title"]
+    if "workflow_required" in row:
+        item["workflow_required"] = row["workflow_required"]
+    if "workflow_phase" in row:
+        item["workflow_phase"] = row["workflow_phase"]
     return item
 
 
@@ -550,13 +554,17 @@ class WorkStore:
                 cursor_created_at = anchor["created_at"]
 
             cursor.execute("""
-                SELECT id, project_alias, base_revision, mode, agent_profile,
-                       recipe_digest, status, revision, created_at, title
-                FROM forge_agent.coding_tasks
-                WHERE owner_id = %s AND project_alias = %s
-                  AND (%s::text IS NULL OR status = %s::text)
-                  AND (%s::timestamptz IS NULL OR (created_at, id) > (%s::timestamptz, %s::uuid))
-                ORDER BY created_at ASC, id ASC
+                SELECT t.id, t.project_alias, t.base_revision, t.mode, t.agent_profile,
+                       t.recipe_digest, t.status, t.revision, t.created_at, t.title,
+                       t.workflow_required, w.phase AS workflow_phase
+                FROM forge_agent.coding_tasks t
+                LEFT JOIN forge_agent.coding_workflows w
+                  ON (w.owner_id, w.project_alias, w.workflow_id) =
+                     (t.owner_id, t.project_alias, t.workflow_id)
+                WHERE t.owner_id = %s AND t.project_alias = %s
+                  AND (%s::text IS NULL OR t.status = %s::text)
+                  AND (%s::timestamptz IS NULL OR (t.created_at, t.id) > (%s::timestamptz, %s::uuid))
+                ORDER BY t.created_at ASC, t.id ASC
                 LIMIT %s
             """, (
                 self._owner, project_alias,
