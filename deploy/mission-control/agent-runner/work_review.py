@@ -13,14 +13,16 @@ import logging
 import os
 import stat
 import threading
+import time
 
-from work_executor import WorkspaceLease
+from work_executor import WorkspaceLease, WorkspaceBusyError
 from work_publication_clients import DIGEST, SHA, PublicationError, uuid
 from work_publication_checks import VerificationFailure
 from work_repair_policy import RepairObservation, RepairPolicy, decide_repair, failure_fingerprint
 from work_verification import VerificationReport, diagnostic_text, gate_manifest_sha256, project_verification
 
 LOG = logging.getLogger("forge-review")
+SNAPSHOT_ACQUISITION_WAIT_SECONDS = 30
 
 
 def validate_review(config, job):
@@ -252,6 +254,7 @@ class ReviewWorker:
     def _finish(self, job, outcome):
         try:
             return self.store.review_finish(job, outcome)
+
         except Exception as error:
             retryable = (isinstance(error, (OSError, TimeoutError))
                          or type(error).__module__.startswith("psycopg2")
@@ -261,6 +264,22 @@ class ReviewWorker:
             # Replay only the identical finish receipt, never a CLI, check,
             # source import, push or PR creation.
             return self.store.review_finish(job, outcome)
+
+    def _snapshot(self, job, require_lease, lost):
+        deadline = time.monotonic() + SNAPSHOT_ACQUISITION_WAIT_SECONDS
+        next_renewal = 0
+        while True:
+            if self.stop.is_set() or lost.is_set() or time.monotonic() >= next_renewal:
+                require_lease()
+                next_renewal = time.monotonic() + 5
+            try:
+                snapshot = self.snapshots.create(job)
+                require_lease()
+                return snapshot
+            except WorkspaceBusyError:
+                if time.monotonic() >= deadline:
+                    raise
+                self.stop.wait(min(.1, max(0, deadline - time.monotonic())))
 
     @contextmanager
     def _locked(self, job):
@@ -306,10 +325,12 @@ class ReviewWorker:
         requires_new = False
         integration_base = job["base_revision"]
         report = None
+        stage = "acquire_review"
         try:
             with self._locked(job):
                 require_lease()
                 check_job = verification_job(job)
+                stage = "quiesce"
                 self.checks.quiesce(check_job)
                 if job.get("source_review_id") is not None and job.get("candidate_commit") is not None:
                     repository, head, prior = self.candidates.retry(job)
@@ -317,7 +338,9 @@ class ReviewWorker:
                     requires_new = prior["repair_requires_new_workspace"]
                     integration_base = prior["integration_base"]
                 else:
-                    snapshot = self.snapshots.create(check_job)
+                    stage = "snapshot"
+                    snapshot = self._snapshot(check_job, require_lease, lost)
+                    stage = "prepare"
                     repository, head = self.git.prepare(check_job, snapshot)
                     integration_base = self.git._git(repository, "rev-parse", "FETCH_HEAD").decode().strip()
                     requires_new = _source_map(snapshot.files) != _tree_map(self.git, repository, head)
@@ -327,6 +350,7 @@ class ReviewWorker:
                 source_gate_digest = gate_source_digest(self.git, repository, head)
                 changed = self.git._git(repository, "diff", "--name-only", "-z", job["base_revision"], head).split(b"\0")
                 gate_changes = any(protected_gate_path(path.decode("utf-8")) for path in changed if path)
+                stage = "checks"
                 try:
                     report = self.checks.run(check_job, repository, lost)
                     if not isinstance(report, VerificationReport):
@@ -381,7 +405,8 @@ class ReviewWorker:
                 self._finish(job, outcome)
         except Exception as error:
             if not lost.is_set():
-                code = error.code if isinstance(error, PublicationError) else "review_unavailable"
+                code = ("workspace_busy" if isinstance(error, WorkspaceBusyError) else
+                        error.code if isinstance(error, PublicationError) else "review_unavailable")
                 uncertain = code in {"prior_verification_scope_unstopped", "verification_scope_unstopped"}
                 try:
                     self._finish(job, {"disposition": "needs_reconcile" if uncertain else "handoff", "reason": code,
@@ -391,6 +416,7 @@ class ReviewWorker:
                         "summary": "Independent review stopped before approval.", "verification": {
                             "checks_passed": False, "candidate_workspace_digest": candidate_digest,
                             "repair_requires_new_workspace": requires_new, "toolchain": "Not reported",
+                            "failure_stage": stage, "exception_type": type(error).__name__[:64],
                             "integration_base": integration_base, "cleanup_confirmed": not uncertain, "checks": []}})
                 except Exception:
                     LOG.warning("Review receipt unavailable; no repair or remote action replayed")

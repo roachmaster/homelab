@@ -4,14 +4,15 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import unittest
 import subprocess
-from unittest.mock import Mock
+import threading
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from test_work_publication import fixture, git
 from work_publication_checks import VerificationFailure
 from work_review import ReviewedCandidateProvider, ReviewWorker, protected_gate_path, validate_review
 from work_publication_clients import PublicationError
-from work_executor import WorkspaceLease
+from work_executor import WorkspaceLease, WorkspaceBusyError
 from work_publication_clients import WorkspaceSnapshotProvider
 from work_verification import project_verification
 from work_hosted_checks import HostedCheckReport
@@ -59,6 +60,76 @@ def review_job(job, **changes):
 
 
 class ReviewWorkerTest(unittest.TestCase):
+    def test_busy_source_acquisition_waits_same_lease_then_checks_unchanged_source(self):
+        with fixture() as values:
+            _, config, source, workspaces, _, _, repository, *_ = values
+            observed = threading.Event()
+            class Snapshots(WorkspaceSnapshotProvider):
+                def create(self, job):
+                    try:return super().create(job)
+                    except WorkspaceBusyError:
+                        observed.set();raise
+            store, checks = ReviewStore(), ReviewChecks(config, True)
+            worker = ReviewWorker(config, store, Snapshots(workspaces), repository, checks,
+                                  ReviewedCandidateProvider(config, repository))
+            with workspaces.inspect(source):
+                thread = threading.Thread(target=worker.process, args=(review_job(source),))
+                thread.start()
+                try:
+                    self.assertTrue(observed.wait(2), "Real workspace flock must report typed contention")
+                    self.assertEqual(checks.calls, 0)
+                    self.assertEqual(store.outcomes, [])
+                finally:
+                    pass  # The context releases only the owned source lock.
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(checks.calls, 1)
+            self.assertEqual(store.outcomes[-1][1]["disposition"], "awaiting_review")
+            with workspaces.inspect(source) as workspace:
+                self.assertEqual(workspace.digest(), source["workspace_digest"])
+
+    def test_busy_source_timeout_reports_only_typed_stage_without_running_checks(self):
+        with fixture() as values:
+            _, config, source, workspaces, _, _, repository, *_ = values
+            store, checks = ReviewStore(), ReviewChecks(config, True)
+            worker = ReviewWorker(config, store, WorkspaceSnapshotProvider(workspaces), repository, checks,
+                                  ReviewedCandidateProvider(config, repository))
+            with workspaces.inspect(source), patch("work_review.SNAPSHOT_ACQUISITION_WAIT_SECONDS", .05):
+                worker.process(review_job(source))
+            outcome = store.outcomes[-1][1]
+            self.assertEqual(outcome["reason"], "workspace_busy")
+            self.assertEqual(outcome["verification"]["failure_stage"], "snapshot")
+            self.assertEqual(outcome["verification"]["exception_type"], "WorkspaceBusyError")
+            self.assertIsNone(outcome["candidate_commit"])
+            self.assertEqual(outcome["verification"]["checks"], [])
+            self.assertEqual(checks.calls, 0)
+
+    def test_stop_or_lost_lease_during_source_wait_never_prepares_or_checks(self):
+        for cancel in (False, True):
+            with self.subTest(cancel=cancel), fixture() as values:
+                _, config, source, workspaces, _, _, repository, *_ = values
+                observed = threading.Event()
+                class Snapshots(WorkspaceSnapshotProvider):
+                    def create(self, job):
+                        try:return super().create(job)
+                        except WorkspaceBusyError:
+                            observed.set();raise
+                store, checks = ReviewStore(), ReviewChecks(config, True)
+                repository.prepare = Mock(side_effect=AssertionError("Lost acquisition may not prepare"))
+                worker = ReviewWorker(config, store, Snapshots(workspaces), repository, checks,
+                                      ReviewedCandidateProvider(config, repository))
+                with workspaces.inspect(source):
+                    thread = threading.Thread(target=worker.process, args=(review_job(source),))
+                    thread.start()
+                    self.assertTrue(observed.wait(2))
+                    if cancel:worker.stop.set()
+                    else:store.live = False
+                thread.join(3)
+                self.assertFalse(thread.is_alive())
+                self.assertEqual(store.outcomes, [])
+                self.assertEqual(checks.calls, 0)
+                repository.prepare.assert_not_called()
+
     def test_missing_candidate_retry_requires_local_consumed_retry_and_exact_previous_review(self):
         with fixture() as values:
             _, config, source, *_ = values

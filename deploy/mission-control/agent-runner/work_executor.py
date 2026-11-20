@@ -61,6 +61,12 @@ class ExecutionError(Exception):
         super().__init__(summary)
 
 
+class WorkspaceBusyError(ExecutionError):
+    """The stopped workspace is temporarily acquired by another trusted owner."""
+    def __init__(self):
+        super().__init__("needs_reconcile", "The task workspace is still owned by another process.")
+
+
 def _git(repository, *args, timeout=40):
     environment = {key: value for key, value in os.environ.items()
                    if key in {"PATH", "LANG", "LC_ALL", "SYSTEMROOT"}}
@@ -196,7 +202,7 @@ class WorkspaceProvider:
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
-                raise ExecutionError("needs_reconcile", "The task workspace is still owned by another process.") from None
+                raise WorkspaceBusyError() from None
             try:
                 expected = {"task_id": task, "project_alias": lease["project_alias"],
                             "repository": str(repository), "base_revision": lease["base_revision"]}

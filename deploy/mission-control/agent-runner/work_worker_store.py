@@ -34,6 +34,7 @@ MAX_SUMMARY_BYTES = 4096
 MAX_CHUNK_BYTES = 16384
 MAX_CHUNKS = 1024
 MAX_RESULT_BYTES = 16 * 1024 * 1024
+REVIEW_ADMISSION_LOCK_SALT = 731492647451
 SHA1_HEX_RE = re.compile(r"^[0-9a-f]{40}$")
 UNIT_NAME_RE = re.compile(r"^forge-coding-[0-9a-f]{32}$")
 VALID_OUTCOMES = frozenset({
@@ -692,6 +693,8 @@ class WorkerDB:
         attempt,token=_extract_attempt_creds(lease)
         receipt=_coerce_uuid(reconciliation_receipt_id,"reconciliation_receipt_id")
         with self._worker_cursor() as cursor:
+            cursor.execute("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(%s,%s))",
+                           (self._owner,REVIEW_ADMISSION_LOCK_SALT))
             cursor.execute("SELECT forge_coding_worker_api.queue_review(%s,%s,%s)",(attempt,token,receipt))
             value=cursor.fetchone()[0]
         return str(value) if value else None
@@ -699,6 +702,8 @@ class WorkerDB:
     def review_claim(self,worker_id):
         validate_identifier(worker_id,"worker_id")
         with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(%s,%s))",
+                           (self._owner,REVIEW_ADMISSION_LOCK_SALT))
             cursor.execute("SELECT forge_coding_reconciler_api.review_claim(%s)",(worker_id,))
             value=cursor.fetchone()[0]
         return None if value is None else dict(value)
