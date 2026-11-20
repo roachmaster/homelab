@@ -9,6 +9,11 @@ and verified on 19 November 2026 from code commit `679088c`. Open
 [deployment checkpoint](../design/implementation-status.md#observed-deployment-checkpoint)
 records the scope and checks. The earlier admission-only slice is superseded.
 
+The current source extends that deployed baseline with the
+[review and bounded repair loop](proposals/forge-agent-feedback-loop.md):
+migration 15, execution policy 5 and browser ABI 8. Merging this source does not
+roll out those changes to the running portal or services.
+
 The [dispatch design](proposals/forge-coding-agent-dispatch.md) and
 [usage design](proposals/forge-agent-usage.md) retain the sequence diagrams and
 explain how the implementation maps to the original design.
@@ -19,7 +24,7 @@ Home links to `/#agents`; `/agents` redirects to that declared same-tab view.
 Existing global navigation stays compact. Rust/WASM owns selection, drafts,
 request guards, actions and polling; generated main JavaScript renders and passes
 actions, and generated I/O worker JavaScript performs admitted requests. The
-browser ABI is **7**, while the HTTP contract stays version **1**. Deploy the
+browser ABI is **8**, while the HTTP contract stays version **1**. Deploy the
 HTML/CSS/JavaScript/WASM bundle atomically.
 
 The catalog supplies permitted projects, their worker-observed Git revisions,
@@ -64,6 +69,9 @@ event sequence is independent of task revision.
 | `ide.work.accept` | `200 work_accepted` | Explicitly accepts stopped `awaiting_review` work as `completed`; never merges code automatically. |
 | `ide.work.resume` | `202 work_resumed` | Explicit user action requiring revision, selected admitted profile and a current trusted reconciliation receipt. |
 | `ide.work.plan.decide` | `202 work_plan_decided` / `200` for Cancel | Resume approves the exact saved Plan for implementation; Revise queues a new Plan with feedback; Cancel preserves history and ends the workflow. |
+| `ide.work.review.decide` | `200 work_review_decided` | Independent approval, bounded repair, infrastructure retry, handoff or cancellation of current review work. |
+| `ide.work.repair` | `202 work_repair_submitted` | A later correction creates a linked task from the exact candidate and preserves the completed parent. |
+| `ide.work.publication.retry` | `200 work_publication_retry_queued` | Append a same-artifact publication retry after source and remote identity checks. |
 
 Prompt limit is 8,192 UTF-8 bytes; acceptance criteria 2,048; raw request ceiling
 16,384 including JSON escaping. Lists default to 20/max 50; event pages default
@@ -98,15 +106,22 @@ flowchart LR
   Revision --> Plan
   Plan -->|Cancel| History[Cancelled; history retained]
   Code --> Verify[Isolated checks]
-  Verify --> PR[Feature branch and PR to main]
-  PR --> Review[User reviews merge]
+  Verify -->|Verified failure within opted-in budget| Feedback[Bounded feedback]
+  Feedback --> Code
+  Verify -->|Checks pass| Approval[Independent review and approval]
+  Approval --> PR[Feature branch and PR to main]
+  PR --> CI[Required hosted checks on exact head]
+  CI --> Accept[Explicit task acceptance]
+  Accept --> Review[Separate merge decision]
 ```
 
 Implementation runs with no GitHub publication authority. After a coherent
 result, confirmed scope stop and trusted workspace reconciliation, an idempotent
-publication job identifies the approved plan, implementation attempt and exact
-workspace digest. The publication store can repair a missed queue handoff from
-these committed records; it cannot rerun the model.
+review job identifies the approved plan, implementation attempt and exact
+workspace digest. Failed checks can return source-bound feedback within the
+owner's frozen repair budget. A local pass still requires independent approval
+before publication. Recovery of a missed queue handoff requires the same review
+authorization and cannot bypass it or replay a model invocation.
 
 The selected publication factory injects workspace-snapshot, Git, verification,
 GitHub and persistence ports. It inspects the locked receipt-bound workspace,
@@ -124,10 +139,11 @@ does not cause blind duplicate writes. The portal displays the actual pending,
 checking, publishing, published or failed state and polls active publication even
 when the model's result is already ready. Merging remains a separate decision.
 
-This workflow is explicitly versioned by policy4 and additive migration14;
-schema13/session-policy support is a prerequisite. A rollout must coordinate the
+The current workflow uses policy 5 and additive migration 15; schema 14 and its
+plan/publication history are prerequisites. A rollout must coordinate the
 matching admission profile, coding worker, publication service and atomic browser
-bundle. Prior policies and immutable plans/results/receipts remain preserved.
+ABI 8 bundle. Prior policies and immutable plans/results/receipts remain preserved.
+Completed implementations receive later corrections through linked repair tasks.
 
 ## Durable execution and explicit recovery
 
@@ -140,12 +156,13 @@ prompt and only wake work discovery; committed rows are authoritative.
 Execution-capable profiles pin recipe **version 2**, including backend, explicit
 model, mode, resource profile, `generation_token_limit: null` and immutable
 `policy_digest`. The worker validates the complete canonical recipe against
-`forge-coding-v3` before workspace creation or CLI spawn. This explicitly versioned
+`forge-coding-v5` before workspace creation or CLI spawn. This explicitly versioned
 policy approves Gemini commands, scoped implementation writes and read-only
 documentation URLs without headless approval prompts. Plan/review remains
 read-only; OS isolation and database/canonical-source masks remain unchanged.
-Migration13 permits policy1, policy2 and policy3 history while exact advertised policy
-digests keep claims separate. Previous attempts retain their original policy.
+Earlier migrations preserve policy 1 through policy 4 history while exact
+advertised policy digests keep claims separate. Previous attempts retain their
+original policy; new feedback context requires the matching policy 5 worker.
 Admission-era version-1
 recipes remain readable and are never silently upgraded or executed.
 
