@@ -360,14 +360,20 @@ BEGIN
  IF a.intent IS NOT NULL THEN IF a.intent IS DISTINCT FROM p_intent THEN RAISE EXCEPTION 'Merge intent conflict' USING ERRCODE='P0006';END IF;RETURN a.intent;END IF;
  SELECT * INTO p FROM forge_agent.coding_publications WHERE publication_id=a.source_publication_id;
  SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p.review_id;
- IF jsonb_typeof(p_intent)<>'object' OR octet_length(p_intent::text)>65536 OR p_intent-ARRAY['version','merge_id','workflow_id','task_id','repository','pr_url','candidate_commit','candidate_tree','expected_main','merge_commit','review_id','gate_manifest_sha256','commit_payload']<>'{}'::jsonb
+ IF (jsonb_typeof(p_intent)<>'object' OR octet_length(p_intent::text)>65536 OR p_intent-ARRAY['version','merge_id','workflow_id','task_id','repository','pr_url','candidate_commit','candidate_tree','expected_main','merge_commit','review_id','gate_manifest_sha256','commit_payload']<>'{}'::jsonb
  OR NOT p_intent?&ARRAY['version','merge_id','workflow_id','task_id','repository','pr_url','candidate_commit','candidate_tree','expected_main','merge_commit','review_id','gate_manifest_sha256','commit_payload']
  OR p_intent->'version'<>'1'::jsonb OR p_intent->>'merge_id'<>a.action_id::text OR p_intent->>'workflow_id'<>a.workflow_id::text OR p_intent->>'task_id'<>p.task_id::text
  OR p_intent->>'candidate_commit'<>q.candidate_commit OR p_intent->>'review_id'<>q.review_id::text OR p_intent->>'gate_manifest_sha256'<>q.gate_manifest_sha256 OR p_intent->>'pr_url'<>p.pr_url
  OR p_intent->>'repository'!~'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' OR p_intent->>'candidate_tree'!~'^[0-9a-f]{40}$' OR p_intent->>'expected_main'!~'^[0-9a-f]{40}$' OR p_intent->>'merge_commit'!~'^[0-9a-f]{40}$'
- OR jsonb_typeof(p_intent->'commit_payload')<>'object' OR p_intent->'commit_payload'-ARRAY['message','tree','parents','author','committer']<>'{}'::jsonb
+ OR jsonb_typeof(p_intent->'commit_payload')<>'object' OR (p_intent->'commit_payload')-ARRAY['message','tree','parents','author','committer']<>'{}'::jsonb
  OR NOT(p_intent->'commit_payload')?&ARRAY['message','tree','parents','author','committer']
- OR p_intent->'commit_payload'->>'tree'<>p_intent->>'candidate_tree' OR p_intent->'commit_payload'->'parents'<>jsonb_build_array(p_intent->>'expected_main',q.candidate_commit)
+ OR (p_intent->'commit_payload'->>'tree')<>(p_intent->>'candidate_tree') OR (p_intent->'commit_payload'->'parents')<>jsonb_build_array(p_intent->>'expected_main',q.candidate_commit)
+ OR jsonb_typeof(p_intent->'commit_payload'->'message')<>'string' OR octet_length(p_intent->'commit_payload'->>'message') NOT BETWEEN 1 AND 4096
+ OR jsonb_typeof(p_intent->'commit_payload'->'author')<>'object' OR jsonb_typeof(p_intent->'commit_payload'->'committer')<>'object'
+ OR (p_intent->'commit_payload'->'author')-ARRAY['name','email','date']<>'{}'::jsonb OR NOT(p_intent->'commit_payload'->'author')?&ARRAY['name','email','date']
+ OR (p_intent->'commit_payload'->'committer')-ARRAY['name','email','date']<>'{}'::jsonb OR NOT(p_intent->'commit_payload'->'committer')?&ARRAY['name','email','date']
+ OR EXISTS(SELECT 1 FROM jsonb_each(p_intent->'commit_payload'->'author') x WHERE jsonb_typeof(x.value)<>'string' OR octet_length(x.value#>>'{}') NOT BETWEEN 1 AND 256)
+ OR EXISTS(SELECT 1 FROM jsonb_each(p_intent->'commit_payload'->'committer') x WHERE jsonb_typeof(x.value)<>'string' OR octet_length(x.value#>>'{}') NOT BETWEEN 1 AND 256)) IS DISTINCT FROM false
  THEN RAISE EXCEPTION 'Invalid merge intent' USING ERRCODE='22023';END IF;
  UPDATE forge_agent.coding_workflow_actions SET intent=p_intent,updated_at=clock_timestamp() WHERE action_id=p_id;
  RETURN p_intent;
@@ -411,7 +417,7 @@ BEGIN
  IF NOT FOUND OR t.status<>'running' OR t.latest_attempt_id<>a.attempt_id OR r.status<>'decided' OR r.verdict_sha256 IS DISTINCT FROM a.workflow_feedback_sha256 OR r.verdict_json IS NULL
  OR NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflows w WHERE w.workflow_id=a.workflow_id AND w.enabled AND w.phase NOT IN('cancelled','completed','escalated') AND w.snapshot->>'author_profile'=a.agent_profile)
  OR NOT((r.target_kind='plan' AND EXISTS(SELECT 1 FROM forge_agent.coding_plan_decisions d WHERE d.decision_id=a.plan_decision_id AND d.owner_id=a.owner_id AND d.project_alias=a.project_alias AND d.task_id=a.task_id AND d.plan_attempt_id=r.source_attempt_id AND d.plan_sha256=r.source_result_sha256))
- OR(r.target_kind='code' AND a.repair_source_review_id=r.source_review_id AND EXISTS(SELECT 1 FROM forge_agent.coding_feedback f WHERE f.feedback_id=a.feedback_id AND f.owner_id=a.owner_id AND f.project_alias=a.project_alias AND f.task_id=a.task_id AND f.parent_attempt_id=r.source_attempt_id)))
+ OR(r.target_kind='code' AND(a.repair_source_review_id=r.source_review_id OR(t.parent_task_id IS NULL AND r.source_task_id=t.id)) AND EXISTS(SELECT 1 FROM forge_agent.coding_feedback f WHERE f.feedback_id=a.feedback_id AND f.owner_id=a.owner_id AND f.project_alias=a.project_alias AND f.task_id=a.task_id AND f.parent_attempt_id=r.source_attempt_id AND f.review_id=r.source_review_id)))
  THEN RAISE EXCEPTION 'Peer feedback no longer authorized' USING ERRCODE='P0009';END IF;
  RETURN jsonb_build_object('target_json',r.target_json,'target_sha256',r.target_sha256,'verdict_json',r.verdict_json,'verdict_sha256',r.verdict_sha256);
 END;$fn$;
@@ -438,3 +444,11 @@ CREATE FUNCTION forge_agent.coding_workflow_role_granted(p_workflow uuid,p_profi
  AND g.agent_profile=p_profile AND g.mode=p_mode AND((p_mode='review' AND p_profile=w.snapshot->>'reviewer_profile') OR(p_mode IN('plan','implement') AND p_profile=w.snapshot->>'author_profile')))
 $fn$;
 REVOKE ALL ON FUNCTION forge_agent.coding_workflow_role_granted(uuid,text,text) FROM PUBLIC;
+
+CREATE FUNCTION forge_agent.coding_workflow_clear_feedback() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,pg_temp AS $fn$
+BEGIN
+ IF NEW.feedback_id IS DISTINCT FROM OLD.feedback_id AND NEW.workflow_feedback_review_id IS NOT DISTINCT FROM OLD.workflow_feedback_review_id THEN NEW.workflow_feedback_review_id:=NULL;NEW.workflow_feedback_sha256:=NULL;END IF;
+ RETURN NEW;
+END;$fn$;
+CREATE TRIGGER coding_tasks_clear_peer_feedback BEFORE UPDATE ON forge_agent.coding_tasks FOR EACH ROW EXECUTE FUNCTION forge_agent.coding_workflow_clear_feedback();
+REVOKE ALL ON FUNCTION forge_agent.coding_workflow_clear_feedback() FROM PUBLIC;
