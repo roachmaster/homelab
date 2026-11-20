@@ -22,6 +22,7 @@ from work_feedback import parse_feedback_json
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE
 from work_review import validate_review
 from work_review_context import validate_context
+from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
 from work_worker_store import OutcomeConflictError, WorkerDB
 import work_policy
 
@@ -77,7 +78,8 @@ class FeedbackLoopEndToEndTest(unittest.TestCase):
         self.db.queue_review(lease, receipt)
         job = self.db.review_claim("independent-verifier")
         self.assertEqual(job["attempt_id"], lease.attempt_id)
-        validate_review(SimpleNamespace(repositories={"homelab": "fixture/project"}), job)
+        validate_review(SimpleNamespace(repositories={"homelab": "fixture/project"},
+                                       required_hosted_checks=DEFAULT_REQUIRED_HOSTED_CHECKS), job)
         return job
 
     def independent_check(self, *, passed=False):
