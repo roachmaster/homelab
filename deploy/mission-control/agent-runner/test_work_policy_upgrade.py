@@ -147,7 +147,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         return incarnation
 
     def old_recipe(self, policy=OLD_POLICY_ID):
-        digest = {OLD_POLICY_ID: OLD_POLICY_DIGEST, PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST, SESSION_POLICY_ID: SESSION_POLICY_DIGEST}[policy]
+        digest = {OLD_POLICY_ID: OLD_POLICY_DIGEST, PREVIOUS_POLICY_ID: PREVIOUS_POLICY_DIGEST, SESSION_POLICY_ID: SESSION_POLICY_DIGEST, PLAN_POLICY_ID: PLAN_POLICY_DIGEST}[policy]
         payload = {
             "version": 2, "backend": "codex", "model": "gpt-5.4",
             "resource_profile": policy, "mode": "plan", "generation_token_limit": None,
@@ -215,7 +215,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 proof = make_stop_proof(lease.unit_name)
                 receipt = db.publish(lease, "awaiting_review", manifest, None, "Old policy result", proof)
                 snapshots = self.rows(
-                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'] FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 )
@@ -224,7 +224,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(self.rows(cluster, "SELECT version FROM forge_agent.schema_migrations WHERE version = 11")[0][0], 11)
                 self.assertEqual(self.rows(
-                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'] FROM forge_agent.coding_tasks t "
+                    cluster, "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'] FROM forge_agent.coding_tasks t "
                     "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
                     (UUID(lease.task_id),),
                 ), snapshots)
@@ -256,7 +256,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                                      "v2-accept-before-session-policy", "Reviewed before upgrade")
                 acceptance = self.legacy_accept(cluster,command)
                 snapshot_query = (
-                    "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'], "
+                    "SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'], to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'], "
                     "(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.idempotency_key) "
                     "FROM forge_agent.coding_control_receipts r WHERE r.task_id=t.id) "
                     "FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
@@ -302,7 +302,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 db.reconcile(lease,"c"*64,proof)
                 command=WorkAccept("homelab",UUID(lease.task_id),publication["revision"],"old-v3-accept","Historical approval")
                 acceptance=self.legacy_accept(cluster,command)
-                snapshot="SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id'],to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit'] FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
+                snapshot="SELECT to_jsonb(t)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','review_required','parent_task_id','repair_source_review_id','repair_candidate_commit','auto_repair','repair_root_task_id','repair_target_publication_id','repair_expected_remote_head','scope_plan_decision_id'],to_jsonb(a)-ARRAY['plan_decision_id','feedback_id','feedback_sha256','legacy_resume_note','repair_source_review_id','repair_candidate_commit','scope_plan_decision_id'] FROM forge_agent.coding_tasks t JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s"
                 before=self.rows(cluster,snapshot,(UUID(lease.task_id),))
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)

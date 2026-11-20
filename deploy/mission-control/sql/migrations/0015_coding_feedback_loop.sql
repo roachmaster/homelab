@@ -397,11 +397,11 @@ BEGIN
  UPDATE forge_agent.coding_reviews q SET status='cancelled',lease_token=NULL,lease_expires_at=NULL,reason='Source superseded or cancelled',updated_at=clock_timestamp()
  WHERE q.owner_id=current_setting('forge.coding_owner',true) AND q.status IN('pending','checking')
  AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_tasks t WHERE(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(q.owner_id,q.project_alias,q.task_id,q.attempt_id)
- AND t.status IN('awaiting_review','completed'));
+ AND t.status IN('awaiting_review','completed') AND t.plan_decision_id IS NOT DISTINCT FROM q.plan_decision_id AND t.scope_plan_decision_id IS NOT DISTINCT FROM q.scope_plan_decision_id);
  SELECT q.* INTO j FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t
  ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(q.owner_id,q.project_alias,q.task_id,q.attempt_id)
  WHERE q.owner_id=current_setting('forge.coding_owner',true) AND (q.status='pending' OR(q.status='checking' AND q.lease_expires_at<=clock_timestamp()))
- AND t.status IN('awaiting_review','completed') AND q.next_poll_at<=clock_timestamp() ORDER BY q.created_at,q.review_id FOR UPDATE OF q SKIP LOCKED LIMIT 1;
+ AND t.status IN('awaiting_review','completed') AND t.plan_decision_id IS NOT DISTINCT FROM q.plan_decision_id AND t.scope_plan_decision_id IS NOT DISTINCT FROM q.scope_plan_decision_id AND q.next_poll_at<=clock_timestamp() ORDER BY q.created_at,q.review_id FOR UPDATE OF q SKIP LOCKED LIMIT 1;
  IF NOT FOUND THEN RETURN NULL;END IF;
  UPDATE forge_agent.coding_reviews SET status='checking',worker_id=p_worker_id,lease_token=gen_random_uuid(),
  lease_expires_at=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp() WHERE review_id=j.review_id RETURNING * INTO j;
@@ -417,7 +417,7 @@ BEGIN
  'reconciliation_receipt_id',j.reconciliation_receipt_id,'parent_result_sha256',j.parent_result_sha256,'source_revision',j.source_revision,
  'lease_token',j.lease_token,'status',j.status,'round',j.round,'stagnant_rounds',j.stagnant_rounds,'infrastructure_retries',j.infrastructure_retries,
  'candidate_commit',j.candidate_commit,'gate_manifest_sha256',j.gate_manifest_sha256,'previous_review_id',j.previous_review_id,
- 'source_review_id',CASE WHEN j.infrastructure_retries>0 THEN j.previous_review_id ELSE NULL END,
+ 'source_review_id',CASE WHEN j.phase='hosted' THEN(SELECT review_id FROM forge_agent.coding_publications WHERE publication_id=j.source_publication_id) WHEN j.phase='local' AND j.infrastructure_retries>0 THEN j.previous_review_id ELSE NULL END,
  'direct_implementation',(SELECT mode='implement' AND review_required AND pinned_recipe->>'resource_profile'='forge-coding-v5' AND plan_decision_id IS NULL AND parent_task_id IS NULL FROM forge_agent.coding_tasks WHERE owner_id=j.owner_id AND project_alias=j.project_alias AND id=j.task_id),
  'parent_task_id',(SELECT parent_task_id FROM forge_agent.coding_tasks WHERE owner_id=j.owner_id AND project_alias=j.project_alias AND id=j.task_id),
  'feedback_id',(SELECT feedback_id FROM forge_agent.coding_tasks WHERE owner_id=j.owner_id AND project_alias=j.project_alias AND id=j.task_id),
@@ -434,7 +434,7 @@ BEGIN
  FROM forge_agent.coding_tasks t WHERE q.review_id=p_review_id AND q.lease_token=p_token AND q.status='checking'
  AND q.owner_id=current_setting('forge.coding_owner',true) AND q.lease_expires_at>clock_timestamp()
  AND(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(q.owner_id,q.project_alias,q.task_id,q.attempt_id)
- AND t.status IN('awaiting_review','completed');RETURN FOUND;
+ AND t.status IN('awaiting_review','completed') AND t.plan_decision_id IS NOT DISTINCT FROM q.plan_decision_id AND t.scope_plan_decision_id IS NOT DISTINCT FROM q.scope_plan_decision_id;RETURN FOUND;
 END;$fn$;
 ALTER TABLE forge_agent.coding_tasks ADD COLUMN repair_root_task_id uuid;
 ALTER TABLE forge_agent.coding_reviews ADD COLUMN owner_decision jsonb;
@@ -477,7 +477,7 @@ BEGIN
  SELECT * INTO q FROM forge_agent.coding_reviews WHERE review_id=p_review FOR UPDATE;
  IF q.owner_id IS DISTINCT FROM current_setting('forge.coding_owner',true) THEN RAISE EXCEPTION 'Repair scope mismatch' USING ERRCODE='42501';END IF;
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE owner_id=q.owner_id AND project_alias=q.project_alias AND coding_tasks.id=q.task_id FOR UPDATE;
- IF t.latest_attempt_id<>q.attempt_id OR t.status NOT IN('awaiting_review','completed') OR q.candidate_commit IS NULL
+ IF t.latest_attempt_id<>q.attempt_id OR t.plan_decision_id IS DISTINCT FROM q.plan_decision_id OR t.scope_plan_decision_id IS DISTINCT FROM q.scope_plan_decision_id OR t.status NOT IN('awaiting_review','completed') OR q.candidate_commit IS NULL
  OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a WHERE a.owner_id=t.owner_id AND a.project_alias=t.project_alias AND a.task_id=t.id AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) THEN
  RAISE EXCEPTION 'Repair requires stopped current source' USING ERRCODE='P0009';END IF;
  SELECT * INTO p FROM forge_agent.coding_review_policy WHERE owner_id=t.owner_id AND project_alias=t.project_alias;
@@ -523,7 +523,8 @@ BEGIN
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE owner_id=q.owner_id AND project_alias=q.project_alias AND coding_tasks.id=q.task_id;
  IF q.owner_id IS DISTINCT FROM current_setting('forge.coding_owner',true) OR q.phase<>'local' OR q.status<>'approved' OR q.owner_decision IS NULL
  OR q.owner_decision->>'candidate_commit' IS DISTINCT FROM q.candidate_commit
- OR q.verification->'checks_passed' IS DISTINCT FROM 'true'::jsonb OR t.latest_attempt_id<>q.attempt_id
+ OR q.verification->'checks_passed' IS DISTINCT FROM 'true'::jsonb OR q.verification->'cleanup_confirmed' IS DISTINCT FROM 'true'::jsonb OR t.latest_attempt_id<>q.attempt_id
+ OR t.plan_decision_id IS DISTINCT FROM q.plan_decision_id OR t.scope_plan_decision_id IS DISTINCT FROM q.scope_plan_decision_id
  OR t.status NOT IN('awaiting_review','completed') THEN RETURN NULL;END IF;
  SELECT * INTO parent FROM forge_agent.coding_publications WHERE owner_id=t.owner_id AND project_alias=t.project_alias
  AND (publication_id=t.repair_target_publication_id OR(t.repair_target_publication_id IS NULL AND task_id=t.id)) ORDER BY created_at DESC LIMIT 1;
@@ -545,15 +546,20 @@ BEGIN
  IF q.finish_token=p_token AND q.finish_receipt->'outcome'=p_outcome THEN RETURN q.finish_receipt;END IF;
  IF q.status<>'checking' OR q.lease_token IS DISTINCT FROM p_token OR q.lease_expires_at<=clock_timestamp() THEN RAISE EXCEPTION 'Review lease expired' USING ERRCODE='P0008';END IF;
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE owner_id=q.owner_id AND project_alias=q.project_alias AND coding_tasks.id=q.task_id FOR UPDATE;
- IF t.latest_attempt_id<>q.attempt_id OR t.status NOT IN('awaiting_review','completed') THEN RAISE EXCEPTION 'Review source superseded' USING ERRCODE='P0008';END IF;
+ IF t.latest_attempt_id<>q.attempt_id OR t.plan_decision_id IS DISTINCT FROM q.plan_decision_id OR t.scope_plan_decision_id IS DISTINCT FROM q.scope_plan_decision_id OR t.status NOT IN('awaiting_review','completed') THEN RAISE EXCEPTION 'Review source superseded' USING ERRCODE='P0008';END IF;
  IF jsonb_typeof(p_outcome)<>'object' OR octet_length(p_outcome::text)>131072 THEN RAISE EXCEPTION 'Invalid review outcome' USING ERRCODE='22023';END IF;
  disposition:=p_outcome->>'disposition';v_candidate:=p_outcome->>'candidate_commit';v_gate:=p_outcome->>'gate_manifest_sha256';
  IF disposition NOT IN('repair','retry_infrastructure','awaiting_review','handoff','cancelled','needs_reconcile','revise_plan')
  OR (v_candidate IS NOT NULL AND v_candidate!~'^[0-9a-f]{40}$') OR(v_gate IS NOT NULL AND v_gate!~'^[0-9a-f]{64}$')
  OR jsonb_typeof(coalesce(p_outcome->'findings','[]'))<>'array' OR jsonb_typeof(coalesce(p_outcome->'verification','{}'))<>'object' THEN
  RAISE EXCEPTION 'Invalid review outcome' USING ERRCODE='22023';END IF;
- IF q.phase='source' AND(q.owner_decision->>'decision' IS DISTINCT FROM 'repair_source' OR v_candidate IS DISTINCT FROM q.candidate_commit OR disposition<>'repair' OR p_outcome->'verification'->>'candidate_workspace_digest' IS NULL) THEN
- RAISE EXCEPTION 'Source import lacks bound owner authorization' USING ERRCODE='P0009';END IF;
+ IF disposition IN('repair','retry_infrastructure','awaiting_review') AND coalesce(p_outcome->'cleanup_confirmed',p_outcome->'verification'->'cleanup_confirmed','false'::jsonb) IS DISTINCT FROM 'true'::jsonb THEN disposition:='needs_reconcile';END IF;
+ IF q.phase='source' THEN
+  IF q.owner_decision->>'decision' IS DISTINCT FROM 'repair_source' OR disposition NOT IN('repair','handoff','needs_reconcile','cancelled','revise_plan','retry_infrastructure')
+  OR(disposition='repair' AND(v_candidate IS DISTINCT FROM q.candidate_commit OR p_outcome->'verification'->>'candidate_workspace_digest' IS NULL)) THEN
+   RAISE EXCEPTION 'Source import lacks bound owner authorization' USING ERRCODE='P0009';END IF;
+  v_candidate:=coalesce(v_candidate,q.candidate_commit);
+ END IF;
  IF q.phase='hosted' THEN
   IF p_outcome->'verification'->'hosted' IS DISTINCT FROM 'true'::jsonb OR v_candidate IS DISTINCT FROM q.candidate_commit THEN
    RAISE EXCEPTION 'Hosted source mismatch' USING ERRCODE='P0006';END IF;
@@ -592,17 +598,17 @@ BEGIN
  -- an explicit independent owner/critic decision bound to this exact commit.
  UPDATE forge_agent.coding_reviews SET status=disposition,candidate_commit=v_candidate,gate_manifest_sha256=v_gate,
  findings=(SELECT coalesce(jsonb_agg(v),'[]') FROM(SELECT DISTINCT ON(x->>'finding_id')x AS v FROM jsonb_array_elements(coalesce(previous.findings,'[]')||coalesce(p_outcome->'findings','[]'))WITH ORDINALITY AS entries(x,ordinal) ORDER BY x->>'finding_id',ordinal DESC)ledger),verified_finding_ids=coalesce(p_outcome->'verified_finding_ids','[]'),
- verification=verification||coalesce(p_outcome->'verification','{}'),fingerprint=p_outcome->>'fingerprint',summary=coalesce(p_outcome->>'summary',''),reason=coalesce(p_outcome->>'reason',''),
+ verification=verification||coalesce(p_outcome->'verification','{}')||jsonb_build_object('cleanup_confirmed',coalesce(p_outcome->'cleanup_confirmed',p_outcome->'verification'->'cleanup_confirmed','false'::jsonb)),fingerprint=p_outcome->>'fingerprint',summary=coalesce(p_outcome->>'summary',''),reason=coalesce(p_outcome->>'reason',''),
  stagnant_rounds=stagnant,lease_token=NULL,lease_expires_at=NULL,finish_token=p_token,updated_at=clock_timestamp() WHERE review_id=q.review_id RETURNING * INTO q;
  IF disposition='repair' AND v_candidate IS NOT NULL AND v_gate IS NOT NULL THEN
   id:=forge_agent.coding_make_feedback(q.review_id,t.id,'repair',q.summary,q.findings);
   UPDATE forge_agent.coding_reviews SET feedback_id=id WHERE review_id=q.review_id;
   IF t.auto_repair OR(q.phase='source' AND q.owner_decision->>'decision'='repair_source') THEN next_id:=forge_agent.coding_schedule_repair(q.review_id,id);END IF;
- ELSIF disposition='retry_infrastructure' AND t.auto_repair THEN
+ ELSIF disposition='retry_infrastructure' AND(t.auto_repair OR(q.phase='source' AND q.owner_decision->>'decision'='repair_source')) THEN
   INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,task_id,attempt_id,plan_decision_id,reconciliation_receipt_id,base_revision,workspace_digest,parent_result_sha256,
-  source_revision,review_no,round,stagnant_rounds,infrastructure_retries,previous_review_id,candidate_commit)
+  source_revision,review_no,round,stagnant_rounds,infrastructure_retries,previous_review_id,candidate_commit,phase,owner_decision,verification,target_publication_id,source_publication_id,gate_manifest_sha256)
   VALUES(q.owner_id,q.project_alias,q.task_id,q.attempt_id,q.plan_decision_id,q.reconciliation_receipt_id,q.base_revision,q.workspace_digest,q.parent_result_sha256,
-  t.revision,q.review_no+1,q.round,q.stagnant_rounds,q.infrastructure_retries+1,q.review_id,q.candidate_commit) RETURNING review_id INTO next_id;
+  t.revision,q.review_no+1,q.round,q.stagnant_rounds,q.infrastructure_retries+1,q.review_id,q.candidate_commit,q.phase,q.owner_decision,q.verification,q.target_publication_id,q.source_publication_id,q.gate_manifest_sha256) RETURNING review_id INTO next_id;
  END IF;
  receipt:=jsonb_build_object('review_id',q.review_id,'status',disposition,'feedback_id',id,'repair_task_id',CASE WHEN disposition='repair' THEN next_id ELSE NULL END,'next_review_id',CASE WHEN disposition='retry_infrastructure' THEN next_id ELSE NULL END,'outcome',p_outcome);
  UPDATE forge_agent.coding_reviews SET finish_receipt=receipt WHERE review_id=q.review_id;
@@ -686,7 +692,7 @@ BEGIN
       AND NOT EXISTS (SELECT 1 FROM forge_agent.coding_tasks t
         WHERE (t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.plan_decision_id) IS NOT DISTINCT FROM
               (p.owner_id,p.project_alias,p.task_id,p.attempt_id,p.plan_decision_id)
-          AND t.mode='implement' AND t.status IN ('awaiting_review','completed'));
+          AND t.mode='implement' AND t.status IN ('awaiting_review','completed') AND(NOT t.review_required OR forge_agent.coding_review_authorized(p.review_id)));
     UPDATE forge_agent.coding_publications SET status='failed',lease_token=NULL,lease_expires_at=NULL,
       summary='Publication outcome is uncertain after its lease expired; review remote state before retrying.',updated_at=now_at
     WHERE owner_id=current_setting('forge.coding_owner',true) AND status='publishing' AND lease_expires_at<=now_at;
@@ -696,7 +702,7 @@ BEGIN
     WHERE p.owner_id=current_setting('forge.coding_owner',true)
       AND (p.status='pending' OR (p.status='checking' AND p.lease_expires_at<=now_at))
       AND t.mode='implement' AND t.status IN ('awaiting_review','completed')
-      AND (NOT t.review_required OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q WHERE q.review_id=p.review_id AND q.status='approved' AND q.owner_decision IS NOT NULL AND q.verification->'checks_passed'='true'::jsonb))
+      AND (NOT t.review_required OR forge_agent.coding_review_authorized(p.review_id))
     ORDER BY p.created_at,p.publication_id FOR UPDATE OF p SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN NULL; END IF;
     UPDATE forge_agent.coding_publications SET status='checking',worker_id=p_worker_id,lease_token=gen_random_uuid(),
@@ -725,7 +731,7 @@ BEGIN
       AND p.owner_id=current_setting('forge.coding_owner',true) AND p.status IN ('checking','publishing')
       AND p.lease_expires_at>clock_timestamp() AND (t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.plan_decision_id) IS NOT DISTINCT FROM
           (p.owner_id,p.project_alias,p.task_id,p.attempt_id,p.plan_decision_id)
-      AND t.mode='implement' AND t.status IN ('awaiting_review','completed');
+      AND t.mode='implement' AND t.status IN ('awaiting_review','completed') AND(NOT t.review_required OR forge_agent.coding_review_authorized(p.review_id));
     RETURN FOUND;
 END; $fn$;
 
@@ -742,10 +748,11 @@ BEGIN
     SELECT * INTO j FROM forge_agent.coding_publications p WHERE p.publication_id=p_publication_id
       AND p.owner_id=current_setting('forge.coding_owner',true) FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Publication not found' USING ERRCODE='P0002'; END IF;
+    IF j.review_id IS NOT NULL AND p_commit_sha IS NOT NULL AND p_commit_sha IS DISTINCT FROM(SELECT candidate_commit FROM forge_agent.coding_reviews WHERE review_id=j.review_id) THEN RAISE EXCEPTION 'Publication candidate changed' USING ERRCODE='P0006';END IF;
     receipt:=jsonb_strip_nulls(jsonb_build_object('publication_id',j.publication_id,'status',p_status,'branch',coalesce(p_branch,j.branch),
        'commit_sha',coalesce(p_commit_sha,j.commit_sha),'pr_url',coalesce(p_pr_url,j.pr_url),'summary',p_summary));
     IF j.finish_token=p_lease_token AND j.finish_receipt=receipt THEN RETURN receipt; END IF;
-    IF j.lease_token IS DISTINCT FROM p_lease_token OR j.status NOT IN ('checking','publishing')
+    IF (j.review_id IS NOT NULL AND NOT forge_agent.coding_review_authorized(j.review_id)) OR j.lease_token IS DISTINCT FROM p_lease_token OR j.status NOT IN ('checking','publishing')
        OR j.lease_expires_at<=clock_timestamp() OR NOT EXISTS(SELECT 1 FROM forge_agent.coding_tasks t
          WHERE (t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.plan_decision_id) IS NOT DISTINCT FROM
                (j.owner_id,j.project_alias,j.task_id,j.attempt_id,j.plan_decision_id)
@@ -780,6 +787,7 @@ BEGIN
  OR EXISTS(SELECT 1 FROM jsonb_array_elements(p_checks)x WHERE x->>'head_sha' IS DISTINCT FROM p_head OR jsonb_typeof(x->'name') IS DISTINCT FROM 'string' OR x->>'status' NOT IN('success','pending','failure','cancelled','skipped')) THEN
  RAISE EXCEPTION 'Ambiguous hosted check observations' USING ERRCODE='22023';END IF;
  SELECT * INTO policy FROM forge_agent.coding_review_policy WHERE owner_id=p.owner_id AND project_alias=p.project_alias;
+ policy.required_hosted_checks:=coalesce((SELECT ARRAY(SELECT jsonb_array_elements_text(b.policy->'required_hosted_checks')) FROM forge_agent.coding_review_budget b JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,coalesce(t.repair_root_task_id,t.id))=(b.owner_id,b.project_alias,b.root_task_id) WHERE t.owner_id=p.owner_id AND t.project_alias=p.project_alias AND t.id=p.task_id),policy.required_hosted_checks);
  green:=policy.owner_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM unnest(policy.required_hosted_checks) name
  WHERE(SELECT count(*) FROM jsonb_array_elements(p_checks)x WHERE x->>'name'=name AND x->>'head_sha'=p_head AND x->>'status'='success')<>1);
  INSERT INTO forge_agent.coding_hosted_checks(owner_id,project_alias,task_id,publication_id,candidate_commit,checks,required_green)
@@ -853,3 +861,17 @@ BEGIN
                              'plan_sha256',d.plan_sha256,'text',content,'note',d.note);
 END; $fn$;
 
+
+CREATE FUNCTION forge_agent.coding_review_authorized(p_review uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
+ SELECT EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t
+ ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(q.owner_id,q.project_alias,q.task_id,q.attempt_id)
+ WHERE q.review_id=p_review AND q.owner_id=current_setting('forge.coding_owner',true)
+ AND q.phase='local' AND q.status='approved' AND q.owner_decision IS NOT NULL
+ AND q.owner_decision->>'candidate_commit'=q.candidate_commit AND q.owner_decision->>'gate_manifest_sha256'=q.gate_manifest_sha256
+ AND q.verification->'checks_passed'='true'::jsonb AND q.verification->'cleanup_confirmed'='true'::jsonb
+ AND t.plan_decision_id IS NOT DISTINCT FROM q.plan_decision_id AND t.scope_plan_decision_id IS NOT DISTINCT FROM q.scope_plan_decision_id
+ AND t.mode='implement' AND t.status IN('awaiting_review','completed')
+ AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_attempts a WHERE a.owner_id=t.owner_id AND a.project_alias=t.project_alias AND a.task_id=t.id AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)))
+$fn$;
+REVOKE ALL ON FUNCTION forge_agent.coding_review_authorized(uuid) FROM PUBLIC;
