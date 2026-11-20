@@ -104,7 +104,7 @@ class FeedbackStoreTest(unittest.TestCase):
         observer=self.db.review_claim('observer');self.assertEqual(observer['phase'],'hosted');self.assertEqual(observer['target_publication_id'],publication['publication_id']);self.assertEqual(observer['source_publication_id'],publication['publication_id']);self.assertEqual(observer['source_review_id'],review)
         checks=[{'name':name,'status':'pending','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')]
         outcome=self.outcome(verification={'hosted':True,'hosted_status':'pending','checks':checks})
-        self.assertEqual(self.db.review_finish(observer,outcome)['status'],'waiting_hosted')
+        pending_receipt=self.db.review_finish(observer,outcome);self.assertEqual(pending_receipt['status'],'waiting_hosted');self.assertEqual(self.db.review_finish(observer,outcome),pending_receipt)
         self.assertIsNone(self.db.review_claim('observer'))
         self.cluster.admin_exec("UPDATE forge_agent.coding_reviews SET next_poll_at=clock_timestamp()-interval '1 second' WHERE phase='hosted'")
         observer=self.db.review_claim('observer')
@@ -225,3 +225,20 @@ class FeedbackStoreTest(unittest.TestCase):
         new_review=self.db.review_claim('reviewer')
         outcome=self.db.review_finish(new_review,self.outcome(disposition='repair',findings=[{'finding_id':'more-source','category':'source','summary':'Another source defect.'}],fingerprint='2'*64))
         self.assertIsNone(outcome['repair_task_id']);self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))
+
+    def test_hosted_deadline_is_persistent_and_exhaustion_never_requeues_or_runs_agent(self):
+        from datetime import datetime,timezone
+        lease,receipt=self.task();review=self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer');self.db.review_finish(job,self.outcome())
+        detail=self.get(lease);self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(review),'approve','codex-v2','Reviewed source.','approve-deadline'))
+        publication=self.db.publication_claim('publisher');self.db.publication_finish(publication,'publishing','Passed',branch='forge/deadline',commit_sha='d'*40)
+        self.db.publication_finish(publication,'published','PR',branch='forge/deadline',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/3')
+        hosted=self.db.review_claim('observer');deadline=datetime.fromisoformat(hosted['hosted_deadline_at'].replace('Z','+00:00'))
+        self.assertGreater((deadline-datetime.now(timezone.utc)).total_seconds(),23*3600)
+        checks=[{'name':name,'status':'pending','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')]
+        pending=self.outcome(verification={'hosted':True,'hosted_status':'pending','checks':checks})
+        self.db.review_finish(hosted,pending)
+        self.cluster.admin_exec("UPDATE forge_agent.coding_reviews SET next_poll_at=clock_timestamp()-interval '1 second',created_at=clock_timestamp()-interval '25 hours' WHERE phase='hosted'")
+        expired=self.db.review_claim('observer');result=self.db.review_finish(expired,pending)
+        self.assertEqual((result['status'],result['reason']),('handoff','hosted_wait_exhausted'))
+        self.assertIsNone(self.db.review_claim('observer'));self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))
+        self.assertFalse(self.get(lease)['review']['can_accept'])

@@ -314,6 +314,28 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertEqual((decision["status"],decision["mode"]),("queued","implement"))
             finally:cluster.stop()
 
+    def test_schema14_v4_history_is_not_upgraded_or_opted_into_repairs(self):
+        with TemporaryDirectory(prefix='forge-v4-feedback-upgrade-',dir='/tmp') as temporary:
+            legacy_sql=Path(temporary)/'sql';historical_registry(legacy_sql,14)
+            cluster=PreUpgradeCluster(legacy_sql).start()
+            try:
+                db=self.worker(cluster);inc=self.advertise(cluster,db,'v4-worker',PLAN_POLICY_DIGEST)
+                admitted=self.admit_old(cluster,'v4-before-feedback',PLAN_POLICY_ID)
+                lease=db.claim('v4-worker',inc,['codex-v2']);text,manifest=self.stage(db,lease);proof=make_stop_proof(lease.unit_name)
+                publication=db.publish(lease,'awaiting_review',manifest,None,'V4 Plan',proof)
+                db.reconcile(lease,'c'*64,proof)
+                command=WorkAccept('homelab',UUID(lease.task_id),publication['revision'],'v4-history-accept','Historical reviewed Plan')
+                accepted=self.legacy_accept(cluster,command)
+                before=self.rows(cluster,'SELECT pinned_recipe,recipe_digest,review_note FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),))
+                DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
+                self.assertEqual(self.rows(cluster,'SELECT pinned_recipe,recipe_digest,review_note FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),before)
+                self.assertEqual(self.rows(cluster,'SELECT auto_repair,review_required,feedback_id FROM forge_agent.coding_tasks WHERE id=%s',(UUID(lease.task_id),)),[(False,False,None)])
+                self.assertEqual(self.service(cluster).accept(command),accepted)
+                self.assertEqual(self.admit_old(cluster,'v4-before-feedback',PLAN_POLICY_ID),admitted)
+                self.assertEqual(db.publish(lease,'awaiting_review',manifest,None,'V4 Plan',proof),publication)
+                self.assertEqual(self.store(cluster).result(project_alias='homelab',task_id=UUID(lease.task_id),attempt_id=UUID(lease.attempt_id))['content'],text)
+            finally:cluster.stop()
+
     def test_v1_v2_and_current_workers_claim_only_their_exact_policy_digest(self):
         old = self.admit_old(self.cluster, "old-queued-first")
         previous = self.admit_old(self.cluster, "previous-queued-second", PREVIOUS_POLICY_ID)

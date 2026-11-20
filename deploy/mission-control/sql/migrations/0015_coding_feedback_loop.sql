@@ -408,7 +408,7 @@ BEGIN
  INSERT INTO forge_agent.coding_review_policy(owner_id,project_alias) VALUES(j.owner_id,j.project_alias) ON CONFLICT DO NOTHING;
  SELECT * INTO p FROM forge_agent.coding_review_policy WHERE owner_id=j.owner_id AND project_alias=j.project_alias;
  SELECT b.policy INTO frozen_policy FROM forge_agent.coding_review_budget b JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,coalesce(t.repair_root_task_id,t.id))=(b.owner_id,b.project_alias,b.root_task_id) WHERE t.owner_id=j.owner_id AND t.project_alias=j.project_alias AND t.id=j.task_id;
- RETURN jsonb_build_object('review_id',j.review_id,'phase',j.phase,'target_publication_id',j.target_publication_id,
+ RETURN jsonb_build_object('review_id',j.review_id,'hosted_deadline_at',to_char((j.created_at+interval '24 hours') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'phase',j.phase,'target_publication_id',j.target_publication_id,
  'source_publication_id',j.source_publication_id,'publication_id',j.source_publication_id,
  'pr_url',(SELECT pr_url FROM forge_agent.coding_publications WHERE publication_id=j.source_publication_id),
  'task_id',j.task_id,'attempt_id',j.attempt_id,'project_alias',j.project_alias,
@@ -561,6 +561,10 @@ BEGIN
   v_candidate:=coalesce(v_candidate,q.candidate_commit);
  END IF;
  IF q.phase='hosted' THEN
+  IF q.created_at+interval '24 hours'<=clock_timestamp() THEN
+   UPDATE forge_agent.coding_reviews SET status='handoff',reason='hosted_wait_exhausted',lease_token=NULL,lease_expires_at=NULL,finish_token=p_token,finish_receipt=jsonb_build_object('review_id',q.review_id,'status','handoff','reason','hosted_wait_exhausted','outcome',p_outcome),updated_at=clock_timestamp() WHERE review_id=q.review_id;
+   SELECT finish_receipt INTO receipt FROM forge_agent.coding_reviews WHERE review_id=q.review_id;RETURN receipt;
+  END IF;
   IF p_outcome->'verification'->'hosted' IS DISTINCT FROM 'true'::jsonb OR v_candidate IS DISTINCT FROM q.candidate_commit THEN
    RAISE EXCEPTION 'Hosted source mismatch' USING ERRCODE='P0006';END IF;
   receipt:=forge_coding_reconciler_api.record_hosted_checks(q.source_publication_id,q.candidate_commit,coalesce(p_outcome->'verification'->'checks','[]'));
@@ -568,12 +572,12 @@ BEGIN
    UPDATE forge_agent.coding_reviews SET status='pending',lease_token=NULL,lease_expires_at=NULL,next_poll_at=clock_timestamp()+interval '60 seconds',
     verification=verification||coalesce(p_outcome->'verification','{}'),finish_token=p_token,
     finish_receipt=jsonb_build_object('review_id',q.review_id,'status','waiting_hosted','outcome',p_outcome),updated_at=clock_timestamp() WHERE review_id=q.review_id;
-   RETURN jsonb_build_object('review_id',q.review_id,'status','waiting_hosted');
+   SELECT finish_receipt INTO receipt FROM forge_agent.coding_reviews WHERE review_id=q.review_id;RETURN receipt;
   ELSIF coalesce(p_outcome->'verification'->>'hosted_status',p_outcome->>'hosted_status')='passed' THEN
    IF receipt->'required_green' IS DISTINCT FROM 'true'::jsonb THEN RAISE EXCEPTION 'Required hosted checks incomplete' USING ERRCODE='P0009';END IF;
    UPDATE forge_agent.coding_reviews SET status='approved',lease_token=NULL,lease_expires_at=NULL,verification=verification||coalesce(p_outcome->'verification','{}'),
     finish_token=p_token,finish_receipt=jsonb_build_object('review_id',q.review_id,'status','hosted_green','outcome',p_outcome),updated_at=clock_timestamp() WHERE review_id=q.review_id;
-   RETURN jsonb_build_object('review_id',q.review_id,'status','hosted_green');
+   SELECT finish_receipt INTO receipt FROM forge_agent.coding_reviews WHERE review_id=q.review_id;RETURN receipt;
   END IF;
  END IF;
  SELECT * INTO p FROM forge_agent.coding_review_policy WHERE owner_id=t.owner_id AND project_alias=t.project_alias;
