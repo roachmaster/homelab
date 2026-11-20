@@ -45,7 +45,7 @@ class PreparationRetryTest(unittest.TestCase):
                 "repair_requires_new_workspace": False, "toolchain": "Not reported",
                 "integration_base": job["base_revision"], "cleanup_confirmed": True, "checks": []}}
 
-    def preparation_failure(self):
+    def preparation_failure(self, *, reason="publication_command_failed"):
         _admitted, author, critic, source = self.checked_implementation(linked=True)
         self.publish(critic, self.verdict(critic, "revise"))
         self.assertTrue(self.coordinator.run_once())
@@ -59,10 +59,10 @@ class PreparationRetryTest(unittest.TestCase):
         self.coordinator.run_once()
         job = self.db.review_claim("checks")
         self.assertIsNotNone(job)
-        self.db.review_finish(job, self.failed_outcome(job))
+        self.db.review_finish(job, {**self.failed_outcome(job), "reason": reason})
         # The original coordinator records the failure before the next scan.
         self.coordinator.run_once()
-        self.assertEqual(self.get(child.task_id)["workflow"]["escalation_reason"], "publication_command_failed")
+        self.assertEqual(self.get(child.task_id)["workflow"]["escalation_reason"], reason)
         request = dict(project_alias="homelab", task_id=UUID(child.task_id),
             expected_revision=self.get(child.task_id)["revision"], review_id=UUID(job["review_id"]),
             reconciliation_receipt_id=UUID(rec), idempotency_key="preparation-recovery")
@@ -168,3 +168,22 @@ class PreparationRetryTest(unittest.TestCase):
         self.assertIsNone(self.db.review_claim("checks"))
         self.assertIsNone(self.claim("agy-v2"))
         self.assertEqual(self.counts(child), before)
+
+    def test_mutable_reason_cannot_forge_original_worker_failure_witness(self):
+        _author, child, _plan, _source, old, _raw, request = self.preparation_failure(reason="review_unavailable")
+        before = self.counts(child)
+        original = self.rows("SELECT finish_receipt FROM forge_agent.coding_reviews WHERE review_id=%s", (old["review_id"],))[0][0]
+        self.assertEqual(original["outcome"]["reason"], "review_unavailable")
+        # Presentation fields can change without changing the trusted callback.
+        self.cluster.admin_exec("UPDATE forge_agent.coding_reviews SET reason='publication_command_failed' "
+            "WHERE review_id='" + old["review_id"] + "'", owner=False)
+        self.cluster.admin_exec("UPDATE forge_agent.coding_workflows SET escalation_reason='publication_command_failed' "
+            "WHERE workflow_id=(SELECT workflow_id FROM forge_agent.coding_tasks WHERE id='" + child.task_id + "')", owner=False)
+        with self.assertRaises(Rejected):
+            self.coordinator.store.retry_preparation(**request)
+        self.coordinator.run_once()
+        self.assertIsNone(self.db.review_claim("checks"))
+        self.assertIsNone(self.claim("agy-v2"))
+        self.assertEqual(self.counts(child), before)
+        self.assertEqual(self.rows("SELECT finish_receipt FROM forge_agent.coding_reviews WHERE review_id=%s", (old["review_id"],))[0][0], original)
+        self.assertEqual(self.rows("SELECT count(*) FROM forge_agent.coding_reviews WHERE previous_review_id=%s", (old["review_id"],))[0][0], 0)
