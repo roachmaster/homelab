@@ -24,6 +24,8 @@ LOG=logging.getLogger('forge-workflow')
 MAX_TARGET_BYTES=64*1024*1024+65536
 NATIVE_DEADLINE_POLICY='forge-native-deadline-recovery-v1'
 NATIVE_DEADLINE_RETRIES=1
+PEER_WIRE_REPLAY_POLICY='forge-peer-wire-replay-v1'
+PEER_WIRE_ERROR='Peer review could not safely continue: PeerReviewError'
 NATIVE_DEADLINE_NOTE=(
     'The previous writer stopped at its deadline; the reconciled workspace is preserved. '
     'Continue the SAME approved Plan. Inspect existing files and retained evidence, preserve completed work, '
@@ -279,6 +281,136 @@ class WorkflowStore:
                 # exceptions retain the existing escalation behavior.
                 pass
 
+    def retry_peer_verdict(self,*,project_alias,workflow_review_id,expected_revision,
+                           reviewer_attempt_id,reviewer_result_sha256,target_sha256,idempotency_key):
+        """Replay one exact saved code revision through the ordinary controller.
+
+        This private factory-owned compatibility recovery never creates a verdict
+        or approves code. The original result bytes remain the source authority.
+        """
+        from work_peer_review import parse_review_target,parse_review_verdict
+        self.store._require_project(project_alias)
+        if (not isinstance(workflow_review_id,UUID) or not isinstance(reviewer_attempt_id,UUID)
+            or type(expected_revision) is not int or expected_revision<1
+            or not isinstance(idempotency_key,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',idempotency_key)
+            or any(not isinstance(v,str) or not re.fullmatch(r'[0-9a-f]{64}',v)
+                   for v in (reviewer_result_sha256,target_sha256))):raise Rejected(400,'invalid_request')
+        with self._transaction() as cursor:
+            self._project_lock(cursor,project_alias)
+            cursor.execute('SELECT * FROM forge_agent.coding_workflow_reviews WHERE owner_id=%s AND project_alias=%s AND workflow_review_id=%s',
+                           (self.store.owner,project_alias,workflow_review_id));r=cursor.fetchone()
+            if not r:raise Rejected(404,'not_found')
+            key='peer-verdict-replay:'+str(workflow_review_id)+':'+str(reviewer_attempt_id)
+            intent={'policy':PEER_WIRE_REPLAY_POLICY,'max_replays':1,'workflow_review_id':str(workflow_review_id),
+                    'source_revision':expected_revision,'reviewer_attempt_id':str(reviewer_attempt_id),
+                    'reviewer_result_sha256':reviewer_result_sha256,'target_sha256':target_sha256,'idempotency_key':idempotency_key}
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",(r['workflow_id'],key));prior=cursor.fetchone()
+            if prior:
+                if prior['intent']!=intent:raise Rejected(409,'idempotency_conflict')
+                if prior['status']!='completed' or not prior['finish_receipt']:raise Rejected(409,'reconcile_required')
+                return dict(prior['finish_receipt']['receipt'])
+            cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE',
+                           (self.store.owner,project_alias,r['source_task_id']));task=cursor.fetchone()
+            cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE',
+                           (self.store.owner,project_alias,r['reviewer_task_id']));critic=cursor.fetchone()
+            cursor.execute('SELECT * FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s FOR UPDATE',(workflow_review_id,));review=dict(cursor.fetchone())
+            cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s FOR UPDATE',(r['workflow_id'],));w=cursor.fetchone()
+            self._current_policy(w);p=w['snapshot']
+            if (w['phase']!='escalated' or w['enabled'] or w['escalation_reason']!=PEER_WIRE_ERROR
+                or review['status']!='escalated' or review['target_kind']!='code' or review['target_sha256']!=target_sha256
+                or not task or not critic or task['workflow_id']!=w['workflow_id'] or critic['workflow_id']!=w['workflow_id']
+                or task['revision']!=expected_revision or task['revision']!=review['source_revision']
+                or task['latest_attempt_id']!=review['source_attempt_id'] or task['status']!='awaiting_review'
+                or task['mode']!='implement' or task['workflow_review_id'] is not None or not task['workflow_required']
+                or critic['status']!='awaiting_review' or critic['mode']!='review' or not critic['workflow_required']
+                or critic['latest_attempt_id']!=reviewer_attempt_id or critic['workflow_review_id']!=workflow_review_id
+                or critic['review_target_sha256']!=target_sha256 or task['cancelled_at'] is not None or critic['cancelled_at'] is not None):
+                raise Rejected(409,'not_reviewable')
+            for row,profile,entry in ((task,p['author_profile'],'author_implement'),(critic,p['reviewer_profile'],'reviewer_review')):
+                recipe=recipe_from_snapshot(p,entry)
+                if row['agent_profile']!=profile or row['pinned_recipe']!=recipe.to_dict() or row['recipe_digest']!=recipe.digest:
+                    raise Rejected(409,'result_mismatch')
+                cursor.execute('SELECT phase,reservation_active,lease_expires_at,published_at,unit_name,pinned_recipe,recipe_digest FROM forge_agent.coding_attempts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s',
+                               (self.store.owner,project_alias,row['id'],row['latest_attempt_id']));attempt=cursor.fetchone()
+                cursor.execute('SELECT stop_proof FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s AND task_revision=%s',
+                               (self.store.owner,project_alias,row['id'],row['latest_attempt_id'],row['revision']));rec=cursor.fetchone()
+                if (not attempt or attempt['phase']!='stopped' or attempt['reservation_active'] or attempt['lease_expires_at'] is not None
+                    or not attempt['published_at'] or attempt['pinned_recipe']!=recipe.to_dict() or attempt['recipe_digest']!=recipe.digest
+                    or not rec or rec['stop_proof'].get('scope_stopped') is not True or rec['stop_proof'].get('source')!='systemd'
+                    or rec['stop_proof'].get('unit_name')!=attempt['unit_name']):
+                    raise Rejected(409,'reconcile_required')
+            source=self._artifact(cursor,task['id'],task['latest_attempt_id']);result=self._artifact(cursor,critic['id'],reviewer_attempt_id)
+            if source['result_sha256']!=review['source_result_sha256'] or result['result_sha256']!=reviewer_result_sha256:
+                raise Rejected(409,'result_mismatch')
+            try:
+                target=parse_review_target(review['target_json'],target_sha256)
+                verdict=parse_review_verdict(result['content'],target)
+                # Only the observed finite wire incompatibility is recoverable.
+                wire=json.loads(result['content'])
+                if verdict['decision']!='revise' or not any(f.get('category')=='correctness' for f in wire['findings']):
+                    raise ValueError('not_compatibility_revision')
+            except (ValueError,KeyError,TypeError):raise Rejected(409,'result_mismatch') from None
+            if (target['reviewer_task_id']!=str(critic['id']) or target['source_task_id']!=str(task['id'])
+                or target['source_attempt_id']!=str(task['latest_attempt_id']) or target['source_revision']!=task['revision']
+                or target['workflow_id']!=str(w['workflow_id']) or target['workflow_review_id']!=str(workflow_review_id)
+                or target['policy_digest']!=w['policy_digest'] or target['plan_decision_id']!=str(task['plan_decision_id'] or task['scope_plan_decision_id'])
+                or target['review_id']!=str(review['source_review_id'])):raise Rejected(409,'result_mismatch')
+            cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE',(review['source_review_id'],));q=cursor.fetchone()
+            if (not q or q['owner_id']!=self.store.owner or q['project_alias']!=project_alias or q['task_id']!=task['id']
+                or q['attempt_id']!=task['latest_attempt_id'] or q['status']!='awaiting_review'
+                or q['candidate_commit']!=target['candidate_commit'] or q['gate_manifest_sha256']!=target['gate_manifest_sha256']
+                or q['verification'].get('checks_passed') is not True or q['verification'].get('cleanup_confirmed') is not True
+                or q['verification'].get('candidate_workspace_digest')!=target['workspace_digest']
+                or q['verification'].get('integration_base')!=target['integration_base']
+                or {'checks_passed':True,'toolchain':q['verification'].get('toolchain','Not reported'),
+                    'checks':[{k:x[k] for k in ('check_id','status','head_sha')} for x in q['verification'].get('checks',[])]}!=target['verification']):
+                raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND workflow_review_id=%s AND kind='decide' AND source_key=%s FOR UPDATE",
+                           (w['workflow_id'],workflow_review_id,str(reviewer_attempt_id)+':'+reviewer_result_sha256));action=cursor.fetchone()
+            if not action or action['status']!='handoff' or action['finish_receipt'] is not None or action['intent'] is not None:
+                raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_tasks WHERE workflow_id=%s AND status IN('queued','running','cancel_requested','failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled')) OR EXISTS(SELECT 1 FROM forge_agent.coding_attempts a JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s AND(a.reservation_active OR a.lease_expires_at IS NOT NULL)) OR EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND status IN('pending','leased')) OR EXISTS(SELECT 1 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(p.owner_id,p.project_alias,p.task_id) WHERE t.workflow_id=%s) OR EXISTS(SELECT 1 FROM forge_agent.coding_reviews q JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(q.owner_id,q.project_alias,q.task_id) WHERE t.workflow_id=%s AND q.status IN('pending','checking')) AS busy",(w['workflow_id'],)*5)
+            if cursor.fetchone()['busy']:raise Rejected(409,'reconcile_required')
+            cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE 'peer-verdict-replay:%%'",(w['workflow_id'],))
+            if cursor.fetchone()['used']:raise Rejected(409,'not_reviewable')
+            cursor.execute('SELECT repair_rounds,stagnant_rounds,policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
+                           (self.store.owner,project_alias,task['repair_root_task_id'] or task['id']));budget=cursor.fetchone()
+            if (q['round']>=p['max_code_revisions'] or budget and (budget['repair_rounds']>=p['max_code_revisions']
+                or budget['stagnant_rounds']>=budget['policy']['max_stagnant_rounds'])):raise Rejected(409,'not_reviewable')
+            cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
+            self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
+            cursor.execute("SELECT projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,POLICY_DIGEST));ready=cursor.fetchall()
+            for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
+                recipe=recipe_from_snapshot(p,entry)
+                if not any(any(x.get('alias')==project_alias for x in row['projects']) and any(x.get('alias')==profile and x.get('backend')==recipe.backend and x.get('model')==recipe.model and mode in x.get('modes',[]) for x in row['profiles']) for row in ready):
+                    raise Rejected(503,'unavailable')
+            cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='reviewing',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(workflow_review_id,))
+            cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='pending',worker_id=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(action['action_id'],))
+            receipt={'status':'peer_verdict_replay_queued','workflow_id':str(w['workflow_id']),'workflow_review_id':str(workflow_review_id),
+                     'source_task_id':str(task['id']),'reviewer_attempt_id':str(reviewer_attempt_id),'reviewer_result_sha256':reviewer_result_sha256,
+                     'target_sha256':target_sha256,'action_id':str(action['action_id'])}
+            cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
+                           (w['workflow_id'],self.store.owner,project_alias,key,Json(intent),Json({'status':'peer_verdict_replay_queued','receipt':receipt})))
+            cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
+            return receipt
+
+    def _recover_peer_verdicts(self):
+        with self.store._transaction(read_only=True) as cursor:
+            cursor.execute("""SELECT r.workflow_review_id,r.target_sha256,r.source_revision,t.project_alias,a.attempt_id,a.result_sha256
+              FROM forge_agent.coding_workflow_reviews r JOIN forge_agent.coding_workflows w USING(workflow_id)
+              JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(r.owner_id,r.project_alias,r.reviewer_task_id)
+              JOIN forge_agent.coding_attempts a ON(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)
+              WHERE r.owner_id=%s AND r.project_alias=ANY(%s) AND r.target_kind='code' AND r.status='escalated'
+              AND w.phase='escalated' AND NOT w.enabled AND w.escalation_reason=%s AND t.status='awaiting_review'
+              AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL AND a.result_sha256 IS NOT NULL
+              AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=w.workflow_id AND x.source_key LIKE 'peer-verdict-replay:%%')
+              ORDER BY r.updated_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),PEER_WIRE_ERROR));rows=cursor.fetchall()
+        for row in rows:
+            try:self.retry_peer_verdict(project_alias=row['project_alias'],workflow_review_id=row['workflow_review_id'],
+                expected_revision=row['source_revision'],reviewer_attempt_id=row['attempt_id'],reviewer_result_sha256=row['result_sha256'],
+                target_sha256=row['target_sha256'],idempotency_key='peer-wire-'+str(row['workflow_review_id']))
+            except Rejected:pass
+
     def recover(self,cursor):
         """Authoritative replay fills missed callbacks using immutable source keys."""
         cursor.execute("SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND phase NOT IN('completed','cancelled','escalated') ORDER BY created_at",(self.store.owner,))
@@ -341,6 +473,7 @@ class WorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('code_review' if q else 'plan_review',w['workflow_id']))
 
     def claim(self,worker_id):
+        self._recover_peer_verdicts()
         self._recover_native_timeouts()
         with self._transaction() as cursor:
             for project in sorted(self.store.allowed_projects):self._project_lock(cursor,project)
@@ -469,6 +602,8 @@ class WorkflowCoordinator:
         return job is not None
     def retry_native_timeout(self,**request):
         return self.store.retry_native_timeout(**request)
+    def retry_peer_verdict(self,**request):
+        return self.store.retry_peer_verdict(**request)
     def run(self):
         while not self.stop.is_set():
             try:
