@@ -36,6 +36,7 @@ def fixtures(root):
     class Client:
         def __init__(self):
             self.paths = []
+            self.extra_runs = []
 
         def _api(self, method, path):
             assert method == "GET"
@@ -47,8 +48,9 @@ def fixtures(root):
                 assert "filter=latest" in path
                 values = jobs[int(match[1])]
                 return {"total_count": len(values), "jobs": values}
-            assert "/actions/runs?" in path and "head_sha=" + head in path and "event=pull_request" in path
-            return {"total_count": len(runs), "workflow_runs": runs}
+            assert "/actions/runs?" in path and "head_sha=" + head in path
+            values = runs if "event=pull_request" in path else runs + self.extra_runs
+            return {"total_count": len(values), "workflow_runs": values}
 
         def _validated(self, job, head, payload):
             return GitHubPullRequestClient(config)._validated(job, head, payload)
@@ -111,6 +113,21 @@ class HostedChecksTest(unittest.TestCase):
                 else:jobs[10].append(copy.deepcopy(jobs[10][0]))
                 with self.assertRaises(PublicationError):
                     GitHubHostedChecksProvider(config, client=client).observe(job)
+
+    def test_push_validation_failure_is_diagnostic_but_push_success_never_passes_pr_checks(self):
+        with TemporaryDirectory(prefix="forge-hosted-validation-") as root:
+            config, job, _, runs, jobs, client = fixtures(root)
+            push = copy.deepcopy(runs.pop(0))
+            push.update(id=30, event="push", name=".github/workflows/rust.yml", conclusion="failure")
+            client.extra_runs.append(push)
+            jobs[30] = []
+            result = GitHubHostedChecksProvider(config, client=client).observe(job)
+            self.assertEqual(result.status, "failed")
+            self.assertTrue(all(finding["diagnostic_code"] == "workflow_validation_failed" for finding in result.findings))
+            self.assertTrue(all(finding["path"] == ".github/workflows/rust.yml" for finding in result.findings))
+            push["conclusion"] = "success"
+            result = GitHubHostedChecksProvider(config, client=client).observe(job)
+            self.assertEqual(result.status, "pending", "A successful PUSH cannot stand in for required PR jobs")
 
 
 if __name__ == "__main__":
