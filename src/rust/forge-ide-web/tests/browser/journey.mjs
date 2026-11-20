@@ -2826,6 +2826,10 @@ async function grokProviderJourney(page) {
     await check(card).toBeInViewport();
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,
       'configured Grok usage fits phone and desktop viewports');
+    assert.equal(await card.locator('.fg-metric dd').evaluateAll(nodes=>nodes.every(node=>{
+      const range=document.createRange();range.selectNodeContents(node);
+      return range.getClientRects().length===1;
+    })),true,'unknown token observations stay on one readable line');
     assert.equal(await card.evaluate(node=>{
       const bounds=node.getBoundingClientRect();
       if(bounds.left< -1 || bounds.right>innerWidth+1)return false;
