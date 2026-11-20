@@ -135,3 +135,46 @@ class AutonomousWorkflowTest(unittest.TestCase):
   _,admitted=self.submit();author=self.claim('agy-v2');self.publish(author,'Plan.')
   removed=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create();self.assertIsNotNone(removed.workflow_worker)
   removed.workflow_worker.run_once();self.assertEqual(self.get(admitted['task_id'])['workflow']['phase'],'escalated');self.assertIsNone(self.claim('codex-v2'))
+ def test_committed_notifications_wake_subscribed_coordinator_and_rollback_does_not(self):
+  import threading
+  _,admitted=self.submit();author=self.claim('agy-v2')
+  with self.coordinator.store.listen() as listener:
+   with closing(self.cluster.connect('forge_agent')) as connection:
+    with connection.cursor() as cursor:cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
+    connection.rollback()
+   self.assertFalse(self.coordinator.store.wait(listener,.05,threading.Event()))
+   self.publish(author,'A committed Plan notification.')
+   self.assertTrue(self.coordinator.store.wait(listener,2,threading.Event()))
+   self.assertTrue(self.coordinator.run_once());self.assertIsNotNone(self.claim('codex-v2'))
+ def test_expired_delegate_waiting_for_local_review_lock_cannot_publish(self):
+  import threading,time
+  admitted,author,critic,checks=self.checked_implementation();self.publish(critic,self.verdict(critic))
+  action=self.coordinator.store.claim('bound-controller')
+  self.cluster.admin_exec("UPDATE forge_agent.coding_workflow_actions SET lease_expires_at=clock_timestamp()+interval '0.3 seconds' WHERE action_id='%s'"%action['action_id'],owner=False)
+  holder=self.cluster.connect('postgres');holder.autocommit=False
+  with holder.cursor() as cursor:cursor.execute('SELECT review_id FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE',(checks['review_id'],))
+  errors=[]
+  def process():
+   try:self.coordinator.store.process(action)
+   except Exception as error:errors.append(error)
+  thread=threading.Thread(target=process);thread.start();time.sleep(.6);self.assertTrue(thread.is_alive());holder.rollback();holder.close();thread.join(5)
+  self.assertFalse(thread.is_alive());self.assertFalse(errors);self.assertIsNone(self.db.publication_claim('publisher'))
+  self.assertEqual(self.get(author.task_id)['workflow']['phase'],'code_review')
+  self.coordinator.run_once();self.assertIsNotNone(self.db.publication_claim('publisher'))
+ def test_escalation_prevents_unstarted_and_active_native_work(self):
+  _,admitted=self.submit();removed=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create()
+  removed.workflow_worker.run_once();self.assertIsNone(self.claim('agy-v2'))
+  self.setUp();_,admitted=self.submit();author=self.claim('agy-v2')
+  removed=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create();removed.workflow_worker.run_once()
+  self.assertFalse(self.db.renew(author));self.assertTrue(self.db.cancellation_requested(author))
+ def test_initial_child_candidate_feedback_survives_later_native_receipt_resume(self):
+  manual=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create()
+  admitted=manual.submit(replace(make_submit(agent_profile='agy-v2',mode='implement'),auto_repair=True));author=self.claim('agy-v2');rec=self.publish(author,'Implementation.')
+  self.db.queue_review(author,rec);job=self.db.review_claim('checks')
+  result=self.db.review_finish(job,{'disposition':'repair','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[{'finding_id':'fix-1','category':'source','summary':'Fix parser.'}],'verified_finding_ids':[],'fingerprint':'f'*64,'summary':'Fix source.','cleanup_confirmed':True,'verification':{'checks_passed':False,'candidate_workspace_digest':'c'*64,'repair_requires_new_workspace':True,'cleanup_confirmed':True}})
+  child=self.claim('agy-v2');original=self.db.read_feedback(child);self.assertEqual(original['feedback']['workspace_digest_kind'],'candidate_tree')
+  proof=make_stop_proof(child.unit_name);self.db.publish(child,'quota_blocked',None,None,'Quota stopped before source edits.',proof);receipt=self.db.reconcile(child,'b'*64,proof)
+  detail=manual.get(WorkGet('homelab',UUID(child.task_id)))
+  manual.resume(WorkResume('homelab',UUID(child.task_id),detail['revision'],'retry-child','agy-v2',UUID(receipt),'Resume the same correction.'))
+  resumed=self.claim('agy-v2');self.assertEqual(resumed.resume_workspace_digest,'b'*64);self.assertEqual(resumed.resume_attempt_id,child.attempt_id)
+  self.assertEqual(self.db.read_feedback(resumed)['feedback_json'],original['feedback_json'])

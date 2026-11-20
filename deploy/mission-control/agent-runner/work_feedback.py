@@ -60,8 +60,9 @@ def validate_findings(values, *, public=False):
 
 
 def validate_feedback(value):
-    if not isinstance(value,dict) or set(value)!=FEEDBACK_FIELDS or type(value['version']) is not int or value['version']!=1:
+    if not isinstance(value,dict) or set(value)-{'workspace_digest_kind'}!=FEEDBACK_FIELDS or type(value['version']) is not int or value['version']!=1:
         raise ValueError('Invalid feedback fields')
+    if 'workspace_digest_kind' in value and (not isinstance(value['workspace_digest_kind'],str) or value['workspace_digest_kind'] not in {'candidate_tree','native_receipt'}):raise ValueError('Invalid workspace digest kind')
     for name in ('feedback_id','task_id','parent_attempt_id','reconciliation_receipt_id'):
         _uuid(value[name])
     _uuid(value['plan_decision_id'],True)

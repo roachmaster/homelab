@@ -709,6 +709,11 @@ class WorkStore:
             expected_revision=expected_revision,
         )
         with self._transaction() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",(self._owner+"\n"+project_alias,ADVISORY_LOCK_SALT))
+            cursor.execute("SELECT w.root_task_id FROM forge_agent.coding_tasks t JOIN forge_agent.coding_workflows w ON w.workflow_id=t.workflow_id WHERE t.owner_id=%s AND t.project_alias=%s AND t.id=%s",(self._owner,project_alias,task_id))
+            scope=cursor.fetchone()
+            if scope and scope['root_task_id']!=task_id:
+                cursor.execute("SELECT id FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self._owner,project_alias,scope['root_task_id']))
             cursor.execute("""
                 SELECT id, project_alias, status, revision,workflow_required,workflow_id
                 FROM forge_agent.coding_tasks
@@ -1218,6 +1223,7 @@ class WorkStore:
                 if recipe.version != 2 or recipe.resource_profile != POLICY_ID or recipe.policy_digest != POLICY_DIGEST:
                     raise Rejected(503,"unavailable")
                 recipe_json, recipe_digest = recipe.to_dict(), recipe.digest
+            self._require_transition_authority(cursor,task,_authority,"plan")
             decision_id, revision = uuid4(), expected_revision + 1
             receipt = {"project_alias": project_alias, "task_id": str(task_id), "base_revision": expected_revision,
                        "revision": revision, "status": status, "mode": mode}
@@ -1377,6 +1383,7 @@ class WorkStore:
             review=cursor.fetchone()
             if not review or review['attempt_id']!=task['latest_attempt_id'] or review['status'] in {'pending','checking','approved','cancelled'}:
                 raise Rejected(409,'not_reviewable')
+            self._require_transition_authority(cursor,task,_authority,"code")
             result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,
                     'status':task['status'],'review_id':str(review_id)}
             if decision=='approve':
