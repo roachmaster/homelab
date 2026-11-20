@@ -482,3 +482,52 @@ fn missing_or_required_review_metadata_and_any_review_cannot_bypass_hosted_gate(
         "legacy metadata cannot bypass open findings"
     );
 }
+
+#[test]
+fn verifier_and_publication_retries_survive_removed_execution_profile_but_repairs_do_not() {
+    let mut agents = implementation(WorkStatus::AwaitingReview);
+    agents.catalog.as_mut().unwrap().profiles.clear();
+    agents.review_note = "Retry only the same admitted artifact.".into();
+    let review = agents.task.as_mut().unwrap().review.as_mut().unwrap();
+    review.stage = "handoff".into();
+    review.can_retry = true;
+    assert!(agents.can_decide_review(WorkReviewDecision::RetryInfrastructure));
+    assert!(!agents.can_decide_review(WorkReviewDecision::Repair));
+    let effects = step(
+        &mut agents,
+        decision('e', WorkReviewDecision::RetryInfrastructure),
+        "retry-verifier",
+    );
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkReviewDecide {
+            decision: WorkReviewDecision::RetryInfrastructure,
+            ..
+        })
+    ));
+    agents.pending = None;
+    agents.task.as_mut().unwrap().publication = Some(WorkPublication {
+        publication_id: Some(KEY.into()),
+        status: WorkPublicationStatus::Failed,
+        branch: None,
+        commit_sha: Some("e".repeat(40)),
+        pr_url: None,
+        summary: None,
+    });
+    assert!(agents.can_retry_publication());
+    let effects = step(
+        &mut agents,
+        UiEvent::RetryAgentPublication {
+            task_id: TASK.into(),
+            expected_revision: 4,
+            publication_id: KEY.into(),
+            candidate_commit: "e".repeat(40),
+            idempotency_key: KEY.into(),
+        },
+        "retry-publication",
+    );
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkPublicationRetry { .. })
+    ));
+}

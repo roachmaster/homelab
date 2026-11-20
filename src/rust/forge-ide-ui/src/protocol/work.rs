@@ -129,11 +129,10 @@ pub enum WorkReviewDecision {
     Cancel,
 }
 impl WorkReviewDecision {
-    pub fn starts_work(self) -> bool {
-        matches!(
-            self,
-            Self::Approve | Self::Repair | Self::RetryInfrastructure
-        )
+    /// Only repair starts a coding CLI. Approval and retries use trusted
+    /// verification/publication providers without a model execution grant.
+    pub fn begins_execution(self) -> bool {
+        self == Self::Repair
     }
 }
 
