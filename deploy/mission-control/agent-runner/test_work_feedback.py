@@ -142,3 +142,86 @@ class FeedbackStoreTest(unittest.TestCase):
             self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),'approve','codex-v2','Attested','approve-forged',verified_finding_ids=('unseen-id',)))
         result=self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(rid),'repair','codex-v2','Fix the independently audited case.','manual-repair',findings=(finding,)))
         self.assertEqual(result['status'],'queued')
+
+    def publish_following(self,lease,digest='c'*64):
+        text='Following candidate '+lease.attempt_id
+        self.db.append_result(lease,0,text);proof=make_stop_proof(lease.unit_name)
+        self.db.publish(lease,'awaiting_review',{'sha256':hashlib.sha256(text.encode()).hexdigest(),'byte_count':len(text),'chunk_count':1},None,'Ready',proof)
+        return self.db.reconcile(lease,digest,proof)
+
+    def test_linked_children_share_frozen_three_round_budget_and_last_round_success_is_reviewable(self):
+        from work_config import freeze_repair_policy
+        self.service=WorkServiceFactory(replace(make_v2_config(),repair_policy=freeze_repair_policy({'max_stagnant_rounds':10})),lambda:self.cluster.connect('forge_agent')).create()
+        lease,receipt=self.task(auto=True);root=lease.task_id
+        for round_no in range(4):
+            self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+            self.assertEqual(job['round'],round_no);self.assertEqual(job['policy']['max_rounds'],3)
+            if round_no==3:
+                result=self.db.review_finish(job,self.outcome())
+                self.assertEqual(result['status'],'awaiting_review');self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))
+                break
+            result=self.db.review_finish(job,self.outcome(disposition='repair',findings=[{'finding_id':'edge-'+str(round_no),'category':'source','summary':'Repair this candidate.'}],
+                fingerprint=str(round_no+1)*64,verification={'checks_passed':False,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':True}))
+            following=self.db.claim('feedback-worker',self.incarnation,['codex-v2']);self.assertEqual(following.task_id,result['repair_task_id'])
+            payload=parse_feedback_json(self.db.read_feedback(following)['feedback_json'],following.feedback_sha256)
+            self.assertEqual(payload['round'],round_no+1)
+            lease=following;receipt=self.publish_following(lease,'f'*64)
+            # Changing global startup policy cannot silently expand this scope.
+            self.cluster.admin_exec('UPDATE forge_agent.coding_review_policy SET max_rounds=10')
+        with closing(self.cluster.connect('postgres')) as c,c.cursor() as cur:
+            cur.execute('SELECT repair_rounds FROM forge_agent.coding_review_budget WHERE root_task_id=%s',(root,));self.assertEqual(cur.fetchone()[0],3)
+
+    def test_two_stagnant_repairs_handoff_even_when_error_fingerprint_changes(self):
+        lease,receipt=self.task(auto=True)
+        for round_no in range(3):
+            self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+            result=self.db.review_finish(job,self.outcome(disposition='repair',findings=[{'finding_id':'same-edge','category':'source','summary':'Still not independently fixed.'}],fingerprint=str(round_no+1)*64))
+            if round_no==2:
+                self.assertEqual(result['status'],'handoff');self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))
+            else:
+                lease=self.db.claim('feedback-worker',self.incarnation,['codex-v2']);self.assertIsNotNone(lease);receipt=self.publish_following(lease)
+
+    def test_feedback_batch_is_three_but_full_open_ledger_is_retained(self):
+        lease,receipt=self.task(auto=True);self.db.queue_review(lease,receipt);job=self.db.review_claim('reviewer')
+        findings=[{'finding_id':'edge-'+str(i),'category':'source','summary':'Fix edge '+str(i)} for i in range(5)]
+        self.db.review_finish(job,self.outcome(disposition='repair',findings=findings))
+        following=self.db.claim('feedback-worker',self.incarnation,['codex-v2'])
+        packet=self.db.read_feedback(following)
+        self.assertEqual(len(packet['feedback']['findings']),3)
+        with closing(self.cluster.connect('postgres')) as c,c.cursor() as cur:
+            cur.execute('SELECT jsonb_array_length(findings) FROM forge_agent.coding_reviews WHERE review_id=%s',(job['review_id'],));self.assertEqual(cur.fetchone()[0],5)
+
+    def test_legacy_completed_source_import_materializes_before_one_manual_repair_and_preserves_plan_text(self):
+        from work_api import WorkPlanDecide,WorkRepair
+        plan,plan_receipt=self.task(mode='plan');detail=self.get(plan)
+        plan_sha=detail['result']['sha256']
+        self.service.plan_decide(WorkPlanDecide('homelab',UUID(plan.task_id),detail['revision'],UUID(plan.attempt_id),plan_sha,
+            'resume','codex-v2','original-approve','Keep approved scope unchanged.'))
+        implementation=self.db.claim('feedback-worker',self.incarnation,['codex-v2'])
+        receipt=self.publish_following(implementation)
+        # Owned historical fixture: an accepted implementation predates review artifacts.
+        self.cluster.admin_exec("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1")
+        detail=self.get(implementation)
+        command=WorkRepair('homelab',UUID(implementation.task_id),detail['revision'],'9'*40,'codex-v2','Fix the hosted compiler failure.',(), 'legacy-source-repair')
+        result=self.service.repair(command)
+        self.assertEqual(self.service.repair(command),result);self.assertIsNone(result['repair_task_id'])
+        self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))
+        source=self.db.review_claim('source-reviewer');self.assertEqual(source['phase'],'source');self.assertTrue(source['owner_source_authorized'])
+        self.assertEqual(source['candidate_commit'],'9'*40)
+        resolved=self.db.review_finish(source,self.outcome(disposition='repair',candidate_commit='9'*40,
+            findings=[{'finding_id':'owner-correction','category':'source','summary':'Fix the hosted compiler failure.'}],
+            verification={'checks_passed':False,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':True}))
+        child=self.db.claim('feedback-worker',self.incarnation,['codex-v2'])
+        self.assertEqual(child.task_id,resolved['repair_task_id']);self.assertEqual(child.base_revision,'9'*40)
+        self.assertIsNone(child.plan_decision_id);self.assertEqual(child.scope_plan_decision_id,implementation.plan_decision_id)
+        original_plan=self.db.read_plan(child)
+        self.assertEqual(original_plan['text'],'A coherent implementation result.');self.assertEqual(original_plan['plan_sha256'],plan_sha)
+        self.assertEqual(original_plan['note'],'Keep approved scope unchanged.')
+        delivered=self.db.read_feedback(child)
+        self.assertEqual(delivered['feedback']['summary'],'Local checks passed.')
+        self.assertEqual(self.get(implementation)['status'],'completed')
+        self.assertFalse(self.get(implementation)['review']['auto_repair'])
+        child_receipt=self.publish_following(child,'f'*64);self.db.queue_review(child,child_receipt)
+        new_review=self.db.review_claim('reviewer')
+        outcome=self.db.review_finish(new_review,self.outcome(disposition='repair',findings=[{'finding_id':'more-source','category':'source','summary':'Another source defect.'}],fingerprint='2'*64))
+        self.assertIsNone(outcome['repair_task_id']);self.assertIsNone(self.db.claim('feedback-worker',self.incarnation,['codex-v2']))

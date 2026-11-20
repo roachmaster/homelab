@@ -166,7 +166,9 @@ SELECT NOT EXISTS (
 INSERT INTO forge_agent.schema_migrations (version,name) VALUES (14,'coding_plan_workflow');
 \endif
 
-SELECT NOT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=15) AS apply_0015
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 15
+) AS apply_0015
 \gset
 \if :apply_0015
 \ir migrations/0015_coding_feedback_loop.sql

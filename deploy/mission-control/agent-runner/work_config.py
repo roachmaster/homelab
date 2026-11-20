@@ -29,7 +29,7 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
 PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label"}
 
@@ -254,6 +254,24 @@ class WorkCatalog:
         )
 
 
+DEFAULT_REPAIR_POLICY = MappingProxyType({'version':'forge-repair-v1','max_rounds':3,'max_stagnant_rounds':2,
+    'max_infrastructure_retries':1,'required_hosted_checks':('check','pr-fast-gate','real-browser')})
+
+
+def freeze_repair_policy(value):
+    if not isinstance(value,(dict,MappingProxyType)) or set(value)-set(DEFAULT_REPAIR_POLICY):
+        raise ValueError('Invalid owner repair policy')
+    policy={**DEFAULT_REPAIR_POLICY,**value}
+    if policy['version']!='forge-repair-v1':raise ValueError('Invalid repair policy version')
+    for name,minimum,maximum in (('max_rounds',0,10),('max_stagnant_rounds',1,10),('max_infrastructure_retries',0,3)):
+        if type(policy[name]) is not int or not minimum<=policy[name]<=maximum:raise ValueError('Invalid repair policy bound')
+    checks=policy['required_hosted_checks']
+    if not isinstance(checks,(list,tuple)) or not 1<=len(checks)<=16 or any(not isinstance(x,str) or not IDENTIFIER_RE.fullmatch(x) for x in checks) or len(set(checks))!=len(checks):
+        raise ValueError('Invalid required hosted checks')
+    policy['required_hosted_checks']=tuple(checks)
+    return MappingProxyType(policy)
+
+
 @dataclass(frozen=True)
 class WorkConfig:
     owner: str
@@ -262,8 +280,10 @@ class WorkConfig:
     max_pending: int
     profiles: MappingProxyType
     project_labels: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
+    repair_policy: MappingProxyType = field(default_factory=lambda:DEFAULT_REPAIR_POLICY)
 
     def __post_init__(self):
+        repair_policy=freeze_repair_policy(self.repair_policy)
         owner = validate_owner(self.owner)
         if not isinstance(self.allowed_projects, (frozenset, set, tuple, list)):
             raise ValueError("Invalid work allowed_projects")
@@ -299,6 +319,7 @@ class WorkConfig:
         object.__setattr__(self, "allowed_modes", modes)
         object.__setattr__(self, "profiles", MappingProxyType(copied_profiles))
         object.__setattr__(self, "project_labels", MappingProxyType(copied_labels))
+        object.__setattr__(self,"repair_policy",repair_policy)
 
     def project_label(self, alias):
         return self.project_labels.get(alias, alias)
@@ -377,6 +398,7 @@ def parse_work_config(raw):
         max_pending=max_pending,
         profiles=MappingProxyType(profiles),
         project_labels=MappingProxyType(project_labels),
+        repair_policy=freeze_repair_policy(raw.get("repair_policy",{})),
     )
 
 

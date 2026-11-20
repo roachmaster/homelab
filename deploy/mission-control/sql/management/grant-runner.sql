@@ -64,7 +64,8 @@ COMMIT;
 BEGIN;
 GRANT SELECT,INSERT ON forge_agent.coding_feedback TO forge_agent;
 GRANT SELECT,INSERT,UPDATE ON forge_agent.coding_reviews,forge_agent.coding_review_policy TO forge_agent;
-GRANT SELECT ON forge_agent.coding_review_budget,forge_agent.coding_hosted_checks TO forge_agent;
+GRANT SELECT,INSERT ON forge_agent.coding_review_budget TO forge_agent;
+GRANT SELECT ON forge_agent.coding_hosted_checks TO forge_agent;
 GRANT EXECUTE ON FUNCTION forge_agent.coding_make_feedback(uuid,uuid,text,text,jsonb),
  forge_agent.coding_schedule_repair(uuid,uuid),forge_agent.coding_queue_approved_review(uuid) TO forge_agent;
 GRANT EXECUTE ON FUNCTION forge_coding_worker_api.read_feedback(uuid,uuid),forge_coding_worker_api.queue_review(uuid,uuid,uuid) TO forge_coding_worker;
