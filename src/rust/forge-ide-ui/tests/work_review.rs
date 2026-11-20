@@ -129,6 +129,7 @@ fn automatic_repair_is_an_explicit_implementation_only_choice() {
         acceptance_criteria: "Verify the checks.".into(),
         idempotency_key: "task".into(),
         auto_repair: true,
+        workflow_policy_digest: None,
     };
     assert!(request.is_valid());
     if let WorkRequest::WorkSubmit { mode, .. } = &mut request {
@@ -229,4 +230,40 @@ fn only_repair_review_decision_starts_model_execution() {
     ] {
         assert!(!decision.begins_execution());
     }
+}
+
+#[test]
+fn autonomous_policy_and_phase_contracts_are_strict_and_request_digest_is_plan_only() {
+    let policy = serde_json::json!({"policy_digest":"c".repeat(64),"author_profile":"agy-primary","reviewer_profile":"codex-primary","max_plan_revisions":3,"max_code_revisions":3,"auto_merge":true});
+    let parsed: WorkWorkflowPolicy = serde_json::from_value(policy.clone()).unwrap();
+    assert!(parsed.is_valid());
+    let mut unknown = policy;
+    unknown["commands"] = serde_json::json!(["merge"]);
+    assert!(serde_json::from_value::<WorkWorkflowPolicy>(unknown).is_err());
+    assert!(serde_json::from_str::<WorkWorkflowPhase>("\"manual_approve\"").is_err());
+    let mut request = WorkRequest::WorkSubmit {
+        request_id: "submit".into(),
+        project_alias: "homelab".into(),
+        base_revision: "a".repeat(40),
+        mode: WorkMode::Plan,
+        agent_profile: "agy-primary".into(),
+        prompt: "Implement the assignment".into(),
+        acceptance_criteria: "Required checks pass".into(),
+        idempotency_key: "workflow-key".into(),
+        auto_repair: false,
+        workflow_policy_digest: Some("c".repeat(64)),
+    };
+    assert!(request.is_valid());
+    if let WorkRequest::WorkSubmit { mode, .. } = &mut request {
+        *mode = WorkMode::Implement;
+    }
+    assert!(!request.is_valid());
+    if let WorkRequest::WorkSubmit {
+        mode, auto_repair, ..
+    } = &mut request
+    {
+        *mode = WorkMode::Plan;
+        *auto_repair = true;
+    }
+    assert!(!request.is_valid());
 }

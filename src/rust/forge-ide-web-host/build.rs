@@ -37,6 +37,7 @@ fn main() -> io::Result<()> {
         ("coding-agents.html", DesignPage::CodingAgents),
         ("agent-usage.html", DesignPage::AgentUsage),
         ("agent-feedback-loop.html", DesignPage::AgentFeedback),
+        ("autonomous-agents.html", DesignPage::AgentAutonomy),
         ("playtest.html", DesignPage::Playtest),
         ("studio.html", DesignPage::Studio),
     ] {

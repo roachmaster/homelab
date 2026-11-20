@@ -38,12 +38,14 @@ pub enum ButtonEmphasis {
 pub enum PortalDocument {
     Home,
     Design,
+    AutonomousAgents,
 }
 impl PortalDocument {
     pub(crate) fn href(self) -> &'static str {
         match self {
             Self::Home => "/home",
             Self::Design => "/design",
+            Self::AutonomousAgents => "/design/autonomous-agents",
         }
     }
 }
@@ -115,6 +117,12 @@ pub enum Component {
         id: String,
         title: String,
         children: Vec<Component>,
+    },
+    /// A protected same-tab document link inside ordinary content.
+    DocumentLink {
+        id: String,
+        label: String,
+        document: PortalDocument,
     },
     /// Open a portal document in the current tab.
     NavigationLink {
@@ -294,6 +302,7 @@ macro_rules! component {
     (sheet_icon $id:expr, $label:expr, $target:expr, $glyph:expr) => { $crate::generate::Component::SheetTrigger { id:$id.into(),label:$label.into(),target:$target.into(),glyph:Some($glyph) } };
     (dialog $id:expr, $title:expr, $close:expr, $focus:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Dialog{id:$id.into(),title:$title.into(),close_action:$close.into(),initial_focus:$focus.into(),children:vec![$($child),*]} };
     (navigation $id:expr, $title:expr; [$($child:expr),* $(,)?]) => { $crate::generate::Component::Navigation { id:$id.into(),title:$title.into(),children:vec![$($child),*] } };
+    (document_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::DocumentLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
     (navigation_link $id:expr, $label:expr, $document:ident) => { $crate::generate::Component::NavigationLink { id:$id.into(),label:$label.into(),document:$crate::generate::PortalDocument::$document } };
     (reader_layout [$sidebar:expr, $body:expr $(,)?]) => { $crate::generate::Component::ReaderLayout(vec![$sidebar,$body]) };
     (reading_column [$($child:expr),* $(,)?]) => { $crate::generate::Component::ReadingColumn(vec![$($child),*]) };
@@ -456,6 +465,7 @@ impl Document {
                 | Component::Diff { id, label }
                 | Component::BrandLink { id, label, .. }
                 | Component::NavigationLink { id, label, .. }
+                | Component::DocumentLink { id, label, .. }
                 | Component::Source { id, label } => (Some(id), Some(label), None),
                 Component::SheetTrigger {
                     id, label, target, ..

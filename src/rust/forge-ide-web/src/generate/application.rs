@@ -129,8 +129,15 @@ pub fn ide_document() -> Document {
                     component!(region "agents-compose"; [
                         component!(heading "agents-compose-heading", "New assignment"),
                         component!(text "agents-compose-help", "Runs in the background. Review the result before accepting it."),
-                        component!(select "agents-profile", "Agent", "select_agent_profile"),
-                        component!(select "agents-mode", "Mode", "select_agent_mode"),
+                        component!(region "agents-manual-assignment"; [
+                            component!(select "agents-profile", "Agent", "select_agent_profile"),
+                            component!(select "agents-mode", "Mode", "select_agent_mode"),
+                        ]),
+                        component!(region "agents-assignment-workflow"; [
+                            component!(text "agents-assignment-roles", ""),
+                            component!(caption "agents-assignment-policy", ""),
+                            component!(document_link "agents-compose-workflow-docs", "How the autonomous workflow works →", AutonomousAgents),
+                        ]),
                         component!(caption "agents-base", "Waiting for a project revision…"),
                         component!(textarea "agents-prompt", "Assignment", "set_agent_prompt", "Describe the task or question…"),
                         component!(textarea "agents-criteria", "Acceptance criteria", "set_agent_criteria", "What should the result include or verify?"),
@@ -150,6 +157,17 @@ pub fn ide_document() -> Document {
                         component!(status "agents-task-status", ""),
                         component!(caption "agents-task-mode", ""),
                         component!(caption "agents-attempt", ""),
+                        component!(region "agents-workflow"; [
+                            component!(row [
+                                component!(heading "agents-workflow-heading", "Autonomous workflow"),
+                                component!(badge "agents-workflow-phase", "Workflow phase"),
+                            ]),
+                            component!(text "agents-workflow-roles", ""),
+                            component!(caption "agents-workflow-revisions", ""),
+                            component!(text "agents-workflow-escalation", ""),
+                            component!(caption "agents-workflow-help", ""),
+                            component!(document_link "agents-workflow-docs", "Workflow design →", AutonomousAgents),
+                        ]),
                         component!(region "agents-verification"; [
                             component!(row [
                                 component!(heading "agents-verification-heading", "Review and repair"),
