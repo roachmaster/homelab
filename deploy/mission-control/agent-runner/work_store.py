@@ -24,6 +24,7 @@ from work_config import (
     validate_owner,
 )
 from work_policy import POLICY_DIGEST, POLICY_ID
+from work_feedback import validate_findings
 
 register_uuid()
 
@@ -100,7 +101,7 @@ def _summary(row):
 
 
 def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
-                          prompt, acceptance_criteria):
+                          prompt, acceptance_criteria, auto_repair=False):
     return sha256_canonical({
         "project_alias": project_alias,
         "base_revision": base_revision,
@@ -108,6 +109,7 @@ def _submit_intent_digest(*, project_alias, base_revision, mode, agent_profile,
         "agent_profile": agent_profile,
         "prompt": prompt,
         "acceptance_criteria": acceptance_criteria,
+        **({"auto_repair":True} if auto_repair else {}),
     })
 
 
@@ -227,6 +229,7 @@ class WorkStore:
                 with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                     if read_only:
                         cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                    cursor.execute("SELECT pg_catalog.set_config('forge.coding_owner',%s,true)",(self._owner,))
                     yield cursor
 
     def catalog(self, *, config):
@@ -313,8 +316,10 @@ class WorkStore:
         }
 
     def submit(self, *, project_alias, base_revision, mode, agent_profile,
-               prompt, acceptance_criteria, idempotency_key, resolve_recipe):
+               prompt, acceptance_criteria, idempotency_key, resolve_recipe, auto_repair=False):
         self._require_project(project_alias)
+        if type(auto_repair) is not bool:
+            raise Rejected(400,"invalid_request")
         title = prepare_title(prompt)
         intent_digest = _submit_intent_digest(
             project_alias=project_alias,
@@ -323,6 +328,7 @@ class WorkStore:
             agent_profile=agent_profile,
             prompt=prompt,
             acceptance_criteria=acceptance_criteria,
+            auto_repair=auto_repair,
         )
         lock_scope = f"{self._owner}\n{project_alias}"
         with self._transaction() as cursor:
@@ -372,13 +378,13 @@ class WorkStore:
                 INSERT INTO forge_agent.coding_tasks (
                     owner_id, project_alias, id, idempotency_key, intent_digest,
                     base_revision, mode, agent_profile, title, prompt, acceptance_criteria,
-                    pinned_recipe, recipe_digest, status, revision
+                    pinned_recipe, recipe_digest, status, revision,auto_repair
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 1)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued', 1,%s)
             """, (
                 self._owner, project_alias, task_id, idempotency_key, intent_digest,
                 base_revision, mode, agent_profile, title, prompt, acceptance_criteria,
-                Json(recipe.to_dict()), recipe.digest,
+                Json(recipe.to_dict()), recipe.digest,auto_repair,
             ))
             cursor.execute("""
                 INSERT INTO forge_agent.coding_events (
@@ -461,19 +467,22 @@ class WorkStore:
                 "reconciliation_receipt_id": reconciliation_receipt_id,
             }
             cursor.execute("""
-                SELECT status,branch,commit_sha,pr_url,summary FROM forge_agent.coding_publications
-                WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s
+                SELECT publication_id,status,branch,commit_sha,pr_url,summary FROM forge_agent.coding_publications
+                WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s ORDER BY created_at DESC LIMIT 1
             """, (self._owner, project_alias, task_id,
                   row["latest_attempt_id"] if row["status"] != "queued" else None))
             publication = cursor.fetchone()
             if publication is not None:
-                detail["publication"] = {key: value for key, value in publication.items() if value is not None}
+                detail["publication"] = {key: str(value) if key=="publication_id" else value for key, value in publication.items() if value is not None}
             elif (row["mode"] == "implement" and row["status"] == "awaiting_review"
                   and self._approved_plan_implementation(cursor,row)):
                 # Publication is authorized by the Plan decision. The worker's
                 # reconcile/queue calls are separate commits, so that handoff
                 # is already pending even before the outbox row becomes visible.
                 detail["publication"] = {"status":"pending","summary":"Waiting for trusted publication."}
+            review=self._review_projection(cursor,row)
+            if review is not None:
+                detail["review"]=review
             if "title" not in detail:
                 detail["title"] = prepare_title(row["prompt"])
             return detail
@@ -807,7 +816,7 @@ class WorkStore:
         )
         with self._transaction() as cursor:
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -849,6 +858,8 @@ class WorkStore:
 
             if self._publication_busy(cursor,task):
                 raise Rejected(409,"reconcile_required")
+            if task["review_required"] and not self._hosted_green(cursor,task):
+                raise Rejected(409,"not_reviewable")
 
             cursor.execute("""
                 UPDATE forge_agent.coding_tasks
@@ -923,7 +934,7 @@ class WorkStore:
                 (lock_scope, ADVISORY_LOCK_SALT),
             )
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -1001,13 +1012,13 @@ class WorkStore:
                     pinned_recipe = %s,
                     recipe_digest = %s,
                     resume_workspace_digest = %s,
-                    cancelled_at = NULL,
+                    cancelled_at = NULL,legacy_resume_note=%s,review_required=true,
                     updated_at = clock_timestamp()
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                   AND revision = %s
                 RETURNING revision
             """, (
-                agent_profile, Json(recipe.to_dict()), recipe.digest, rec["workspace_digest"],
+                agent_profile, Json(recipe.to_dict()), recipe.digest, rec["workspace_digest"],note,
                 self._owner, project_alias, task_id, expected_revision,
             ))
             updated = cursor.fetchone()
@@ -1058,7 +1069,7 @@ class WorkStore:
             return receipt
 
     def plan_decide(self, *, project_alias, task_id, expected_revision, plan_attempt_id,
-                    plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe):
+                    plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe,auto_repair=False):
         """Atomically decide one exact immutable Plan and pin the next stage."""
         self._require_project(project_alias)
         try:
@@ -1068,6 +1079,7 @@ class WorkStore:
                      and isinstance(decision, str) and decision in {"resume", "revise", "cancel"}
                      and isinstance(agent_profile, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", agent_profile)
                      and isinstance(idempotency_key, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", idempotency_key)
+                     and type(auto_repair) is bool
                      and isinstance(note, str) and len(note.encode("utf-8")) <= 2048
                      and (decision != "revise" or bool(note.strip()))
                      and all(unicodedata.category(c) != "Cc" or c in "\r\n\t" for c in note))
@@ -1078,7 +1090,8 @@ class WorkStore:
         intent = sha256_canonical({"action": "plan_decide", "project_alias": project_alias,
             "task_id": str(task_id), "expected_revision": expected_revision,
             "plan_attempt_id": str(plan_attempt_id), "plan_sha256": plan_sha256,
-            "decision": decision, "agent_profile": agent_profile, "note": note})
+            "decision": decision, "agent_profile": agent_profile, "note": note,
+            **({"auto_repair":True} if auto_repair else {})})
         with self._transaction() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",
                            (f"{self._owner}\n{project_alias}", ADVISORY_LOCK_SALT))
@@ -1145,10 +1158,10 @@ class WorkStore:
             cursor.execute("""UPDATE forge_agent.coding_tasks SET status=%s,mode=%s,revision=%s,
                 agent_profile=%s,pinned_recipe=%s,recipe_digest=%s,plan_decision_id=%s,resume_workspace_digest=%s,
                 accepted_at=NULL,cancelled_at=CASE WHEN %s='cancelled' THEN clock_timestamp() ELSE NULL END,
-                review_note=%s,updated_at=clock_timestamp()
+                review_note=%s,auto_repair=%s,review_required=true,updated_at=clock_timestamp()
                 WHERE owner_id=%s AND project_alias=%s AND id=%s AND revision=%s""",
                 (status,mode,revision,task["agent_profile"] if decision == "cancel" else agent_profile,
-                 Json(recipe_json),recipe_digest,decision_id,digest,status,note,self._owner,project_alias,task_id,expected_revision))
+                 Json(recipe_json),recipe_digest,decision_id,digest,status,note,auto_repair,self._owner,project_alias,task_id,expected_revision))
             cursor.execute("""INSERT INTO forge_agent.coding_control_receipts
                 (owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json)
                 VALUES (%s,%s,%s,'plan_decide',%s,%s,%s,%s,%s)""",
@@ -1162,3 +1175,215 @@ class WorkStore:
             if decision != "cancel":
                 cursor.execute("SELECT pg_notify(%s,'')", (NOTIFY_CHANNEL,))
             return receipt
+
+    def _hosted_green(self,cursor,task):
+        cursor.execute("""SELECT h.required_green FROM forge_agent.coding_publications p
+            JOIN forge_agent.coding_reviews r ON r.review_id=p.review_id AND r.status='approved'
+            JOIN LATERAL(SELECT x.required_green FROM forge_agent.coding_hosted_checks x
+              WHERE x.publication_id=p.publication_id AND x.candidate_commit=p.commit_sha
+              ORDER BY x.observed_at DESC,x.observation_id DESC LIMIT 1)h ON true
+            WHERE p.owner_id=%s AND p.project_alias=%s AND p.task_id=%s AND p.attempt_id=%s
+              AND p.status='published' AND p.commit_sha=r.candidate_commit
+            ORDER BY p.created_at DESC LIMIT 1""",
+            (self._owner,task['project_alias'],task['id'],task['latest_attempt_id']))
+        value=cursor.fetchone()
+        return bool(value and value['required_green'])
+
+    def _review_projection(self,cursor,task):
+        cursor.execute("SELECT review_required,auto_repair FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",
+                       (self._owner,task['project_alias'],task['id']))
+        flags=cursor.fetchone()
+        if not flags or not flags['review_required']:
+            return None
+        cursor.execute("""SELECT r.*,coalesce(p.max_rounds,3) AS max_rounds FROM forge_agent.coding_reviews r
+            LEFT JOIN forge_agent.coding_review_policy p USING(owner_id,project_alias)
+            WHERE r.owner_id=%s AND r.project_alias=%s AND r.task_id=%s ORDER BY r.review_no DESC LIMIT 1""",
+            (self._owner,task['project_alias'],task['id']))
+        row=cursor.fetchone()
+        green=self._hosted_green(cursor,task) if task['latest_attempt_id'] else False
+        value={'stage':'waiting_for_result','review_id':None,'feedback_id':None,'round':0,'max_rounds':3,
+            'open_findings':0,'verified_findings':0,'latest_check_status':None,'toolchain':None,'handoff_reason':None,
+            'source_attempt_id':str(task['latest_attempt_id']) if task['latest_attempt_id'] else None,
+            'candidate_commit':None,'workspace_digest':None,'gate_manifest_sha256':None,'required_hosted_green':green,
+            'can_accept':False,'can_repair':False,'can_retry':False,'auto_repair':flags['auto_repair']}
+        if row:
+            verified=set(row['verified_finding_ids'])|set((row['owner_decision'] or {}).get('verified_finding_ids',[]))
+            findings=row['findings'];open_ids={item['finding_id'] for item in findings if item.get('status','open')=='open'}-verified
+            stage='awaiting_decision' if row['status']=='awaiting_review' else row['status']
+            if row['status']=='approved' and not green:
+                stage='waiting_hosted'
+            value.update(stage=stage,review_id=str(row['review_id']),feedback_id=str(row['feedback_id']) if row['feedback_id'] else None,
+                round=row['round'],max_rounds=row['max_rounds'],open_findings=len(open_ids),verified_findings=len(verified),
+                latest_check_status='passed' if row['verification'].get('checks_passed') else ('running' if row['status']=='checking' else 'failed'),
+                toolchain=row['verification'].get('toolchain'),handoff_reason=row['reason'] or None,
+                source_attempt_id=str(row['attempt_id']),candidate_commit=row['candidate_commit'],workspace_digest=row['workspace_digest'],
+                gate_manifest_sha256=row['gate_manifest_sha256'],can_accept=green and task['status']=='awaiting_review',
+                can_repair=task['status'] in {'completed','awaiting_review'} and row['candidate_commit'] is not None and row['round']<row['max_rounds'],
+                can_retry=task['status']=='awaiting_review' and row['status'] in {'handoff','retry_infrastructure','needs_reconcile'})
+        return value
+
+    def _control_task(self,cursor,project_alias,task_id,expected_revision,key,action,intent):
+        self._require_project(project_alias)
+        if (not isinstance(task_id,UUID) or type(expected_revision) is not int or not 1<=expected_revision<MAX_REVISION
+                or not isinstance(key,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',key)):
+            raise Rejected(400,'invalid_request')
+        cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self._owner,project_alias,task_id))
+        task=cursor.fetchone()
+        if task is None:
+            raise Rejected(404,'not_found')
+        cursor.execute("SELECT action,intent_digest,receipt_json FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND idempotency_key=%s",
+                       (self._owner,project_alias,task_id,key))
+        old=cursor.fetchone()
+        if old:
+            if old['action']!=action or old['intent_digest']!=intent:
+                raise Rejected(409,'idempotency_conflict')
+            return task,dict(old['receipt_json'])
+        if task['revision']!=expected_revision:
+            raise Rejected(409,'revision_conflict')
+        if task['status'] not in {'awaiting_review','completed'}:
+            raise Rejected(409,'not_reviewable')
+        return task,None
+
+    def _control_record(self,cursor,task,expected_revision,key,action,intent,receipt):
+        cursor.execute("UPDATE forge_agent.coding_tasks SET revision=%s,updated_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s AND revision=%s",
+            (expected_revision+1,self._owner,task['project_alias'],task['id'],expected_revision))
+        # same-task repair may already have advanced exactly this revision.
+        if cursor.rowcount!=1:
+            cursor.execute("SELECT revision FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s",(self._owner,task['project_alias'],task['id']))
+            if cursor.fetchone()['revision']!=expected_revision+1:
+                raise Rejected(409,'revision_conflict')
+        cursor.execute("""INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,
+            intent_digest,base_revision,result_revision,receipt_json) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (self._owner,task['project_alias'],task['id'],action,key,intent,expected_revision,expected_revision+1,Json(receipt)))
+        cursor.execute("""INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
+            SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events
+            WHERE owner_id=%s AND project_alias=%s AND task_id=%s""",
+            (self._owner,task['project_alias'],task['id'],Json(receipt),self._owner,task['project_alias'],task['id']))
+        cursor.execute("SELECT pg_notify(%s,'')",(NOTIFY_CHANNEL,))
+
+    def review_decide(self,*,project_alias,task_id,expected_revision,review_id,decision,agent_profile,note,idempotency_key,
+                      findings=(),verified_finding_ids=(),recipe):
+        if not isinstance(review_id,UUID) or decision not in {'approve','repair','escalate','retry_infrastructure','cancel'}:
+            raise Rejected(400,'invalid_request')
+        try:
+            findings=validate_findings(list(findings),public=True)
+            if not isinstance(note,str) or len(note.encode())>2048 or len(set(verified_finding_ids))!=len(verified_finding_ids):
+                raise ValueError()
+            if any(not isinstance(x,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',x) for x in verified_finding_ids):
+                raise ValueError()
+        except (ValueError,TypeError,UnicodeError):
+            raise Rejected(400,'invalid_request') from None
+        intent=sha256_canonical({'action':'review_decide','project_alias':project_alias,'task_id':str(task_id),'expected_revision':expected_revision,
+            'review_id':str(review_id),'decision':decision,'agent_profile':agent_profile,'note':note,'findings':findings,'verified_finding_ids':list(verified_finding_ids)})
+        with self._transaction() as cursor:
+            task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'review_decide',intent)
+            if old:return old
+            cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE",
+                           (self._owner,project_alias,task_id,review_id))
+            review=cursor.fetchone()
+            if not review or review['attempt_id']!=task['latest_attempt_id'] or review['status'] in {'pending','checking','approved','cancelled'}:
+                raise Rejected(409,'not_reviewable')
+            result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,
+                    'status':task['status'],'review_id':str(review_id)}
+            if decision=='approve':
+                if not review['verification'].get('checks_passed') or not review['candidate_commit'] or not review['gate_manifest_sha256']:
+                    raise Rejected(409,'not_reviewable')
+                open_ids={x['finding_id'] for x in review['findings'] if x.get('status','open')=='open'}
+                verified=set(review['verified_finding_ids'])
+                owner_ids=set(verified_finding_ids)
+                if not owner_ids<=open_ids or open_ids-verified-owner_ids or (owner_ids and not note.strip()) or findings:
+                    raise Rejected(409,'not_reviewable')
+                attestation={'closed_by':'owner','owner':self._owner,'candidate_commit':review['candidate_commit'],
+                    'gate_manifest_sha256':review['gate_manifest_sha256'],'verified_finding_ids':list(verified_finding_ids),'note':note}
+                cursor.execute("UPDATE forge_agent.coding_reviews SET status='approved',owner_decision=%s,updated_at=clock_timestamp() WHERE review_id=%s",(Json(attestation),review_id))
+                cursor.execute("SELECT forge_agent.coding_queue_approved_review(%s)",(review_id,))
+                if next(iter(cursor.fetchone().values())) is None:raise Rejected(409,'not_reviewable')
+            elif decision=='repair':
+                ledger={x['finding_id']:x for x in review['findings'] if x.get('status','open')=='open'}
+                ledger.update({x['finding_id']:x for x in findings})
+                if not ledger:raise Rejected(400,'invalid_request')
+                ledger=validate_findings(list(ledger.values()),public=True)
+                cursor.execute("UPDATE forge_agent.coding_reviews SET findings=%s,status='repair',summary=%s,updated_at=clock_timestamp() WHERE review_id=%s",(Json(ledger),note,review_id))
+                cursor.execute("UPDATE forge_agent.coding_tasks SET agent_profile=%s,pinned_recipe=%s,recipe_digest=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",
+                    (agent_profile,Json(recipe.to_dict()),recipe.digest,self._owner,project_alias,task_id))
+                cursor.execute("SELECT forge_agent.coding_make_feedback(%s,%s,'repair',%s,%s)",(review_id,task_id,note,Json(ledger)))
+                feedback_id=next(iter(cursor.fetchone().values()))
+                cursor.execute("UPDATE forge_agent.coding_reviews SET feedback_id=%s WHERE review_id=%s",(feedback_id,review_id))
+                cursor.execute("SELECT forge_agent.coding_schedule_repair(%s,%s)",(review_id,feedback_id))
+                result['repair_task_id']=str(next(iter(cursor.fetchone().values())));result['status']='queued' if result['repair_task_id']==str(task_id) else task['status']
+            elif decision=='retry_infrastructure':
+                result['review_id']=str(self._append_review_retry(cursor,task,review,note))
+            elif decision=='escalate':
+                cursor.execute("UPDATE forge_agent.coding_reviews SET status='handoff',reason=%s,updated_at=clock_timestamp() WHERE review_id=%s",(note,review_id))
+            else:
+                if task['status']=='completed':raise Rejected(409,'not_cancellable')
+                cursor.execute("UPDATE forge_agent.coding_reviews SET status='cancelled',reason=%s WHERE review_id=%s",(note,review_id))
+                cursor.execute("UPDATE forge_agent.coding_tasks SET status='cancelled',cancelled_at=clock_timestamp() WHERE owner_id=%s AND project_alias=%s AND id=%s",(self._owner,project_alias,task_id));result['status']='cancelled'
+            self._control_record(cursor,task,expected_revision,idempotency_key,'review_decide',intent,result)
+            return result
+
+    def _append_review_retry(self,cursor,task,review,note):
+        cursor.execute("SELECT max_infrastructure_retries FROM forge_agent.coding_review_policy WHERE owner_id=%s AND project_alias=%s",(self._owner,task['project_alias']))
+        policy=cursor.fetchone()
+        if not policy or review['infrastructure_retries']>=policy['max_infrastructure_retries']:
+            raise Rejected(409,'not_reviewable')
+        cursor.execute("""INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,task_id,attempt_id,plan_decision_id,reconciliation_receipt_id,
+            base_revision,workspace_digest,parent_result_sha256,source_revision,review_no,round,stagnant_rounds,infrastructure_retries,previous_review_id,candidate_commit,summary)
+            SELECT owner_id,project_alias,task_id,attempt_id,plan_decision_id,reconciliation_receipt_id,base_revision,workspace_digest,parent_result_sha256,%s,
+             (SELECT coalesce(max(review_no),0)+1 FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s),round,stagnant_rounds,infrastructure_retries+1,review_id,candidate_commit,%s
+            FROM forge_agent.coding_reviews WHERE review_id=%s RETURNING review_id""",
+            (task['revision']+1,self._owner,task['project_alias'],task['id'],note,review['review_id']))
+        return cursor.fetchone()['review_id']
+
+    def repair(self,*,project_alias,task_id,expected_revision,candidate_commit,agent_profile,note,findings,idempotency_key,recipe):
+        try:
+            findings=validate_findings(list(findings),public=True)
+            if not isinstance(note,str) or len(note.encode())>2048 or not isinstance(candidate_commit,str) or not SHA1_HEX_RE.fullmatch(candidate_commit):raise ValueError()
+        except (ValueError,TypeError,UnicodeError):raise Rejected(400,'invalid_request') from None
+        intent=sha256_canonical({'action':'repair','project_alias':project_alias,'task_id':str(task_id),'expected_revision':expected_revision,
+            'candidate_commit':candidate_commit,'agent_profile':agent_profile,'note':note,'findings':findings})
+        with self._transaction() as cursor:
+            task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'repair',intent)
+            if old:return old
+            if task['status']!='completed':raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND candidate_commit=%s ORDER BY review_no DESC LIMIT 1 FOR UPDATE",
+                (self._owner,project_alias,task_id,candidate_commit))
+            review=cursor.fetchone()
+            if not review or not review['verification'].get('candidate_workspace_digest'):
+                raise Rejected(409,'reconcile_required')
+            if not findings:findings=[x for x in review['findings'] if x.get('status','open')=='open']
+            if not findings:
+                if not note.strip():raise Rejected(400,'invalid_request')
+                findings=validate_findings([{'finding_id':'owner-correction','category':'source','summary':note}],public=True)
+            cursor.execute("UPDATE forge_agent.coding_tasks SET agent_profile=%s,pinned_recipe=%s,recipe_digest=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",
+                (agent_profile,Json(recipe.to_dict()),recipe.digest,self._owner,project_alias,task_id))
+            cursor.execute("SELECT forge_agent.coding_make_feedback(%s,%s,'repair',%s,%s)",(review['review_id'],task_id,note,Json(findings)))
+            fid=next(iter(cursor.fetchone().values()))
+            cursor.execute("SELECT forge_agent.coding_schedule_repair(%s,%s)",(review['review_id'],fid))
+            child=next(iter(cursor.fetchone().values()))
+            # Parent completion and original recipe are immutable history.
+            cursor.execute("UPDATE forge_agent.coding_tasks SET agent_profile=%s,pinned_recipe=%s,recipe_digest=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",
+                (task['agent_profile'],Json(task['pinned_recipe']),task['recipe_digest'],self._owner,project_alias,task_id))
+            result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,'status':'completed','repair_task_id':str(child)}
+            self._control_record(cursor,task,expected_revision,idempotency_key,'repair',intent,result)
+            return result
+
+    def publication_retry(self,*,project_alias,task_id,expected_revision,publication_id,candidate_commit,note,idempotency_key):
+        if not isinstance(publication_id,UUID) or not isinstance(note,str) or len(note.encode())>2048:
+            raise Rejected(400,'invalid_request')
+        intent=sha256_canonical({'action':'publication_retry','project_alias':project_alias,'task_id':str(task_id),'expected_revision':expected_revision,
+            'publication_id':str(publication_id),'candidate_commit':candidate_commit,'note':note})
+        with self._transaction() as cursor:
+            task,old=self._control_task(cursor,project_alias,task_id,expected_revision,idempotency_key,'publication_retry',intent)
+            if old:return old
+            cursor.execute("SELECT * FROM forge_agent.coding_publications WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND publication_id=%s FOR UPDATE",
+                (self._owner,project_alias,task_id,publication_id))
+            publication=cursor.fetchone()
+            if not publication or publication['status']!='failed' or publication['commit_sha']!=candidate_commit or not publication['review_id']:
+                raise Rejected(409,'not_reviewable')
+            cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE review_id=%s",(publication['review_id'],));review=cursor.fetchone()
+            review_id=self._append_review_retry(cursor,task,review,note)
+            result={'project_alias':project_alias,'task_id':str(task_id),'base_revision':expected_revision,'revision':expected_revision+1,
+                    'status':task['status'],'publication_id':str(publication_id),'review_id':str(review_id)}
+            self._control_record(cursor,task,expected_revision,idempotency_key,'publication_retry',intent,result)
+            return result

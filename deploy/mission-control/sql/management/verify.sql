@@ -150,7 +150,7 @@ BEGIN
           AND p.prosecdef
           AND 'search_path=pg_catalog, pg_temp' = ANY(p.proconfig)
           AND position(
-              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2','forge-coding-v3','forge-coding-v4')$predicate$
+              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2','forge-coding-v3','forge-coding-v4','forge-coding-v5')$predicate$
               IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
           ) > 0
           AND position(
@@ -162,7 +162,7 @@ BEGIN
               IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
           ) > 0
           AND position(
-              $predicate$'resume_attempt_id',CASEWHENv_resume_digestISNOTNULLTHENv_task.latest_attempt_idELSENULLEND$predicate$
+              $predicate$'resume_attempt_id',CASEWHENv_resume_digestISNOTNULLTHENcoalesce(v_task.latest_attempt_id,(SELECTf.parent_attempt_idFROMforge_agent.coding_feedbackfWHEREf.feedback_id=v_task.feedback_id))ELSENULLEND$predicate$
               IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
           ) > 0
     ) THEN
@@ -396,7 +396,7 @@ BEGIN
             ('coding_control_receipts', 'coding_control_receipts_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, action, idempotency_key)$def$),
             ('coding_control_receipts', 'coding_control_receipts_task_key_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, idempotency_key)$def$),
             ('coding_control_receipts', 'coding_control_receipts_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
-            ('coding_control_receipts', 'coding_control_receipts_action_check', 'c', $def$CHECK ((action = ANY (ARRAY['cancel'::text, 'accept'::text, 'resume'::text, 'plan_decide'::text])))$def$),
+            ('coding_control_receipts', 'coding_control_receipts_action_check', 'c', $def$CHECK ((action = ANY (ARRAY['cancel'::text, 'accept'::text, 'resume'::text, 'plan_decide'::text, 'review_decide'::text, 'repair'::text, 'publication_retry'::text])))$def$),
             ('coding_control_receipts', 'coding_control_receipts_idempotency_key_check', 'c', $def$CHECK ((idempotency_key ~ '^[A-Za-z0-9_.-]{1,128}$'::text))$def$),
             ('coding_control_receipts', 'coding_control_receipts_intent_digest_check', 'c', $def$CHECK ((intent_digest ~ '^[0-9a-f]{64}$'::text))$def$),
             ('coding_control_receipts', 'coding_control_receipts_base_revision_check', 'c', $def$CHECK (((base_revision >= 1)
@@ -410,18 +410,7 @@ BEGIN
             ('coding_worker_readiness', 'coding_worker_readiness_pkey', 'p', $def$PRIMARY KEY (worker_role, owner_id, worker_id)$def$),
             ('coding_worker_readiness', 'coding_worker_readiness_policy_digest_check', 'c', $def$CHECK ((policy_digest ~ '^[0-9a-f]{64}$'::text))$def$),
             ('coding_attempts', 'coding_attempts_agent_profile_check', 'c', $def$CHECK ((agent_profile ~ '^[A-Za-z0-9_.-]{1,64}$'::text))$def$),
-            ('coding_attempts', 'coding_attempts_pinned_recipe_check', 'c', $def$CHECK ((((jsonb_typeof(pinned_recipe) = 'object'::text)
-                 AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb)
-                 AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text])
-                 AND ((pinned_recipe -> 'version'::text) = '2'::jsonb)
-                 AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text]))
-                 AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text)
-                 AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1)
-                 AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128))
-                 AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text, 'forge-coding-v3'::text, 'forge-coding-v4'::text]))
-                 AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text]))
-                 AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text)
-                 AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),
+            ('coding_attempts', 'coding_attempts_pinned_recipe_check', 'c', $def$CHECK ((((jsonb_typeof(pinned_recipe) = 'object'::text) AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb) AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) AND ((pinned_recipe -> 'version'::text) = '2'::jsonb) AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text])) AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text) AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1) AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128)) AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text, 'forge-coding-v3'::text, 'forge-coding-v4'::text, 'forge-coding-v5'::text])) AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text])) AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text) AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),
             ('coding_attempts', 'coding_attempts_recipe_digest_check', 'c', $def$CHECK ((recipe_digest ~ '^[0-9a-f]{64}$'::text))$def$),
             ('coding_attempts', 'coding_attempts_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, attempt_id)$def$),
             ('coding_attempts', 'coding_attempts_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
@@ -468,7 +457,7 @@ BEGIN
             ('coding_plan_decisions', 'coding_plan_decisions_scope_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, decision_id)$def$),
             ('coding_plan_decisions', 'coding_plan_decisions_source_revision_check', 'c', $def$CHECK (((source_revision >= 1) AND (source_revision <= '9007199254740990'::bigint)))$def$),
             ('coding_publications', 'coding_publications_attempt_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id, attempt_id) REFERENCES forge_agent.coding_attempts(owner_id, project_alias, task_id, attempt_id)$def$),
-            ('coding_publications', 'coding_publications_attempt_unique', 'u', $def$UNIQUE (owner_id, project_alias, task_id, attempt_id)$def$),
+            ('coding_publications', 'coding_publications_attempt_unique', 'u', $def$UNIQUE NULLS NOT DISTINCT (owner_id, project_alias, task_id, attempt_id, review_id)$def$),
             ('coding_publications', 'coding_publications_base_revision_check', 'c', $def$CHECK ((base_revision ~ '^[0-9a-f]{40}$'::text))$def$),
             ('coding_publications', 'coding_publications_branch_check', 'c', $def$CHECK (((branch IS NULL) OR ((octet_length(branch) <= 128) AND (branch ~ '^forge/[A-Za-z0-9][A-Za-z0-9._/-]*$'::text) AND (branch !~ '(\.\.|//|/$|\.lock$)'::text))))$def$),
             ('coding_publications', 'coding_publications_commit_sha_check', 'c', $def$CHECK (((commit_sha IS NULL) OR (commit_sha ~ '^[0-9a-f]{40}$'::text)))$def$),
@@ -672,5 +661,7 @@ $verify$;
 SELECT version, name, applied_at
 FROM forge_agent.schema_migrations
 ORDER BY version;
+
+\ir verify-feedback.sql
 
 COMMIT;
