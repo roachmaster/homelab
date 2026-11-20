@@ -118,6 +118,40 @@ class PeerVerdictReplayTest(unittest.TestCase):
         self.assert_repair(author, critic, raw)
         self.assertEqual(self.coordinator.store.retry_peer_verdict(**request), first)
 
+    def test_scanner_materializes_linked_candidate_child_with_full_original_plan_and_verdict(self):
+        author, critic, checks, raw, request = self.failed_verdict(
+            prepared=self.checked_implementation(linked=True))
+        self.assertTrue(self.coordinator.run_once())
+        child = self.claim("agy-v2")
+        self.assertIsNotNone(child)
+        self.assertNotEqual(child.task_id, author.task_id)
+        self.assertEqual(child.parent_task_id, author.task_id)
+        self.assertEqual(child.mode, "implement")
+        self.assertEqual(child.agent_profile, author.agent_profile)
+        self.assertEqual(dict(child.recipe), dict(author.recipe))
+        self.assertEqual(child.base_revision, "d" * 40)
+        self.assertEqual(child.repair_candidate_commit, child.base_revision)
+        self.assertEqual(child.repair_source_review_id, checks["review_id"])
+        self.assertIsNone(child.plan_decision_id)
+        self.assertEqual(child.scope_plan_decision_id, author.plan_decision_id)
+        plan = self.db.read_plan(child)
+        peer = self.db.read_workflow_feedback(child)
+        self.assertEqual(peer["verdict_json"], raw)
+        self.assertEqual(peer["verdict_sha256"], request["reviewer_result_sha256"])
+        target = parse_review_target(peer["target_json"], peer["target_sha256"])
+        self.assertEqual(target["plan_decision_id"], child.scope_plan_decision_id)
+        self.assertEqual(plan["plan_attempt_id"], target["approved_plan"]["attempt_id"])
+        self.assertEqual(plan["plan_sha256"], target["approved_plan"]["sha256"])
+        self.assertEqual(plan["text"], target["approved_plan"]["content"])
+        self.assertEqual(parse_review_verdict(raw, target)["findings"][0]["category"], "source")
+        feedback = self.db.read_feedback(child)
+        self.assertEqual(feedback["feedback"]["workspace_digest_kind"], "candidate_tree")
+        self.assertEqual(feedback["feedback"]["workspace_digest"], "f" * 64)
+        self.assertEqual(feedback["feedback"]["candidate_commit"], child.base_revision)
+        self.assertEqual(feedback["feedback"]["parent_attempt_id"], author.attempt_id)
+        self.assertEqual(self.get(author.task_id)["workflow"]["code_revisions"], 1)
+        self.assertEqual(self.get(child.task_id)["workflow"]["code_revisions"], 1)
+
     def test_unknown_category_changed_hash_and_stale_author_revision_do_not_replay(self):
         for case in ("unknown_category", "non_alias_category", "approve", "reviewer_hash", "target_hash", "revision"):
             with self.subTest(case=case):
