@@ -19,6 +19,7 @@ _POLICY = {
     "grok_config_sha256": "478dc64ed679f9d5d91ec0a0b051f3dbb4406a84b280594e3e00871d09b5da34",
     "grok_managed_policy_sha256": "bdd376cc07a776d50d04e906e25a15b0057e1f6d421aa9c0fdf7336592a8beaf",
     "grok_state_policy": "isolated-home-no-shared-leader-auth-only-v1",
+    "grok_auth_cleanup_policy": "retained-dirfd-inode-after-proven-stop-v1",
     "grok_binary_sha256": "add4d201dbf2c0bd6077a36feb55a76939de30bae48dbb06f16b2307d38ceacb",
     "max_wall_seconds": 1800,
     "max_stream_bytes": 67108864,

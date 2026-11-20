@@ -125,6 +125,23 @@ preserves actual workspace changes for reconciliation; it does not imply a
 rollback. Grok's nested sandbox remains enabled and also needs qualification
 under the actual outer process boundary.
 
+The parent owns a retained directory descriptor and the original copied-auth
+inode descriptor. It removes that copy only after both the launcher and native
+scope are proven stopped, or after a setup failure proves no process started.
+Partial credential writes and later invocation setup failures use the same
+cleanup. Unlinking is relative to the retained directory and requires the exact
+regular-file inode with one link; a renamed or symlink-replaced `.grok` cannot
+redirect deletion into the host account. Unrelated leaf replacements and extra
+hard links fail closed. All descriptors close when the bounded attempt ends.
+
+An uncertain scope or unresolved inode returns `needs_reconcile` and retains
+the copy. A nonsecret identity witness is written under the parent-owned
+`auth-cleanup/<attempt UUID>.json`, outside the child's writable alias; it is
+evidence for explicit reconciliation, not automatic deletion authority. No
+result is accepted while credential cleanup is uncertain. Prompts, receipts,
+workspace changes and session metadata are retained. Policy9 pins this cleanup
+boundary independently of its configuration hashes.
+
 ## Terminal events and token accounting
 
 The bounded JSONL parser accepts documented `streaming-json` events. It retains
