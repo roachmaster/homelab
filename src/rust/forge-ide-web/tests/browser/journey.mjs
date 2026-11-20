@@ -2673,6 +2673,104 @@ async function retiredChatJourney(page, traffic) {
   await check(page.locator('#workbench')).toBeVisible();
 }
 
+// Controlled workspace fixture: real UI/WASM and admitted Work relay remain in
+// use; only workspace restore/save is overridden with owned boundary-size data.
+async function oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic) {
+  process.stderr.write('QA_CHECK oversized_dormant_workspace\n');
+  const conversation = {
+    messages: [{role:'user',content:'\\'.repeat(2048)},{role:'assistant',content:'\\'.repeat(4096)}],
+    draft:'\\'.repeat(2048),
+  };
+  const chat = {
+    selected:0,model_id:'qwen2.5-coder-7b',
+    conversations:Array.from({length:16},()=>structuredClone(conversation)),
+    pending_run:{chat_id:'11111111-1111-4111-8111-111111111111',
+      idempotency_key:'22222222-2222-4222-8222-222222222222',
+      run_id:'33333333-3333-4333-8333-333333333333',expected_revision:4,model_id:'qwen2.5-coder-7b'},
+  };
+  chat.conversations[0].chat_id=chat.pending_run.chat_id;
+  chat.conversations[0].revision=4;
+  assert(Buffer.byteLength(JSON.stringify(chat))>256*1024,
+    'valid escaped Chat fields exceed the navigation-cache budget');
+  let durable={chat:structuredClone(chat),workbench:null,workbench_open:false};
+  let restores=0,unavailableRestores=0,savesDuringOutage=0,restoreUnavailable=false,submitted=null;
+  const workspaceUrl=fixture.origin+'/forge/v1/dispatch/workspace';
+  const gatewayUrl=fixture.origin+'/forge/v1/dispatch';
+  const workspace=async route=>{
+    const body=route.request().postDataJSON();
+    assert.equal(body.preserve_chat,true);
+    if(body.operation==='restore'){
+      assert.equal('history' in body || 'models' in body,false);
+      if(restoreUnavailable){
+        unavailableRestores++;
+        await route.fulfill({status:503,contentType:'application/json',body:'{}'});
+      }else{
+        restores++;
+        await route.fulfill({json:{lease:'a'.repeat(64),snapshot:structuredClone(durable)}});
+      }
+    }else{
+      assert.equal(body.operation,'save');
+      if(restoreUnavailable)savesDuringOutage++;
+      assert.deepEqual(body.snapshot.chat,chat,'saving active work cannot truncate dormant Chat');
+      durable=structuredClone(body.snapshot);
+      await route.fulfill({json:{}});
+    }
+  };
+  const observeSubmission=async route=>{
+    const body=route.request().postDataJSON();
+    if(body.kind==='work_submit'){
+      const cache=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('forge-workspace-navigation')));
+      assert.equal(cache.snapshot,null,'oversized duplicate data is omitted from the bounded local cache');
+      assert.deepEqual(cache.agents.retry_intent,body,'the complete task intent is cached before Work I/O');
+      submitted=structuredClone(body);
+    }
+    await route.fallback();
+  };
+  // Leave the prior small snapshot before installing the large restored data.
+  await page.locator('#forge-home').click();
+  await check(page).toHaveURL(fixture.origin+'/home');
+  await context.route(workspaceUrl,workspace);
+  await context.route(gatewayUrl,observeSubmission);
+  try{
+    await page.locator('.home-launcher-agents').click();
+    await check(page.locator('#agents')).toBeVisible();
+    await check(page.locator('#agents-new')).toBeEnabled();
+    await assertRetiredChat(page,traffic);
+    await page.locator('#agents-new').click();
+    const prompt='Boundary-size dormant Chat must not block this new assignment.';
+    await page.locator('#agents-prompt').fill(prompt);
+    await page.locator('#agents-criteria').fill('Preserve full dormant data and exact task retry identity.');
+    await check(page.locator('#agents-send')).toBeEnabled();
+    await page.locator('#agents-send').click();
+    await check.poll(()=>submitted!==null).toBe(true);
+    await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-prompt')).toHaveText(prompt);
+    assert.equal(relay.workflowSubmissions.at(-1).idempotency_key,submitted.idempotency_key);
+    await page.locator('#forge-home').click();
+    await check(page).toHaveURL(fixture.origin+'/home');
+    const cache=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('forge-workspace-navigation')));
+    assert.equal(cache.snapshot,null);
+    assert.equal(cache.agents.task_id,relay.latestWorkflowTaskId);
+    await page.getByRole('link',{name:'Browse design docs',exact:true}).click();
+    await check(page).toHaveURL(fixture.origin+'/design');
+    await assertNativeViews(page,'Design');
+    // The server now refuses restoration. A cache with no workspace body must
+    // not synthesize a lease or write an empty replacement over durable Chat.
+    restoreUnavailable=true;
+    await page.getByRole('navigation',{name:'Forge views'}).getByRole('link',{name:'Agents',exact:true}).click();
+    await check(page.locator('#agents-reader')).toBeVisible();
+    await check(page.locator('#agents-task-prompt')).toHaveText(prompt);
+    assert.equal(unavailableRestores,1);
+    assert.equal(savesDuringOutage,0,'unavailable restore cannot admit a workspace write');
+    assert.ok(restores>=1);
+    assert.deepEqual(durable.chat,chat,'the full retained Chat snapshot remains unchanged');
+    await assertRetiredChat(page,traffic);
+  }finally{
+    await context.unroute(workspaceUrl,workspace);
+    await context.unroute(gatewayUrl,observeSubmission);
+  }
+}
+
 async function agentsJourney() {
   process.stderr.write('QA_CHECK portal_agents_workflow\n');
   agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
@@ -3151,6 +3249,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
+    await oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic);
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);
