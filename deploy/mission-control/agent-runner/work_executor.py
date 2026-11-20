@@ -23,6 +23,7 @@ from work_policy import POLICY
 from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
 from work_sessions import SessionError, SessionSelection
+from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext
 from work_worker_config import WorkerConfig, verify_recipe
 
 UNIT_RE = re.compile(r"forge-coding-[0-9a-f]{32}")
@@ -230,6 +231,7 @@ class Invocation:
     implement: bool
     session: SessionSelection | None = None
     plan_file: Path | None = None
+    readonly_files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -462,6 +464,12 @@ class SystemdSupervisor:
                     or invocation.plan_file.is_symlink() or not invocation.plan_file.is_file()):
                 raise ExecutionError("failed", "The saved plan artifact is unavailable.")
             readonly_bindings.append(str(invocation.plan_file) + ":" + str(CHILD_STATE / invocation.plan_file.name))
+        for path in invocation.readonly_files:
+            if (not isinstance(path, Path) or path.parent != invocation.scratch
+                    or path.name not in {"review-feedback.json", "verify.py"}
+                    or path.is_symlink() or not path.is_file()):
+                raise ExecutionError("failed", "The immutable execution context is unavailable.")
+            readonly_bindings.append(str(path) + ":" + str(CHILD_STATE / path.name))
         if invocation.implement:
             bindings.append(str(invocation.cwd) + ":" + str(CHILD_WORKSPACE))
             if verification:
@@ -520,6 +528,7 @@ class SystemdSupervisor:
             immutable_native.append(CHILD_WORKSPACE / ".git")
         if invocation.plan_file is not None:
             immutable_native.append(CHILD_STATE / invocation.plan_file.name)
+        immutable_native.extend(CHILD_STATE / path.name for path in invocation.readonly_files)
         if not invocation.implement:
             immutable_native.append(CHILD_WORKSPACE)
         properties.append("ReadOnlyPaths=" + " ".join("-" + str(path) for path in immutable_native))
@@ -601,7 +610,7 @@ class CommandRunnerProvider:
                 raise ValueError("Configured coding program is not executable")
             self._binary_hashes[backend] = (actual, hashlib.sha256(actual.read_bytes()).digest())
 
-    def invocation(self, lease, workspace, *, progress=False, plan_context=None):
+    def invocation(self, lease, workspace, *, progress=False, plan_context=None, feedback_context=None):
         if not verify_recipe(self.config, lease):
             raise ExecutionError("failed", "Assignment execution policy is unavailable or changed.")
         backend = lease["recipe"]["backend"]
@@ -675,6 +684,32 @@ class CommandRunnerProvider:
             prompt += ("\n\nEXPLICIT PLAN DECISION: " + decision.upper() + ". " + instruction
                        + "The original assignment above is retained context. Read the exact saved plan at "
                        + str(CHILD_STATE / plan_file.name) + ".\nREVIEW FEEDBACK:\n" + note)
+        feedback_file = None
+        if lease.get("feedback_id") is not None and feedback_context is None:
+            raise ExecutionError("needs_reconcile", "The admitted repair feedback is unavailable.")
+        if feedback_context is not None:
+            if (not isinstance(feedback_context, ReviewContext)
+                    or len(feedback_context.content) > MAX_FEEDBACK_BYTES
+                    or hashlib.sha256(feedback_context.content).hexdigest() != feedback_context.sha256
+                    or feedback_context.feedback_id != lease.get("feedback_id")
+                    or (feedback_context.feedback_id is not None
+                        and feedback_context.sha256 != lease.get("feedback_sha256"))):
+                raise ExecutionError("needs_reconcile", "The admitted repair feedback changed before execution.")
+            feedback_file = scratch / "review-feedback.json"
+            try:
+                descriptor = os.open(feedback_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(feedback_context.content)
+            except OSError:
+                raise ExecutionError("needs_reconcile", "The immutable repair feedback could not be prepared.") from None
+            prompt += ("\n\nCURRENT REPAIR FEEDBACK: Read the exact immutable artifact at "
+                       + str(CHILD_STATE / feedback_file.name) + ". SHA-256: "
+                       + feedback_context.sha256 + ". Address finding IDs: "
+                       + ", ".join(feedback_context.finding_ids)
+                       + ". Report changed files, addressed IDs, commands/exits and remaining gaps. "
+                       "Findings close only after independent verification. Do not weaken required checks.")
+            if feedback_context.legacy_resume_note:
+                prompt += "\nOWNER RESUME FEEDBACK:\n" + feedback_context.legacy_resume_note
         if backend == "antigravity":
             prompt += ("\n\nAgent tools: filesystem tools, shell commands, and read-only URL reads "
                        "are provisioned within the approved coding scope. MCP and browser "
@@ -712,10 +747,12 @@ class CommandRunnerProvider:
                     "workspace-write" if implement else "read-only", "--model", lease["recipe"]["model"],
                     "--json", "--color", "never", "--ephemeral", "-")
             payload = prompt.encode("utf-8")
-        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file)
+        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file,
+                          (feedback_file,) if feedback_file is not None else ())
 
-    def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None):
-        invocation = self.invocation(lease, workspace, progress=report_progress is not None, plan_context=plan_context)
+    def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None):
+        invocation = self.invocation(lease, workspace, progress=report_progress is not None,
+                                     plan_context=plan_context, feedback_context=feedback_context)
         conversation = invocation.session.conversation_id if invocation.session is not None else None
         parser = CliParser(invocation.backend, expected_conversation_id=conversation)
         progress = ProgressReader(invocation.scratch / "progress", report_progress) if report_progress is not None else None

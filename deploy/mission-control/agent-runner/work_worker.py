@@ -17,6 +17,7 @@ from work_executor import (
 )
 from work_policy import POLICY, POLICY_DIGEST
 from work_sessions import AntigravitySessionProvider
+from work_review_context import ReviewContextError, ReviewContextProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
@@ -75,12 +76,14 @@ class CodingWorker:
     """Owned collaborators are supplied by bootstrap; no global lookups."""
 
     def __init__(self, config, store, runner_provider, workspace_provider, supervisor,
-                 *, collector=None, clock=time.monotonic, stop=None, usage_normalizer=None):
+                 *, collector=None, clock=time.monotonic, stop=None, usage_normalizer=None,
+                 review_context_provider=None):
         self.config, self.store = config, store
         self.runner, self.workspaces, self.supervisor = runner_provider, workspace_provider, supervisor
         self.collector, self.clock = collector, clock
         self.stop = stop if stop is not None else threading.Event()
         self.usage_normalizer = usage_normalizer
+        self.review_contexts = review_context_provider
         self.incarnation = str(uuid4())
         self._last_advertisement = float("-inf")
 
@@ -254,6 +257,16 @@ class CodingWorker:
                             arguments["plan_context"] = self.store.read_plan(lease)
                         except Exception:
                             raise ExecutionError("needs_reconcile", "The saved plan could not be verified; review is required before execution.") from None
+                    if any(lease.get(name) is not None for name in
+                           ("resume_attempt_id", "feedback_id", "feedback_sha256")):
+                        try:
+                            if self.review_contexts is None:
+                                raise ReviewContextError()
+                            feedback = self.review_contexts.acquire(lease, workspace)
+                            if feedback is not None:
+                                arguments["feedback_context"] = feedback
+                        except Exception:
+                            raise ExecutionError("needs_reconcile", "The current review feedback could not be verified.") from None
                     outcome = self.runner.run(lease, workspace, stop, **arguments)
                     proof = outcome.stop_proof
                 if self.stop.is_set() and not cancelled.is_set():
@@ -271,7 +284,7 @@ class CodingWorker:
                         receipt = self.store.reconcile(lease, workspace.digest(), proof)
                         if (lease["mode"] == "implement" and lease.get("plan_decision_id") is not None
                                 and outcome.status == "awaiting_review"):
-                            self.store.queue_publication(lease, receipt)
+                            self.store.queue_review(lease, receipt)
                     except Exception:
                         LOG.warning("Coding reconciliation or publication handoff unavailable; recovery remains fenced")
         except ExecutionError as error:
@@ -334,7 +347,7 @@ class CodingWorkerFactory:
 
     def __init__(self, config, store_factory, *, runner_factory=None, workspace_factory=None,
                  supervisor_factory=None, session_factory=None, collector_factory=None, clock=time.monotonic, stop=None,
-                 usage_normalizer=None):
+                 usage_normalizer=None, review_context_factory=None):
         if not isinstance(config, WorkerConfig) or not callable(store_factory):
             raise TypeError("Coding worker requires frozen configuration and a store factory")
         self.config, self.store_factory = validated_copy(config), store_factory
@@ -347,6 +360,8 @@ class CodingWorkerFactory:
         self.supervisor_factory = supervisor_factory if supervisor_factory is not None else SystemdSupervisor
         self.collector_factory, self.clock, self.stop = collector_factory, clock, stop
         self.usage_normalizer = usage_normalizer
+        self.review_context_factory = (review_context_factory if review_context_factory is not None
+                                       else ReviewContextProvider)
 
     def create(self):
         store = self.store_factory(self.config)
@@ -356,8 +371,10 @@ class CodingWorkerFactory:
         workspaces.prepare()
         runner.prepare()
         collector = self.collector_factory(self.config, store) if self.collector_factory else None
+        review_contexts = self.review_context_factory(store)
         return CodingWorker(self.config, store, runner, workspaces, supervisor, collector=collector,
-                            clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer)
+                            clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer,
+                            review_context_provider=review_contexts)
 
 
 def default_store_factory(config):
