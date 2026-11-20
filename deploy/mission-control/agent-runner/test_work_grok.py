@@ -87,6 +87,7 @@ class GrokBoundaryTest(unittest.TestCase):
    auth=c.account.home/'.grok/auth.json';auth.parent.mkdir(parents=True,mode=0o700);auth.write_text('fixture');auth.chmod(0o600)
    value=lease(c,backend='grok');value['agent_profile']='grok'
    w=WorkspaceLease(Path(root)/'owned',Path(root)/'repository',Path(root)/'git',value['task_id'],'a'*40)
+   w.path.mkdir()
    i=p.invocation(value,w);self.assertIsNone(i.session);self.assertEqual(i.stdin,b'');self.assertNotIn(value['prompt'],' '.join(i.argv))
    self.assertIn(value['attempt_id'],i.argv);self.assertNotIn('--continue',i.argv);self.assertNotIn('--resume',i.argv);self.assertIn('dontAsk',i.argv);self.assertIn('MCPTool(*)',i.argv)
    self.assertIn('--no-memory',i.argv);self.assertIn('--no-subagents',i.argv);self.assertNotIn('--always-approve',i.argv)
@@ -120,6 +121,7 @@ class GrokFakeChildTest(unittest.TestCase):
    provider=CommandRunnerProvider(c,supervisor,popen=spawn)
    with patch('work_executor.GROK_BINARY_SHA256',hashlib.sha256(Path('/usr/bin/python3').resolve().read_bytes()).hexdigest()):provider.prepare()
    w=WorkspaceLease(Path(root)/'owned',Path(root)/'repository',Path(root)/'git',value['task_id'],'a'*40)
+   w.path.mkdir()
    outcome=provider.run(value,w,threading.Event());self.assertEqual(outcome.status,'awaiting_review');self.assertEqual(outcome.conversation_id,value['attempt_id']);self.assertTrue(outcome.fresh_session)
    self.assertIsNotNone(supervisor.process.returncode)
  def test_usage_refresh_not_starved_when_all_execution_is_disabled(self):

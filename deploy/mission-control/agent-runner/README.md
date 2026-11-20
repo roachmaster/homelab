@@ -686,3 +686,8 @@ execution grant and reports Not reported, with no consumer OAuth polling.
 See [the Grok provider design](../../../docs/architecture/grok-coding-provider.md)
 for exact documented flags, isolated state, fresh-session policy, terminal-only
 cache accounting, cancellation semantics and additive migration coverage.
+Native folder trust is limited to ordinary repository instructions: a fixed
+metadata-only preflight rejects executable project configuration before auth or
+process acquisition, while read-only managed policy blocks unmanaged hooks,
+MCP servers and marketplace installs. The immutable config disables `.envrc`
+loading; the outer supervisor forwards no parent API-key environment.

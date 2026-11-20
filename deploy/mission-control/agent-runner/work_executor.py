@@ -15,11 +15,12 @@ import os
 from pathlib import Path
 import re
 import selectors
+import stat
 import subprocess
 import time
 from uuid import UUID
 
-from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
+from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
 from work_policy import POLICY
 from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
@@ -763,6 +764,18 @@ class SystemdSupervisor:
                 implement=invocation.implement)
             if invocation.argv != expected or invocation.session is not None or invocation.external_sandbox:
                 raise ExecutionError("failed", "The Grok execution boundary does not match its pinned policy.")
+            for name, expected_content in (("config.toml", GROK_CONFIG), ("managed_config.toml", GROK_MANAGED_POLICY)):
+                path = invocation.scratch / "home/.grok" / name
+                try:
+                    expected_bytes = expected_content.encode("utf-8")
+                    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    with os.fdopen(descriptor, "rb") as source:
+                        metadata = os.fstat(source.fileno())
+                        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size != len(expected_bytes)
+                                or source.read(len(expected_bytes) + 1) != expected_bytes):
+                            raise ValueError()
+                except (OSError, ValueError):
+                    raise ExecutionError("failed", "The immutable Grok execution policy is unavailable.") from None
         verification = invocation.backend == "verification"
         native_state = (None if verification or invocation.backend == "grok" else account.home /
                         (".gemini" if invocation.backend == "antigravity" else ".codex"))
@@ -790,7 +803,7 @@ class SystemdSupervisor:
             bindings.append(str(native_state))
         readonly_bindings = [str(path) for path in readonly]
         if invocation.backend == "grok":
-            for relative in ("prompt.txt", "home/.grok/config.toml", "home/.grok/auth.json"):
+            for relative in ("prompt.txt", "home/.grok/config.toml", "home/.grok/managed_config.toml", "home/.grok/auth.json"):
                 source = invocation.scratch / relative
                 if source.is_file():
                     readonly_bindings.append(str(source) + ":" + str(CHILD_STATE / relative))
@@ -860,6 +873,8 @@ class SystemdSupervisor:
         immutable_native = ([native_state / "config.toml", native_state / "rules", native_state / "plugins",
                              native_state / "packages", native_state / "antigravity-cli/settings.json",
                              native_state / "antigravity-cli/forge-settings.json"] if native_state is not None else [])
+        if invocation.backend == "grok":
+            immutable_native.extend(CHILD_STATE / "home/.grok" / name for name in ("config.toml", "managed_config.toml", "auth.json"))
         if verification:
             immutable_native.append(CHILD_WORKSPACE / ".git")
         if invocation.plan_file is not None:
@@ -969,6 +984,11 @@ class CommandRunnerProvider:
         if not verify_recipe(self.config, lease):
             raise ExecutionError("failed", "Assignment execution policy is unavailable or changed.")
         backend = lease["recipe"]["backend"]
+        if backend == "grok":
+            try:
+                validate_grok_project_subset(workspace.path)
+            except (OSError, ValueError):
+                raise ExecutionError("blocked_permission", "Grok supports project instructions without executable project configuration.") from None
         actual, pinned_hash = self._binary_hashes[backend]
         if hashlib.sha256(actual.read_bytes()).digest() != pinned_hash:
             raise ExecutionError("failed", "Configured coding program changed after worker startup.")
@@ -1189,6 +1209,8 @@ class CommandRunnerProvider:
                     raise ValueError("Grok account is not authenticated")
                 (native / "config.toml").write_text(GROK_CONFIG, encoding="utf-8")
                 (native / "config.toml").chmod(0o400)
+                (native / "managed_config.toml").write_text(GROK_MANAGED_POLICY, encoding="utf-8")
+                (native / "managed_config.toml").chmod(0o400)
                 descriptor = os.open(scratch / "prompt.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
                 with os.fdopen(descriptor, "wb") as stream:
                     stream.write(prompt.encode("utf-8"))

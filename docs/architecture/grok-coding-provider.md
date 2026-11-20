@@ -39,7 +39,7 @@ Admission never selects the launcher or an auto-updated binary. Fixed arguments
 come from the installed help and bundled headless/config/permission guides:
 
 ```text
-grok-bin --no-auto-update --prompt-file <immutable attempt prompt>
+grok-bin --no-auto-update --trust --prompt-file <immutable attempt prompt>
   --output-format streaming-json --model <configured model>
   --cwd /run/forge-coding-workspace --session-id <attempt UUID>
   --leader-socket <attempt-owned socket>
@@ -64,6 +64,56 @@ The controlled config disables the shared leader/registry, updates, memory,
 auto-wake, workflows, goal tools and telemetry; the immutable argv and outer
 supervisor retain final ownership. Project instructions remain project context,
 not authority to change the admitted recipe.
+
+### Supported project trust subset
+
+Grok1.0.92 requires folder trust to load repository instructions and skills in
+headless mode. Forge explicitly selects the verified `--trust` flag for ordinary
+`AGENTS.md` and `.agents/skills` text. It does not grant a repository permission
+to install native extensions or run startup configuration. Before authentication
+staging, scratch acquisition or process startup, a fixed metadata-only preflight
+rejects any of these documented discovery paths, including dangling symlinks:
+
+| Native surface | Rejected project paths |
+| --- | --- |
+| Grok executable configuration | `.grok/config.toml`, `.grok/sandbox.toml`, `.grok/lsp.json` |
+| Grok hooks, plugins and agent definitions | `.grok/hooks`, `.grok/plugins`, `.grok/agents`, `.grok/personas`, `.grok/roles`, `.grok/workflows` |
+| Compatibility settings/plugins | `.claude/settings.json`, `.claude/settings.local.json`, `.claude/plugins` |
+| Compatibility hooks/MCP | `.cursor/hooks.json`, `.cursor/mcp.json`, `.mcp.json` |
+| Executable environment setup | `.envrc` |
+
+The `.grok`, `.claude` and `.cursor` containers themselves must be real
+directories when present; symlink or non-directory containers are rejected.
+Checks do not traverse or parse the rejected content and do not recursively
+scan arbitrary files. This subset applies at the owned worktree root used as
+Grok's fixed cwd. Repository executable extensions are unsupported and require
+separate design/qualification. Disabling `lsp_tools` is not used as evidence
+that passive LSP startup is blocked.
+
+The immutable native config also sets documented `session.load_envrc=false`.
+The supervisor builds an empty inherited environment with a fixed allowlist:
+no `XAI_API_KEY`, `GROK_AUTH`, parent `GROK_CONFIG` or provider credentials are
+forwarded. Guides02/05 describe per-model config, the active auth session and
+`XAI_API_KEY` as credential sources; project config is rejected, the controlled
+native config defines no key or alternate model provider, and only the owned
+account auth file is staged. No additional automatic `.env` key-discovery path
+is documented in this version; ordinary files are not interpreted as auth.
+
+A separate immutable `managed_config.toml` contains tighten-only native policy:
+`allow_managed_hooks_only=true`, `allow_managed_mcp_servers_only=true`,
+`allowed_mcp_servers=[]`, `enable_all_project_mcp_servers=false` and
+`strict_known_marketplaces=[]`. Installed guides09/10 describe these policies;
+network-disabled native `inspect --json` with a fresh no-auth HOME confirmed
+project instructions loaded, unmanaged hooks were disabled by enforced policy
+and a deliberately configured project MCP server was locked down. This
+inspection made no model/account call and did not run a project hook/server.
+The source preflight also rejects those fixture paths before native execution.
+
+The supervisor verifies bounded exact control-file bytes and exact argv, then
+mounts both config files and authentication read-only. Missing, altered or
+symlinked policy files fail before launch. Policy9's digest includes the trust
+subset and exact config/managed-policy hashes before its initial deployment; old policies and
+receipts retain their identities.
 
 The staged authentication file is read-only. A native refresh that requires
 rewriting it is intentionally unavailable: it must fail as an account/setup
