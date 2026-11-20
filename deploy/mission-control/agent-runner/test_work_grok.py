@@ -76,9 +76,9 @@ class GrokBoundaryTest(unittest.TestCase):
   self.assertNotIn('grok',c.allowed_profiles);self.assertNotIn('grok',[x['alias']for x in c.advertised_profiles()]);self.assertEqual(validated_copy(c),c)
   v=lease(c,backend='grok');v['agent_profile']='grok';self.assertFalse(verify_recipe(c,v))
   cfg=make_v2_config();profile=WorkProfile('grok','grok','fixture-model',POLICY_ID);self.assertFalse(profile.execution_enabled)
-  cfg=replace(cfg,profiles={**cfg.profiles,'grok':profile});store=Mock();service=WorkService(cfg,WorkCatalog(cfg.profiles),store)
+  cfg=replace(cfg,profiles={**cfg.profiles,'grok':profile});store=Mock();store.submit.side_effect=lambda **kw:kw['resolve_recipe']();service=WorkService(cfg,WorkCatalog(cfg.profiles),store)
   with patch('subprocess.Popen',side_effect=AssertionError('no native process')),self.assertRaises(Rejected):service.submit(make_submit(agent_profile='grok'))
-  store.submit.assert_not_called()
+  store.submit.assert_called_once()
  def test_pinned_flags_fresh_home_prompt_and_scope_auth_only(self):
   with TemporaryDirectory()as root:
    c=parse_config(self.raw(root,True));s=SystemdSupervisor(c);p=CommandRunnerProvider(c,s)
@@ -138,3 +138,15 @@ class GrokManualUsageTest(unittest.TestCase):
   store.next_refresh.return_value={'refresh_id':str(uuid4()),'profile_alias':'grok','generation':1,'configuration_epoch':1}
   self.assertTrue(collector.run_once());saved=store.record_usage.call_args.kwargs['snapshot']
   self.assertEqual(saved['allowance']['state'],'unsupported');self.assertEqual(saved['allowance']['reason'],'unsupported_headless');self.assertIsNone(saved['allowance']['ordinary_usage_allowed'])
+
+class GrokErrorIdentityTest(unittest.TestCase):
+ def test_unbound_error_usage_never_attaches_to_attempt(self):
+  for supplied in ({},{'sessionId':SID},{'cwd':'/run/forge-coding-workspace'}):
+   outcome=parse([{'type':'error','message':'authentication_required','usage':SPEND,**supplied}])
+   self.assertEqual(outcome.status,'blocked_auth');self.assertIsNone(outcome.usage)
+   self.assertEqual(normalize_attempt_usage('grok',outcome.usage)['coverage'],'unknown')
+ def test_supplied_foreign_error_identity_is_rejected(self):
+  base={'type':'error','message':'authentication_required','sessionId':SID,'cwd':'/run/forge-coding-workspace','requestId':'request1','usage':SPEND}
+  for changed in ({'sessionId':str(uuid4())},{'cwd':'/other'},{'requestId':None},{'requestId':''}):
+   with self.subTest(changed=changed),self.assertRaises(ExecutionError):parse([{**base,**changed}])
+  bound=parse([base]);self.assertEqual(bound.status,'blocked_auth');self.assertEqual(normalize_attempt_usage('grok',bound.usage)['total_tokens'],'100')

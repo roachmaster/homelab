@@ -110,7 +110,22 @@ class GrokEvents:
             self.cancelled=event.get('stopReason')=='cancelled' or message.strip().lower()=='cancelled'
             incomplete=event.get('usage_is_incomplete',False)
             if type(incomplete)is not bool:raise ValueError('Invalid Grok accounting coverage')
-            self.usage=None if incomplete else self._usage(event.get('usage'))
+            # Early errors may not have a native session yet. Retain their
+            # blocked reason, but never attribute unbound spend to this job.
+            for key in ('sessionId','cwd','requestId'):
+                if key not in event:continue
+                value=event[key]
+                if key=='sessionId':
+                    if (not isinstance(value,str) or str(UUID(value))!=value
+                            or self.session is not None and value!=self.session):
+                        raise ValueError('Grok error session binding changed')
+                elif key=='cwd' and value!='/run/forge-coding-workspace':
+                    raise ValueError('Grok error workspace binding changed')
+                elif key=='requestId' and not (value=='' and self.cancelled and incomplete):
+                    if not isinstance(value,str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',value):
+                        raise ValueError('Invalid Grok error request identity')
+            bound=all(key in event for key in ('sessionId','cwd','requestId')) and bool(event.get('requestId'))
+            self.usage=self._usage(event.get('usage')) if bound and not incomplete else None
             self.complete=True
         elif kind=='end':
             session=event.get('sessionId')

@@ -215,11 +215,10 @@ class WorkService:
         self._require_project(command.project_alias)
         if command.mode not in self._config.allowed_modes:
             raise Rejected(403, "denied")
-        if (command.agent_profile not in self._config.profiles
-                or not self._config.profiles[command.agent_profile].execution_enabled):
-            raise Rejected(403, "denied")
-
         def resolve_recipe():
+            if (command.agent_profile not in self._config.profiles
+                    or not self._config.profiles[command.agent_profile].execution_enabled):
+                raise Rejected(403, "denied")
             try:
                 return self._catalog.resolve(command.agent_profile, command.mode)
             except KeyError:
@@ -304,11 +303,10 @@ class WorkService:
 
     def resume(self, command):
         self._require_project(command.project_alias)
-        if (command.agent_profile not in self._config.profiles
-                or not self._config.profiles[command.agent_profile].execution_enabled):
-            raise Rejected(403, "denied")
-
         def resolve_recipe(mode):
+            if (command.agent_profile not in self._config.profiles
+                    or not self._config.profiles[command.agent_profile].execution_enabled):
+                raise Rejected(403, "denied")
             try:
                 return self._catalog.resolve(command.agent_profile, mode)
             except KeyError:
@@ -331,7 +329,8 @@ class WorkService:
         self._require_project(command.project_alias)
 
         def resolve_recipe(mode):
-            if mode not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
+            if (mode not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
+                    or not self._config.profiles[command.agent_profile].execution_enabled):
                 raise Rejected(403, "denied")
             try:
                 return self._catalog.resolve(command.agent_profile, mode)
@@ -343,7 +342,8 @@ class WorkService:
     def review_decide(self, command):
         self._require_project(command.project_alias)
         def resolve_recipe():
-            if "implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
+            if ("implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
+                    or not self._config.profiles[command.agent_profile].execution_enabled):
                 raise Rejected(403,"denied")
             try:
                 return self._catalog.resolve(command.agent_profile,"implement")
@@ -353,10 +353,15 @@ class WorkService:
 
     def repair(self, command):
         self._require_project(command.project_alias)
-        if "implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
-            raise Rejected(403,"denied")
-        recipe=self._catalog.resolve(command.agent_profile,"implement")
-        return self._store.repair(**vars(command),recipe=recipe)
+        def resolve_recipe():
+            if ("implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
+                    or not self._config.profiles[command.agent_profile].execution_enabled):
+                raise Rejected(403,"denied")
+            try:
+                return self._catalog.resolve(command.agent_profile,"implement")
+            except KeyError:
+                raise Rejected(503,"unavailable") from None
+        return self._store.repair(**vars(command),resolve_recipe=resolve_recipe)
 
     def publication_retry(self, command):
         self._require_project(command.project_alias)
