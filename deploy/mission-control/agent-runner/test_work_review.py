@@ -9,7 +9,8 @@ from uuid import uuid4
 
 from test_work_publication import fixture, git
 from work_publication_checks import VerificationFailure
-from work_review import ReviewedCandidateProvider, ReviewWorker, protected_gate_path
+from work_review import ReviewedCandidateProvider, ReviewWorker, protected_gate_path, validate_review
+from work_publication_clients import PublicationError
 from work_executor import WorkspaceLease
 from work_publication_clients import WorkspaceSnapshotProvider
 from work_verification import project_verification
@@ -58,6 +59,19 @@ def review_job(job, **changes):
 
 
 class ReviewWorkerTest(unittest.TestCase):
+    def test_missing_candidate_retry_requires_local_consumed_retry_and_exact_previous_review(self):
+        with fixture() as values:
+            _, config, source, *_ = values
+            previous = str(uuid4())
+            fresh = review_job(source, phase="local", infrastructure_retries=1,
+                source_review_id=previous, previous_review_id=previous, candidate_commit=None)
+            validate_review(config, fresh)
+            for change in ({"infrastructure_retries": 0}, {"phase": "hosted"},
+                           {"phase": "source"}, {"phase": None},
+                           {"previous_review_id": str(uuid4())}, {"candidate_commit": ""}):
+                with self.subTest(change=change), self.assertRaises(PublicationError):
+                    validate_review(config, {**fresh, **change})
+
     def test_unreferenced_linked_base_and_preparation_retry_run_fresh_full_checks(self):
         with fixture() as values:
             root, config, source, workspaces, _, bare, repository, *_ = values
