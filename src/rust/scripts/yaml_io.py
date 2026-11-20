@@ -230,9 +230,18 @@ def _is_complete_double_quoted(raw: str) -> bool:
     return False
 
 
+def _unique_mapping_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    mapping: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in mapping:
+            raise ValueError(f"duplicate YAML mapping key {key!r}")
+        mapping[key] = value
+    return mapping
+
+
 def _parse_flow_collection(raw: str, lineno: int) -> Any:
     try:
-        return json.loads(raw)
+        return json.loads(raw, object_pairs_hook=_unique_mapping_pairs)
     except json.JSONDecodeError:
         pass
     # Minimal strict flow parser for YAML flow sequences/mappings with single-quoted or plain scalars.
@@ -281,7 +290,10 @@ def _parse_flow_collection(raw: str, lineno: int) -> Any:
                     raise ValueError(f"line {lineno}: expected ':' in flow mapping")
                 pos += 1
                 val, pos = parse_val(pos)
-                mapping[str(key)] = val
+                key = str(key)
+                if key in mapping:
+                    raise ValueError(f"line {lineno}: duplicate YAML mapping key {key!r}")
+                mapping[key] = val
                 pos = skip_ws(pos)
                 if pos < n and s[pos] == ",":
                     pos += 1
@@ -368,8 +380,6 @@ def _parse_scalar(raw: str, lineno: int = 1) -> Any:
             raise ValueError(f"line {lineno}: unterminated or trailing single-quoted scalar")
         return _parse_single_quoted(raw, lineno)
     _check_unsupported_token(raw, lineno)
-    if ": " in raw or raw.endswith(":"):
-        raise ValueError(f"line {lineno}: mapping value ':' not allowed in plain scalar: {raw!r}")
     if re.fullmatch(r"[+-]?\d+", raw):
         return int(raw)
     if re.fullmatch(r"[+-]?(?:\d+\.\d*|\.\d+)(?:[eE][+-]?\d+)?", raw) or re.fullmatch(
@@ -436,7 +446,7 @@ def _stdlib_load_yaml(text: str) -> Any:
         stripped_doc.startswith("[") and not stripped_doc.startswith("- ")
     ):
         try:
-            return json.loads(stripped_doc)
+            return json.loads(stripped_doc, object_pairs_hook=_unique_mapping_pairs)
         except json.JSONDecodeError:
             pass
 
@@ -598,6 +608,8 @@ def _stdlib_load_yaml(text: str) -> Any:
                 parts.append(" " + cont)
             pos += 1
         joined = "".join(parts)
+        if re.search(r":(?:[ \t\r\n]|$)", joined):
+            raise ValueError(f"line {lineno}: mapping value ':' not allowed in plain scalar: {joined!r}")
         return _parse_scalar(joined, lineno), pos
 
     def parse_mapping_value(rest: str, pos: int, key_indent: int, lineno: int) -> tuple[Any, int]:
@@ -674,6 +686,8 @@ def _stdlib_load_yaml(text: str) -> Any:
                             f"line {sub_lno}: expected 'key: value' inside mapping, got {sub_content!r}"
                         )
                     sub_k, sub_rest = sub_kv
+                    if sub_k in obj:
+                        raise ValueError(f"line {sub_lno}: duplicate YAML mapping key {sub_k!r}")
                     pos = next_pos + 1
                     obj[sub_k], pos = parse_mapping_value(sub_rest, pos, item_indent, sub_lno)
                 items.append(obj)
@@ -699,6 +713,8 @@ def _stdlib_load_yaml(text: str) -> Any:
             if kv is None:
                 raise ValueError(f"line {lineno}: expected mapping entry 'key: value', got {cur!r}")
             key, rest = kv
+            if key in mapping:
+                raise ValueError(f"line {lineno}: duplicate YAML mapping key {key!r}")
             pos += 1
             mapping[key], pos = parse_mapping_value(rest, pos, map_indent, lineno)
         return mapping, pos
@@ -750,5 +766,30 @@ def load_yaml(text: str) -> Any:
     """Safely load YAML using PyYAML CSafeLoader/SafeLoader when installed, else strict stdlib fallback."""
     if _PYYAML is not None:
         loader = getattr(_PYYAML, "CSafeLoader", _PYYAML.SafeLoader)
-        return _PYYAML.load(text, Loader=loader)
+
+        class UniqueKeyLoader(loader):
+            def flatten_mapping(self, node):
+                # Check explicit entries before merge expansion; valid merge overrides remain valid.
+                checked = getattr(self, "_checked_mappings", None)
+                if checked is None:
+                    checked = self._checked_mappings = set()
+                if id(node) not in checked:
+                    checked.add(id(node))
+                    keys = set()
+                    for key_node, _ in node.value:
+                        if key_node.tag == "tag:yaml.org,2002:merge":
+                            continue
+                        key = (
+                            key_node.value
+                            if key_node.tag == "tag:yaml.org,2002:value"
+                            else self.construct_object(key_node, deep=False)
+                        )
+                        if key in keys:
+                            raise ValueError(
+                                f"line {key_node.start_mark.line + 1}: duplicate YAML mapping key {key!r}"
+                            )
+                        keys.add(key)
+                super().flatten_mapping(node)
+
+        return _PYYAML.load(text, Loader=UniqueKeyLoader)
     return _stdlib_load_yaml(text)

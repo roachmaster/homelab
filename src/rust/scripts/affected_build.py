@@ -124,6 +124,11 @@ def validate_graph_schema(graph: Any, *, label: str = "AST graph") -> None:
             raise ValueError(f"{label}: edges[{idx}].from must be a non-empty string")
         if not isinstance(edge.get("to"), str) or not edge["to"]:
             raise ValueError(f"{label}: edges[{idx}].to must be a non-empty string")
+        for endpoint in ("from", "to"):
+            if edge[endpoint] not in seen_ids:
+                raise ValueError(
+                    f"{label}: edges[{idx}].{endpoint} references unknown module {edge[endpoint]!r}"
+                )
         if edge.get("kind") not in VALID_EDGE_KINDS:
             raise ValueError(f"{label}: edges[{idx}].kind invalid: {edge.get('kind')!r}")
     if "global_files" in graph:

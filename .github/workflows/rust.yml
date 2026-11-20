@@ -128,16 +128,16 @@ jobs:
           REFRESH_AST: "0"
         run: |
           run_selective() {
-            local target="$1"
+            local mode="$1"
             set +e
-            make "$target"
+            python3 -B src/rust/scripts/affected_build.py "$mode"
             local rc=$?
             set -e
             if [ "$rc" -eq 0 ]; then
               return 0
             fi
             if [ "$rc" -eq 3 ]; then
-              python3 -B - "$CARGO_TARGET_DIR/ast/affected-plan.yaml" "$target" <<'PY'
+              python3 -B - "$CARGO_TARGET_DIR/ast/affected-plan.yaml" "$mode" <<'PY'
           import pathlib, sys
           sys.path.insert(0, "src/rust/scripts")
           import yaml_io
@@ -154,8 +154,8 @@ jobs:
             fi
             return "$rc"
           }
-          run_selective build-affected
-          run_selective test-affected
+          run_selective build
+          run_selective test
       - name: Publish PR fast-gate summary
         if: always()
         run: |

@@ -252,12 +252,18 @@ def _detect_loader_helpers(tree: ast.Module) -> dict[str, tuple[int, str]]:
                 "importlib.import_module",
                 "__import__",
             ):
-                for idx, pname in enumerate(params):
-                    if any(_expr_references_name(a, pname) for a in sub.args) or any(
-                        _expr_references_name(kw.value, pname) for kw in sub.keywords
-                    ):
-                        helpers[stmt.name] = (idx, pname)
-                        break
+                is_file_loader = cname.rsplit(".", 1)[-1] == "spec_from_file_location"
+                target_idx = 1 if is_file_loader else 0
+                target_keyword = "location" if is_file_loader else "name"
+                target = sub.args[target_idx] if len(sub.args) > target_idx else next(
+                    (kw.value for kw in sub.keywords if kw.arg == target_keyword), None
+                )
+                candidates = [
+                    (idx, pname) for idx, pname in enumerate(params)
+                    if target is not None and _expr_references_name(target, pname)
+                ]
+                if len(candidates) == 1:
+                    helpers[stmt.name] = candidates[0]
                 if stmt.name in helpers:
                     break
     return helpers
