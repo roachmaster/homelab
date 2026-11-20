@@ -2420,6 +2420,11 @@ async function wireframesDesignJourney(page, designUrl) {
   await check(page.getByRole('heading', { level: 1 })).toHaveText('Workspace data flow');
   await check(page.getByRole('heading', { name: 'Workspace recovery', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Back to Design', exact: true }).click();
+  // Let destination loading and fragment navigation settle before the caller
+  // transfers keyboard focus; otherwise navigation can overwrite that focus.
+  await page.waitForURL(`${designUrl}#wireframes-and-workspace`, { waitUntil: 'load', timeout: 10_000 });
+  await check(page.getByRole('heading', { level: 1, name: 'Forge IDE design', exact: true })).toBeVisible();
+  await check(page.locator('#wireframes-and-workspace')).toBeInViewport();
   assert.deepEqual(context.pages(), pages, 'all documentation readers use the existing page');
 }
 
