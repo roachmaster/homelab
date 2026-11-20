@@ -311,3 +311,27 @@ It avoids another full cold CI run inside the native turn; the independent
 verifier still runs **all** required checks. A bounded operator note can point to
 an audited outstanding issue without granting commits, pushes, scope changes,
 account rotation or paid-credit fallback. A second deadline stop escalates.
+
+## Saved peer-verdict compatibility recovery
+
+The peer decoder accepts the single wire alias `correctness` as `source`;
+canonical feedback categories and all other unknown values remain strict. The
+stored reviewer bytes, result SHA, target SHA and full author feedback never
+change. Reviewer instructions enumerate categories and field/packet limits.
+
+`WorkflowCoordinator.retry_peer_verdict` is a private factory-owned recovery port;
+the ordinary durable scan invokes the same method automatically. It accepts only
+the precise parser-error escalation for a stopped, reconciled code reviewer whose
+saved decision is `revise` and contains that alias. Current source revision,
+immutable target, approved Plan, candidate, successful local gates, frozen roles,
+recipes, grants, readiness and remaining code budget must still match. Cancelled,
+blocked, concurrent or published work cannot be revived. This path cannot recover
+an approval, fabricate a verdict or accept a generic parser error.
+
+A project lock and one immutable completed recovery ledger entry per workflow
+make concurrent/repeated requests idempotent. Recovery queues the original
+handed-off decision action, then the normal controller validates and applies the
+saved verdict. The usual code repair allowance is consumed by that transition;
+no Plan, native-deadline, verifier retry or code budget is reset. An unchanged
+candidate keeps its existing exact-head local evidence; repaired source goes
+through all normal checks and another independent review before publication.

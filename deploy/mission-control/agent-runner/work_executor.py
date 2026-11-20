@@ -743,7 +743,12 @@ class CommandRunnerProvider:
                 "Copy identity fields from the target and the context hash above. Do not use Markdown fences. "
                 "Approve only when no new findings remain. Revise requires actionable open findings, using stable "
                 "finding_id, category, summary and optional check_id/path/diagnostic_code/reproduction/expected/actual/"
-                "evidence_digest/status fields; status may only be open. Attested finding IDs may contain only "
+                "evidence_digest/status fields; status may only be open. Category must be exactly source, "
+                "infrastructure, quota, authentication, permission or scope (use source for correctness bugs). "
+                "Return at most 32 findings; finding_id is 1-64 ASCII letters/digits/_.-, summary is 1-2048 UTF-8 bytes, "
+                "check_id/diagnostic_code at most 128 bytes, path at most 1024, and reproduction/expected/actual at most "
+                "2048 each. Evidence_digest is empty or 64 lowercase hex characters. Summary is at most 2048 UTF-8 bytes; "
+                "the complete JSON verdict is at most 65536 bytes. Attested finding IDs may contain only "
                 "existing open IDs independently verified for a code approval. Escalate when uncertain or outside scope. "
                 "You cannot approve checks, choose another agent, alter the merge target or perform publication.")
         elif peer_context is not None:
@@ -804,7 +809,9 @@ class CommandRunnerProvider:
                        + feedback_context.sha256 + ". Address finding IDs: "
                        + ", ".join(feedback_context.finding_ids)
                        + ". Report changed files, addressed IDs, commands/exits and remaining gaps. "
-                       "Findings close only after independent verification. Do not weaken required checks.")
+                       "Findings close only after independent verification. Do not weaken required checks. "
+                       "Finish focused checks and the final report promptly; avoid repeating full cold repository CI "
+                       "on each repair turn because the trusted independent verifier still runs ALL fixed CI.")
             if feedback_context.legacy_resume_note:
                 prompt += "\nOWNER RESUME FEEDBACK:\n" + feedback_context.legacy_resume_note
         peer_feedback_file = None

@@ -184,7 +184,14 @@ def parse_review_verdict(raw, target):
                      for field in _IDENTITY_FIELDS) and value["context_sha256"] == expected)
         _require(value["decision"] in ("approve", "revise", "escalate"))
         _text(value["summary"], 2048)
-        findings = validate_findings(value["findings"], public=True)
+        # A finite peer-wire compatibility alias only. Preserve the exact raw
+        # verdict for its hash/receipt; shared feedback categories stay strict.
+        peer_findings = deepcopy(value["findings"])
+        if isinstance(peer_findings, list):
+            for finding in peer_findings:
+                if isinstance(finding, dict) and finding.get("category") == "correctness":
+                    finding["category"] = "source"
+        findings = validate_findings(peer_findings, public=True)
         ids = value["attested_finding_ids"]
         _require(isinstance(ids, list) and len(ids) <= 32)
         for identity in ids:

@@ -60,6 +60,23 @@ def verdict(value, decision="approve"):
 
 
 class PeerReviewContractTest(unittest.TestCase):
+    def test_only_peer_correctness_wire_alias_is_normalized_without_mutating_raw(self):
+        from work_feedback import validate_findings
+        parsed = bind(target("code"))
+        value = verdict(parsed, "revise")
+        value["findings"][0]["category"] = "correctness"
+        raw = json.dumps(value)
+        original = sha(raw)
+        self.assertEqual(parse_review_verdict(raw, parsed)["findings"][0]["category"], "source")
+        self.assertEqual(sha(raw), original)
+        self.assertEqual(value["findings"][0]["category"], "correctness")
+        with self.assertRaises(ValueError):
+            validate_findings(value["findings"], public=True)
+        for category in ("Correctness", "bug", "security", "correctness ", [], None):
+            value["findings"][0]["category"] = category
+            with self.subTest(category=category), self.assertRaises(PeerReviewError):
+                parse_review_verdict(json.dumps(value), parsed)
+
     def test_exact_unicode_plan_and_three_revision_context_remain_intact(self):
         value = target(source="Plan: preserve José’s draft → review → execute.")
         value["plan_revision"] = 3
