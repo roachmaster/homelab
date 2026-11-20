@@ -319,7 +319,12 @@ impl Agents {
             || self.publication_processing()
             || self.review_processing()
             || self.workflow_processing()
-            || self.pane == Pane::List && self.tasks.iter().any(|t| t.status.is_processing())
+            || self.pane == Pane::List
+                && self.tasks.iter().any(|t| {
+                    t.status.is_processing()
+                        || t.workflow_phase
+                            .is_some_and(WorkWorkflowPhase::is_processing)
+                })
     }
     pub fn network_failed(&mut self, id: &str, watch: String, effects: &mut Vec<UiEffect>) {
         if self.pending.as_ref().is_some_and(|r| r.request_id() == id) {
@@ -459,9 +464,12 @@ impl Agents {
                 self.clear_progress();
                 self.clear_result();
                 self.pane = Pane::Compose;
-                self.status =
+                self.status = if self.workflow_policy().is_some() {
+                    "New assignment. Plan review, implementation and required checks advance automatically."
+                } else {
                     "New task. Work runs in the background; review the result before accepting."
-                        .into();
+                }
+                .into();
             }
             UiEvent::AgentsBack {} => {
                 self.pane = Pane::List;
@@ -2346,7 +2354,7 @@ impl Agents {
                     toggle: None,
                     correspondence: None,
                     summary: Some(RowSummary {
-                        badge: task_badge(t.status),
+                        badge: self.task_summary_badge(t),
                         tag: t.agent_profile.clone(),
                         time: timestamp(&t.created_at, self.now_ms),
                     }),

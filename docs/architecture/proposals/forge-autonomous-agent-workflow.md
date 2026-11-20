@@ -272,3 +272,42 @@ projection/context fails closed and cannot re-enable manual approvals by acciden
 - A coordinated migration 15/16, policy 7, service and atomic portal rollout, then
   a separately identified real-agent pilot. Mocked CLI/GitHub tests are not evidence
   that the new production workflow has run.
+
+## Native deadline recovery
+
+`forge-native-deadline-recovery-v1` permits **one native deadline recovery per
+workflow**. This is a distinct fixed allowance; it does not spend or expand the
+existing verifier infrastructure-retry allowance. Plan revisions, code repair
+rounds, the frozen workflow policy and the original Plan decision stay unchanged.
+
+The factory-owned `WorkflowCoordinator.retry_native_timeout` port is a supported
+private operator entry point. The same scoped store method runs automatically
+when the existing durable-event scan finds a reconciled deadline stop. Public
+`WorkResume` remains closed to autonomous-task overrides. Neither agents nor
+browser requests can assert the private retry authority.
+
+Admission requires the exact latest Implement attempt, current task revision
+and reconciliation receipt, zero remaining writers, no coherent result,
+unchanged author profile/recipe/Plan, current role grants and fresh matching
+worker readiness. A trusted `deadline_exceeded` event is sufficient provenance;
+the `record_stop` race is also supported when its trusted
+`stopped_without_publication` event, database `finished_at`, stop proof and
+reconciliation all occur after the immutable attempt deadline. A summary string
+or a lease-only expiry is never deadline authority. Authentication, quota,
+permission, cancellation, unrelated sibling failures, active publication/review
+work and arbitrary human escalations remain blocked.
+
+The transition uses the existing locked `WorkStore.resume` path with a
+nonserializable, cursor/task/attempt-bound server capability. An immutable
+attempt-keyed completed workflow action and the existing resume control receipt
+make retries idempotent and prevent concurrent callers from granting a second
+turn. The committed `resumed` event wakes the normal coding worker, which verifies
+the preserved workspace digest before starting another writer. No schema change,
+new daemon, raw task SQL recovery or new workflow/Plan is required.
+
+The trusted resume note tells the author to inspect preserved work, continue the
+same approved Plan, finish focused checks and publish a final report promptly.
+It avoids another full cold CI run inside the native turn; the independent
+verifier still runs **all** required checks. A bounded operator note can point to
+an audited outstanding issue without granting commits, pushes, scope changes,
+account rotation or paid-credit fallback. A second deadline stop escalates.

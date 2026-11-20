@@ -3584,12 +3584,25 @@ async function agentsJourney() {
     assert.equal(autonomousSubmission.mode,'plan');assert.equal(autonomousSubmission.agent_profile,'agy-primary');
     const workflowTaskId=relay.latestWorkflowTaskId;
     for(const id of ['agents-plan-actions','agents-review','agents-accept','agents-resume'])await check(page.locator('#'+id)).toBeHidden();
+    await page.locator('#agents-back').click();
+    const workflowRow=page.locator(`#agents-tasks [data-row-id="${workflowTaskId}"]`);
+    await check(workflowRow.locator('.fg-row-summary .fg-badge')).toHaveText('Reviewing plan');
+    relay.workflowPhase(workflowTaskId,'checks');
+    await check(workflowRow.locator('.fg-row-summary .fg-badge')).toHaveText('Running checks');
+    await workflowRow.locator('.fg-row-select').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Running checks');
     for(const phase of ['code_review','hosted','merging','completed']){
       relay.workflowPhase(workflowTaskId,phase);await page.locator('#agents-refresh').click();
-      await check(page.locator('#agents-workflow-phase')).toHaveText({code_review:'Reviewing code',hosted:'Hosted checks pending',merging:'Merging',completed:'Merged'}[phase]);
+      const phaseLabel={code_review:'Reviewing code',hosted:'Hosted checks pending',merging:'Merging',completed:'Merged'}[phase];
+      await check(page.locator('#agents-workflow-phase')).toHaveText(phaseLabel);
       await check(page.locator('#agents-accept')).toBeHidden();
       await check(page.locator('#agents-plan-actions')).toBeHidden();
       if(['merging','completed'].includes(phase))await check(page.locator('#agents-cancel')).toBeHidden();
+      await page.locator('#agents-back').click();
+      await check(workflowRow).toContainText(phaseLabel);
+      await check(workflowRow).not.toContainText('Ready for review');
+      await workflowRow.locator('.fg-row-select').click();
+      await check(page.locator('#agents-workflow-phase')).toHaveText(phaseLabel);
     }
     for(const width of [320,390,1440]){
       await page.setViewportSize({width,height:844});
@@ -3600,10 +3613,16 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Preserve the source and expose cancellation after escalation.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
-    relay.workflowPhase(relay.latestWorkflowTaskId,'escalated');await page.locator('#agents-refresh').click();
-    await check(page.locator('#agents-workflow-phase')).toHaveText('Operator attention');
+    const escalationTaskId=relay.latestWorkflowTaskId;
+    relay.workflowPhase(escalationTaskId,'escalated');await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
     await check(page.locator('#agents-workflow-escalation')).toContainText('Revision budget exhausted');
     await check(page.locator('#agents-accept')).toBeHidden();await check(page.locator('#agents-plan-actions')).toBeHidden();
+    await page.locator('#agents-back').click();
+    const escalationRow=page.locator(`#agents-tasks [data-row-id="${escalationTaskId}"]`);
+    await check(escalationRow).toContainText('Needs attention');
+    await escalationRow.locator('.fg-row-select').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
