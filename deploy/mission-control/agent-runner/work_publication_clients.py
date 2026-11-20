@@ -263,6 +263,18 @@ class GitRepositoryProvider:
             shutil.rmtree(repository)  # Only this stopped, identity-bound private clone.
         self._git(None, "clone", "--quiet", "--no-local", "--no-checkout", "--",
                   str(self.config.worker.projects[job["project_alias"]]), str(repository))
+        # Linked repairs may start at a reviewed commit imported without a ref.
+        # clone copies advertised refs, so import this exact admitted object from
+        # the selected canonical repository before checkout. Canonical refs,
+        # FETCH_HEAD and working files are never changed by this acquisition.
+        canonical = self.config.worker.projects[job["project_alias"]]
+        base = job["base_revision"]
+        if self._git(canonical, "rev-parse", "--verify", base + "^{commit}").decode().strip() != base:
+            raise PublicationError("publication_base_changed")
+        self._git(repository, "fetch", "--quiet", "--no-tags", "--no-recurse-submodules",
+                  "--no-write-fetch-head", "--", str(canonical), base)
+        if self._git(repository, "rev-parse", "--verify", base + "^{commit}").decode().strip() != base:
+            raise PublicationError("publication_base_changed")
         self._git(repository, "checkout", "--quiet", "--detach", job["base_revision"])
         self._git(repository, "checkout", "--quiet", "-b", branch_name(job))
         for child in repository.iterdir():

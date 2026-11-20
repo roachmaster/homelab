@@ -335,3 +335,27 @@ saved verdict. The usual code repair allowance is consumed by that transition;
 no Plan, native-deadline, verifier retry or code budget is reset. An unchanged
 candidate keeps its existing exact-head local evidence; repaired source goes
 through all normal checks and another independent review before publication.
+
+## Linked candidate preparation retries
+
+A linked repair base can exist only as an immutable canonical Git object, with
+no branch naming it. After cloning, candidate preparation explicitly fetches and
+verifies that exact admitted commit from the configured local canonical source,
+without changing canonical refs, files or `FETCH_HEAD`. No task-supplied source
+path, remote fallback or upload-pack setting is accepted.
+
+The private factory-owned `retry_preparation` port and normal durable scan can
+recover the known pre-candidate `publication_command_failed` handoff. They require
+the latest linked author result, stopped/reconciled matching workspace, approved
+scope, unchanged frozen roles/grants/readiness, no checks or candidate yet, and
+no cancelled, blocked or competing work. They use the existing
+`review_decide(retry_infrastructure)` path and its existing frozen infrastructure
+allowance of one. No author reruns, code repair rounds, Plan revisions or native
+deadline allowances are granted or reset. The failed review receipt stays intact.
+
+The appended review preserves inherited Plan scope and all stopped source hashes.
+A local infrastructure retry without a candidate takes a fresh digest-validated
+snapshot and runs normal preparation and **all** fixed checks; it cannot reuse a
+missing candidate manifest as approval. Retries with an existing candidate retain
+the existing exact-candidate reuse contract. Source merge conflicts, authentication
+failures and unrelated handoffs are not asserted to be successful preparation.

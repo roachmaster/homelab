@@ -59,7 +59,10 @@ def validate_review(config, job):
                 raise PublicationError("review_gate_policy_changed")
         if job.get("source_review_id") is not None:
             uuid(job["source_review_id"])
-            if not SHA.fullmatch(job.get("candidate_commit", "")):
+            fresh_preparation = (job.get("candidate_commit") is None and job.get("phase") == "local"
+                and job.get("infrastructure_retries", 0) > 0
+                and job["source_review_id"] == job.get("previous_review_id"))
+            if not fresh_preparation and not SHA.fullmatch(job.get("candidate_commit", "")):
                 raise PublicationError("invalid_review_candidate")
         if job.get("phase") == "hosted":
             uuid(job["source_publication_id"])
@@ -308,7 +311,7 @@ class ReviewWorker:
                 require_lease()
                 check_job = verification_job(job)
                 self.checks.quiesce(check_job)
-                if job.get("source_review_id") is not None:
+                if job.get("source_review_id") is not None and job.get("candidate_commit") is not None:
                     repository, head, prior = self.candidates.retry(job)
                     candidate_digest = prior["candidate_workspace_digest"]
                     requires_new = prior["repair_requires_new_workspace"]
