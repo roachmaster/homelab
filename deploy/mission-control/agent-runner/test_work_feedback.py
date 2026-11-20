@@ -45,7 +45,7 @@ class FeedbackStoreTest(unittest.TestCase):
         receipt=self.db.reconcile(lease,'c'*64,proof)
         return lease,receipt
     def outcome(self,**changes):
-        result={'disposition':'awaiting_review','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[],
+        result={'cleanup_confirmed':True,'disposition':'awaiting_review','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,'findings':[],
                 'verified_finding_ids':[],'fingerprint':None,'summary':'Local checks passed.','reason':'Independent approval required.',
                 'verification':{'checks_passed':True,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':False,'toolchain':'fixture'}}
         result.update(changes);return result
@@ -101,7 +101,7 @@ class FeedbackStoreTest(unittest.TestCase):
         publication=self.db.publication_claim('publisher')
         self.db.publication_finish(publication,'publishing','Passed',branch='forge/hosted',commit_sha='d'*40)
         self.db.publication_finish(publication,'published','PR',branch='forge/hosted',commit_sha='d'*40,pr_url='https://github.com/fixture/project/pull/2')
-        observer=self.db.review_claim('observer');self.assertEqual(observer['phase'],'hosted');self.assertEqual(observer['target_publication_id'],publication['publication_id'])
+        observer=self.db.review_claim('observer');self.assertEqual(observer['phase'],'hosted');self.assertEqual(observer['target_publication_id'],publication['publication_id']);self.assertEqual(observer['source_publication_id'],publication['publication_id']);self.assertEqual(observer['source_review_id'],review)
         checks=[{'name':name,'status':'pending','head_sha':'d'*40} for name in ('check','pr-fast-gate','real-browser')]
         outcome=self.outcome(verification={'hosted':True,'hosted_status':'pending','checks':checks})
         self.assertEqual(self.db.review_finish(observer,outcome)['status'],'waiting_hosted')

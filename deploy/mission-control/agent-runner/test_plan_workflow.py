@@ -8,7 +8,7 @@ from uuid import UUID,uuid4
 
 from queue_store import Rejected
 from test_work_execution_and_usage import make_v2_config,make_submit,make_stop_proof
-from work_api import WorkAccept,WorkGet,WorkResume,WorkPlanDecide,WorkServiceFactory,Destination,decode,dispatch
+from work_api import WorkAccept,WorkGet,WorkResume,WorkPlanDecide,WorkReviewDecide,WorkServiceFactory,Destination,decode,dispatch
 from work_executor import utf8_chunks
 from work_pg_fixture import DisposablePostgresCluster,PG16_AVAILABLE
 from work_worker_store import WorkerDB,WorkerAccessError,LeaseExpiredError
@@ -74,6 +74,19 @@ class PlanWorkflowPostgresTest(unittest.TestCase):
         lease=self.claim();self.assertEqual(lease.resume_attempt_id,plan.attempt_id);self.assertIsNotNone(lease.plan_decision_id)
         return plan,lease,command,receipt
 
+    def approve_review(self,lease,receipt):
+        review_id=self.db.queue_review(lease,receipt)
+        review=self.db.review_claim('independent-reviewer')
+        self.db.review_finish(review,{'disposition':'awaiting_review','candidate_commit':'a'*40,'gate_manifest_sha256':'e'*64,
+            'cleanup_confirmed':True,'findings':[],'verified_finding_ids':[],'fingerprint':None,'summary':'Verified local gates.',
+            'verification':{'checks_passed':True,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':False}})
+        detail=self.service.get(WorkGet('homelab',UUID(lease.task_id)))
+        self.service.review_decide(WorkReviewDecide('homelab',UUID(lease.task_id),detail['revision'],UUID(review_id),'approve','codex-v2','Independently reviewed source.',str(uuid4())))
+        return self.db.queue_publication(lease,receipt)
+
+    def hosted_green(self,job,head='a'*40):
+        return self.db.record_hosted_checks(job['publication_id'],head,[{'name':name,'status':'success','head_sha':head} for name in ('check','pr-fast-gate','real-browser')])
+
     def test_resume_queues_same_task_implement_and_reads_exact_plan(self):
         text="## Plan\n"+"Long exact Unicode plan 😀.\n"*1500
         plan,manifest,detail,_=self.plan(text)
@@ -124,7 +137,7 @@ class PlanWorkflowPostgresTest(unittest.TestCase):
 
     def test_publication_is_idempotent_fenced_and_blocks_generic_controls(self):
         _,lease,command,decision=self.implementation();_,publication,rec=self.publish(lease)
-        jobid=self.db.queue_publication(lease,rec);self.assertEqual(self.db.queue_publication(lease,rec),jobid)
+        jobid=self.approve_review(lease,rec);self.assertEqual(self.db.queue_publication(lease,rec),jobid)
         detail=self.service.get(WorkGet("homelab",UUID(lease.task_id)));self.assertEqual(detail["publication"]["status"],"pending")
         with self.assertRaises(Rejected):self.service.resume(WorkResume("homelab",UUID(lease.task_id),detail["revision"],"race","codex-v2",UUID(rec)))
         with self.assertRaises(Rejected):self.service.accept(WorkAccept("homelab",UUID(lease.task_id),detail["revision"],"accept-race"))
@@ -137,8 +150,10 @@ class PlanWorkflowPostgresTest(unittest.TestCase):
         self.assertEqual(self.db.publication_finish(job,"published","Pull request ready",branch,commit,url),receipt)
         self.assertFalse(self.db.publication_renew(job))
         result=self.service.get(WorkGet("homelab",UUID(lease.task_id)))["publication"]
-        self.assertEqual(result,{"status":"published","summary":"Pull request ready","branch":branch,"commit_sha":commit,"pr_url":url})
+        self.assertEqual(result,{"status":"published","summary":"Pull request ready","branch":branch,"commit_sha":commit,"pr_url":url,"publication_id":jobid})
         self.assertEqual(self.service.plan_decide(command),decision)
+        with self.assertRaises(Rejected):self.service.accept(WorkAccept("homelab",UUID(lease.task_id),detail["revision"],"accept-published"))
+        self.hosted_green(job)
         self.assertEqual(self.service.accept(WorkAccept("homelab",UUID(lease.task_id),detail["revision"],"accept-published"))["status"],"completed")
 
     def test_approved_implementation_accept_and_resume_wait_for_publication_even_before_outbox(self):
@@ -149,25 +164,28 @@ class PlanWorkflowPostgresTest(unittest.TestCase):
         result=self.db.publish(lease,"awaiting_review",{"sha256":hashlib.sha256(raw).hexdigest(),
             "byte_count":len(raw),"chunk_count":1},None,"Ready",proof)
         detail=self.service.get(WorkGet("homelab",UUID(lease.task_id)))
-        self.assertEqual(detail["publication"],{"status":"pending","summary":"Waiting for trusted publication."})
+        self.assertNotIn("publication",detail)
+        self.assertEqual(detail["review"]["stage"],"waiting_for_result")
         command=WorkAccept("homelab",UUID(lease.task_id),result["revision"],"accept-before-publication")
         with self.assertRaises(Rejected) as failure:self.service.accept(command)
         self.assertEqual(failure.exception.code,"reconcile_required")
         rec=self.db.reconcile(lease,"c"*64,proof)
         with self.assertRaises(Rejected):self.service.accept(command)
         with self.assertRaises(Rejected):self.service.resume(WorkResume("homelab",UUID(lease.task_id),result["revision"],"resume-before-outbox","codex-v2",UUID(rec)))
-        self.db.queue_publication(lease,rec)
+        self.assertIsNone(self.db.queue_publication(lease,rec))
         with self.assertRaises(Rejected):self.service.accept(command)
+        self.approve_review(lease,rec)
+        command=replace(command,expected_revision=self.service.get(WorkGet("homelab",UUID(lease.task_id)))["revision"])
         job=self.db.publication_claim("publisher")
         self.db.publication_finish(job,"failed","Checks require review before publication")
-        self.assertEqual(self.service.accept(command)["status"],"completed")
+        with self.assertRaises(Rejected):self.service.accept(command)
 
     def test_superseded_publication_is_failed_without_remote_replay_and_releases_controls(self):
         for status in ("pending","checking","publishing"):
             with self.subTest(status=status):
                 self.setUp()
                 _,lease,_,_=self.implementation();_,result,rec=self.publish(lease)
-                job_id=self.db.queue_publication(lease,rec)
+                job_id=self.approve_review(lease,rec)
                 job=None
                 if status!="pending":job=self.db.publication_claim("publisher")
                 branch="forge/task-"+job_id
@@ -186,23 +204,18 @@ class PlanWorkflowPostgresTest(unittest.TestCase):
                 if status=="publishing":
                     self.assertEqual(detail["publication"]["branch"],branch)
                     self.assertEqual(detail["publication"]["commit_sha"],"a"*40)
-                self.assertEqual(self.service.accept(WorkAccept("homelab",UUID(lease.task_id),result["revision"],"accept-revoked"))["status"],"completed")
+                with self.assertRaises(Rejected):self.service.accept(WorkAccept("homelab",UUID(lease.task_id),result["revision"],"accept-revoked"))
 
-    def test_queued_implementation_retry_does_not_display_prior_publication(self):
+    def test_generic_resume_cannot_bypass_review_after_failed_publication(self):
         _,lease,_,_=self.implementation();_,result,rec=self.publish(lease)
-        self.db.queue_publication(lease,rec)
-        job=self.db.publication_claim("publisher")
-        self.db.publication_finish(job,"failed","Preflight checks require revision")
-        detail=self.service.get(WorkGet("homelab",UUID(lease.task_id)))
-        self.assertEqual(detail["publication"]["status"],"failed")
-        self.service.resume(WorkResume("homelab",UUID(lease.task_id),result["revision"],"retry-after-checks","codex-v2",UUID(rec)))
-        queued=self.service.get(WorkGet("homelab",UUID(lease.task_id)))
-        self.assertEqual(queued["status"],"queued")
-        self.assertIsNone(queued["attempt"]);self.assertIsNone(queued["result"])
-        self.assertNotIn("publication",queued)
+        self.approve_review(lease,rec);job=self.db.publication_claim('publisher')
+        self.db.publication_finish(job,'failed','Preflight checks require revision')
+        detail=self.service.get(WorkGet('homelab',UUID(lease.task_id)))
+        with self.assertRaises(Rejected):self.service.resume(WorkResume('homelab',UUID(lease.task_id),detail['revision'],'retry-after-checks','codex-v2',UUID(rec)))
+        self.assertEqual(self.service.get(WorkGet('homelab',UUID(lease.task_id)))['status'],'awaiting_review')
 
     def test_expired_checking_reclaims_but_uncertain_publishing_never_replays(self):
-        _,lease,_,_=self.implementation();_,_,rec=self.publish(lease);self.db.queue_publication(lease,rec)
+        _,lease,_,_=self.implementation();_,_,rec=self.publish(lease);self.approve_review(lease,rec)
         first=self.db.publication_claim("publisher")
         self.cluster.admin_exec("UPDATE forge_agent.coding_publications SET lease_expires_at=clock_timestamp()-interval '1 second'")
         second=self.db.publication_claim("replacement");self.assertNotEqual(first["lease_token"],second["lease_token"])
@@ -215,7 +228,7 @@ class PlanWorkflowPostgresTest(unittest.TestCase):
         self.assertEqual(row["status"],"failed");self.assertIn("review",row["summary"])
 
     def test_missed_queue_recovers_with_owner_and_latest_attempt_fences(self):
-        _,lease,_,_=self.implementation();self.publish(lease);job=self.db.publication_claim("publisher")
+        _,lease,_,_=self.implementation();_,_,rec=self.publish(lease);self.approve_review(lease,rec);job=self.db.publication_claim("publisher")
         self.assertEqual(job["attempt_id"],lease.attempt_id)
         other=WorkerDB(lambda:self.cluster.connect("forge_coding_worker"),"other-owner",reconcile_connect_factory=lambda:self.cluster.connect("forge_coding_reconciler"))
         self.assertIsNone(other.publication_claim("another-owner"));self.assertFalse(other.publication_renew(job))
