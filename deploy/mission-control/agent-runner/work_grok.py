@@ -14,6 +14,8 @@ CONFIG='''[cli]
 auto_update = false
 use_leader = false
 session_registry = false
+[session]
+load_envrc = false
 [features]
 shared_daemon = false
 auto_wake = false
@@ -47,10 +49,43 @@ trace_upload = false
 '''
 
 
+# Installed1.0.92 guides05 (project config/LSP),07 (MCP compatibility),
+# 09 (plugins),10 (hooks),16 (agent roles) and22 (folder trust).
+# Fixed metadata checks only: never recurse into or read project config bodies.
+PROJECT_EXECUTABLE_PATHS=(
+    '.grok/config.toml', '.grok/sandbox.toml', '.grok/lsp.json',
+    '.grok/hooks', '.grok/plugins', '.grok/agents', '.grok/personas', '.grok/roles', '.grok/workflows',
+    '.claude/settings.json', '.claude/settings.local.json', '.claude/plugins',
+    '.cursor/hooks.json', '.cursor/mcp.json', '.mcp.json', '.envrc',
+)
+PROJECT_CONFIG_ROOTS=('.grok','.claude','.cursor')
+MANAGED_POLICY='allow_managed_hooks_only = true\nallow_managed_mcp_servers_only = true\nallowed_mcp_servers = []\nenable_all_project_mcp_servers = false\nstrict_known_marketplaces = []\n'
+
+
+def validate_project_subset(workspace):
+    """Accept instruction-only projects before acquiring auth or native state.
+
+    Leaf or container symlinks (including dangling links) are presence, not an
+    invitation to follow/read another directory. Unreadable metadata fails shut.
+    """
+    root=workspace.lstat()
+    if not stat.S_ISDIR(root.st_mode):
+        raise ValueError('Unsupported Grok project scope')
+    for relative in PROJECT_CONFIG_ROOTS:
+        try: info=(workspace/relative).lstat()
+        except FileNotFoundError: continue
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError('Unsupported Grok project configuration')
+    for relative in PROJECT_EXECUTABLE_PATHS:
+        try: (workspace/relative).lstat()
+        except FileNotFoundError: continue
+        raise ValueError('Unsupported Grok project executable configuration')
+
+
 def argv(binary,model,workspace,prompt_file,session_id,leader_socket,*,implement):
     tools='read_file,grep,list_dir,run_terminal_cmd'
     if implement:tools+=',search_replace,write'
-    args=(str(binary),'--no-auto-update','--prompt-file',str(prompt_file),
+    args=(str(binary),'--no-auto-update','--trust','--prompt-file',str(prompt_file),
           '--output-format','streaming-json','--model',model,'--cwd',str(workspace),
           '--session-id',session_id,'--leader-socket',str(leader_socket),
           '--no-memory','--no-subagents','--no-plan','--disable-web-search',
