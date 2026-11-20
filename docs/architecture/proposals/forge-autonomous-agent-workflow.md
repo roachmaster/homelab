@@ -55,6 +55,11 @@ are unchanged. An unsupervised/custom runner retains Codex's inner sandbox.
 This changes the immutable execution-policy identity rather than reinterpreting
 previous policy receipts.
 
+Native CLI tools share the host network and selected staged native-account
+state; this is not the verifier's network-isolated scope. The policy records
+that allowance explicitly. Database/publication credentials remain masked, and
+verification continues to use its private network namespace.
+
 ```mermaid
 flowchart TD
     U[One user assignment] --> P[Configured project workflow policy]
