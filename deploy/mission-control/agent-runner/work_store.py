@@ -291,7 +291,7 @@ class WorkStore:
                     continue
                 alias = entry.get("alias")
                 profile = config.profiles.get(alias)
-                if profile is None or profile.resource_profile != POLICY_ID:
+                if profile is None or not profile.execution_enabled or profile.resource_profile != POLICY_ID:
                     continue
                 if entry.get("backend") != profile.backend or entry.get("model") != profile.model:
                     continue
@@ -322,7 +322,7 @@ class WorkStore:
             for alias in sorted(config.allowed_projects)[:MAX_PROJECTS]
         ]
         profiles = []
-        for alias in sorted(config.profiles)[:MAX_PROFILES]:
+        for alias in sorted(alias for alias, profile in config.profiles.items() if profile.execution_enabled)[:MAX_PROFILES]:
             modes = advertised_profile_modes.get(alias)
             if not modes:
                 continue
