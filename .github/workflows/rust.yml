@@ -3,9 +3,9 @@ name: Rust CI
 on:
   push:
     branches: [main, validation/forge-ide-ui]
-    paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', '.github/workflows/rust.yml']
+    paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', 'deploy/mission-control/**', '.github/workflows/rust.yml']
   pull_request:
-    paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', '.github/workflows/rust.yml']
+    paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', 'deploy/mission-control/**', '.github/workflows/rust.yml']
   workflow_dispatch:
 
 permissions:
@@ -18,10 +18,11 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       RUSTUP_TOOLCHAIN: stable
       CARGO_TERM_COLOR: always
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -34,13 +35,151 @@ jobs:
           node --version
       - name: Fetch locked optional capability dependencies
         run: cargo fetch --manifest-path src/rust/Cargo.toml --locked
-      - name: Install game asset cooker prerequisites
+      - name: Install game asset cooker and Mission Control PostgreSQL test prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgdk-pixbuf2.0-bin librsvg2-common imagemagick
+          sudo apt-get install -y --no-install-recommends \
+            libgdk-pixbuf2.0-bin librsvg2-common imagemagick \
+            postgresql-16 postgresql-client-16 libpq-dev python3-psycopg2 python3-yaml
+          test -x /usr/lib/postgresql/16/bin/initdb
+          command -v pg_config
+          python3 -B -c "import psycopg2, yaml"
       - name: Verify game asset cooking and pixel-art exports
         run: |
           python3 -B -m unittest discover -s src/python/game-assets/tests -v
           python3 -B -m unittest discover -s src/python/pixel-art/tests -v
-      - name: Shared repository quality gates
+      - name: Authoritative shared repository quality gates
         run: make ci
+      - name: Verify Mission Control portal backend suites (zero silent skips)
+        run: |
+          ASSETS_DIR="$(python3 -B src/rust/scripts/ui_tools.py build | awk '/^ASSETS / {print $2}' | tail -n 1)"
+          test -d "$ASSETS_DIR"
+          export FORGE_STUDIO_HOST_FIXTURE="$PWD/src/rust/target/debug/examples/loopback_fixture"
+          export FORGE_STUDIO_AGENT="$PWD/src/rust/target/debug/forge-agent"
+          export FORGE_STUDIO_ASSETS="$ASSETS_DIR"
+          test -x "$FORGE_STUDIO_HOST_FIXTURE"
+          test -x "$FORGE_STUDIO_AGENT"
+          python3 -B - <<'PY'
+          import os, subprocess, sys, unittest
+
+          suites = [
+              ("deploy/mission-control", "test_services.py"),
+              ("deploy/mission-control/agent-driver", "test_*.py"),
+              ("deploy/mission-control/agent-runner", "test_*.py"),
+              ("deploy/mission-control/studio", "test_*.py"),
+          ]
+          for start_dir, pattern in suites:
+              print(f"=== Running backend suite: {start_dir} ({pattern}) ===", flush=True)
+              code = (
+                  "import sys, unittest\n"
+                  f"suite = unittest.defaultTestLoader.discover('.', pattern={pattern!r})\n"
+                  "res = unittest.TextTestRunner(verbosity=2).run(suite)\n"
+                  "print(f'SUITE_SUMMARY tests={res.testsRun} skipped={len(res.skipped)} failures={len(res.failures)} errors={len(res.errors)}', flush=True)\n"
+                  "if not res.wasSuccessful() or res.testsRun == 0 or res.skipped:\n"
+                  "    sys.exit(1)\n"
+              )
+              proc = subprocess.run([sys.executable, "-B", "-c", code], cwd=start_dir, check=False)
+              if proc.returncode != 0:
+                  sys.exit(proc.returncode)
+          PY
+
+  pr-fast-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TERM_COLOR: always
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Configure external build output
+        run: |
+          printf 'CARGO_TARGET_DIR=%s/forge-pr-fast-target\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Select stable Rust and check components
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup target add wasm32-unknown-unknown
+          cargo fetch --manifest-path src/rust/Cargo.toml --locked
+          node --version
+      - name: Install game asset cooker and portal Python prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgdk-pixbuf2.0-bin librsvg2-common imagemagick \
+            postgresql-16 postgresql-client-16 libpq-dev python3-psycopg2 python3-yaml
+      - name: Formatting, portal style, and DAG guard
+        run: |
+          make fmt-check
+          make portal-style-check
+          make check-deps
+      - name: Generate YAML AST graph and run selective dead-code analysis
+        env:
+          BASE_REF: origin/${{ github.base_ref }}...HEAD
+          CHANGED_ONLY: "1"
+          REFRESH_AST: "0"
+        run: |
+          make ast-yaml
+          make dead-code
+      - name: Run strictly 1-hop direct-dependent build and test
+        env:
+          BASE_REF: origin/${{ github.base_ref }}...HEAD
+          REFRESH_AST: "0"
+        run: |
+          run_selective() {
+            local mode="$1"
+            set +e
+            python3 -B src/rust/scripts/affected_build.py "$mode"
+            local rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              return 0
+            fi
+            if [ "$rc" -eq 3 ]; then
+              python3 -B - "$CARGO_TARGET_DIR/ast/affected-plan.yaml" "$mode" <<'PY'
+          import pathlib, sys
+          sys.path.insert(0, "src/rust/scripts")
+          import yaml_io
+          plan = yaml_io.load_yaml(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if plan.get("incomplete_graph"):
+              print(f"FAIL: {sys.argv[2]} refused due to incomplete AST graph: {plan.get('graph_incomplete_reasons')}", file=sys.stderr)
+              sys.exit(3)
+          print(
+              f"NOTICE: {sys.argv[2]} conservatively deferred to authoritative full `check` job "
+              f"(reasons={plan.get('invalidation_reasons')}, global={plan.get('global_files')}, unmapped={plan.get('unmapped_files')})."
+          )
+          PY
+              return $?
+            fi
+            return "$rc"
+          }
+          run_selective build
+          run_selective test
+      - name: Publish PR fast-gate summary
+        if: always()
+        run: |
+          {
+            echo "## Forge PR Fast Gate (Selective 1-Hop Direct-Dependent Check)"
+            echo ""
+            echo "Authoritative full-workspace verification runs in the \`check\` job (\`make ci\` + Mission Control backend suites)."
+            echo ""
+            if [ -f "$CARGO_TARGET_DIR/ast/affected-plan.yaml" ]; then
+              echo '```yaml'
+              head -n 80 "$CARGO_TARGET_DIR/ast/affected-plan.yaml"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload YAML AST, affected-build plan, and dead-code reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: forge-ast-and-dead-code-reports
+          path: |
+            ${{ runner.temp }}/forge-pr-fast-target/ast/ast-graph.yaml
+            ${{ runner.temp }}/forge-pr-fast-target/ast/affected-plan.yaml
+            ${{ runner.temp }}/forge-pr-fast-target/ast/dead-code-report.yaml
+          if-no-files-found: ignore
+          retention-days: 7

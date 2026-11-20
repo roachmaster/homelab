@@ -158,7 +158,7 @@ impl fmt::Display for SyntaxError {
 }
 impl Error for SyntaxError {}
 
-fn source_span(span: Span) -> SourceSpan {
+pub(crate) fn source_span(span: Span) -> SourceSpan {
     let start = span.start();
     let end = span.end();
     SourceSpan {
@@ -297,7 +297,7 @@ fn skip_header_trivia(mut text: &str) -> &str {
     }
 }
 
-fn preflight(source: &str, max_depth: usize) -> Result<TokenStream, SyntaxError> {
+pub(crate) fn preflight(source: &str, max_depth: usize) -> Result<TokenStream, SyntaxError> {
     // Pinned proc-macro2 1.0.107 uses explicit stacks for fallback tokenization
     // and TokenStream drop. Outside a procedural macro these are the normal paths.
     let tokens = file_content(source)

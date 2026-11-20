@@ -1,6 +1,7 @@
 //! Thin command-line boundary and explicit single-shot application composition.
 use crate::{
-    assembly::{register_ide, IdeConfig},
+    assembly::{register_ast_graph, register_ide, AstGraphConfig, IdeConfig},
+    ast_graph::{AstGraphReport, AstGraphRequest, AstGraphTask},
     filesystem::{FsError, FsRequest, FsResponse},
     model::ProjectReport,
     task::{InspectError, InspectRequest, InspectTask},
@@ -20,8 +21,10 @@ use std::{
 };
 
 const ROUTE: &str = "ide.inspect";
+const AST_GRAPH_ROUTE: &str = "ide.ast_graph";
 const HELP_ROUTE: &str = "ide.help";
 const MAX_OUTPUT: usize = 16 * 1024 * 1024;
+const MAX_AST_OUTPUT: usize = 64 * 1024 * 1024;
 pub struct Catalog;
 impl DescribeCommand for Catalog {
     fn descriptors(&self) -> &'static [CommandDescriptor] {
@@ -35,6 +38,26 @@ impl DescribeCommand for Catalog {
                     data_type: DataType::Path,
                     presence: Presence::Required,
                 }],
+            },
+            CommandDescriptor {
+                name: AST_GRAPH_ROUTE,
+                help: "Extract expanded Rust AST graph (visibility, imports, modules, attrs, refs) as YAML or JSON.",
+                arguments: &[
+                    ArgumentDescriptor {
+                        name: "root",
+                        help: "Root directory; .git, target and node_modules are excluded at every depth.",
+                        data_type: DataType::Path,
+                        presence: Presence::Required,
+                    },
+                    ArgumentDescriptor {
+                        name: "--format",
+                        help: "Output format: yaml (default) or json.",
+                        data_type: DataType::Text,
+                        presence: Presence::Optional {
+                            default: Some("yaml"),
+                        },
+                    },
+                ],
             },
             CommandDescriptor {
                 name: HELP_ROUTE,
@@ -53,16 +76,33 @@ const HELP_OPTION: ArgumentDescriptor = ArgumentDescriptor {
     },
 };
 fn help() -> String {
-    let d = &Catalog.descriptors()[0];
-    format!("Forge IDE — local project inspector\n\nUsage: forge-ide inspect ROOT\n       forge-ide --help\n\n{} [{}]\n  {}: {} (required) — {}\n  {} — {}\n\nYAML to stdout; no writes, macro expansion or type checking.\n",d.help,d.name,d.arguments[0].name,d.arguments[0].data_type,d.arguments[0].help,HELP_OPTION.name,HELP_OPTION.help)
+    let inspect = &Catalog.descriptors()[0];
+    let ast = &Catalog.descriptors()[1];
+    format!(
+        "Forge IDE — local project inspector\n\nUsage: forge-ide inspect ROOT\n       forge-ide ast-graph ROOT\n       forge-ide --help\n\n{} [{}]\n  {}: {} (required) — {}\n{} [{}]\n  {}: {} (required) — {}\n  {} — {}\n\nYAML to stdout; no writes, macro expansion or type checking.\n",
+        inspect.help,
+        inspect.name,
+        inspect.arguments[0].name,
+        inspect.arguments[0].data_type,
+        inspect.arguments[0].help,
+        ast.help,
+        ast.name,
+        ast.arguments[0].name,
+        ast.arguments[0].data_type,
+        ast.arguments[0].help,
+        HELP_OPTION.name,
+        HELP_OPTION.help,
+    )
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Inspect,
+    AstGraph,
     Help,
 }
 enum Command {
     Inspect,
+    AstGraph,
     Help,
 }
 impl Payload for Command {
@@ -70,12 +110,14 @@ impl Payload for Command {
     fn kind(&self) -> Kind {
         match self {
             Self::Inspect => Kind::Inspect,
+            Self::AstGraph => Kind::AstGraph,
             Self::Help => Kind::Help,
         }
     }
 }
 enum Output {
     Report(Box<ProjectReport>),
+    AstGraph(Box<AstGraphReport>),
     Help(String),
 }
 fn admit(_: &Header, allowed: &bool) -> Result<(), AdmissionDenied> {
@@ -89,6 +131,7 @@ type Policy = fn(&Header, &bool) -> Result<(), AdmissionDenied>;
 type AppBridge = Bridge<'static, Command, bool, Output, InspectError, Policy>;
 fn bridge<C: IoClient<Request = FsRequest, Response = FsResponse, Error = FsError> + 'static>(
     task: Option<InspectTask<C>>,
+    ast_task: Option<AstGraphTask<C>>,
 ) -> Result<AppBridge, String> {
     forge_command::validate_descriptors(Catalog.descriptors()).map_err(|e| e.to_string())?;
     let mut routes = RegistryBuilder::new();
@@ -110,9 +153,27 @@ fn bridge<C: IoClient<Request = FsRequest, Response = FsResponse, Error = FsErro
             )
             .map_err(|e| e.to_string())?;
     }
+    if let Some(ast_task) = ast_task {
+        let provider = Singleton::new(ast_task);
+        routes
+            .register(
+                RouteKey::new(Catalog.descriptors()[1].name, 1).map_err(|e| e.to_string())?,
+                Kind::AstGraph,
+                move |command, _: &bool| {
+                    if !matches!(command, Command::AstGraph) {
+                        return Err(InspectError::Protocol("ast-graph binding mismatch"));
+                    }
+                    let lease = provider.acquire().unwrap_or_else(|never| match never {});
+                    lease
+                        .run(AstGraphRequest::Workspace)
+                        .map(|report| Output::AstGraph(Box::new(report)))
+                },
+            )
+            .map_err(|e| e.to_string())?;
+    }
     routes
         .register(
-            RouteKey::new(Catalog.descriptors()[1].name, 1).map_err(|e| e.to_string())?,
+            RouteKey::new(Catalog.descriptors()[2].name, 1).map_err(|e| e.to_string())?,
             Kind::Help,
             |command, _: &bool| {
                 if !matches!(command, Command::Help) {
@@ -124,30 +185,44 @@ fn bridge<C: IoClient<Request = FsRequest, Response = FsResponse, Error = FsErro
         .map_err(|e| e.to_string())?;
     Ok(Bridge::new(routes.freeze(), admit as Policy))
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AstFormat {
+    Yaml,
+    Json,
+}
 enum Invocation {
     Help,
     Inspect(PathBuf),
+    AstGraph { root: PathBuf, format: AstFormat },
+}
+fn parse_format(value: &OsString) -> Result<AstFormat, String> {
+    match value.to_str() {
+        Some("yaml") => Ok(AstFormat::Yaml),
+        Some("json") => Ok(AstFormat::Json),
+        _ => Err("expected --format yaml or --format json".into()),
+    }
 }
 fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, String> {
     let mut args = args.into_iter();
     let mut parts = Vec::new();
     let mut bytes = 0usize;
-    for item in args.by_ref().take(4) {
+    for item in args.by_ref().take(5) {
         bytes = bytes.saturating_add(item.as_encoded_bytes().len());
         if bytes > 64 * 1024 {
             return Err("arguments exceed 64 KiB".into());
         }
         parts.push(item);
     }
-    if parts.len() > 3 || args.next().is_some() {
+    if parts.len() > 4 || args.next().is_some() {
         return Err("too many arguments".into());
     }
     match parts.as_slice() {
         [] => Ok(Invocation::Help),
         [one] if one == "--help" || one == "-h" || one == "help" => Ok(Invocation::Help),
         [one, two]
-            if (one == "inspect" && (two == "--help" || two == "-h"))
-                || (one == "help" && two == "inspect") =>
+            if ((one == "inspect" || one == "ast-graph")
+                && (two == "--help" || two == "-h"))
+                || (one == "help" && (two == "inspect" || two == "ast-graph")) =>
         {
             Ok(Invocation::Help)
         }
@@ -158,8 +233,40 @@ fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Invocation, String>
         {
             Ok(Invocation::Inspect(PathBuf::from(root)))
         }
+        [one, root]
+            if one == "ast-graph"
+                && !root.is_empty()
+                && !root.to_string_lossy().starts_with("--") =>
+        {
+            Ok(Invocation::AstGraph {
+                root: PathBuf::from(root),
+                format: AstFormat::Yaml,
+            })
+        }
+        [one, flag, fmt, root]
+            if one == "ast-graph"
+                && flag == "--format"
+                && !root.is_empty()
+                && !root.to_string_lossy().starts_with("--") =>
+        {
+            Ok(Invocation::AstGraph {
+                root: PathBuf::from(root),
+                format: parse_format(fmt)?,
+            })
+        }
+        [one, root, flag, fmt]
+            if one == "ast-graph"
+                && flag == "--format"
+                && !root.is_empty()
+                && !root.to_string_lossy().starts_with("--") =>
+        {
+            Ok(Invocation::AstGraph {
+                root: PathBuf::from(root),
+                format: parse_format(fmt)?,
+            })
+        }
         _ => Err(
-            "expected inspect ROOT or --help; paths are native arguments, not shell commands"
+            "expected inspect ROOT, ast-graph [--format yaml|json] ROOT, or --help; paths are native arguments, not shell commands"
                 .into(),
         ),
     }
@@ -188,21 +295,25 @@ impl IoClient for Console {
         }
     }
 }
+fn resolve_root(root: PathBuf) -> Result<PathBuf, String> {
+    if root.is_absolute() {
+        Ok(root)
+    } else {
+        Ok(std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(root))
+    }
+}
 fn execute(invocation: Invocation) -> Result<(Vec<u8>, u8), String> {
+    let mut ast_format = AstFormat::Yaml;
     let (app, route, command) = match invocation {
         Invocation::Help => (
-            bridge::<crate::filesystem::NativeFiles>(None)?,
+            bridge::<crate::filesystem::NativeFiles>(None, None)?,
             HELP_ROUTE,
             Command::Help,
         ),
         Invocation::Inspect(root) => {
-            let root = if root.is_absolute() {
-                root
-            } else {
-                std::env::current_dir()
-                    .map_err(|e| e.to_string())?
-                    .join(root)
-            };
+            let root = resolve_root(root)?;
             let group =
                 register_ide("ide.project", IdeConfig::project(root)).map_err(|e| e.to_string())?;
             let pending = Registry::new()
@@ -213,7 +324,24 @@ fn execute(invocation: Invocation) -> Result<(Vec<u8>, u8), String> {
             // Explicit startup authority acquisition only: walking/reading starts
             // inside the admitted task. No caller-provided remote authentication.
             let task = factory.create().map_err(|e| e.to_string())?;
-            (bridge(Some(task))?, ROUTE, Command::Inspect)
+            (bridge(Some(task), None)?, ROUTE, Command::Inspect)
+        }
+        Invocation::AstGraph { root, format } => {
+            ast_format = format;
+            let root = resolve_root(root)?;
+            let group = register_ast_graph("ide.ast_graph", AstGraphConfig::project(root))
+                .map_err(|e| e.to_string())?;
+            let pending = Registry::new()
+                .register(group)
+                .map_err(|e| e.reason().to_string())?;
+            let frozen = pending.freeze().map_err(|e| e.reason().to_string())?;
+            let ((), factory) = frozen.into_factories();
+            let task = factory.create().map_err(|e| e.to_string())?;
+            (
+                bridge(None, Some(task))?,
+                AST_GRAPH_ROUTE,
+                Command::AstGraph,
+            )
         }
     };
     let header = Header::new(
@@ -232,6 +360,17 @@ fn execute(invocation: Invocation) -> Result<(Vec<u8>, u8), String> {
             yaml::to_yaml(&report, MAX_OUTPUT)
                 .map(|bytes| (bytes, code))
                 .map_err(|e| e.to_string())
+        }
+        Output::AstGraph(report) => {
+            let code = if report.complete { 0 } else { 3 };
+            match ast_format {
+                AstFormat::Yaml => yaml::to_ast_graph_yaml(&report, MAX_AST_OUTPUT)
+                    .map(|bytes| (bytes, code))
+                    .map_err(|e| e.to_string()),
+                AstFormat::Json => {
+                    yaml::to_ast_graph_json(&report, MAX_AST_OUTPUT).map(|bytes| (bytes, code))
+                }
+            }
         }
     }
 }
@@ -278,11 +417,14 @@ mod tests {
     fn rejected_requests_and_help_do_not_inspect() {
         let calls = Rc::new(Cell::new(0));
         let task = InspectTask::new(Fake(calls.clone()), Default::default(), vec![]).unwrap();
-        let app = bridge(Some(task)).unwrap();
+        let ast_task = AstGraphTask::new(Fake(calls.clone()), Default::default(), vec![]).unwrap();
+        let app = bridge(Some(task), Some(ast_task)).unwrap();
         for (route, version, command, allowed) in [
             (ROUTE, 1, Command::Inspect, false),
             (ROUTE, 1, Command::Help, true),
             (ROUTE, 2, Command::Inspect, true),
+            (AST_GRAPH_ROUTE, 1, Command::AstGraph, false),
+            (AST_GRAPH_ROUTE, 1, Command::Inspect, true),
             ("missing", 1, Command::Inspect, true),
         ] {
             let h = Header::new(RouteKey::new(route, version).unwrap(), "test").unwrap();
@@ -296,15 +438,47 @@ mod tests {
             .dispatch(Envelope::new(h, Command::Inspect), &true)
             .is_ok());
         assert_eq!(calls.get(), 1);
+        let h = Header::new(RouteKey::new(AST_GRAPH_ROUTE, 1).unwrap(), "ok-ast").unwrap();
+        assert!(app
+            .dispatch(Envelope::new(h, Command::AstGraph), &true)
+            .is_ok());
+        assert_eq!(calls.get(), 2);
     }
     #[test]
     fn grammar_is_small_and_bounded() {
         assert!(parse(["inspect", "x", "--bad"].map(Into::into)).is_err());
         assert!(parse(["inspect"].map(Into::into)).is_err());
+        assert!(parse(["ast-graph"].map(Into::into)).is_err());
         assert!(matches!(
             parse(["inspect", "--help"].map(Into::into)),
             Ok(Invocation::Help)
         ));
+        assert!(matches!(
+            parse(["ast-graph", "--help"].map(Into::into)),
+            Ok(Invocation::Help)
+        ));
+        assert!(matches!(
+            parse(["ast-graph", "."].map(Into::into)),
+            Ok(Invocation::AstGraph {
+                format: AstFormat::Yaml,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse(["ast-graph", "--format", "json", "."].map(Into::into)),
+            Ok(Invocation::AstGraph {
+                format: AstFormat::Json,
+                ..
+            })
+        ));
+        assert!(matches!(
+            parse(["ast-graph", ".", "--format", "json"].map(Into::into)),
+            Ok(Invocation::AstGraph {
+                format: AstFormat::Json,
+                ..
+            })
+        ));
+        assert!(parse(["ast-graph", "--format", "xml", "."].map(Into::into)).is_err());
         assert!(parse(std::iter::repeat(OsString::from("x"))).is_err());
         assert!(parse([OsString::from("x".repeat(65537))]).is_err());
     }

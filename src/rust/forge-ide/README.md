@@ -66,10 +66,11 @@ expose project information. Bodies are omitted, but that is not secret redaction
 | `model` | Typed tree/content/report; lossless native name representation |
 | `filesystem` | Rooted native `IoClient` and typed prepared List/Read requests |
 | `syntax` | Pure syn-based parser and bounded declaration extraction |
+| `ast_graph` | Pure bounded AST graph extractor (visibility, imports, modules, attrs, includes, refs) + `AstGraphTask<C>` |
 | `task` | `InspectTask<C>` traverses, prepares requests and analyzes source |
-| `assembly` | Public `IdeConfig`, `InspectFactory`, `register_ide` |
-| `yaml` (feature) | Bounded YAML serialization of the typed report |
-| `cli` (feature) | Descriptor-derived help, typed ingress and single-shot composition |
+| `assembly` | Public `IdeConfig`, `InspectFactory`, `register_ide`, `AstGraphConfig`, `AstGraphFactory`, `register_ast_graph` |
+| `yaml` (feature) | Bounded YAML serialization of typed reports (`ProjectReport` and `AstGraphReport`) |
+| `cli` (feature) | Descriptor-derived help, typed ingress (`ide.inspect@1`, `ide.ast_graph@1`, `ide.help@1`) and single-shot composition |
 
 ```rust
 use forge_ide::{assembly::{register_ide, IdeConfig}, task::InspectRequest};
@@ -238,3 +239,24 @@ The report digest field requires matching updated agent/codec consumers. Deploy
 these components together; the report remains metadata rather than an atomic
 filesystem snapshot. Revision checking proves equality to the reported file bytes,
 not that every project file existed at one simultaneous instant.
+
+## Expanded YAML AST graph (`ide.ast_graph@1`)
+
+`ProjectReport` (`ide.inspect@1`) remains byte-for-byte unchanged for remote and
+browser consumers. Alongside it, `ast_graph::{AstGraphReport, AstGraphLimits,
+AstGraphRequest, AstGraphTask}` extracts visibility, flattened `use`/`pub use`
+and `extern crate` imports, inline-module ancestry and out-of-line `mod` targets
+(`#[path]` and `#[cfg_attr(..., path = ...)]` included), `include!` paths,
+attributes (`#[cfg]`, `#[test]`, `#[allow(dead_code)]`, export markers), bounded
+per-declaration/per-file symbol references with truncation flags (`complete: false`
+when truncated), and lossless `unsupported_paths` for non-UTF-8 paths.
+
+Bootstrap registers this capability effect-free via `assembly::register_ast_graph`
+with `AstGraphConfig`, freezes the `Registry`, and creates `AstGraphTask<NativeFiles>`
+through `AstGraphFactory::create()` (keeping default `forge-ide` features empty).
+The opt-in CLI binds `forge-ide ast-graph [--format yaml|json] ROOT` on
+`ide.ast_graph@1` through the same `forge_bridge::Bridge`. Root Make targets
+(`make ast-yaml`, `make dead-code`, `make build-affected`, `make check-affected`,
+`make test-affected`, and `make portal-style-check`) merge `forge-ide ast-graph
+--format json` output with `cargo metadata`, Python stdlib AST, global build-file
+digests, and explicit portal UI/asset edges outside source.

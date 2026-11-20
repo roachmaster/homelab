@@ -1,5 +1,5 @@
 //! YAML 1.1 output boundary. Internal reports are typed, not generic YAML values.
-use crate::model::ProjectReport;
+use crate::{ast_graph::AstGraphReport, model::ProjectReport};
 use std::{
     error::Error,
     fmt,
@@ -45,6 +45,30 @@ impl Write for Bounded {
 /// Serialize privately before exposing any bytes. This caps emitted bytes, not
 /// all serializer-internal allocation. The report itself must also be bounded.
 pub fn to_yaml(report: &ProjectReport, max_bytes: usize) -> Result<Vec<u8>, YamlError> {
+    encode_bounded(report, max_bytes)
+}
+
+/// Serialize an expanded Rust AST graph report under the same byte ceiling.
+pub fn to_ast_graph_yaml(report: &AstGraphReport, max_bytes: usize) -> Result<Vec<u8>, YamlError> {
+    encode_bounded(report, max_bytes)
+}
+
+/// Serialize an expanded Rust AST graph report as typed JSON under the same byte ceiling.
+#[cfg(feature = "cli")]
+pub fn to_ast_graph_json(report: &AstGraphReport, max_bytes: usize) -> Result<Vec<u8>, String> {
+    if max_bytes == 0 || max_bytes > 64 * 1024 * 1024 {
+        return Err(YamlError::InvalidLimit.to_string());
+    }
+    let mut output = Bounded {
+        bytes: Vec::new(),
+        limit: max_bytes,
+    };
+    serde_json::to_writer(&mut output, report).map_err(|e| e.to_string())?;
+    output.write_all(b"\n").map_err(|e| e.to_string())?;
+    Ok(output.bytes)
+}
+
+fn encode_bounded<T: serde::Serialize>(value: &T, max_bytes: usize) -> Result<Vec<u8>, YamlError> {
     if max_bytes == 0 || max_bytes > 64 * 1024 * 1024 {
         return Err(YamlError::InvalidLimit);
     }
@@ -52,6 +76,6 @@ pub fn to_yaml(report: &ProjectReport, max_bytes: usize) -> Result<Vec<u8>, Yaml
         bytes: Vec::new(),
         limit: max_bytes,
     };
-    serde_yaml_ng::to_writer(&mut output, report).map_err(YamlError::Encode)?;
+    serde_yaml_ng::to_writer(&mut output, value).map_err(YamlError::Encode)?;
     Ok(output.bytes)
 }

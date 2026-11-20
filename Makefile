@@ -11,14 +11,31 @@ export ARGS ?= --help
 export ASM_TARGET ?= lib
 export NATIVE ?= 0
 export QA_OUTPUT_ROOT ?=
+export CHANGED_ONLY ?= 0
+export SCOPE ?= all
+export BASE_REF ?= HEAD
+export DEAD_CODE_OUT ?=
+export AST_OUT ?=
+export AST_BASELINE ?=
+export INCLUDE_DEV ?= 0
+export DRY_RUN ?= 0
+export ALLOW_GLOBAL ?= 0
+export REFRESH_AST ?= 1
+export AFFECTED_PLAN_OUT ?=
 
-.PHONY: help build check fmt fmt-check lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
+.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml build-affected check-affected test-affected lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
 
 help:
 	@printf '%s\n' \
 	  'Forge Rust — run from the repository root' \
 	  '  make build / check     Compile / type-check selected packages and targets' \
-	  '  make fmt / fmt-check   Format / verify the entire Rust workspace' \
+	  '  make fmt / fmt-check   Format / verify Rust (supports PACKAGE=<pkg> or CHANGED_ONLY=1)' \
+	  '  make portal-style-check Verify Rust fmt + portal Python syntax/LF + UI YAML parsing' \
+	  '  make dead-code         Layered dead-code check (SCOPE=all|portal, CHANGED_ONLY=0|1)' \
+	  '  make ast-yaml          Generate deterministic workspace YAML AST + dependency graph' \
+	  '  make build-affected    Rebuild changed + strictly 1-hop direct dependents (no transitive)' \
+	  '  make check-affected    Type-check changed + strictly 1-hop direct dependents' \
+	  '  make test-affected     Test changed + strictly 1-hop direct dependents (includes dev edges)' \
 	  '  make lint              Clippy with warnings denied' \
 	  '  make test              Debug tests (including doctests)' \
 	  '  make test-release      Release tests (including doctests)' \
@@ -71,16 +88,29 @@ test-release:
 doc:
 	$(call cargo-selected,RUSTDOCFLAGS="-D warnings",doc,--no-deps)
 fmt:
-	@cargo fmt --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --all
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/style_check.py" fmt
 fmt-check:
-	@cargo fmt --manifest-path "$$FORGE_RUST_ROOT/Cargo.toml" --all -- --check
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/style_check.py" fmt-check
+portal-style-check:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/style_check.py" portal-style-check
+dead-code:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/dead_code.py"
+ast-yaml:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/ast_graph.py"
+build-affected:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/affected_build.py" build
+check-affected:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/affected_build.py" check
+test-affected:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/affected_build.py" test
 check-deps:
 	@python3 "$$FORGE_RUST_ROOT/scripts/check_dependencies.py"
 
 # Fixed gates: selection overrides cannot accidentally narrow CI.
 ci:
 	@python3 -B -m unittest discover -s "$$FORGE_RUST_ROOT/scripts/tests" -v
-	$(MAKE) fmt-check check-deps
+	$(MAKE) fmt-check PACKAGE= CHANGED_ONLY=0
+	$(MAKE) check-deps
 	$(MAKE) build check lint test test-release doc PACKAGE= FEATURES= ALL_FEATURES=1 NO_DEFAULT_FEATURES=0
 	$(MAKE) test lint PACKAGE=forge-remote-https FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test lint PACKAGE=forge-ide FEATURES=remote ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
