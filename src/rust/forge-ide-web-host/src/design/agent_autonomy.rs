@@ -3,7 +3,7 @@ use super::{text, Attribute, Node, Tag};
 pub(super) const BODY: &[Node] = &[
     element!(Div [Class = "intro reader-intro"];
         element!(H1; text("Autonomous agent workflow")),
-        element!(P; text("Configure an author and an independent reviewer once per project. A submitted assignment then advances through plan, implementation, review, required checks and trusted merge without routine approval prompts. The implementation is in source; deployment and the real-agent rollout remain pending.")),
+        element!(P; text("Configure an author and an independent reviewer once per project. A submitted assignment then advances through plan, implementation, review, required checks and trusted merge without routine approval prompts. Task lists and readers display the authoritative workflow phase; human action is reserved for cancellation and escalated exceptions.")),
     ),
     element!(Section [Class = "design-section", AriaLabelledby = "autonomy-flow-title"];
         element!(H2 [Id = "autonomy-flow-title"]; text("The normal workflow")),
