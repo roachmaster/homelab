@@ -1467,7 +1467,7 @@ class WorkStore:
             (task['revision']+1,self._owner,task['project_alias'],task['id'],note,review['review_id']))
         return cursor.fetchone()['review_id']
 
-    def repair(self,*,project_alias,task_id,expected_revision,candidate_commit,agent_profile,note,findings,idempotency_key,recipe):
+    def repair(self,*,project_alias,task_id,expected_revision,candidate_commit,agent_profile,note,findings,idempotency_key,recipe=None,resolve_recipe=None):
         try:
             findings=validate_findings(list(findings),public=True)
             if not isinstance(note,str) or len(note.encode())>2048 or not isinstance(candidate_commit,str) or not SHA1_HEX_RE.fullmatch(candidate_commit):raise ValueError()
@@ -1479,6 +1479,9 @@ class WorkStore:
             if old:return old
             if task.get("workflow_required"):raise Rejected(409,"not_reviewable")
             if task['status']!='completed' or task['mode']!='implement':raise Rejected(409,'not_reviewable')
+            if resolve_recipe is not None:recipe=resolve_recipe()
+            if not isinstance(recipe,PinnedRecipe) or recipe.mode!='implement' or recipe.resource_profile!=POLICY_ID or recipe.policy_digest!=POLICY_DIGEST:
+                raise Rejected(503,'unavailable')
             cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND candidate_commit=%s ORDER BY review_no DESC LIMIT 1 FOR UPDATE",
                 (self._owner,project_alias,task_id,candidate_commit))
             review=cursor.fetchone()

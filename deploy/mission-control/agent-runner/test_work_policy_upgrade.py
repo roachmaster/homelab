@@ -637,6 +637,58 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         usage=UsageStore(config,lambda:self.cluster.connect("forge_agent")).overview("homelab")
         self.assertIn("grok-off",[entry["alias"]for entry in usage["providers"]])
 
+    def test_enabled_then_disabled_submit_and_repair_replay_preserve_exact_receipts(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        from work_api import WorkRepair
+        from queue_store import Rejected
+        cfg=make_v2_config()
+        profile=WorkProfile("grok-replay","grok","fixture-grok",work_policy.POLICY_ID,execution_enabled=True)
+        cfg=replace(cfg,profiles={**cfg.profiles,profile.alias:profile})
+        enabled=WorkServiceFactory(cfg,lambda:self.cluster.connect("forge_agent")).create()
+        off=WorkServiceFactory(replace(cfg,profiles={**cfg.profiles,profile.alias:replace(profile,execution_enabled=False)}),lambda:self.cluster.connect("forge_agent")).create()
+        command=make_submit(agent_profile=profile.alias,mode="implement",idempotency_key="grok-replay-submit")
+        admitted=enabled.submit(command)
+        self.assertEqual(off.submit(command),admitted)
+        with self.assertRaises(Rejected)as error:off.submit(replace(command,idempotency_key="fresh-disabled-submit"))
+        self.assertEqual(error.exception.status,403)
+        db=self.worker(self.cluster);inc=str(uuid4())
+        self.cluster.grant_worker("mission-control","homelab",profile.alias,("implement",))
+        db.advertise("grok-replay-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":profile.alias,"backend":"grok","model":profile.model,"modes":["implement"]}],work_policy.POLICY_DIGEST)
+        lease=db.claim("grok-replay-worker",inc,[profile.alias]);_,manifest=self.stage(db,lease)
+        proof=make_stop_proof(lease.unit_name);db.publish(lease,"awaiting_review",manifest,None,"Fixture implementation",proof);db.reconcile(lease,"c"*64,proof)
+        # Owned historical fixture: a completed implementation before source review.
+        self.cluster.admin_exec("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1")
+        revision=self.rows(self.cluster,"SELECT revision FROM forge_agent.coding_tasks WHERE id=%s",(UUID(lease.task_id),))[0][0]
+        repair=WorkRepair("homelab",UUID(lease.task_id),revision,"d"*40,profile.alias,"Inspect this correction.",(),"grok-replay-repair")
+        repaired=enabled.repair(repair)
+        state=self.rows(self.cluster,"SELECT (SELECT count(*) FROM forge_agent.coding_tasks),(SELECT count(*) FROM forge_agent.coding_reviews),(SELECT count(*) FROM forge_agent.coding_control_receipts),(SELECT count(*) FROM forge_agent.coding_events)")
+        self.assertEqual(off.repair(repair),repaired)
+        with self.assertRaises(Rejected)as error:off.repair(replace(repair,idempotency_key="fresh-disabled-repair",expected_revision=repaired["revision"]))
+        self.assertEqual(error.exception.status,403)
+        self.assertEqual(self.rows(self.cluster,"SELECT (SELECT count(*) FROM forge_agent.coding_tasks),(SELECT count(*) FROM forge_agent.coding_reviews),(SELECT count(*) FROM forge_agent.coding_control_receipts),(SELECT count(*) FROM forge_agent.coding_events)"),state)
+
+    def test_enabled_then_disabled_resume_replays_before_current_recipe_resolution(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        profile=WorkProfile("grok-resume","grok","fixture-grok",work_policy.POLICY_ID,execution_enabled=True)
+        cfg=make_v2_config();cfg=replace(cfg,profiles={**cfg.profiles,profile.alias:profile})
+        enabled=WorkServiceFactory(cfg,lambda:self.cluster.connect("forge_agent")).create()
+        off=WorkServiceFactory(replace(cfg,profiles={**cfg.profiles,profile.alias:replace(profile,execution_enabled=False)}),lambda:self.cluster.connect("forge_agent")).create()
+        command=make_submit(agent_profile=profile.alias,mode="review",idempotency_key="grok-resume-submit")
+        admitted=enabled.submit(command);db=self.worker(self.cluster);inc=str(uuid4())
+        self.cluster.grant_worker("mission-control","homelab",profile.alias,("review",))
+        db.advertise("grok-resume-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":profile.alias,"backend":"grok","model":profile.model,"modes":["review"]}],work_policy.POLICY_DIGEST)
+        lease=db.claim("grok-resume-worker",inc,[profile.alias]);proof=make_stop_proof(lease.unit_name)
+        published=db.publish(lease,"quota_blocked",None,None,"Fixture quota boundary",proof);receipt=db.reconcile(lease,"c"*64,proof)
+        resume=WorkResume("homelab",UUID(lease.task_id),published["revision"],"grok-resume-replay",profile.alias,UUID(receipt),"Operator qualified continuation.")
+        admitted=enabled.resume(resume)
+        before=self.rows(self.cluster,"SELECT count(*),max(revision) FROM forge_agent.coding_tasks")
+        self.assertEqual(off.resume(resume),admitted)
+        self.assertEqual(self.rows(self.cluster,"SELECT count(*),max(revision) FROM forge_agent.coding_tasks"),before)
+
     def test_apply_twice_and_verify_policy_membership_and_digest_predicate_drift(self):
         self.cluster.apply_and_verify()
         self.cluster.apply_and_verify()
