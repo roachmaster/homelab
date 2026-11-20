@@ -24,14 +24,14 @@ def target(kind="plan", *, source="A concrete plan with acceptance checks."):
         "source_result_sha256": sha(source), "source_revision": 3,
         "base_revision": "b" * 40, "plan_revision": 0, "plan_decision_id": None,
         "review_id": None, "candidate_commit": None, "gate_manifest_sha256": None,
-        "workspace_digest": None, "source_text": source, "acceptance_criteria": "Tests pass.",
+        "workspace_digest": None, "integration_base": None, "source_text": source, "acceptance_criteria": "Tests pass.",
         "findings": [], "verification": None, "approved_plan": None,
     }
     if kind == "code":
         plan = "The exact approved implementation plan."
         value.update(plan_decision_id=str(uuid4()), review_id=str(uuid4()),
             candidate_commit=value["base_revision"], gate_manifest_sha256="c" * 64,
-            workspace_digest="d" * 64, verification={"checks_passed": True,
+            workspace_digest="d" * 64, integration_base="e" * 40, verification={"checks_passed": True,
                 "toolchain": "rustc fixture", "checks": [{"check_id": "make-ci",
                     "status": "passed", "head_sha": value["base_revision"]}]},
             approved_plan={"attempt_id": str(uuid4()), "sha256": sha(plan), "content": plan})
