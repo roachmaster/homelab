@@ -63,6 +63,7 @@ def historical_registry(root, maximum):
     registry.write_text(script)
     grant=root/"management/grant-runner.sql"
     value=grant.read_text()
+    if maximum<16:value=value.split("-- M16:")[0]
     if maximum<15:value=value.split("-- M15:")[0]
     value=value.replace(",\n    forge_agent.coding_plan_decisions TO forge_agent;"," TO forge_agent;")
     value="\n".join(line for line in value.splitlines() if not any(token in line for token in (
@@ -78,7 +79,7 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v5")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v6")
         self.assertEqual(PLAN_POLICY_DIGEST,"b541291edbadf6390f1a46f1f8f82d5b090f9942aaf2b57ced50ef3f779ab5e4")
         self.assertEqual(work_policy.POLICY["feedback_workflow"],"lease-bound-immutable-feedback-review-v1")
         self.assertEqual(work_policy.POLICY["plan_workflow"], "artifact-bound-plan-decisions-publication-v1")
@@ -87,7 +88,7 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertNotIn("fresh_session", work_policy.POLICY)
         self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow"}}
+                      if key not in {"id", "antigravity_session_policy", "codex_session_policy", "plan_workflow", "feedback_workflow", "peer_review_workflow"}}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 

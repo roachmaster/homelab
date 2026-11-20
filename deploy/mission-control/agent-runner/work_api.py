@@ -76,6 +76,7 @@ class WorkSubmit:
     acceptance_criteria: str
     idempotency_key: str
     auto_repair: bool = False
+    workflow_policy_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +202,7 @@ class WorkService:
         self._config = config
         self._catalog = catalog
         self._store = store
+        self.workflow_worker=None
 
     def _require_project(self, project_alias):
         if project_alias not in self._config.allowed_projects:
@@ -234,7 +236,19 @@ class WorkService:
             idempotency_key=command.idempotency_key,
             resolve_recipe=resolve_recipe,
             auto_repair=command.auto_repair,
+            workflow_policy_digest=command.workflow_policy_digest,
+            resolve_workflow=lambda:self._workflow_snapshot(command.project_alias,command.mode,command.agent_profile,command.workflow_policy_digest),
         )
+
+    def _workflow_snapshot(self,project,mode,profile,digest):
+        policy=self._config.project_workflows.get(project)
+        if policy is None:
+            if digest is not None:raise Rejected(409,"result_mismatch")
+            return None
+        snapshot=policy.snapshot(self._catalog,self._config.repair_policy)
+        if digest!=snapshot["policy_digest"] or mode!="plan" or profile!=policy.author_profile:
+            raise Rejected(409,"result_mismatch")
+        return snapshot
 
     def get(self, command):
         self._require_project(command.project_alias)
@@ -372,7 +386,10 @@ class WorkServiceFactory:
             max_pending=self._config.max_pending,
             repair_policy=self._config.repair_policy,
         )
-        return WorkService(self._config, catalog, store)
+        service=WorkService(self._config,catalog,store)
+        from work_workflow import WorkflowCoordinatorFactory
+        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store).create()
+        return service
 
 
 def handles(headers):
@@ -439,6 +456,11 @@ def _text(value, max_bytes, *, allow_empty=False):
     return value
 
 
+def _sha256(value):
+    if not isinstance(value,str) or not re.fullmatch(r"[0-9a-f]{64}",value):raise Rejected(400,"invalid_request")
+    return value
+
+
 def _result_cursor(value):
     if value is None:
         return None
@@ -472,7 +494,7 @@ def decode(route, correlation, body):
     project_alias = _identifier(body["project_alias"])
 
     if (route is Destination.SUBMIT and kind == "work_submit"
-            and body.keys() - {"auto_repair"} == base | {
+            and body.keys() - {"auto_repair","workflow_policy_digest"} == base | {
                 "base_revision", "mode", "agent_profile",
                 "prompt", "acceptance_criteria", "idempotency_key",
             }):
@@ -485,6 +507,7 @@ def decode(route, correlation, body):
             acceptance_criteria=_text(body["acceptance_criteria"], MAX_ACCEPTANCE_BYTES),
             idempotency_key=_idempotency_key(body["idempotency_key"]),
             auto_repair=_boolean(body.get("auto_repair",False)),
+            workflow_policy_digest=_sha256(body["workflow_policy_digest"]) if "workflow_policy_digest" in body else None,
         )
 
     if route is Destination.GET and kind == "work_get" and body.keys() == base | {"task_id"}:

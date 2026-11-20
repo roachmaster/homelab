@@ -29,7 +29,7 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
 PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label"}
 
@@ -273,6 +273,63 @@ def freeze_repair_policy(value):
 
 
 @dataclass(frozen=True)
+class WorkflowPolicy:
+    """Owner-selected role delegation; recipes and policy identity freeze at admission."""
+    author_profile: str
+    reviewer_profile: str
+    max_plan_revisions: int = 3
+    auto_merge: bool = True
+    merge_method: str = "merge"
+    version: str = "forge-autonomy-v1"
+
+    def __post_init__(self):
+        validate_identifier(self.author_profile, "workflow author")
+        validate_identifier(self.reviewer_profile, "workflow reviewer")
+        if self.author_profile == self.reviewer_profile:
+            raise ValueError("Workflow author and reviewer must be distinct profiles")
+        if self.version != "forge-autonomy-v1" or type(self.max_plan_revisions) is not int or not 0 <= self.max_plan_revisions <= 3:
+            raise ValueError("Invalid workflow revision policy")
+        if type(self.auto_merge) is not bool or self.merge_method != "merge":
+            raise ValueError("Invalid workflow merge delegation")
+
+    def snapshot(self, catalog, repair_policy):
+        recipes={"author_plan":catalog.resolve(self.author_profile,"plan"),
+                 "author_implement":catalog.resolve(self.author_profile,"implement"),
+                 "reviewer_review":catalog.resolve(self.reviewer_profile,"review")}
+        if any(r.resource_profile != POLICY_ID or r.policy_digest != POLICY_DIGEST for r in recipes.values()):
+            raise ValueError("Workflow requires current immutable execution policy")
+        result={"version":self.version,"author_profile":self.author_profile,"reviewer_profile":self.reviewer_profile,
+                "max_plan_revisions":self.max_plan_revisions,"max_code_revisions":repair_policy["max_rounds"],
+                "auto_merge":self.auto_merge,"merge_method":self.merge_method,
+                "repair_policy":{**repair_policy,"required_hosted_checks":list(repair_policy["required_hosted_checks"])},
+                "recipes":{name:{"recipe":r.to_dict(),"digest":r.digest} for name,r in recipes.items()}}
+        result["policy_digest"]=sha256_canonical(result)
+        return result
+
+    def summary(self, catalog, repair_policy):
+        snapshot=self.snapshot(catalog,repair_policy)
+        return {key:snapshot[key] for key in ("policy_digest","author_profile","reviewer_profile","max_plan_revisions","max_code_revisions","auto_merge")}
+
+
+def freeze_workflows(value, projects, profiles, modes):
+    if not isinstance(value,(dict,MappingProxyType)):
+        raise ValueError("Invalid project workflows")
+    result={}
+    for project,raw in value.items():
+        if project not in projects or not {"plan","review","implement"} <= modes:
+            raise ValueError("Workflow requires granted project and all execution modes")
+        if isinstance(raw,WorkflowPolicy):policy=raw
+        elif isinstance(raw,dict) and {"author_profile","reviewer_profile"} <= set(raw) <= {"version","author_profile","reviewer_profile","max_plan_revisions","auto_merge","merge_method"}:
+            policy=WorkflowPolicy(**raw)
+        else:raise ValueError("Invalid project workflow policy")
+        if policy.author_profile not in profiles or policy.reviewer_profile not in profiles:
+            raise ValueError("Unknown workflow role profile")
+        policy.snapshot(WorkCatalog(profiles),DEFAULT_REPAIR_POLICY)
+        result[project]=policy
+    return MappingProxyType(result)
+
+
+@dataclass(frozen=True)
 class WorkConfig:
     owner: str
     allowed_projects: frozenset[str]
@@ -281,6 +338,7 @@ class WorkConfig:
     profiles: MappingProxyType
     project_labels: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
     repair_policy: MappingProxyType = field(default_factory=lambda:DEFAULT_REPAIR_POLICY)
+    project_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
 
     def __post_init__(self):
         repair_policy=freeze_repair_policy(self.repair_policy)
@@ -320,6 +378,7 @@ class WorkConfig:
         object.__setattr__(self, "profiles", MappingProxyType(copied_profiles))
         object.__setattr__(self, "project_labels", MappingProxyType(copied_labels))
         object.__setattr__(self,"repair_policy",repair_policy)
+        object.__setattr__(self,"project_workflows",freeze_workflows(self.project_workflows,projects,copied_profiles,modes))
 
     def project_label(self, alias):
         return self.project_labels.get(alias, alias)
@@ -399,6 +458,7 @@ def parse_work_config(raw):
         profiles=MappingProxyType(profiles),
         project_labels=MappingProxyType(project_labels),
         repair_policy=freeze_repair_policy(raw.get("repair_policy",{})),
+        project_workflows=raw.get("project_workflows",{}),
     )
 
 
