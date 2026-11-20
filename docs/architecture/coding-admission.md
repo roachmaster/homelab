@@ -82,11 +82,11 @@ prompt and only wake work discovery; committed rows are authoritative.
 Execution-capable profiles pin recipe **version 2**, including backend, explicit
 model, mode, resource profile, `generation_token_limit: null` and immutable
 `policy_digest`. The worker validates the complete canonical recipe against
-`forge-coding-v2` before workspace creation or CLI spawn. This explicitly versioned
+`forge-coding-v3` before workspace creation or CLI spawn. This explicitly versioned
 policy approves Gemini commands, scoped implementation writes and read-only
 documentation URLs without headless approval prompts. Plan/review remains
 read-only; OS isolation and database/canonical-source masks remain unchanged.
-Migration11 permits policy1 and policy2 history while exact advertised policy
+Migration13 permits policy1, policy2 and policy3 history while exact advertised policy
 digests keep claims separate. Previous attempts retain their original policy.
 Admission-era version-1
 recipes remain readable and are never silently upgraded or executed.
@@ -98,12 +98,40 @@ an isolated Git worktree at the approved base. Plan/review mounts it read-only;
 implement can write only the approved isolated tree and its Git metadata.
 
 Only the configured real CLI binary is invoked with fixed argument structure,
-`shell=False`, sanitized environment and a fresh session. Native provider/model
+`shell=False` and a sanitized environment. Unrelated submissions start fresh;
+Antigravity may reuse an explicitly resumed task's parent-verified conversation
+through `--conversation UUID`. Never use the global latest `--continue`, because
+all child scopes share the same mounted workspace pathname. Codex stays ephemeral.
+Native provider/model
 limits apply. No Chat/Mail/llama.cpp completion cap is inherited, and no purchased
 credit fallback, automatic account rotation or implicit conversation continuation
 is enabled. A successful exit alone is insufficient: the parser requires a
 coherent owned final result, nonempty text, no unresolved permission/error state
 and confirmed process-scope stop.
+
+The selected worker factory injects an Antigravity session provider. A private
+bounded hint binds task/project/workspace/base revision/profile/model/recipe,
+local account and binary identity. It is reusable only with the existing trusted
+workspace reconciliation digest and the receipt's immediately preceding attempt,
+is invalidated before execution, and is saved
+again only after a coherent stopped result. It cannot grant a lease, replay an
+assignment or choose another task's CLI history. The child cannot access the
+parent's session records.
+
+AGY output remains `stream-json`; one stdin JSON user event and EOF bound each
+attempt. Only terminal usage is normalized. `cache_read_tokens` / `cached_tokens`
+are aliases, not additive metrics, and cache-only observations are partial.
+Cross-process resumed counters have no verified zero baseline, so they remain
+unknown with `unverified_baseline` provenance instead of double-counting earlier
+usage. Unsupported headless allowance stays **Not reported**, with no OAuth
+polling or generation-based quota probe. Context reuse is an opportunity for
+native cache hits, not a measured quota saving.
+
+The local launcher has separate bounded SIGTERM → SIGKILL/reap cleanup on normal
+and exceptional paths. A successful task requires both this cleanup and the
+independent systemd cgroup stop proof. The source policy3 requires migration13
+and coordinated admission/worker configuration; dated policy2 deployment records
+do not establish that it is already enabled.
 
 A root-managed supervisor launches a fixed namespace/privilege-drop wrapper.
 The outer launcher needs namespace authority; it is not the agent process.

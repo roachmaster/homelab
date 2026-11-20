@@ -85,6 +85,73 @@ class AccountingTest(unittest.TestCase):
         self.assertEqual(unknown["coverage"], "unknown")
         self.assertEqual(unknown["session_provenance"], "unverified_baseline")
 
+    def test_agy_cache_aliases_agree_without_adding_overlapping_metrics(self):
+        for cache in ({"cache_read_tokens": 80}, {"cached_tokens": 80},
+                      {"cache_read_tokens": 80, "cached_tokens": "80"},
+                      {"cache_read_tokens": None, "cached_tokens": 80}):
+            with self.subTest(cache=cache):
+                observed = normalize_attempt_usage("antigravity", {
+                    "input_tokens": 100, "output_tokens": 20, "total_tokens": 120,
+                    "thinking_tokens": 10, "cache_write_tokens": 30, **cache,
+                })
+                self.assertEqual(observed["cached_input_tokens"], "80")
+                self.assertEqual(observed["total_tokens"], "120")
+                self.assertEqual(observed["coverage"], "complete")
+
+    def test_agy_conflicting_or_invalid_cache_does_not_discard_primary_metrics(self):
+        for cache in ({"cache_read_tokens": 80, "cached_tokens": 70},
+                      {"cache_read_tokens": 80, "cached_tokens": True},
+                      {"cache_read_tokens": -1, "cached_tokens": 80},
+                      {"cached_tokens": 1.5}, {"cache_read_tokens": "01"}):
+            with self.subTest(cache=cache):
+                observed = normalize_attempt_usage("antigravity", {
+                    "input_tokens": 100, "output_tokens": 20, "total_tokens": 120, **cache,
+                })
+                self.assertIsNone(observed["cached_input_tokens"])
+                self.assertEqual(observed["input_tokens"], "100")
+                self.assertEqual(observed["output_tokens"], "20")
+                self.assertEqual(observed["total_tokens"], "120")
+                self.assertEqual(observed["coverage"], "complete")
+
+    def test_agy_cache_only_is_partial_and_keeps_exact_zero_and_wide_counters(self):
+        for field in ("cache_read_tokens", "cached_tokens"):
+            for value in (0, 9007199254740999, 10**40 - 1, "9007199254740999"):
+                with self.subTest(field=field, value=value):
+                    observed = normalize_attempt_usage("antigravity", {field: value})
+                    self.assertEqual(observed["cached_input_tokens"], str(value))
+                    self.assertEqual(observed["coverage"], "partial")
+                    for primary in ("input_tokens", "output_tokens", "total_tokens"):
+                        self.assertIsNone(observed[primary])
+        zero = normalize_attempt_usage("antigravity", {
+            "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cached_tokens": 0,
+        })
+        self.assertEqual(zero["coverage"], "complete")
+        self.assertTrue(all(zero[key] == "0" for key in (
+            "input_tokens", "output_tokens", "cached_input_tokens", "total_tokens")))
+
+    def test_agy_resumed_or_unverified_usage_never_attributes_cumulative_counts(self):
+        raw = {"input_tokens": 1000, "output_tokens": 200, "total_tokens": 1200,
+               "cache_read_tokens": 900, "cached_tokens": 900}
+        for provenance in (False, None, 1, "fresh_session"):
+            with self.subTest(provenance=provenance):
+                observed = normalize_attempt_usage("antigravity", raw, fresh_session=provenance)
+                self.assertEqual(observed["coverage"], "unknown")
+                self.assertEqual(observed["session_provenance"], "unverified_baseline")
+                self.assertTrue(all(observed[key] is None for key in (
+                    "input_tokens", "output_tokens", "cached_input_tokens", "total_tokens")))
+
+    def test_agy_explicit_total_is_not_invented_or_replaced_by_subdivisions(self):
+        without_total = normalize_attempt_usage("antigravity", {
+            "input_tokens": 100, "output_tokens": 20, "cached_tokens": 1000, "thinking_tokens": 12,
+        })
+        self.assertIsNone(without_total["total_tokens"])
+        self.assertEqual(without_total["coverage"], "partial")
+        codex = normalize_attempt_usage("codex", {
+            "input_tokens": 100, "output_tokens": 20, "cached_tokens": 80,
+        })
+        self.assertIsNone(codex["cached_input_tokens"])
+        self.assertEqual(codex["total_tokens"], "120")
+
     def test_large_null_invalid_and_partial_counters_preserve_uncertainty(self):
         large = 9007199254740999
         observed = normalize_attempt_usage("codex", {"input_tokens": large, "output_tokens": 1})

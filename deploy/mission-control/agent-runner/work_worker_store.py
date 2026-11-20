@@ -99,6 +99,7 @@ class Lease:
     deadline_at: str
     unit_name: str
     resume_workspace_digest: str | None = None
+    resume_attempt_id: str | None = None
 
     def to_dict(self):
         return {
@@ -118,6 +119,7 @@ class Lease:
             "deadline_at": self.deadline_at,
             "unit_name": self.unit_name,
             "resume_workspace_digest": self.resume_workspace_digest,
+            "resume_attempt_id": self.resume_attempt_id,
         }
 
 
@@ -392,6 +394,7 @@ class WorkerDB:
             deadline_at=payload["deadline_at"],
             unit_name=payload["unit_name"],
             resume_workspace_digest=payload.get("resume_workspace_digest"),
+            resume_attempt_id=str(payload["resume_attempt_id"]) if payload.get("resume_attempt_id") else None,
         )
 
     def renew(self, lease):

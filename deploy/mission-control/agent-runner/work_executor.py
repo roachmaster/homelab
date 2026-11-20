@@ -5,11 +5,12 @@ Assignments are stdin data. No function here connects to the application databas
 """
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import fcntl
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -19,7 +20,9 @@ import time
 from uuid import UUID
 
 from work_policy import POLICY
+from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
+from work_sessions import SessionError, SessionSelection
 from work_worker_config import WorkerConfig, verify_recipe
 
 UNIT_RE = re.compile(r"forge-coding-[0-9a-f]{32}")
@@ -30,6 +33,7 @@ CHILD_WORKSPACE = Path("/run/forge-coding-workspace")
 CHILD_STATE = Path("/run/forge-coding-attempt")
 MAX_FILES = 20_000
 MAX_WORKSPACE_BYTES = 256 * 1024 * 1024
+LOG = logging.getLogger("forge-coding-worker")
 
 
 def utc_now():
@@ -224,6 +228,7 @@ class Invocation:
     scratch: Path
     workspace: WorkspaceLease
     implement: bool
+    session: SessionSelection | None = None
 
 
 @dataclass(frozen=True)
@@ -234,6 +239,7 @@ class CliOutcome:
     usage: dict | None
     summary: str
     stop_proof: dict
+    fresh_session: bool = True
 
 
 def _json_object(pairs):
@@ -259,7 +265,7 @@ def _provider_error(message):
 class CliParser:
     """Incremental bounded machine-event parser, retaining no tool arguments/thoughts."""
 
-    def __init__(self, backend):
+    def __init__(self, backend, *, expected_conversation_id=None):
         if backend not in {"antigravity", "codex"}:
             raise ValueError("Invalid CLI backend")
         self.backend = backend
@@ -272,6 +278,8 @@ class CliParser:
         self.failure = None
         self.denied = False
         self.stderr_tail = bytearray()
+        if expected_conversation_id is not None:
+            self._session(expected_conversation_id)
 
     def feed(self, data, *, stderr=False):
         self.stream_bytes += len(data)
@@ -314,6 +322,9 @@ class CliParser:
         self.conversation_id = value
 
     def _antigravity(self, event):
+        if event.get("event") == "init":
+            self._session(event.get("conversation_id"))
+            return
         if event.get("event") == "step_update":
             update = event.get("step_update")
             if isinstance(update, dict) and update.get("conversation_id") is not None:
@@ -451,7 +462,9 @@ class SystemdSupervisor:
         if registry.is_dir():
             readonly_bindings.append(str(registry) + ":" + str(CHILD_STATE / "cargo-home/registry"))
         properties = [
-            "Type=exec", "KillMode=control-group", "TimeoutStopSec=10", "RuntimeMaxSec=1800",
+            "Type=exec", "KillMode=control-group", "KillSignal=SIGTERM",
+            "FinalKillSignal=SIGKILL", "SendSIGKILL=yes", "TimeoutStopSec=10",
+            "RuntimeMaxSec=" + str(POLICY["max_wall_seconds"]),
             # Only the fixed system unshare/setpriv launcher executes before the
             # UID/capability drop. The actual CLI has NNP=1 and zero capabilities.
             "NoNewPrivileges=no", "PrivateTmp=yes", "PrivateDevices=yes", "ProtectSystem=strict",
@@ -502,7 +515,7 @@ class SystemdSupervisor:
                 "/usr/bin/systemctl", "show", unit + ".service",
                 "--property=LoadState,ActiveState,SubState,MainPID,ControlGroup"),
                 capture_output=True, timeout=10, check=False)
-            if result.returncode == 0:
+            if result.returncode in (0, 4):
                 fields = dict(line.split("=", 1) for line in result.stdout.decode().splitlines() if "=" in line)
                 expected_group = "/system.slice/" + unit + ".service"
                 group = fields.get("ControlGroup") or expected_group
@@ -533,12 +546,15 @@ class SystemdSupervisor:
 class CommandRunnerProvider:
     """Selected factory that creates a fresh adapter/process scope per attempt."""
 
-    def __init__(self, config, supervisor, *, popen=subprocess.Popen, clock=time.monotonic):
+    def __init__(self, config, supervisor, *, sessions=None, popen=subprocess.Popen, clock=time.monotonic):
         self.config, self.supervisor, self.popen, self.clock = config, supervisor, popen, clock
+        self.sessions = sessions
         self._binary_hashes = {}
 
     def prepare(self):
         (self.config.state_root / "attempts").mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.sessions is not None:
+            self.sessions.prepare()
         for backend, path in self.config.binaries.items():
             actual = path.resolve(strict=True)
             if not actual.is_file() or not os.access(actual, os.X_OK):
@@ -552,6 +568,11 @@ class CommandRunnerProvider:
         actual, pinned_hash = self._binary_hashes[backend]
         if hashlib.sha256(actual.read_bytes()).digest() != pinned_hash:
             raise ExecutionError("failed", "Configured coding program changed after worker startup.")
+        try:
+            session = (self.sessions.select(lease, workspace, pinned_hash.hex())
+                       if backend == "antigravity" and self.sessions is not None else None)
+        except (OSError, SessionError):
+            raise ExecutionError("needs_reconcile", "Antigravity continuation metadata is unavailable; review is required.") from None
         attempt = _uuid(lease["attempt_id"])
         scratch = self.config.state_root / "attempts" / attempt
         scratch.mkdir(mode=0o700, exist_ok=True)
@@ -608,7 +629,9 @@ class CommandRunnerProvider:
             settings.chmod(0o600)
             argv = (str(actual), "--settings", str(CHILD_STATE / "settings.json"), "--mode", "accept-edits" if implement else "plan",
                     "--model", lease["recipe"]["model"], "--input-format", "stream-json", "--output-format",
-                    "stream-json", "--print-timeout", "1800s", "--disable-slash-commands")
+                    "stream-json", "--print-timeout", str(POLICY["max_wall_seconds"]) + "s", "--disable-slash-commands")
+            if session is not None and session.conversation_id is not None:
+                argv += ("--conversation", session.conversation_id)
             payload = json.dumps({"event": "user", "message": {"content": prompt}},
                                  ensure_ascii=False).encode("utf-8") + b"\n"
         else:
@@ -617,16 +640,49 @@ class CommandRunnerProvider:
                     "workspace-write" if implement else "read-only", "--model", lease["recipe"]["model"],
                     "--json", "--color", "never", "--ephemeral", "-")
             payload = prompt.encode("utf-8")
-        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement)
+        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session)
 
     def run(self, lease, workspace, stop, *, report_progress=None):
         invocation = self.invocation(lease, workspace, progress=report_progress is not None)
-        parser = CliParser(invocation.backend)
+        conversation = invocation.session.conversation_id if invocation.session is not None else None
+        parser = CliParser(invocation.backend, expected_conversation_id=conversation)
         progress = ProgressReader(invocation.scratch / "progress", report_progress) if report_progress is not None else None
         process = None
         errors = []
         interrupted = False
+        scope_settled = False
+
+        def settled(outcome):
+            nonlocal scope_settled
+            scope_settled = True
+            # systemd owns the model's cgroup; this is the separate local
+            # systemd-run launcher. Both lifetimes must be confirmed stopped.
+            if not terminate_and_reap(process) or not outcome.stop_proof.get("scope_stopped"):
+                outcome = replace(outcome, status="needs_reconcile", text="",
+                                  summary="Agent or launcher stop could not be verified; review is required.")
+            if (outcome.status == "awaiting_review" and not stop.is_set()
+                    and invocation.session is not None):
+                try:
+                    self.sessions.remember(invocation.session, workspace, outcome.conversation_id)
+                except (OSError, SessionError, ExecutionError):
+                    # Losing an optional cache hint cannot discard completed
+                    # work. The old hint was removed before process startup.
+                    LOG.warning("Antigravity continuation cache unavailable")
+            # A separate process resumed with --conversation has no verified
+            # zero usage baseline. Never label its cumulative totals fresh.
+            return replace(outcome, fresh_session=conversation is None)
+
         try:
+            if stop.is_set():
+                return settled(CliOutcome("cancelled", "", None, None,
+                                          "The assignment stopped before execution.",
+                                          self.supervisor.stop(lease["unit_name"])))
+            if invocation.session is not None:
+                self.sessions.invalidate(invocation.session)
+            if stop.is_set():
+                return settled(CliOutcome("cancelled", "", None, None,
+                                          "The assignment stopped before execution.",
+                                          self.supervisor.stop(lease["unit_name"])))
             process = self.popen(self.supervisor.argv(lease, invocation), stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True,
                                  start_new_session=True, env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"})
@@ -687,8 +743,9 @@ class CommandRunnerProvider:
             try:
                 returncode = process.wait(timeout=15)
             except subprocess.TimeoutExpired:
-                process.kill()
-                returncode = process.wait(timeout=5)
+                terminate_and_reap(process)
+                returncode = process.poll()
+                errors.append(ExecutionError("failed", "The approved agent launcher did not exit within its bound."))
             proof = self.supervisor.stop(lease["unit_name"])
             if progress is not None and not errors and not interrupted:
                 try:
@@ -698,24 +755,36 @@ class CommandRunnerProvider:
                 except ProgressSinkError:
                     errors.append(ExecutionError("needs_reconcile", "Agent progress persistence is uncertain; review is required."))
             if errors:
-                return CliOutcome("needs_reconcile" if not proof["scope_stopped"] else errors[0].outcome,
-                                  "", parser.conversation_id, parser.usage, errors[0].summary, proof)
+                return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else errors[0].outcome,
+                                          "", parser.conversation_id, parser.usage, errors[0].summary, proof))
             outcome = parser.finish(returncode, proof, interrupted=interrupted)
             if outcome.status == "awaiting_review" and progress is not None and not progress.accepted:
-                return CliOutcome("failed", "", parser.conversation_id, parser.usage,
-                                  "Agent returned a result without a persisted public plan; submit a new attempt that reports its plan first.", proof)
-            return outcome
-        except (OSError, subprocess.SubprocessError):
+                return settled(CliOutcome("failed", "", parser.conversation_id, parser.usage,
+                                          "Agent returned a result without a persisted public plan; submit a new attempt that reports its plan first.", proof))
+            return settled(outcome)
+        except (OSError, subprocess.SubprocessError, SessionError):
             proof = self.supervisor.stop(lease["unit_name"])
-            return CliOutcome("needs_reconcile" if not proof["scope_stopped"] else "failed", "", None, None,
-                              "The approved agent process could not be started or stopped.", proof)
+            return settled(CliOutcome("needs_reconcile" if not proof["scope_stopped"] else "failed", "", None, None,
+                                      "The approved agent process could not be started or stopped.", proof))
         finally:
-            if progress is not None:
-                progress.close()
-            if process is not None:
-                for stream in (process.stdin, process.stdout, process.stderr):
-                    if stream is not None:
-                        stream.close()
+            try:
+                try:
+                    if process is not None and not scope_settled:
+                        self.supervisor.stop(lease["unit_name"])
+                finally:
+                    terminate_and_reap(process)
+            finally:
+                try:
+                    if process is not None:
+                        for stream in (process.stdin, process.stdout, process.stderr):
+                            if stream is not None:
+                                try:
+                                    stream.close()
+                                except OSError:
+                                    LOG.warning("Agent pipe cleanup unavailable")
+                finally:
+                    if progress is not None:
+                        progress.close()
 
 
 def utf8_chunks(content, maximum=CHUNK_BYTES):

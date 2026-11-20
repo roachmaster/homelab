@@ -215,28 +215,41 @@ def validate_snapshot(value):
     return value
 
 
+def _attempt_counter(raw_usage, fields):
+    """Accept one reported counter or agreeing aliases; null means unreported."""
+    try:
+        reported = [counter(raw_usage[field], provider_integer=True)
+                    for field in fields if raw_usage.get(field) is not None]
+    except InvalidUsage:
+        return None
+    return reported[0] if reported and len(set(reported)) == 1 else None
+
+
 def normalize_attempt_usage(provider, raw_usage, *, fresh_session=True):
-    """Attribute one trusted terminal event, never step records or parent+child sums."""
+    """Attribute one trusted terminal event, never step records or parent+child sums.
+
+    AGY result usage is accepted only with a verified fresh-session baseline.
+    Resumed processes without that baseline keep counters unknown. Cached-token
+    aliases describe the same metric and must not be summed or added to totals.
+    """
     enum(provider, {"antigravity", "codex"})
     fresh_session = fresh_session is True
     values = {"input_tokens": None, "output_tokens": None, "cached_input_tokens": None, "total_tokens": None}
     source = "agy-result-v1" if provider == "antigravity" else "codex-exec-turn-v1"
     if fresh_session and isinstance(raw_usage, dict):
-        for output, field in (("input_tokens", "input_tokens"), ("output_tokens", "output_tokens"),
-                              ("cached_input_tokens", "cache_read_tokens" if provider == "antigravity" else "cached_input_tokens")):
-            try:
-                values[output] = counter(raw_usage.get(field), provider_integer=True)
-            except InvalidUsage:
-                pass
+        cache_fields = (("cache_read_tokens", "cached_tokens") if provider == "antigravity"
+                        else ("cached_input_tokens",))
+        for output, fields in (("input_tokens", ("input_tokens",)),
+                               ("output_tokens", ("output_tokens",)),
+                               ("cached_input_tokens", cache_fields)):
+            values[output] = _attempt_counter(raw_usage, fields)
         if provider == "antigravity":
-            try:
-                values["total_tokens"] = counter(raw_usage.get("total_tokens"), provider_integer=True)
-            except InvalidUsage:
-                pass
+            values["total_tokens"] = _attempt_counter(raw_usage, ("total_tokens",))
         elif values["input_tokens"] is not None and values["output_tokens"] is not None:
             total = int(values["input_tokens"]) + int(values["output_tokens"])
             values["total_tokens"] = str(total) if total <= MAX_COUNTER else None
     primary = [values[key] for key in ("input_tokens", "output_tokens", "total_tokens")]
-    coverage = "complete" if all(item is not None for item in primary) else "partial" if any(item is not None for item in primary) else "unknown"
+    coverage = ("complete" if all(item is not None for item in primary)
+                else "partial" if any(item is not None for item in values.values()) else "unknown")
     return {**values, "source": source, "coverage": coverage,
             "session_provenance": "fresh_session" if fresh_session else "unverified_baseline"}

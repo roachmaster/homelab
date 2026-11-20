@@ -116,6 +116,11 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Forge coding progress migration 0012 is missing';
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM forge_agent.schema_migrations WHERE version = 13 AND name = 'coding_task_session_policy'
+    ) THEN
+        RAISE EXCEPTION 'Forge coding task session policy migration 0013 is missing';
+    END IF;
     FOR expected IN
         SELECT * FROM (VALUES ('progress_attempt_id', 'uuid'), ('progress_sequence', 'integer')) AS columns(name, type)
     LOOP
@@ -145,15 +150,19 @@ BEGIN
           AND p.prosecdef
           AND 'search_path=pg_catalog, pg_temp' = ANY(p.proconfig)
           AND position(
-              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2')$predicate$
+              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2','forge-coding-v3')$predicate$
               IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
           ) > 0
           AND position(
               $predicate$(t.pinned_recipe->>'policy_digest')=r.policy_digest$predicate$
               IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
           ) > 0
+          AND position(
+              $predicate$'resume_attempt_id',CASEWHENv_resume_digestISNOTNULLTHENv_task.latest_attempt_idELSENULLEND$predicate$
+              IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
+          ) > 0
     ) THEN
-        RAISE EXCEPTION 'Missing or unexpected migration 0011 claim policy predicates';
+        RAISE EXCEPTION 'Missing or unexpected migration 0013 claim policy predicates';
     END IF;
 
     SELECT attnum INTO att_archive_reason
@@ -383,7 +392,7 @@ BEGIN
                  AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text)
                  AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1)
                  AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128))
-                 AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text]))
+                 AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text, 'forge-coding-v3'::text]))
                  AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text]))
                  AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text)
                  AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),

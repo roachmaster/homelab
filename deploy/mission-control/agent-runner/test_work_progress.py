@@ -288,7 +288,7 @@ class WorkProgressTest(unittest.TestCase):
     def test_migration_12_apply_twice_schema_scope_and_narrow_acl_drift(self):
         self.cluster.apply_and_verify()
         self.cluster.apply_and_verify()
-        self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 12)
+        self.assertEqual(self.rows("SELECT version FROM forge_agent.schema_migrations WHERE version=12")[0][0], 12)
         columns = self.rows(
             "SELECT attname,format_type(atttypid,atttypmod),attnotnull FROM pg_attribute "
             "WHERE attrelid='forge_agent.coding_events'::regclass "
