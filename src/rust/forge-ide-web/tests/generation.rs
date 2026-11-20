@@ -432,9 +432,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==9"));
+    assert!(worker.contains("wasm.abi_version()!==10"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 9);
+    assert_eq!(manifest["abi_version"], 10);
 }
 
 #[test]
@@ -710,7 +710,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
     assert!(main.contains("navigation_checkpoint_saved"));
     assert!(worker.contains("!await localCheckpoint.pending"));
     assert!(worker.contains("restore_agents_navigation"));
-    assert!(worker.contains("wasm.abi_version()!==9"));
+    assert!(worker.contains("wasm.abi_version()!==10"));
 }
 
 #[test]

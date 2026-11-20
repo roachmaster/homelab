@@ -3,8 +3,12 @@
 Updated 20 November 2026. The current source navigation is **Agents, Workbench,
 Home and Design**. Chat is temporarily inactive; Mail remains retired. Their
 PostgreSQL history and backend APIs remain preserved. The current source requires
-an atomic **ABI9** bundle and the matching inert workspace restore/save backend;
+an atomic **ABI10** bundle and the matching inert workspace restore/save backend;
 this source change does not itself deploy the new portal.
+
+The typed agent catalog and usage contracts accept Grok when the configured
+backend advertises it. Missing allowance and token observations stay unknown;
+this UI support does not itself configure a runnable provider or verify live quota.
 
 The preceding runtime checkpoint activated M17 / `forge-coding-v8` from
 `8a1faf496f76ef30dd6f1362a32e5d70f80f012a`, with the prior checked UI assets.
@@ -34,7 +38,7 @@ The current [implementation captures](/design/wireframes) use disposable accepta
 
 | Concern | Implemented ownership | Practical limit |
 | --- | --- | --- |
-| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **9**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
+| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **10**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
 | Same-tab navigation | The IDE saves a checkpoint and bounded local JSON handoff before Home/Design. Return resumes admission, restores state and re-verifies Workbench source. Declared `#workbench` and `#agents` entry actions run after restore and are consumed. Legacy `#chat` and `#mail` map to Agents. Inert restore/save preserves Chat metadata without hydration. | URLs contain view intent, not reports, credentials or source identities. A fresh tab does not inherit another tab's unsent drafts. |
 | Chat persistence | PostgreSQL keeps operator history, tab checkpoints, conversation retention and queued runs. The history DAO supports list/open, expiry, long-term retention and deletion. | A default expiry applies automatically; deleting a saved conversation is distinct from cancelling a model run. |
 | Mail persistence | PostgreSQL stores threads, ordered messages, queued runs and recall metadata. Each inference reconstructs the accepted transcript and pins its model/profile. | Mail drafts survive the supported same-tab documentation handoff in local JSON; there is no durable cross-device Mail-draft table. |
