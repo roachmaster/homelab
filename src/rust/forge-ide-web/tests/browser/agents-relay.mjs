@@ -18,8 +18,8 @@ const resultText = '## Fixture agent result\n\nVerified first section.\n\n'
 const bytes = Buffer.from(resultText);
 const digest = createHash('sha256').update(bytes).digest('hex');
 const profiles = [
-  { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review'] },
-  { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review'] },
+  { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'] },
+  { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'] },
 ];
 
 function task(status, number, input = {}) {
@@ -64,6 +64,7 @@ function detail(t) {
     attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? t.public_summary ?? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
     result: ['awaiting_review', 'completed'].includes(t.status) ? { attempt_id: t.attempt_id, sha256: digest, byte_count: bytes.length, chunk_count: Math.ceil(bytes.length / 16384) } : null,
     reconciliation_receipt_id: null,
+    ...(t.publication ? { publication: t.publication } : {}),
   };
 }
 function usage(alias, tasks) {
@@ -90,7 +91,9 @@ export async function startAgentsRelay() {
   const receipts = new Map();
   const controls = new Map();
   const calls = [];
-  const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false };
+  const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
+    dropNextPlanDecision: false, holdPublication: false };
+  const planDecisions = [], publicationRevisions = [];
   let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
     try {
@@ -138,6 +141,19 @@ export async function startAgentsRelay() {
       const selected = tasks.get(input.task_id);
       if (!selected) { failed(404, 'not_found'); return; }
       if (input.kind === 'work_get') {
+        if (selected.publication && ['pending', 'checking', 'publishing'].includes(selected.publication.status)) {
+          publicationRevisions.push(selected.revision);
+          if (!faults.holdPublication) {
+            selected.publication_step++;
+            const stages = ['pending', 'checking', 'publishing', 'published'];
+            selected.publication.status = stages[Math.min(selected.publication_step, 3)];
+            selected.publication.summary = 'Required fixture checks and PR publication.';
+            if (selected.publication.status === 'published') {
+              selected.publication.commit_sha = 'e'.repeat(40);
+              selected.publication.pr_url = 'https://github.com/roachmaster/homelab/pull/42';
+            }
+          }
+        }
         if (selected.status === 'queued') { selected.status = 'running'; selected.revision++; event(selected, 'started'); }
         else if (selected.status === 'running' && selected.progress_emitted) progressRefetches++;
         send(200, 'work_opened', { task: detail(selected) }); return;
@@ -146,11 +162,46 @@ export async function startAgentsRelay() {
         if (selected.status === 'running' && !selected.progress_emitted) progress(selected);
         else if (selected.status === 'running' && !faults.holdProgressCompletion) {
           selected.status = 'awaiting_review'; selected.revision++; event(selected, 'awaiting_review');
+          if (selected.mode === 'implement') {
+            selected.publication = { status: 'pending', branch: 'forge/task-fixture', summary: 'Waiting for required checks.' };
+            selected.publication_step = -1;
+          }
         } else if (selected.status === 'cancel_requested') {
           selected.status = 'cancelled'; selected.revision++; event(selected, 'cancelled');
         }
         const events = selected.events.filter(item => item.sequence > (input.after_sequence ?? 0)).slice(0, input.limit ?? 50);
         send(200, 'work_events', { project_alias: project, task_id: selected.task_id, revision: selected.revision, status: selected.status, events, next_sequence: events.at(-1)?.sequence ?? input.after_sequence ?? 0 }); return;
+      }
+      if (input.kind === 'work_plan_decide') {
+        if (request.headers['forge-destination'] !== 'ide.work.plan.decide') throw new Error('fixture plan destination');
+        planDecisions.push({ ...input });
+        const intent = JSON.stringify(Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'request_id')));
+        let saved = controls.get(input.idempotency_key);
+        if (saved && (saved.kind !== 'work_plan_decide' || saved.intent !== intent)) { failed(409, 'idempotency_conflict'); return; }
+        if (!saved) {
+          if (input.expected_revision !== selected.revision) { failed(409, 'revision_conflict'); return; }
+          if (selected.mode !== 'plan' || !['awaiting_review', 'completed'].includes(selected.status)
+              || input.plan_attempt_id !== selected.attempt_id || input.plan_sha256 !== digest) { failed(409, 'not_reviewable'); return; }
+          if (!['resume', 'revise', 'cancel'].includes(input.decision)
+              || input.decision === 'revise' && !input.note?.trim()) { failed(400, 'invalid_request'); return; }
+          const mode = input.decision === 'resume' ? 'implement' : 'plan';
+          if (input.decision !== 'cancel' && !profiles.some(p => p.alias === input.agent_profile && p.modes.includes(mode))) { failed(403, 'denied'); return; }
+          const before = selected.revision;
+          selected.revision++; selected.mode = mode;
+          selected.status = input.decision === 'cancel' ? 'cancelled' : 'queued';
+          if (input.decision !== 'cancel') {
+            selected.agent_profile = input.agent_profile;
+            selected.attempt_id = randomUUID(); selected.progress_emitted = false;
+            selected.publication = null;
+            if (input.decision === 'revise') selected.prompt += '\nReview feedback: ' + input.note;
+          }
+          event(selected, input.decision === 'cancel' ? 'cancelled' : 'resumed');
+          saved = { kind: 'work_plan_decide', intent, receipt: { project_alias: project, task_id: selected.task_id,
+            base_revision: before, revision: selected.revision, status: selected.status, mode } };
+          controls.set(input.idempotency_key, saved);
+        }
+        if (faults.dropNextPlanDecision) { faults.dropNextPlanDecision = false; response.destroy(); return; }
+        send(saved.receipt.status === 'queued' ? 202 : 200, 'work_plan_decided', saved.receipt); return;
       }
       if (input.kind === 'work_cancel' || input.kind === 'work_accept') {
         let receipt = controls.get(input.idempotency_key);
@@ -180,6 +231,11 @@ export async function startAgentsRelay() {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
+    planDecisions, publicationRevisions,
+    addPlan(status, title) {
+      if (!['awaiting_review', 'completed'].includes(status)) throw new Error('fixture plan state');
+      const next = task(status, tasks.size, { mode: 'plan', prompt: title }); tasks.set(next.task_id, next); return next.task_id;
+    },
     get taskCount() { return tasks.size; }, get refreshes() { return refreshes; },
     get progressRefetches() { return progressRefetches; },
     async close() { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); },

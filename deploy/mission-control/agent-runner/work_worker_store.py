@@ -100,6 +100,7 @@ class Lease:
     unit_name: str
     resume_workspace_digest: str | None = None
     resume_attempt_id: str | None = None
+    plan_decision_id: str | None = None
 
     def to_dict(self):
         return {
@@ -120,6 +121,7 @@ class Lease:
             "unit_name": self.unit_name,
             "resume_workspace_digest": self.resume_workspace_digest,
             "resume_attempt_id": self.resume_attempt_id,
+            "plan_decision_id": self.plan_decision_id,
         }
 
 
@@ -395,6 +397,7 @@ class WorkerDB:
             unit_name=payload["unit_name"],
             resume_workspace_digest=payload.get("resume_workspace_digest"),
             resume_attempt_id=str(payload["resume_attempt_id"]) if payload.get("resume_attempt_id") else None,
+            plan_decision_id=str(payload["plan_decision_id"]) if payload.get("plan_decision_id") else None,
         )
 
     def renew(self, lease):
@@ -564,3 +567,43 @@ class WorkerDB:
                 "SELECT forge_coding_worker_api.fail_usage_poll(%s, %s, %s, %s)",
                 (profile_alias, generation, configuration_epoch, sanitized_code),
             )
+
+    def read_plan(self, lease):
+        attempt, token = _extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.read_plan(%s,%s)", (attempt,token))
+            value = cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def queue_publication(self, lease, reconciliation_receipt_id):
+        attempt, token = _extract_attempt_creds(lease)
+        receipt = _coerce_uuid(reconciliation_receipt_id, "reconciliation_receipt_id")
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.queue_publication(%s,%s,%s)", (attempt,token,receipt))
+            value = cursor.fetchone()[0]
+        return str(value) if value is not None else None
+
+    def publication_claim(self, worker_id):
+        validate_identifier(worker_id, "worker_id")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.publication_claim(%s)", (worker_id,))
+            value = cursor.fetchone()[0]
+        return None if value is None else dict(value)
+
+    def publication_renew(self, job):
+        publication = _coerce_uuid(job["publication_id"], "publication_id")
+        token = _coerce_uuid(job["lease_token"], "lease_token")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.publication_renew(%s,%s)", (publication,token))
+            return bool(cursor.fetchone()[0])
+
+    def publication_finish(self, job, status, summary, branch=None, commit_sha=None, pr_url=None):
+        publication = _coerce_uuid(job["publication_id"], "publication_id")
+        token = _coerce_uuid(job["lease_token"], "lease_token")
+        if status not in {"publishing", "published", "failed"}:
+            raise ValueError("Invalid publication outcome")
+        _validate_summary(summary)
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.publication_finish(%s,%s,%s,%s,%s,%s,%s)",
+                           (publication,token,status,branch,commit_sha,pr_url,summary))
+            return dict(cursor.fetchone()[0])

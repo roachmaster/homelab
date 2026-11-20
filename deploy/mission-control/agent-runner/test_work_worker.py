@@ -46,13 +46,15 @@ class FakeRunner:
     def __init__(self, events, action=None):
         self.events, self.action = events, action
         self.callbacks = []
+        self.plan_contexts = []
 
     def prepare(self):
         self.events.append("runner-prepare")
 
-    def run(self, lease, workspace, stop, *, report_progress=None):
+    def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None):
         self.events.append("runner")
         self.callbacks.append(report_progress)
+        self.plan_contexts.append(plan_context)
         if report_progress is not None:
             report_progress(1, "plan", "Fixture public plan.")
         if self.action:

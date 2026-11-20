@@ -11,7 +11,9 @@ GRANT SELECT, INSERT, UPDATE ON forge_agent.ide_workspace_history, forge_agent.i
 GRANT SELECT, INSERT, UPDATE ON forge_agent.mail_threads TO forge_agent;
 GRANT SELECT, INSERT ON forge_agent.mail_messages TO forge_agent;
 GRANT SELECT, INSERT, UPDATE ON forge_agent.coding_tasks TO forge_agent;
-GRANT SELECT, INSERT ON forge_agent.coding_events, forge_agent.coding_control_receipts TO forge_agent;
+GRANT SELECT, INSERT ON forge_agent.coding_events, forge_agent.coding_control_receipts,
+    forge_agent.coding_plan_decisions TO forge_agent;
+GRANT SELECT ON forge_agent.coding_publications TO forge_agent;
 GRANT SELECT ON
     forge_agent.coding_worker_readiness,
     forge_agent.coding_attempts,
@@ -37,6 +39,8 @@ GRANT EXECUTE ON FUNCTION
     forge_coding_worker_api.renew(uuid, uuid),
     forge_coding_worker_api.checkpoint(uuid, uuid, text),
     forge_coding_worker_api.report_progress(uuid, uuid, integer, text, text),
+    forge_coding_worker_api.read_plan(uuid, uuid),
+    forge_coding_worker_api.queue_publication(uuid, uuid, uuid),
     forge_coding_worker_api.append_result(uuid, uuid, integer, text),
     forge_coding_worker_api.publish(uuid, uuid, text, jsonb, jsonb, text, jsonb),
     forge_coding_worker_api.record_stop(uuid, uuid, jsonb, text),
@@ -50,6 +54,9 @@ GRANT USAGE ON SCHEMA forge_coding_reconciler_api TO forge_coding_reconciler;
 GRANT EXECUTE ON FUNCTION
     forge_coding_reconciler_api.expire_leases(),
     forge_coding_reconciler_api.pending_reconciliations(integer),
-    forge_coding_reconciler_api.reconcile(uuid, uuid, text, jsonb)
+    forge_coding_reconciler_api.reconcile(uuid, uuid, text, jsonb),
+    forge_coding_reconciler_api.publication_claim(text),
+    forge_coding_reconciler_api.publication_renew(uuid, uuid),
+    forge_coding_reconciler_api.publication_finish(uuid, uuid, text, text, text, text, text)
 TO forge_coding_reconciler;
 COMMIT;

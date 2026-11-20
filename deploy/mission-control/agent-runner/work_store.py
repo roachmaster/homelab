@@ -397,7 +397,7 @@ class WorkStore:
             cursor.execute("""
                 SELECT id, project_alias, base_revision, mode, agent_profile,
                        recipe_digest, status, revision, created_at,
-                       title, prompt, acceptance_criteria, latest_attempt_id
+                       title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
             """, (self._owner, project_alias, task_id))
@@ -409,7 +409,7 @@ class WorkStore:
             result_dto = None
             reconciliation_receipt_id = None
 
-            if row["latest_attempt_id"] is not None:
+            if row["latest_attempt_id"] is not None and row["status"] != "queued":
                 cursor.execute("""
                     SELECT attempt_id, worker_id, phase, started_at, finished_at, summary,
                            published_at, result_sha256, result_byte_count, result_chunk_count
@@ -460,6 +460,20 @@ class WorkStore:
                 "result": result_dto,
                 "reconciliation_receipt_id": reconciliation_receipt_id,
             }
+            cursor.execute("""
+                SELECT status,branch,commit_sha,pr_url,summary FROM forge_agent.coding_publications
+                WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s
+            """, (self._owner, project_alias, task_id,
+                  row["latest_attempt_id"] if row["status"] != "queued" else None))
+            publication = cursor.fetchone()
+            if publication is not None:
+                detail["publication"] = {key: value for key, value in publication.items() if value is not None}
+            elif (row["mode"] == "implement" and row["status"] == "awaiting_review"
+                  and self._approved_plan_implementation(cursor,row)):
+                # Publication is authorized by the Plan decision. The worker's
+                # reconcile/queue calls are separate commits, so that handoff
+                # is already pending even before the outbox row becomes visible.
+                detail["publication"] = {"status":"pending","summary":"Waiting for trusted publication."}
             if "title" not in detail:
                 detail["title"] = prepare_title(row["prompt"])
             return detail
@@ -753,6 +767,30 @@ class WorkStore:
                 cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
             return receipt
 
+    def _approved_plan_implementation(self, cursor, task):
+        if task.get("plan_decision_id") is None or task["mode"] != "implement":
+            return False
+        cursor.execute("""SELECT 1 FROM forge_agent.coding_plan_decisions
+            WHERE owner_id=%s AND project_alias=%s AND task_id=%s
+              AND decision_id=%s AND decision='resume'""",
+            (self._owner,task["project_alias"],task["id"],task["plan_decision_id"]))
+        return cursor.fetchone() is not None
+
+    def _publication_busy(self, cursor, task):
+        cursor.execute("""SELECT 1 FROM forge_agent.coding_publications
+            WHERE owner_id=%s AND project_alias=%s AND task_id=%s
+              AND status IN ('pending','checking','publishing')""",
+            (self._owner,task["project_alias"],task["id"]))
+        if cursor.fetchone() is not None:
+            return True
+        if task["status"] != "awaiting_review" or not self._approved_plan_implementation(cursor,task):
+            return False
+        cursor.execute("""SELECT 1 FROM forge_agent.coding_publications
+            WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s
+              AND status IN ('published','failed')""",
+            (self._owner,task["project_alias"],task["id"],task["latest_attempt_id"]))
+        return cursor.fetchone() is None
+
     def accept(self, *, project_alias, task_id, expected_revision, idempotency_key, review_note=""):
         self._require_project(project_alias)
         if (not isinstance(task_id, UUID)
@@ -769,7 +807,7 @@ class WorkStore:
         )
         with self._transaction() as cursor:
             cursor.execute("""
-                SELECT id, project_alias, status, revision, latest_attempt_id
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -790,7 +828,7 @@ class WorkStore:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
-            if task["status"] != "awaiting_review" or task["latest_attempt_id"] is None:
+            if task["mode"] == "plan" or task["status"] != "awaiting_review" or task["latest_attempt_id"] is None:
                 raise Rejected(409, "not_reviewable")
 
             cursor.execute("""
@@ -808,6 +846,9 @@ class WorkStore:
 
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
+
+            if self._publication_busy(cursor,task):
+                raise Rejected(409,"reconcile_required")
 
             cursor.execute("""
                 UPDATE forge_agent.coding_tasks
@@ -882,7 +923,7 @@ class WorkStore:
                 (lock_scope, ADVISORY_LOCK_SALT),
             )
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -907,7 +948,11 @@ class WorkStore:
 
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
-            if task["status"] in NON_RESUMABLE_STATUSES or task["latest_attempt_id"] is None:
+
+            if self._publication_busy(cursor,task):
+                raise Rejected(409,"reconcile_required")
+            if (task["mode"] == "plan" and task["status"] == "awaiting_review"
+                    or task["status"] in NON_RESUMABLE_STATUSES or task["latest_attempt_id"] is None):
                 raise Rejected(409, "reconcile_required")
 
             cursor.execute("""
@@ -1010,4 +1055,110 @@ class WorkStore:
                 intent_digest, expected_revision, new_revision, Json(receipt),
             ))
             cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
+            return receipt
+
+    def plan_decide(self, *, project_alias, task_id, expected_revision, plan_attempt_id,
+                    plan_sha256, decision, agent_profile, idempotency_key, note="", resolve_recipe):
+        """Atomically decide one exact immutable Plan and pin the next stage."""
+        self._require_project(project_alias)
+        try:
+            valid = (isinstance(task_id, UUID) and isinstance(plan_attempt_id, UUID)
+                     and type(expected_revision) is int and 1 <= expected_revision < MAX_REVISION
+                     and isinstance(plan_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", plan_sha256)
+                     and isinstance(decision, str) and decision in {"resume", "revise", "cancel"}
+                     and isinstance(agent_profile, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", agent_profile)
+                     and isinstance(idempotency_key, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", idempotency_key)
+                     and isinstance(note, str) and len(note.encode("utf-8")) <= 2048
+                     and (decision != "revise" or bool(note.strip()))
+                     and all(unicodedata.category(c) != "Cc" or c in "\r\n\t" for c in note))
+        except UnicodeError:
+            valid = False
+        if not valid:
+            raise Rejected(400, "invalid_request")
+        intent = sha256_canonical({"action": "plan_decide", "project_alias": project_alias,
+            "task_id": str(task_id), "expected_revision": expected_revision,
+            "plan_attempt_id": str(plan_attempt_id), "plan_sha256": plan_sha256,
+            "decision": decision, "agent_profile": agent_profile, "note": note})
+        with self._transaction() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s::text,%s::bigint))",
+                           (f"{self._owner}\n{project_alias}", ADVISORY_LOCK_SALT))
+            cursor.execute("""SELECT * FROM forge_agent.coding_tasks
+                WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE""",
+                (self._owner, project_alias, task_id))
+            task = cursor.fetchone()
+            if task is None:
+                raise Rejected(404, "not_found")
+            cursor.execute("""SELECT action,intent_digest,receipt_json FROM forge_agent.coding_control_receipts
+                WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND idempotency_key=%s""",
+                (self._owner, project_alias, task_id, idempotency_key))
+            old = cursor.fetchone()
+            if old is not None:
+                if old["action"] != "plan_decide" or old["intent_digest"] != intent:
+                    raise Rejected(409, "idempotency_conflict")
+                return dict(old["receipt_json"])
+            if task["revision"] != expected_revision:
+                raise Rejected(409, "revision_conflict")
+            if task["mode"] != "plan" or task["status"] not in {"awaiting_review", "completed"}:
+                raise Rejected(409, "not_reviewable")
+            if task["latest_attempt_id"] != plan_attempt_id:
+                raise Rejected(409, "result_mismatch")
+            cursor.execute("""SELECT * FROM forge_agent.coding_attempts
+                WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s""",
+                (self._owner, project_alias, task_id, plan_attempt_id))
+            source = cursor.fetchone()
+            if (source is None or source["phase"] != "stopped" or source["reservation_active"]
+                    or source["lease_expires_at"] is not None or source["published_at"] is None
+                    or source["result_sha256"] != plan_sha256 or source["pinned_recipe"]["mode"] != "plan"):
+                raise Rejected(409, "result_mismatch")
+            mode = "implement" if decision == "resume" else "plan"
+            status = "cancelled" if decision == "cancel" else "queued"
+            digest = None
+            recipe_json, recipe_digest = task["pinned_recipe"], task["recipe_digest"]
+            if decision != "cancel":
+                cursor.execute("""SELECT workspace_digest FROM forge_agent.coding_reconciliation_receipts
+                    WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s
+                    ORDER BY created_at DESC LIMIT 1""", (self._owner, project_alias, task_id, plan_attempt_id))
+                rec = cursor.fetchone()
+                if rec is None:
+                    raise Rejected(409, "reconcile_required")
+                digest = rec["workspace_digest"]
+                cursor.execute("""SELECT count(*) AS pending FROM forge_agent.coding_tasks
+                    WHERE owner_id=%s AND project_alias=%s AND status IN ('queued','running','cancel_requested')""",
+                    (self._owner, project_alias))
+                if cursor.fetchone()["pending"] >= self._max_pending:
+                    raise Rejected(503, "queue_full")
+                recipe = resolve_recipe(mode)
+                if not isinstance(recipe, PinnedRecipe) or recipe.mode != mode or recipe.generation_token_limit is not None:
+                    raise ValueError("Plan resolver returned an invalid pinned recipe")
+                if recipe.version != 2 or recipe.resource_profile != POLICY_ID or recipe.policy_digest != POLICY_DIGEST:
+                    raise Rejected(503,"unavailable")
+                recipe_json, recipe_digest = recipe.to_dict(), recipe.digest
+            decision_id, revision = uuid4(), expected_revision + 1
+            receipt = {"project_alias": project_alias, "task_id": str(task_id), "base_revision": expected_revision,
+                       "revision": revision, "status": status, "mode": mode}
+            cursor.execute("""INSERT INTO forge_agent.coding_plan_decisions
+                (decision_id,owner_id,project_alias,task_id,plan_attempt_id,plan_sha256,source_revision,base_revision,
+                 decision,agent_profile,note,idempotency_key,receipt_json)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (decision_id,self._owner,project_alias,task_id,plan_attempt_id,plan_sha256,expected_revision,
+                 task["base_revision"],decision,agent_profile,note,idempotency_key,Json(receipt)))
+            cursor.execute("""UPDATE forge_agent.coding_tasks SET status=%s,mode=%s,revision=%s,
+                agent_profile=%s,pinned_recipe=%s,recipe_digest=%s,plan_decision_id=%s,resume_workspace_digest=%s,
+                accepted_at=NULL,cancelled_at=CASE WHEN %s='cancelled' THEN clock_timestamp() ELSE NULL END,
+                review_note=%s,updated_at=clock_timestamp()
+                WHERE owner_id=%s AND project_alias=%s AND id=%s AND revision=%s""",
+                (status,mode,revision,task["agent_profile"] if decision == "cancel" else agent_profile,
+                 Json(recipe_json),recipe_digest,decision_id,digest,status,note,self._owner,project_alias,task_id,expected_revision))
+            cursor.execute("""INSERT INTO forge_agent.coding_control_receipts
+                (owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json)
+                VALUES (%s,%s,%s,'plan_decide',%s,%s,%s,%s,%s)""",
+                (self._owner,project_alias,task_id,idempotency_key,intent,expected_revision,revision,Json(receipt)))
+            cursor.execute("""INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
+                SELECT %s,%s,%s,coalesce(max(sequence),0)+1,%s,%s FROM forge_agent.coding_events
+                WHERE owner_id=%s AND project_alias=%s AND task_id=%s""",
+                (self._owner,project_alias,task_id,"cancelled" if decision == "cancel" else "resumed",
+                 Json({**receipt,"decision_id":str(decision_id),"decision":decision,"plan_attempt_id":str(plan_attempt_id),
+                       "plan_sha256":plan_sha256}),self._owner,project_alias,task_id))
+            if decision != "cancel":
+                cursor.execute("SELECT pg_notify(%s,'')", (NOTIFY_CHANNEL,))
             return receipt

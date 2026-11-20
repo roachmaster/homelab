@@ -3227,6 +3227,9 @@ async function agentsJourney() {
     await check(page.locator('#agents-overview')).toBeVisible();
 
     await page.locator('#agents-new').click();
+    // Keep the existing result-acceptance journey on a Review task. Finished
+    // Plan tasks now use the explicit artifact-bound decision flow below.
+    await page.locator('#agents-mode').selectOption('review');
     const prompt = page.locator('#agents-prompt');
     const criteria = page.locator('#agents-criteria');
     const retained = 'Keep this local Agents draft. A long task title preserves useful context across the dashboard without pushing status or timestamps out of view.';
@@ -3281,7 +3284,7 @@ async function agentsJourney() {
         usageOverviewHeld = true;
         await usageOverviewGate;
       }
-      if (['work_submit', 'work_cancel', 'work_accept', 'work_resume'].includes(request.kind)) {
+      if (['work_submit', 'work_cancel', 'work_accept', 'work_resume', 'work_plan_decide'].includes(request.kind)) {
         const saved = await page.evaluate(intent => {
           const cache = JSON.parse(sessionStorage.getItem('forge-workspace-navigation'));
           return cache?.agents?.retry_intent?.kind === intent.kind
@@ -3456,7 +3459,82 @@ async function agentsJourney() {
       await page.locator('#agents').evaluate(node => { node.scrollTop = 0; });
       await screenshot(page, `ide-agents-overview-${name}.png`);
     }
-    assert(checkpoints >= 5, 'submission, retry, acceptance and cancellation all checkpoint before IO');
+    process.stderr.write('QA_CHECK plan_decision_lifecycle\n');
+    await page.setViewportSize({ width: 390, height: 844 });
+    async function openFinishedPlan(status, title) {
+      const taskId = relay.addPlan(status, title);
+      await page.locator('#agents-refresh').click();
+      const row = page.locator(`#agents-tasks [data-row-id="${taskId}"] .fg-row-select`);
+      await check(row).toBeVisible(); await row.click();
+      await check(page.locator('#agents-plan-actions')).toBeVisible();
+      await check(page.locator('#agents-plan-resume')).toBeEnabled();
+      await check(page.locator('#agents-plan-resume')).toHaveText('Resume');
+      await check(page.locator('#agents-plan-revise')).toHaveText('Revise');
+      await check(page.locator('#agents-plan-cancel')).toHaveText('Cancel');
+      await check(page.locator('#agents-accept')).toBeHidden();
+      await check(page.locator('#agents-resume')).toBeHidden();
+      await check(page.locator('#agents-plan-revise')).toBeDisabled();
+      return taskId;
+    }
+    const approvedPlan = await openFinishedPlan('awaiting_review', 'Plan approval and PR fixture');
+    relay.faults.dropNextPlanDecision = true;
+    relay.faults.holdPublication = true;
+    await page.locator('#agents-plan-resume').click();
+    await check(page.locator('#agents-retry')).toBeVisible();
+    await check(page.locator('#open-agents')).toBeDisabled();
+    const originalDecision = relay.planDecisions.at(-1);
+    assert.equal(originalDecision.decision, 'resume');
+    assert.equal(originalDecision.task_id, approvedPlan);
+    assert.match(originalDecision.plan_sha256, /^[0-9a-f]{64}$/);
+    await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+    await check(page.locator('#agents-retry')).toBeVisible();
+    await check(page.locator('#agents-retry')).toBeEnabled();
+    await page.locator('#agents-retry').click();
+    await check(page.locator('#agents-retry')).toBeHidden();
+    await check(page.locator('#agents-plan-actions')).toBeHidden();
+    await check(page.locator('#agents-publication-status')).toContainText('Publication pending');
+    await check(page.locator('#agents-task-mode')).toHaveText('Mode · Implement');
+    await check(page.locator('#agents-accept')).toBeHidden();
+      await check(page.locator('#agents-resume')).toBeHidden();
+    const retriedDecisions = relay.planDecisions.filter(value => value.task_id === approvedPlan);
+    assert.equal(retriedDecisions.length, 2);
+    for (const value of retriedDecisions) {
+      assert.equal(value.idempotency_key, originalDecision.idempotency_key);
+      assert.equal(value.expected_revision, originalDecision.expected_revision);
+      assert.equal(value.plan_attempt_id, originalDecision.plan_attempt_id);
+      assert.equal(value.plan_sha256, originalDecision.plan_sha256);
+    }
+    relay.faults.holdPublication = false;
+    await check(page.locator('#agents-publication-status')).toHaveText('Pull request published', { timeout: 15000 });
+    const pullRequest = page.locator('#agents-publication-link a');
+    await check(pullRequest).toHaveAttribute('href', 'https://github.com/roachmaster/homelab/pull/42');
+    await check(pullRequest).toHaveAttribute('rel', 'noopener noreferrer');
+    await check(pullRequest).toHaveAttribute('target', '_blank');
+    assert(relay.publicationRevisions.length >= 4);
+    assert.equal(new Set(relay.publicationRevisions).size, 1, 'publication polling observes same-revision changes');
+    for (const width of [320, 390, 1440]) {
+      await page.setViewportSize({ width, height: 844 });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
+      const box = await pullRequest.boundingBox(); assert(box && box.height >= 44);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('#agents-back').click();
+    await openFinishedPlan('completed', 'Legacy completed plan revision fixture');
+    const feedback = 'Add concrete failure-path tests before implementation.';
+    await page.locator('#agents-review-note').fill(feedback);
+    await check(page.locator('#agents-plan-revise')).toBeEnabled();
+    await page.locator('#agents-plan-revise').click();
+    await check(page.locator('#agents-plan-actions')).toBeHidden();
+    await check(page.locator('#agents-task-status')).toHaveText('Ready for review');
+    await check(page.locator('#agents-plan-actions')).toBeVisible();
+    assert.equal(relay.planDecisions.at(-1).decision, 'revise');
+    assert.equal(relay.planDecisions.at(-1).note, feedback);
+    await page.locator('#agents-plan-cancel').click();
+    await check(page.locator('#agents-task-status')).toHaveText('Cancelled');
+    await check(page.locator('#agents-plan-actions')).toBeHidden();
+    assert.equal(relay.planDecisions.at(-1).decision, 'cancel');
+    await page.locator('#agents-back').click();
+    assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);
     assert.deepEqual(errors, []);

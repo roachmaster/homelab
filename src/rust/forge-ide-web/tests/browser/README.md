@@ -102,6 +102,16 @@ existing groups; the 28-group inventory and ten viewport cases remain unchanged.
 Historical Mail design articles, dated wireframe images and the relay's retained
 backend handlers are reference coverage, not proof of a live browser Mail screen.
 
+The same Agents journey covers finished Plan decisions: Resume approves the exact
+saved artifact for Implement mode, Revise requires review-note feedback, and Cancel
+ends the plan without execution. Legacy completed plans retain these controls.
+The fixture deliberately drops an acknowledged decision response, reloads the tab,
+and verifies retry keeps its artifact/revision/idempotency identity. Implementation
+publication is a separate bounded detail: Pending/Checking/Publishing is polled even
+at an unchanged task revision, generic Accept/Resume stays unavailable until it
+settles, and a Published result links only to a validated GitHub pull request. These
+are controlled backend/browser proofs; no real coding agent or remote PR is invoked.
+
 ## Evidence scopes
 
 - **Real-agent journey:** disposable source directories and ephemeral test TLS

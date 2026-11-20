@@ -34,6 +34,9 @@ def _lease(value):
     for field in ("task_id", "attempt_id", "attempt_token"):
         if str(UUID(str(result[field]))) != str(result[field]):
             raise ValueError("Invalid coding lease identity")
+    for field in ("plan_decision_id", "resume_attempt_id"):
+        if result.get(field) is not None and str(UUID(str(result[field]))) != str(result[field]):
+            raise ValueError("Invalid coding continuation identity")
     if result["unit_name"] != unit_name(result["attempt_id"]):
         raise ValueError("Invalid coding lease scope")
     return result
@@ -245,7 +248,13 @@ class CodingWorker:
                     # scratch writes in plan mode. Codex read-only sandbox
                     # stays unchanged and retains terminal-result reporting.
                     reporter = report_progress if lease["recipe"]["backend"] == "antigravity" else None
-                    outcome = self.runner.run(lease, workspace, stop, report_progress=reporter)
+                    arguments = {"report_progress": reporter}
+                    if lease.get("plan_decision_id") is not None:
+                        try:
+                            arguments["plan_context"] = self.store.read_plan(lease)
+                        except Exception:
+                            raise ExecutionError("needs_reconcile", "The saved plan could not be verified; review is required before execution.") from None
+                    outcome = self.runner.run(lease, workspace, stop, **arguments)
                     proof = outcome.stop_proof
                 if self.stop.is_set() and not cancelled.is_set():
                     outcome = replace(outcome, status="needs_reconcile", text="", stop_proof=proof,
@@ -259,9 +268,12 @@ class CodingWorker:
                 self._publish(lease, outcome, usage=self._normalize_usage(lease, outcome))
                 if proof["scope_stopped"]:
                     try:
-                        self.store.reconcile(lease, workspace.digest(), proof)
+                        receipt = self.store.reconcile(lease, workspace.digest(), proof)
+                        if (lease["mode"] == "implement" and lease.get("plan_decision_id") is not None
+                                and outcome.status == "awaiting_review"):
+                            self.store.queue_publication(lease, receipt)
                     except Exception:
-                        LOG.warning("Coding reconciliation receipt unavailable; takeover remains disabled")
+                        LOG.warning("Coding reconciliation or publication handoff unavailable; recovery remains fenced")
         except ExecutionError as error:
             proof = proof or self.supervisor.stop(lease["unit_name"])
             if lost.is_set():

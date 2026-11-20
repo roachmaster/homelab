@@ -34,20 +34,20 @@ class WorkProgressTest(unittest.TestCase):
         self.serial = 0
         self.db = self.make_db()
         self.service = WorkServiceFactory(make_v2_config(), lambda: self.cluster.connect("forge_agent")).create()
-        self.cluster.grant_worker("mission-control", "homelab", "codex-v2", ("plan",))
+        self.cluster.grant_worker("mission-control", "homelab", "codex-v2", ("plan", "review"))
         self.incarnation = str(uuid4())
         self.db.advertise(
             "progress-worker", self.incarnation, [{"alias": "homelab", "base_revision": BASE_REV}],
-            [{"alias": "codex-v2", "backend": "codex", "model": "gpt-5.4", "modes": ["plan"]}],
+            [{"alias": "codex-v2", "backend": "codex", "model": "gpt-5.4", "modes": ["plan", "review"]}],
             work_policy.POLICY_DIGEST,
         )
 
     def make_db(self, owner="mission-control", connect_factory=None):
         return WorkerDB(connect_factory or (lambda: self.cluster.connect("forge_coding_worker")), owner)
 
-    def claim(self):
+    def claim(self, mode="plan"):
         self.serial += 1
-        task = self.service.submit(make_submit(idempotency_key=f"progress-{self.serial}"))
+        task = self.service.submit(make_submit(idempotency_key=f"progress-{self.serial}", mode=mode))
         lease = self.db.claim("progress-worker", self.incarnation, ["codex-v2"])
         self.assertEqual(lease.task_id, task["task_id"])
         return lease
@@ -182,7 +182,7 @@ class WorkProgressTest(unittest.TestCase):
     def test_exact_replay_after_expiry_completed_and_cancelled_cannot_regress_state(self):
         for state in ("expired", "completed", "cancelled"):
             with self.subTest(state=state):
-                lease = self.claim()
+                lease = self.claim(mode="review" if state == "completed" else "plan")
                 self.db.report_progress(lease, 1, "plan", "The original plan")
                 self.db.report_progress(lease, 2, "progress", "The newest progress")
                 if state == "expired":

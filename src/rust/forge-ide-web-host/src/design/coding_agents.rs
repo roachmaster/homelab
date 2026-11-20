@@ -27,9 +27,9 @@ pub(super) const DISPATCH: &[Node] = &[
         element!(H1; text("Coding-agent dispatch")),
         element!(P;
             element!(Strong; text("Implemented; activation is deployment controlled.")),
-            text(" Source checkpoint: 19 November 2026. Original design base "),
+            text(" Source checkpoint: 20 November 2026. Original design base "),
             element!(Code; text("2e1300a00da92e9f97bdb1a656c2b182d4219a6c")),
-            text(". The source implements the Agents view, durable assignments, native Antigravity/Codex workers, full-result paging and explicit review/resume. Work and Usage are independent opt-in capabilities. This reader does not certify deployment of the bundle, migrations or worker. Retained diagrams use original illustrative port names."),
+            text(". The source implements the Agents view, durable assignments, native Antigravity/Codex workers, full-result paging, finished-plan decisions and checked PR publication. Work and Usage are independent opt-in capabilities. This reader does not certify deployment of the bundle, migrations or worker. Retained diagrams use original illustrative port names."),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Coding-agent dispatch sections"];
             element!(A [Href = "#flow"]; text("End-to-end flow")),
@@ -304,6 +304,10 @@ pub(super) const DISPATCH: &[Node] = &[
     ),
     element!(Section [Id = "progress", Class = "design-section", AriaLabelledby = "progress-title"];
         element!(H2 [Id = "progress-title"]; text("Plans and live progress")),
+        element!(H3; text("After a finished Plan: Resume, Revise or Cancel")),
+        element!(P; text("Resume approves the exact saved plan and queues implementation. Revise sends feedback back through planning and waits for another decision. Cancel ends the workflow while preserving its history. Previously accepted Plan tasks remain actionable. Each decision is revision-, artifact- and idempotency-bound; historical attempts retain their original recipe.")),
+        element!(P; text("An implementation result and confirmed workspace reconciliation queue a trusted publication job. Separate providers inspect a private snapshot, run isolated checks without GitHub or native CLI credentials, then push a generated feature branch and open a PR targeting main. The portal displays actual publication status and its PR link. Failed checks or conflicts block publication; merging remains a separate review.")),
+        element!(P [Class = "contract-note"]; text("A public plan milestone reported during an implementation is progress, not a separate approval gate. Plan decisions apply to the stopped final result of a task created in Plan mode. Policy4 and migration14 require a coordinated rollout; earlier deployment records do not establish activation.")),
         element!(P; text("Gemini publishes a concise public plan before work and reports observable milestones through its provisioned scratch helper. The trusted worker validates bounded, sequential reports and persists them as checkpoint events. No database credentials or attempt tokens enter the agent process.")),
         element!(Ol [Class = "contract-steps"];
             element!(Li; text("Gemini → scratch helper: publish plan, then milestone summaries.")),

@@ -3070,17 +3070,17 @@
     - selector: "#agents-usage-page"
       declarations:
         - ["font-size", ".75rem"]
-    - selector: "#agents-result,#agents-plan,#agents-progress"
+    - selector: "#agents-result,#agents-plan,#agents-progress,#agents-publication-link"
       declarations:
         - ["border", "0"]
         - ["background", "transparent"]
         - ["max-height", "none"]
         - ["overflow", "visible"]
         - ["padding", "0"]
-    - selector: "#agents-plan,#agents-progress"
+    - selector: "#agents-plan,#agents-progress,#agents-publication-link"
       declarations:
         - ["min-height", "0"]
-    - selector: "#agents-result .fg-message,#agents-plan .fg-message,#agents-progress .fg-message"
+    - selector: "#agents-result .fg-message,#agents-plan .fg-message,#agents-progress .fg-message,#agents-publication-link .fg-message"
       declarations:
         - ["border", "0"]
         - ["background", "transparent"]
@@ -3094,6 +3094,17 @@
       declarations:
         - ["max-width", "100%"]
         - ["overflow-x", "auto"]
+    - selector: "#agents-publication-link .fg-message>strong"
+      declarations:
+        - ["display", "none"]
+    - selector: "#agents-publication-link a"
+      declarations:
+        - ["display", "inline-flex"]
+        - ["align-items", "center"]
+        - ["min-height", "44px"]
+    - selector: "#agents-publication-summary:empty,#agents-publication-reference:empty"
+      declarations:
+        - ["display", "none"]
     - selector: "#agents .fg-row"
       declarations:
         - ["flex-wrap", "wrap"]

@@ -144,6 +144,7 @@ pub fn ide_document() -> Document {
                     component!(region "agents-reader"; [
                         component!(heading "agents-task-title", "Task"),
                         component!(status "agents-task-status", ""),
+                        component!(caption "agents-task-mode", ""),
                         component!(caption "agents-attempt", ""),
                         component!(row [
                             component!(uuid_action "agents-cancel", "Cancel task", "cancel_agent_task", "idempotency_key"),
@@ -169,8 +170,23 @@ pub fn ide_document() -> Document {
                                 component!(button "agents-result-next", "Next result page", "next_agent_result"),
                             ]),
                         ]),
+                        component!(region "agents-publication"; [
+                            component!(status "agents-publication-status", ""),
+                            component!(text "agents-publication-summary", ""),
+                            component!(caption "agents-publication-reference", ""),
+                            component!(transcript "agents-publication-link", "Pull request", "You", "Publication", ""),
+                        ]),
                         component!(region "agents-review"; [
                             component!(text_field "agents-review-note", "Review note", "set_agent_review_note"),
+                            component!(region "agents-plan-actions"; [
+                                component!(caption "agents-plan-decision-help", "Resume approves this saved plan for implementation. To request a revised plan, add your changes in Review note and choose Revise."),
+                                component!(row [
+                                    component!(uuid_button "agents-plan-resume", "Resume", "decide_agent_plan", "agents-review-note", "idempotency_key"),
+                                    component!(uuid_action "agents-plan-revise", "Revise", "decide_agent_plan", "idempotency_key"),
+                                    component!(uuid_action "agents-plan-cancel", "Cancel", "decide_agent_plan", "idempotency_key"),
+                                ]),
+                                component!(caption "agents-plan-unavailable", "Implementation is not enabled for this agent and project. You can revise or cancel this plan."),
+                            ]),
                             component!(text "agents-accept-help", "Acceptance records your review. It does not merge or publish code."),
                             component!(uuid_button "agents-accept", "Accept result", "accept_agent_task", "agents-review-note", "idempotency_key"),
                         ]),
@@ -565,6 +581,13 @@ pub fn ide_transport() -> Transport {
             "work_accept",
             "ide.work.accept",
             "work_accepted",
+            "work_failed",
+            true,
+        ),
+        (
+            "work_plan_decide",
+            "ide.work.plan.decide",
+            "work_plan_decided",
             "work_failed",
             true,
         ),

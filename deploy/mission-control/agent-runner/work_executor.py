@@ -229,6 +229,7 @@ class Invocation:
     workspace: WorkspaceLease
     implement: bool
     session: SessionSelection | None = None
+    plan_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -433,7 +434,11 @@ class SystemdSupervisor:
         if not UNIT_RE.fullmatch(unit) or unit != unit_name(lease["attempt_id"]):
             raise ExecutionError("failed", "Invalid attempt supervision identity.")
         account = self.config.account
-        native_state = account.home / (".gemini" if invocation.backend == "antigravity" else ".codex")
+        if invocation.backend not in {"antigravity", "codex", "verification"}:
+            raise ExecutionError("failed", "The selected process scope is unavailable.")
+        verification = invocation.backend == "verification"
+        native_state = (None if verification else account.home /
+                        (".gemini" if invocation.backend == "antigravity" else ".codex"))
         binary = Path(invocation.argv[0])
         readonly = [invocation.workspace.repository, binary]
         for ancestor in (account.home / "repos/AGENTS.md", account.home / "repos/mission-control/AGENTS.md"):
@@ -447,11 +452,22 @@ class SystemdSupervisor:
                      self.config.usage.hmac_key_file if self.config.usage else None):
             if path is not None:
                 hidden.append(path)
-        bindings = [str(native_state), str(invocation.scratch) + ":" + str(CHILD_STATE)]
+        bindings = [str(invocation.scratch) + ":" + str(CHILD_STATE)]
+        if native_state is not None:
+            bindings.append(str(native_state))
         readonly_bindings = [str(path) for path in readonly]
+        if invocation.plan_file is not None:
+            if (invocation.plan_file.parent != invocation.scratch
+                    or invocation.plan_file.name not in {"approved-plan.md", "previous-plan.md"}
+                    or invocation.plan_file.is_symlink() or not invocation.plan_file.is_file()):
+                raise ExecutionError("failed", "The saved plan artifact is unavailable.")
+            readonly_bindings.append(str(invocation.plan_file) + ":" + str(CHILD_STATE / invocation.plan_file.name))
         if invocation.implement:
-            bindings.extend([str(invocation.cwd) + ":" + str(CHILD_WORKSPACE),
-                             str(invocation.workspace.git_directory)])
+            bindings.append(str(invocation.cwd) + ":" + str(CHILD_WORKSPACE))
+            if verification:
+                readonly_bindings.append(str(invocation.workspace.git_directory) + ":" + str(CHILD_WORKSPACE / ".git"))
+            else:
+                bindings.append(str(invocation.workspace.git_directory))
         else:
             readonly_bindings.append(str(invocation.cwd) + ":" + str(CHILD_WORKSPACE))
         toolchains = account.home / ".rustup/toolchains"
@@ -461,6 +477,18 @@ class SystemdSupervisor:
             readonly_bindings.append(str(toolchains))
         if registry.is_dir():
             readonly_bindings.append(str(registry) + ":" + str(CHILD_STATE / "cargo-home/registry"))
+        if verification:
+            browser = Path("src/rust/forge-ide-web/tests/browser")
+            dependencies = invocation.workspace.repository / browser / "node_modules"
+            if dependencies.is_dir():
+                target = invocation.cwd / browser / "node_modules"
+                lock = invocation.cwd / browser / "package-lock.json"
+                source_lock = invocation.workspace.repository / browser / "package-lock.json"
+                if (target.is_symlink() or not target.is_dir()
+                        or not target.resolve().is_relative_to(invocation.cwd.resolve())
+                        or not lock.is_file() or lock.read_bytes() != source_lock.read_bytes()):
+                    raise ExecutionError("failed", "Verification browser dependencies do not match the committed lockfile.")
+                readonly_bindings.append(str(dependencies) + ":" + str(CHILD_WORKSPACE / browser / "node_modules"))
         properties = [
             "Type=exec", "KillMode=control-group", "KillSignal=SIGTERM",
             "FinalKillSignal=SIGKILL", "SendSIGKILL=yes", "TimeoutStopSec=10",
@@ -474,18 +502,30 @@ class SystemdSupervisor:
             "BindPaths=" + " ".join(bindings),
             "InaccessiblePaths=" + " ".join("-" + str(path) for path in dict.fromkeys(hidden)),
         ]
+        if verification:
+            # Repository checks are untrusted code. Their loopback fixtures
+            # share this private namespace; the host's trusted-proxy gateway,
+            # runner API and all external account endpoints remain unreachable.
+            properties.append("PrivateNetwork=yes")
         writable = [CHILD_STATE]
         if invocation.implement:
-            writable.extend([CHILD_WORKSPACE, invocation.workspace.git_directory])
+            writable.append(CHILD_WORKSPACE)
+            if not verification:
+                writable.append(invocation.workspace.git_directory)
         properties.append("ReadWritePaths=" + " ".join(map(str, writable)))
-        immutable_native = [native_state / "config.toml", native_state / "rules", native_state / "plugins",
-                            native_state / "packages", native_state / "antigravity-cli/settings.json",
-                            native_state / "antigravity-cli/forge-settings.json"]
+        immutable_native = ([native_state / "config.toml", native_state / "rules", native_state / "plugins",
+                             native_state / "packages", native_state / "antigravity-cli/settings.json",
+                             native_state / "antigravity-cli/forge-settings.json"] if native_state is not None else [])
+        if verification:
+            immutable_native.append(CHILD_WORKSPACE / ".git")
+        if invocation.plan_file is not None:
+            immutable_native.append(CHILD_STATE / invocation.plan_file.name)
         if not invocation.implement:
             immutable_native.append(CHILD_WORKSPACE)
         properties.append("ReadOnlyPaths=" + " ".join("-" + str(path) for path in immutable_native))
         environment = {
-            "HOME": str(account.home), "USER": account.user, "LOGNAME": account.user,
+            "HOME": str(CHILD_STATE / "home") if verification else str(account.home),
+            "USER": account.user, "LOGNAME": account.user,
             "PATH": ":".join([*(str(path) for path in stable_tools), "/usr/local/bin", "/usr/bin", "/bin"]),
             "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
             "TMPDIR": str(CHILD_STATE / "tmp"),
@@ -561,7 +601,7 @@ class CommandRunnerProvider:
                 raise ValueError("Configured coding program is not executable")
             self._binary_hashes[backend] = (actual, hashlib.sha256(actual.read_bytes()).digest())
 
-    def invocation(self, lease, workspace, *, progress=False):
+    def invocation(self, lease, workspace, *, progress=False, plan_context=None):
         if not verify_recipe(self.config, lease):
             raise ExecutionError("failed", "Assignment execution policy is unavailable or changed.")
         backend = lease["recipe"]["backend"]
@@ -603,6 +643,38 @@ class CommandRunnerProvider:
                        "Plan/review mode may invoke this helper through the allowed command tool; "
                        "keep the repository read-only. Do not edit or replace report files or the helper.")
         implement = lease["mode"] == "implement"
+        plan_file = None
+        if lease.get("plan_decision_id") is not None:
+            if not isinstance(plan_context, dict) or plan_context.get("decision_id") != lease["plan_decision_id"]:
+                raise ExecutionError("failed", "The persisted plan decision is unavailable.")
+            decision = plan_context.get("decision")
+            text, note = plan_context.get("text"), plan_context.get("note")
+            try:
+                encoded = text.encode("utf-8") if isinstance(text, str) else b""
+                valid = (decision in {"resume", "revise"} and isinstance(note, str)
+                         and len(note.encode("utf-8")) <= 2048
+                         and bool(encoded) and len(encoded) <= POLICY["max_result_bytes"]
+                         and (decision != "revise" or bool(note.strip()))
+                         and hashlib.sha256(encoded).hexdigest() == plan_context.get("plan_sha256")
+                         and (decision == "resume") == implement)
+                _uuid(plan_context.get("plan_attempt_id"))
+            except (UnicodeError, ValueError, TypeError, AttributeError):
+                valid = False
+            if not valid:
+                raise ExecutionError("failed", "The saved plan does not match the admitted decision.")
+            plan_file = scratch / ("approved-plan.md" if implement else "previous-plan.md")
+            try:
+                descriptor = os.open(plan_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(encoded)
+            except OSError:
+                raise ExecutionError("needs_reconcile", "The saved plan artifact could not be prepared safely.") from None
+            instruction = ("Implement the approved plan and verify the changes in the current task workspace. "
+                           if implement else
+                           "Revise the previous plan using the feedback, return a complete updated plan, and wait for a new decision. Do not implement code changes. ")
+            prompt += ("\n\nEXPLICIT PLAN DECISION: " + decision.upper() + ". " + instruction
+                       + "The original assignment above is retained context. Read the exact saved plan at "
+                       + str(CHILD_STATE / plan_file.name) + ".\nREVIEW FEEDBACK:\n" + note)
         if backend == "antigravity":
             prompt += ("\n\nAgent tools: filesystem tools, shell commands, and read-only URL reads "
                        "are provisioned within the approved coding scope. MCP and browser "
@@ -640,10 +712,10 @@ class CommandRunnerProvider:
                     "workspace-write" if implement else "read-only", "--model", lease["recipe"]["model"],
                     "--json", "--color", "never", "--ephemeral", "-")
             payload = prompt.encode("utf-8")
-        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session)
+        return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file)
 
-    def run(self, lease, workspace, stop, *, report_progress=None):
-        invocation = self.invocation(lease, workspace, progress=report_progress is not None)
+    def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None):
+        invocation = self.invocation(lease, workspace, progress=report_progress is not None, plan_context=plan_context)
         conversation = invocation.session.conversation_id if invocation.session is not None else None
         parser = CliParser(invocation.backend, expected_conversation_id=conversation)
         progress = ProgressReader(invocation.scratch / "progress", report_progress) if report_progress is not None else None

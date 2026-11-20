@@ -43,17 +43,17 @@ class WorkerDatabaseFencesTest(unittest.TestCase):
             reconcile_connect_factory=lambda: self.cluster.connect("forge_coding_reconciler"),
         )
 
-    def advertise(self, db, incarnation):
+    def advertise(self, db, incarnation, modes=("plan",)):
         db.advertise(
             "fence-worker", incarnation,
             [{"alias": "homelab", "base_revision": BASE_REV}],
-            [{"alias": "codex-v2", "backend": "codex", "model": "gpt-5.4", "modes": ["plan"]}],
+            [{"alias": "codex-v2", "backend": "codex", "model": "gpt-5.4", "modes": list(modes)}],
             work_policy.POLICY_DIGEST,
         )
 
-    def claim(self):
+    def claim(self, mode="plan"):
         self.serial += 1
-        receipt = self.service.submit(make_submit(idempotency_key=f"fence-{self.serial}"))
+        receipt = self.service.submit(make_submit(idempotency_key=f"fence-{self.serial}",mode=mode))
         lease = self.db.claim("fence-worker", self.incarnation, ["codex-v2"])
         self.assertIsNotNone(lease)
         self.assertEqual(lease.task_id, receipt["task_id"])
@@ -210,7 +210,9 @@ class WorkerDatabaseFencesTest(unittest.TestCase):
                 self.assertEqual(self.event_count(lease), before + 1)
 
     def test_late_stop_never_changes_completed_publication_or_its_original_receipt(self):
-        lease = self.claim()
+        self.cluster.grant_worker("mission-control","homelab","codex-v2",("review",))
+        self.advertise(self.db,self.incarnation,modes=("plan","review"))
+        lease = self.claim(mode="review")
         manifest = self.stage(lease)
         proof = make_stop_proof(lease.unit_name)
         receipt = self.db.publish(lease, "awaiting_review", manifest, None, "Accepted agent result", proof)

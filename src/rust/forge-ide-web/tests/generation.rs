@@ -671,7 +671,13 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
         c.transport.entry_actions.get("agents").map(String::as_str),
         Some("open_agents")
     );
-    for kind in ["work_submit", "work_cancel", "work_accept", "work_resume"] {
+    for kind in [
+        "work_submit",
+        "work_cancel",
+        "work_accept",
+        "work_resume",
+        "work_plan_decide",
+    ] {
         let binding = c
             .transport
             .bindings

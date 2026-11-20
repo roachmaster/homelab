@@ -453,7 +453,7 @@ class WorkExecutionAndUsagePostgresTest(unittest.TestCase):
         self.grant_default_worker()
         inc = self.advertise_default_worker(db)
 
-        task_id = UUID(service.submit(make_submit(idempotency_key="result-full"))["task_id"])
+        task_id = UUID(service.submit(make_submit(idempotency_key="result-full",mode="review"))["task_id"])
         lease = db.claim("worker-1", inc, ["codex-v2"])
         attempt_uuid = UUID(lease.attempt_id)
 

@@ -72,6 +72,7 @@ fn detail(status: WorkStatus) -> WorkTaskDetail {
         }),
         result: None,
         reconciliation_receipt_id: None,
+        publication: None,
     }
 }
 fn draft(agents: &mut Agents) {
@@ -820,4 +821,334 @@ fn closing_a_restored_draft_before_catalog_arrives_restarts_catalog_admission() 
         .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkCatalog { .. }))));
     assert_eq!(agents.pending.as_ref().unwrap().request_id(), "catalog");
     assert!(!agents.can_submit());
+}
+
+fn finished_plan(status: WorkStatus) -> Agents {
+    let mut agents = ready();
+    agents.catalog.as_mut().unwrap().profiles[0]
+        .modes
+        .push(WorkMode::Implement);
+    let mut task = detail(status);
+    task.result = Some(WorkResultManifest {
+        attempt_id: ATTEMPT.into(),
+        sha256: "c".repeat(64),
+        byte_count: 4,
+        chunk_count: 1,
+    });
+    task.reconciliation_receipt_id = Some(KEY.into());
+    agents.task = Some(task);
+    agents.selected = Some(TASK.into());
+    agents.pane = Pane::Reader;
+    agents.events_loaded = true;
+    agents
+}
+fn plan_event(decision: WorkPlanDecision) -> UiEvent {
+    UiEvent::DecideAgentPlan {
+        task_id: TASK.into(),
+        expected_revision: 4,
+        plan_attempt_id: ATTEMPT.into(),
+        plan_sha256: "c".repeat(64),
+        decision,
+        idempotency_key: KEY.into(),
+    }
+}
+#[test]
+fn finished_and_legacy_completed_plans_have_three_guarded_decisions_instead_of_acceptance() {
+    for status in [WorkStatus::AwaitingReview, WorkStatus::Completed] {
+        let mut agents = finished_plan(status);
+        assert!(agents.finished_plan());
+        assert!(!agents.can_accept());
+        assert!(!agents.can_resume());
+        assert!(step(
+            &mut agents,
+            UiEvent::AcceptAgentTask {
+                idempotency_key: KEY.into()
+            },
+            "invalid-accept"
+        )
+        .is_empty());
+        assert!(step(
+            &mut agents,
+            UiEvent::ResumeAgentTask {
+                idempotency_key: KEY.into()
+            },
+            "invalid-resume"
+        )
+        .is_empty());
+        let mut view = ViewModel::default();
+        agents.project(&mut view, true, true, true);
+        assert!(view
+            .visibility
+            .iter()
+            .any(|b| b.id == "agents-plan-actions" && b.visible));
+        assert!(!view
+            .visibility
+            .iter()
+            .any(|b| b.id == "agents-accept" && b.visible));
+        let resume = view
+            .buttons
+            .iter()
+            .find(|b| b.id == "agents-plan-resume")
+            .unwrap();
+        assert!(!resume.disabled);
+        assert!(
+            matches!(&resume.action,Some(RowAction::DecideAgentPlan {expected_revision:4,plan_sha256,..}) if plan_sha256==&"c".repeat(64))
+        );
+        assert!(
+            view.buttons
+                .iter()
+                .find(|b| b.id == "agents-plan-revise")
+                .unwrap()
+                .disabled
+        );
+        assert!(
+            !view
+                .buttons
+                .iter()
+                .find(|b| b.id == "agents-plan-cancel")
+                .unwrap()
+                .disabled
+        );
+    }
+}
+#[test]
+fn plan_decisions_require_feedback_and_target_grants_but_cancel_survives_a_removed_profile() {
+    let mut agents = finished_plan(WorkStatus::AwaitingReview);
+    assert!(step(&mut agents, plan_event(WorkPlanDecision::Revise), "blank").is_empty());
+    agents.review_note = "Please add failure-path tests.".into();
+    let effects = step(&mut agents, plan_event(WorkPlanDecision::Revise), "revise");
+    assert!(
+        matches!(&effects[0],UiEffect::Work(WorkRequest::WorkPlanDecide {decision:WorkPlanDecision::Revise,note,..}) if note=="Please add failure-path tests.")
+    );
+    let mut agents = finished_plan(WorkStatus::Completed);
+    agents.catalog.as_mut().unwrap().profiles.clear();
+    assert!(step(&mut agents, plan_event(WorkPlanDecision::Resume), "denied").is_empty());
+    let effects = step(&mut agents, plan_event(WorkPlanDecision::Cancel), "cancel");
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkPlanDecide {
+            decision: WorkPlanDecision::Cancel,
+            ..
+        })
+    ));
+}
+#[test]
+fn stale_plan_controls_cannot_approve_a_changed_task_revision_or_artifact() {
+    for field in ["task", "revision", "attempt", "digest"] {
+        let mut agents = finished_plan(WorkStatus::AwaitingReview);
+        let old = plan_event(WorkPlanDecision::Resume);
+        let task = agents.task.as_mut().unwrap();
+        match field {
+            "task" => task.task_id = "44444444-4444-4444-8444-444444444444".into(),
+            "revision" => task.revision += 1,
+            "attempt" => task.result.as_mut().unwrap().attempt_id = KEY.into(),
+            _ => task.result.as_mut().unwrap().sha256 = "d".repeat(64),
+        }
+        assert!(step(&mut agents, old, "stale").is_empty());
+    }
+}
+#[test]
+fn unknown_plan_decision_retries_the_same_intent_and_resets_the_reader_only_after_confirmation() {
+    let mut agents = finished_plan(WorkStatus::AwaitingReview);
+    let effects = step(&mut agents, plan_event(WorkPlanDecision::Resume), "decide");
+    let UiEffect::Work(request) = &effects[0] else {
+        panic!("decision")
+    };
+    let original = request.clone();
+    assert_eq!(agents.task.as_ref().unwrap().mode, WorkMode::Plan);
+    assert!(agents.locked());
+    assert!(agents.snapshot().unwrap().is_valid());
+    assert!(step(
+        &mut agents,
+        plan_event(WorkPlanDecision::Resume),
+        "duplicate"
+    )
+    .is_empty());
+    agents.network_failed("decide", "watch".into(), &mut vec![]);
+    assert_eq!(agents.retry.as_ref(), Some(&original));
+    let effects = step(&mut agents, UiEvent::RetryAgentRequest {}, "retry");
+    assert!(matches!(&effects[0],UiEffect::Work(r) if r==&rekey(original,"retry".into())));
+    let effects = step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkPlanDecided {
+            request_id: "retry".into(),
+            project_alias: "workspace".into(),
+            task_id: TASK.into(),
+            base_revision: 4,
+            revision: 5,
+            status: WorkStatus::Queued,
+            mode: WorkMode::Implement,
+        }),
+        "refresh",
+    );
+    assert!(
+        matches!(&effects[0],UiEffect::Work(WorkRequest::WorkGet {task_id,..}) if task_id==TASK)
+    );
+    assert!(!agents.locked());
+    assert!(agents.task.is_none());
+    assert!(agents.result_digest.is_none());
+    assert_eq!(agents.mode, Some(WorkMode::Implement));
+}
+#[test]
+fn publication_polling_reads_same_revision_details_and_blocks_generic_recovery_until_settled() {
+    let mut agents = finished_plan(WorkStatus::AwaitingReview);
+    let task = agents.task.as_mut().unwrap();
+    task.mode = WorkMode::Implement;
+    task.publication = Some(WorkPublication {
+        status: WorkPublicationStatus::Checking,
+        branch: Some("forge/task-fixture".into()),
+        commit_sha: None,
+        pr_url: None,
+        summary: Some("Running required checks.".into()),
+    });
+    assert!(!agents.can_accept());
+    assert!(!agents.can_resume());
+    let mut effects = vec![];
+    agents.schedule("pub-watch".into(), &mut effects);
+    assert!(matches!(&effects[0],UiEffect::AgentsWatch{watch} if watch=="pub-watch"));
+    let effects = step(
+        &mut agents,
+        UiEvent::PollAgents {
+            watch: "pub-watch".into(),
+        },
+        "pub-detail",
+    );
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkGet { .. })
+    ));
+    let mut settled = agents.task.clone().unwrap();
+    settled.publication = Some(WorkPublication {
+        status: WorkPublicationStatus::Published,
+        branch: Some("forge/task-fixture".into()),
+        commit_sha: Some("e".repeat(40)),
+        pr_url: Some("https://github.com/roachmaster/homelab/pull/42".into()),
+        summary: Some("Required checks passed.".into()),
+    });
+    assert!(settled.is_valid());
+    step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkOpened {
+            request_id: "pub-detail".into(),
+            task: settled.into(),
+        }),
+        "result",
+    );
+    assert!(agents.can_accept());
+    assert!(!agents.publication_processing());
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert!(view
+        .texts
+        .iter()
+        .any(|b| b.id == "agents-publication-status" && b.text == "Pull request published"));
+    let link = view
+        .transcripts
+        .iter()
+        .find(|b| b.id == "agents-publication-link")
+        .unwrap();
+    assert!(link.messages[0]
+        .rendered_html
+        .as_deref()
+        .unwrap()
+        .contains("href=\"https://github.com/roachmaster/homelab/pull/42\""));
+    assert!(link.messages[0]
+        .rendered_html
+        .as_deref()
+        .unwrap()
+        .contains("noopener noreferrer"));
+}
+#[test]
+fn failed_publication_keeps_the_result_reviewable_without_inventing_a_pull_request() {
+    let mut agents = finished_plan(WorkStatus::AwaitingReview);
+    let task = agents.task.as_mut().unwrap();
+    task.mode = WorkMode::Implement;
+    task.publication = Some(WorkPublication {
+        status: WorkPublicationStatus::Failed,
+        branch: Some("forge/task-fixture".into()),
+        commit_sha: None,
+        pr_url: None,
+        summary: Some("Required checks failed. Review the saved result.".into()),
+    });
+    assert!(agents.can_accept());
+    assert!(agents.can_resume());
+    assert!(!agents.publication_processing());
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert!(view
+        .texts
+        .iter()
+        .any(|b| b.id == "agents-publication-status"
+            && b.tone == Tone::Error
+            && b.text == "Publication failed"));
+    assert!(!view
+        .visibility
+        .iter()
+        .any(|b| b.id == "agents-publication-link" && b.visible));
+    assert!(view
+        .transcripts
+        .iter()
+        .find(|b| b.id == "agents-publication-link")
+        .unwrap()
+        .messages
+        .is_empty());
+}
+
+#[test]
+fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_recovery() {
+    let mut agents = finished_plan(WorkStatus::AwaitingReview);
+    let task = agents.task.as_mut().unwrap();
+    task.mode = WorkMode::Implement;
+    task.publication = Some(
+        serde_json::from_str::<WorkPublication>(
+            r#"{"status":"pending","summary":"Waiting for trusted publication."}"#,
+        )
+        .unwrap(),
+    );
+    assert!(task.is_valid());
+    assert!(!agents.can_accept());
+    assert!(!agents.can_resume());
+    assert!(step(
+        &mut agents,
+        UiEvent::AcceptAgentTask {
+            idempotency_key: KEY.into()
+        },
+        "early-accept"
+    )
+    .is_empty());
+    assert!(step(
+        &mut agents,
+        UiEvent::ResumeAgentTask {
+            idempotency_key: KEY.into()
+        },
+        "early-resume"
+    )
+    .is_empty());
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert!(view
+        .visibility
+        .iter()
+        .any(|b| b.id == "agents-publication" && b.visible));
+    assert!(!view.visibility.iter().any(|b| matches!(
+        b.id,
+        "agents-accept" | "agents-resume" | "agents-publication-link"
+    ) && b.visible));
+    assert!(view
+        .texts
+        .iter()
+        .any(|b| b.id == "agents-publication-status" && b.text == "Publication pending"));
+    let mut effects = vec![];
+    agents.schedule("waiting-for-outbox".into(), &mut effects);
+    assert!(matches!(&effects[0],UiEffect::AgentsWatch { watch } if watch == "waiting-for-outbox"));
+    let effects = step(
+        &mut agents,
+        UiEvent::PollAgents {
+            watch: "waiting-for-outbox".into(),
+        },
+        "check-outbox",
+    );
+    assert!(
+        matches!(&effects[0],UiEffect::Work(WorkRequest::WorkGet { task_id, .. }) if task_id == TASK)
+    );
 }

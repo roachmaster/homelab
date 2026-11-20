@@ -156,4 +156,14 @@ INSERT INTO forge_agent.schema_migrations (version, name)
 VALUES (13, 'coding_task_session_policy');
 \endif
 
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version = 14
+) AS apply_0014
+\gset
+
+\if :apply_0014
+\ir migrations/0014_coding_plan_workflow.sql
+INSERT INTO forge_agent.schema_migrations (version,name) VALUES (14,'coding_plan_workflow');
+\endif
+
 COMMIT;

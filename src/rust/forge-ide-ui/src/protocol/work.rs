@@ -104,6 +104,96 @@ impl WorkMode {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum WorkPlanDecision {
+    Resume,
+    Revise,
+    Cancel,
+}
+impl WorkPlanDecision {
+    pub fn mode(self) -> WorkMode {
+        if self == Self::Resume {
+            WorkMode::Implement
+        } else {
+            WorkMode::Plan
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkPublicationStatus {
+    Pending,
+    Checking,
+    Publishing,
+    Published,
+    Failed,
+}
+impl WorkPublicationStatus {
+    pub fn is_processing(self) -> bool {
+        matches!(self, Self::Pending | Self::Checking | Self::Publishing)
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Pending => "Publication pending",
+            Self::Checking => "Checking changes",
+            Self::Publishing => "Publishing pull request",
+            Self::Published => "Pull request published",
+            Self::Failed => "Publication failed",
+        }
+    }
+}
+
+pub fn valid_work_pr_url(value: &str) -> bool {
+    if value.len() > 512 {
+        return false;
+    }
+    let Some(path) = value.strip_prefix("https://github.com/") else {
+        return false;
+    };
+    let parts: Vec<_> = path.split('/').collect();
+    parts.len() == 4
+        && valid_work_name(parts[0], 100)
+        && valid_work_name(parts[1], 100)
+        && !matches!(parts[0], "." | "..")
+        && !matches!(parts[1], "." | "..")
+        && parts[2] == "pull"
+        && !parts[3].starts_with('0')
+        && parts[3].bytes().all(|b| b.is_ascii_digit())
+        && parts[3].parse::<u64>().is_ok_and(|n| n > 0)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkPublication {
+    pub status: WorkPublicationStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+impl WorkPublication {
+    pub fn is_valid(&self) -> bool {
+        self.branch
+            .as_deref()
+            .is_none_or(|s| valid_work_label(s, 128))
+            && self
+                .commit_sha
+                .as_deref()
+                .is_none_or(|s| valid_work_hex(s, 40))
+            && self.pr_url.as_deref().is_none_or(valid_work_pr_url)
+            && self
+                .summary
+                .as_deref()
+                .is_none_or(|s| optional_text(s, 4096))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkBackend {
     Antigravity,
     Codex,
@@ -344,6 +434,8 @@ pub struct WorkTaskDetail {
     pub result: Option<WorkResultManifest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reconciliation_receipt_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication: Option<WorkPublication>,
 }
 impl WorkTaskDetail {
     pub fn summary(&self) -> WorkTaskSummary {
@@ -362,6 +454,10 @@ impl WorkTaskDetail {
     }
     pub fn is_valid(&self) -> bool {
         self.summary().is_valid()
+            && self
+                .publication
+                .as_ref()
+                .is_none_or(WorkPublication::is_valid)
             && valid_chat_text(&self.prompt, MAX_WORK_PROMPT_BYTES)
             && valid_chat_text(&self.acceptance_criteria, MAX_WORK_CRITERIA_BYTES)
             && self.attempt.as_ref().is_none_or(WorkAttempt::is_valid)
@@ -485,6 +581,19 @@ pub enum WorkRequest {
         #[serde(default)]
         review_note: String,
     },
+    WorkPlanDecide {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        expected_revision: u64,
+        plan_attempt_id: String,
+        plan_sha256: String,
+        decision: WorkPlanDecision,
+        agent_profile: String,
+        idempotency_key: String,
+        #[serde(default)]
+        note: String,
+    },
     WorkResume {
         request_id: String,
         project_alias: String,
@@ -517,7 +626,8 @@ impl WorkRequest {
             | Self::WorkCancel { request_id, .. }
             | Self::WorkResult { request_id, .. }
             | Self::WorkAccept { request_id, .. }
-            | Self::WorkResume { request_id, .. } => request_id,
+            | Self::WorkResume { request_id, .. }
+            | Self::WorkPlanDecide { request_id, .. } => request_id,
         }
     }
     pub fn project_alias(&self) -> Option<&str> {
@@ -530,7 +640,8 @@ impl WorkRequest {
             | Self::WorkCancel { project_alias, .. }
             | Self::WorkResult { project_alias, .. }
             | Self::WorkAccept { project_alias, .. }
-            | Self::WorkResume { project_alias, .. } => Some(project_alias),
+            | Self::WorkResume { project_alias, .. }
+            | Self::WorkPlanDecide { project_alias, .. } => Some(project_alias),
         }
     }
     pub fn task_id(&self) -> Option<&str> {
@@ -540,7 +651,8 @@ impl WorkRequest {
             | Self::WorkCancel { task_id, .. }
             | Self::WorkResult { task_id, .. }
             | Self::WorkAccept { task_id, .. }
-            | Self::WorkResume { task_id, .. } => Some(task_id),
+            | Self::WorkResume { task_id, .. }
+            | Self::WorkPlanDecide { task_id, .. } => Some(task_id),
             _ => None,
         }
     }
@@ -555,6 +667,7 @@ impl WorkRequest {
             Self::WorkResult { .. } => "ide.work.result",
             Self::WorkAccept { .. } => "ide.work.accept",
             Self::WorkResume { .. } => "ide.work.resume",
+            Self::WorkPlanDecide { .. } => "ide.work.plan.decide",
         }
     }
     pub fn is_destination(value: &str) -> bool {
@@ -569,6 +682,7 @@ impl WorkRequest {
                 | "ide.work.result"
                 | "ide.work.accept"
                 | "ide.work.resume"
+                | "ide.work.plan.decide"
         )
     }
     pub fn is_mutation(&self) -> bool {
@@ -578,6 +692,7 @@ impl WorkRequest {
                 | Self::WorkCancel { .. }
                 | Self::WorkAccept { .. }
                 | Self::WorkResume { .. }
+                | Self::WorkPlanDecide { .. }
         )
     }
     pub fn is_valid(&self) -> bool {
@@ -636,6 +751,24 @@ impl WorkRequest {
                     valid_work_revision(*expected_revision)
                         && valid_work_name(idempotency_key, 128)
                         && optional_text(review_note, 2048)
+                }
+                Self::WorkPlanDecide {
+                    expected_revision,
+                    plan_attempt_id,
+                    plan_sha256,
+                    decision,
+                    agent_profile,
+                    idempotency_key,
+                    note,
+                    ..
+                } => {
+                    valid_work_revision(*expected_revision)
+                        && valid_chat_id(plan_attempt_id)
+                        && valid_work_hex(plan_sha256, 64)
+                        && valid_work_name(agent_profile, 64)
+                        && valid_work_name(idempotency_key, 128)
+                        && optional_text(note, 2048)
+                        && (*decision != WorkPlanDecision::Revise || !note.trim().is_empty())
                 }
                 Self::WorkResume {
                     expected_revision,
@@ -765,6 +898,15 @@ pub enum WorkResponse {
         revision: u64,
         status: WorkStatus,
     },
+    WorkPlanDecided {
+        request_id: String,
+        project_alias: String,
+        task_id: String,
+        base_revision: u64,
+        revision: u64,
+        status: WorkStatus,
+        mode: WorkMode,
+    },
     WorkResumed {
         request_id: String,
         project_alias: String,
@@ -792,6 +934,7 @@ impl WorkResponse {
             | Self::WorkResultPage { request_id, .. }
             | Self::WorkAccepted { request_id, .. }
             | Self::WorkResumed { request_id, .. }
+            | Self::WorkPlanDecided { request_id, .. }
             | Self::WorkFailed { request_id, .. } => request_id,
         }
     }
@@ -961,6 +1104,33 @@ impl WorkResponse {
                     && *status == WorkStatus::Completed
             }
             (
+                Self::WorkPlanDecided {
+                    project_alias,
+                    task_id,
+                    base_revision,
+                    revision,
+                    status,
+                    mode,
+                    ..
+                },
+                WorkRequest::WorkPlanDecide {
+                    expected_revision,
+                    decision,
+                    ..
+                },
+            ) => {
+                project(project_alias)
+                    && task(task_id)
+                    && base_revision == expected_revision
+                    && step(*base_revision, *revision)
+                    && *mode == decision.mode()
+                    && if *decision == WorkPlanDecision::Cancel {
+                        http_status == 200 && *status == WorkStatus::Cancelled
+                    } else {
+                        http_status == 202 && *status == WorkStatus::Queued
+                    }
+            }
+            (
                 Self::WorkResumed {
                     project_alias,
                     task_id,
@@ -1104,5 +1274,114 @@ mod progress_tests {
         progress.summary = "hidden\u{7f}control".into();
         assert!(!progress.is_valid());
         assert!(serde_json::from_str::<WorkProgress>(r#"{"attempt_id":"11111111-1111-4111-8111-111111111111","sequence":1,"stage":"completed","summary":"done"}"#).is_err());
+    }
+}
+
+#[cfg(test)]
+mod plan_lifecycle_tests {
+    use super::*;
+    #[test]
+    fn decisions_bind_the_exact_plan_and_validate_the_target_transition() {
+        for decision in [
+            WorkPlanDecision::Resume,
+            WorkPlanDecision::Revise,
+            WorkPlanDecision::Cancel,
+        ] {
+            let request = WorkRequest::WorkPlanDecide {
+                request_id: "decide".into(),
+                project_alias: "workspace".into(),
+                task_id: "11111111-1111-4111-8111-111111111111".into(),
+                expected_revision: 4,
+                plan_attempt_id: "22222222-2222-4222-8222-222222222222".into(),
+                plan_sha256: "c".repeat(64),
+                decision,
+                agent_profile: "agy-primary".into(),
+                idempotency_key: "same-intent".into(),
+                note: "Refine the tests".into(),
+            };
+            assert!(request.is_valid());
+            assert!(request.is_mutation());
+            assert_eq!(request.destination(), "ide.work.plan.decide");
+            let response = WorkResponse::WorkPlanDecided {
+                request_id: "decide".into(),
+                project_alias: "workspace".into(),
+                task_id: request.task_id().unwrap().into(),
+                base_revision: 4,
+                revision: 5,
+                mode: decision.mode(),
+                status: if decision == WorkPlanDecision::Cancel {
+                    WorkStatus::Cancelled
+                } else {
+                    WorkStatus::Queued
+                },
+            };
+            let status = if decision == WorkPlanDecision::Cancel {
+                200
+            } else {
+                202
+            };
+            assert!(response.valid_for(&request, status));
+            assert!(!response.valid_for(&request, if status == 200 { 202 } else { 200 }));
+            let mut forged = response.clone();
+            if let WorkResponse::WorkPlanDecided { mode, .. } = &mut forged {
+                *mode = WorkMode::Review;
+            }
+            assert!(!forged.valid_for(&request, status));
+            let mut invalid = request.clone();
+            if let WorkRequest::WorkPlanDecide { plan_sha256, .. } = &mut invalid {
+                *plan_sha256 = "D".repeat(64);
+            }
+            assert!(!invalid.is_valid());
+            let mut invalid = request.clone();
+            if let WorkRequest::WorkPlanDecide { note, .. } = &mut invalid {
+                *note = "x".repeat(2049);
+            }
+            assert!(!invalid.is_valid());
+            if decision == WorkPlanDecision::Revise {
+                let mut invalid = request.clone();
+                if let WorkRequest::WorkPlanDecide { note, .. } = &mut invalid {
+                    *note = " \n".into();
+                }
+                assert!(!invalid.is_valid());
+            }
+        }
+    }
+    #[test]
+    fn publication_metadata_is_bounded_and_links_only_to_canonical_github_pull_requests() {
+        assert!(valid_work_pr_url(
+            "https://github.com/roachmaster/homelab/pull/42"
+        ));
+        for bad in [
+            "javascript:alert(1)",
+            "http://github.com/owner/repo/pull/1",
+            "https://github.com.evil.test/o/r/pull/1",
+            "https://github.com/o/r/pull/1?redirect=evil",
+            "https://github.com/o/r/pull/1#fragment",
+            "https://github.com/o/r/pull/01",
+            "https://github.com/o/r/pull/0",
+            "https://github.com/../r/pull/1",
+            "https://github.com/o/r/issues/1",
+            "https://user@github.com/o/r/pull/1",
+            "https://github.com/o/r/pull/1/extra",
+        ] {
+            assert!(!valid_work_pr_url(bad), "{bad}");
+        }
+        let mut publication = WorkPublication {
+            status: WorkPublicationStatus::Published,
+            branch: Some("forge/task-fixture".into()),
+            commit_sha: Some("a".repeat(40)),
+            pr_url: Some("https://github.com/o/r/pull/1".into()),
+            summary: Some("Checks passed.".into()),
+        };
+        assert!(publication.is_valid());
+        publication.summary = Some("é".repeat(2049));
+        assert!(!publication.is_valid());
+        publication.summary = None;
+        publication.branch = Some("x".repeat(129));
+        assert!(!publication.is_valid());
+        assert!(serde_json::from_str::<WorkPublication>(
+            r#"{"status":"published","lease_token":"private"}"#
+        )
+        .is_err());
     }
 }

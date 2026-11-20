@@ -255,6 +255,7 @@ impl UiModel {
                 | UiEvent::CancelAgentTask { .. }
                 | UiEvent::AcceptAgentTask { .. }
                 | UiEvent::ResumeAgentTask { .. }
+                | UiEvent::DecideAgentPlan { .. }
                 | UiEvent::NextAgentResult {}
                 | UiEvent::PreviousAgentResult {}
                 | UiEvent::RefreshAgentUsage {}
@@ -758,6 +759,7 @@ impl UiModel {
             | UiEvent::CancelAgentTask { .. }
             | UiEvent::AcceptAgentTask { .. }
             | UiEvent::ResumeAgentTask { .. }
+            | UiEvent::DecideAgentPlan { .. }
             | UiEvent::NextAgentResult {}
             | UiEvent::PreviousAgentResult {}
             | UiEvent::RefreshAgentUsage {}

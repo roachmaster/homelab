@@ -55,6 +55,7 @@ class Destination(Enum):
     RESULT = "ide.work.result"
     ACCEPT = "ide.work.accept"
     RESUME = "ide.work.resume"
+    PLAN_DECIDE = "ide.work.plan.decide"
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,19 @@ class WorkResume:
     idempotency_key: str
     agent_profile: str
     reconciliation_receipt_id: UUID
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class WorkPlanDecide:
+    project_alias: str
+    task_id: UUID
+    expected_revision: int
+    plan_attempt_id: UUID
+    plan_sha256: str
+    decision: str
+    agent_profile: str
+    idempotency_key: str
     note: str = ""
 
 
@@ -252,6 +266,20 @@ class WorkService:
             allowed_modes=self._config.allowed_modes,
             resolve_recipe=resolve_recipe,
         )
+
+
+    def plan_decide(self, command):
+        self._require_project(command.project_alias)
+
+        def resolve_recipe(mode):
+            if mode not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
+                raise Rejected(403, "denied")
+            try:
+                return self._catalog.resolve(command.agent_profile, mode)
+            except KeyError:
+                raise Rejected(503, "unavailable") from None
+
+        return self._store.plan_decide(**vars(command), resolve_recipe=resolve_recipe)
 
 
 class WorkServiceFactory:
@@ -459,6 +487,20 @@ def decode(route, correlation, body):
                 note=_text(body.get("note", ""), MAX_NOTE_BYTES, allow_empty=True),
             )
 
+    if route is Destination.PLAN_DECIDE and kind == "work_plan_decide":
+        required = base | {"task_id", "expected_revision", "plan_attempt_id", "plan_sha256",
+                           "decision", "agent_profile", "idempotency_key"}
+        if required <= body.keys() <= required | {"note"}:
+            decision = body["decision"]
+            digest = body["plan_sha256"]
+            if (not isinstance(decision, str) or decision not in {"resume", "revise", "cancel"}
+                    or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+                raise Rejected(400, "invalid_request")
+            return WorkPlanDecide(project_alias, _uuid(body["task_id"]),
+                _int_range(body["expected_revision"], 1, MAX_REVISION), _uuid(body["plan_attempt_id"]),
+                digest, decision, _identifier(body["agent_profile"]), _idempotency_key(body["idempotency_key"]),
+                _text(body.get("note", ""), MAX_NOTE_BYTES, allow_empty=decision != "revise"))
+
     raise Rejected(400, "invalid_request")
 
 
@@ -511,4 +553,8 @@ def dispatch(route, correlation, command, service):
     if route is Destination.RESUME and isinstance(command, WorkResume):
         receipt = service.resume(command)
         return HTTPStatus.ACCEPTED, common.envelope("work_resumed", correlation, **receipt)
+    if route is Destination.PLAN_DECIDE and isinstance(command, WorkPlanDecide):
+        receipt = service.plan_decide(command)
+        status = HTTPStatus.OK if receipt["status"] == "cancelled" else HTTPStatus.ACCEPTED
+        return status, common.envelope("work_plan_decided", correlation, **receipt)
     raise Rejected(400, "invalid_request")

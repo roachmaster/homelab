@@ -4,6 +4,7 @@ use crate::{
     service::Rejection,
     ChatConfig, HostError,
 };
+use forge_ide_ui::protocol::WorkPlanDecision;
 use forge_ide_ui::protocol::{valid_work_name, WorkReply, WorkRequest};
 pub use forge_ide_ui::protocol::{WorkFailure as Failure, WorkMode};
 use forge_ingress_contract::Header;
@@ -57,6 +58,19 @@ impl WorkConfig {
                 }
                 WorkRequest::WorkResume { agent_profile, .. } => {
                     self.allowed_profiles.contains(agent_profile)
+                }
+                WorkRequest::WorkPlanDecide {
+                    decision,
+                    agent_profile,
+                    ..
+                } => {
+                    // Cancel does not start execution and remains available
+                    // after a profile is removed. The backend owns artifact CAS
+                    // and idempotency: do not strand a committed receipt replay
+                    // by requiring the task to still have its old Plan mode.
+                    *decision == WorkPlanDecision::Cancel
+                        || self.allowed_modes.contains(&decision.mode())
+                            && self.allowed_profiles.contains(agent_profile)
                 }
                 _ => true,
             }

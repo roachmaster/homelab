@@ -178,7 +178,7 @@ class AgentsRuntimeIntegrationTest(unittest.TestCase):
             "awaiting_review", "Fixture result", str(uuid4()), raw_usage,
             "Fixture ready", make_stop_proof(lease["unit_name"]), fresh_session=True,
         )
-        submitted = self.service.submit(make_submit(agent_profile="agy-v2", idempotency_key="agy-cache"))
+        submitted = self.service.submit(make_submit(agent_profile="agy-v2", idempotency_key="agy-cache", mode="review"))
         lease = self.db.claim(worker.config.worker_id, worker.incarnation, ["agy-v2"])
         with patch.object(self.db, "publish", wraps=self.db.publish) as publication:
             worker.process(lease)

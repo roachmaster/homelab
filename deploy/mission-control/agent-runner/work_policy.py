@@ -8,7 +8,7 @@ import hashlib
 import json
 from types import MappingProxyType
 
-POLICY_ID = "forge-coding-v3"
+POLICY_ID = "forge-coding-v4"
 _POLICY = {
     "id": POLICY_ID,
     "adapter_versions": {"antigravity": "1.5.12", "codex": "0.160.0"},
@@ -23,6 +23,7 @@ _POLICY = {
     "scope": "systemd-root-v1",
     "workspace": "isolated-git-worktree-v1",
     "billing": "included-no-fallback",
+    "plan_workflow": "artifact-bound-plan-decisions-publication-v1",
 }
 POLICY_DIGEST = hashlib.sha256(
     json.dumps(_POLICY, sort_keys=True, separators=(",", ":")).encode("utf-8")

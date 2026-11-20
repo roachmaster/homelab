@@ -122,7 +122,7 @@ class WorkerConfigTest(unittest.TestCase):
 
     def test_elevated_policy_is_versioned_and_refuses_previous_recipes(self):
         previous_digest = "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44"
-        self.assertEqual(POLICY_ID, "forge-coding-v3")
+        self.assertEqual(POLICY_ID, "forge-coding-v4")
         self.assertEqual(POLICY["antigravity_tool_policy"], "workspace-elevated-v1")
         self.assertNotEqual(POLICY_DIGEST, previous_digest)
         config = parse_config(raw_config("/tmp/forge-config-fixture"))
@@ -132,6 +132,7 @@ class WorkerConfigTest(unittest.TestCase):
             (POLICY_ID, previous_digest),
             ("forge-coding-v1", previous_digest),
             ("forge-coding-v2", "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58"),
+            ("forge-coding-v3", "e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075"),
         ):
             with self.subTest(resource=resource, digest=digest):
                 previous = lease(config)
