@@ -106,6 +106,35 @@ class WorkspaceApiTest(unittest.TestCase):
             self.assertEqual(post(port, dict(RESTORE, history=True, models=True))[0], 200)
             restore.assert_called_once_with(TAB, history_enabled=True, models=True)
 
+    def test_inert_restore_and_save_require_explicit_true_and_route_without_hydration(self):
+        saved = snapshot({"draft": "dormant", "messages": [], "chat_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "revision": 3})
+        saved["chat"]["model_id"] = "gpt-oss-20b"
+        restored = {"lease": LEASE, "snapshot": saved}
+        with (server() as port,
+              patch.object(runner.store, "restore_workspace", return_value=restored) as restore,
+              patch.object(runner.store, "save_workspace", return_value={}) as store):
+            status, body, cache = post(port, dict(RESTORE, preserve_chat=True))
+            self.assertEqual((status, json.loads(body), cache), (200, restored, "no-store"))
+            restore.assert_called_once_with(TAB, preserve_chat=True)
+            self.assertEqual(post(port, dict(save(saved), preserve_chat=True))[0], 200)
+            store.assert_called_once_with(TAB, LEASE, 1, saved, preserve_chat=True)
+            restore.reset_mock()
+            store.reset_mock()
+            for request in (
+                dict(RESTORE, preserve_chat=True, history=True),
+                dict(RESTORE, preserve_chat=True, models=True),
+                dict(RESTORE, preserve_chat=True, history=True, models=True),
+                dict(RESTORE, preserve_chat=False),
+                dict(RESTORE, preserve_chat=1),
+                dict(save(saved), preserve_chat=False),
+                dict(save(saved), preserve_chat=1),
+                dict(save(saved), preserve_chat=True, history=True),
+            ):
+                with self.subTest(request=request):
+                    self.assertEqual(post(port, request)[0], 400)
+            restore.assert_not_called()
+            store.assert_not_called()
+
     def test_stale_lease_and_oversized_stored_response_return_generic_errors(self):
         stale = runner.Rejected(401, "workspace_lease")
         with (server() as port, patch.object(runner.store, "save_workspace", side_effect=stale),
