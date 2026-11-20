@@ -140,3 +140,43 @@ fn automatic_repair_is_an_explicit_implementation_only_choice() {
     }
     assert!(request.is_valid());
 }
+
+#[test]
+fn linked_repair_receipt_has_no_task_identity_until_source_import_completes() {
+    let request = WorkRequest::WorkRepair {
+        request_id: "import".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        expected_revision: 11,
+        candidate_commit: "c".repeat(40),
+        agent_profile: "agy-primary".into(),
+        note: "Import the approved source first".into(),
+        findings: vec![],
+        idempotency_key: "source-import".into(),
+    };
+    let mut response = WorkResponse::WorkRepairSubmitted {
+        request_id: "import".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        base_revision: 11,
+        revision: 12,
+        status: WorkStatus::Completed,
+        repair_task_id: None,
+        review_id: Some(REVIEW.into()),
+    };
+    assert!(response.valid_for(&request, 202));
+    let encoded = serde_json::to_value(&response).unwrap();
+    assert!(encoded["repair_task_id"].is_null());
+    assert_eq!(encoded["review_id"], REVIEW);
+    if let WorkResponse::WorkRepairSubmitted { repair_task_id, .. } = &mut response {
+        *repair_task_id = Some(TASK.into());
+    }
+    assert!(
+        !response.valid_for(&request, 202),
+        "the completed parent cannot become its own repair child"
+    );
+    if let WorkResponse::WorkRepairSubmitted { repair_task_id, .. } = &mut response {
+        *repair_task_id = Some("33333333-3333-4333-8333-333333333333".into());
+    }
+    assert!(response.valid_for(&request, 202));
+}

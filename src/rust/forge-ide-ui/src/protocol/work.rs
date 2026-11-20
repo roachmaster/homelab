@@ -1265,7 +1265,10 @@ pub enum WorkResponse {
         base_revision: u64,
         revision: u64,
         status: WorkStatus,
-        repair_task_id: String,
+        #[serde(default)]
+        repair_task_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review_id: Option<String>,
     },
     WorkPublicationRetryQueued {
         request_id: String,
@@ -1556,6 +1559,7 @@ impl WorkResponse {
                     base_revision,
                     revision,
                     repair_task_id,
+                    review_id,
                     ..
                 },
                 WorkRequest::WorkRepair {
@@ -1567,8 +1571,11 @@ impl WorkResponse {
                     && task(task_id)
                     && base_revision == expected_revision
                     && step(*base_revision, *revision)
-                    && valid_chat_id(repair_task_id)
-                    && repair_task_id != task_id
+                    && repair_task_id
+                        .as_deref()
+                        .is_none_or(|id| valid_chat_id(id) && id != task_id)
+                    && review_id.as_deref().is_none_or(valid_chat_id)
+                    && (repair_task_id.is_some() || review_id.is_some())
             }
             (
                 Self::WorkPublicationRetryQueued {

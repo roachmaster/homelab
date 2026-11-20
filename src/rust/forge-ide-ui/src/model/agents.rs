@@ -992,10 +992,12 @@ impl Agents {
             .is_some_and(|p| p.status.is_processing())
     }
     fn review_processing(&self) -> bool {
-        self.task
-            .as_ref()
-            .and_then(|t| t.review.as_ref())
-            .is_some_and(WorkReviewSummary::is_processing)
+        self.task.as_ref().is_some_and(|task| {
+            task.review.as_ref().is_some_and(|review| {
+                !(task.status == WorkStatus::Completed && review.repair_task_id.is_some())
+                    && review.is_processing()
+            })
+        })
     }
     fn implementation_enabled(&self) -> bool {
         self.task.as_ref().is_some_and(|task| {
@@ -1392,11 +1394,15 @@ impl Agents {
             WorkResponse::WorkRepairSubmitted { repair_task_id, .. } => {
                 self.retry = None;
                 self.review_note.clear();
-                self.selected = Some(repair_task_id);
-                self.task = None;
-                self.clear_progress();
-                self.clear_result();
-                self.status = "Linked repair saved. The completed parent is preserved.".into();
+                if let Some(child) = repair_task_id {
+                    self.selected = Some(child);
+                    self.task = None;
+                    self.clear_progress();
+                    self.clear_result();
+                    self.status = "Linked repair saved. The completed parent is preserved.".into();
+                } else {
+                    self.status = "Verifying the source before creating the linked repair.".into();
+                }
                 self.get(id, effects);
             }
             WorkResponse::WorkPublicationRetryQueued { .. } => {
