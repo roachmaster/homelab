@@ -4,8 +4,8 @@ on:
   push:
     branches: [main, validation/forge-ide-ui]
     paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', 'deploy/mission-control/**', '.github/workflows/rust.yml']
-  pull_request:
-    paths: ['Makefile', 'src/rust/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', 'deploy/mission-control/**', '.github/workflows/rust.yml']
+  # Every admitted agent PR requires these checks, including docs-only changes.
+  pull_request: {}
   workflow_dispatch:
 
 permissions:

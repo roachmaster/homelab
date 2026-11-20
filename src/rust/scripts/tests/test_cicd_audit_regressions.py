@@ -113,6 +113,24 @@ class GraphInputIntegrityTests(unittest.TestCase):
 
 
 class WorkflowExitStatusTests(unittest.TestCase):
+    def test_every_required_agent_check_runs_for_all_pull_request_paths(self):
+        # Missing checks remain pending forever, so backend/docs-only tasks
+        # need the same required check witnesses as frontend tasks.
+        repository = SCRIPTS.parents[2]
+        module = ast.parse((repository / "deploy/mission-control/agent-runner/work_verification.py").read_text())
+        declaration = next(node for node in module.body if isinstance(node, ast.Assign)
+                           and any(isinstance(name, ast.Name) and name.id == "DEFAULT_REQUIRED_HOSTED_CHECKS"
+                                   for name in node.targets))
+        for path, workflow_name, job in ast.literal_eval(declaration.value):
+            with self.subTest(workflow=path, required_job=job):
+                workflow = yaml_io.load_yaml((repository / path).read_text())
+                events = workflow.get("on", workflow.get(True))
+                self.assertIn("pull_request", events)
+                self.assertIn(events["pull_request"], (None, {}))
+                self.assertNotIn("pull_request_target", events)
+                self.assertEqual(workflow["name"], workflow_name)
+                self.assertIn(job, workflow["jobs"])
+
     @unittest.skipUnless(shutil.which("make") and shutil.which("bash"), "requires Make and Bash")
     def test_selective_workflow_preserves_refusal_and_error_status(self):
         workflow = yaml_io.load_yaml(
