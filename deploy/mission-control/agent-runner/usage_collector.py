@@ -118,7 +118,8 @@ class UsageCollector:
             for offset in range(len(self._order)):
                 index = (self._index + offset) % len(self._order)
                 candidate = self._order[index]
-                if now >= self._next_due[candidate]:
+                if (getattr(self._providers[candidate], "manual_refresh_only", False) is not True
+                        and now >= self._next_due[candidate]):
                     alias = candidate
                     self._index = (index + 1) % len(self._order)
                     break
@@ -221,10 +222,10 @@ def create_worker_usage_collector(config, store):
     factories = []
     for profile in config.profiles.values():
         process = None
-        if profile.backend == "codex":
+        if profile.backend in {"codex", "muse"}:
             process = MetadataProcessConfig(
                 binary=config.binaries[profile.backend], home=account.home,
-                code_home=account.home / ".codex",
+                code_home=account.home / ".codex" if profile.backend == "codex" else None,
                 run_uid=account.uid if os.geteuid() == 0 else None,
                 run_gid=account.gid if os.geteuid() == 0 else None,
             )
