@@ -319,14 +319,32 @@ def _json_object(pairs):
     return value
 
 
-def _provider_error(message):
+_BLOCKED_FAILURES = frozenset({"quota_blocked", "blocked_auth", "blocked_permission"})
+_FAILURE_PRIORITY = {
+    "failed": 1,
+    "blocked_permission": 2,
+    "blocked_auth": 3,
+    "quota_blocked": 4,
+}
+
+
+def _blocked_outcomes(message):
     text = message.lower() if isinstance(message, str) else ""
+    found = set()
     if any(code in text for code in ("usage_limit_reached", "insufficient_quota", "quota_exhausted", "quota_exceeded")):
-        return "quota_blocked"
+        found.add("quota_blocked")
     if any(code in text for code in ("unauthorized", "authentication_required", "invalid_grant", "not logged in")):
-        return "blocked_auth"
+        found.add("blocked_auth")
     if any(code in text for code in ("permission_denied", "permission denied", "approval required")):
-        return "blocked_permission"
+        found.add("blocked_permission")
+    return found
+
+
+def _provider_error(message):
+    found = _blocked_outcomes(message)
+    for status in ("quota_blocked", "blocked_auth", "blocked_permission"):
+        if status in found:
+            return status
     return "failed"
 
 
@@ -485,12 +503,36 @@ class CliParser:
         self.usage = None
         self.complete = False
         self.failure = None
+        self.observed_blocked = set()
         self.denied = False
         self.saw_work = False
         self.error_messages = []
         self.stderr_tail = bytearray()
+        self._stderr_scan_tail = bytearray()
+        self._stderr_blocked = set()
+        self._stderr_denied = False
         if expected_conversation_id is not None:
             self._session(expected_conversation_id)
+
+    @property
+    def has_blocked_diagnostic(self):
+        return bool(self.observed_blocked or self._stderr_blocked or self.denied)
+
+    def _record_failure(self, status):
+        if status in _BLOCKED_FAILURES:
+            self.observed_blocked.add(status)
+        if self.failure is None or _FAILURE_PRIORITY.get(status, 0) > _FAILURE_PRIORITY.get(self.failure, 0):
+            self.failure = status
+
+    def _record_failure_text(self, *messages):
+        found = set()
+        for message in messages:
+            found.update(_blocked_outcomes(message))
+        if found:
+            for status in found:
+                self._record_failure(status)
+        else:
+            self._record_failure("failed")
 
     def _remember_error(self, message):
         if isinstance(message, str) and message.strip() and len(self.error_messages) < 16:
@@ -501,6 +543,12 @@ class CliParser:
         if self.stream_bytes > POLICY["max_stream_bytes"]:
             raise ExecutionError("failed", "Agent output exceeded its declared stream resource bound.")
         if stderr:
+            window = (self._stderr_scan_tail + data).decode("utf-8", errors="replace").lower()
+            self._stderr_blocked.update(_blocked_outcomes(window))
+            if "no output produced" in window or "permission that headless mode cannot prompt" in window:
+                self._stderr_denied = True
+            self._stderr_scan_tail.extend(data)
+            del self._stderr_scan_tail[:-64]
             self.stderr_tail.extend(data)
             del self.stderr_tail[:-4096]
             return
@@ -556,10 +604,14 @@ class CliParser:
         status = result.get("status")
         if status != "SUCCESS":
             error = result.get("error", {})
-            self.failure = _provider_error(error.get("code", status) if isinstance(error, dict) else status)
+            if isinstance(error, dict):
+                self._record_failure_text(error.get("code"), error.get("message"), status)
+            else:
+                self._record_failure_text(status)
         denied = result.get("denied_actions", [])
         if not isinstance(denied, list) or denied:
             self.denied = True
+            self.observed_blocked.add("blocked_permission")
         response = result.get("response")
         if not isinstance(response, str):
             raise ExecutionError("failed", "The coding agent returned no readable response.")
@@ -583,15 +635,25 @@ class CliParser:
                 self.response = item["text"]
             elif item.get("type") == "command_execution" and item.get("status") == "declined":
                 self.denied = True
+                self.observed_blocked.add("blocked_permission")
         elif kind == "turn.failed":
             error = event.get("error")
-            message = error.get("message") if isinstance(error, dict) else ""
+            if isinstance(error, dict):
+                message = error.get("message", "")
+                code = error.get("code", "")
+            elif isinstance(error, str):
+                message = error
+                code = ""
+            else:
+                message = ""
+                code = ""
             self._remember_error(message)
-            self.failure = _provider_error(message)
+            self._record_failure_text(message, code)
         elif kind == "error":
             message = event.get("message")
+            code = event.get("code")
             self._remember_error(message)
-            self.failure = _provider_error(message)
+            self._record_failure_text(message, code)
         elif kind == "turn.completed":
             if self.complete:
                 raise ExecutionError("failed", "The coding agent returned multiple completed turns.")
@@ -609,21 +671,25 @@ class CliParser:
         if interrupted:
             return CliOutcome("cancelled", "", self.conversation_id, self.usage,
                               "Agent scope stopped after an interruption request.", proof)
-        stderr = self.stderr_tail.decode("utf-8", errors="replace").lower()
-        failure = self.failure or (_provider_error(stderr) if returncode != 0 else None)
+        if returncode != 0 or self.failure is not None:
+            for status in self._stderr_blocked:
+                self._record_failure(status)
+            if self.failure is None:
+                self._record_failure("failed")
+        failure = self.failure
         # An empty-output diagnostic is less specific than a provider's quota
         # or authentication failure. Preserve the actionable blocked state.
         if failure in {"quota_blocked", "blocked_auth"}:
             return CliOutcome(failure, "", self.conversation_id, self.usage,
                               "Agent invocation did not complete successfully.", proof)
-        if "no output produced" in stderr or "permission that headless mode cannot prompt" in stderr:
+        if self._stderr_denied:
             self.denied = True
         if self.denied:
+            self.observed_blocked.add("blocked_permission")
             return CliOutcome("blocked_permission", "", self.conversation_id, self.usage,
                               "Agent required a permission unavailable in the approved profile.", proof)
         if returncode != 0 or self.failure is not None:
-            status = self.failure or _provider_error(stderr)
-            return CliOutcome(status, "", self.conversation_id, self.usage,
+            return CliOutcome(self.failure or "failed", "", self.conversation_id, self.usage,
                               "Agent invocation did not complete successfully.", proof)
         try:
             encoded = self.response.encode("utf-8")
@@ -1221,8 +1287,8 @@ class CommandRunnerProvider:
                     and reaped
                     and proof.get("scope_stopped") is True
                     and returncode != 0
-                    and outcome.status not in {"quota_blocked", "blocked_auth", "blocked_permission"}
-                    and not parser.denied
+                    and outcome.status not in _BLOCKED_FAILURES
+                    and not parser.has_blocked_diagnostic
                     and not parser.saw_work
                     and not parser.complete
                     and not parser.response

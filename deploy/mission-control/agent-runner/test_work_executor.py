@@ -237,6 +237,42 @@ class CliParserTest(unittest.TestCase):
         parser.feed(json.dumps({"type": "turn.failed", "error": {"message": "HTTP 429 backend busy"}}).encode() + b"\n")
         self.assertEqual(parser.finish(1, proof()).status, "failed", "429 alone is not proven exhausted quota")
 
+    def test_codex_blocked_diagnostics_are_monotonic_across_jsonl_and_chunked_stderr(self):
+        for first_msg, expected in (
+            ("usage_limit_reached", "quota_blocked"),
+            ("unauthorized", "blocked_auth"),
+            ("permission_denied", "blocked_permission"),
+        ):
+            with self.subTest(first_msg=first_msg):
+                parser = CliParser("codex")
+                parser.feed(json.dumps({"type": "error", "message": first_msg}).encode() + b"\n")
+                parser.feed(json.dumps({"type": "turn.failed", "error": {"message": "session not found"}}).encode() + b"\n")
+                outcome = parser.finish(1, proof())
+                self.assertEqual(outcome.status, expected)
+                self.assertIn(expected, parser.observed_blocked)
+                self.assertTrue(parser.has_blocked_diagnostic)
+        # Chunk-split stderr marker evicted from stderr_tail still preserves blocked state on nonzero exit.
+        parser = CliParser("codex")
+        parser.feed(b"prefix authentication_", stderr=True)
+        parser.feed(b"required suffix\n", stderr=True)
+        parser.feed(b"z" * 5000 + b"\nsession not found\n", stderr=True)
+        parser.feed(json.dumps({"type": "error", "message": "session not found"}).encode() + b"\n")
+        outcome = parser.finish(1, proof())
+        self.assertEqual(outcome.status, "blocked_auth")
+        self.assertIn("blocked_auth", parser.observed_blocked)
+        self.assertTrue(parser.has_blocked_diagnostic)
+        # Successful exit-0 run with benign stderr text is unaffected.
+        conversation = str(uuid4())
+        parser = CliParser("codex")
+        parser.feed(b"warning: ignored permission denied in optional probe\n", stderr=True)
+        for event in (
+            {"type": "thread.started", "thread_id": conversation},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "Clean result"}},
+            {"type": "turn.completed", "usage": {"input_tokens": 5, "output_tokens": 2, "cached_input_tokens": 1}},
+        ):
+            parser.feed(json.dumps(event).encode() + b"\n")
+        self.assertEqual(parser.finish(0, proof()).status, "awaiting_review")
+
     def test_stream_and_result_resource_limits_fail_explicitly(self):
         with patch("work_executor.POLICY", {"max_stream_bytes": 64, "max_result_bytes": 16}):
             with self.assertRaises(ExecutionError):

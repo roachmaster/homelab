@@ -339,6 +339,71 @@ class CodexSessionExecutionTest(unittest.TestCase):
                 self.assertFalse(result.fresh_session)
                 self.assertFalse(hint_path.exists())
 
+    def test_refuses_fallback_when_blocked_diagnostic_precedes_or_mixes_with_stale_session(self):
+        cases = (
+            ("jsonl-quota-then-stale-turn-failed", "quota_blocked",
+             "import sys,json; sys.stdin.read(); "
+             "print(json.dumps({'type':'error','message':'usage_limit_reached'})); "
+             "print(json.dumps({'type':'turn.failed','error':{'message':'session not found'}})); "
+             "sys.exit(1)"),
+            ("jsonl-auth-then-stale-turn-failed", "blocked_auth",
+             "import sys,json; sys.stdin.read(); "
+             "print(json.dumps({'type':'error','message':'unauthorized'})); "
+             "print(json.dumps({'type':'turn.failed','error':{'message':'session not found'}})); "
+             "sys.exit(1)"),
+            ("jsonl-permission-then-stale-turn-failed", "blocked_permission",
+             "import sys,json; sys.stdin.read(); "
+             "print(json.dumps({'type':'error','message':'permission_denied'})); "
+             "print(json.dumps({'type':'turn.failed','error':{'message':'session not found'}})); "
+             "sys.exit(1)"),
+            ("jsonl-quota-turn-failed-then-stale-error", "quota_blocked",
+             "import sys,json; sys.stdin.read(); "
+             "print(json.dumps({'type':'turn.failed','error':{'message':'quota_exhausted'}})); "
+             "print(json.dumps({'type':'error','message':'no rollout found'})); "
+             "sys.exit(1)"),
+            ("jsonl-code-quota-with-stale-message", "quota_blocked",
+             "import sys,json; sys.stdin.read(); "
+             "print(json.dumps({'type':'turn.failed','error':{'code':'usage_limit_reached','message':'session not found'}})); "
+             "sys.exit(1)"),
+            ("stderr-quota-plus-jsonl-stale", "quota_blocked",
+             "import sys,json; sys.stdin.read(); "
+             "sys.stderr.write('usage_limit_reached\\n' + 'x'*5000 + '\\n'); "
+             "print(json.dumps({'type':'error','message':'session not found'})); "
+             "sys.exit(1)"),
+            ("stderr-auth-plus-jsonl-stale", "blocked_auth",
+             "import sys,json; sys.stdin.read(); "
+             "sys.stderr.write('authentication_required\\n'); "
+             "print(json.dumps({'type':'turn.failed','error':{'message':'thread not found'}})); "
+             "sys.exit(1)"),
+            ("stderr-permission-plus-jsonl-stale", "blocked_permission",
+             "import sys,json; sys.stdin.read(); "
+             "sys.stderr.write('permission denied\\n'); "
+             "print(json.dumps({'type':'error','message':'session not found'})); "
+             "sys.exit(1)"),
+        )
+        for label, expected_status, child_script in cases:
+            with self.subTest(case=label), TemporaryDirectory(prefix="forge-codex-mixed-blocked-") as root:
+                initial_thread = str(uuid4())
+
+                def handler(index, _lease, _invocation, script=child_script):
+                    if index == 0:
+                        return _emit_codex_success(initial_thread)
+                    return script
+
+                _cfg, value, workspace, supervisor, sessions, provider = self._setup(root, handler)
+                first = provider.run(value, workspace, threading.Event())
+                self.assertEqual(first.status, "awaiting_review")
+                hint_path = sessions.directory / (value["task_id"] + ".json")
+                self.assertTrue(hint_path.exists())
+
+                continued = self._continued(value, workspace)
+                result = provider.run(continued, workspace, threading.Event())
+                self.assertEqual(len(supervisor.invocations), 2, "Blocked diagnostic must prevent fresh fallback")
+                self.assertIn("resume", supervisor.invocations[1].argv)
+                self.assertEqual(result.status, expected_status)
+                self.assertFalse(result.fresh_session)
+                self.assertFalse(hint_path.exists())
+
     def test_reviewers_and_ttl_zero_always_use_ephemeral_with_zero_session_calls(self):
         with TemporaryDirectory(prefix="forge-codex-reviewer-") as root:
             def handler(_index, _lease, _invocation):
