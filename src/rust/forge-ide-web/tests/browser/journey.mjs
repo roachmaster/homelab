@@ -1574,7 +1574,6 @@ async function sourceSearchJourney() {
     await assertRetiredChat(page, traffic);
     if (managedWrites) {
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.locator('#open-workbench').click();
       await managedWriteJourney(page, context, respondToLeaveWarning);
     }
     await designLocalRestoreJourney(page);
