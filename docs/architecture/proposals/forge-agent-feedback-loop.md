@@ -87,6 +87,13 @@ review/task revision; the UI never blanket-verifies unseen IDs. Source changes
 clear those choices. Final acceptance stays unavailable while required hosted
 checks are pending, failed, missing, stale or attached to a different head.
 
+That requirement applies to new review-required implementations and any task
+with a bound review. Migrated legacy tasks retain their historical acceptance
+policy only when the persisted `review_required` flag is explicitly false and
+there is no review record. A missing flag never grants that exception.
+Nonexecution owner actions do not require an installed model profile; admitting
+a new repair still requires the current Implement grant and selected recipe.
+
 ## Persisted feedback, budgets and authority
 
 Migration `0015_coding_feedback_loop.sql` adds review jobs, immutable feedback,
@@ -123,11 +130,19 @@ process/storage limits remain; coding jobs have no llama.cpp completion-token ca
 | Quota, cancellation, lease loss or uncertain stop | Preserve the checkpoint; prove cleanup before a successor writer. No account rotation, paid-credit fallback or consumer OAuth polling. |
 
 The gate manifest binds fixed commands, required hosted workflow/job identities
-and protected gate-source bytes. Changes to CI, check scripts or tests require
+and protected gate-source bytes. Changes to CI, check scripts, tests, Cargo
+manifests or build/toolchain selection require
 independent review. Diagnostic text never supplies an executable check command.
 Verified finding closure, rather than an agent claim or changing error string,
 establishes progress. Fingerprints omit ephemeral timestamps/PIDs/source SHA;
 source identity is bound separately.
+
+Hosted observations have a persistent 24-hour deadline from the hosted review's
+creation. Missing checks cannot leave the dashboard running indefinitely:
+expiry hands off without another model invocation. A failed workflow-validation
+run can supply diagnostics, but only the required pull-request jobs can establish
+success. Stream metadata retains the actual toolchain and active check even when
+the bounded diagnostic tail no longer contains their initial markers.
 
 ## Runner and factory/provider boundaries
 
