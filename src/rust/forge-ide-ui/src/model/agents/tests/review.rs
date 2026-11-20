@@ -171,7 +171,8 @@ fn completed_parent_repair_opens_the_new_task_and_preserves_the_parent_identity(
             base_revision: 4,
             revision: 5,
             status: WorkStatus::Completed,
-            repair_task_id: child.into(),
+            repair_task_id: Some(child.into()),
+            review_id: None,
         }),
         "open-child",
     );
@@ -312,4 +313,69 @@ fn linked_task_navigation_cannot_select_unrelated_unknown_tasks() {
     assert!(
         matches!(&effects[0],UiEffect::Work(WorkRequest::WorkGet {task_id,..}) if task_id==child)
     );
+}
+
+#[test]
+fn source_import_receipt_keeps_parent_until_a_real_linked_task_is_projected() {
+    let mut agents = implementation(WorkStatus::Completed);
+    agents.review_note = "Repair the delivered candidate after trusted source import.".into();
+    step(
+        &mut agents,
+        UiEvent::RepairAgentTask {
+            task_id: TASK.into(),
+            expected_revision: 4,
+            candidate_commit: "e".repeat(40),
+            idempotency_key: KEY.into(),
+        },
+        "source-import",
+    );
+    let effects = step(
+        &mut agents,
+        UiEvent::Work(WorkResponse::WorkRepairSubmitted {
+            request_id: "source-import".into(),
+            project_alias: "workspace".into(),
+            task_id: TASK.into(),
+            base_revision: 4,
+            revision: 5,
+            status: WorkStatus::Completed,
+            repair_task_id: None,
+            review_id: Some(KEY.into()),
+        }),
+        "parent-detail",
+    );
+    assert_eq!(agents.selected.as_deref(), Some(TASK));
+    assert_eq!(agents.task.as_ref().unwrap().status, WorkStatus::Completed);
+    assert!(
+        matches!(&effects[0],UiEffect::Work(WorkRequest::WorkGet {task_id,..}) if task_id==TASK)
+    );
+    let task = agents.task.as_mut().unwrap();
+    task.revision = 5;
+    let review = task.review.as_mut().unwrap();
+    review.stage = "pending".into();
+    review.can_repair = false;
+    assert!(
+        agents.review_processing(),
+        "source import remains observable while no task exists"
+    );
+    let child = "44444444-4444-4444-8444-444444444444";
+    agents
+        .task
+        .as_mut()
+        .unwrap()
+        .review
+        .as_mut()
+        .unwrap()
+        .repair_task_id = Some(child.into());
+    assert!(
+        !agents.review_processing(),
+        "a materialized repair uses its own task lifecycle"
+    );
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, true);
+    assert!(view
+        .visibility
+        .iter()
+        .any(|v| v.id == "agents-repair-task" && v.visible));
+    assert!(view.buttons.iter().any(|b| b.id == "agents-repair-task"
+        && matches!(&b.action,Some(RowAction::OpenAgentTask {task_id}) if task_id==child)));
 }
