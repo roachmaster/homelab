@@ -1,8 +1,8 @@
 # Current Forge implementation
 
-Updated 19 November 2026 against the current source. The preceding review checkpoint was after `7e03991`. This is the current design reference. Earlier proposal PDFs, review reports and schematic diagrams remain dated design history. A capability implemented in the repository is not automatically enabled by a running host.
+Updated 20 November 2026 against the integrated source; final feedback-loop release validation and deployment remain pending. The preceding review checkpoint was after `7e03991`. This is the current design reference. Earlier proposal PDFs, review reports and schematic diagrams remain dated design history. A capability implemented in the repository is not automatically enabled by a running host.
 
-Manual archive and the functional Agents/Usage source were added on 19 November 2026. The current browser ABI is **7**, adding typed dashboard badges, formatted times, quota meters, compact exact-safe metrics and adjacent accounting disclosures. Gemini workspace autonomy uses pinned `forge-coding-v2` and additive migration11. The current source also adds public Gemini plans and milestone checkpoints through a scoped parent-owned channel and migration12; Rust loads those reports for running and finished tasks. Codex retains its existing sandbox and terminal-result behavior. The operational checkpoint below records their verified deployment; earlier observations remain dated separately.
+Manual archive and the functional Agents/Usage source were added on 19 November 2026. The current source browser ABI is **8**, adding source-bound review/repair decisions and native checkbox bindings to the existing dashboard presentation. The last observed deployed dashboard below remains ABI7. The last observed live Gemini workspace-autonomy rollout uses pinned `forge-coding-v2` and additive migration11. The current source also adds public Gemini plans and milestone checkpoints through a scoped parent-owned channel and migration12; Rust loads those reports for running and finished tasks. Codex retains its existing sandbox and terminal-result behavior. The operational checkpoint below records their verified deployment; earlier observations remain dated separately.
 
 [Coding-agent workflow](https://github.com/roachmaster/homelab/blob/main/docs/architecture/coding-admission.md) now includes catalog-backed assignment, native Antigravity/Codex execution, full-result paging, explicit review/receipt-gated resume and truthful provider/project usage. Work and Usage remain independently optional/default-off until configured and verified.
 
@@ -20,7 +20,7 @@ observations below remain dated history until the replacement rollout is verifie
 | Chat | Compact thread-title history drawer, new-chat icon, open message stream, inline composer, model selection, saved history search and retention management. | Search covers the loaded history page. Model choices come from the admitted catalog. |
 | Mail (retired portal view) | Saved PostgreSQL threads and private backend contracts are preserved; old local draft hints stay inert. | No active Mail controls, requests or polling. Legacy Mail URLs lead to Agents; public Mail flags are disabled during rollout. |
 | Workbench | Header project breadcrumb and view sheet; unified search with entry-name mode; Explorer, verified File source, Outline and supplied Problems. Markdown has Raw/Display and source has Wrap. | Search covers the accepted report, not arbitrary filesystem contents or resolved references. Problems are inspection diagnostics, not compiler/test results. |
-| Agents | Catalog-backed assignment and task lifecycle; semantic task/worker badges, readable times, compact exact-safe token metrics, truthful quota meters and adjacent accounting disclosures with scoped refresh. Provider pages are bounded locally. | Independent Work/Usage grants and supervised worker configuration are required. Quota blocks never automatically retry, rotate accounts or purchase credits. |
+| Agents | Catalog-backed assignment and task lifecycle; semantic task/worker badges, readable times, compact exact-safe token metrics, truthful quota meters and adjacent accounting disclosures with scoped refresh. Provider pages are bounded locally. The source adds opt-in bounded repair rounds, individual owner finding attestations, review/toolchain/handoff visibility, linked repairs and exact-head hosted acceptance. | Feedback-loop migration15, policy5/runtime and ABI8 rollout remain pending. Independent Work/Usage grants and supervised worker configuration are required. Quota blocks never automatically retry, rotate accounts or purchase credits. |
 | Editing | Contextual questions, bounded edit proposals/diffs, direct textarea editing, Apply, Undo and status reconciliation are implemented for admitted managed projects. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. A rendered button is not write authority. |
 
 The current [implementation captures](/design/wireframes) use disposable acceptance fixtures. Some fixtures contain partial inspection results or mask editable controls. Mail wireframes are dated historical references. They are current generated UI, not captures of private operator data.
@@ -29,7 +29,7 @@ The current [implementation captures](/design/wireframes) use disposable accepta
 
 | Concern | Implemented ownership | Practical limit |
 | --- | --- | --- |
-| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The browser ABI is **7**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
+| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **8**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
 | Same-tab navigation | The IDE saves a checkpoint and bounded local JSON handoff before Home/Design. Return resumes admission, restores state and re-verifies Workbench source. Declared `#chat`, `#workbench` and `#agents` entry actions run after restore and are consumed. Legacy `#mail` maps to Agents. | URLs contain view intent, not reports, credentials or source identities. A fresh tab does not inherit another tab's unsent drafts. |
 | Chat persistence | PostgreSQL keeps operator history, tab checkpoints, conversation retention and queued runs. The history DAO supports list/open, expiry, long-term retention and deletion. | A default expiry applies automatically; deleting a saved conversation is distinct from cancelling a model run. |
 | Mail persistence | PostgreSQL stores threads, ordered messages, queued runs and recall metadata. Each inference reconstructs the accepted transcript and pins its model/profile. | Mail drafts survive the supported same-tab documentation handoff in local JSON; there is no durable cross-device Mail-draft table. |
@@ -55,6 +55,31 @@ Read the focused [Chat history](/design/chat-history), [dispatch](/design/chat-d
 Explore [Scout character creation](/design/characters) for the greybox-to-illustrated workflow and all 16 authored animation clips.
 
 See [plug-and-play](/design/forge-providers), [workers](/design/forge-workers), [game runtime](/design/game-studio), [physics](/design/game-physics) and [assets](/design/game-asset-pipeline).
+
+## Agent feedback-loop source checkpoint — 20 November 2026
+
+The [feedback-loop implementation](../architecture/proposals/forge-agent-feedback-loop.md)
+adds migration15 and `forge-coding-v5`, immutable lease-bound repair feedback,
+independent local/hosted verification, append-only retry runs and a frozen root
+repair budget. The default policy permits three repair rounds, two successive
+rounds without verified progress and one infrastructure retry. The owner must
+explicitly opt in when submitting Implement or resuming an approved plan;
+configuration changes and linked tasks do not reset that authorization/budget.
+
+A local pass pauses for owner review before publication. Open findings require
+individual source-bound attestations and a note; a model completion claim grants
+no approval. Final acceptance requires every configured hosted check to pass on
+the exact delivered head, with no open findings. Merge remains a separate action.
+A completed legacy task first imports and verifies its owner-selected project
+commit; its repair receipt has no child ID until a real linked task exists.
+
+Rust controls/protocols, generator/host checks and owned backend/runtime fixtures
+have focused implementation evidence. The final integrated full CI, backend and
+28 actual-browser groups, screenshot review, hosted exact-head checks and any
+real-agent repair pilot must be recorded separately. **This feedback-loop source
+has not been deployed.** The historical live checkpoints below do not establish
+schema15, policy5, its trusted review configuration or ABI8 on a running portal.
+The new focused design reader is [/design/agent-feedback-loop](/design/agent-feedback-loop).
 
 ## Observed deployment checkpoint
 
