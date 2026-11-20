@@ -194,6 +194,27 @@ class ReviewWorkerTest(unittest.TestCase):
             self.assertEqual(checks.calls, 0)
             self.assertEqual((accepted / "app.py").read_text(), "implemented\n")
 
+    def test_lost_finish_ack_replays_only_the_identical_receipt(self):
+        class LostAckStore(ReviewStore):
+            def __init__(self):
+                super().__init__()
+                self.calls = []
+            def review_finish(self, job, outcome):
+                self.calls.append(outcome)
+                if len(self.calls) == 1:
+                    self.outcomes.append((job, outcome))
+                    raise OSError("Acknowledgement lost")
+                return {"review_id": job["review_id"]}
+        with fixture() as values:
+            _, config, source, workspaces, _, _, repository, *_ = values
+            store, checks = LostAckStore(), ReviewChecks(config, True)
+            ReviewWorker(config, store, WorkspaceSnapshotProvider(workspaces), repository,
+                checks, ReviewedCandidateProvider(config, repository)).process(review_job(source))
+            self.assertEqual(checks.calls, 1)
+            self.assertEqual(len(store.outcomes), 1)
+            self.assertEqual(len(store.calls), 2)
+            self.assertIs(store.calls[0], store.calls[1])
+
 
 if __name__ == "__main__":
     unittest.main()
