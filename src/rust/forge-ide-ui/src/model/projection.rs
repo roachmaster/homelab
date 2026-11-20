@@ -1119,10 +1119,23 @@ impl UiModel {
             badges: vec![],
             metric_cards: vec![],
         };
-        self.chats.project(&mut view, connected);
+        if self.presentation.chat {
+            self.chats.project(&mut view, connected);
+        } else {
+            view.visibility.push(visible("ide-navigation", connected));
+            view.buttons.push(ButtonBinding {
+                id: "open-workbench",
+                disabled: !connected || self.chats.workbench,
+                pressed: Some(connected && self.chats.workbench),
+                action: None,
+            });
+        }
         let (workbench_chat, propose, attachment) = match (key, entry, &self.source) {
             (Some(report), Some(entry), Some(source))
-                if connected && self.chats.workbench && self.editor.is_none() =>
+                if self.presentation.chat
+                    && connected
+                    && self.chats.workbench
+                    && self.editor.is_none() =>
             {
                 let (byte_start, _, first, last, clipped) = source.chat_window();
                 let location = if source.document.text.is_empty() {
@@ -1178,14 +1191,16 @@ impl UiModel {
             };
             view.texts.push(text("workbench-edit-status", label));
         }
-        self.chats.project_workbench(
-            &mut view,
-            workbench_chat,
-            propose,
-            attachment,
-            review.is_some(),
-            self.pending_edit.is_some(),
-        );
+        if self.presentation.chat {
+            self.chats.project_workbench(
+                &mut view,
+                workbench_chat,
+                propose,
+                attachment,
+                review.is_some(),
+                self.pending_edit.is_some(),
+            );
+        }
         self.project_write(
             &mut view,
             review.and_then(|review| review.preview.proposal_id.as_deref()),

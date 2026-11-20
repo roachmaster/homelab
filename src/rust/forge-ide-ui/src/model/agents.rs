@@ -96,6 +96,9 @@ impl Agents {
     pub fn has_work(&self) -> bool {
         self.active || self.has_draft()
     }
+    pub(super) fn has_workspace_work(&self) -> bool {
+        self.has_draft() || self.selected.is_some()
+    }
     pub fn snapshot(&self) -> Option<AgentsNavigationSnapshot> {
         self.has_work().then(|| AgentsNavigationSnapshot {
             active: self.active,
@@ -161,8 +164,26 @@ impl Agents {
         aux: String,
         effects: &mut Vec<UiEffect>,
     ) {
-        if !snapshot.is_valid() || self.has_work() {
+        // The portal may open the default view before its saved navigation is
+        // delivered. Replace only that pristine, read-only bootstrap; genuine
+        // drafts, selections and uncertain mutations retain the existing fence.
+        let bootstrap = self.active
+            && self.catalog.is_none()
+            && self.pane == Pane::List
+            && !self.has_workspace_work()
+            && self
+                .pending
+                .as_ref()
+                .is_none_or(|r| matches!(r, WorkRequest::WorkCatalog { .. }));
+        if !snapshot.is_valid() || self.has_work() && !bootstrap {
             return;
+        }
+        if bootstrap {
+            self.pending = None;
+            self.pending_usage = None;
+            self.watch = None;
+            self.clock_watch = None;
+            self.active = false;
         }
         self.project = snapshot.project_alias;
         self.profile = snapshot.agent_profile;
@@ -2574,11 +2595,19 @@ fn provider_card(
     refresh_disabled: bool,
     project: &str,
 ) -> MetricCard {
-    let state = match p.worker_state {
-        UsageWorkerState::Idle => badge("Idle", BadgeTone::Neutral),
-        UsageWorkerState::Running => badge("Running", BadgeTone::Accent),
-        UsageWorkerState::Offline => badge("Offline", BadgeTone::Warning),
-        UsageWorkerState::Unknown => badge("Unknown", BadgeTone::Neutral),
+    let state = if matches!(
+        p.worker_state,
+        UsageWorkerState::Offline | UsageWorkerState::Unknown
+    ) && p.last_error.as_deref() == Some("setup_required")
+    {
+        badge("Setup required", BadgeTone::Warning)
+    } else {
+        match p.worker_state {
+            UsageWorkerState::Idle => badge("Idle", BadgeTone::Neutral),
+            UsageWorkerState::Running => badge("Running", BadgeTone::Accent),
+            UsageWorkerState::Offline => badge("Offline", BadgeTone::Warning),
+            UsageWorkerState::Unknown => badge("Unknown", BadgeTone::Neutral),
+        }
     };
     let observation = badge(
         p.snapshot_state.label(),

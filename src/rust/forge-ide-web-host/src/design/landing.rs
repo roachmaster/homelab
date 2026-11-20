@@ -69,7 +69,7 @@ pub(super) const BODY: &[Node] = &[
         element!(Section [Id = "wireframes-and-workspace", Class = "index-panel", AriaLabelledby = "wireframes-and-workspace-title"];
             element!(H2 [Id = "wireframes-and-workspace-title"]; text("Wireframes and workspace")),
             element!(Ul;
-                doc_row!("/design/wireframes#phone", "Phone wireframes", "Current Chat, Mail, Workbench and sheet captures."),
+                doc_row!("/design/wireframes#phone", "Phone wireframes", "Historical conversation views and Workbench layout references."),
                 doc_row!("/design/wireframes#desktop", "Desktop wireframes", "Current conversation, mail and source workspace captures."),
                 doc_row!("/design/workspace", "Workspace data flow", "Save, restore, and recovery across navigation."),
             ),

@@ -6,7 +6,7 @@ assert.ok(path, 'supply the built forge_ide_web.wasm path');
 const { instance } = await WebAssembly.instantiate(await readFile(path), {});
 const w = instance.exports;
 for (const name of ['memory', 'abi_version', 'reserve_input', 'dispatch_input', 'output_ptr', 'output_len', 'release_output']) assert.ok(w[name], name);
-assert.equal(w.abi_version(), 8);
+assert.equal(w.abi_version(), 9);
 assert.equal(w.reserve_input(0), 0);
 assert.equal(w.reserve_input(8 * 1024 * 1024 + 1), 0);
 const encoder = new TextEncoder();
@@ -43,6 +43,8 @@ const nativeName = value => ({ encoding: 'utf8', value });
 const entry = (id, name) => ({ id, parent: 0, name: nativeName(name), kind: 'file', size_bytes: 12, lines: 1, content_status: 'text', diagnostics: ['<img src=x onerror=evil()>'], declarations: [{ id: 0, parent: null, kind: 'function', name: 'run', span: { start: { line: 1, column: 0 }, end: { line: 1, column: 12 } }, module_inline: null, implementation: null }] });
 const report = { format_version: 1, complete: false, files: 2, bytes_read: 24, entries: [{ id: 0, parent: null, name: nativeName('project'), kind: 'directory', size_bytes: null, lines: null, content_status: '', diagnostics: [], declarations: [] }, entry(1, 'lib.rs'), entry(2, 'other.rs')] };
 function accept(request) { return send({ kind: 'result', result: { protocol_version: 1, token: request.token, node_key: request.node_key, project: request.project, outcome: { kind: 'report', report } } }); }
+assert.ok(send({kind:'open_chat'}).view.visibility.some(binding=>binding.id==='agents'&&binding.visible),'legacy Chat lands on Agents');
+send({kind:'open_workbench'});
 const request = send({ kind: 'inspect' }).effects[0].request;
 let ready = accept(request);
 assert.ok(send({ kind: 'select_entry', value: 1 }).error, 'legacy unkeyed local intent is rejected');

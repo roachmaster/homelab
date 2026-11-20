@@ -5,11 +5,13 @@ use super::{
     Transport,
 };
 use crate::component;
+use forge_ide_ui::PORTAL_PRESENTATION;
+mod external_agents;
 
 pub fn ide_document() -> Document {
-    Document {
+    let mut document = Document {
         title: "Forge IDE".into(),
-        subtitle: "Chat, Agents and source workbench".into(),
+        subtitle: "Agents and source workbench".into(),
         children: vec![
             component!(brand_link "forge-home", "Forge IDE", Home),
             component!(header_actions "ide-header-actions"; [
@@ -119,6 +121,7 @@ pub fn ide_document() -> Document {
                             component!(heading "agents-tasks-heading", "Tasks"),
                             component!(stacked_tree "agents-tasks", "Coding assignments"),
                         ]),
+                        external_agents::directory(),
                     ]),
                     component!(region "agents-list-pagination"; [
                         component!(row [
@@ -378,9 +381,60 @@ pub fn ide_document() -> Document {
                 ]),
             ]),
         ],
+    };
+    if !PORTAL_PRESENTATION.chat {
+        retire_chat_components(&mut document.children);
+    }
+    document
+}
+
+fn retire_chat_components(children: &mut Vec<super::Component>) {
+    use super::Component;
+    children.retain(|component| {
+        !matches!(component,
+        Component::Screen { id, .. } if id == "chat")
+            && !matches!(component, Component::Region { id, .. } if id == "chat-header-actions")
+            && !matches!(component, Component::Button { id, .. } if id == "open-chat")
+    });
+    for component in children {
+        if let Component::PaneFooter { id, children } = component {
+            if id == "workbench-chat" {
+                *id = "workbench-write-footer".into();
+                children.retain(|child| matches!(child, Component::Region { id, .. } if id == "workbench-write"));
+            }
+        }
+        let descendants = match component {
+            Component::HeaderActions { children, .. }
+            | Component::Navigation { children, .. }
+            | Component::CompactToolbar { children, .. }
+            | Component::Screen { children, .. }
+            | Component::Panel { children, .. }
+            | Component::Dialog { children, .. }
+            | Component::Sheet { children, .. }
+            | Component::Disclosure { children, .. }
+            | Component::PaneLayout { children, .. }
+            | Component::Region { children, .. }
+            | Component::Pane { children, .. }
+            | Component::PaneFooter { children, .. }
+            | Component::SourceFormats { children, .. }
+            | Component::Row(children)
+            | Component::LayoutControls(children)
+            | Component::ReadingColumn(children)
+            | Component::ReaderLayout(children)
+            | Component::Toolbar(children)
+            | Component::Workspace(children) => Some(children),
+            _ => None,
+        };
+        if let Some(descendants) = descendants {
+            retire_chat_components(descendants);
+        }
     }
 }
 pub fn ide_transport() -> Transport {
+    ide_transport_with_policy(PORTAL_PRESENTATION)
+}
+
+pub fn ide_transport_with_policy(presentation: forge_ide_ui::PresentationPolicy) -> Transport {
     let common = vec![
         HeaderBinding::literal("Forge-Envelope-Version", "1"),
         HeaderBinding::literal("Forge-Contract-Version", "1"),
@@ -714,10 +768,24 @@ pub fn ide_transport() -> Transport {
             },
         });
     }
+    if !presentation.chat {
+        bindings.retain(|b| {
+            b.kind != "chat" && !b.kind.starts_with("chat_") && b.kind != "propose_edit"
+        });
+    }
     Transport {
         initial_event: "resume".into(),
+        preserve_workspace_chat: !presentation.chat,
         entry_actions: [
-            ("chat".into(), "open_chat".into()),
+            (
+                "chat".into(),
+                if presentation.chat {
+                    "open_chat"
+                } else {
+                    "open_agents"
+                }
+                .into(),
+            ),
             ("mail".into(), "open_agents".into()),
             ("workbench".into(), "open_workbench".into()),
             ("agents".into(), "open_agents".into()),

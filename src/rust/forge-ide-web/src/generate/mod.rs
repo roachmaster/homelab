@@ -89,6 +89,8 @@ pub struct TimerBinding {
 #[derive(Clone, Debug, Serialize)]
 pub struct Transport {
     pub initial_event: String,
+    /// Preserve dormant snapshot fields without requesting optional hydration.
+    pub preserve_workspace_chat: bool,
     /// Bounded URL fragments mapped to existing typed application events.
     /// Applied once, after admitted session and workspace restoration.
     pub entry_actions: BTreeMap<String, String>,
@@ -348,7 +350,7 @@ impl Factory<AssetBundle> for AssetFactory {
         ]);
         let manifest = Manifest {
             format_version: 1,
-            abi_version: 8,
+            abi_version: 9,
             files: files
                 .iter()
                 .map(|(path, bytes)| ManifestFile {

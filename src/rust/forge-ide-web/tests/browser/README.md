@@ -84,23 +84,39 @@ cannot be established. Review images before sharing them beyond the test artifac
 | `injected.requests.cancel_retry`, `probe.presentation.ordered_drafts`, `injected.requests.revisions`, `injected.requests.refresh_focus` | Injected timing, local cancellation, repeated events, input acknowledgements and focus |
 | `injected.failures.unavailable_timeout`, `probe.worker.fatal`, `injected.catalog.empty`, `probe.session.missing` | Separately controlled error, fatal, catalog and session-lifetime cases |
 
-The connected application and native Design headers share five views in order:
-**Chat, Agents, Workbench, Home, Design**. Home keeps its focused launcher header
-and links to Agents without adding a duplicate IDE tab strip. The Agents workflow remains inside
-`real.report.partial`: it exercises keyboard entry from Workbench and Chat, active-tab
-semantics, same-tab Home handoff, legacy `#mail` recovery, retained Agents drafts and
-browser Back/Forward. A valid legacy Mail cache is retained as inactive recovery data
-without replacing the current Agents draft or issuing Mail requests.
+The connected application and native Design headers share four views in order:
+**Agents, Workbench, Home, Design**. Agents is the default entry; legacy `#chat`
+and `#mail` entries resolve there without acquiring Chat or Mail requests. Home
+keeps its focused launcher header and links to Agents without a duplicate IDE strip.
+The Agents journey remains inside `real.report.partial`, covering keyboard entry,
+active-tab semantics, same-tab Home handoff, retained task drafts and browser
+Back/Forward. A valid legacy Mail cache remains inactive and cannot overwrite a
+current Agents draft or replay a request.
 
-`probe.page.lifecycle` also checks the always-visible Agents tab on a host with no
-Work/Usage services, at 320/375/390px. Its actual catalog still advertises the
-preserved Mail backend; Agents honestly reports that it is not configured, legacy
-`/mail` redirects to `/#agents`, and navigation issues zero Mail, Work or Usage
-gateway requests. Legacy subject/draft data stays inert on this host as well.
-These checks replace the retired Mail inbox/thread/compose UI journey inside the
-existing groups; the 28-group inventory and ten viewport cases remain unchanged.
-Historical Mail design articles, dated wireframe images and the relay's retained
-backend handlers are reference coverage, not proof of a live browser Mail screen.
+The current portal does not expose Chat, model selection, saved-chat management,
+contextual inference or model-generated edit proposals. Assertions require those
+entry points and screens to be absent. The request observer counts inference,
+history, model, run and proposal dispatches and requires zero throughout the
+retirement path. Existing native/backend tests retain the archived capability's
+contracts; the browser suite no longer claims those retired screens are live.
+
+`probe.page.lifecycle` checks an unconfigured Agents host at 320/375/390px, legacy
+entry redirects, synchronous DOM clearing, source re-verification and host restart.
+Its owned relay seeds a saved Chat snapshot containing multiple drafts, committed
+messages, selected model and an admitted pending-run identity. Authenticated
+`preserve_chat` restores and later saves must round-trip that snapshot unchanged,
+without linked-history hydration or resubmission. Raw stale Chat events are sent
+through the actual worker/WASM and cannot mutate it or acquire Chat I/O. A new
+browser tab gets neither the old bookmark nor dormant snapshot. These are
+controlled persistence proofs, not a claim about production database contents.
+
+The fixed 28-group inventory and ten viewport cases remain unchanged. Historical
+Chat/Mail design articles and dated wireframe images are reference coverage.
+Direct file editing remains live: its browser path verifies a dirty editor survives
+an Agents/Workbench switch, a lost save reply recovers through the same-operation
+status check, reload preserves the committed file, and Undo restores its prior text.
+Model-generated proposal/apply coverage is retained by the native tests rather
+than represented as a current portal action.
 
 The same Agents journey covers finished Plan decisions: Resume approves the exact
 saved artifact for Implement mode, Revise requires review-note feedback, and Cancel
@@ -152,11 +168,11 @@ are controlled backend/browser proofs; no real coding agent or remote PR is invo
 - **Page lifetime:** real reload and leave/return are combined with a deterministic
   `pagehide/pageshow` persisted-event probe to assert synchronous DOM clearing.
   The synthetic persisted flag does not claim the browser actually used bfcache.
-  A controlled loopback Chat relay stays up while separate native hosts serve
-  the same browser origin. The original tab recovers its draft and reauthorizes
-  the selected source. A new, independently paired browser context sees the
-  submitted transcript with no draft or Workbench selection. The relay uses
-  test-owned memory and a deterministic inference response.
+  A controlled loopback workspace relay stays up while separate native hosts serve
+  the same browser origin. The original tab preserves its dormant Chat data and
+  reauthorizes the selected source after new pairing. A new tab has no old
+  Workbench selection or dormant data. The relay uses only test-owned memory;
+  no inference turn is invoked.
 
 The driver bounds the browser journey to 180seconds, then independently attempts
 bounded cleanup. The root wrapper allows 300seconds for the driver, followed by

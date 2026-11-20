@@ -457,7 +457,6 @@ pub fn home_stylesheet() -> String {
 
 const DOCS_GLOBAL_NAV: &[Node] = &[
     element!(Nav [Class = "page-width docs-global-nav", AriaLabel = "Forge views"];
-        element!(A [Href = "/#chat"]; text("Chat")),
         element!(A [Href = "/#agents"]; text("Agents")),
         element!(A [Href = "/#workbench"]; text("Workbench")),
         element!(A [Href = "/home"]; text("Home")),

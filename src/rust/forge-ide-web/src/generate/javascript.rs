@@ -929,9 +929,9 @@ async function restoreWorkspace(chatHistory,chatModels){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),2500);
   try{
-    const request={operation:'restore',tab:workspaceTab,...(chatHistory?{history:true}:{}),...(chatModels?{models:true}:{})};
+    const request={operation:'restore',tab:workspaceTab,...(CONFIG.preserve_workspace_chat?{preserve_chat:true}:{...(chatHistory?{history:true}:{}),...(chatModels?{models:true}:{})})};
     let response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
-    if(chatModels&&response.status===400){
+    if(request.models&&response.status===400){
       await response.body?.cancel();
       delete request.models;
       response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
@@ -965,7 +965,7 @@ function checkpointWorkspace(snapshot){
   if(!workspaceLease||!csrf||!snapshot)return;
   const json=JSON.stringify(snapshot);
   if(json===workspaceJSON)return;
-  const body=JSON.stringify({operation:'save',tab:workspaceTab,lease:workspaceLease,revision:++workspaceRevision,snapshot});
+  const body=JSON.stringify({operation:'save',tab:workspaceTab,lease:workspaceLease,revision:++workspaceRevision,snapshot,...(CONFIG.preserve_workspace_chat?{preserve_chat:true}:{})});
   const bytes=encoder.encode(body).length;
   if(bytes>WORKSPACE_MAX)return;
   workspaceJSON=json;
@@ -994,17 +994,15 @@ async function flushNavigation(id){
     JSON.stringify(latestWorkspace)===json&&(!checkpoint||checkpoint.saved));
   let cache=null;
   if(saved&&workspaceEpoch&&!mailNavigationLocked){
-    const local=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,
-      snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),...(agentsNavigation?{agents:agentsNavigation}:{})});
-    if(encoder.encode(local).length<=NAVIGATION_CACHE_MAX)cache=local;
+    cache=navigationCacheJSON(snapshot);
   }
   const requiresCache=Boolean(mailNavigation?.active||agentsNavigation);
   postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!requiresCache||cache!==null),requires_cache:requiresCache,cache});
 }
 function localNavigationCheckpoint(snapshot){
   if(!agentsNavigation||!workspaceEpoch||!workspaceTab)return null;
-  const cache=JSON.stringify({version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),agents:agentsNavigation});
-  if(encoder.encode(cache).length>NAVIGATION_CACHE_MAX||localCheckpointAcks.size>=64)return {snapshot:agentsNavigation,pending:Promise.resolve(false)};
+  const cache=navigationCacheJSON(snapshot);
+  if(cache===null||localCheckpointAcks.size>=64)return {snapshot:agentsNavigation,pending:Promise.resolve(false)};
   const id=++localCheckpointSequence;
   const pending=new Promise(resolve=>{
     const timer=setTimeout(()=>{localCheckpointAcks.delete(id);resolve(false);},2500);
@@ -1013,10 +1011,22 @@ function localNavigationCheckpoint(snapshot){
   postMessage({kind:'navigation_checkpoint',id,cache});
   return {snapshot:agentsNavigation,pending};
 }
+function navigationCacheJSON(snapshot){
+  const record={version:1,tab:workspaceTab,epoch:workspaceEpoch,snapshot:navigationSnapshot(snapshot),...(mailNavigation?{mail:mailNavigation}:{}),...(agentsNavigation?{agents:agentsNavigation}:{})};
+  let cache=JSON.stringify(record);
+  if(encoder.encode(cache).length>NAVIGATION_CACHE_MAX&&CONFIG.preserve_workspace_chat&&workspaceLease){
+    // A successful restore established the durable copy. Retain exact local
+    // request identity without duplicating an oversized immutable snapshot.
+    // With no lease the local snapshot may be the only copy; never discard it.
+    record.snapshot=null;cache=JSON.stringify(record);
+  }
+  return encoder.encode(cache).length<=NAVIGATION_CACHE_MAX?cache:null;
+}
 function navigationSnapshot(snapshot){
   // Keep draft text and selection hints. Rust validates the restored snapshot.
   const chat=snapshot?.chat;
   if(!Array.isArray(chat?.conversations)||chat.conversations.length>16)return null;
+  if(CONFIG.preserve_workspace_chat)return snapshot;
   const conversations=chat.conversations.map(item=>({draft:typeof item?.draft==='string'?item.draft:'',messages:[]}));
   return {chat:{selected:chat.selected,model_id:chat.model_id,conversations},
     workbench:snapshot.workbench,workbench_open:snapshot.workbench_open};
@@ -1159,7 +1169,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==8 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==9 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));
