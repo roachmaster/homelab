@@ -108,6 +108,8 @@ class AntigravitySessionProvider:
             "project_alias": lease["project_alias"], "base_revision": lease["base_revision"],
             "workspace": str(workspace.path), "repository": str(workspace.repository),
             "agent_profile": lease["agent_profile"], "recipe": lease["recipe"],
+            "plan_decision_id": lease.get("plan_decision_id"),
+            "scope_plan_decision_id": lease.get("scope_plan_decision_id"),
             "account": [self.config.account.user, self.config.account.uid,
                         self.config.account.gid, str(self.config.account.home)],
             "binary_sha256": binary_sha256,

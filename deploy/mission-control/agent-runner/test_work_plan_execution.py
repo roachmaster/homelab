@@ -71,6 +71,17 @@ class PlanExecutionTest(unittest.TestCase):
             with self.assertRaises(ExecutionError):
                 runner.invocation(value, workspace)
 
+    def test_linked_repair_reads_the_original_scope_plan_without_rebinding_its_task_fk(self):
+        with TemporaryDirectory(prefix="forge-linked-scope-plan-") as root:
+            value, workspace, runner = self.configured(root)
+            saved = context()
+            value["plan_decision_id"] = None
+            value["scope_plan_decision_id"] = saved["decision_id"]
+            invocation = runner.invocation(value, workspace, plan_context=saved)
+            self.assertEqual(invocation.plan_file.read_text(), saved["text"])
+            self.assertIn(saved["note"], json.loads(invocation.stdin)["message"]["content"])
+            self.assertIsNone(value["plan_decision_id"])
+
     def test_plan_file_cannot_overwrite_a_preexisting_symlink(self):
         with TemporaryDirectory(prefix="forge-plan-file-") as root:
             value, workspace, runner = self.configured(root)
