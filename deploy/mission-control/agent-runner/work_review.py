@@ -245,11 +245,12 @@ class ReviewedCandidateProvider:
 class ReviewWorker:
     """One leased verification; SQL alone admits repair/publication successors."""
     def __init__(self, config, store, snapshots, git, checks, candidates, *, stop=None,
-                 policy_decider=decide_repair, hosted_checks=None):
+                 policy_decider=decide_repair, hosted_checks=None, native_ci=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.candidates, self.policy_decider = checks, candidates, policy_decider
         self.stop = stop if stop is not None else threading.Event()
         self.hosted_checks = hosted_checks
+        self.native_ci = native_ci
 
     def _finish(self, job, outcome):
         try:
@@ -348,6 +349,9 @@ class ReviewWorker:
                         repository / ".git", job["task_id"], head).digest()
                 require_lease()
                 source_gate_digest = gate_source_digest(self.git, repository, head)
+                check_job = {**check_job, 'candidate_commit': head, 'integration_base': integration_base,
+                    'gate_manifest_sha256': gate_manifest_sha256(self.config.checks,
+                        self.config.required_hosted_checks, source_gate_digest)}
                 changed = self.git._git(repository, "diff", "--name-only", "-z", job["base_revision"], head).split(b"\0")
                 gate_changes = any(protected_gate_path(path.decode("utf-8")) for path in changed if path)
                 stage = "checks"
@@ -390,6 +394,8 @@ class ReviewWorker:
                     "candidate_workspace_digest": candidate_digest,
                     "repair_requires_new_workspace": requires_new, "integration_base": integration_base,
                     "checks_passed": report.checks_passed}
+                if self.native_ci is not None:
+                    manifest['native_ci'] = self.native_ci.evidence(check_job, repository)
                 if report.cleanup_confirmed:
                     self.candidates.record(job, manifest)
                 outcome = {"disposition": disposition, "reason": reason, "candidate_commit": head,

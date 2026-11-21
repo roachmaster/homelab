@@ -75,6 +75,16 @@ def protected_delivery_gate(path):
             or path.rsplit('/', 1)[-1] == 'work_external_delivery.py')
 
 
+def jenkins_gate_manifest(config, files):
+    """Compute the source map and operator-owned installed verifier identity."""
+    protected = {path: value for path, value in files.items() if protected_delivery_gate(path)}
+    source_digest = hashlib.sha256(canonical(protected)).hexdigest()
+    helper_digest = hashlib.sha256(read_private(config.verifier, owner=0, maximum=1024 * 1024)).hexdigest()
+    gate = hashlib.sha256(canonical({'version': 1, 'provider': 'jenkins', 'profile': PROFILE,
+        'checks': CHECKS, 'verifier_sha256': helper_digest, 'source_gate_sha256': source_digest})).hexdigest()
+    return source_digest, helper_digest, gate
+
+
 def read_private(path, *, maximum=65536, owner=None):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, 'rb') as stream:
@@ -347,11 +357,7 @@ class TrustedDeliveryPort:
                 raise ValueError('External source exceeds checkout bounds')
             artifact_guard(name, data)
             files[name] = [mode, blob]
-        protected = {path: value for path, value in files.items() if protected_delivery_gate(path)}
-        source_digest = hashlib.sha256(canonical(protected)).hexdigest()
-        helper_digest = hashlib.sha256(read_private(self.config.verifier, owner=0, maximum=1024 * 1024)).hexdigest()
-        gate = hashlib.sha256(canonical({'version': 1, 'provider': 'jenkins', 'profile': PROFILE,
-            'checks': CHECKS, 'verifier_sha256': helper_digest, 'source_gate_sha256': source_digest})).hexdigest()
+        source_digest, _helper_digest, gate = jenkins_gate_manifest(self.config, files)
         base_tree = self.git(repository, 'rev-parse', expected + '^{tree}').decode().strip()
         if base_tree == claimed_tree:
             clean = expected
