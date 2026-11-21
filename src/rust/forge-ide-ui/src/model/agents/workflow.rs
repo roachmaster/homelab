@@ -26,7 +26,14 @@ impl Agents {
     }
     pub(super) fn workflow_policy(&self) -> Option<&WorkWorkflowPolicy> {
         if self.external_assignment() {
-            return None;
+            return self
+                .catalog
+                .as_ref()?
+                .projects
+                .iter()
+                .find(|p| p.alias == self.project)?
+                .external_workflow
+                .as_ref();
         }
         self.project_policy()
     }
@@ -145,9 +152,15 @@ impl Agents {
             visible("agents-cancel", reader && self.can_cancel()),
         ]);
         view.texts.extend([
-            text("agents-compose-help",if self.external_assignment(){"Muse owns its runner. PostgreSQL carries the assignment and returned artifact; this transport does not authorize a merge."}else if policy.is_some(){"The configured author and reviewer carry this assignment through peer review, required checks and merge."}else{"Runs in the background. Review the result before accepting it."}),
+            text("agents-compose-help",if self.external_assignment() && policy.is_some(){"Muse authors through PostgreSQL. The independent reviewer, required checks and trusted merger advance this assignment automatically."}else if self.external_assignment(){"Muse owns its runner. PostgreSQL carries the assignment and returned artifact; this transport does not authorize a merge."}else if policy.is_some(){"The configured author and reviewer carry this assignment through peer review, required checks and merge."}else{"Runs in the background. Review the result before accepting it."}),
             text("agents-assignment-roles",policy.map_or_else(String::new,|p|format!("{} authors · {} reviews",self.role_label(&p.author_profile),self.role_label(&p.reviewer_profile)))),
             text("agents-assignment-policy",policy.map_or_else(String::new,|p|if !self.workflow_submission_ready(){"The configured workflow is unavailable. Refresh after its roles, policy and workers are ready.".into()}else{format!("Up to {} plan revisions · {} code revisions · {}",p.max_plan_revisions,p.max_code_revisions,if p.auto_merge{"Merge after required checks"}else{"Project merge policy"})})),
+            text("agents-workflow-source",workflow.map_or_else(String::new,|w|{
+                let mut lines=Vec::new();
+                if let Some(commit)=w.candidate_commit.as_ref(){lines.push(format!("Verified candidate · {commit}"));}
+                if let Some(commit)=w.merge_commit.as_ref(){lines.push(format!("Merged commit · {commit}"));}
+                if lines.is_empty(){"Source verification has not completed yet.".into()}else{lines.join("\n")}
+            })),
             text("agents-workflow-roles",workflow.map_or_else(String::new,|w|format!("{} authors · {} reviews",self.role_label(&w.author_profile),self.role_label(&w.reviewer_profile)))),
             text("agents-workflow-revisions",workflow.map_or_else(String::new,|w|format!("Plan revisions {}/{} · Code revisions {}/{}",w.plan_revisions,w.max_plan_revisions,w.code_revisions,w.max_code_revisions))),
             text("agents-workflow-escalation",workflow.and_then(|w|w.escalation_reason.as_deref()).unwrap_or("")),

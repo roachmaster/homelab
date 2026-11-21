@@ -51,7 +51,7 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":11,"files":files}))
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":12,"files":files}))
                 .unwrap(),
         )
         .unwrap();
@@ -1758,7 +1758,7 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12] {
+    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();

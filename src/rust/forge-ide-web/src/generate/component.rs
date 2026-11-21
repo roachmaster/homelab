@@ -197,6 +197,10 @@ pub enum Component {
         id: String,
         label: String,
     },
+    Timeline {
+        id: String,
+        label: String,
+    },
     Select {
         id: String,
         label: String,
@@ -336,6 +340,7 @@ macro_rules! component {
     (text $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Body} };
     (badge $id:expr, $label:expr) => { $crate::generate::Component::Badge{id:$id.into(),label:$label.into()} };
     (metric_cards $id:expr, $label:expr) => { $crate::generate::Component::MetricCards{id:$id.into(),label:$label.into()} };
+    (timeline $id:expr, $label:expr) => { $crate::generate::Component::Timeline{id:$id.into(),label:$label.into()} };
     (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
     (context $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Context} };
     (heading $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Heading} };
@@ -458,6 +463,7 @@ impl Document {
                 }
                 Component::Badge { id, label }
                 | Component::MetricCards { id, label }
+                | Component::Timeline { id, label }
                 | Component::Transcript { id, label, .. }
                 | Component::Tree { id, label, .. }
                 | Component::Reload { id, label }

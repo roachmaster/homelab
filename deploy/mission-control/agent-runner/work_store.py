@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 from psycopg2.extras import Json, RealDictCursor, register_uuid
 
 from queue_store import Rejected
-from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES
+from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES, POLICIES as EXTERNAL_POLICIES
 from work_config import (
     DEFAULT_MAX_PENDING,
     DEFAULT_REPAIR_POLICY,freeze_repair_policy,
@@ -75,6 +75,39 @@ def _public_progress(payload):
         return None
     return ({"attempt_id": attempt, "sequence": ordinal, "stage": stage,
              "summary": summary} if valid else None)
+def _public_external_progress(payload, binding):
+    if not isinstance(payload, dict) or set(payload) != {"provider", "assignment_id", "generation", "summary"} or not isinstance(binding, dict):
+        return None
+    try:
+        identity = str(UUID(payload["assignment_id"]))
+        summary = payload["summary"]
+        generation = payload["generation"]
+        valid = (payload["provider"] == "muse-db" and payload["assignment_id"] == identity == str(binding["assignment_id"])
+                 and type(generation) is int and 1 <= generation <= binding["generation"]
+                 and isinstance(summary, str) and bool(summary.strip()) and len(summary.encode("utf-8")) <= 4096
+                 and all(unicodedata.category(c) != "Cc" or c in "\n\t" for c in summary))
+    except (ValueError, TypeError, KeyError, UnicodeError):
+        return None
+    return dict(payload) if valid else None
+
+
+def _public_workflow_progress(payload, workflow, related_allowed=False):
+    if not isinstance(payload, dict) or not ({"workflow_id", "phase", "summary"} <= payload.keys() <= {"workflow_id", "phase", "summary", "related_task_id"}) or not isinstance(workflow, dict):
+        return None
+    try:
+        identity = str(UUID(payload["workflow_id"]))
+        summary = payload["summary"]
+        related = payload.get("related_task_id")
+        related_valid = related is None or (related_allowed and isinstance(related,str) and str(UUID(related)) == related)
+        valid = (related_valid and payload["workflow_id"] == identity == workflow["workflow_id"]
+                 and payload["phase"] in {"plan", "plan_review", "plan_revision", "implement", "checks", "code_review", "repair", "publishing", "hosted", "merging", "completed", "cancelled", "escalated"}
+                 and isinstance(summary, str) and bool(summary.strip()) and len(summary.encode("utf-8")) <= 4096
+                 and all(unicodedata.category(c) != "Cc" or c in "\n\t" for c in summary))
+    except (ValueError, TypeError, KeyError, UnicodeError):
+        return None
+    return dict(payload) if valid else None
+
+
 NON_RESUMABLE_STATUSES = frozenset({"queued", "running", "cancel_requested", "completed"})
 MODE_ORDER = ("plan", "review", "implement")
 
@@ -89,6 +122,7 @@ def _timestamp(value):
 def _summary(row):
     item = {
         "task_id": str(row["id"]),
+        "correlation_id": str(row["correlation_id"]),
         "project_alias": row["project_alias"],
         "base_revision": row["base_revision"],
         "mode": row["mode"],
@@ -233,6 +267,10 @@ class WorkStore:
     def max_pending(self):
         return self._max_pending
 
+    def _external_workflow_for(self, project_alias):
+        workflow = getattr(self._external,"workflow",None)
+        return workflow if workflow is not None and workflow.manages(project_alias) else None
+
     def _require_project(self, project_alias):
         if project_alias not in self._allowed_projects:
             raise Rejected(403, "denied")
@@ -293,7 +331,7 @@ class WorkStore:
                 observed_at = entry.observed_at
             if entry.is_fresh:
                 worker_status = "ready"
-                advertised_profile_modes.setdefault(entry.profile_alias, set()).update(EXTERNAL_MODES & config.allowed_modes)
+                advertised_profile_modes.setdefault(entry.profile_alias, set()).update(EXTERNAL_POLICIES[profile.resource_profile][1] & config.allowed_modes)
             elif worker_status == "unknown":
                 worker_status = "offline"
         for row in rows:
@@ -345,6 +383,7 @@ class WorkStore:
                 "label": config.project_label(alias),
                 "base_revision": advertised_revisions.get(alias),
                 "workflow":config.project_workflows[alias].summary(config.catalog(),config.repair_policy) if alias in config.project_workflows else None,
+                "external_workflow":getattr(self._external,"workflow",None).project_policy(alias) if getattr(self._external,"workflow",None) is not None else None,
             }
             for alias in sorted(config.allowed_projects)[:MAX_PROJECTS]
         ]
@@ -461,7 +500,7 @@ class WorkStore:
                 )
                 VALUES (%s, %s, %s, 1, 'queued', %s)
             """, (self._owner, project_alias, task_id, Json(receipt)))
-            if recipe.resource_profile == EXTERNAL_POLICY_ID:
+            if recipe.resource_profile in EXTERNAL_POLICIES:
                 if self._external is None or agent_profile not in self._external.profiles:
                     raise Rejected(503, "unavailable")
                 self._external.enqueue(cursor, project_alias, task_id)
@@ -478,7 +517,7 @@ class WorkStore:
         read_mode = {"repeatable_read": True} if self._external is not None else {"read_only": True}
         with self._transaction(**read_mode) as cursor:
             cursor.execute("""
-                SELECT id, project_alias, base_revision, mode, agent_profile,
+                SELECT id, correlation_id, project_alias, base_revision, mode, agent_profile,
                        recipe_digest, status, revision, created_at,
                        title, prompt, acceptance_criteria, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id,workflow_review_id
                 FROM forge_agent.coding_tasks
@@ -565,6 +604,12 @@ class WorkStore:
                 detail["review"]=review
             if "title" not in detail:
                 detail["title"] = prepare_title(row["prompt"])
+            external_workflow = self._external_workflow_for(project_alias)
+            if external_workflow is not None:
+                projection = external_workflow.project(cursor,project_alias,task_id)
+                if projection is not None:
+                    detail["workflow_required"] = True
+                    detail["workflow"] = projection
             if self._external is not None and row["agent_profile"] in self._external.profiles:
                 artifact = self._external.artifact_by_task(cursor, project_alias, task_id)
                 if artifact is not None:
@@ -580,7 +625,9 @@ class WorkStore:
         if cursor_task_id is not None and not isinstance(cursor_task_id, UUID):
             raise Rejected(400, "invalid_request")
 
-        with self._transaction(read_only=True) as cursor:
+        mode = {"repeatable_read": True} if self._external_workflow_for(project_alias) is not None else {"read_only": True}
+        external_filter = "AND NOT forge_external_workflow_api.is_internal(t.owner_id,t.project_alias,t.id)" if self._external_workflow_for(project_alias) is not None else ""
+        with self._transaction(**mode) as cursor:
             cursor_created_at = None
             if cursor_task_id is not None:
                 cursor.execute("""
@@ -593,8 +640,8 @@ class WorkStore:
                     raise Rejected(400, "invalid_request")
                 cursor_created_at = anchor["created_at"]
 
-            cursor.execute("""
-                SELECT t.id, t.project_alias, t.base_revision, t.mode, t.agent_profile,
+            cursor.execute(f"""
+                SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile,
                        t.recipe_digest, t.status, t.revision, t.created_at, t.title,
                        t.workflow_required, w.phase AS workflow_phase
                 FROM forge_agent.coding_tasks t
@@ -602,6 +649,7 @@ class WorkStore:
                   ON (w.owner_id, w.project_alias, w.workflow_id) =
                      (t.owner_id, t.project_alias, t.workflow_id)
                 WHERE t.owner_id = %s AND t.project_alias = %s
+                  {external_filter}
                   AND (%s::text IS NULL OR t.status = %s::text)
                   AND (%s::timestamptz IS NULL OR (t.created_at, t.id) > (%s::timestamptz, %s::uuid))
                 ORDER BY t.created_at ASC, t.id ASC
@@ -613,12 +661,26 @@ class WorkStore:
                 limit + 1,
             ))
             rows = cursor.fetchall()
+            projected = {}
+            external_workflow = self._external_workflow_for(project_alias)
+            if external_workflow is not None:
+                for row in rows:
+                    current = external_workflow.project(cursor,project_alias,row["id"])
+                    if current is not None:
+                        projected[str(row["id"])]=current
 
         page = rows[:limit]
+        summaries = []
+        for row in page:
+            item = _summary(row)
+            if str(row["id"]) in projected:
+                item["workflow_required"] = True
+                item["workflow_phase"] = projected[str(row["id"])]["phase"]
+            summaries.append(item)
         next_cursor = str(page[-1]["id"]) if len(rows) > limit else None
         return {
             "project_alias": project_alias,
-            "tasks": [_summary(row) for row in page],
+            "tasks": summaries,
             "next_cursor": next_cursor,
         }
 
@@ -629,18 +691,18 @@ class WorkStore:
                 or type(limit) is not int or not 1 <= limit <= 100):
             raise Rejected(400, "invalid_request")
 
-        with self._transaction(read_only=True) as cursor:
+        mode = {"repeatable_read": True} if self._external is not None else {"read_only": True}
+        with self._transaction(**mode) as cursor:
             cursor.execute("""
-                SELECT id, project_alias, revision, status
+                SELECT id, correlation_id, project_alias, revision, status
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
             """, (self._owner, project_alias, task_id))
             task = cursor.fetchone()
             if task is None:
                 raise Rejected(404, "not_found")
-
             cursor.execute("""
-                SELECT sequence, event_kind, created_at, payload
+                SELECT event_id, correlation_id, sequence, event_kind, created_at, payload
                 FROM forge_agent.coding_events
                 WHERE owner_id = %s AND project_alias = %s AND task_id = %s
                   AND sequence > %s
@@ -648,17 +710,45 @@ class WorkStore:
                 LIMIT %s
             """, (self._owner, project_alias, task_id, after_sequence, limit))
             rows = cursor.fetchall()
-
-        items = [
-            {
-                "sequence": row["sequence"],
-                "kind": row["event_kind"],
-                "created_at": _timestamp(row["created_at"]),
-                **({"progress": progress} if row["event_kind"] == "checkpoint"
-                   and (progress := _public_progress(row["payload"])) is not None else {}),
-            }
-            for row in rows
-        ]
+            cursor.execute("""SELECT attempt_id FROM forge_agent.coding_attempts
+                WHERE owner_id=%s AND project_alias=%s AND task_id=%s""", (self._owner,project_alias,task_id))
+            owned_attempts = {str(row["attempt_id"]) for row in cursor.fetchall()}
+            binding = None
+            workflow = None
+            if self._external is not None:
+                cursor.execute("SELECT forge_external_agent_api.event_binding(%s,%s,%s) AS binding",(self._owner,project_alias,task_id))
+                binding = cursor.fetchone()["binding"]
+                external_workflow = self._external_workflow_for(project_alias)
+                if external_workflow is not None:
+                    workflow = external_workflow.project(cursor,project_alias,task_id)
+            items = []
+            for row in rows:
+                if row["correlation_id"] != task["correlation_id"]:
+                    raise Rejected(409,"result_mismatch")
+                item = {"event_id":str(row["event_id"]),"correlation_id":str(row["correlation_id"]),
+                        "sequence":row["sequence"],"kind":row["event_kind"],"created_at":_timestamp(row["created_at"])}
+                if row["event_kind"] == "checkpoint":
+                    native = _public_progress(row["payload"])
+                    external = _public_external_progress(row["payload"],binding)
+                    related_allowed = False
+                    payload = row["payload"]
+                    if workflow is not None and isinstance(payload,dict) and payload.get("workflow_id") == workflow["workflow_id"]:
+                        related = payload.get("related_task_id")
+                        try:
+                            valid_related = isinstance(related,str) and str(UUID(related)) == related
+                        except (ValueError,TypeError):
+                            valid_related = False
+                        if valid_related:
+                            related_allowed = external_workflow.related_task(cursor,project_alias,workflow["workflow_id"],related)
+                    flow = _public_workflow_progress(payload,workflow,related_allowed)
+                    if native is not None and native["attempt_id"] in owned_attempts:
+                        item["progress"] = native
+                        item["progress_verified"] = True
+                    elif external is not None:
+                        item["external_progress"] = external
+                    elif flow is not None:
+                        item["workflow_progress"] = flow
+                items.append(item)
         next_sequence = items[-1]["sequence"] if items else after_sequence
         return {
             "project_alias": task["project_alias"],

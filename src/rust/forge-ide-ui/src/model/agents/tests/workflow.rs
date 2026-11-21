@@ -148,8 +148,12 @@ fn external_artifact_is_safe_to_read_and_never_admits_native_acceptance() {
         .unwrap_or("")
         .contains("<script>"));
 }
-fn summary(phase: WorkWorkflowPhase) -> WorkWorkflowSummary {
+pub(super) fn summary(phase: WorkWorkflowPhase) -> WorkWorkflowSummary {
     WorkWorkflowSummary {
+        kind: WorkWorkflowKind::Native,
+        reviewer_task_id: None,
+        candidate_commit: None,
+        merge_commit: None,
         workflow_id: KEY.into(),
         policy_digest: "c".repeat(64),
         phase,
@@ -332,6 +336,9 @@ fn workflow_review_and_hosted_progress_poll_detail_without_owner_prompts() {
     assert!(agents.processing());
     let mut effects = vec![];
     agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into());
     agents.schedule("phase-watch".into(), &mut effects);
     assert!(matches!(&effects[0], UiEffect::AgentsWatch { .. }));
     let effects = step(

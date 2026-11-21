@@ -3363,6 +3363,62 @@ async function agentsJourney() {
     await screenshot(page,'ide-agents-external-muse.png');
     await page.locator('#agents-back').click();
     await check(page.locator('#agents-muse-db-state')).toHaveText('Runner available');
+    // The full envelope history is separate from the bounded current-attempt milestones.
+    const historyTaskId=relay.addHistory();
+    await page.locator('#agents-refresh').click();
+    await page.locator(`#agents-tasks [data-row-id="${historyTaskId}"] .fg-row-select`).click();
+    await check(page.locator('#agents-task-correlation')).toContainText('Correlation ·');
+    await check(page.locator('#agents-history > li')).toHaveCount(50);
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    const eventDetails=page.locator('#agents-history > li').first().locator('details');
+    await eventDetails.locator('summary').focus();await page.keyboard.press('Enter');
+    await check(eventDetails).toHaveJSProperty('open',true);
+    const eventNode=await eventDetails.elementHandle();
+    await page.locator('#agents-refresh').click();
+    await check(eventDetails).toHaveJSProperty('open',true);
+    assert.equal(await eventNode.evaluate(node=>node.isConnected),true,'event disclosure nodes survive refresh');
+    await check(page.locator('#agents-history script,#agents-history img')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>globalThis.__historyExecuted),undefined);
+    relay.faults.denyNextEvents=true;
+    await page.locator('#agents-history-next').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    await check(page.locator('#agents-history-next')).toBeEnabled();
+    await page.locator('#agents-history-next').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 51–61');
+    await check(page.locator('#agents-history > li')).toHaveCount(11);
+    await check(page.locator('#agents-history-next')).toBeDisabled();
+    await page.locator('#agents-history-previous').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    await page.locator('#agents-history-next').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 51–61');
+    await page.locator('#agents-history-first').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'event metadata and summaries fit the viewport');
+    }
+    await screenshot(page,'ide-agents-event-history.png');
+    await page.locator('#agents-back').click();
+    relay.enableExternalWorkflow();
+    await page.reload({waitUntil:'domcontentloaded'});
+    await page.locator('#agents-new').click();
+    await page.locator('#agents-profile').selectOption('muse-db-primary');
+    await check(page.locator('#agents-compose-help')).toContainText('advance this assignment automatically');
+    await page.locator('#agents-prompt').fill('Run the external database workflow through independent review and verified merge.');
+    await page.locator('#agents-criteria').fill('Preserve the envelope history and source receipts with no manual approvals.');
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    const externalWorkflowTask=relay.latestWorkflowTaskId;
+    for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
+      relay.workflowPhase(externalWorkflowTask,phase);await page.locator('#agents-refresh').click();
+      await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+      for(const id of ['agents-accept','agents-resume','agents-plan-actions','agents-review-actions'])await check(page.locator('#'+id)).toBeHidden();
+    }
+    await check(page.locator('#agents-history')).toContainText('Trusted fixture workflow: completed.');
+    await check(page.locator('#agents-workflow-source')).toContainText('Merged commit');
+    for(const id of ['agents-progress-panel','agents-result-panel'])await check(page.locator('#'+id)).toBeHidden();
+    await screenshot(page,'ide-agents-external-workflow.png');
+
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);

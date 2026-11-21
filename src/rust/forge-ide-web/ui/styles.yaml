@@ -3228,3 +3228,53 @@
     - selector: "#agents-workflow-escalation:empty"
       declarations:
         - ["display", "none"]
+
+- rules:
+    - selector: "#agents-task-correlation,.fg-timeline-properties dd"
+      declarations:
+        - ["overflow-wrap", "anywhere"]
+    - selector: ".fg-timeline"
+      declarations:
+        - ["list-style", "none"]
+        - ["margin", "12px 0"]
+        - ["padding", "0"]
+    - selector: ".fg-timeline-row"
+      declarations:
+        - ["padding", "12px 0"]
+        - ["border-bottom", "1px solid var(--border)"]
+    - selector: ".fg-timeline-header"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["justify-content", "space-between"]
+        - ["gap", "12px"]
+        - ["flex-wrap", "wrap"]
+    - selector: ".fg-timeline-header time,.fg-timeline-row summary"
+      declarations:
+        - ["color", "var(--muted)"]
+        - ["font-size", ".875rem"]
+    - selector: ".fg-timeline-summary"
+      declarations:
+        - ["white-space", "pre-wrap"]
+        - ["overflow-wrap", "anywhere"]
+        - ["display", "-webkit-box"]
+        - ["-webkit-box-orient", "vertical"]
+        - ["-webkit-line-clamp", "3"]
+        - ["overflow", "hidden"]
+        - ["margin", "8px 0"]
+    - selector: ".fg-timeline-row summary"
+      declarations:
+        - ["min-height", "44px"]
+        - ["padding", "12px 0"]
+        - ["cursor", "pointer"]
+    - selector: ".fg-timeline-properties"
+      declarations:
+        - ["margin", "0"]
+        - ["font-size", ".875rem"]
+    - selector: ".fg-timeline-properties dt"
+      declarations:
+        - ["color", "var(--muted)"]
+    - selector: ".fg-timeline-properties dd"
+      declarations:
+        - ["margin", "4px 0 12px"]
+        - ["white-space", "pre-wrap"]

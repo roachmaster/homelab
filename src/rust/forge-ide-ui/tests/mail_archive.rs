@@ -253,6 +253,7 @@ fn retired_mail_replies_cannot_steal_a_pending_agents_request_or_replay_mutation
         UiEvent::Work(WorkResponse::WorkCatalog {
             request_id: id,
             projects: vec![WorkProject {
+                external_workflow: None,
                 alias: "workspace".into(),
                 label: "Workspace".into(),
                 base_revision: Some("a".repeat(40)),

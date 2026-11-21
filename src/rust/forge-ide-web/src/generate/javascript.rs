@@ -194,7 +194,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('select[data-action]')){n.replaceChildren();n.value='';n.removeAttribute('title');delete n.dataset.options;n.disabled=true;}
   for(const n of document.querySelectorAll('input,textarea')){n.value='';if(n.type==='checkbox')n.checked=false;n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
-  for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
+  for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,.fg-timeline,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
   for(const n of document.querySelectorAll('[data-diff-view]')){n.replaceChildren();n.scrollTop=0;}
   for(const n of document.querySelectorAll('[data-source-wrap],[data-compact-toolbar]')){
     if(n.hasAttribute('data-source-wrap')){
@@ -317,6 +317,35 @@ function renderMetricCards(binding){
   if(!binding.cards.length){const empty=document.createElement('p');empty.className='fg-empty';empty.textContent=binding.empty_message;host.append(empty);}
 }
 
+// Keyed native disclosures preserve presentation focus/open state on refresh.
+const timelineViews=new WeakMap();
+function renderTimeline(binding){
+  const host=element(binding.id);if(!host)return;
+  const known=new Map([...host.children].filter(n=>n.dataset.eventId).map(n=>[n.dataset.eventId,n]));
+  const keep=new Set();let index=0;
+  for(const row of binding.rows){
+    keep.add(row.event_id);let node=known.get(row.event_id),parts=node&&timelineViews.get(node);
+    if(!parts){
+      node=document.createElement('li');node.dataset.eventId=row.event_id;node.className='fg-timeline-row';
+      const header=document.createElement('div');header.className='fg-timeline-header';
+      const state=document.createElement('span');const time=document.createElement('time');header.append(state,time);
+      const body=document.createElement('p');body.className='fg-timeline-summary';
+      const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Event details';
+      const properties=document.createElement('dl');properties.className='fg-timeline-properties';details.append(summary,properties);
+      const related=document.createElement('button');related.type='button';related.className='fg-timeline-related';related.textContent='Open linked task';related.addEventListener('click',()=>sendAction(related));details.append(related);node.append(header,body,details);parts={state,time,body,details,properties,related,signature:null};timelineViews.set(node,parts);
+    }
+    paintBadge(parts.state,row.badge);paintTime(parts.time,row.time);parts.body.textContent=row.summary;parts.body.hidden=!row.summary;parts.related.hidden=!row.related_action;actionByElement.set(parts.related,row.related_action);focusKeyByElement.set(parts.related,binding.id+':'+row.event_id+':related:'+JSON.stringify(row.related_action));
+    const signature=JSON.stringify(row.details);
+    if(parts.signature!==signature){
+      parts.properties.replaceChildren(...row.details.map(p=>{const block=document.createElement('div');const label=document.createElement('dt');label.textContent=p.label;const value=document.createElement('dd');value.textContent=p.value;block.append(label,value);return block;}));
+      parts.signature=signature;
+    }
+    const at=host.children[index++];if(at!==node)host.insertBefore(node,at||null);
+  }
+  for(const node of [...host.children])if(!node.dataset.eventId||!keep.has(node.dataset.eventId))node.remove();
+  if(!binding.rows.length){const empty=document.createElement('li');empty.className='fg-empty';empty.textContent=binding.empty_message;host.append(empty);}
+}
+
 function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(!view||typeof view!=='object')throw new Error('Invalid view');
   const focus=document.activeElement;
@@ -342,6 +371,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   for(const b of view.texts||[]){const n=element(b.id);if(n){if(n.textContent!==b.text)n.textContent=b.text;n.dataset.tone=['neutral','accent','warning','error'].includes(b.tone)?b.tone:'neutral';}}
   for(const b of view.badges||[]){const n=element(b.id);if(n)paintBadge(n,b.badge);}
   for(const b of view.metric_cards||[])renderMetricCards(b);
+  for(const b of view.timelines||[])renderTimeline(b);
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;if(typeof b.pressed==='boolean')n.setAttribute('aria-pressed',String(b.pressed));actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(typeof b.pressed==='boolean'?b.pressed:b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
   for(const b of view.inputs||[]){
     const n=element(b.id);if(!n)continue;
@@ -621,7 +651,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(enteringEditor&&!activeEditor.disabled&&visible(activeEditor)){activeEditor.focus({preventScroll:true});return;}
   if(visible(sourceFocus)){sourceFocus.focus({preventScroll:true});return;}
   if(visible(invalidatedFocus)){invalidatedFocus.focus();return;}
-  if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
+  if(focusKey){const same=[...document.querySelectorAll('.fg-row-select,.fg-toggle,.fg-timeline-related')].find(n=>focusKeyByElement.get(n)===focusKey);if(visible(same)){same.focus({preventScroll:true});return;}}
   // Only repair focus that this rendering invalidated. Background results do not steal it.
   if(focus!==document.body && (!focus.isConnected||!visible(focus))){
     const controlled=element(focus.getAttribute?.('aria-controls'));
@@ -1169,7 +1199,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==11 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==12 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

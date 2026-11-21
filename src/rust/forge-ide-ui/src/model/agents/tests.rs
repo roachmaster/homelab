@@ -13,6 +13,7 @@ fn ready() -> Agents {
         mode: Some(WorkMode::Plan),
         catalog: Some(WorkCatalog {
             projects: vec![WorkProject {
+                external_workflow: None,
                 alias: "workspace".into(),
                 label: "Workspace".into(),
                 base_revision: Some("a".repeat(40)),
@@ -49,6 +50,7 @@ fn step(agents: &mut Agents, event: UiEvent, id: &str) -> Vec<UiEffect> {
 fn detail(status: WorkStatus) -> WorkTaskDetail {
     WorkTaskDetail {
         task_id: TASK.into(),
+        correlation_id: "99999999-9999-4999-8999-999999999999".into(),
         project_alias: "workspace".into(),
         base_revision: "a".repeat(40),
         mode: WorkMode::Plan,
@@ -343,6 +345,11 @@ fn polling_uses_owned_watch_and_accepts_events_beyond_task_revision() {
             revision: 5,
             status: WorkStatus::AwaitingReview,
             events: vec![WorkLogEvent {
+                event_id: "77777777-7777-4777-8777-777777777777".into(),
+                correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+                progress_verified: false,
+                external_progress: None,
+                workflow_progress: None,
                 sequence: 55,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,
@@ -371,7 +378,10 @@ fn result_pages_are_utf8_bounded_manifest_bound_and_previous_is_exact() {
     agents.task = Some(task);
     agents.selected = Some(TASK.into());
     agents.pane = Pane::Reader;
-    agents.events_loaded = true; // This test isolates paging after history was admitted.
+    agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into()); // This test isolates paging after history was admitted.
     agents.result_page("page-0".into(), None, &mut vec![]);
     for page in 0..4 {
         let offset = page * 16384;
@@ -748,6 +758,11 @@ fn terminal_history_keeps_public_plan_and_updates_without_revision_changes() {
         .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkEvents { .. }))));
     let events = (1..=31)
         .map(|ordinal| WorkLogEvent {
+            event_id: format!("{ordinal:08x}-7777-4777-8777-777777777777"),
+            correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+            progress_verified: false,
+            external_progress: None,
+            workflow_progress: None,
             sequence: ordinal,
             kind: WorkEventKind::Checkpoint,
             created_at: TIME.into(),
@@ -825,6 +840,11 @@ fn reports_from_an_old_attempt_do_not_become_current_progress() {
     let mut agents = ready();
     agents.task = Some(detail(WorkStatus::Running));
     agents.keep_progress(vec![WorkLogEvent {
+        event_id: "77777777-7777-4777-8777-777777777777".into(),
+        correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+        progress_verified: false,
+        external_progress: None,
+        workflow_progress: None,
         sequence: 10,
         kind: WorkEventKind::Checkpoint,
         created_at: TIME.into(),
@@ -844,6 +864,11 @@ fn an_external_resume_clears_the_old_plan_once_without_restarting_history_foreve
     agents.selected = Some(TASK.into());
     agents.task = Some(detail(WorkStatus::Failed));
     agents.progress = vec![WorkLogEvent {
+        event_id: "77777777-7777-4777-8777-777777777777".into(),
+        correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+        progress_verified: false,
+        external_progress: None,
+        workflow_progress: None,
         sequence: 3,
         kind: WorkEventKind::Checkpoint,
         created_at: TIME.into(),
@@ -867,6 +892,9 @@ fn an_external_resume_clears_the_old_plan_once_without_restarting_history_foreve
     assert_eq!(agents.event_sequence, 0);
     agents.event_sequence = 9;
     agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into());
     agents.get("same".into(), &mut vec![]);
     step(
         &mut agents,
@@ -940,6 +968,9 @@ fn finished_plan(status: WorkStatus) -> Agents {
     agents.selected = Some(TASK.into());
     agents.pane = Pane::Reader;
     agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into());
     agents
 }
 fn plan_event(decision: WorkPlanDecision) -> UiEvent {
@@ -1283,6 +1314,7 @@ fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_r
     );
 }
 
+mod history;
 mod review;
 mod workflow;
 

@@ -560,6 +560,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(label)
             );
         }
+        Component::Timeline { id, label } => {
+            let _ = write!(
+                out,
+                "<ol id=\"{}\" class=\"fg-timeline\" aria-label=\"{}\"></ol>",
+                escape(id),
+                escape(label)
+            );
+        }
         Component::Tree { id, label, stacked } => {
             let class = if *stacked {
                 "fg-tree fg-stacked-tree"

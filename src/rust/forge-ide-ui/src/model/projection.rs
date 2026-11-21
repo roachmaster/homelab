@@ -1118,6 +1118,7 @@ impl UiModel {
             diffs: vec![],
             badges: vec![],
             metric_cards: vec![],
+            timelines: vec![],
         };
         if self.presentation.chat {
             self.chats.project(&mut view, connected);
