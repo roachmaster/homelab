@@ -216,6 +216,65 @@ fn injected_native_factory_cannot_extend_typed_client_request_budget() {
 }
 
 #[test]
+fn typed_request_cannot_extend_selected_native_factory_budgets() {
+    let (endpoint, request, server) = fixture(
+        wire("200 OK", "", r#"{"jobs":[]}"#),
+        Duration::from_millis(250),
+    );
+    let config = Config::new(endpoint).unwrap();
+    let transport = forge_jenkins::http::HttpFactory::new(forge_jenkins::Limits {
+        timeout: Duration::from_millis(60),
+        max_response_bytes: 256,
+    })
+    .unwrap();
+    let ((), factory) = Registry::new()
+        .register(
+            forge_jenkins::register(
+                config,
+                Credentials::new("operator", "fixture-token").unwrap(),
+                transport,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    assert_eq!(
+        factory.create().unwrap().execute(Request::Jobs),
+        Err(Error::Timeout)
+    );
+    request.recv().unwrap();
+    server.join().unwrap();
+    let (endpoint, request, server) = fixture(wire("200 OK", "", &"x".repeat(300)), Duration::ZERO);
+    let config = Config::new(endpoint).unwrap();
+    let transport = forge_jenkins::http::HttpFactory::new(forge_jenkins::Limits {
+        timeout: Duration::from_secs(2),
+        max_response_bytes: 256,
+    })
+    .unwrap();
+    let ((), factory) = Registry::new()
+        .register(
+            forge_jenkins::register(
+                config,
+                Credentials::new("operator", "fixture-token").unwrap(),
+                transport,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    assert_eq!(
+        factory.create().unwrap().execute(Request::Controller),
+        Err(Error::BodyLimit)
+    );
+    request.recv().unwrap();
+    server.join().unwrap();
+}
+
+#[test]
 fn native_build_submission_returns_only_owned_queue_receipt() {
     let (endpoint, request, server) = fixture(
         wire("201 Created", "Location: /queue/item/11/\r\n", ""),
