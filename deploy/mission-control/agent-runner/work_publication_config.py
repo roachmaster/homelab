@@ -33,6 +33,7 @@ class PublicationConfig:
     merge_method: str = "merge"
     hosted_provider: str = "github-actions"
     jenkins_delivery_config: Path | None = None
+    native_delivery_mode: str = "integrate-first-v1"
 
     @property
     def state_root(self):
@@ -44,7 +45,7 @@ def parse_config(raw, worker, *, source_path=None):
         raise ValueError("Publisher requires typed worker configuration")
     if not {"worker_config", "repositories", "github_config_dir"} <= raw.keys() <= {
         "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks",
-        "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config"
+        "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -94,6 +95,11 @@ def parse_config(raw, worker, *, source_path=None):
             raise ValueError("Jenkins verification requires the full fixed check suite")
     elif delivery_path is not None:
         raise ValueError("Unused Jenkins delivery configuration")
+    delivery_mode = raw.get("native_delivery_mode", "integrate-first-v1")
+    if not isinstance(delivery_mode, str) or delivery_mode not in {"integrate-first-v1", "branch-first-v1"}:
+        raise ValueError("Invalid native delivery mode")
+    if delivery_mode == "branch-first-v1" and hosted_provider != "jenkins":
+        raise ValueError("Branch-first delivery requires Jenkins")
     required = raw.get("required_hosted_checks", DEFAULT_REQUIRED_HOSTED_CHECKS)
     if (not isinstance(required, (tuple, list)) or not 1 <= len(required) <= 8
             or any(not isinstance(row, (tuple, list)) or len(row) != 3
@@ -110,7 +116,7 @@ def parse_config(raw, worker, *, source_path=None):
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
                              tuple(tuple(row) for row in required), merge_enabled, merge_method,
-                             hosted_provider, delivery_path)
+                             hosted_provider, delivery_path, delivery_mode)
 
 
 def _object(pairs):

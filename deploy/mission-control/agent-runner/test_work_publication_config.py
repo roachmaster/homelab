@@ -27,6 +27,11 @@ class PublicationProviderConfigTest(unittest.TestCase):
             self.assertEqual(selected.checks, DEFAULT_CHECKS)
             self.assertEqual(selected.required_hosted_checks, legacy.required_hosted_checks)
             self.assertFalse((root / "delivery.json").exists())
+            self.assertEqual(legacy.native_delivery_mode, "integrate-first-v1")
+            branch_first = parse_config({**raw, "hosted_provider": "jenkins",
+                "jenkins_delivery_config": str(root / "delivery.json"),
+                "native_delivery_mode": "branch-first-v1"}, worker)
+            self.assertEqual(branch_first.native_delivery_mode, "branch-first-v1")
 
     def test_invalid_selection_or_reduced_checks_rejected(self):
         with TemporaryDirectory() as temporary:
@@ -36,6 +41,8 @@ class PublicationProviderConfigTest(unittest.TestCase):
                    "repositories": {"homelab": "fixture/project"},
                    "github_config_dir": str(worker.account.home / ".config/gh")}
             for fields in ({"hosted_provider": "unknown"}, {"hosted_provider": []},
+                    {"native_delivery_mode": "branch-first-v1"},
+                    {"native_delivery_mode": []}, {"native_delivery_mode": "unknown"},
                     {"hosted_provider": "jenkins"},
                     {"hosted_provider": "jenkins", "jenkins_delivery_config": "relative.json"},
                     {"jenkins_delivery_config": str(root / "delivery.json")},
