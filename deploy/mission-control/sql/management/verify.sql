@@ -680,6 +680,8 @@ ORDER BY version;
 
 \ir verify-task-events.sql
 
+\ir verify-external-workflows.sql
+
 \ir verify-feedback.sql
 
 \ir verify-autonomy.sql

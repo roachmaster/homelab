@@ -91,3 +91,10 @@ SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=21) AS h
 \if :has_task_events
 \ir grant-task-events.sql
 \endif
+
+-- M22: isolated external workflow coordination, native review and delivery ports.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=22) AS has_external_workflows
+\gset
+\if :has_external_workflows
+\ir grant-external-workflows.sql
+\endif
