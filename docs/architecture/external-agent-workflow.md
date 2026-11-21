@@ -97,3 +97,39 @@ actual checks and binds the same candidate/tree/gate manifest. Merge records the
 actual merge commit and tree. None advances `refs/forge/verified-main` or creates
 a native source-approval receipt; that native provider retains its original
 receipt semantics.
+
+## Jenkins execution and recovery
+
+`deploy/mission-control/jenkins/setup-ci.py --execute` provisions the fixed
+`forge-exact-candidate` job and a single WebSocket agent. The controller retains
+zero executors. The Jenkins account supervises the agent; candidate checks run
+as the separate `forge_ci` account with no supplementary groups, credential
+mounts or privilege gain. A root-owned UUID-only supervisor verifies an immutable
+bundle, source tree and protected-gate manifest before checkout, then runs exactly
+`make ci`, `make ui-qa`, and the complete agent-runner Python test suite. The
+candidate cannot select another command. The supervisor confirms all build-user
+processes are reaped and writes a source-bound, root-owned check receipt.
+
+`forge-external-delivery.service` selects an owner-scoped PostgreSQL DAO and
+trusted delivery ports from its private typed configuration. It uses Forge's
+Rust Jenkins `IoClient` through the pinned `forge` executable, rather than a
+second Python HTTP adapter. Its separately selected Jenkins configuration must
+enable mutations and observe only the seven public parameters: action, workflow,
+commit, tree, expected main, gate-manifest digest and correlation ID. The existing
+operator read-only configuration remains separate.
+
+The admitted CLI operations are `jenkins.queue-list`, `jenkins.recent-builds`,
+`jenkins.build`, `jenkins.queue`, `jenkins.stop-build` and `jenkins.cancel`, all
+with an explicit `--jenkins-config` path. There are no background model or OAuth
+requests in this worker. Database leases bound each action; transient transport
+failure preserves the same action and its deadline. A durable journal precedes
+the first Jenkins POST. Lost acknowledgements trigger observation, never a
+blind second POST. Duplicate conflicting runs or incomplete observations cannot
+establish success or absence. Cancellation waits for an actual cancelled queue
+or a stopped build with the supervisor's cleanup receipt.
+
+Publication imports a same-tree commit with public main as its sole parent.
+Private author history stays in quarantine. After independent approval and all
+three exact-source gates, the worker publishes this clean candidate and performs
+a non-forced main update. Main movement requires fresh integration, review and
+checks; lost merge acknowledgements are reconciled against real main ancestry.

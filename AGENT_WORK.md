@@ -1,6 +1,30 @@
 # Shared Agent Work Checkpoint
 
-## Current: Merge Muse's completed plan — 2026-11-21
+## Current: Complete the agent workflow and event history — 2026-11-21
+
+- **authorization:** User explicitly requests finishing the system rather than
+  returning more partial work. Implement the Muse-to-independent-review handoff,
+  bounded revision/implementation/verification/merge flow, and the reviewed task
+  correlation/event-history design. Existing authorization includes independent
+  agent review, at most three revisions and automatic merge after real CI.
+- **ownership:** Separate worktrees own SQL trace migration21, external workflow
+  backend/migration22, and Rust/generated UI/trace projections. Root integrates,
+  supplies trusted candidate/Jenkins/merge delivery, verifies and deploys. The
+  native author's receipt-bound source base is older than manual main; preserve
+  that authority and use explicit external context instead of fabricated receipts.
+- **boundaries:** Muse owns its runner through PostgreSQL; native Muse CLI stays
+  disabled. Preserve existing roles/reads/defaults/HBA, frozen policies and
+  migrations1–20, immutable artifacts and all historical receipts. No global
+  registry lookups in workers. JS remains generated presentation/I/O glue.
+  GitHub Actions stays disabled. Verification must use Jenkins with exact source
+  identity, followed by an independently approved, guarded merge.
+- **delivery:** In progress. Recover actual external Plan task
+  `7699599c-b5d0-4118-9bb0-3f8f917c5843` through genuine reviewer work and show its
+  lifecycle in the portal. Do not manually mark it approved/completed or invent
+  stopped-process, workspace, CI or publication evidence.
+- **evidence:** `/mnt/data/homelab-build/complete-agent-workflow-20261121`.
+
+## Retained: Merge Muse's completed plan — 2026-11-21
 
 - **authorization:** User requested merging Muse's work. GitHub has no Muse
   feature branch or open PR; the completed deliverable is its immutable Plan
