@@ -8,10 +8,15 @@ description: Integrate or review the external Muse database provider. Muse owns 
 Start with [Wire Forge Providers](../wire-forge-providers/SKILL.md) and the
 [Muse DB contract](../../../docs/architecture/muse-agent.md).
 
-Use `muse-db-primary` with resource `forge-external-db-v1`, explicit enablement,
+Use `muse-db-primary` with resource `forge-external-db-v2`, explicit enablement,
 model metadata `external-runner` and portal transport `external_db`. Native
 `muse-primary` remains disabled under frozen P10. Do not enable the old
 [external intake prototype](../../../docs/architecture/proposals/muse-intake-rejected.md).
+Preserve historical v1 recipes. For automatic SDLC use the scoped
+[external workflow contract](../../../docs/architecture/external-agent-workflow.md):
+Muse authors, an independently configured native agent reviews, bounded author
+revisions precede Jenkins verification and a guarded automatic merge. An older
+saved v1 Plan can be adopted without rewriting its recipe or artifact.
 
 The external runner owns execution and uses the scoped PostgreSQL capabilities,
 advertise, claim, renew/progress, finish/release and artifact functions. Preserve
@@ -30,10 +35,20 @@ External Plan/Review artifacts appear as `external_result` with `provider:
 muse-db`, their actual digest/content/time and bounded summary. Never manufacture
 native attempts, systemd stop proofs or workspace reconciliation receipts. The
 256KiB artifact and 4KiB summary limits protect report transport, not model token
-budgets. Implement, independent artifact-context review and Jenkins/candidate
-integration require a separate bridge; awaiting_review is not approval or merge.
-Progress summaries remain database-only in this slice; portal task status and
-the final external artifact are visible without inventing native progress IDs.
+budgets. The M22 coordinator owns database-only review/implementation transitions;
+a separate leased delivery worker owns Git/Jenkins/merge credentials. Enable
+`external_reviews` only on the independently configured native worker. Its actual
+attempt and stop/reconciliation evidence must bind the full immutable external
+artifact. Supply and verify the complete claim context/digest, approved Plan,
+feedback, trusted base and candidate result contract on every author follow-up.
+
+M21 gives every root task a durable correlation ID and every event its own UUID.
+The portal's bounded history shows external assignment progress, native linked
+review tasks and coordinator checkpoints with their truthful source. A Plan's
+`awaiting_review` status is neither approval nor completion. Confirm the actual
+review verdict, all fixed exact-source Jenkins checks and main receipt before
+reporting a workflow complete. Preserve the stable delivery action on uncertain
+acknowledgements; never blindly resubmit a Jenkins job or manufacture a receipt.
 
 Preserve native AGY/Codex workflows and historical recipes. Keep idempotent task
 receipt lookup before current admission checks. Test selected-instance use,
