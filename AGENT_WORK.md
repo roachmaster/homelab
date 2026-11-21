@@ -1,6 +1,50 @@
 # Shared Agent Work Checkpoint
 
-## Current: Reviewed source consolidation — 2026-11-21
+## Current: Main deployed with preserved Muse access — 2026-11-21
+
+- **authorization:** User requested merging the remaining branches and following
+  deployment instructions, then explicitly confirmed that Muse's database
+  permissions are needed. Preserve those permissions and credentials.
+- **runtime:** Release `20261121T034350Z-cb9e299-main`, code source `cb9e299`,
+  is live with schema19, policy `forge-coding-v10` and matched ABI10. Source agent,
+  web host, API, coding and publication services are active and boot-enabled.
+  Temporary candidate units are stopped; the existing proxy again forwards to
+  permanent port8788. Cloudflare access policy and mTLS credentials are retained.
+- **Muse access:** Existing role `muse_events` keeps its13 table SELECT grants,
+  schema USAGE, database CONNECT, localhost SCRAM rule, login/password and the
+  existing owner/schema/table default SELECT grant for future tables. The exact
+  optional read contract is checked without revoking or changing those rights.
+  Native Muse and Grok execution stay disabled; email remains Muse's primary
+  transport. Unverified external intake publication/approval remains dormant.
+- **data and recovery:** A fresh schema17 as-found archive was restored and
+  compared across all35 tables, complete row contents, constraint semantics,
+  schema/ACL/function/trigger/index/owner state, database grants and sequences.
+  Its old strict verifier lacks the authorized Muse read contract; this is
+  recorded explicitly. M18/M19 then applied and current strict schema/privilege
+  checks passed. A fresh schema19 archive also passed restore/fidelity checks and
+  its pinned strict production verifier. Historical rows and old migration
+  records were preserved; only the independent GPU seen_at heartbeat was allowed
+  beside the new migration records during the upgrade.
+- **verification:** Prior full Rust CI and all28 browser groups remain applicable
+  to identical compiled Rust and asset bytes. New reader regressions passed7/7
+  with no skips, and the integrated reader/policy upgrade run passed27 tests.
+  The live release passed asset hashes, real mTLS inspection, session/cookie,
+  Host/Origin and CSRF checks. An isolated actual-browser journey through the
+  existing local proxy passed Agents readiness, Workbench, Home, Design, legacy
+  Chat entry, single-tab navigation and phone overflow checks without page errors.
+  Public HTTPS still redirects unauthenticated requests to Cloudflare sign-in;
+  an authenticated external Cloudflare browser journey was not performed.
+- **source authority:** `refs/forge/verified-main` and its durable completion
+  receipts remain unchanged. Runtime deployment and the read-only inspection
+  snapshot are separate from that receipt-bound coding-project source base.
+  No model task, email, Jenkins build or GitHub workflow was submitted. Repository
+  Actions remain disabled per the earlier user stop.
+- **evidence:** Private rollout, saved unit/config state, backups, source hashes
+  and final receipt are under `/var/lib/forge-provisioning/deploy-main-20261121`;
+  safe source/test records are under `/mnt/data/homelab-build/deploy-main-20261121`.
+  The later documentation/ancestry checkpoint does not change deployed code.
+
+## Retained source consolidation — 2026-11-21
 
 - **authorization:** The user explicitly requested all feature branches be
   consolidated into main and deleted afterward. This supersedes the earlier
