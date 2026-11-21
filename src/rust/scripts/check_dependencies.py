@@ -7,6 +7,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
+    "forge-jenkins": {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-io-client")},
     "forge-llama": {(name, "normal") for name in ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider")},
     "forge-ide-ui": set(),
     "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-bootstrap","forge-provider","forge-template","forge-game-runtime")},
@@ -30,10 +31,10 @@ ALLOWED = {
     "forge-bootstrap": set(),
     "forge-kernel": {(name, "normal") for name in
                      ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task", "forge-command")},
-    "forge-local": {(name, "normal") for name in
+    "forge-local": {("forge-jenkins", "normal")} | {(name, "normal") for name in
                     ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider",
                      "forge-io-client", "forge-task", "forge-kernel", "forge-command")},
-    "forge-terminal": {(name, "normal") for name in
+    "forge-terminal": {("forge-jenkins", "normal")} | {(name, "normal") for name in
                        ("forge-local", "forge-io-client", "forge-bootstrap", "forge-provider",
                         "forge-access", "forge-ingress-contract", "forge-jobs")},
     "forge-demo-messages": {(name, "normal") for name in
@@ -47,9 +48,10 @@ ALLOWED = {
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
 EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
+    "forge-jenkins": {"serde", "serde_json", "url", "base64", "ureq"},
     "forge-llama": {"ctrlc", "nix", "http-body-util", "hyper", "hyper-util", "serde", "serde_json", "subtle", "tokio"},
     "forge-ide-ui": {"serde"},
-    "forge-terminal": {"ctrlc", "nix"},
+    "forge-terminal": {"ctrlc", "nix", "serde", "serde_json"},
     "forge-jobs": {"cap-std", "serde", "serde_json"},
     "forge-ide-web": {"serde", "serde_json", "serde_yaml_ng", "sha2"},
     "forge-ide-web-host": {"serde", "serde_json", "httparse", "getrandom", "subtle", "sha2", "ctrlc",
@@ -106,6 +108,17 @@ def validate_packages(packages):
             if name == "forge-bootstrap-demo" and target in OPTIONAL and not dependency["optional"]:
                 raise SystemExit(f"Demo capability dependency must be optional: {target}")
             edges[name].add(target)
+    jenkins = packages["forge-jenkins"]
+    if jenkins["features"].get("default", []) != []:
+        raise SystemExit("Jenkins native HTTP must remain opt-in")
+    if not next(d for d in jenkins["dependencies"] if d["name"] == "ureq")["optional"]:
+        raise SystemExit("Jenkins HTTP transport must remain optional")
+    for name in ("forge-local", "forge-terminal"):
+        selected = packages[name]
+        if "jenkins" in selected["features"].get("default", []):
+            raise SystemExit("Jenkins must not expand existing CLI defaults")
+        if not next(d for d in selected["dependencies"] if d["name"] == "forge-jenkins")["optional"]:
+            raise SystemExit("Jenkins capability dependency must remain optional")
     web = packages["forge-ide-web"]
     if web["features"].get("default", []) != []:
         raise SystemExit("WASM facade must not enable native generation by default")
@@ -280,7 +293,7 @@ def main():
         raise SystemExit("Only the playtest runtime and digest verifier may expand the default WASM profile")
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-access"})
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-jenkins", "forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-access"})
     for args in [(), ("--features", "disk"), ("--features", "jobs")]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
@@ -290,10 +303,20 @@ def main():
         raise SystemExit("Durable jobs must remain a separate explicit terminal feature")
     for selection in [("--features", "durable-jobs"), ("--all-features",)]:
         tree = consumer_tree(*selection, package="forge-terminal")
-        if {name for name in tree if name.startswith("forge-")} != local_expected | {"forge-jobs", "forge-access"}:
+        expected_forge = local_expected | {"forge-jobs", "forge-access"}
+        if selection == ("--all-features",):
+            expected_forge |= {"forge-jenkins"}
+        if {name for name in tree if name.startswith("forge-")} != expected_forge:
             raise SystemExit("Durable jobs terminal consumer has unexpected Forge dependencies")
         if not {"ctrlc", "nix"} <= tree:
             raise SystemExit("Durable terminal must select native operator and worker shutdown adapters")
+    if "ureq" in consumer_tree(package="forge-jenkins"):
+        raise SystemExit("Jenkins default library unexpectedly requires native HTTP")
+    jenkins_tree = consumer_tree("--features", "jenkins", package="forge-terminal")
+    if not {"forge-jenkins", "ureq"} <= jenkins_tree:
+        raise SystemExit("Selected Jenkins terminal must include its chosen HTTP adapter")
+    if {name for name in jenkins_tree if name.startswith("forge-")} != local_expected | {"forge-jenkins"}:
+        raise SystemExit("Jenkins terminal changed unrelated Forge dependency edges")
     features = cargo("tree", "-p", "forge-terminal", "--no-default-features", "--edges", "features", "--prefix", "none")
     if 'forge-kernel feature "disk"' in features or 'forge-kernel feature "default"' in features:
         raise SystemExit("Node-only terminal unexpectedly includes native disk module")
