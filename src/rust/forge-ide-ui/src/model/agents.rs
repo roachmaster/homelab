@@ -535,6 +535,7 @@ impl Agents {
             UiEvent::AgentsRefresh {} => {
                 if work && self.pending.is_none() {
                     if self.pane == Pane::Reader && self.catalog.is_some() {
+                        self.events_loaded = false;
                         self.get(id, effects);
                     } else {
                         self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
@@ -1381,7 +1382,9 @@ impl Agents {
             }
             WorkResponse::WorkOpened { task, .. } => {
                 if self.task.as_ref().is_some_and(|old| {
-                    old.task_id == task.task_id && old.correlation_id != task.correlation_id
+                    old.task_id == task.task_id
+                        && old.project_alias == task.project_alias
+                        && old.correlation_id != task.correlation_id
                 }) {
                     self.warning = true;
                     self.status="The task correlation changed unexpectedly. Refresh to recover the authoritative task.".into();

@@ -278,3 +278,25 @@ fn event_page_bookmarks_are_bounded_and_context_changes_clear_history() {
     assert!(a.history_task.is_none());
     assert!(a.history_correlation.is_none());
 }
+
+#[test]
+fn manual_refresh_reads_unseen_events_even_after_the_workflow_finishes() {
+    let mut a = reader();
+    a.history_loaded = true;
+    a.events_loaded = true;
+    a.event_sequence = 10;
+    let effects = step(&mut a, UiEvent::AgentsRefresh {}, "refresh");
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkGet { .. })
+    ));
+    assert!(!a.events_loaded);
+    let effects = detail_reply(&mut a, "terminal-events");
+    assert!(matches!(
+        &effects[0],
+        UiEffect::Work(WorkRequest::WorkEvents {
+            after_sequence: 10,
+            ..
+        })
+    ));
+}
