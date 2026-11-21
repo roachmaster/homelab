@@ -37,6 +37,27 @@ SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
 
 
+class MainAncestorRequired(ValueError):
+    """The pushed source does not yet contain its observed main baseline."""
+
+
+def main_ancestor_preflight(source, request, env):
+    """Read only the imported bundle; never fetch or synthesize an untested merge."""
+    expected = request['expected_main']
+    commit = bounded_output(['/usr/bin/git', '-C', str(source), 'rev-parse', '--verify',
+                             expected + '^{commit}'], env=env).decode().strip()
+    if commit != expected:
+        raise ValueError('Expected main commit is unavailable from the verified bundle')
+    result = subprocess.run(['/usr/bin/git', '-C', str(source), 'merge-base', '--is-ancestor',
+                             expected, request['candidate_commit']], env=env,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, timeout=30, check=False)
+    if result.returncode == 1:
+        raise MainAncestorRequired()
+    if result.returncode != 0:
+        raise ValueError('Expected main ancestry cannot be verified')
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
 
@@ -299,6 +320,9 @@ def execute(action, config):
 
 
 def execute_locked(action, config):
+    require_main = config.get('require_main_ancestor', False)
+    if type(require_main) is not bool:
+        raise ValueError('Main ancestry selection must be an operator boolean')
     account = pwd.getpwnam(config['build_user'])
     submitter = pwd.getpwnam(config['submitter_user'])
     if (account.pw_uid == 0 or account.pw_uid == submitter.pw_uid or account.pw_name != 'forge_ci'
@@ -422,6 +446,13 @@ def execute_locked(action, config):
                 'source_gate_sha256': hashlib.sha256(canonical(protected)).hexdigest()})).hexdigest()
             if manifest != request['gate_manifest_sha256']:
                 raise ValueError('Gate manifest does not match the installed policy and source')
+            if require_main:
+                try:
+                    main_ancestor_preflight(source, request, safe_env)
+                except MainAncestorRequired:
+                    os.write(fd, ('FORGE_MAIN_ANCESTOR_REQUIRED expected_main=' +
+                        request['expected_main'] + ' candidate_commit=' + request['candidate_commit'] + '\n').encode())
+                    raise
             subprocess.run(['/usr/bin/git', '-C', str(source), '-c', 'core.hooksPath=/dev/null',
                             'checkout', '--detach', request['candidate_commit']],
                            env=safe_env, check=True, stdout=subprocess.DEVNULL,
@@ -461,6 +492,8 @@ def execute_locked(action, config):
             after = subprocess.check_output(['/usr/bin/git', '-C', str(source), 'status', '--porcelain', '--untracked-files=no'], env=safe_env, text=True)
             if after.strip():
                 failure = 'source_changed_during_checks'
+        except MainAncestorRequired:
+            failure = 'main_ancestor_required'
         except InterruptedError:
             failure = 'cancelled_or_timed_out'
         except (OSError, ValueError, subprocess.SubprocessError):

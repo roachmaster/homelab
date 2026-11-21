@@ -134,6 +134,78 @@ def qualify_remoting(path, expected_sha256, account):
             raise ValueError('Installed remoting does not expose required flags')
 
 
+def native_installation_plan(pipeline, verifier):
+    """Pure selection: legacy helper/config/job bytes are never changed."""
+    if (not isinstance(pipeline, dict) or pipeline.get('version') != 1
+            or pipeline.get('build_user') != 'forge_ci'
+            or pipeline.get('verification_profile') != 'forge-sdlc-jenkins-v1'
+            or pipeline.get('projects') != ['homelab']
+            or type(pipeline.get('require_main_ancestor', False)) is not bool):
+        raise ValueError('Expected the existing typed isolated CI pipeline')
+    original = b"CONFIG = Path('/etc/forge-ci/pipeline.json')"
+    if not isinstance(verifier, bytes) or verifier.count(original) != 1:
+        raise ValueError('Expected the reviewed fixed helper configuration binding')
+    native = verifier.replace(original, b"CONFIG = Path('/etc/forge-ci/native-pipeline.json')")
+    digest = hashlib.sha256(native).hexdigest()
+    selected = {**pipeline, 'require_main_ancestor': True, 'verifier_sha256': digest}
+    return {'helper': native, 'helper_sha256': digest, 'pipeline': selected,
+            'release': BASE / ('native-verifier-' + digest[:16]),
+            'wrapper': Path('/usr/local/libexec/forge-native-ci-check'),
+            'config': CONFIG / 'native-pipeline.json', 'job': 'forge-native-candidate'}
+
+
+def read_pipeline(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022
+                or info.st_nlink != 1 or info.st_size > 65536):
+            raise ValueError('Expected immutable root-owned pipeline configuration')
+        raw = source.read(65537)
+        if len(raw) > 65536:
+            raise ValueError('Oversized pipeline configuration')
+    return json.loads(raw)
+
+
+def execute_native(client_path, operator):
+    """Install only a separately pinned native job on the existing CI executor."""
+    if os.geteuid() != 0:
+        raise ValueError('Provisioning requires root')
+    user = pwd.getpwnam(operator)
+    if user.pw_uid == 0:
+        raise ValueError('Expected unprivileged operator account')
+    client = json.loads(read_owned(client_path, user.pw_uid, 16384))
+    client['_uid'] = user.pw_uid
+    selected = native_installation_plan(read_pipeline(CONFIG / 'pipeline.json'),
+                                        (HERE / 'verify-candidate.py').read_bytes())
+    # Root-controlled fixed paths only. Existing remoting, node, legacy job,
+    # pipeline.json, wrapper and external delivery configuration are untouched.
+    directory(PRIVATE, mode=0o700)
+    directory(selected['release'])
+    install(selected['release'] / 'verify-candidate.py', selected['helper'], mode=0o755)
+    install(selected['wrapper'], selected['helper'], mode=0o755)
+    install(selected['config'], (json.dumps(selected['pipeline'], indent=2) + '\n').encode())
+    rule = b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-native-ci-check *\n'
+    staged = PRIVATE / 'sudoers-native-check'
+    install(staged, rule, mode=0o440)
+    subprocess.run(['/usr/sbin/visudo', '-cf', str(staged)], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    install(Path('/etc/sudoers.d/forge-native-ci-check'), rule, mode=0o440)
+    script = (HERE / 'native-ci-job.groovy').read_text()
+    info = json.loads(request(client, 'scriptText', body=urllib.parse.urlencode({'script': script}).encode()))
+    if (info.get('job') != selected['job'] or info.get('node') != 'forge-mission-control-ci'
+            or info.get('controller_executors') != 0 or info.get('no_job_submitted') is not True):
+        raise ValueError('Native job qualification failed')
+    report = {'version': 1, 'job': selected['job'], 'node': info['node'],
+        'helper': str(selected['release'] / 'verify-candidate.py'),
+        'helper_sha256': selected['helper_sha256'], 'wrapper': str(selected['wrapper']),
+        'pipeline': str(selected['config']), 'require_main_ancestor': True,
+        'existing_job_unchanged': 'forge-exact-candidate', 'no_service_restarted': True,
+        'no_job_submitted': True}
+    install(PRIVATE / 'native-provisioned.json', (json.dumps(report, indent=2) + '\n').encode(), mode=0o600)
+    print(json.dumps(report))
+
+
 def execute(client_path, operator):
     if os.geteuid() != 0:
         raise ValueError('Provisioning requires root')
@@ -252,7 +324,9 @@ if __name__ == '__main__':
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--client-config', type=Path, required=True)
     parser.add_argument('--operator', default='lrocha')
+    parser.add_argument('--native-only', action='store_true',
+                        help='Add the separate branch-first job; preserve the installed legacy executor/job')
     options = parser.parse_args()
     if not options.execute:
         parser.error('Explicit --execute is required')
-    execute(options.client_config, options.operator)
+    (execute_native if options.native_only else execute)(options.client_config, options.operator)
