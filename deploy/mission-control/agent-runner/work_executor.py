@@ -845,7 +845,7 @@ class SystemdSupervisor:
             readonly_bindings.append(str(invocation.plan_file) + ":" + str(CHILD_STATE / invocation.plan_file.name))
         for path in invocation.readonly_files:
             if (not isinstance(path, Path) or path.parent != invocation.scratch
-                    or path.name not in {"review-feedback.json", "agent-review.json", "agent-review-feedback.json", "verify.py"}
+                    or path.name not in {"review-feedback.json", "agent-review.json", "agent-review-feedback.json", "external-review.json", "verify.py"}
                     or path.is_symlink() or not path.is_file()):
                 raise ExecutionError("failed", "The immutable execution context is unavailable.")
             readonly_bindings.append(str(path) + ":" + str(CHILD_STATE / path.name))

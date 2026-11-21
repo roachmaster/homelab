@@ -233,7 +233,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   from test_work_publication import git
   from work_worker_config import parse_config
   from work_worker import CodingWorkerFactory
-  from work_executor import CommandRunnerProvider,SystemdSupervisor,CliOutcome
+  from work_executor import CommandRunnerProvider,SystemdSupervisor,CliOutcome,ExecutionError,CHILD_STATE
   with TemporaryDirectory(prefix='forge-external-worker-') as root:
    raw=raw_config(root);raw.update(owner='test-owner',external_reviews=True)
    raw['profiles']={'codex-v2':{**raw['profiles']['codex'],'model':'gpt-5.4','modes':['review']}};raw['binaries']={'codex':'/usr/bin/python3'}
@@ -257,6 +257,21 @@ class ExternalFlowPGTest(unittest.TestCase):
      invocations.append(invocation);self.assertFalse(invocation.implement);self.assertIsNone(invocation.session)
      file=next(p for p in invocation.readonly_files if p.name=='external-review.json')
      self.assertEqual(file.read_bytes(),context.content);self.assertEqual(file.stat().st_mode&0o777,0o400)
+     # Exercise the real supervisor boundary; invocation-only fakes missed its
+     # immutable-context allowlist and caused the live pre-launch failure.
+     command=real.supervisor.argv(lease,invocation)
+     binds=next(value for value in command if value.startswith('--property=BindReadOnlyPaths='))
+     self.assertIn(str(file)+':'+str(CHILD_STATE/'external-review.json'),binds)
+     readonly=next(value for value in command if value.startswith('--property=ReadOnlyPaths='))
+     self.assertIn(str(CHILD_STATE/'external-review.json'),readonly)
+     self.assertIn('/run/forge-coding-workspace',readonly)
+     for forbidden in (file.parent/'unexpected-review.json',file.parent/'elsewhere'/'external-review.json'):
+      forbidden.parent.mkdir(exist_ok=True);forbidden.write_bytes(context.content)
+      with self.assertRaises(ExecutionError):real.supervisor.argv(lease,replace(invocation,readonly_files=(forbidden,)))
+     raw_context=file.read_bytes();file.unlink();file.symlink_to(file.parent/'unexpected-review.json')
+     with self.assertRaises(ExecutionError):real.supervisor.argv(lease,invocation)
+     file.unlink();file.write_bytes(raw_context);file.chmod(0o400)
+
      value={'version':1,**{k:target[k] for k in ('workflow_id','review_id','reviewer_task_id','source_assignment_id','source_sha256','target_kind')},'context_sha256':context.sha256,'decision':'approve','summary':'Reviewed entire supplied plan.','findings':[],'attested_finding_ids':[]}
      return CliOutcome('awaiting_review',canonical(value).decode(),None,None,'Independent review',make_stop_proof(lease['unit_name']))
    class Supervisor:
@@ -335,3 +350,76 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.assertEqual(self.rows("SELECT count(*) AS count FROM forge_agent.coding_events WHERE task_id=%s AND event_kind='completed'",(root['task_id'],))[0]['count'],1)
   children=self.rows("SELECT t.status FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id) WHERE x.role<>'root'")
   self.assertTrue(children);self.assertTrue(all(child['status']=='completed' for child in children))
+
+ def failed_setup_review(self,flow):
+  lease=self.db.claim('review-worker',self.inc,['codex-v2']);self.assertIsNotNone(lease)
+  proof=make_stop_proof(lease.unit_name)
+  self.db.publish(lease,'failed',None,None,'The immutable execution context is unavailable.',proof)
+  self.db.reconcile(lease,'b'*64,proof);self.assertTrue(flow.run_once());return lease
+ def escalated_setup(self):
+  _,root,flow,job=self.submit_plan('# Same immutable legacy plan\n'+'detail '*2400)
+  first=self.failed_setup_review(flow);second=self.failed_setup_review(flow)
+  w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
+  self.assertEqual(w['phase'],'escalated');self.assertEqual(w['state']['review_retries'],1)
+  return root,job,first,second,w
+ def recovery_service(self):
+  from work_external_recovery import NativeReviewerGrantScope
+  from work_external import ExternalWorkProviderFactory
+  scope=NativeReviewerGrantScope(lambda:self.pg.connect('postgres'))
+  return WorkServiceFactory(cfg(),self.connect,external_factory=lambda config:ExternalWorkProviderFactory(config,recovery_grant_provider=scope).create()).create()
+ def recovery_command(self,w,root,**changes):
+  from work_external_recovery import ExternalInfrastructureRetry
+  revision=self.rows('SELECT revision FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]['revision']
+  value={'project_alias':'homelab','workflow_id':w['workflow_id'],'root_task_id':UUID(root['task_id']),'expected_workflow_revision':w['revision'],'expected_root_revision':revision,'idempotency_key':uuid4(),'reason':'Fix immutable external-review filename admission in the actual supervisor.','deployed_fix_revision':'f'*40}
+  return ExternalInfrastructureRetry(**{**value,**changes})
+ def test_private_infrastructure_rescue_is_audited_scoped_and_refreshes_source_once(self):
+  root,job,first,second,w=self.escalated_setup();service=self.recovery_service();flow=service._external_workflow
+  old_attempts=self.rows('SELECT * FROM forge_agent.coding_attempts ORDER BY attempt_id')
+  old_reviews=self.rows('SELECT review_id,target_json,target_sha256 FROM forge_external_workflow.reviews ORDER BY review_id')
+  old_actions=self.rows('SELECT * FROM forge_external_workflow.actions ORDER BY action_id')
+  command=self.recovery_command(w,root)
+  with self.assertRaises(Rejected):self.service().recover_external_review_infrastructure(command)  # normal HTTP composition owns no operator grant port
+  receipt=service.recover_external_review_infrastructure(command)
+  self.assertEqual(receipt,service.recover_external_review_infrastructure(command))
+  with self.assertRaises(Rejected):service.recover_external_review_infrastructure(replace(command,reason='Changed replay intent'))
+  now=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
+  self.assertEqual(now['phase'],'plan');self.assertTrue(now['enabled']);self.assertEqual(now['state']['review_retries'],1)
+  self.assertEqual(now['plan_revisions'],w['plan_revisions']);self.assertEqual(now['code_revisions'],w['code_revisions'])
+  self.assertNotIn('base_revision',now['state']);self.assertEqual(now['state']['operator_source_epoch'],receipt['operator_rescue_id'])
+  self.assertEqual(len(now['state']['operator_infrastructure_rescues']),1)
+  self.assertEqual(old_attempts,self.rows('SELECT * FROM forge_agent.coding_attempts ORDER BY attempt_id'))
+  self.assertEqual(old_reviews,self.rows('SELECT review_id,target_json,target_sha256 FROM forge_external_workflow.reviews ORDER BY review_id'))
+  self.assertEqual(old_actions,self.rows('SELECT * FROM forge_external_workflow.actions ORDER BY action_id'))
+  self.assertTrue(flow.run_once());source=self.delivery.claim('owned-delivery');self.assertEqual(source.kind,'source')
+  self.assertNotEqual(source.action_id,str(old_actions[0]['action_id']))
+  self.delivery.checkpoint(source,{'status':'passed','receipt':{'base_revision':'f'*40},'summary':'Actual fresh post-fix main observed'})
+  self.assertTrue(flow.run_once());review=self.rows("SELECT * FROM forge_external_workflow.reviews WHERE status='reviewing'")[0]
+  target=json.loads(review['target_json']);self.assertEqual(target['source_assignment_id'],job['assignment_id'])
+  self.assertEqual(target['source_content'],'# Same immutable legacy plan\n'+'detail '*2400);self.assertEqual(target['review_base_revision'],'f'*40)
+  self.assertEqual(self.rows('SELECT state FROM forge_external_workflow.workflows')[0]['state']['review_retries'],1)
+  self.assertEqual(service.recover_external_review_infrastructure(command),receipt)  # replay after new review exists with no attempt
+
+  with service._store._transaction() as cursor:public=flow.project(cursor,'homelab',UUID(root['task_id']))
+  self.assertIsNone(public['escalation_reason'])
+  self.failed_setup_review(flow)  # no normal retry budget is reset by the rescue
+  again=self.rows('SELECT * FROM forge_external_workflow.workflows')[0];self.assertEqual(again['phase'],'escalated')
+  with self.assertRaises(Rejected):service.recover_external_review_infrastructure(self.recovery_command(again,root))
+  self.assertEqual(len(self.rows('SELECT * FROM forge_agent.coding_attempts')),3)
+  self.assertEqual(service.recover_external_review_infrastructure(command),receipt)  # replay after the one rescue failed again
+
+  self.assertEqual(self.db.project_revisions(),{})
+ def test_recovery_rejects_stale_revision_scope_revoke_or_wrong_actual_failure(self):
+  root,job,first,second,w=self.escalated_setup();service=self.recovery_service();command=self.recovery_command(w,root)
+  with self.assertRaises(Rejected):service.recover_external_review_infrastructure(replace(command,expected_root_revision=1))
+  self.pg.admin_exec("UPDATE forge_external_agent.scope_grants SET enabled=false")
+  with self.assertRaises(Rejected):service.recover_external_review_infrastructure(command)
+  self.pg.admin_exec("UPDATE forge_external_agent.scope_grants SET enabled=true")
+  self.pg.admin_exec("DELETE FROM forge_agent.coding_worker_grants")
+  with self.assertRaises(Rejected):service.recover_external_review_infrastructure(command)
+  self.assertEqual(self.rows('SELECT phase FROM forge_external_workflow.workflows')[0]['phase'],'escalated')
+
+ def test_recovery_denies_a_retained_workflow_lease_without_consuming_rescue(self):
+  root,job,first,second,w=self.escalated_setup();service=self.recovery_service();command=self.recovery_command(w,root)
+  self.pg.admin_exec("UPDATE forge_external_workflow.workflows SET lease_token=gen_random_uuid(),lease_until=clock_timestamp()+interval '1 hour'")
+  with self.assertRaises(Rejected):service.recover_external_review_infrastructure(command)
+  self.assertNotIn('operator_infrastructure_rescues',self.rows('SELECT state FROM forge_external_workflow.workflows')[0]['state'])

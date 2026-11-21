@@ -21,8 +21,9 @@ def _str(value):return str(value) if value is not None else None
 
 
 class ExternalWorkflowStore:
-    def __init__(self,config,catalog):
+    def __init__(self,config,catalog,*,recovery_grant_provider=None):
         self.config,self.catalog=config,catalog
+        self._recovery_grants=recovery_grant_provider
         self.policies=config.external_workflows
         self.owner=config.owner
         self._store=None
@@ -55,7 +56,7 @@ class ExternalWorkflowStore:
         result={'workflow_id':str(w['workflow_id']),'kind':'external_database','policy_digest':w['policy_digest'],'phase':w['phase'],
                 'author_profile':w['author_profile'],'reviewer_profile':w['reviewer_profile'],'plan_revisions':w['plan_revisions'],
                 'max_plan_revisions':w['snapshot']['max_plan_revisions'],'code_revisions':w['code_revisions'],'max_code_revisions':w['snapshot']['max_code_revisions'],
-                'escalation_reason':w['state'].get('escalation_reason'),'can_cancel':w['phase'] not in TERMINAL|{'merging'}}
+                'escalation_reason':w['state'].get('escalation_reason') if w['phase']=='escalated' else None,'can_cancel':w['phase'] not in TERMINAL|{'merging'}}
         if r:result['reviewer_task_id']=str(r['reviewer_task_id'])
         if w['state'].get('candidate'):result['candidate_commit']=w['state']['candidate']['candidate_commit']
         if w['state'].get('merge_receipt'):result['merge_commit']=w['state']['merge_receipt']['merge_commit']
@@ -175,7 +176,99 @@ class ExternalWorkflowStore:
                 finally:cursor.execute('RELEASE SAVEPOINT external_workflow_step')
             return changed or self._new_actions
 
-    def _source_key(self,w):return str(w['active_task_id'])+':'+str(w['plan_revisions'])+':'+str(w['code_revisions'])
+    def recover_review_infrastructure(self,command):
+        from work_external_recovery import ExternalInfrastructureRetry
+        if not isinstance(command,ExternalInfrastructureRetry) or not self.manages(command.project_alias) or self._recovery_grants is None:
+            raise Rejected(403,'denied')
+        policy=self.policies[command.project_alias]
+        intent_digest=hashlib.sha256(canonical(command.intent(self.owner))).hexdigest()
+        # The operator-only provider holds this exact current grant through the
+        # service-role transaction, without widening forge_agent's SQL ACLs.
+        with self._recovery_grants.acquire(self.owner,command.project_alias,policy.reviewer_profile,command.workflow_id) as evidence_lock:
+            with self._transaction() as cursor:
+                self._scope(cursor,command.project_alias,policy.author_profile)
+                cursor.execute('''SELECT * FROM forge_external_workflow.workflows
+                  WHERE(workflow_id,owner_id,project_alias,root_task_id)=(%s,%s,%s,%s) FOR UPDATE''',
+                  (command.workflow_id,self.owner,command.project_alias,command.root_task_id))
+                w=cursor.fetchone()
+                if not w:raise Rejected(404,'not_found')
+                root=self._task(cursor,w,w['root_task_id'])
+                if (w['policy_digest']!=policy.snapshot(self.catalog)['policy_digest']
+                        or w['author_profile']!=policy.author_profile or w['reviewer_profile']!=policy.reviewer_profile
+                        or not self.config.profiles[w['reviewer_profile']].execution_enabled):raise Rejected(403,'denied')
+                rescues=w['state'].get('operator_infrastructure_rescues',[])
+                if not isinstance(rescues,list):raise Rejected(409,'result_mismatch')
+                for prior in rescues:
+                    if prior.get('idempotency_key')==str(command.idempotency_key):
+                        if prior.get('intent_digest')!=intent_digest:raise Rejected(409,'idempotency_conflict')
+                        return dict(prior['receipt'])
+                if rescues:raise Rejected(409,'recovery_exhausted')
+                if w['revision']!=command.expected_workflow_revision or root['revision']!=command.expected_root_revision:raise Rejected(409,'revision_conflict')
+                if w['lease_token'] is not None or w['lease_until'] is not None:raise Rejected(409,'reconcile_required')
+                if w['enabled'] or w['phase']!='escalated' or not w['state'].get('active_review_id'):raise Rejected(409,'not_reviewable')
+                cursor.execute('SELECT * FROM forge_external_workflow.reviews WHERE workflow_id=%s AND review_id=%s FOR UPDATE',(w['workflow_id'],w['state']['active_review_id']))
+                review=cursor.fetchone()
+                if not review or review['target_kind']!='plan' or review['status'] not in {'reviewing','escalated'} or w['state'].get('review_retries')!=1:
+                    raise Rejected(409,'not_reviewable')
+                target=validate_target(review['target_json'],review['target_sha256'])
+                critic=self._task(cursor,w,review['reviewer_task_id']);source=self._task(cursor,w,review['source_task_id'])
+                bindings={'workflow_id':str(w['workflow_id']),'review_id':str(review['review_id']),'reviewer_task_id':str(critic['id']),
+                          'reviewer_profile':w['reviewer_profile'],'source_task_id':str(source['id']),'source_assignment_id':str(review['source_assignment_id']),
+                          'source_sha256':review['source_sha256'],'target_kind':'plan'}
+                if any(target.get(key)!=value for key,value in bindings.items()) or w['active_task_id']!=source['id']:
+                    raise Rejected(409,'result_mismatch')
+                if not self.related_task(cursor,w['project_alias'],w['workflow_id'],source['id']) or not self.related_task(cursor,w['project_alias'],w['workflow_id'],critic['id']):
+                    raise Rejected(409,'result_mismatch')
+
+                if (critic['status']!='failed' or critic['latest_attempt_id'] is None or critic['agent_profile']!=w['reviewer_profile']
+                        or critic['recipe_digest']!=w['snapshot']['recipes']['reviewer_review']['digest']
+                        or source['mode']!='plan' or source['latest_attempt_id'] is not None or source['agent_profile']!=w['author_profile']
+                        or source['status']!='cancelled' or source['revision']!=target['source_revision']+1):raise Rejected(409,'not_reviewable')
+                cursor.execute('''SELECT a.attempt_id,a.summary,r.receipt_id FROM forge_agent.coding_attempts a
+                  JOIN forge_agent.coding_reconciliation_receipts r ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id,%s)
+                  WHERE(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(%s,%s,%s,%s) AND a.phase='stopped' AND NOT a.reservation_active
+                  AND a.lease_expires_at IS NULL AND a.published_at IS NOT NULL AND a.outcome='failed' AND a.result_sha256 IS NULL
+                  AND a.result_byte_count IS NULL AND a.result_chunk_count IS NULL
+                  AND NOT EXISTS(SELECT FROM forge_agent.coding_result_chunks c WHERE c.attempt_id=a.attempt_id)
+                  AND a.summary='The immutable execution context is unavailable.' ORDER BY r.created_at DESC LIMIT 1''',
+                  (critic['revision'],self.owner,w['project_alias'],critic['id'],critic['latest_attempt_id']))
+                failed=cursor.fetchone()
+                if not failed:raise Rejected(409,'reconcile_required')
+                evidence_lock.lock_review_evidence(review['review_id'],failed['attempt_id'])
+                cursor.execute('''SELECT EXISTS(SELECT FROM forge_agent.coding_attempts a JOIN forge_external_workflow.tasks t
+                  ON(t.owner_id,t.project_alias,t.task_id)=(a.owner_id,a.project_alias,a.task_id) WHERE t.workflow_id=%s
+                  AND(a.phase<>'stopped' OR a.reservation_active OR a.lease_expires_at IS NOT NULL)) AS active''',(w['workflow_id'],))
+                if cursor.fetchone()['active']:raise Rejected(409,'reconcile_required')
+                cursor.execute("SELECT EXISTS(SELECT FROM forge_external_workflow.actions WHERE workflow_id=%s AND status IN('queued','leased')) AS active",(w['workflow_id'],))
+                if cursor.fetchone()['active']:raise Rejected(409,'reconcile_required')
+                cursor.execute('''SELECT EXISTS(SELECT FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x
+                  ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id) WHERE x.workflow_id=%s AND t.status IN('queued','running','cancel_requested')) AS active''',(w['workflow_id'],))
+                if cursor.fetchone()['active']:raise Rejected(409,'reconcile_required')
+                cursor.execute('SELECT forge_external_agent_api.artifact_by_task(%s,%s,%s) AS value',(self.owner,w['project_alias'],source['id']))
+                artifact=cursor.fetchone()['value']
+                if not artifact or artifact['assignment_id']!=str(review['source_assignment_id']) or artifact['sha256']!=review['source_sha256'] or artifact['content']!=target['source_content'] or hashlib.sha256(artifact['content'].encode()).hexdigest()!=artifact['sha256']:
+                    raise Rejected(409,'result_mismatch')
+                rescue_id=uuid4();old_reason=w['state'].get('escalation_reason')
+                for task in {root['id']:root,source['id']:source}.values():
+                    if task['latest_attempt_id'] is not None or task['status']!='cancelled':raise Rejected(409,'not_reviewable')
+                    cursor.execute("UPDATE forge_agent.coding_tasks SET status='awaiting_review',cancelled_at=NULL,revision=revision+1,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(%s,%s,%s)",(self.owner,w['project_alias'],task['id']))
+                cursor.execute("UPDATE forge_external_workflow.reviews SET status='escalated',updated_at=clock_timestamp() WHERE review_id=%s",(review['review_id'],))
+                receipt={'project_alias':w['project_alias'],'workflow_id':str(w['workflow_id']),'root_task_id':str(w['root_task_id']),
+                         'operator_rescue_id':str(rescue_id),'workflow_revision':w['revision']+1,'root_revision':root['revision']+1,
+                         'phase':'plan','trusted_source_pending':True,'deployed_fix_revision':command.deployed_fix_revision}
+                record={'idempotency_key':str(command.idempotency_key),'intent_digest':intent_digest,'reason':command.reason,
+                        'deployed_fix_revision':command.deployed_fix_revision,'prior_workflow_revision':w['revision'],'prior_root_revision':root['revision'],
+                        'prior_review_id':str(review['review_id']),'prior_reviewer_task_id':str(critic['id']),'prior_attempt_id':str(failed['attempt_id']),
+                        'prior_reconciliation_receipt_id':str(failed['receipt_id']),'prior_escalation_reason':old_reason,
+                        'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'receipt':receipt}
+                w['state']['operator_infrastructure_rescues']=[record]
+                w['state']['operator_source_epoch']=str(rescue_id);w['state']['operator_rescue_pending']=True
+                w['state'].pop('base_revision',None)
+                w['active_task_id']=source['id'];w['enabled']=True
+                self._save(cursor,w,'Operator authorized one infrastructure review retry after deployed fix '+command.deployed_fix_revision+'. Selecting fresh trusted source; previous attempts and budgets remain preserved.',phase='plan',related_task_id=source['id'])
+                return receipt
+
+    def _source_key(self,w):return str(w['active_task_id'])+':'+str(w['plan_revisions'])+':'+str(w['code_revisions'])+(':'+w['state']['operator_source_epoch'] if w['state'].get('operator_source_epoch') else '')
 
     def _action(self,cursor,w,kind,key,request):
         cursor.execute('SELECT * FROM forge_external_workflow.actions WHERE workflow_id=%s AND kind=%s AND source_key=%s',(w['workflow_id'],kind,key))
@@ -222,7 +315,9 @@ class ExternalWorkflowStore:
                 summary=w['state'].pop('pending_rebase')
                 return self._revise(cursor,w,'code',{'summary':summary,'findings':[]},artifact)
             if task['mode']=='plan':
-                self._queue_review(cursor,w,task,artifact,'plan');return True
+                retry=w['state'].get('review_retries',0) if w['state'].get('operator_rescue_pending') else 0
+                w['state'].pop('operator_rescue_pending',None)
+                self._queue_review(cursor,w,task,artifact,'plan',retry=retry);return True
             try:manifest=self._candidate_manifest(artifact['content'])
             except ValueError:
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate JSON manifest with version,candidate_commit,candidate_tree,base_revision,summary. Preserve your existing branch and completed work.','findings':[]},artifact)
