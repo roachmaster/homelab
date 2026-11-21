@@ -321,6 +321,7 @@ pub(crate) fn format_output(value: Response) -> String {
             build.duration_ms,
             build
                 .queue_id
+                .filter(|value| *value > 0)
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "not_reported".into())
         ),
@@ -333,5 +334,38 @@ fn flag(value: Option<bool>) -> &'static str {
         Some(true) => "true",
         Some(false) => "false",
         None => "not_reported",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use forge_jenkins::{BuildInfo, QueueItem, QueueReceipt};
+    #[test]
+    fn unknown_states_and_unassigned_queue_ids_are_not_reported_as_real_values() {
+        let queue = format_output(Response::Queue(QueueItem {
+            id: 1,
+            cancelled: None,
+            blocked: Some(false),
+            buildable: None,
+            why: Some("waiting\u{1b}[31m".into()),
+            executable: None,
+        }));
+        assert!(queue.contains("cancelled=not_reported\nblocked=false\nbuildable=not_reported"));
+        assert!(!queue.contains('\u{1b}'));
+        let build = format_output(Response::Build(BuildInfo {
+            number: 3,
+            building: true,
+            result: None,
+            duration_ms: 0,
+            queue_id: Some(-1),
+        }));
+        assert!(build.contains("queue_id=not_reported"));
+        assert!(format_output(Response::Queued(QueueReceipt { id: 2 }))
+            .contains("completion=not_observed"));
+        assert_eq!(
+            format_output(Response::CancelRequested),
+            "cancellation=requested_not_confirmed\n"
+        );
     }
 }

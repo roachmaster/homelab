@@ -12,6 +12,25 @@ registrar/factory, explicit stepping, owner-scoped receipts, finite limits and f
 omission. `bootstrap_with_jobs` opts in; existing bootstrap remains node/disk-only.
 No background progress, production authentication or durable acceptance is claimed.
 
+## Jenkins (optional)
+
+The `jenkins` feature adds application-owned `jenkins::JenkinsCommand` values and
+six registered Jenkins routes. `Application::bootstrap_with_jenkins(config,
+client)` accepts a ready `IoClient<Request=forge_jenkins::Request,
+Response=forge_jenkins::Response,Error=forge_jenkins::Error>`.
+`bootstrap_with_jobs_and_jenkins` independently selects cooperative local jobs
+and the Jenkins port. Existing bootstrap functions remain node/disk-only.
+
+Composition owns the shared per-application handle and injects it into Jenkins
+tasks. A task validates/prepares its request before calling the selected port;
+the existing bridge still checks header destination/version/variant before task
+execution. Discovery uses descriptors registered with those same bindings and
+does not call the client. The local application reads no Jenkins files or
+credentials and chooses no HTTP transport. The optional
+[terminal adapter](../forge-terminal/README.md#optional-jenkins-client) supplies
+that deployment boundary. Caller-selected in-process ports are trusted code;
+the local bridge is not remote authentication or an OS sandbox.
+
 ## Assembly and requests
 
 1. Prepare `LocalConfig` at the environment boundary. The library reads no env vars.
