@@ -98,3 +98,11 @@ SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=22) AS h
 \if :has_external_workflows
 \ir grant-external-workflows.sql
 \endif
+
+-- M24: narrow native Jenkins identity/status ports; no direct table access.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=24) AS has_native_jenkins
+\gset
+\if :has_native_jenkins
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.native_ci_status(uuid,text,uuid,uuid),
+ forge_coding_reconciler_api.native_ci_context(uuid,uuid,text,uuid,uuid) TO forge_coding_reconciler;
+\endif

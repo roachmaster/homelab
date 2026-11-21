@@ -736,3 +736,48 @@ class WorkerDB:
         with self._reconcile_cursor() as cursor:
             cursor.execute("SELECT forge_coding_reconciler_api.record_hosted_checks(%s,%s,%s)",(publication,candidate_commit,Json(checks)))
             return dict(cursor.fetchone()[0])
+
+    def _native_ci_context(self, job, *, acquire):
+        """Read only canonical CI identities; never expose prompts or lease tokens."""
+        if not isinstance(job, dict) or ("version" in job and
+                (type(job["version"]) is not int or job["version"] != 1)):
+            raise ValueError("Invalid native CI identity")
+        project = validate_identifier(job.get("project_alias"), "native CI project")
+        review = _coerce_uuid(job.get("review_id"), "native CI review")
+        task = _coerce_uuid(job.get("task_id"), "native CI task")
+        attempt = _coerce_uuid(job.get("attempt_id"), "native CI attempt")
+        with self._reconcile_cursor() as cursor:
+            if acquire:
+                token = _coerce_uuid(job.get("lease_token"), "native CI lease")
+                cursor.execute("SELECT forge_coding_reconciler_api.native_ci_context(%s,%s,%s,%s,%s)",
+                               (review, token, project, task, attempt))
+            else:
+                cursor.execute("SELECT forge_coding_reconciler_api.native_ci_status(%s,%s,%s,%s)",
+                               (review, project, task, attempt))
+            value = cursor.fetchone()[0]
+        keys = {"version", "owner_id", "project_alias", "task_id", "attempt_id", "review_id",
+                "workflow_id", "correlation_id", "candidate_commit", "active", "state"}
+        if (not isinstance(value, dict) or set(value) != keys or type(value["version"]) is not int
+                or value["version"] != 1 or value["owner_id"] != self._owner
+                or value["project_alias"] != project or value["task_id"] != str(task)
+                or value["attempt_id"] != str(attempt) or value["review_id"] != str(review)
+                or type(value["active"]) is not bool
+                or value["state"] not in {"active", "cancelled", "superseded", "completed", "inactive"}
+                or value["active"] != (value["state"] == "active")
+                or value["candidate_commit"] is not None and (
+                    not isinstance(value["candidate_commit"], str)
+                    or not SHA1_HEX_RE.fullmatch(value["candidate_commit"]))):
+            raise ValueError("Invalid native CI context response")
+        _coerce_uuid(value["workflow_id"], "native CI workflow")
+        _coerce_uuid(value["correlation_id"], "native CI correlation")
+        if acquire and not value["active"]:
+            raise WorkerAccessError("Native CI source is no longer active")
+        return dict(value)
+
+    def native_ci_binding(self, job):
+        """Durable scoped activity read for an existing immutable CI sidecar."""
+        return self._native_ci_context(job, acquire=False)
+
+    def native_ci_acquire_context(self, job):
+        """Acquire canonical identities only through a current local-review lease."""
+        return self._native_ci_context(job, acquire=True)

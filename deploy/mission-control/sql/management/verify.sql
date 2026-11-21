@@ -5,6 +5,7 @@ SET LOCAL search_path = pg_catalog;
 
 -- Validate the M23 replacement before any historical-catalog normalization.
 \ir verify-agy-unattended.sql
+\ir verify-native-jenkins.sql
 
 DO $verify$
 DECLARE

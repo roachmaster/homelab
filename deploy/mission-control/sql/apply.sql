@@ -237,4 +237,13 @@ SELECT NOT EXISTS (
 \ir migrations/0023_coding_agy_unattended.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(23,'coding_agy_unattended');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=24
+) AS apply_0024
+\gset
+\if :apply_0024
+\ir migrations/0024_native_jenkins_context.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(24,'native_jenkins_context');
+\endif
 COMMIT;
