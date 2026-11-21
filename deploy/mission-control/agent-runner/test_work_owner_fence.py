@@ -16,6 +16,7 @@ from work_config import sha256_canonical
 from work_feedback import validate_findings
 from work_pg_fixture import DisposablePostgresCluster, PG16_AVAILABLE, SQL_DIR
 from work_store import _resume_intent_digest
+from work_worker_store import WorkerStoreError
 from test_work_execution_and_usage import make_stop_proof
 
 
@@ -201,6 +202,21 @@ class OwnerContinuationFenceTest(unittest.TestCase):
         self.assertEqual(self.rows('SELECT status,phase,verification->\'delivery_failure\' FROM forge_agent.coding_reviews WHERE review_id=%s',(failure['source_review_id'],)),[('handoff','source',failure['delivery_failure'])])
         self.assertEqual(self.f.get(author.task_id)['workflow']['phase'],'escalated');self.assertIsNone(self.f.claim('agy-v2'))
 
+    def test_owner_precheck_conflict_cannot_admit_another_branch_first_replay(self):
+        _,scope,_,_=self.owner_marker();author,job,_=self.checked_owner_attempt(scope)
+        outcome=dict(disposition='handoff',reason='main_merge_conflict',candidate_commit=None,gate_manifest_sha256='e'*64,
+            findings=[],verified_finding_ids=[],fingerprint=None,summary='Actual source preparation conflict.',
+            verification=dict(checks_passed=False,cleanup_confirmed=True,checks=[],failure_stage='prepare',
+                exception_type='PublicationError',candidate_workspace_digest=job['workspace_digest'],repair_requires_new_workspace=False))
+        self.f.db.review_finish(job,outcome);self.f.coordinator.run_once()
+        revision=self.f.get(author.task_id)['revision']
+        before=self.rows('SELECT count(*),max(review_no) FROM forge_agent.coding_reviews')
+        budget=self.rows('SELECT to_jsonb(b) FROM forge_agent.coding_review_budget b')
+        with self.assertRaises(WorkerStoreError):self.f.db.native_branch_first_replay(job['review_id'],revision)
+        self.assertEqual(self.rows('SELECT count(*),max(review_no) FROM forge_agent.coding_reviews'),before)
+        self.assertEqual(self.rows('SELECT to_jsonb(b) FROM forge_agent.coding_review_budget b'),budget)
+        self.assertIsNone(self.f.db.review_claim('no-owner-replay'))
+
     def test_strict_source_owner_acl_and_search_path_drift_are_rejected(self):
         for signature in ['forge_agent._coding_owner_continuation_fenced(uuid)','forge_agent.owner_continuation_capability()',
                           'forge_coding_reconciler_api.owner_continuation_fenced(jsonb)',
@@ -213,6 +229,12 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                     c.rollback()
         with closing(self.cluster.connect('postgres')) as c,c.cursor() as q:
             q.execute('GRANT EXECUTE ON FUNCTION forge_agent._coding_owner_continuation_fenced(uuid) TO PUBLIC')
+            with self.assertRaises(psycopg2.Error):q.execute((SQL_DIR/'management/verify-owner-continuation.sql').read_text())
+            c.rollback()
+        with closing(self.cluster.connect('postgres')) as c,c.cursor() as q:
+            q.execute("SELECT pg_get_functiondef('forge_agent._coding_owner_continuation_fenced(uuid)'::regprocedure)")
+            definition=q.fetchone()[0];self.assertEqual(definition.count(' RETURN true;'),1)
+            q.execute(definition.replace(' RETURN true;',' RETURN false;'))
             with self.assertRaises(psycopg2.Error):q.execute((SQL_DIR/'management/verify-owner-continuation.sql').read_text())
             c.rollback()
 
