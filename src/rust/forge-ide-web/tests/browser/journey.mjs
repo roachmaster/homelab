@@ -3397,10 +3397,12 @@ async function agentsJourney() {
       await page.setViewportSize({width,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'event metadata and summaries fit the viewport');
     }
+    await page.setViewportSize({width:390,height:844});
+    await page.locator('#agents-history-panel').scrollIntoViewIfNeeded();
     await screenshot(page,'ide-agents-event-history.png');
     await page.locator('#agents-back').click();
     relay.enableExternalWorkflow();
-    await page.reload({waitUntil:'domcontentloaded'});
+    await respondToLeaveWarning(() => page.reload({waitUntil:'domcontentloaded'}), 'leave');
     await page.locator('#agents-new').click();
     await page.locator('#agents-profile').selectOption('muse-db-primary');
     await check(page.locator('#agents-compose-help')).toContainText('advance this assignment automatically');
@@ -3412,6 +3414,19 @@ async function agentsJourney() {
     for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
       relay.workflowPhase(externalWorkflowTask,phase);await page.locator('#agents-refresh').click();
       await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+      if(phase==='code_review'){
+        await check(page.locator('#agents-workflow-reviewer')).toBeVisible();
+        const linkedEvent=page.locator('#agents-history > li').filter({hasText:'Trusted fixture workflow: code_review.'});
+        await check(linkedEvent).toHaveCount(1);
+        await linkedEvent.locator('summary').click();
+        await linkedEvent.locator('.fg-timeline-related').click();
+        await check(page.locator('#agents-task-title')).toHaveText('Independent external workflow review');
+        await check(page.locator('#agents-workflow-reviewer')).toBeHidden();
+        await page.locator('#agents-back').click();
+        await check(page.locator('#agents-tasks')).not.toContainText('Independent external workflow review');
+        await page.locator(`#agents-tasks [data-row-id="${externalWorkflowTask}"] .fg-row-select`).click();
+        await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+      }
       for(const id of ['agents-accept','agents-resume','agents-plan-actions','agents-review-actions'])await check(page.locator('#'+id)).toBeHidden();
     }
     await check(page.locator('#agents-history')).toContainText('Trusted fixture workflow: completed.');

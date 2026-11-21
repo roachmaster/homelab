@@ -334,7 +334,7 @@ function renderTimeline(binding){
       const properties=document.createElement('dl');properties.className='fg-timeline-properties';details.append(summary,properties);
       const related=document.createElement('button');related.type='button';related.className='fg-timeline-related';related.textContent='Open linked task';related.addEventListener('click',()=>sendAction(related));details.append(related);node.append(header,body,details);parts={state,time,body,details,properties,related,signature:null};timelineViews.set(node,parts);
     }
-    paintBadge(parts.state,row.badge);paintTime(parts.time,row.time);parts.body.textContent=row.summary;parts.body.hidden=!row.summary;parts.related.hidden=!row.related_action;actionByElement.set(parts.related,row.related_action);focusKeyByElement.set(parts.related,binding.id+':'+row.event_id+':related:'+JSON.stringify(row.related_action));
+    paintBadge(parts.state,row.badge);paintTime(parts.time,row.time);parts.body.textContent=row.summary;parts.body.hidden=!row.summary;parts.related.hidden=!row.related_action;parts.related.disabled=row.related_disabled;actionByElement.set(parts.related,row.related_action);focusKeyByElement.set(parts.related,binding.id+':'+row.event_id+':related:'+JSON.stringify(row.related_action));
     const signature=JSON.stringify(row.details);
     if(parts.signature!==signature){
       parts.properties.replaceChildren(...row.details.map(p=>{const block=document.createElement('div');const label=document.createElement('dt');label.textContent=p.label;const value=document.createElement('dd');value.textContent=p.value;block.append(label,value);return block;}));

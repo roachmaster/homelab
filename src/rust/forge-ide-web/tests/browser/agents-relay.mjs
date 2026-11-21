@@ -142,7 +142,7 @@ export async function startAgentsRelay() {
         refreshes++; send(202, 'usage_refresh_queued', { project_alias: project, refresh_id: randomUUID(), profiles: [input.agent_profile], coalesced: false }); return;
       }
       if (input.kind === 'work_list') {
-        const ordered = [...tasks.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.task_id.localeCompare(b.task_id));
+        const ordered = [...tasks.values()].filter(t=>!t.internal).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.task_id.localeCompare(b.task_id));
         const after = input.cursor ? ordered.findIndex(t => t.task_id === input.cursor) + 1 : 0;
         const available = ordered.slice(after).filter(t => !input.status_filter || t.status === input.status_filter);
         const page = available.slice(0, input.limit ?? 20);
@@ -293,7 +293,12 @@ export async function startAgentsRelay() {
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
       selected.workflow.phase=phase;selected.workflow.can_cancel=!['completed','cancelled','merging'].includes(phase);
       selected.workflow.plan_revisions=1;
+      selected.workflow.reviewer_task_id=null;
+      if(selected.workflow.kind==='external_database' && ['plan_review','code_review'].includes(phase)){
+        const reviewer=task('awaiting_review',tasks.size,{mode:'review',agent_profile:'codex-primary',prompt:'Independent external workflow review'});reviewer.internal=true;reviewer.workflow_required=true;reviewer.workflow={...selected.workflow,reviewer_task_id:reviewer.task_id};tasks.set(reviewer.task_id,reviewer);selected.workflow.reviewer_task_id=reviewer.task_id;
+      }
       const record={event_id:randomUUID(),correlation_id:selected.correlation_id,sequence:++selected.sequence,kind:'checkpoint',created_at:time,workflow_progress:{workflow_id:selected.workflow.workflow_id,phase,summary:`Trusted fixture workflow: ${phase}.`}};
+      if(selected.workflow.reviewer_task_id)record.workflow_progress.related_task_id=selected.workflow.reviewer_task_id;
       selected.events.push(record);selected.revision++;
       if(['checks','code_review','merging','completed'].includes(phase))selected.workflow.candidate_commit='e'.repeat(40);
       if(phase==='completed')selected.workflow.merge_commit='f'.repeat(40);

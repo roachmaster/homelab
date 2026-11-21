@@ -38,6 +38,7 @@ pub struct TimelineRow {
     pub summary: String,
     pub details: Vec<Property>,
     pub related_action: Option<RowAction>,
+    pub related_disabled: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DiffBinding {

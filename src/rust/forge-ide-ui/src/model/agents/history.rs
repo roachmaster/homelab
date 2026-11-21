@@ -311,6 +311,7 @@ impl Agents {
                         summary,
                         details,
                         related_action,
+                        related_disabled: self.pending.is_some() || self.locked(),
                     }
                 })
                 .collect(),
