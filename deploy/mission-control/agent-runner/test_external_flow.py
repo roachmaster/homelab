@@ -7,7 +7,7 @@ import hashlib,json,unittest
 from unittest.mock import Mock
 from psycopg2.extras import RealDictCursor,Json
 from work_pg_fixture import DisposablePostgresCluster,PG16_AVAILABLE,SQL_DIR
-from work_api import WorkServiceFactory,WorkCancel,WorkAccept
+from work_api import WorkServiceFactory,WorkCancel,WorkAccept,WorkGet
 from work_config import WorkProfile,sha256_canonical
 from work_external_policy import V2_POLICY_ID,V2_POLICY_DIGEST
 from work_external_review_context import canonical,validate_target,parse_verdict,ExternalReviewContextProvider
@@ -138,6 +138,8 @@ class ExternalFlowPGTest(unittest.TestCase):
  def test_complete_actual_native_review_delivery_lifecycle(self):
   service,root,flow,job=self.submit_plan('# Full plan\n'+'ownership detail '*1200)
   candidate=self.implementation(flow)
+  before_merge=self.rows('SELECT status,accepted_at FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]
+  self.assertEqual(before_merge['status'],'awaiting_review');self.assertIsNone(before_merge['accepted_at'])
   target=self.review(flow);self.assertEqual(target['review_base_revision'],'c'*40);self.assertEqual(target['candidate'],candidate)
   flow.run_once();action=self.delivery.claim('owned-delivery');self.assertEqual(action.kind,'verify')
   pending={'status':'pending','receipt':{'queue_id':99},'summary':'Actual Jenkins queue observation'}
@@ -159,6 +161,18 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.assertEqual(len(self.rows('SELECT * FROM forge_external_agent.artifacts')),2)
   events=self.rows('SELECT * FROM forge_agent.coding_events WHERE task_id=%s ORDER BY sequence',(root['task_id'],));self.assertEqual(events[-1]['payload']['phase'],'completed')
   self.assertTrue(all(e['correlation_id']==events[0]['correlation_id'] for e in events))
+  terminal=self.rows('SELECT * FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]
+  self.assertEqual(terminal['status'],'completed');self.assertIsNotNone(terminal['accepted_at']);self.assertIsNone(terminal['latest_attempt_id'])
+  self.assertEqual(service.get(WorkGet('homelab',UUID(root['task_id'])))['status'],'completed')
+  completion=[event for event in events if event['event_kind']=='completed'];self.assertEqual(len(completion),1)
+  evidence=completion[0]['payload'];self.assertEqual(evidence['merge_commit'],'c'*40);self.assertEqual(evidence['candidate_tree'],'d'*40)
+  self.assertEqual(evidence['delivery_action_id'],merge.action_id);self.assertEqual(evidence['workflow_id'],str(w['workflow_id']))
+  self.assertEqual(evidence['revision'],terminal['revision']);self.assertEqual(evidence['base_revision']+1,evidence['revision'])
+  self.assertEqual(len({str(event['event_id']) for event in events}),len(events))
+  self.assertFalse(self.rows('SELECT * FROM forge_agent.coding_control_receipts WHERE task_id=%s',(root['task_id'],)))
+  self.assertFalse(flow.run_once())
+  self.assertEqual(len(self.rows("SELECT * FROM forge_agent.coding_events WHERE task_id=%s AND event_kind='completed'",(root['task_id'],))),1)
+
  def test_three_revisions_then_approval_and_fourth_revision_escalation(self):
   _,_,flow,_=self.submit_plan()
   for n in range(3):
@@ -304,3 +318,20 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.assertEqual(last['verdict']['summary'],complete_summary)
   event=self.rows("SELECT payload FROM forge_agent.coding_events WHERE task_id=%s AND event_kind='checkpoint' ORDER BY sequence DESC LIMIT 1",(root['task_id'],))[0]
   self.assertEqual(event['payload']['summary'],reason)
+
+ def test_revised_plan_still_completes_original_root_only_after_real_merge(self):
+  service,root,flow,_=self.submit_plan()
+  self.review(flow,'revise');self.author(flow,'Revised approved Plan with original work preserved.')
+  candidate=self.implementation(flow);self.review(flow);flow.run_once();verify=self.delivery.claim('owned-delivery')
+  self.assertEqual(self.rows('SELECT status FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]['status'],'awaiting_review')
+  self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256')},'result':'SUCCESS'},'summary':'Exact fixed checks passed'})
+  flow.run_once();flow.run_once();merge=self.delivery.claim('owned-delivery')
+  self.delivery.checkpoint(merge,{'status':'merged','receipt':{'merge_commit':'c'*40,'candidate_tree':'d'*40,'expected_main':'a'*40},'summary':'Actual trusted merge observed'})
+  self.assertTrue(flow.run_once())
+  detail=service.get(WorkGet('homelab',UUID(root['task_id'])))
+  self.assertEqual(detail['status'],'completed');self.assertIsNone(detail.get('attempt'));self.assertIsNone(detail.get('result'))
+  root_row=self.rows('SELECT * FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]
+  self.assertIsNone(root_row['latest_attempt_id']);self.assertIsNotNone(root_row['accepted_at'])
+  self.assertEqual(self.rows("SELECT count(*) AS count FROM forge_agent.coding_events WHERE task_id=%s AND event_kind='completed'",(root['task_id'],))[0]['count'],1)
+  children=self.rows("SELECT t.status FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id) WHERE x.role<>'root'")
+  self.assertTrue(children);self.assertTrue(all(child['status']=='completed' for child in children))

@@ -338,6 +338,9 @@ class ExternalWorkflowStore:
         self._queue_review(cursor,w,task,source,review['target_kind'],retry=1,correction=summary);return True
 
     def _accept_task(self,cursor,w,task):
+        # The root is the whole external envelope, not a completed Plan artifact.
+        # Its real delegated terminal acceptance is recorded only after merge.
+        if task['id']==w['root_task_id']:return
         if task['status']=='completed':return
         if task['status']!='awaiting_review':raise ValueError('Task is not reviewable')
         cursor.execute("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(%s,%s,%s)",(self.owner,w['project_alias'],task['id']))
@@ -403,10 +406,25 @@ class ExternalWorkflowStore:
         result=a['result'];receipt=result['receipt']
         if result['status']=='main_changed':
             return self._request_rebase(cursor,w,'Main changed before merge. Rebase the preserved implementation onto the new trusted base and repeat independent review/checks.')
-        if result['status']!='merged' or not isinstance(receipt.get('merge_commit'),str) or not HEX40.fullmatch(receipt['merge_commit']) or receipt.get('candidate_tree')!=w['state']['candidate']['candidate_tree']:
+        candidate=w['state']['candidate']
+        if result['status']!='merged' or receipt.get('merge_commit')!=candidate['candidate_commit'] or receipt.get('candidate_tree')!=candidate['candidate_tree'] or receipt.get('expected_main')!=candidate['integration_base']:
             self._escalate(cursor,w,'Trusted merge could not be verified: '+result['summary']);return True
         w['state']['merge_receipt']=receipt;w['enabled']=False
         self._save(cursor,w,'The exact reviewed and Jenkins-verified candidate is on main.',phase='completed')
+        root=self._task(cursor,w,w['root_task_id'])
+        if root['latest_attempt_id'] is not None or root['agent_profile']!=w['author_profile']:
+            raise ValueError('Root external envelope identity changed')
+        cursor.execute('''UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=coalesce(accepted_at,clock_timestamp()),
+          cancelled_at=NULL,revision=revision+1,updated_at=clock_timestamp()
+          WHERE(owner_id,project_alias,id)=(%s,%s,%s) RETURNING revision''',(self.owner,w['project_alias'],w['root_task_id']))
+        revision=cursor.fetchone()['revision']
+        evidence={'workflow_id':str(w['workflow_id']),'phase':'completed','summary':'Trusted exact-source merge completed the external assignment.',
+                  'status':'completed','base_revision':root['revision'],'revision':revision,'delivery_action_id':str(a['action_id']),
+                  'candidate_commit':candidate['candidate_commit'],'candidate_tree':candidate['candidate_tree'],
+                  'gate_manifest_sha256':candidate['gate_manifest_sha256'],'merge_commit':receipt['merge_commit']}
+        cursor.execute('''INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
+          SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'completed',%s FROM forge_agent.coding_events
+          WHERE(owner_id,project_alias,task_id)=(%s,%s,%s)''',(self.owner,w['project_alias'],w['root_task_id'],Json(evidence),self.owner,w['project_alias'],w['root_task_id']))
         return True
 
     def _request_rebase(self,cursor,w,summary):
