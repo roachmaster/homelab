@@ -50,6 +50,8 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
             "GRANT CONNECT ON DATABASE forge_agent TO muse_events",
             "GRANT USAGE ON SCHEMA forge_agent TO muse_events",
             "GRANT SELECT ON " + ",".join("forge_agent." + table for table in TABLES) + " TO muse_events",
+            "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent "
+            "GRANT SELECT ON TABLES TO muse_events",
         )
 
     def assert_verifies(self):
@@ -82,6 +84,16 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
             "FROM pg_roles WHERE rolname='muse_events'"
         )
         before = self.rows(role_query)
+        default_query = (
+            "SELECT d.defaclrole::regrole::text,n.nspname,d.defaclobjtype,d.defaclacl::text "
+            "FROM pg_default_acl d JOIN pg_namespace n ON n.oid=d.defaclnamespace "
+            "WHERE d.defaclrole='forge_agent_owner'::regrole AND n.nspname='forge_agent' "
+            "AND d.defaclobjtype='r'"
+        )
+        default_before = self.rows(default_query)
+        self.assertEqual(default_before, [(
+            "forge_agent_owner", "forge_agent", "r", "{muse_events=r/forge_agent_owner}"
+        )])
         self.assert_verifies()
         for _repeat in range(2):
             provision = self.cluster.run_sql_script(SQL_DIR / "provision.sql")
@@ -90,6 +102,7 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
             result = self.cluster.run_sql_script(GRANT)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.rows(role_query), before)
+        self.assertEqual(self.rows(default_query), default_before)
         self.assertEqual(self.rows(
             "SELECT has_database_privilege('muse_events',current_database(),'CONNECT'),"
             "has_schema_privilege('muse_events','forge_agent','USAGE')"), [(True, True)])
@@ -158,6 +171,29 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
             self.cluster.admin_exec(
                 "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner REVOKE SELECT ON TABLES FROM PUBLIC")
         self.assert_verifies()
+        for grant, revoke in (
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent IN SCHEMA forge_agent GRANT SELECT ON TABLES TO muse_events",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent IN SCHEMA forge_agent REVOKE SELECT ON TABLES FROM muse_events"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA public GRANT SELECT ON TABLES TO muse_events",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA public REVOKE SELECT ON TABLES FROM muse_events"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent GRANT SELECT ON SEQUENCES TO muse_events",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent REVOKE SELECT ON SEQUENCES FROM muse_events"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent GRANT UPDATE ON TABLES TO muse_events",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent REVOKE UPDATE ON TABLES FROM muse_events"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent GRANT SELECT ON TABLES TO muse_events WITH GRANT OPTION",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent REVOKE GRANT OPTION FOR SELECT ON TABLES FROM muse_events"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent GRANT SELECT ON TABLES TO PUBLIC",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent REVOKE SELECT ON TABLES FROM PUBLIC"),
+            ("ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent GRANT SELECT ON TABLES TO forge_coding_worker",
+             "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent REVOKE SELECT ON TABLES FROM forge_coding_worker"),
+        ):
+            with self.subTest(default_grant=grant):
+                self.cluster.admin_exec(grant, owner=False)
+                try:
+                    self.assert_rejected()
+                finally:
+                    self.cluster.admin_exec(revoke, owner=False)
+                self.assert_verifies()
 
     def test_membership_and_elevated_role_attributes_are_rejected(self):
         self.fixture_reader()
