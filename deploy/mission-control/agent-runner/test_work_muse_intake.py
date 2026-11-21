@@ -203,14 +203,14 @@ class DormantBoundaryTest(unittest.TestCase):
 
 @unittest.skipUnless(PG16_AVAILABLE, "Requires non-root disposable PostgreSQL16")
 class DormantIntakePostgresTest(unittest.TestCase):
-    def test_apply_twice_adds_no_external_intake_authority(self):
+    def test_apply_twice_keeps_legacy_intake_dormant(self):
         cluster = DisposablePostgresCluster().start()
         self.addCleanup(cluster.stop)
         cluster.apply_and_verify()
         cluster.apply_and_verify()
         with closing(cluster.connect("postgres")) as connection, connection.cursor() as cursor:
             cursor.execute("SELECT max(version) FROM forge_agent.schema_migrations")
-            self.assertEqual(cursor.fetchone()[0], 19)
+            self.assertEqual(cursor.fetchone()[0], 20)
             cursor.execute("SELECT to_regclass('forge_agent.coding_muse_intake')")
             self.assertIsNone(cursor.fetchone()[0])
             cursor.execute("SELECT count(*) FROM pg_roles WHERE rolname='muse_events'")

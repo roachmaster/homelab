@@ -81,3 +81,6 @@ GRANT EXECUTE ON FUNCTION forge_coding_worker_api.project_revisions() TO forge_c
 GRANT EXECUTE ON FUNCTION forge_coding_worker_api.read_review_target(uuid,uuid),forge_coding_worker_api.read_workflow_feedback(uuid,uuid) TO forge_coding_worker;
 GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.merge_claim(text),forge_coding_reconciler_api.merge_renew(uuid,uuid),forge_coding_reconciler_api.merge_intent(uuid,uuid,jsonb),forge_coding_reconciler_api.merge_finish(uuid,uuid,text,jsonb) TO forge_coding_reconciler;
 COMMIT;
+
+-- M20: scoped external DB API only.
+\ir grant-external-agent.sql

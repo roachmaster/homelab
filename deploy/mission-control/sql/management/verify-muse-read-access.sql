@@ -49,8 +49,8 @@ BEGIN
        OR EXISTS(SELECT FROM pg_namespace n
           WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema'
             AND (n.nspowner=reader OR has_schema_privilege(reader,n.oid,'CREATE')
-              OR (n.nspname NOT IN('forge_agent','public') AND has_schema_privilege(reader,n.oid,'USAGE'))
-              OR (n.nspname<>'forge_agent' AND EXISTS(
+              OR (n.nspname NOT IN('forge_agent','public','forge_external_agent_api') AND has_schema_privilege(reader,n.oid,'USAGE'))
+              OR (n.nspname NOT IN('forge_agent','forge_external_agent_api') AND EXISTS(
                   SELECT FROM aclexplode(n.nspacl) a WHERE a.grantee=reader)))) THEN
         RAISE EXCEPTION 'Unexpected direct Muse reader schema ACL';
     END IF;
@@ -99,7 +99,7 @@ BEGIN
     END IF;
     IF EXISTS(SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema'
-          AND (p.proowner=reader OR has_function_privilege(reader,p.oid,'EXECUTE')))
+          AND (p.proowner=reader OR (has_function_privilege(reader,p.oid,'EXECUTE') AND NOT(p.oid IN(to_regprocedure('forge_external_agent_api.capabilities()'),to_regprocedure('forge_external_agent_api.advertise(text,text,text)'),to_regprocedure('forge_external_agent_api.claim(text,text)'),to_regprocedure('forge_external_agent_api.renew(uuid,integer,uuid)'),to_regprocedure('forge_external_agent_api.progress(uuid,integer,uuid,text)'),to_regprocedure('forge_external_agent_api.finish(uuid,integer,uuid,text,text)'),to_regprocedure('forge_external_agent_api.release(uuid,integer,uuid)'),to_regprocedure('forge_external_agent_api.artifact(uuid)'))))))
        OR EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema' AND c.relkind='S'
           AND (c.relowner=reader OR has_sequence_privilege(reader,c.oid,'USAGE,SELECT,UPDATE')))

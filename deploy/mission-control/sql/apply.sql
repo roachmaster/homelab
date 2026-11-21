@@ -203,4 +203,12 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=19)
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(19,'coding_muse_provider');
 \endif
 
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=20
+) AS apply_0020
+\gset
+\if :apply_0020
+\ir migrations/0020_external_agent_transport.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(20,'external_agent_transport');
+\endif
 COMMIT;
