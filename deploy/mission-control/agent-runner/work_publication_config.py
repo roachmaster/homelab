@@ -31,6 +31,8 @@ class PublicationConfig:
     required_hosted_checks: tuple = DEFAULT_REQUIRED_HOSTED_CHECKS
     merge_enabled: bool = False
     merge_method: str = "merge"
+    hosted_provider: str = "github-actions"
+    jenkins_delivery_config: Path | None = None
 
     @property
     def state_root(self):
@@ -42,7 +44,7 @@ def parse_config(raw, worker, *, source_path=None):
         raise ValueError("Publisher requires typed worker configuration")
     if not {"worker_config", "repositories", "github_config_dir"} <= raw.keys() <= {
         "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks",
-        "merge_enabled", "merge_method"
+        "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -80,6 +82,18 @@ def parse_config(raw, worker, *, source_path=None):
         raise ValueError("Trusted merge requires verified project source selection")
     if merge_enabled and any(char in name + email for char in "<>"):
         raise ValueError("Invalid trusted merge commit identity")
+    hosted_provider = raw.get("hosted_provider", "github-actions")
+    if not isinstance(hosted_provider, str) or hosted_provider not in {"github-actions", "jenkins"}:
+        raise ValueError("Invalid hosted verification provider")
+    delivery_path = raw.get("jenkins_delivery_config")
+    if hosted_provider == "jenkins":
+        if delivery_path is None:
+            raise ValueError("Jenkins verification requires explicit delivery configuration")
+        delivery_path = absolute_path(delivery_path)
+        if tuple(frozen_checks) != DEFAULT_CHECKS:
+            raise ValueError("Jenkins verification requires the full fixed check suite")
+    elif delivery_path is not None:
+        raise ValueError("Unused Jenkins delivery configuration")
     required = raw.get("required_hosted_checks", DEFAULT_REQUIRED_HOSTED_CHECKS)
     if (not isinstance(required, (tuple, list)) or not 1 <= len(required) <= 8
             or any(not isinstance(row, (tuple, list)) or len(row) != 3
@@ -90,10 +104,13 @@ def parse_config(raw, worker, *, source_path=None):
             or len({tuple(row) for row in required}) != len(required)
             or len({row[2] for row in required}) != len(required)):
         raise ValueError("Invalid required hosted checks")
+    if hosted_provider == "jenkins" and tuple(tuple(row) for row in required) != DEFAULT_REQUIRED_HOSTED_CHECKS:
+        raise ValueError("Jenkins verification requires the unchanged logical gate identities")
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
-                             tuple(tuple(row) for row in required), merge_enabled, merge_method)
+                             tuple(tuple(row) for row in required), merge_enabled, merge_method,
+                             hosted_provider, delivery_path)
 
 
 def _object(pairs):
