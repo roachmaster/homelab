@@ -12,8 +12,30 @@
   receipts. They never manufacture native attempts, stopped-process evidence,
   workspace reconciliation, review approvals or CI results. Native Muse stays
   disabled. GitHub Actions stays disabled; Jenkins orchestration remains separate.
-- **delivery:** In progress. Readiness requires an external runner heartbeat;
-  enabling database permissions alone does not establish runner availability.
+- **delivery:** Code `2cd504d` is published on main and deployed as immutable
+  release `20261121T044052Z-2cd504d-main`: schema20, matched ABI11 and unchanged
+  native P10. All five existing application services are active and enabled.
+  The scoped `muse-db-primary` binding is enabled for Homelab; authenticated
+  Muse capabilities and private-storage denial were checked through its actual
+  PostgreSQL principal. No Muse process or email watcher was installed.
+- **runner state:** No external heartbeat has arrived. The portal correctly
+  shows No runner heartbeat and exposes the task option only after genuine
+  advertisement. Mission Control did not advertise on Muse's behalf or submit
+  a model task. Muse must use the documented database contract from its runner.
+- **verification:** Integrated external tests23/23, native policy/history upgrade
+  tests20/20, final UI unit tests113/113, generation tests27/27, targeted Rust
+  package tests, Clippy and deterministic assets passed. All28 sandboxed browser
+  acceptance groups passed with successful cleanup. Live asset/session/CSRF,
+  mTLS Workbench and isolated browser checks through the existing loopback proxy
+  passed; external Cloudflare sign-in was not exercised.
+- **data and limits:** Verified schema19 backup preceded migration. All existing
+  rows, Muse account/password, thirteen table reads, future-table default and HBA
+  were preserved. A fresh strict schema20 backup was restored and compared
+  across all39 tables. This transport admits plans and review reports; progress
+  text is database-only. Independent external-artifact review/context staging,
+  implementation and Jenkins-to-merge wiring remain separate unfinished work.
+  Native Muse Code stays disabled, the receipt-bound verified-main ref is
+  unchanged, and GitHub Actions remains disabled.
 - **evidence:** `/mnt/data/homelab-build/muse-db-enable-20261121`.
 
 ## Current: Main deployed with preserved Muse access — 2026-11-21
