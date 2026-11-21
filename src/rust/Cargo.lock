@@ -522,6 +522,7 @@ dependencies = [
  "forge-command",
  "forge-ingress-contract",
  "forge-io-client",
+ "forge-jenkins",
  "forge-kernel",
  "forge-provider",
  "forge-task",
@@ -594,10 +595,13 @@ dependencies = [
  "forge-bootstrap",
  "forge-ingress-contract",
  "forge-io-client",
+ "forge-jenkins",
  "forge-jobs",
  "forge-local",
  "forge-provider",
  "nix",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
