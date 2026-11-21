@@ -21,6 +21,7 @@ import urllib.request
 
 HERE = Path(__file__).resolve().parent
 BASE = Path('/opt/forge-ci')
+NODE_MODULES = BASE / 'node_modules'
 PRIVATE = Path('/var/lib/forge-provisioning/jenkins-ci')
 CONFIG = Path('/etc/forge-ci')
 
@@ -159,7 +160,7 @@ def execute(client_path, operator):
         raise ValueError('CI account is not isolated')
     registry = BASE / 'cargo-registry'
     toolchain = BASE / 'toolchain'
-    modules = BASE / 'browser-node-modules'
+    modules = NODE_MODULES
     sources = [(Path(user.pw_dir) / '.cargo/registry', registry),
                (Path(user.pw_dir) / '.rustup/toolchains/1.97.1-x86_64-unknown-linux-gnu', toolchain),
                (Path(user.pw_dir) / 'repos/homelab/src/rust/forge-ide-web/tests/browser/node_modules', modules)]

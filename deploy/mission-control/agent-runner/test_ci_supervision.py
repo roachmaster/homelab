@@ -323,6 +323,25 @@ class SupervisionBoundaryTest(unittest.TestCase):
             self.assertEqual(result['checks'], [])
             self.assertEqual(order[-1][1], result)
 
+    def test_real_node_import_resolves_sibling_packages_from_the_provisioned_cache_basename(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            modules = root / 'staged' / SETUP.NODE_MODULES.name
+            package = modules / '@playwright/test'; package.mkdir(parents=True)
+            sibling = modules / 'playwright'; sibling.mkdir()
+            (package / 'package.json').write_text(json.dumps({'name': '@playwright/test', 'type': 'module', 'exports': './index.mjs'}))
+            (package / 'index.mjs').write_text("export { ready } from 'playwright/test';\n")
+            (sibling / 'package.json').write_text(json.dumps({'name': 'playwright', 'type': 'module', 'exports': {'./test': './test.mjs'}}))
+            (sibling / 'test.mjs').write_text('export const ready = true;\n')
+            project = root / 'project'; project.mkdir()
+            (project / 'node_modules').symlink_to(modules, target_is_directory=True)
+            result = subprocess.run(['/usr/bin/node', '--input-type=module', '-e',
+                "const { ready } = await import('@playwright/test'); console.log(ready);"],
+                cwd=project, env={'PATH': '/usr/bin:/bin', 'HOME': str(root)},
+                capture_output=True, text=True, timeout=10, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, 'true\n')
+
     def test_provisioner_requires_explicit_execution_before_reading_configuration(self):
         result = subprocess.run([sys.executable, '-B', str(HERE.parent / 'jenkins/setup-ci.py'),
             '--client-config', '/nonexistent/never-opened'], capture_output=True, text=True, timeout=10)
