@@ -2,6 +2,7 @@
 
 from contextlib import closing
 import hashlib
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -48,16 +49,16 @@ class AgYUnattendedDatabaseContractTest(unittest.TestCase):
             q.execute(statement, params)
             return q.fetchall()
 
-    def admit(self, value, *, profile="agy-unattended", cluster=None):
+    def admit(self, value, *, profile="agy-unattended", cluster=None, auto_repair=False):
         task_id = uuid4()
         with closing((cluster or self.cluster).connect("forge_agent")) as c, c, c.cursor() as q:
             q.execute("""INSERT INTO forge_agent.coding_tasks (
                 owner_id,project_alias,id,idempotency_key,intent_digest,base_revision,
-                mode,agent_profile,title,prompt,acceptance_criteria,pinned_recipe,recipe_digest)
+                mode,agent_profile,title,prompt,acceptance_criteria,pinned_recipe,recipe_digest,auto_repair)
                 VALUES('mission-control','homelab',%s,%s,%s,%s,%s,%s,
-                       'Owned contract fixture','Owned contract fixture','Verify ownership',%s,%s)""",
+                       'Owned contract fixture','Owned contract fixture','Verify ownership',%s,%s,%s)""",
                 (task_id, str(uuid4()), "a" * 64, BASE_REV, value.get("mode", "plan"),
-                 profile, Json(value), sha256_canonical(value)))
+                 profile, Json(value), sha256_canonical(value), auto_repair))
             q.execute("""INSERT INTO forge_agent.coding_events(
                 owner_id,project_alias,task_id,sequence,event_kind,payload)
                 VALUES('mission-control','homelab',%s,1,'queued',%s)""",
@@ -147,6 +148,37 @@ class AgYUnattendedDatabaseContractTest(unittest.TestCase):
                     with self.assertRaises(psycopg2.Error):
                         q.execute((SQL_DIR / "management/verify-agy-unattended.sql").read_text())
                 c.rollback()
+
+    def test_unattended_direct_implementation_retains_native_feedback_semantics(self):
+        task = self.admit(recipe(mode="implement"), auto_repair=True)
+        incarnation = self.advertise("unattended", POLICY_DIGEST, modes=("implement",))
+        db = self.worker()
+        lease = db.claim("unattended", incarnation, ["agy-unattended"])
+        self.assertEqual(lease.task_id, task)
+        text = "An owned unattended implementation fixture."
+        db.append_result(lease, 0, text)
+        proof = make_stop_proof(lease.unit_name)
+        db.publish(lease, "awaiting_review", dict(sha256=hashlib.sha256(text.encode()).hexdigest(),
+                   byte_count=len(text.encode()), chunk_count=1), None, "Owned fixture", proof)
+        receipt = db.reconcile(lease, "c" * 64, proof)
+        review = db.queue_review(lease, receipt)
+        job = db.review_claim("reviewer")
+        self.assertEqual(job["review_id"], review)
+        self.assertTrue(job["direct_implementation"])
+        finding = dict(finding_id="edge", category="source", summary="Repair the owned fixture.")
+        outcome = dict(cleanup_confirmed=True, disposition="repair", candidate_commit="d" * 40,
+                       gate_manifest_sha256="e" * 64, findings=[finding], verified_finding_ids=[],
+                       fingerprint="1" * 64, summary="A repair is required.", reason="Owned fixture",
+                       verification=dict(checks_passed=False, candidate_workspace_digest="f" * 64,
+                                         repair_requires_new_workspace=False))
+        decision = db.review_finish(job, outcome)
+        self.assertEqual(decision["repair_task_id"], task)
+        following = db.claim("unattended", incarnation, ["agy-unattended"])
+        packet = db.read_feedback(following)
+        feedback = json.loads(packet["feedback_json"])
+        self.assertEqual(feedback["workspace_digest_kind"], "native_receipt")
+        self.assertEqual(following.recipe["resource_profile"], RESOURCE)
+        self.assertEqual(following.recipe["policy_digest"], POLICY_DIGEST)
 
     def test_schema22_upgrade_preserves_receipts_and_old_p10_worker_remains_usable(self):
         with TemporaryDirectory(prefix="forge-agy-policy-upgrade-") as temporary:
