@@ -176,6 +176,21 @@ def write_result(path, result, reader_group):
         os.close(fd)
 
 
+def import_verified_bundle(bundle, source, env):
+    # Delivery bundles intentionally advertise refs/forge/*, not branch heads.
+    # Default clone refspecs can silently import nothing from those bundles.
+    # Import objects explicitly without materializing any candidate file until
+    # its complete tree has passed the privileged checkout validation below.
+    subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', 'init', '--quiet', str(source)],
+        env=env, check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, timeout=15)
+    subprocess.run(['/usr/bin/git', '-C', str(source), '-c', 'core.hooksPath=/dev/null',
+        'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--no-write-fetch-head',
+        '--', str(bundle), '+refs/*:refs/forge-ci-import/*'],
+        env=env, check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, timeout=60)
+
+
 def create_job_directory(path):
     path.mkdir(mode=0o711, exist_ok=False)
     path.chmod(0o711)  # The Jenkins service deliberately inherits umask0077.
@@ -286,10 +301,7 @@ def execute_locked(action, config):
             safe_env = {'PATH': '/usr/bin:/bin', 'HOME': '/nonexistent',
                         'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
                         'GIT_NO_REPLACE_OBJECTS': '1'}
-            subprocess.run(['/usr/bin/git', 'clone', '--no-local', '--no-checkout', '--',
-                            str(verified_bundle), str(source)],
-                           env=safe_env, check=True, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=60)
+            import_verified_bundle(verified_bundle, source, safe_env)
             observed = bounded_output(['/usr/bin/git', '-C', str(source), 'rev-parse', request['candidate_commit'] + '^{tree}'], env=safe_env).decode().strip()
             if observed != request['candidate_tree']:
                 raise ValueError('CI tree mismatch')

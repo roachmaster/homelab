@@ -65,6 +65,33 @@ class SupervisionBoundaryTest(unittest.TestCase):
         value = {'tests/事件.rs': ['100644', 'a' * 40], 'checks': CI.CHECKS}
         self.assertEqual(CI.canonical(value), canonical(value))
 
+    def test_non_head_delivery_bundle_imports_exact_objects_before_any_checkout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); original = root / 'original'; source = root / 'source'
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'GIT_CONFIG_NOSYSTEM': '1',
+                'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_NO_REPLACE_OBJECTS': '1',
+                'GIT_AUTHOR_NAME': 'Owned fixture', 'GIT_COMMITTER_NAME': 'Owned fixture',
+                'GIT_AUTHOR_EMAIL': 'fixture@example.invalid', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
+            def git(*args):
+                return subprocess.check_output(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', *args], env=env, stderr=subprocess.DEVNULL)
+            git('init', '--quiet', str(original))
+            (original / 'source.txt').write_text('Exact immutable input')
+            git('-C', str(original), 'add', 'source.txt')
+            git('-C', str(original), 'commit', '--quiet', '-m', 'Owned bundle fixture')
+            commit = git('-C', str(original), 'rev-parse', 'HEAD').strip()
+            tree = git('-C', str(original), 'rev-parse', 'HEAD^{tree}').strip()
+            ref = 'refs/forge/external-candidates/' + str(uuid4())
+            git('-C', str(original), 'update-ref', ref, commit.decode())
+            bundle = root / 'candidate.bundle'
+            git('-C', str(original), 'bundle', 'create', str(bundle), ref)
+            self.assertNotIn(b'refs/heads/', git('bundle', 'list-heads', str(bundle)))
+            CI.import_verified_bundle(bundle, source, env)
+            self.assertEqual(git('-C', str(source), 'rev-parse', commit.decode() + '^{tree}').strip(), tree)
+            self.assertEqual([p.name for p in source.iterdir()], ['.git'])
+            self.assertFalse((source / '.git/FETCH_HEAD').exists())
+            imported = git('-C', str(source), 'for-each-ref', '--format=%(refname)').strip()
+            self.assertTrue(imported.startswith(b'refs/forge-ci-import/forge/external-candidates/'))
+
     def test_restrictive_service_umask_keeps_explicit_traversal_and_receipt_readability(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -169,7 +196,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
             submitter = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
             source = work / action / 'source'
             def git(command, **_options):
-                if 'clone' in command:
+                if 'init' in command:
                     (source / 'src/rust/forge-ide-web/tests/browser').mkdir(parents=True)
                     (source / 'Makefile').write_text('fixture')
                 return SimpleNamespace(returncode=0)
