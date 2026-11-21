@@ -3,6 +3,7 @@ import importlib.util
 import hashlib
 import json
 import stat
+import socket
 import os
 from pathlib import Path
 import subprocess
@@ -166,6 +167,32 @@ class SupervisionBoundaryTest(unittest.TestCase):
              patch.object(CI.os, 'setuid') as setuid:
             with self.assertRaises(PermissionError): CI.child_identity(account)()
             setuid.assert_not_called()
+
+    def test_private_short_tmp_supports_real_unix_sockets_and_does_not_follow_cleanup_links(self):
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+        with tempfile.TemporaryDirectory() as outside:
+            sentinel = Path(outside) / 'preserved'; sentinel.write_text('outside CI temporary scope')
+            short = CI.create_short_tmp(account)
+            try:
+                self.assertEqual(short.parent, Path('/tmp'))
+                self.assertLess(len(os.fsencode(short / 'owned.sock')), 108)
+                self.assertEqual(stat.S_IMODE(short.stat().st_mode), 0o700)
+                self.assertEqual(short.stat().st_uid, account.pw_uid)
+                with socket.socket(socket.AF_UNIX) as owned:
+                    owned.bind(str(short / 'owned.sock'))
+                (short / 'outside-link').symlink_to(outside, target_is_directory=True)
+                CI.cleanup_short_tmp(short)
+                self.assertFalse(short.exists())
+                self.assertEqual(sentinel.read_text(), 'outside CI temporary scope')
+            finally:
+                if short.exists(): CI.cleanup_short_tmp(short)
+            replacement = CI.create_short_tmp(account)
+            replacement.rmdir(); replacement.symlink_to(outside, target_is_directory=True)
+            try:
+                with self.assertRaises(ValueError): CI.cleanup_short_tmp(replacement)
+                self.assertTrue(sentinel.exists())
+            finally:
+                replacement.unlink()
 
     def test_restrictive_service_umask_keeps_explicit_traversal_and_receipt_readability(self):
         with tempfile.TemporaryDirectory() as temporary:

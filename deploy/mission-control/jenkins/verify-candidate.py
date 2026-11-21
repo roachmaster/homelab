@@ -17,6 +17,8 @@ import pwd
 import re
 import signal
 import selectors
+import shutil
+import tempfile
 import stat
 import subprocess
 import sys
@@ -244,6 +246,33 @@ def exclude_generated_outputs(source, paths):
         stream.write('\n# Trusted CI generated output links only.\n' + '\n'.join(patterns) + '\n')
 
 
+def create_short_tmp(account):
+    # The agent service already supplies PrivateTmp. Keep the literal pathname
+    # short enough for AF_UNIX fixtures; the long scratch symlink is provenance.
+    path = Path(tempfile.mkdtemp(prefix='fci-', dir='/tmp'))
+    try:
+        os.chown(path, account.pw_uid, account.pw_gid)
+        path.chmod(0o700)
+        return path
+    except BaseException:
+        path.rmdir()
+        raise
+
+
+def cleanup_short_tmp(path):
+    # Use the supervisor's captured path, never resolve the candidate-writable
+    # scratch/tmp symlink. rmtree's directory-fd implementation rejects links.
+    if path.parent != Path('/tmp') or not re.fullmatch(r'fci-[a-z0-9_]{8,32}', path.name):
+        raise ValueError('Unexpected CI temporary directory')
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(info.st_mode) or not shutil.rmtree.avoids_symlink_attacks:
+        raise ValueError('Unsafe CI temporary cleanup')
+    shutil.rmtree(path)
+
+
 def create_job_directory(path):
     path.mkdir(mode=0o711, exist_ok=False)
     path.chmod(0o711)  # The Jenkins service deliberately inherits umask0077.
@@ -326,14 +355,14 @@ def execute_locked(action, config):
         scratch = job / 'scratch'
         scratch.mkdir(mode=0o700)
         os.chown(scratch, account.pw_uid, account.pw_gid)
-        for name in ('home', 'tmp', 'target', 'cargo-home', 'qa'):
+        for name in ('home', 'target', 'cargo-home', 'qa'):
             p = scratch / name
             p.mkdir(mode=0o700)
             os.chown(p, account.pw_uid, account.pw_gid)
         (scratch / 'cargo-home/registry').symlink_to(config['cargo_registry'], target_is_directory=True)
         source = job / 'source'
         environment = {'PATH': config['toolchain'] + '/bin:/usr/bin:/bin',
-            'HOME': str(scratch / 'home'), 'TMPDIR': str(scratch / 'tmp'),
+            'HOME': str(scratch / 'home'),
             'LANG': 'C.UTF-8', 'CARGO_HOME': str(scratch / 'cargo-home'),
             'CARGO_TARGET_DIR': str(scratch / 'target'), 'CARGO_NET_OFFLINE': 'true',
             'PYTHONDONTWRITEBYTECODE': '1', 'QA_OUTPUT_ROOT': str(scratch / 'qa'),
@@ -348,7 +377,11 @@ def execute_locked(action, config):
         checks = []
         started = time.time()
         failure = None
+        short_tmp = None
         try:
+            short_tmp = create_short_tmp(account)
+            (scratch / 'tmp').symlink_to(short_tmp, target_is_directory=True)
+            environment['TMPDIR'] = str(short_tmp)
             # Git only reads the trusted, bounded, digest-bound bundle. Source is
             # then root-owned read-only, with explicit writable scratch symlinks.
             safe_env = {'PATH': '/usr/bin:/bin', 'HOME': '/nonexistent',
@@ -436,6 +469,8 @@ def execute_locked(action, config):
             if fd is not None:
                 os.close(fd)
             kill_build_user(account)
+            if short_tmp is not None:
+                cleanup_short_tmp(short_tmp)
         result = {**{key: request[key] for key in ('action_id', 'workflow_id', 'candidate_commit',
             'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'verification_profile', 'correlation_id')},
             'version': 1, 'request_sha256': identity, 'checks': checks,
