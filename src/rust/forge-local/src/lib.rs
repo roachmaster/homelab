@@ -26,6 +26,8 @@ pub use forge_kernel::node::{
 };
 #[cfg(feature = "disk")]
 mod disk;
+#[cfg(feature = "jenkins")]
+pub mod jenkins;
 #[cfg(feature = "jobs")]
 pub mod jobs;
 #[cfg(feature = "disk")]
@@ -58,6 +60,18 @@ pub enum CommandKind {
     Commands,
     NodeInfo,
     NodeStatus,
+    #[cfg(feature = "jenkins")]
+    JenkinsStatus,
+    #[cfg(feature = "jenkins")]
+    JenkinsJobs,
+    #[cfg(feature = "jenkins")]
+    JenkinsBuild,
+    #[cfg(feature = "jenkins")]
+    JenkinsQueue,
+    #[cfg(feature = "jenkins")]
+    JenkinsBuildStatus,
+    #[cfg(feature = "jenkins")]
+    JenkinsCancel,
     #[cfg(feature = "jobs")]
     JobSubmit,
     #[cfg(feature = "jobs")]
@@ -81,6 +95,8 @@ pub enum CommandKind {
 pub enum Command {
     Commands,
     Node(NodeCommand),
+    #[cfg(feature = "jenkins")]
+    Jenkins(jenkins::JenkinsCommand),
     #[cfg(feature = "jobs")]
     Jobs(jobs::JobCommand),
     #[cfg(feature = "disk")]
@@ -93,6 +109,8 @@ impl Payload for Command {
             Self::Commands => CommandKind::Commands,
             Self::Node(NodeCommand::Info) => CommandKind::NodeInfo,
             Self::Node(NodeCommand::Status) => CommandKind::NodeStatus,
+            #[cfg(feature = "jenkins")]
+            Self::Jenkins(command) => command.kind(),
             #[cfg(feature = "jobs")]
             Self::Jobs(command) => match command {
                 jobs::JobCommand::Submit { .. } => CommandKind::JobSubmit,
@@ -119,6 +137,8 @@ pub struct CommandInfo {
 pub enum Output {
     Commands(Vec<CommandInfo>),
     Node(NodeResponse),
+    #[cfg(feature = "jenkins")]
+    Jenkins(forge_jenkins::Response),
     #[cfg(feature = "jobs")]
     Jobs(jobs::JobOutput),
     #[cfg(feature = "disk")]
@@ -128,6 +148,8 @@ pub enum Output {
 #[derive(Debug)]
 pub enum RunError {
     Node(NodeError),
+    #[cfg(feature = "jenkins")]
+    Jenkins(forge_jenkins::Error),
     #[cfg(feature = "jobs")]
     Jobs(jobs::JobError),
     #[cfg(feature = "disk")]
@@ -139,6 +161,8 @@ impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Node(e) => e.fmt(f),
+            #[cfg(feature = "jenkins")]
+            Self::Jenkins(e) => e.fmt(f),
             #[cfg(feature = "jobs")]
             Self::Jobs(e) => e.fmt(f),
             #[cfg(feature = "disk")]
@@ -154,6 +178,8 @@ impl Error for RunError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Node(e) => Some(e),
+            #[cfg(feature = "jenkins")]
+            Self::Jenkins(e) => Some(e),
             #[cfg(feature = "jobs")]
             Self::Jobs(e) => Some(e),
             #[cfg(feature = "disk")]
@@ -403,6 +429,8 @@ impl Application {
             registrar,
             #[cfg(feature = "jobs")]
             None,
+            #[cfg(feature = "jenkins")]
+            None,
         )
     }
 
@@ -413,7 +441,13 @@ impl Application {
         config: LocalConfig,
         jobs: jobs::JobsConfig,
     ) -> Result<Self, BootstrapError> {
-        Self::bootstrap_selected(config, node::register, Some(jobs))
+        Self::bootstrap_selected(
+            config,
+            node::register,
+            Some(jobs),
+            #[cfg(feature = "jenkins")]
+            None,
+        )
     }
 
     /// Select the node implementation and the local jobs configuration explicitly.
@@ -428,13 +462,62 @@ impl Application {
         C: IoClient<Request = NodeRequest, Response = NodeResponse, Error = NodeError> + 'static,
         R: FnOnce(NodeConfig) -> Result<PreparedGroup<NodeFactories<F>>, NodeConfigError>,
     {
-        Self::bootstrap_selected(config, registrar, Some(jobs))
+        Self::bootstrap_selected(
+            config,
+            registrar,
+            Some(jobs),
+            #[cfg(feature = "jenkins")]
+            None,
+        )
+    }
+
+    /// Inject an explicitly selected Jenkins port shared by this application's
+    /// admitted Jenkins commands. No transport or credentials are selected here.
+    #[cfg(feature = "jenkins")]
+    pub fn bootstrap_with_jenkins<C>(config: LocalConfig, client: C) -> Result<Self, BootstrapError>
+    where
+        C: IoClient<
+                Request = forge_jenkins::Request,
+                Response = forge_jenkins::Response,
+                Error = forge_jenkins::Error,
+            > + 'static,
+    {
+        Self::bootstrap_selected(
+            config,
+            node::register,
+            #[cfg(feature = "jobs")]
+            None,
+            Some(jenkins::JenkinsHandle::new(client)),
+        )
+    }
+
+    /// Select local cooperative jobs and a ready Jenkins port independently.
+    #[cfg(all(feature = "jenkins", feature = "jobs"))]
+    pub fn bootstrap_with_jobs_and_jenkins<C>(
+        config: LocalConfig,
+        jobs: jobs::JobsConfig,
+        client: C,
+    ) -> Result<Self, BootstrapError>
+    where
+        C: IoClient<
+                Request = forge_jenkins::Request,
+                Response = forge_jenkins::Response,
+                Error = forge_jenkins::Error,
+            > + 'static,
+    {
+        Self::bootstrap_selected(
+            config,
+            node::register,
+            Some(jobs),
+            Some(jenkins::JenkinsHandle::new(client)),
+        )
     }
 
     fn bootstrap_selected<F, C, R>(
         config: LocalConfig,
         registrar: R,
         #[cfg(feature = "jobs")] jobs: Option<jobs::JobsConfig>,
+        #[cfg(feature = "jenkins")] jenkins: Option<jenkins::JenkinsHandle>,
     ) -> Result<Self, BootstrapError>
     where
         F: Factory<C, Error = NodeError>,
@@ -459,6 +542,8 @@ impl Application {
                 pending,
                 #[cfg(feature = "jobs")]
                 jobs,
+                #[cfg(feature = "jenkins")]
+                jenkins,
                 |(((), node), disk)| {
                     let node = node.client.create().map_err(BootstrapError::NodeFactory)?;
                     let disk = disk.client.create().map_err(BootstrapError::DiskFactory)?;
@@ -473,6 +558,8 @@ impl Application {
             pending,
             #[cfg(feature = "jobs")]
             jobs,
+            #[cfg(feature = "jenkins")]
+            jenkins,
             |((), node)| {
                 Ok(Resources {
                     node: node.client.create().map_err(BootstrapError::NodeFactory)?,
@@ -557,6 +644,7 @@ struct Resources<C> {
 fn finish_registration<G, C>(
     pending: Registry<G>,
     #[cfg(feature = "jobs")] jobs: Option<jobs::JobsConfig>,
+    #[cfg(feature = "jenkins")] jenkins: Option<jenkins::JenkinsHandle>,
     create: impl FnOnce(G) -> Result<Resources<C>, BootstrapError>,
 ) -> Result<Application, BootstrapError>
 where
@@ -573,7 +661,12 @@ where
         let (groups, jobs) = frozen.into_factories();
         let resources = create(groups)?;
         let jobs = jobs.service.create().map_err(BootstrapError::Jobs)?;
-        return assemble(resources, Some(jobs));
+        return assemble(
+            resources,
+            Some(jobs),
+            #[cfg(feature = "jenkins")]
+            jenkins,
+        );
     }
     let frozen = pending
         .freeze()
@@ -582,12 +675,15 @@ where
         create(frozen.into_factories())?,
         #[cfg(feature = "jobs")]
         None,
+        #[cfg(feature = "jenkins")]
+        jenkins,
     )
 }
 
 fn assemble<C>(
     resources: Resources<C>,
     #[cfg(feature = "jobs")] jobs: Option<jobs::JobsHandle>,
+    #[cfg(feature = "jenkins")] jenkins: Option<jenkins::JenkinsHandle>,
 ) -> Result<Application, BootstrapError>
 where
     C: IoClient<Request = NodeRequest, Response = NodeResponse, Error = NodeError> + 'static,
@@ -625,6 +721,10 @@ where
     #[cfg(feature = "jobs")]
     if let Some(jobs) = jobs {
         bind_jobs(&mut bindings, jobs)?;
+    }
+    #[cfg(feature = "jenkins")]
+    if let Some(client) = jenkins {
+        jenkins::bind(&mut bindings, Ready(Rc::new(Singleton::new(client))))?;
     }
     bindings.finish()
 }
