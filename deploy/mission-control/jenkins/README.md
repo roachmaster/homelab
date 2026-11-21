@@ -12,7 +12,8 @@ The service listens only on `127.0.0.1:18084`. Its persisted home is
 the secure bootstrap is ready, creates `forge-admin` through a systemd-delivered
 credential, disables signup/anonymous access/inbound TCP agents, and leaves
 zero build executors on the controller. Default CSRF protection remains enabled.
-No plugins or GitHub credentials/connections are installed. Existing Jenkins
+The base installer adds no plugins or GitHub credentials. The separately
+authorized GitHub access step below configures the Unix service account. Existing Jenkins
 data is rejected instead of overwritten. Failed setup is retained for inspection,
 without an automatic retry. Successful reruns verify the saved installation.
 
@@ -48,6 +49,43 @@ without weakening signature or listener checks. Private evidence remains in
 and performed the health and restart checks without reinstalling or recreating
 accounts. The final root-owned installer SHA-256 is
 `3b1f026d3d853a3bcc3739f990f8910fb40610f80219d4640974b7af975cc0da`.
+
+## GitHub access for the Jenkins user
+
+On 2026-11-21 the operator explicitly authorized sharing the existing main
+account's GitHub credentials with the `jenkins` Unix user. The reviewed
+`connect-github.py` job copied only the active `github.com` account and selected
+SSH identity into `/var/lib/jenkins`, its actual Unix home. The Jenkins data
+directory is a separate path. Credential files are Jenkins-owned mode0600 inside
+mode0700 directories. No secret contents are in this repository or job output.
+
+The GitHub-specific SSH configuration requires the selected key, noninteractive
+authentication and strict verification against the operator's existing GitHub
+host-key pins. The existing token authenticates GitHub CLI; HTTPS Git uses
+`gh auth setup-git --hostname github.com`. All target writes and permission
+changes execute in a child permanently switched to Jenkins UID/GID with empty
+supplementary groups. Root only reads the authorized source credentials and
+writes the protected provisioning report. No sudo/group membership is added.
+
+Local job `forge-jenkins-github-access-20261121.service` succeeded at00:11:24UTC.
+GitHub API identity and SSH authentication both identify `roachmaster`. GitHub
+reports read/write access to `roachmaster/homelab`; HTTPS and SSH `git ls-remote`
+both returned main `a3968c17841bddc533fa76f1df491542930a9987`. These were read-only
+checks; no push, build or GitHub workflow was submitted. Private evidence is
+`/var/lib/forge-provisioning/jenkins/github-access.json` and its adjacent intent.
+
+To use the configured account from an operator shell:
+
+```sh
+sudo -H -u jenkins sh -c 'cd "$HOME" && gh api user --jq .login'
+sudo -H -u jenkins sh -c 'cd "$HOME" && git ls-remote git@github.com:roachmaster/homelab.git refs/heads/main'
+```
+
+This configures service-user Git and CLI authentication. Jenkins credential-store
+entries, SCM jobs, plugins, build agents and trigger/pipeline configuration remain
+separate work. The stopped Grok workflow remains stopped.
+
+GitHub CLI reference: [credential-helper setup](https://cli.github.com/manual/gh_auth_setup-git).
 
 Official references: [Linux installation](https://www.jenkins.io/doc/book/installing/linux/),
 [systemd overrides](https://www.jenkins.io/doc/book/system-administration/systemd-services/),

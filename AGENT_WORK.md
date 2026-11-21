@@ -76,3 +76,11 @@
   source and evidence paths. Jenkins build agents/pipelines and replacement Forge
   verification/publication adapters have not been assigned or configured. Do not
   resume the stopped Grok/GitHub work without a new user instruction.
+- **github_access_2026-11-21:** At the user's explicit request, the separate
+  `connect-github.py` job provisioned the existing operator GitHub token and
+  selected SSH identity for Unix user `jenkins`, using its actual home
+  `/var/lib/jenkins`. Selected-host credentials remain private0600/0700; target
+  writes run permanently as Jenkins UID/GID, with no sudo/group changes. API and
+  SSH identify `roachmaster`; GitHub reports homelab read/write permissions; both
+  HTTPS and SSH read main `a3968c1`. Job completed at00:11:24UTC. No push, build
+  or workflow was started. Jenkins jobs, agents and pipeline wiring remain future.
