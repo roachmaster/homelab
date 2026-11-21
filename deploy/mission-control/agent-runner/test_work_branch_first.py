@@ -15,6 +15,8 @@ from test_work_native_jenkins import Driver
 from test_work_merge import merge_fixture, MergeStore
 from work_external_delivery import CHECKS, DeliveryConfig, canonical, durable_json
 from work_feedback import validate_findings
+from work_candidate_source import ReviewCandidateSourceProvider
+from work_executor import WorkspaceProvider
 from work_merge import MergeWorker
 from work_native_jenkins import NativeJenkinsVerification
 from work_native_repair import BranchFirstRepairProvider
@@ -157,6 +159,43 @@ class BranchFirstTest(unittest.TestCase):
             self.assertTrue(outcome['verification']['repair_requires_new_workspace'])
             self.assertTrue(all(check['status']=='not_run' for check in outcome['verification']['checks']))
             self.assertEqual(manifest['native_ci']['request']['candidate_commit'],details['tested_candidate'])
+            self.assertEqual(git(values[5],'rev-parse','refs/heads/main').decode().strip(),main)
+
+    def test_repaired_child_review_diff_includes_feature_already_present_in_unapproved_seed(self):
+        with native_fixture(diverge=True) as (values,config,job,main,store,native,repair,candidates,_events,worker):
+            worker.process(job)
+            seed = store.outcomes[-1][1]['candidate_commit']
+            child = {**job,'task_id':str(uuid4()),'attempt_id':str(uuid4()),'review_id':str(uuid4()),
+                'base_revision':seed,'parent_task_id':job['task_id'],'feedback_id':str(uuid4()),
+                'feedback_sha256':'a'*64,'repair_source_review_id':job['review_id'],
+                'repair_candidate_commit':seed}
+            sources = ReviewCandidateSourceProvider(config.worker,native.git._git)
+            workspaces = WorkspaceProvider(config.worker,candidate_source_provider=sources)
+            workspaces.prepare()
+            with workspaces.acquire(child) as workspace:
+                (workspace.path/'app.py').write_text('resolved feature and current main\n')
+                child['workspace_digest'] = workspace.digest()
+            scope = {key:child[key] for key in ('project_alias','task_id','attempt_id','review_id','workflow_id','correlation_id')}
+            scope['owner_id'] = config.worker.owner
+            store.native_ci_acquire_context.return_value = {**scope,'active':True}
+            store.native_ci_binding.return_value = {**scope,'active':True}
+            def verify(request,require):
+                private = config.state_root/child['review_id']/'repository'
+                native.git._git(private,'merge-base','--is-ancestor',main,request['candidate_commit'])
+                return Driver.verify(native.delivery,request,require)
+            native.delivery.verify = verify
+            ReviewWorker(config,store,WorkspaceSnapshotProvider(workspaces),native.git,native,candidates,
+                native_ci=native,repair_sources=repair).process(child)
+            outcome = store.outcomes[-1][1]
+            self.assertEqual(outcome['disposition'],'awaiting_review',outcome)
+            manifest = candidates.read(child['review_id'])
+            self.assertEqual(manifest['integration_base'],main)
+            self.assertNotEqual(manifest['integration_base'],seed)
+            private = candidates.directory(child['review_id'])/'repository'
+            full = git(private,'diff','--name-only',main,outcome['candidate_commit']).decode().splitlines()
+            marker_only = git(private,'diff','--name-only',seed,outcome['candidate_commit']).decode().splitlines()
+            self.assertIn('new.py',full)
+            self.assertNotIn('new.py',marker_only)
             self.assertEqual(git(values[5],'rev-parse','refs/heads/main').decode().strip(),main)
 
     def test_uncertain_push_never_starts_jenkins_or_repeats_the_write(self):
