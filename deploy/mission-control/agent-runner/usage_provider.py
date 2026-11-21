@@ -6,6 +6,7 @@ import hashlib
 import hmac
 
 from usage_rpc import CodexMetadataRPC, MetadataProcessConfig, ProviderFailure
+from usage_muse import MuseUsageProcess
 from usage_types import (
     InvalidUsage, MAX_BUCKETS, MAX_DAILY, account_activity, allowance, boolean,
     counter, identifier, normalize_attempt_usage, text, validate_snapshot,
@@ -41,10 +42,12 @@ class UsageProviderConfig:
         identifier(self.alias)
         text(self.label)
         text(self.model)
-        if self.provider not in {"antigravity", "codex", "grok"}:
+        if self.provider not in {"antigravity", "codex", "grok", "muse"}:
             raise ValueError("Unknown usage provider")
-        if self.provider == "codex" and not isinstance(self.process, MetadataProcessConfig):
-            raise ValueError("Codex usage requires typed process configuration")
+        if self.provider in {"codex", "muse"} and not isinstance(self.process, MetadataProcessConfig):
+            raise ValueError("Native usage requires typed process configuration")
+        if self.provider == "muse" and self.process.code_home is not None:
+            raise ValueError("Muse usage requires isolated native state")
 
 
 class AntigravityUsageProvider:
@@ -73,6 +76,28 @@ class GrokUsageProvider:
             "source":"grok-headless/allowance-capability", "version":POLICY["adapter_versions"]["grok"],
             "last_error":None, "allowance":_empty_allowance("unsupported", "unsupported_headless"),
             "account_activity":_unknown_activity(), "account_identity":None})
+class MuseUsageProvider:
+    """One explicit metadata read; absence is never zero or unlimited quota."""
+
+    manual_refresh_only = True
+
+    def __init__(self, config, process, *, clock=utc_now):
+        self.config, self._process, self._clock = config, process, clock
+
+    def read_snapshot(self):
+        raw = self._process.read()
+        # This is the only authenticated schema verified for the pinned native
+        # build. A future allowance shape needs its own reviewed normalizer.
+        if (not isinstance(raw, dict) or raw.keys() != {"schemaVersion", "allowance", "reason", "hint"}
+                or type(raw["schemaVersion"]) is not int or raw["schemaVersion"] != 1
+                or raw["allowance"] is not None or raw["reason"] != "no_allowance" or raw["hint"] is not None):
+            raise ProviderFailure("malformed_metadata")
+        return validate_snapshot({
+            "snapshot_state": "fresh", "observed_at": _now(self._clock),
+            "source": "muse-cli/usage-json-v1", "version": POLICY["adapter_versions"]["muse"],
+            "last_error": "setup_required", "allowance": _empty_allowance("unsupported", "no_allowance"),
+            "account_activity": _unknown_activity(), "account_identity": None,
+        })
 
 
 class UnavailableUsageProvider:
@@ -80,6 +105,7 @@ class UnavailableUsageProvider:
         self.config = config
         self.version = version
         self._code = code
+        self.manual_refresh_only = config.provider == "muse"
 
     def read_snapshot(self):
         raise ProviderFailure(self._code)
@@ -215,9 +241,9 @@ class CodexUsageProvider:
 
 
 class UsageProviderFactory:
-    """Selects an adapter without effects; creation probes only safe CLI version."""
+    """Select effect-free factories; only Codex creation probes a safe version."""
 
-    def __init__(self, config, *, hmac_key, rpc_factory=CodexMetadataRPC, clock=utc_now):
+    def __init__(self, config, *, hmac_key, rpc_factory=CodexMetadataRPC, muse_factory=MuseUsageProcess, clock=utc_now):
         if not isinstance(config, UsageProviderConfig):
             raise TypeError("Usage provider requires typed configuration")
         if not isinstance(hmac_key, bytes) or len(hmac_key) < 32:
@@ -225,6 +251,7 @@ class UsageProviderFactory:
         self._config = config
         self._key = bytes(hmac_key)
         self._rpc_factory = rpc_factory
+        self._muse_factory = muse_factory
         self._clock = clock
 
     @property
@@ -236,6 +263,9 @@ class UsageProviderFactory:
             return AntigravityUsageProvider(self._config, clock=self._clock)
         if self._config.provider == "grok":
             return GrokUsageProvider(self._config, clock=self._clock)
+        if self._config.provider == "muse":
+            # Construction is effect-free: no version probe or account read.
+            return MuseUsageProvider(self._config, self._muse_factory(self._config.process), clock=self._clock)
         try:
             rpc = self._rpc_factory(self._config.process)
             version = rpc.version()

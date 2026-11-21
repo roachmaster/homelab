@@ -69,6 +69,20 @@ WARM_POLICY={**EXTERNAL_SANDBOX_POLICY,"id":WARM_POLICY_ID,
  "codex_session_policy":"fresh-unless-receipt-owned-author-resume-ttl-v1",
  "codex_feature_controls":"no-user-config-no-multi-agent-no-fast-mode-v1"}
 WARM_POLICY_DIGEST=sha256_canonical(WARM_POLICY)
+GROK_POLICY_ID="forge-coding-v9"
+GROK_POLICY={**WARM_POLICY,"id":GROK_POLICY_ID,
+ "adapter_versions":{"antigravity":"1.5.12","codex":"0.160.0","grok":"1.0.92"},
+ 'grok_session_policy':'fresh-attempt-session-id-v1',
+ 'grok_execution_policy':'dontask-trusted-instructions-managed-only-supervised-v1',
+ 'grok_project_policy':'plain-instructions-reject-project-executable-config-v1',
+ 'grok_config_sha256':'478dc64ed679f9d5d91ec0a0b051f3dbb4406a84b280594e3e00871d09b5da34',
+ 'grok_managed_policy_sha256':'bdd376cc07a776d50d04e906e25a15b0057e1f6d421aa9c0fdf7336592a8beaf',
+ 'grok_state_policy':'isolated-home-no-shared-leader-auth-only-v1',
+ 'grok_auth_cleanup_policy':'retained-dirfd-inode-after-proven-stop-v1',
+ 'grok_binary_sha256':'add4d201dbf2c0bd6077a36feb55a76939de30bae48dbb06f16b2307d38ceacb',
+}
+GROK_POLICY_DIGEST=sha256_canonical(GROK_POLICY)
+
 
 
 
@@ -99,7 +113,9 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertEqual(OLD_POLICY_DIGEST, "2465fea4c303e83825339fd15793927a80b147519586519283e7534b2ad3be44")
         self.assertEqual(PREVIOUS_POLICY_DIGEST, "67065fb04466901c8c0df1faad5d7a04503322c6e4c1b8a75ca08eba1375fa58")
         self.assertEqual(SESSION_POLICY_DIGEST,"e619dbab071b1d1b0e3fa0cf6e6212e879c953825d6c80da5f4de048fb787075")
-        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v9")
+        self.assertEqual(work_policy.POLICY_ID, "forge-coding-v10")
+        self.assertEqual(GROK_POLICY_DIGEST,"8191ffeda267b598c9d550a81e3f272d706c00e37731c7612c8ca3cb7d4ecf0e")
+        self.assertEqual(work_policy.POLICY_DIGEST,"58a3f1c876630627ee01220b0d45524557cf3f4f685993f027ee31d9fe52d523")
         self.assertEqual(PEER_POLICY_DIGEST,"78d8f96280b9b75597e2b10276e1854f64026ff8f359f0f2abb65113774a8e5e")
         self.assertEqual(EXTERNAL_SANDBOX_POLICY_DIGEST,"40b4e50c9acf64a835fc477a8748fb1cf266188c46f6ac943dd075d506df6124")
         self.assertEqual(work_policy.POLICY["codex_sandbox"],"supervised-external-v1")
@@ -113,8 +129,8 @@ class PolicyIdentityTest(unittest.TestCase):
         self.assertNotIn("fresh_session", work_policy.POLICY)
         self.assertNotIn(work_policy.POLICY_DIGEST, (OLD_POLICY_DIGEST, PREVIOUS_POLICY_DIGEST, EXTERNAL_SANDBOX_POLICY_DIGEST))
         comparable = {key: value for key, value in work_policy.POLICY.items()
-                      if not key.startswith("grok_") and key not in {"id", "antigravity_session_policy", "codex_session_policy", "codex_feature_controls", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
-        comparable["adapter_versions"] = {k:v for k,v in comparable["adapter_versions"].items() if k != "grok"}
+                      if not key.startswith(("grok_", "muse_")) and key not in {"id", "antigravity_session_policy", "codex_session_policy", "codex_feature_controls", "plan_workflow", "feedback_workflow", "peer_review_workflow", "codex_sandbox", "codex_external_io"}}
+        comparable["adapter_versions"] = {k:v for k,v in comparable["adapter_versions"].items() if k not in {"grok","muse"}}
         self.assertEqual(comparable, {key: value for key, value in PREVIOUS_POLICY.items()
                                       if key not in {"id", "fresh_session"}})
 
@@ -183,6 +199,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
             PEER_POLICY_ID: PEER_POLICY_DIGEST,
             EXTERNAL_SANDBOX_POLICY_ID: EXTERNAL_SANDBOX_POLICY_DIGEST,
             WARM_POLICY_ID: WARM_POLICY_DIGEST,
+            GROK_POLICY_ID: GROK_POLICY_DIGEST,
         }[policy]
         payload = {
             "version": 2, "backend": "codex", "model": "gpt-5.4",
@@ -301,7 +318,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 19)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -440,7 +457,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 19)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -500,7 +517,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 19)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -530,6 +547,66 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 v7_lease = db.claim("v7-worker", v7_inc2, ["codex-v2"])
                 self.assertEqual(v7_lease.task_id, v7_queued["task_id"])
                 self.assertEqual(v7_lease.recipe["resource_profile"], "forge-coding-v8")
+            finally:
+                cluster.stop()
+
+    def test_schema18_v9_receipts_survive_m19_and_exact_policy_claims(self):
+        with TemporaryDirectory(prefix="forge-v9-muse-upgrade-", dir="/tmp") as temporary:
+            legacy_sql = Path(temporary) / "sql"
+            historical_registry(legacy_sql, 18)
+            cluster = PreUpgradeCluster(legacy_sql).start()
+            try:
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 18)
+                db = self.worker(cluster)
+                v9_inc = self.advertise(cluster, db, "v9-worker", GROK_POLICY_DIGEST)
+                admitted = self.admit_old(cluster, "v9-before-codex-warm", GROK_POLICY_ID)
+                lease = db.claim("v9-worker", v9_inc, ["codex-v2"])
+                self.assertEqual(lease.task_id, admitted["task_id"])
+                text, manifest = self.stage(db, lease)
+                proof = make_stop_proof(lease.unit_name)
+                published = db.publish(lease, "awaiting_review", manifest, None, "V7 result", proof)
+                receipt = db.reconcile(lease, "d" * 64, proof)
+                reconciliation = self.rows(
+                    cluster, "SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s",
+                    (UUID(receipt),),
+                )
+                before = self.rows(
+                    cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
+                    "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
+                    (UUID(lease.task_id),),
+                )
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 19)
+                self.assertEqual(
+                    self.rows(cluster, "SELECT to_jsonb(t), to_jsonb(a) FROM forge_agent.coding_tasks t "
+                              "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
+                              (UUID(lease.task_id),)),
+                    before,
+                )
+                self.assertEqual(
+                    self.rows(cluster, "SELECT to_jsonb(r) FROM forge_agent.coding_reconciliation_receipts r WHERE receipt_id=%s",
+                              (UUID(receipt),)),
+                    reconciliation,
+                )
+                self.assertEqual(self.admit_old(cluster, "v9-before-codex-warm", GROK_POLICY_ID), admitted)
+                self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V7 result", proof), published)
+                self.assertEqual(
+                    self.store(cluster).result(project_alias="homelab", task_id=UUID(lease.task_id),
+                                               attempt_id=UUID(lease.attempt_id))["content"],
+                    text,
+                )
+                v9_queued = self.admit_old(cluster, "v9-queued-after-m19", GROK_POLICY_ID)
+                v10_queued = self.service(cluster).submit(make_submit(idempotency_key="v10-queued-after-m19"))
+                v10_inc = self.advertise(cluster, db, "v10-worker", work_policy.POLICY_DIGEST)
+                v10_lease = db.claim("v10-worker", v10_inc, ["codex-v2"])
+                self.assertEqual(v10_lease.task_id, v10_queued["task_id"])
+                self.assertEqual(v10_lease.recipe["resource_profile"], work_policy.POLICY_ID)
+                self.assertIsNone(db.claim("v10-worker", v10_inc, ["codex-v2"]))
+                v9_inc2 = self.advertise(cluster, db, "v9-worker", GROK_POLICY_DIGEST)
+                v9_lease = db.claim("v9-worker", v9_inc2, ["codex-v2"])
+                self.assertEqual(v9_lease.task_id, v9_queued["task_id"])
+                self.assertEqual(v9_lease.recipe["resource_profile"], "forge-coding-v9")
             finally:
                 cluster.stop()
 
@@ -605,7 +682,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         lease = db.claim("grok-worker",inc,["grok"])
         self.assertEqual(lease.task_id,task["task_id"])
         self.assertEqual(lease.recipe["backend"],"grok")
-        self.assertEqual(lease.recipe["resource_profile"],"forge-coding-v9")
+        self.assertEqual(lease.recipe["resource_profile"],"forge-coding-v10")
         text, manifest = self.stage(db,lease)
         usage = normalize_attempt_usage("grok", {"input_tokens":20,"output_tokens":25,"cache_read_input_tokens":80,"cache_creation_input_tokens":0,"total_tokens":125})
         db.publish(lease,"awaiting_review",manifest,usage,"Grok fixture result",make_stop_proof(lease.unit_name))
@@ -684,6 +761,97 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
         lease=db.claim("grok-resume-worker",inc,[profile.alias]);proof=make_stop_proof(lease.unit_name)
         published=db.publish(lease,"quota_blocked",None,None,"Fixture quota boundary",proof);receipt=db.reconcile(lease,"c"*64,proof)
         resume=WorkResume("homelab",UUID(lease.task_id),published["revision"],"grok-resume-replay",profile.alias,UUID(receipt),"Operator qualified continuation.")
+        admitted=enabled.resume(resume)
+        before=self.rows(self.cluster,"SELECT count(*),max(revision) FROM forge_agent.coding_tasks")
+        self.assertEqual(off.resume(resume),admitted)
+        self.assertEqual(self.rows(self.cluster,"SELECT count(*),max(revision) FROM forge_agent.coding_tasks"),before)
+
+    def test_muse_normal_admission_worker_tokens_and_exact_backend_policy_fences(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        from usage_types import normalize_attempt_usage
+        config = make_v2_config()
+        config = replace(config, profiles={**config.profiles,
+            "muse": WorkProfile("muse", "muse", "fixture-meta-model", work_policy.POLICY_ID, execution_enabled=True)})
+        service = WorkServiceFactory(config, lambda: self.cluster.connect("forge_agent")).create()
+        db = self.worker(self.cluster)
+        self.cluster.grant_worker("mission-control", "homelab", "muse", ("plan",))
+        inc = str(uuid4())
+        task = service.submit(make_submit(agent_profile="muse", idempotency_key="real-muse-m19"))
+        # A latent metadata grant cannot claim Muse work while no matching
+        # executable profile is advertised. This models usage-only registration.
+        for profiles in (
+            [{"alias":"codex-v2","backend":"codex","model":"gpt-5.4","modes":["plan"]}],
+            [{"alias":"muse","backend":"muse","model":"wrong-model","modes":["plan"]}],
+            [{"alias":"muse","backend":"muse","model":"fixture-meta-model","modes":["review"]}],
+        ):
+            db.advertise("muse-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],profiles,work_policy.POLICY_DIGEST)
+            self.assertIsNone(db.claim("muse-worker",inc,["muse"]))
+        db.advertise("muse-worker", inc, [{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":"muse","backend":"muse","model":"fixture-meta-model","modes":["plan"]}], work_policy.POLICY_DIGEST)
+        lease = db.claim("muse-worker",inc,["muse"])
+        self.assertEqual(lease.task_id,task["task_id"])
+        self.assertEqual(lease.recipe["backend"],"muse")
+        self.assertEqual(lease.recipe["resource_profile"],"forge-coding-v10")
+        text, manifest = self.stage(db,lease)
+        usage = normalize_attempt_usage("muse", {"input_tokens":100,"output_tokens":25,"cached_tokens":80})
+        db.publish(lease,"awaiting_review",manifest,usage,"Muse fixture result",make_stop_proof(lease.unit_name))
+        row = self.rows(self.cluster,"SELECT usage_json FROM forge_agent.coding_attempts WHERE attempt_id=%s",(UUID(lease.attempt_id),))[0][0]
+        self.assertEqual(row,usage)
+        self.assertEqual(row["total_tokens"],"125")
+        self.assertEqual(row["cached_input_tokens"],"80")
+        self.assertEqual(self.rows(self.cluster,"SELECT forge_coding_worker_api._validate_usage_json(%s)",(Json({**usage,"source":"unverified-muse-source"}),))[0][0],False)
+        # Existing worker roles cannot mutate migration catalogs or grant their
+        # own authority just because another provider has been selected.
+        self.assertEqual(self.rows(self.cluster,"SELECT has_table_privilege('forge_coding_worker','forge_agent.schema_migrations','UPDATE')")[0][0],False)
+
+    def test_muse_enabled_then_disabled_submit_and_repair_replay_preserve_exact_receipts(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        from work_api import WorkRepair
+        from queue_store import Rejected
+        cfg=make_v2_config()
+        profile=WorkProfile("muse-replay","muse","fixture-muse",work_policy.POLICY_ID,execution_enabled=True)
+        cfg=replace(cfg,profiles={**cfg.profiles,profile.alias:profile})
+        enabled=WorkServiceFactory(cfg,lambda:self.cluster.connect("forge_agent")).create()
+        off=WorkServiceFactory(replace(cfg,profiles={**cfg.profiles,profile.alias:replace(profile,execution_enabled=False)}),lambda:self.cluster.connect("forge_agent")).create()
+        command=make_submit(agent_profile=profile.alias,mode="implement",idempotency_key="muse-replay-submit")
+        admitted=enabled.submit(command)
+        self.assertEqual(off.submit(command),admitted)
+        with self.assertRaises(Rejected)as error:off.submit(replace(command,idempotency_key="fresh-disabled-submit"))
+        self.assertEqual(error.exception.status,403)
+        db=self.worker(self.cluster);inc=str(uuid4())
+        self.cluster.grant_worker("mission-control","homelab",profile.alias,("implement",))
+        db.advertise("muse-replay-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":profile.alias,"backend":"muse","model":profile.model,"modes":["implement"]}],work_policy.POLICY_DIGEST)
+        lease=db.claim("muse-replay-worker",inc,[profile.alias]);_,manifest=self.stage(db,lease)
+        proof=make_stop_proof(lease.unit_name);db.publish(lease,"awaiting_review",manifest,None,"Fixture implementation",proof);db.reconcile(lease,"c"*64,proof)
+        # Owned historical fixture: a completed implementation before source review.
+        self.cluster.admin_exec("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1")
+        revision=self.rows(self.cluster,"SELECT revision FROM forge_agent.coding_tasks WHERE id=%s",(UUID(lease.task_id),))[0][0]
+        repair=WorkRepair("homelab",UUID(lease.task_id),revision,"d"*40,profile.alias,"Inspect this correction.",(),"muse-replay-repair")
+        repaired=enabled.repair(repair)
+        state=self.rows(self.cluster,"SELECT (SELECT count(*) FROM forge_agent.coding_tasks),(SELECT count(*) FROM forge_agent.coding_reviews),(SELECT count(*) FROM forge_agent.coding_control_receipts),(SELECT count(*) FROM forge_agent.coding_events)")
+        self.assertEqual(off.repair(repair),repaired)
+        with self.assertRaises(Rejected)as error:off.repair(replace(repair,idempotency_key="fresh-disabled-repair",expected_revision=repaired["revision"]))
+        self.assertEqual(error.exception.status,403)
+        self.assertEqual(self.rows(self.cluster,"SELECT (SELECT count(*) FROM forge_agent.coding_tasks),(SELECT count(*) FROM forge_agent.coding_reviews),(SELECT count(*) FROM forge_agent.coding_control_receipts),(SELECT count(*) FROM forge_agent.coding_events)"),state)
+
+    def test_muse_enabled_then_disabled_resume_replays_before_current_recipe_resolution(self):
+        from dataclasses import replace
+        from work_config import WorkProfile
+        profile=WorkProfile("muse-resume","muse","fixture-muse",work_policy.POLICY_ID,execution_enabled=True)
+        cfg=make_v2_config();cfg=replace(cfg,profiles={**cfg.profiles,profile.alias:profile})
+        enabled=WorkServiceFactory(cfg,lambda:self.cluster.connect("forge_agent")).create()
+        off=WorkServiceFactory(replace(cfg,profiles={**cfg.profiles,profile.alias:replace(profile,execution_enabled=False)}),lambda:self.cluster.connect("forge_agent")).create()
+        command=make_submit(agent_profile=profile.alias,mode="review",idempotency_key="muse-resume-submit")
+        admitted=enabled.submit(command);db=self.worker(self.cluster);inc=str(uuid4())
+        self.cluster.grant_worker("mission-control","homelab",profile.alias,("review",))
+        db.advertise("muse-resume-worker",inc,[{"alias":"homelab","base_revision":BASE_REV}],
+            [{"alias":profile.alias,"backend":"muse","model":profile.model,"modes":["review"]}],work_policy.POLICY_DIGEST)
+        lease=db.claim("muse-resume-worker",inc,[profile.alias]);proof=make_stop_proof(lease.unit_name)
+        published=db.publish(lease,"quota_blocked",None,None,"Fixture quota boundary",proof);receipt=db.reconcile(lease,"c"*64,proof)
+        resume=WorkResume("homelab",UUID(lease.task_id),published["revision"],"muse-resume-replay",profile.alias,UUID(receipt),"Operator qualified continuation.")
         admitted=enabled.resume(resume)
         before=self.rows(self.cluster,"SELECT count(*),max(revision) FROM forge_agent.coding_tasks")
         self.assertEqual(off.resume(resume),admitted)

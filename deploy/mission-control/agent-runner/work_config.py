@@ -22,7 +22,7 @@ MAX_LABEL_BYTES = 128
 MAX_TITLE_CHARS = 128
 MAX_TITLE_BYTES = 512
 VALID_MODES = frozenset({"plan", "review", "implement"})
-VALID_BACKENDS = frozenset({"antigravity", "codex", "grok"})
+VALID_BACKENDS = frozenset({"antigravity", "codex", "grok", "muse"})
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
@@ -130,7 +130,7 @@ class WorkProfile:
         validate_identifier(self.resource_profile, "resource profile")
         if self.label is not None:
             validate_label(self.label, "profile label")
-        enabled = self.backend != "grok" if self.execution_enabled is None else self.execution_enabled
+        enabled = self.backend not in {"grok", "muse"} if self.execution_enabled is None else self.execution_enabled
         if type(enabled) is not bool:
             raise ValueError("Invalid work execution capability")
         object.__setattr__(self, "execution_enabled", enabled)
