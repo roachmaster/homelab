@@ -269,6 +269,11 @@ fn failures_and_malformed_success_preserve_write_uncertainty_without_retries() {
     }
     for response in [
         Err(TransportError::Timeout),
+        reply(200, "", &[]),
+        reply(202, "", &[]),
+        reply(204, "", &[]),
+        reply(302, "", &[]),
+        reply(400, "", &[]),
         reply(503, "", &[]),
         reply(201, "", &[]),
     ] {
@@ -324,6 +329,8 @@ fn configuration_is_bounded_and_secrets_debug_redacted() {
         "https://example.com/?token=x",
         "https://example.com/#x",
         "https://example.com/a/../",
+        "https://example.com/a/..",
+        "https://example.com/a/.",
         "https://example.com/%2e%2e/",
         "file:///tmp/jenkins",
         "https://example.com/a\\b",

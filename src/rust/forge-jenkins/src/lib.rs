@@ -4,6 +4,7 @@
 //! `http` adds the optional native blocking transport. No environment, files,
 //! registries or credentials are discovered by this library. Jenkins API tokens
 //! use preemptive HTTP Basic authentication with a username, not Bearer.
+#![doc = include_str!("../README.md")]
 use base64::{engine::general_purpose::STANDARD, Engine};
 use forge_bootstrap::{PreparedGroup, RegistrationError};
 use forge_io_client::IoClient;
@@ -221,6 +222,7 @@ impl Config {
                     || matches!(part, "." | "..")
             })
             || input.contains('%')
+            || input.split('/').any(|part| matches!(part, "." | ".."))
             || input.contains('\\')
             || input.contains("/../")
             || input.contains("/./")
@@ -533,7 +535,7 @@ where
         match request {
             Request::Build { .. } => {
                 if response.status != 201 {
-                    return Err(Error::UnexpectedStatus(response.status));
+                    return Err(Error::MutationUncertain);
                 }
                 let location = response
                     .headers
@@ -552,6 +554,12 @@ where
                         .headers
                         .get("location")
                         .ok_or(Error::MutationUncertain)?;
+                    if location.is_empty()
+                        || location.len() > 4096
+                        || location.chars().any(char::is_control)
+                    {
+                        return Err(Error::MutationUncertain);
+                    }
                     let target = self
                         .config
                         .endpoint
@@ -571,7 +579,7 @@ where
                 } else if matches!(response.status, 200 | 201 | 204) {
                     Ok(Response::CancelRequested)
                 } else {
-                    Err(Error::UnexpectedStatus(response.status))
+                    Err(Error::MutationUncertain)
                 }
             }
             request => {
