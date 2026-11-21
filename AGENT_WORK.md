@@ -1,3 +1,12 @@
+## Current: Clean up stalled pipeline work — 2026-11-21
+
+- **authorization:** User requests cleaning up and fixing the stalled conflict workflows. Preserve saved source, immutable Plans/verdicts, budget counters and actual source authority. Never manufacture acceptance or reset an exhausted automatic budget.
+- **coordinator fix:** A genuine Code Review Revise at the frozen2/2 stagnation limit caused SQL P0009 to escape the inner savepoint, rolling back the verdict and retrying forever. Record the exact verdict/reviewer result and an explicit exhausted-budget handoff atomically. Preserve source task/review/budget; unrelated database failures still propagate. Scoped64 real PostgreSQL/feedback/replay/preparation tests passed; independent source review approved dd1eec1.
+- **actual cache evidence:** Native Jenkins build3 passed all3fixed gates, all769 backend tests and confirmed cleanup on a19a46a. This is not source approval: independent Codex found swallowed cancellation, orphaned snapshots escaping retention, and missing live cold/warm qualification. Root is coordinating source correction/qualification; the exhausted automatic ledger remains2repair rounds/2stagnant rounds.
+- **cleanup:** The obsolete plan-only c6aa3fde task was normally cancelled as superseded (revision7), retaining its artifact and review history. The distinct old Jenkins-events task remains intact; a selective M26 recovery reference307d034 passed100focused tests. Its never-applied0018 migration collision and API-only consumer/lifecycle/scope defects are corrected in unreviewed reference material, not claimed deployed or approved.
+- **deployment:** Stage and activate only the reviewed API Python source for this coordinator hotfix; schema25, credentials/grants, native policy snapshots, Rust/ABI12 assets and all other services remain unchanged. Record real activation and subsequent workflow outcome privately.
+- **evidence:** /mnt/data/homelab-build/cleanup-conflicts-20261121 and /var/lib/forge-provisioning/cleanup-conflicts-20261121.
+
 # Shared Agent Work Checkpoint
 
 ## Current: Push, build, merge and return failures to Gemini — 2026-11-21
