@@ -1,0 +1,13 @@
+[package]
+name = "jenkins-independent-consumer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+forge-jenkins = { path = "../.." }
+forge-bootstrap = { path = "../../../forge-bootstrap" }
+forge-provider = { path = "../../../forge-provider" }
+forge-io-client = { path = "../../../forge-io-client" }
