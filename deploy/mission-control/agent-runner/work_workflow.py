@@ -694,6 +694,9 @@ class WorkflowStore:
                     elif q and q['status'] in {'pending','checking','retry_infrastructure'}:self._phase(cursor,w,'checks')
                     elif q and q['status']=='repair':self._phase(cursor,w,'repair')
                     elif q and q['status']=='approved':
+                        if q['repair_task_id'] is not None:
+                            self._phase(cursor,w,'repair')
+                            continue
                         cursor.execute("SELECT publication_id,status FROM forge_agent.coding_publications WHERE review_id=%s ORDER BY created_at DESC LIMIT 1",(q['review_id'],));publication=cursor.fetchone()
                         if publication and publication['status']=='published':
                             cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE source_publication_id=%s AND kind='merge' AND status IN('pending','leased')) AS active",(publication['publication_id'],))
@@ -703,7 +706,7 @@ class WorkflowStore:
             cursor.execute("SELECT enabled,phase FROM forge_agent.coding_workflows WHERE workflow_id=%s",(w['workflow_id'],));active=cursor.fetchone()
             if not active or not active['enabled'] or active['phase'] in {'completed','cancelled','escalated'}:continue
             cursor.execute("""SELECT p.*,q.candidate_commit,q.gate_manifest_sha256 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)
-              JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.owner_decision->>'closed_by'='peer_reviewer'
+              JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.repair_task_id IS NULL AND q.owner_decision->>'closed_by'='peer_reviewer'
               AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha ORDER BY h.observed_at DESC,h.observation_id DESC LIMIT 1) IS TRUE ORDER BY p.created_at DESC""",(w['workflow_id'],))
             for p in cursor.fetchall():
                 if not w['snapshot']['auto_merge']:continue

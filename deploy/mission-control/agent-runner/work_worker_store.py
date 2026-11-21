@@ -642,6 +642,28 @@ class WorkerDB:
             value=cursor.fetchone()[0]
         return None if value is None else dict(value)
 
+    def read_native_delivery_context(self, lease):
+        """Read build context only through this attempt's authenticated feedback."""
+        attempt, token = _extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_worker_api.read_native_delivery_context(%s,%s)", (attempt, token))
+            value = cursor.fetchone()[0]
+        if value is None:
+            return None
+        keys = {"feedback_id", "feedback_sha256", "review_id", "source_task_id", "source_attempt_id",
+                "candidate_commit", "gate_manifest_sha256", "delivery_failure"}
+        if (not isinstance(value, dict) or set(value) != keys
+                or not isinstance(value["delivery_failure"], dict)):
+            raise ValueError("Invalid native delivery context")
+        for name in ("feedback_id", "review_id", "source_task_id", "source_attempt_id"):
+            _coerce_uuid(value[name], name)
+        for name in ("feedback_sha256", "gate_manifest_sha256"):
+            if not isinstance(value[name], str) or not DIGEST_HEX_RE.fullmatch(value[name]):
+                raise ValueError("Invalid native delivery context digest")
+        if not isinstance(value["candidate_commit"], str) or not SHA1_HEX_RE.fullmatch(value["candidate_commit"]):
+            raise ValueError("Invalid native delivery context source")
+        return dict(value)
+
     def project_revisions(self):
         """Only durable merged heads for this owner and this worker's project grants."""
         with self._worker_cursor() as cursor:
@@ -695,6 +717,40 @@ class WorkerDB:
         with self._reconcile_cursor() as cursor:
             cursor.execute("SELECT forge_coding_reconciler_api.merge_finish(%s,%s,%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token']),status,Json(receipt)))
             return dict(cursor.fetchone()[0])
+
+    def native_merge_failure(self, job, outcome):
+        """Return one reconciled non-merge to its bounded native author loop."""
+        from work_feedback import validate_findings
+        if not isinstance(outcome, dict):
+            raise ValueError("Invalid native merge failure")
+        outcome = {**outcome, "findings": validate_findings(outcome.get("findings", []), public=True)}
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.native_merge_failure(%s,%s,%s)",
+                (_coerce_uuid(job["merge_id"]), _coerce_uuid(job["lease_token"]), Json(outcome)))
+            return dict(cursor.fetchone()[0])
+
+    def native_branch_first_replay(self, review_id, expected_revision):
+        """Once append a real pre-CI conflict retry, retaining its old evidence."""
+        if type(expected_revision) is not int or not 1 <= expected_revision < 2**53:
+            raise ValueError("Invalid native replay revision")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.native_branch_first_replay(%s,%s)",
+                (_coerce_uuid(review_id), expected_revision))
+            return dict(cursor.fetchone()[0])
+
+    def native_branch_published(self, job, receipt):
+        """Persist the confirmed owned-branch event before admitting Jenkins I/O."""
+        if not isinstance(receipt, dict):
+            raise ValueError("Invalid native branch receipt")
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.native_branch_published(%s,%s,%s)",
+                (_coerce_uuid(job["review_id"]), _coerce_uuid(job["lease_token"]), Json(receipt)))
+            value = cursor.fetchone()[0]
+        if not isinstance(value, dict) or set(value) != {"event_id", "correlation_id"}:
+            raise ValueError("Invalid native branch event acknowledgement")
+        _coerce_uuid(value["event_id"], "native branch event")
+        _coerce_uuid(value["correlation_id"], "native branch correlation")
+        return dict(value)
 
     def queue_review(self,lease,reconciliation_receipt_id):
         attempt,token=_extract_attempt_creds(lease)

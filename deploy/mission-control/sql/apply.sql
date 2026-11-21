@@ -246,4 +246,11 @@ SELECT NOT EXISTS (
 \ir migrations/0024_native_jenkins_context.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(24,'native_jenkins_context');
 \endif
+
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=25) AS apply_0025
+\gset
+\if :apply_0025
+\ir migrations/0025_native_delivery_repair.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(25,'native_delivery_repair');
+\endif
 COMMIT;
