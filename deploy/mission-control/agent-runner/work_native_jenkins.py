@@ -17,7 +17,7 @@ from uuid import UUID, uuid5
 
 from work_executor import unit_name
 from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
-    LeaseLost, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
+    LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
 from work_publication_checks import VerificationFailure
 from work_publication_clients import PublicationError, branch_name
@@ -87,6 +87,83 @@ class NativeJenkinsVerification:
             'job': selected.jenkins_job, 'spool': str(selected.spool_root),
             'results': str(selected.results_root), 'verifier': str(selected.verifier),
         })).hexdigest()
+
+    def _historical_terminal(self, directory):
+        """Read-only cleanup proof for an inactive action's retired transport.
+
+        This cannot authorize a replay, CI pass or new effect. Active actions
+        and uncertain evidence still pass through the unchanged strict _read.
+        """
+        try:
+            action = uid(directory.name)
+            binding = json.loads(read_private(directory / 'native-binding.json', owner=os.geteuid()))
+            if (binding.get('version') != VERSION or binding.get('transport_sha256') == self._transport_digest()
+                    or digest(binding['transport_sha256']) != binding['transport_sha256']):
+                return False
+            request = binding['request']
+            scope = self._scope(binding['scope'], request)
+            if request.get('action_id') != action or any(request.get(key) != scope[key] for key in IDENTITY):
+                return False
+            identity = {**scope, 'candidate_commit': sha(request['candidate_commit']),
+                'candidate_tree': sha(request['candidate_tree']),
+                'native_gate_manifest_sha256': digest(binding['native_gate_manifest_sha256'])}
+            expected_action = str(uuid5(UUID(scope['workflow_id']), VERSION + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
+            if action != expected_action or request.get('prepare_action_id') != str(uuid5(UUID(action),'candidate-bundle')):
+                return False
+            observed = None
+            for filename,terminal in (('observation.json',{'passed','failed'}),('cancel-observation.json',{'cancelled'})):
+                if (directory / filename).exists():
+                    value = json.loads(read_private(directory / filename, owner=os.geteuid()))
+                    if value.get('status') in terminal and value.get('receipt',{}).get('cleanup_confirmed') is True:
+                        observed = value
+                        break
+            if observed is None:
+                return False
+            receipt = observed['receipt']
+            if observed['status']=='cancelled' and receipt.get('target_action_id')!=action:
+                return False
+            raw_request = read_private(self.delivery.config.spool_root / action / 'request.json', owner=os.geteuid())
+            submitted = json.loads(raw_request)
+            expected = {'version': 1, 'action_id': action, 'workflow_id': scope['workflow_id'],
+                'project_alias': scope['project_alias'], 'candidate_commit': sha(request['candidate_commit']),
+                'candidate_tree': sha(request['candidate_tree']), 'expected_main': sha(request['integration_base']),
+                'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
+                'verification_profile': PROFILE, 'correlation_id': scope['correlation_id']}
+            if 'branch_scope' in request:
+                expected['branch_scope'] = request['branch_scope']
+            if (set(submitted) != set(expected) | {'bundle_sha256'} or type(submitted['version']) is not int
+                    or any(submitted.get(key) != value for key,value in expected.items())):
+                return False
+            digest(submitted['bundle_sha256'])
+            root_raw = read_private(self.delivery.config.results_root / (action + '.json'), owner=0, maximum=262144)
+            root = json.loads(root_raw)
+            if (digest(receipt['check_receipt_sha256']) != hashlib.sha256(root_raw).hexdigest()
+                    or type(root.get('version')) is not int or root['version'] != 1
+                    or root.get('status') not in {'passed','failed'} or root.get('cleanup_confirmed') is not True
+                    or any(root.get(key) != value for key,value in expected.items() if key != 'project_alias')
+                    or root.get('request_sha256') != hashlib.sha256(raw_request).hexdigest()):
+                return False
+            digest(root['log_sha256'])
+            if (observed['status']!='cancelled' or 'log_sha256' in receipt) and receipt.get('log_sha256')!=root['log_sha256']:
+                return False
+            if ('branch_scope' in root) != ('branch_scope' in request):
+                return False
+            if observed['status'] == 'passed' and root['status'] != 'passed':
+                return False
+            checks = root.get('checks')
+            if (not isinstance(checks,list) or len(checks)>len(CHECKS)
+                    or any(not isinstance(check,dict) or set(check)!={'index','argv','returncode'}
+                        or type(check['index']) is not int or check['index']!=index or check['argv']!=list(CHECKS[index])
+                        or type(check['returncode']) is not int for index,check in enumerate(checks))
+                    or root['status']=='passed' and (len(checks)!=len(CHECKS)
+                        or any(check['returncode']!=0 for check in checks))):
+                return False
+            current = self.store.native_ci_binding(scope)
+            self._scope(current, scope)
+            return (current.get('active') is False
+                and current.get('state') in {'completed','cancelled','superseded','inactive'})
+        except (OSError,ValueError,KeyError,TypeError,AttributeError,PublicationError):
+            return False
 
     def publish_source(self, job, repository, stop=None):
         """Publish only this leased stopped source, before starting Jenkins."""
@@ -513,6 +590,8 @@ class NativeJenkinsVerification:
             if not directory.is_dir() or directory.is_symlink() or not (directory / 'native-binding.json').exists():
                 continue
             try:
+                if self._historical_terminal(directory):
+                    continue
                 binding = self._read(uid(directory.name))
                 cancelled = directory / 'cancel-observation.json'
                 if cancelled.exists():
