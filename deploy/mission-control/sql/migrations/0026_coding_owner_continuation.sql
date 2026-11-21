@@ -9,7 +9,7 @@ SET search_path=pg_catalog,pg_temp AS $fn$
 DECLARE t forge_agent.coding_tasks%ROWTYPE;w forge_agent.coding_workflows%ROWTYPE;
  a forge_agent.coding_workflow_actions%ROWTYPE;q forge_agent.coding_reviews%ROWTYPE;
  r forge_agent.coding_workflow_reviews%ROWTYPE;s forge_agent.coding_attempts%ROWTYPE;
- p forge_agent.coding_plan_decisions%ROWTYPE;rec forge_agent.coding_reconciliation_receipts%ROWTYPE;
+ p forge_agent.coding_plan_decisions%ROWTYPE;rec forge_agent.coding_reconciliation_receipts%ROWTYPE;checked_at timestamptz;
 BEGIN
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE id=p_task
   AND owner_id=current_setting('forge.coding_owner',true);
@@ -40,12 +40,16 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'Owner continuation source denied' USING ERRCODE='P0009';END IF;
  SELECT * INTO s FROM forge_agent.coding_attempts WHERE attempt_id=q.attempt_id
   AND(owner_id,project_alias,task_id)=(q.owner_id,q.project_alias,q.task_id);
- SELECT * INTO rec FROM forge_agent.coding_reconciliation_receipts WHERE receipt_id=q.reconciliation_receipt_id;
+ SELECT * INTO rec FROM forge_agent.coding_reconciliation_receipts
+  WHERE receipt_id::text=a.intent->'request'->>'reconciliation_receipt_id';
  SELECT * INTO r FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id::text=a.intent->>'peer_review_id'
   AND(owner_id,project_alias,workflow_id)=(t.owner_id,t.project_alias,w.workflow_id)
   AND(source_task_id,source_attempt_id,source_review_id)=(q.task_id,q.attempt_id,q.review_id);
  SELECT * INTO p FROM forge_agent.coding_plan_decisions WHERE decision_id=coalesce(q.plan_decision_id,q.scope_plan_decision_id)
   AND(owner_id,project_alias)=(t.owner_id,t.project_alias);
+ BEGIN checked_at:=(rec.stop_proof->>'checked_at')::timestamptz;
+ EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN
+  RAISE EXCEPTION 'Owner continuation stop proof malformed' USING ERRCODE='P0009';END;
  IF(s.attempt_id IS NULL OR rec.receipt_id IS NULL OR r.workflow_review_id IS NULL OR p.decision_id IS NULL
   OR s.phase<>'stopped' OR s.reservation_active OR s.lease_expires_at IS NOT NULL
   OR s.result_sha256 IS DISTINCT FROM q.parent_result_sha256
@@ -54,6 +58,12 @@ BEGIN
   OR a.intent->>'source_workspace_digest' IS DISTINCT FROM q.workspace_digest
   OR(rec.owner_id,rec.project_alias,rec.task_id,rec.attempt_id,rec.workspace_digest)
    IS DISTINCT FROM(q.owner_id,q.project_alias,q.task_id,q.attempt_id,q.workspace_digest)
+  OR rec.receipt_id=q.reconciliation_receipt_id OR rec.task_revision<>q.source_revision
+  OR rec.created_at<r.updated_at OR rec.created_at>a.created_at
+  OR checked_at IS NULL OR checked_at<r.updated_at OR checked_at>clock_timestamp()
+  OR rec.stop_proof->'scope_stopped' IS DISTINCT FROM 'true'::jsonb
+  OR rec.stop_proof->>'source' IS DISTINCT FROM 'systemd'
+  OR rec.stop_proof->>'unit_name' IS DISTINCT FROM s.unit_name
   OR a.intent->'request'->>'reconciliation_receipt_id' IS DISTINCT FROM rec.receipt_id::text
   OR a.intent->'request'->'expected_revision' IS DISTINCT FROM to_jsonb(q.source_revision)
   OR a.intent->>'candidate_commit' IS DISTINCT FROM q.candidate_commit

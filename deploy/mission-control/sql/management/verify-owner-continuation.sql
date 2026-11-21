@@ -5,7 +5,7 @@ BEGIN
  IF NOT EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=26 AND name='coding_owner_continuation') THEN
   RAISE EXCEPTION 'Missing owner continuation migration26';END IF;
  FOR expected IN SELECT * FROM(VALUES
-  ('forge_agent._coding_owner_continuation_fenced(uuid)','245121de26e34ee55a80cc192e936b5e6ff3c8cba8e0daeed23fd957e986a64e'),
+  ('forge_agent._coding_owner_continuation_fenced(uuid)','69c4f503bb5002e547ff3bd426f94d819b3932882a7aa52167ca72fda5a5ce87'),
   ('forge_agent.coding_schedule_repair(uuid,uuid)','0f5f8c0891d7aff543246d582879f8893fe6804aff64b67a5f4442265f845187'),
   ('forge_agent.owner_continuation_capability()','bb0d3d842372691a43669cf94a7a05bddb726814c12d4269e84a73082fd0c434'),
   ('forge_coding_reconciler_api.native_branch_first_replay(uuid,bigint)','e8a8a79743e96d944101ff5363e653425f9d26983f001e2950a1fabfe78a7024'),
