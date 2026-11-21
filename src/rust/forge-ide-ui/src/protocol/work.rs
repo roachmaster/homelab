@@ -385,6 +385,7 @@ pub enum WorkBackend {
     Antigravity,
     Codex,
     Grok,
+    Muse,
 }
 impl WorkBackend {
     pub fn label(self) -> &'static str {
@@ -392,6 +393,7 @@ impl WorkBackend {
             Self::Antigravity => "Gemini / Antigravity",
             Self::Codex => "Codex",
             Self::Grok => "Grok",
+            Self::Muse => "Muse Code",
         }
     }
 }
@@ -1699,6 +1701,7 @@ mod tests {
             ),
             (WorkBackend::Codex, "codex", "Codex"),
             (WorkBackend::Grok, "grok", "Grok"),
+            (WorkBackend::Muse, "muse", "Muse Code"),
         ] {
             assert_eq!(serde_json::to_value(backend).unwrap(), wire);
             assert_eq!(
