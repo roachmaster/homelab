@@ -27,12 +27,14 @@ pub(super) const DISPATCH: &[Node] = &[
         element!(H1; text("Coding-agent dispatch")),
         element!(P;
             element!(Strong; text("Implemented; activation is deployment controlled.")),
-            text(" Source checkpoint: 20 November 2026. Original design base "),
+            text(" Source checkpoint: 21 November 2026. Original design base "),
             element!(Code; text("2e1300a00da92e9f97bdb1a656c2b182d4219a6c")),
-            text(". The source implements the Agents view, durable assignments, native Antigravity/Codex adapters and an opt-in Grok adapter, full-result paging, finished-plan decisions and checked PR publication. Work and Usage are independent opt-in capabilities. Grok execution defaults off until explicitly qualified; listing a usage profile does not enable tasks. This reader does not certify deployment of the bundle, migrations or worker. Retained diagrams use original illustrative port names."),
+            text(". Schema22 and atomic ABI12 add durable task/event identities, bounded history and the Muse database workflow through actual native Codex review, Jenkins checks and trusted merge. The native Antigravity/Codex adapters and opt-in Grok adapter retain their separate frozen recipes, full-result paging and legacy/manual decisions. Work and Usage are independent opt-in capabilities. Grok execution defaults off until explicitly qualified; listing a usage profile does not enable tasks. This reader does not certify deployment of the bundle, migrations or worker. Retained diagrams use original illustrative port names."),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Coding-agent dispatch sections"];
-            element!(A [Href = "#flow"]; text("End-to-end flow")),
+            element!(A [Href = "#external-workflow"]; text("Muse database workflow")),
+            element!(A [Href = "#task-history"]; text("Task history")),
+            element!(A [Href = "#flow"]; text("Native execution flow")),
             element!(A [Href = "#ownership"]; text("Ownership and providers")),
             element!(A [Href = "#progress"]; text("Plans and live progress")),
             element!(A [Href = "#lifecycle"]; text("Leases and takeover")),
@@ -42,8 +44,32 @@ pub(super) const DISPATCH: &[Node] = &[
             element!(A [Href = "/design/agent-feedback-loop"]; text("Feedback and repair")),
         ),
     ),
+    element!(Section [Id = "external-workflow", Class = "design-section", AriaLabelledby = "external-workflow-title"];
+        element!(H2 [Id = "external-workflow-title"]; text("Muse through PostgreSQL")),
+        element!(P; text("Muse owns its runner. Mission Control submits persisted external assignments and receives complete artifacts through scoped SQL. The configured external workflow advances automatically; routine Resume, Approve and Accept controls stay hidden.")),
+        element!(Ol [Class = "contract-steps"];
+            element!(Li; element!(Strong; text("Plan and independent review.")), text(" The API coordinator queues a trusted source observation, then creates a real native Codex review task. Its actual lease receives the full immutable Plan, original request and acceptance criteria; a structured, source-bound verdict admits revision or implementation.")),
+            element!(Li; element!(Strong; text("Implement and review exact source.")), text(" Muse receives the approved Plan and bounded findings through PostgreSQL. The separate delivery worker quarantines its candidate and produces a sanitized same-tree commit. Codex reviews the complete approved Plan and verified diff under its own read-only native attempt.")),
+            element!(Li; element!(Strong; text("Run fixed Jenkins gates.")), text(" The trusted delivery provider uses Forge's pinned Rust Jenkins IoClient. Jenkins runs make ci, make ui-qa and the complete backend test suite on that exact commit/tree/gate manifest. A model reply or exit code cannot replace the root-owned check and process-cleanup receipts.")),
+            element!(Li; element!(Strong; text("Record the guarded merge.")), text(" Only independent approval and matching successful checks admit a non-forced remote main update. Stable action IDs and a private journal reconcile lost acknowledgements. Main movement requires fresh integration, review and checks; cancellation waits for actual owned-process cleanup.")),
+        ),
+        element!(Dl [Class = "storage"];
+            element!(Div; element!(Dt; text("API composition root")), element!(Dd; text("WorkServiceFactory injects the owner/project-scoped ExternalWorkflowStore through ExternalWorkDAO and the coordinator. This port performs PostgreSQL effects and has no model, GitHub or Jenkins credentials."))),
+            element!(Div; element!(Dt; text("Native review composition root")), element!(Dd; text("CodingWorkerFactory injects ExternalReviewContextProvider only when external_reviews is enabled. Real lease validation, complete read-only artifact context and native stop/reconciliation proofs stay in that worker."))),
+            element!(Div; element!(Dt; text("Trusted delivery composition root")), element!(Dd; text("A separate delivery service injects its scoped DAO and source/prepare/verify/merge/cancel providers. Only this trusted boundary receives GitHub/Jenkins access. Models and generated browser JavaScript receive neither."))),
+        ),
+        element!(P [Class = "contract-note"]; text("Plan and code revision budgets are frozen separately, up to three each. Exhausted budgets or unresolved authorization/cleanup escalate with preserved evidence. Native P10 and stored external-v1 recipes/artifacts remain unchanged. An external artifact never invents a native attempt, stop proof or source-approval receipt.")),
+        element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/external-agent-workflow.md"]; text("External workflow UML sequence, config and recovery contract →")),
+    ),
+    element!(Section [Id = "task-history", Class = "design-section", AriaLabelledby = "task-history-title"];
+        element!(H2 [Id = "task-history-title"]; text("One envelope with bounded event history")),
+        element!(P; text("Each root assignment has one compact task row. Its reader shows the full immutable task correlation, actual reviewer/source links and typed workflow phase. M21 generates every event UUID and derives its correlation from the owning task; client request IDs and idempotency keys keep their separate meanings.")),
+        element!(P; text("Rust retains one 50-event page, a 256KiB summary budget and 64 cursor bookmarks. First, Previous and Next reach older history without growing an in-memory log. Exact event identity/time and provenance live in keyboard/touch disclosures whose open state survives refresh. Native current-attempt milestones keep their separate 21-entry limit.")),
+        element!(P; text("Native attempt summaries, Muse assignment/generation summaries and Forge coordinator workflow summaries are separate typed DTOs. The DAO checks actual task/assignment/workflow membership before projecting a summary or linked task. Arbitrary payloads and foreign identities never become process proof or review authority.")),
+        element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-task-event-envelope.md"]; text("Trace identity, paging and migration contract →")),
+    ),
     element!(Section [Id = "flow", Class = "design-section", AriaLabelledby = "flow-title"];
-        element!(H2 [Id = "flow-title"]; text("From assignment to reviewed completion")),
+        element!(H2 [Id = "flow-title"]; text("Retained native and manual execution path")),
         element!(Ol [Class = "contract-steps"];
             element!(Li;
                 element!(Strong; text("Single admitted gateway.")),
@@ -322,7 +348,7 @@ pub(super) const DISPATCH: &[Node] = &[
     element!(Section [Id = "contracts", Class = "design-section", AriaLabelledby = "contracts-title"];
         element!(H2 [Id = "contracts-title"]; text("Implemented API, DTO, and DAO contracts")),
         element!(P;
-            text("All implemented destinations share "),
+            text("The admitted destinations share "),
             element!(Code; text("POST /forge/v1/dispatch")),
             text(" -> private "),
             element!(Code; text("POST /v1/dispatch")),
@@ -442,7 +468,7 @@ pub(super) const DISPATCH: &[Node] = &[
             element!(Details;
                 element!(Summary; text("Illustrative submit request and 202 receipt example")),
                 element!(Pre [Class = "contract-code"];
-                    element!(Code; text("{\"kind\":\"work_submit\",\"request_id\":\"req-9f2a\",\"project_alias\":\"homelab\",\"base_revision\":\"2e1300a00da92e9f97bdb1a656c2b182d4219a6c\",\"mode\":\"plan\",\"agent_profile\":\"agy-plan-v1\",\"prompt\":\"Draft fix plan\",\"acceptance_criteria\":\"Bounded plan\",\"idempotency_key\":\"task-001\"}\n\n202 Accepted (after COMMIT):\n{\"protocol_version\":1,\"event\":{\"kind\":\"work_submitted\",\"request_id\":\"req-9f2a\",\"task_id\":\"8c1d4c3e-6b4f-4d2e-9a1b-2c3d4e5f6a7b\",\"revision\":1,\"status\":\"queued\",\"recipe_digest\":\"sha256:...\"}}")),
+                    element!(Code; text("{\"kind\":\"work_submit\",\"request_id\":\"req-9f2a\",\"project_alias\":\"homelab\",\"base_revision\":\"2e1300a00da92e9f97bdb1a656c2b182d4219a6c\",\"mode\":\"plan\",\"agent_profile\":\"agy-plan-v1\",\"prompt\":\"Draft fix plan\",\"acceptance_criteria\":\"Bounded plan\",\"idempotency_key\":\"task-001\"}\n\n202 Accepted (after COMMIT):\n{\"protocol_version\":1,\"event\":{\"kind\":\"work_submitted\",\"request_id\":\"req-9f2a\",\"task_id\":\"8c1d4c3e-6b4f-4d2e-9a1b-2c3d4e5f6a7b\",\"revision\":1,\"status\":\"queued\",\"recipe_digest\":\"sha 256:...\"}}")),
                 ),
             ),
         ),
@@ -821,7 +847,7 @@ pub(super) const USAGE: &[Node] = &[
             ),
             element!(Li;
                 element!(Strong; text("Versioned metadata smoke and explicit deployment.")),
-                text(" Codex allowance/activity metadata capability has been verified without generation. Requalify the release, then explicitly provision/configure/deploy; Antigravity and Grok headless allowance stay unsupported and are never inferred from TUI-only hooks. Grok requires the additive policy9/schema18 release and matching ABI10 portal bundle; historical recipes and receipts remain unchanged. Account qualification and explicit execution configuration remain separate from usage visibility."),
+                text(" Codex allowance/activity metadata capability has been verified without generation. Requalify the release, then explicitly provision/configure/deploy; Antigravity and Grok headless allowance stay unsupported and are never inferred from TUI-only hooks. Grok retains its additive policy9/schema18 qualification history; the current atomic release uses schema22, native policy10 and ABI12. Historical recipes and receipts remain unchanged. Account qualification and explicit execution configuration remain separate from usage visibility."),
             ),
         ),
         element!(Nav [Class = "section-nav", AriaLabel = "Related agent usage design references"];

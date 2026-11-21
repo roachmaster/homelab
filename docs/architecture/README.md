@@ -13,10 +13,15 @@ The [current implementation reference](../design/implementation-status.md) and [
 ## Coding-agent dispatch and usage
 
 [Task correlation and event envelopes](proposals/forge-task-event-envelope.md)
-imports Muse's reviewed plan for per-task trace IDs, generated event IDs, derived
-event correlations and bounded history. Implementation and rollout are pending.
+documents implemented M21 trace identities and the ABI12 bounded task reader.
+The full correlation and every typed event are available through explicit paging;
+live activation remains release-controlled.
 
-[Current coding-agent workflow](coding-admission.md) covers the implemented Agents UI, nine Work destinations, immutable policy/recipe, isolated native workers, scoped execute-only database roles, result paging and explicit review/resume. Work/Usage remain independently opt-in; this source checkpoint does not claim live deployment.
+[External author and native reviewer SDLC](external-agent-workflow.md)
+documents the implemented M22 Muse database → native Codex review → Jenkins →
+trusted merge flow, including bounded revision, cancellation and lost-ack recovery.
+
+[Current coding-agent workflow](coding-admission.md) covers the implemented Agents UI, typed Work destinations, immutable policy/recipe, isolated native workers, scoped execute-only database roles, result paging and legacy explicit review/resume plus configured automatic workflows. Work/Usage remain independently opt-in; this source checkpoint does not claim live deployment.
 
 [Dispatch sequences](proposals/forge-coding-agent-dispatch.md) retain ownership/lifecycle/completion/takeover diagrams with current source mapping. [Agent usage](proposals/forge-agent-usage.md) separates supported provider allowance/account activity from Forge project token/runtime totals. Codex metadata is supported; Antigravity headless allowance is explicitly unsupported. Refresh performs metadata only and never automatically resumes a quota-blocked task.
 

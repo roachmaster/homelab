@@ -1,10 +1,11 @@
 # Current Forge implementation
 
-Updated 20 November 2026. The current source navigation is **Agents, Workbench,
+Updated 21 November 2026. The current source navigation is **Agents, Workbench,
 Home and Design**. Chat is temporarily inactive; Mail remains retired. Their
-PostgreSQL history and backend APIs remain preserved. The current source requires
-an atomic **ABI10** bundle and the matching inert workspace restore/save backend;
-this source change does not itself deploy the new portal.
+PostgreSQL history and backend APIs remain preserved. Current source targets
+schema22, native `forge-coding-v10` and an atomic **ABI12** host/assets bundle.
+External authors use the separately versioned `forge-external-db-v2` workflow.
+Source validation and live rollout receipts remain separate.
 
 The typed agent catalog and usage contracts accept Grok when the configured
 backend advertises it. Missing allowance and token observations stay unknown;
@@ -14,7 +15,7 @@ one authorized free-preview response verified structured token output, while
 production execution and numerical allowance remain unqualified. See the
 [Grok provider design](../architecture/grok-coding-provider.md).
 
-The preceding runtime checkpoint activated M17 / `forge-coding-v8` from
+An earlier successful runtime checkpoint activated M17 / `forge-coding-v8` from
 `8a1faf496f76ef30dd6f1362a32e5d70f80f012a`, with the prior checked UI assets.
 A real Gemini-author/Codex-reviewer workflow completed one repair round, passed
 `make ci`, all 28 browser groups, 466 zero-skip backend tests and all three exact-head
@@ -33,8 +34,9 @@ Earlier observations below are dated history, not current readiness claims.
 | Mail (retired portal view) | Saved PostgreSQL threads and private backend contracts are preserved; old local draft hints stay inert. | No active Mail controls, requests or polling. Legacy Mail URLs lead to Agents; public Mail flags are disabled during rollout. |
 | Workbench | Header project breadcrumb and view sheet; unified search with entry-name mode; Explorer, verified File source, Outline and supplied Problems. Markdown has Raw/Display and source has Wrap. | Search covers the accepted report, not arbitrary filesystem contents or resolved references. Problems are inspection diagnostics, not compiler/test results. |
 | Agents | Catalog-backed autonomous assignments with configured independent author/reviewer roles, bounded revisions/repairs, exact-head checks and trusted automatic publication/merge; legacy assignments retain their manual lifecycle. Task/usage cards use semantic badges, readable times, precise token metrics and scoped refresh. | Independent Work/Usage grants and supervised workers remain required. Quota blocks never automatically rotate accounts or purchase credits. Runtime activation is recorded separately from source UI delivery. |
-| Grok provider | Pinned native 1.0.92 adapter, explicit fresh sessions, bound terminal cache accounting, instruction-only project trust and owned credential cleanup. Typed cards render supplied catalog/usage data. | Execution defaults off in API and worker config. Usage-only visibility reports Not reported; no quota polling, inferred allowance, paid fallback or change to Gemini/Codex roles. Requires additive M18/P9 and matching ABI10 activation. |
-| External agent directory | Agents lists Muse Email as a manual contact, with its recipient and verified sender identity. | It has no native task profile, quota/usage observation or worker-readiness claim. Forge email sending, replies and background task tracking are not integrated. |
+| Grok provider | Pinned native 1.0.92 adapter, explicit fresh sessions, bound terminal cache accounting, instruction-only project trust and owned credential cleanup. Typed cards render supplied catalog/usage data. | Execution defaults off in API and worker config. Usage-only visibility reports Not reported; no quota polling, inferred allowance, paid fallback or change to Gemini/Codex roles. Historical M18/P9 qualification remains distinct from current schema22/P10/ABI12 activation. |
+| Muse database workflow | A scoped `muse-db-primary` external runner authors Plan/Implement through PostgreSQL. The API coordinator queues actual independent native Codex reviews, bounded revisions and trusted Jenkins delivery; the root envelope displays phase, reviewer links and verified candidate/merge receipts. | Muse owns its process. No Mission Control Muse CLI or email runner is used. External artifacts supply no native attempt, stop proof or inferred allowance. Activation requires the matching schema22 scopes, `external_reviews:true`, delivery service and Jenkins job. |
+| Task envelopes and history | Every task has an immutable correlation UUID; every event has its own UUID and derives correlation from its owning task. One task row opens paged lifecycle/progress history with exact identities in disclosures. | Rust retains one 50-event page, a 256KiB summary budget and 64 cursor bookmarks. Native current-attempt milestones keep their separate 21-entry bound. Foreign attempt/assignment/workflow summaries are omitted. |
 | Editing | Direct textarea editing, Undo and status reconciliation remain available for admitted managed projects. Chat questions and model-generated proposal controls are inactive; backend contracts remain preserved. | Writes require an opted-in managed workspace, independent agent authorization and revision/journal checks. A rendered button is not write authority. |
 
 The current [implementation captures](/design/wireframes) use disposable acceptance fixtures. Some fixtures contain partial inspection results or mask editable controls. Chat and Mail wireframes are dated historical references; they do not show the current active navigation. All captures use controlled data, not private operator data.
@@ -43,15 +45,18 @@ The current [implementation captures](/design/wireframes) use disposable accepta
 
 | Concern | Implemented ownership | Practical limit |
 | --- | --- | --- |
-| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **10**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
+| Browser application | `forge-ide-ui` Rust/WASM owns domain state, event guards, display formatting and prepared effects. Generated main JS renders, handles focus and owns browser lifecycle. Generated worker JS runs admitted I/O and returns results. | The source browser ABI is **12**; deploy HTML/CSS/JS/WASM as one verified bundle. The HTTP protocol remains version 1. |
 | Same-tab navigation | The IDE saves a checkpoint and bounded local JSON handoff before Home/Design. Return resumes admission, restores state and re-verifies Workbench source. Declared `#workbench` and `#agents` entry actions run after restore and are consumed. Legacy `#chat` and `#mail` map to Agents. Inert restore/save preserves Chat metadata without hydration. | URLs contain view intent, not reports, credentials or source identities. A fresh tab does not inherit another tab's unsent drafts. |
 | Chat persistence | PostgreSQL keeps operator history, tab checkpoints, conversation retention and queued runs. The history DAO supports list/open, expiry, long-term retention and deletion. | A default expiry applies automatically; deleting a saved conversation is distinct from cancelling a model run. |
 | Mail persistence | PostgreSQL stores threads, ordered messages, queued runs and recall metadata. Each inference reconstructs the accepted transcript and pins its model/profile. | Mail drafts survive the supported same-tab documentation handoff in local JSON; there is no durable cross-device Mail-draft table. |
-| Dispatch | Mission Control commits queued work, events and notifications. A runner claims work and performs private inference; browser polling reads accepted state. | PostgreSQL notifications wake readers; committed rows are authoritative. This is not browser push, streaming tokens or model process memory. |
+| Dispatch | Mission Control commits scoped queued work and events. Native workers own isolated CLI processes; Muse claims its external assignments; the database coordinator validates actual results and schedules review/delivery successors. | Notifications only wake discovery. Committed rows, leases, immutable hashes, current grants and actual receipts authorize transitions. The browser never advances workflow state. |
+| Trusted delivery | A separate scoped delivery worker prepares a sanitized same-tree candidate, requests fixed Jenkins checks and records a guarded remote-main receipt. A private journal reconciles lost queue/merge acknowledgements. | Models receive no GitHub/Jenkins credentials. Required gates are `make ci`, `make ui-qa` and the full backend Python suite on the exact reviewed source; GitHub Actions stay disabled. Cancellation needs actual process cleanup. |
 | Mail token budget | Repository and inspected live runner profile: **4,096 context / 1,024 completion / 16 safety margin / 256 minimum follow-up tokens**. | An 8k profile is not active in the inspected runner. Context reservation is not a guarantee of response length. |
 | Coding execution | Root-managed namespace supervisor drops to the approved signed-in CLI UID, zero capabilities and no-new-privileges; scoped worker/reconciler roles, isolated worktree, database-time leases, stop proofs and immutable full results. | Source capability; deployment is separately verified. Expiry/uncertain stop keeps the workspace reserved and requires trusted reconciliation plus explicit user resume. |
-| Agent usage | Codex supported metadata-only allowance/activity; fresh-session per-job counters for both adapters; decimal counters, provenance and stale/unknown states. | Antigravity headless allowance is `unsupported_headless`. Account activity is separate from project totals. Context/cost estimates are future work; metadata refresh never generates a model turn. |
+| Agent usage | Codex supported metadata-only allowance/activity; fresh-session per-job counters for both adapters; decimal counters, provenance and stale/unknown states. | Antigravity headless allowance is `unsupported_headless`; external Muse allowance and unsupplied token observations stay Not reported. Account activity is separate from project totals. Context/cost estimates are future work; metadata refresh never generates a model turn. |
 | Recall/cache | The complete selected thread is re-tokenized within its profile. Mail can request llama.cpp prefix-cache reuse; the database remains the transcript authority. | Prefix caching is an optimization, not persistent model memory. A full thread archives for review when follow-up no longer fits. |
+
+The current [external workflow](../architecture/external-agent-workflow.md) documents the full Plan → independent review → Implement → code review → Jenkins → merge saga and factory/provider boundaries. [Task envelopes](../architecture/proposals/forge-task-event-envelope.md) records M21 and bounded Rust history.
 
 Read the focused [Chat history](/design/chat-history), [dispatch](/design/chat-dispatch), [Mail](/design/mail) and [workspace recovery](/design/workspace) contracts for the exact DAO/DTO, event and recovery flows.
 
@@ -70,7 +75,7 @@ Explore [Scout character creation](/design/characters) for the greybox-to-illust
 
 See [plug-and-play](/design/forge-providers), [workers](/design/forge-workers), [game runtime](/design/game-studio), [physics](/design/game-physics) and [assets](/design/game-asset-pipeline).
 
-## Agent feedback-loop source checkpoint — 20 November 2026
+## Historical feedback-loop source checkpoint — 20 November 2026
 
 The [feedback-loop implementation](../architecture/proposals/forge-agent-feedback-loop.md)
 adds migration15 and `forge-coding-v5`, immutable lease-bound repair feedback,
@@ -90,9 +95,9 @@ commit; its repair receipt has no child ID until a real linked task exists.
 Rust controls/protocols, generator/host checks and owned backend/runtime fixtures
 have focused implementation evidence. The final integrated full CI, backend and
 28 actual-browser groups, screenshot review, hosted exact-head checks and any
-real-agent repair pilot must be recorded separately. **This feedback-loop source
-has not been deployed.** The historical live checkpoints below do not establish
-schema15, policy5, its trusted review configuration or ABI8 on a running portal.
+real-agent repair pilot must be recorded separately. At that historical source checkpoint, deployment had not yet been qualified.
+Later activation is recorded separately; this dated entry is not the current
+schema, policy or ABI declaration.
 The new focused design reader is [/design/agent-feedback-loop](/design/agent-feedback-loop).
 
 ## Observed deployment checkpoint

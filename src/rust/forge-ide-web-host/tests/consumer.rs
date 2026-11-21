@@ -3057,6 +3057,10 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
                 "awaiting_review",
                 "needs_reconcile",
                 "coding_reconciliation_receipts",
+                "Muse through PostgreSQL",
+                "ExternalReviewContextProvider",
+                "one 50-event page",
+                "external-agent-workflow.md",
             ],
             diagrams: &[
                 "/design/coding-agents/ownership.svg",

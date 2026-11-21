@@ -1,6 +1,13 @@
 # Task correlation IDs and the event envelope
 
-Status: reviewed design proposal; implementation and deployment are pending.
+Status: implemented in M21 and the ABI12 task reader; deployment remains separately verified.
+
+The source includes required UUID projections, a separate50-event history page,
+a 256KiB summary budget, 64 bounded cursor bookmarks, explicit First/Previous/Next
+controls, keyed event disclosures and the unchanged 21-entry native milestone
+window. M22 adds the separately scoped [external review/delivery workflow](../external-agent-workflow.md).
+SQL/DAO, Rust protocol/model, host and actual owned browser checks cover these
+paths. Publishing this source does not substitute for live migration/rollout receipts.
 
 Derived from Muse's immutable Plan artifact for task
 `7699599c-b5d0-4118-9bb0-3f8f917c5843`, assignment
@@ -15,9 +22,9 @@ and typed Rust presentation design. It corrected request strictness, bounded
 history paging, external-progress projection, compatibility and migration
 requirements against source checkpoint `2a0bcbc`.
 
-Publishing this proposal records a source review. It does not create a native
-workflow review receipt, approve the live task for execution, apply a migration,
-or implement the missing external-to-Codex review dispatcher.
+The original plan remains an immutable review artifact. The implemented M22
+dispatcher creates a real native Codex review task with the complete bound context;
+this document itself grants no review approval or execution authority.
 Acceptance criteria: the portal shows a single task, and clicking on the task
 displays that task's events.
 
@@ -33,9 +40,10 @@ This is a tracing and presentation change. It does not change task admission,
 workflow policy, recipes, attempts, receipts, or publication. Stored event kinds, payloads and lifecycle transitions remain unchanged.
 Typed response projections expand as specified below.
 
-## 2. Current state
+## 2. Original reviewed baseline
 
-All references are to main `2a0bcbc`.
+The table preserves the design audit at main `2a0bcbc`; the gaps below are now
+implemented by M21 and the ABI12 protocol/model/generator changes.
 
 | Piece | As built | Gap |
 | --- | --- | --- |
@@ -71,8 +79,7 @@ What these are not:
 
 ## 4. Database — migration 0021
 
-Migration 0021 is the proposed next migration at the source checkpoint; confirm
-that number is still available before implementation. Migrations 0001–0020
+Migration0021 is the implemented task-event trace migration. Migrations 0001–0020
 remain immutable. No existing column changes type and no row is deleted.
 Backfill and DDL still require the rollout rehearsal in section 9.
 
@@ -126,7 +133,7 @@ fields in the same style as the existing ones. Validate new UUIDs at the typed b
 selected task as well as checking its task/project/request context. Event kinds
 remain a closed typed enum; adding a future kind requires protocol qualification.
 
-The current atomic UI ABI is 11. Qualify the next atomic bundle (proposed ABI12)
+The previous atomic UI ABI was11. The implemented atomic bundle is ABI12
 for the required response fields: host validation, Rust/WASM, generated glue,
 manifest and fixtures must agree. Do not send wider responses to an old strict
 consumer or weaken `deny_unknown_fields` for compatibility.
@@ -192,16 +199,16 @@ WorkEvents transport. No new backend route or main-thread fetch is needed.
 - No workflow-level correlation. A workflow's plan task, implement task, and
   review task each keep their own correlation. Grouping tasks under one
   workflow correlation is a separate design.
-- No correlation on mail, Jenkins, or usage records. The task correlation is
-  the handle those systems would carry later; this slice does not wire it
-  into them.
+- Mail and usage correlation remain separate work. M22 carries the root task
+  correlation into trusted Jenkins delivery/check receipts; it does not turn that
+  per-task ID into a shared correlation for all child tasks.
 - No change to stored event kinds, payloads, lifecycle transitions, or retention.
   Response projections gain validated identity and external-summary fields.
 - No change to the external transport functions: the trigger covers
   `forge_external_agent._event` without touching the reviewed 0020 code.
 - No new background process, poller, or watcher.
-- No automatic external Plan review, implementation dispatch or Jenkins bridge.
-  This tracing design does not resolve the current Muse review-handoff gap.
+- Automatic external Plan review, implementation dispatch and the Jenkins bridge
+  are implemented separately in M22; they are not authority conferred by trace metadata.
 
 ## 8. Verification
 
@@ -244,7 +251,6 @@ phone/desktop rendering before reporting implementation complete.
    authorizing by owner/project/task; a correlation is an identifier, not access.
 4. Shared workflow correlation and causation IDs are separate future fields.
    The immutable, unique task correlation keeps its current per-task meaning.
-5. Automatic review of Muse artifacts remains a separate implementation: a
-   durable artifact-to-review binding, complete context delivery to the native
-   reviewer and verified verdict handling. Publishing this plan does not create
-   that runtime handoff or change the live task's review state.
+5. M22 now implements the separately authorized artifact-to-review binding, full
+   native reviewer context and verified verdict handling. Trace metadata alone
+   still cannot approve an artifact or alter its review state.

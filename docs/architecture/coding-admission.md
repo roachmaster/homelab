@@ -6,19 +6,17 @@ One assignment automatically advances through planning, independent agent review
 bounded revision, implementation, checks and authorized merge. The manual decision
 operations documented below remain available for manual and legacy tasks.
 
-**Source checkpoint: 20 November 2026.** The repository now implements durable
-coding work, native CLI execution, result paging, explicit review/resume, provider
-usage collection and the generated Agents view. Work and Usage remain independent,
-optional capabilities. The ABI7 portal, API runner and coding worker were deployed
-and verified on 19 November 2026 from code commit `679088c`. Open
-[Agents](https://portal.thedevex.com/agents) or Home → Agents. The
-[deployment checkpoint](../design/implementation-status.md#observed-deployment-checkpoint)
-records the scope and checks. The earlier admission-only slice is superseded.
-
-The current source extends that deployed baseline with the
-[review and bounded repair loop](proposals/forge-agent-feedback-loop.md):
-migration 15, execution policy 5 and browser ABI 8. Merging this source does not
-roll out those changes to the running portal or services.
+**Source checkpoint:21 November2026.** Current source uses schema22, native
+`forge-coding-v10`, external `forge-external-db-v2` and atomic browser ABI12.
+The [external author/reviewer workflow](external-agent-workflow.md) implements
+Muse's PostgreSQL assignments, real native Codex review tasks, bounded revisions,
+exact-source Jenkins verification and trusted automatic merge. Each root envelope
+shows durable correlation and paged event history; internal workflow tasks remain
+reachable through actual links. Native process proofs are never invented for an
+external artifact. Legacy/manual tasks keep their original recipe and controls.
+Work and Usage remain independently configured. Source implementation and owned
+fixture validation do not certify live activation; see the dated
+[deployment checkpoints](../design/implementation-status.md#observed-deployment-checkpoint).
 
 The [dispatch design](proposals/forge-coding-agent-dispatch.md) and
 [usage design](proposals/forge-agent-usage.md) retain the sequence diagrams and
@@ -30,7 +28,7 @@ Home links to `/#agents`; `/agents` redirects to that declared same-tab view.
 Existing global navigation stays compact. Rust/WASM owns selection, drafts,
 request guards, actions and polling; generated main JavaScript renders and passes
 actions, and generated I/O worker JavaScript performs admitted requests. The
-browser ABI is **8**, while the HTTP contract stays version **1**. Deploy the
+browser ABI is **12**, while the HTTP contract stays version **1**. Deploy the
 HTML/CSS/JavaScript/WASM bundle atomically.
 
 The catalog supplies permitted projects, their worker-observed Git revisions,
@@ -145,10 +143,10 @@ does not cause blind duplicate writes. The portal displays the actual pending,
 checking, publishing, published or failed state and polls active publication even
 when the model's result is already ready. Merging remains a separate decision.
 
-The current workflow uses policy 5 and additive migration 15; schema 14 and its
-plan/publication history are prerequisites. A rollout must coordinate the
-matching admission profile, coding worker, publication service and atomic browser
-ABI 8 bundle. Prior policies and immutable plans/results/receipts remain preserved.
+The feedback contract originated in policy5 and additive migration15. The current
+release coordinates schema22, matching admission/worker/publication configuration
+and the atomic ABI12 host/assets bundle. Prior policies and immutable
+plans/results/receipts remain preserved.
 Completed implementations receive later corrections through linked repair tasks.
 
 ## Durable execution and explicit recovery
@@ -168,7 +166,7 @@ documentation URLs without headless approval prompts. Plan/review remains
 read-only; OS isolation and database/canonical-source masks remain unchanged.
 Earlier migrations preserve policy 1 through policy 4 history while exact
 advertised policy digests keep claims separate. Previous attempts retain their
-original policy; new feedback context requires the matching policy 5 worker.
+original policy; new feedback context requires the matching worker and frozen recipe policy.
 Admission-era version-1
 recipes remain readable and are never silently upgraded or executed.
 
