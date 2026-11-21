@@ -93,6 +93,11 @@ active-tab semantics, same-tab Home handoff, retained task drafts and browser
 Back/Forward. A valid legacy Mail cache remains inactive and cannot overwrite a
 current Agents draft or replay a request.
 
+The controlled Agents relay also supplies a Grok profile through the native
+catalog and usage ports. Its unobserved readiness, allowance and counters remain
+Unknown/Not reported, without a quota meter. The actual WASM journey verifies
+this generic card at 320/390/1440px; it does not invoke a real Grok CLI.
+
 The current portal does not expose Chat, model selection, saved-chat management,
 contextual inference or model-generated edit proposals. Assertions require those
 entry points and screens to be absent. The request observer counts inference,

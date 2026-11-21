@@ -2809,6 +2809,56 @@ async function museEmailDirectoryJourney(page) {
   await page.locator('#agents-heading').scrollIntoViewIfNeeded();
 }
 
+async function grokProviderJourney(page) {
+  process.stderr.write('QA_CHECK grok_configured_provider\n');
+  const viewport=page.viewportSize();
+  const card=page.locator('#agents-providers article[data-card-id="grok-primary"]');
+  await check(card.locator('.fg-metric-select')).toHaveText('Grok');
+  await check(card.locator('.fg-metric-header > .fg-badge')).toHaveText('Unknown');
+  await check(card.locator('.fg-metric-observation > .fg-badge')).toHaveText('Unknown');
+  await check(card.locator('.fg-quota-unavailable')).toContainText('Not reported');
+  await check(card.locator('.fg-quota-unavailable')).toContainText('No verified allowance observation.');
+  await check(card.locator('meter,progress')).toHaveCount(0);
+  await check(card.locator('.fg-metric dd')).toHaveText(['Unknown','Unknown','Unknown','Unknown']);
+  for(const width of [320,390,1440]){
+    await page.setViewportSize({width,height:844});
+    await card.scrollIntoViewIfNeeded();
+    await check(card).toBeInViewport();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,
+      'configured Grok usage fits phone and desktop viewports');
+    assert.equal(await card.locator('.fg-metric dd').evaluateAll(nodes=>nodes.every(node=>{
+      const range=document.createRange();range.selectNodeContents(node);
+      return range.getClientRects().length===1;
+    })),true,'unknown token observations stay on one readable line');
+    assert.equal(await card.evaluate(node=>{
+      const bounds=node.getBoundingClientRect();
+      if(bounds.left< -1 || bounds.right>innerWidth+1)return false;
+      const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);
+      for(let text=walker.nextNode();text;text=walker.nextNode()){
+        if(!text.textContent.trim())continue;
+        const range=document.createRange();range.selectNodeContents(text);
+        if([...range.getClientRects()].some(rect=>rect.left< -1 || rect.right>innerWidth+1))return false;
+      }
+      return true;
+    }),true,'Grok card labels and unknown metrics remain readable');
+  }
+  await card.locator('.fg-metric-select').focus();
+  await page.keyboard.press('Enter');
+  const details=card.locator('details.fg-metric-details');
+  const disclosure=details.locator('summary');
+  await check(disclosure).toBeVisible();
+  await disclosure.focus();
+  await page.keyboard.press('Enter');
+  await check(details).toHaveJSProperty('open',true);
+  await check(details).toContainText('Grok / owned-browser-fixture');
+  await check(details).toContainText('grok-4.7');
+  await page.keyboard.press('Enter');
+  await check(details).toHaveJSProperty('open',false);
+  await page.locator('#agents-providers article[data-card-id="agy-primary"] .fg-metric-select').click();
+  if(viewport)await page.setViewportSize(viewport);
+  await page.locator('#agents-heading').scrollIntoViewIfNeeded();
+}
+
 async function agentsJourney() {
   process.stderr.write('QA_CHECK portal_agents_workflow\n');
   agentsRelayOwner = acquireOwned(() => startAgentsRelay(), relay => relay.close());
@@ -2847,8 +2897,9 @@ async function agentsJourney() {
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
-    await check(cards).toHaveCount(2);
+    await check(cards).toHaveCount(3);
     await museEmailDirectoryJourney(page);
+    await grokProviderJourney(page);
     await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
     await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
     await check(geminiCard.locator('.fg-quota-unavailable')).toContainText('does not expose account allowance');

@@ -41,7 +41,7 @@ class UsageProviderConfig:
         identifier(self.alias)
         text(self.label)
         text(self.model)
-        if self.provider not in {"antigravity", "codex"}:
+        if self.provider not in {"antigravity", "codex", "grok"}:
             raise ValueError("Unknown usage provider")
         if self.provider == "codex" and not isinstance(self.process, MetadataProcessConfig):
             raise ValueError("Codex usage requires typed process configuration")
@@ -61,6 +61,18 @@ class AntigravityUsageProvider:
             "last_error": None, "allowance": _empty_allowance("unsupported", "unsupported_headless"),
             "account_activity": _unknown_activity(), "account_identity": None,
         })
+
+
+class GrokUsageProvider:
+    """No qualified headless allowance schema; no daemon/OAuth polling."""
+    manual_refresh_only = True
+    def __init__(self, config, *, clock=utc_now):
+        self.config, self._clock = config, clock
+    def read_snapshot(self):
+        return validate_snapshot({"snapshot_state":"unknown", "observed_at":_now(self._clock),
+            "source":"grok-headless/allowance-capability", "version":POLICY["adapter_versions"]["grok"],
+            "last_error":None, "allowance":_empty_allowance("unsupported", "unsupported_headless"),
+            "account_activity":_unknown_activity(), "account_identity":None})
 
 
 class UnavailableUsageProvider:
@@ -222,6 +234,8 @@ class UsageProviderFactory:
     def create(self):
         if self._config.provider == "antigravity":
             return AntigravityUsageProvider(self._config, clock=self._clock)
+        if self._config.provider == "grok":
+            return GrokUsageProvider(self._config, clock=self._clock)
         try:
             rpc = self._rpc_factory(self._config.process)
             version = rpc.version()
