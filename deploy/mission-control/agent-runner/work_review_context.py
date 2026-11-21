@@ -1,6 +1,6 @@
 """Lease-scoped immutable feedback delivery, independent of plan decisions."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import re
@@ -57,6 +57,7 @@ class ReviewContext:
     feedback_id: str | None
     finding_ids: tuple[str, ...]
     legacy_resume_note: str = ""
+    build: object | None = None
 
 
 def validate_context(lease, workspace, envelope):
@@ -142,14 +143,18 @@ def validate_context(lease, workspace, envelope):
 
 class ReviewContextProvider:
     """Selected at CodingWorkerFactory; the worker holds no global registry."""
-    def __init__(self, store):
+    def __init__(self, store, *, build_provider=None):
         self.store = store
+        self.build_provider = build_provider
 
     def acquire(self, lease, workspace):
         if not any(lease.get(name) is not None for name in
                    ("resume_attempt_id", "feedback_id", "feedback_sha256")):
             return None
         try:
-            return validate_context(lease, workspace, self.store.read_feedback(lease))
+            context = validate_context(lease, workspace, self.store.read_feedback(lease))
+            if self.build_provider is not None and context is not None and context.feedback_id is not None:
+                context = replace(context, build=self.build_provider.acquire(lease, context))
+            return context
         except (OSError, ValueError, KeyError, TypeError, AttributeError, UnicodeError):
             raise ReviewContextError() from None

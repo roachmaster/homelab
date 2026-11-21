@@ -33,7 +33,7 @@ DAY_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 VALID_SNAPSHOT_STATES = frozenset({"fresh", "stale", "unknown", "unavailable", "auth_required"})
 VALID_ALLOWANCE_STATES = frozenset({"available", "unsupported", "unknown", "auth_required", "unavailable"})
 VALID_ACTIVITY_STATES = frozenset({"available", "unknown", "unavailable"})
-VALID_ATTEMPT_USAGE_SOURCES = frozenset({"codex-exec-turn-v1", "agy-result-v1"})
+VALID_ATTEMPT_USAGE_SOURCES = frozenset({"codex-exec-turn-v1", "agy-result-v1", "grok-headless-end-v1", "muse-run-usage-v1"})
 VALID_ATTEMPT_USAGE_COVERAGES = frozenset({"complete", "partial", "unknown"})
 VALID_ATTEMPT_USAGE_PROVENANCES = frozenset({"fresh_session", "unverified_baseline"})
 

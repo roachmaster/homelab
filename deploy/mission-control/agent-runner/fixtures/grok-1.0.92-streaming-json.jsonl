@@ -1,0 +1,47 @@
+{"type":"available_commands","tools":["search_tool","use_tool"],"commands":["compact","always-approve","context","session-info","feedback"]}
+{"type":"available_commands","tools":["search_tool","use_tool"],"commands":["compact","always-approve","context","session-info","feedback"]}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"thought","data":"[native reasoning omitted]"}
+{"type":"text","data":"FOR"}
+{"type":"text","data":"GE"}
+{"type":"text","data":"_"}
+{"type":"text","data":"GRO"}
+{"type":"text","data":"K"}
+{"type":"text","data":"_"}
+{"type":"text","data":"PRE"}
+{"type":"text","data":"VIEW"}
+{"type":"text","data":"_"}
+{"type":"text","data":"OK"}
+{"type":"available_commands","tools":["search_tool","use_tool"],"commands":["compact","always-approve","context","session-info","feedback"]}
+{"type":"usage","usage":{"input_tokens":582,"output_tokens":42,"cache_read_input_tokens":2816,"cache_creation_input_tokens":0,"reasoning_tokens":32},"signature":"FIXTURE_SIGNATURE_NOT_FOR_VERIFICATION"}
+{"type":"end","stopReason":"end_turn","sessionId":"00000000-0000-4000-8000-000000000001","requestId":"00000000-0000-4000-8000-000000000002","cwd":"/run/forge-coding-workspace","usage":{"input_tokens":582,"cache_read_input_tokens":2816,"cache_creation_input_tokens":0,"output_tokens":42,"reasoning_tokens":32,"total_tokens":3440},"num_turns":1,"total_cost_usd":0.002824,"total_cost_usd_ticks":28240000,"modelUsage":{"grok-4.7":{"inputTokens":582,"outputTokens":42,"cacheReadInputTokens":2816,"cacheCreationInputTokens":0,"modelCalls":1,"costUSD":0.002824}}}

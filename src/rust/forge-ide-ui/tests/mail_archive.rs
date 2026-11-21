@@ -253,6 +253,7 @@ fn retired_mail_replies_cannot_steal_a_pending_agents_request_or_replay_mutation
         UiEvent::Work(WorkResponse::WorkCatalog {
             request_id: id,
             projects: vec![WorkProject {
+                external_workflow: None,
                 alias: "workspace".into(),
                 label: "Workspace".into(),
                 base_revision: Some("a".repeat(40)),
@@ -262,6 +263,7 @@ fn retired_mail_replies_cannot_steal_a_pending_agents_request_or_replay_mutation
                 alias: "agy-primary".into(),
                 label: "Gemini".into(),
                 backend: WorkBackend::Antigravity,
+                transport: None,
                 model: "Fixture".into(),
                 modes: vec![WorkMode::Plan],
             }],

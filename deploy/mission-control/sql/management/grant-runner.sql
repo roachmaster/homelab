@@ -81,3 +81,38 @@ GRANT EXECUTE ON FUNCTION forge_coding_worker_api.project_revisions() TO forge_c
 GRANT EXECUTE ON FUNCTION forge_coding_worker_api.read_review_target(uuid,uuid),forge_coding_worker_api.read_workflow_feedback(uuid,uuid) TO forge_coding_worker;
 GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.merge_claim(text),forge_coding_reconciler_api.merge_renew(uuid,uuid),forge_coding_reconciler_api.merge_intent(uuid,uuid,jsonb),forge_coding_reconciler_api.merge_finish(uuid,uuid,text,jsonb) TO forge_coding_reconciler;
 COMMIT;
+
+-- M20: scoped external DB API only.
+\ir grant-external-agent.sql
+
+-- M21: scoped trace projection; keep historical fixtures below this marker.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=21) AS has_task_events
+\gset
+\if :has_task_events
+\ir grant-task-events.sql
+\endif
+
+-- M22: isolated external workflow coordination, native review and delivery ports.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=22) AS has_external_workflows
+\gset
+\if :has_external_workflows
+\ir grant-external-workflows.sql
+\endif
+
+-- M24: narrow native Jenkins identity/status ports; no direct table access.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=24) AS has_native_jenkins
+\gset
+\if :has_native_jenkins
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.native_ci_status(uuid,text,uuid,uuid),
+ forge_coding_reconciler_api.native_ci_context(uuid,uuid,text,uuid,uuid) TO forge_coding_reconciler;
+\endif
+
+-- M25: bounded native delivery repair and genuine pre-CI replay only.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=25) AS has_native_delivery
+\gset
+\if :has_native_delivery
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.native_merge_failure(uuid,uuid,jsonb),
+ forge_coding_reconciler_api.native_branch_first_replay(uuid,bigint),
+ forge_coding_reconciler_api.native_branch_published(uuid,uuid,jsonb) TO forge_coding_reconciler;
+GRANT EXECUTE ON FUNCTION forge_coding_worker_api.read_native_delivery_context(uuid,uuid) TO forge_coding_worker;
+\endif

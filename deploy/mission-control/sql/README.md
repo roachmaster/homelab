@@ -10,6 +10,8 @@ This directory holds the SQL for the Forge agent database on Mission Control.
 | `management/grant-runner.sql` | Grant the runner access to its scoped application tables and grant the GPU worker access to its function API. |
 | `management/verify.sql` | Check the expected schema, migration 0008 archive constraints, migration 0009 coding admission constraints/PUBLIC revocation, GPU worker privileges, and applied versions. |
 | `management/verify-runner-privileges.sql` | Check required legacy permissions and exact effective permissions on the scoped Mail, GPU, and coding-admission runtime tables (used by `setup-postgres.sh --check` and disposable database tests). |
+| `management/grant-muse-read-access.sql` | Explicitly grant the existing Muse account its reviewed read-only capability; never creates or changes the account. |
+| `management/verify-muse-read-access.sql` | Read-only exact optional Muse reader contract, included by schema verification. |
 | `management/run-status.sql` | Summarize run and tool states without printing prompts or tool output. |
 | `tests/schema.sql` | Exercise the schema with a disposable transcript inside a rolled-back transaction. |
 
@@ -77,3 +79,47 @@ To exercise the constraints on a disposable database:
 psql -X --dbname=forge_agent_test --file=deploy/mission-control/sql/apply.sql
 psql -X --dbname=forge_agent_test --file=deploy/mission-control/sql/tests/schema.sql
 ```
+
+## Optional Muse read access
+
+The externally managed `muse_events` login can read the coding lifecycle without
+owning or executing it. When that role exists, verification requires direct
+`CONNECT` on `forge_agent`, `USAGE` on its `forge_agent` schema and exactly
+non-grantable `SELECT` on these thirteen tables:
+
+- `coding_events`, `coding_plan_decisions`, `coding_result_chunks`
+- `coding_reconciliation_receipts`, `coding_publications`, `coding_hosted_checks`
+- `coding_feedback`, `coding_reviews`, `coding_tasks`, `coding_attempts`
+- `coding_workflows`, `coding_workflow_reviews`, `coding_workflow_actions`
+
+The check rejects extra table or column grants, writes, grant options, API or
+function execution, ownership, elevated role flags, memberships and default
+privileges that extend this scope. The existing owner/schema-scoped table
+default is the sole exception: `forge_agent_owner` in schema `forge_agent`
+grants non-grantable `SELECT` on future tables to `muse_events`. Its exact
+catalog row is required and retained, not replaced by a global grant. New
+tables still require an explicit update to the current-table allowlist before
+strict verification admits them. Existing `INHERIT` or `NOINHERIT` configuration
+is retained; neither adds authority without memberships. Historical catalog
+snapshots accept only the exact owner-issued Muse read ACL while preserving all
+other fields and ACL entries. Missing required reads fail verification without
+repairing or revoking permissions.
+
+On hosts where an administrator has already provisioned this account, the
+explicit management command is:
+
+```bash
+sudo -u postgres psql -X --dbname=forge_agent \
+  --file=deploy/mission-control/sql/management/grant-muse-read-access.sql
+```
+
+This command is transactional and repeatable. It refuses an absent account and
+never creates a login, alters passwords or role attributes, or rewrites HBA.
+The standard schema path creates no Muse account and keeps migrations1–19 and
+P10 unchanged. The source HBA include retains the dedicated localhost SCRAM rule
+for `muse_events` before its general connection rejections; no public listener
+or password authentication fallback is introduced.
+
+Read access does not enable external intake, task submission, approval,
+execution, reconciliation or merge. The [external intake design](../../../docs/architecture/muse-agent.md)
+remains dormant and separate from this capability.

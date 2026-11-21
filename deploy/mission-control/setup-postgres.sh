@@ -54,8 +54,16 @@ check_cluster() {
              AND database = ARRAY['forge_agent'] AND user_name = ARRAY['forge_gpu_worker']
              AND address = '$loopback' AND netmask = '255.255.255.255'
              AND auth_method = 'scram-sha-256') = 1
-           AND count(*) FILTER (WHERE rule_number IN (2, 3) AND auth_method = 'reject'
-             AND type = 'host' AND address = '$loopback' AND netmask = '255.255.255.255') = 2
+           AND count(*) FILTER (WHERE rule_number = 2 AND type = 'host'
+             AND database = ARRAY['forge_agent'] AND user_name = ARRAY['muse_events']
+             AND address = '$loopback' AND netmask = '255.255.255.255'
+             AND auth_method = 'scram-sha-256') = 1
+           AND count(*) FILTER (WHERE rule_number = 3 AND database = ARRAY['all']
+             AND user_name = ARRAY['all'] AND auth_method = 'reject'
+             AND type = 'host' AND address = '$loopback' AND netmask = '255.255.255.255') = 1
+           AND count(*) FILTER (WHERE rule_number = 4 AND database = ARRAY['replication']
+             AND user_name = ARRAY['all'] AND auth_method = 'reject'
+             AND type = 'host' AND address = '$loopback' AND netmask = '255.255.255.255') = 1
         FROM pg_hba_file_rules;
     ")"
     [[ "$worker_access" == t ]] || fail 'Unexpected Forge worker authentication rules.'

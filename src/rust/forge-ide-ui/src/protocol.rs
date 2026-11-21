@@ -709,6 +709,21 @@ pub enum UiEvent {
     AgentsRefresh {},
     AgentsNext {},
     AgentsPrevious {},
+    AgentHistoryFirst {
+        task_id: String,
+        correlation_id: String,
+        after_sequence: u64,
+    },
+    AgentHistoryPrevious {
+        task_id: String,
+        correlation_id: String,
+        after_sequence: u64,
+    },
+    AgentHistoryNext {
+        task_id: String,
+        correlation_id: String,
+        after_sequence: u64,
+    },
     AgentsDiscardDraft {},
     SelectAgentProject {
         value: String,

@@ -3,6 +3,9 @@
 Run the existing **28 ordered browser acceptance groups** with one repository-root
 command. This is test automation around the workbench, not a new UI, scheduler or
 replacement backend. Test-driver JavaScript is not a hand-authored application asset.
+The Agents journey covers separate 50-event history pages with durable correlation,
+keyboard disclosure preservation, failed-page retry and external database workflow
+phases through reviewed merge, using deterministic owned runner fixtures.
 
 ```sh
 # One-time prerequisites in your development environment (not run by make ui-qa):
@@ -18,6 +21,9 @@ owned fixture, then launches headless Chrome with its sandbox **enabled**. It se
 the fixed full browser suite; Cargo package/feature overrides cannot narrow it.
 No credentials, configuration, user project or running service is required. Only
 new disposable localhost fixtures and ephemeral test TLS identities are used.
+The expanded full journey has a 270-second deadline within the Python
+supervisor's 300-second limit. Individual assertions keep their existing bounds;
+deadline failure still stops the sequence and cleans up owned resources.
 
 Every invocation prints `QA_OUTPUT <directory>` and allocates a **new** run under
 ignored `src/rust/target/ui-qa/`. Set `QA_OUTPUT_ROOT=/absolute/owned-output-parent`
@@ -92,6 +98,11 @@ The Agents journey remains inside `real.report.partial`, covering keyboard entry
 active-tab semantics, same-tab Home handoff, retained task drafts and browser
 Back/Forward. A valid legacy Mail cache remains inactive and cannot overwrite a
 current Agents draft or replay a request.
+
+The controlled Agents relay also supplies a Grok profile through the native
+catalog and usage ports. Its unobserved readiness, allowance and counters remain
+Unknown/Not reported, without a quota meter. The actual WASM journey verifies
+this generic card at 320/390/1440px; it does not invoke a real Grok CLI.
 
 The current portal does not expose Chat, model selection, saved-chat management,
 contextual inference or model-generated edit proposals. Assertions require those

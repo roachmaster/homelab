@@ -353,6 +353,16 @@ mod native_disk {
         let app = Application::bootstrap(f.config()).unwrap();
         for c in app.commands().unwrap() {
             let command = match c.kind {
+                #[cfg(feature = "jenkins")]
+                CommandKind::JenkinsStatus
+                | CommandKind::JenkinsJobs
+                | CommandKind::JenkinsQueueList
+                | CommandKind::JenkinsRecentBuilds
+                | CommandKind::JenkinsStopBuild
+                | CommandKind::JenkinsBuild
+                | CommandKind::JenkinsQueue
+                | CommandKind::JenkinsBuildStatus
+                | CommandKind::JenkinsCancel => panic!("legacy bootstrap must not select Jenkins"),
                 #[cfg(feature = "jobs")]
                 CommandKind::JobSubmit
                 | CommandKind::JobInspect

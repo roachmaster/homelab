@@ -1,9 +1,10 @@
 # Forge architecture
 
-The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 19 November 2026; distinguish source capabilities from what a live host enables.
+The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 21 November 2026; distinguish source capabilities from what a live host enables.
 
 ## Current design references
 
+- [Jenkins I/O client and Forge CLI](forge-jenkins.md): optional typed adapter, factory/provider wiring, token authentication and bounded operations.
 - [Generated browser boundary](proposals/forge-ide-ui.md), [portal Home](proposals/forge-portal-landing.md), [managed editing](proposals/forge-ide-inline-edit.md).
 - [Chat/Mail PostgreSQL dispatch](forge-postgres-inference-dispatch.md), [service inventory](forge-ide-system-inventory.yaml).
 - [Game framework](proposals/forge-game-engine.md), [physics](proposals/forge-game-physics.md), [asset pipeline](proposals/forge-game-asset-pipeline.md), [snapshot](proposals/forge-game-snapshot.md), [debug/trace](proposals/forge-game-debug.md), [replay](proposals/forge-game-debug.md#full-replay-and-historical-assets), [worker ownership](proposals/forge-worker-ownership.md).
@@ -11,7 +12,16 @@ The [current implementation reference](../design/implementation-status.md) and [
 
 ## Coding-agent dispatch and usage
 
-[Current coding-agent workflow](coding-admission.md) covers the implemented Agents UI, nine Work destinations, immutable policy/recipe, isolated native workers, scoped execute-only database roles, result paging and explicit review/resume. Work/Usage remain independently opt-in; this source checkpoint does not claim live deployment.
+[Task correlation and event envelopes](proposals/forge-task-event-envelope.md)
+documents implemented M21 trace identities and the ABI12 bounded task reader.
+The full correlation and every typed event are available through explicit paging;
+live activation remains release-controlled.
+
+[External author and native reviewer SDLC](external-agent-workflow.md)
+documents the implemented M22 Muse database → native Codex review → Jenkins →
+trusted merge flow, including bounded revision, cancellation and lost-ack recovery.
+
+[Current coding-agent workflow](coding-admission.md) covers the implemented Agents UI, typed Work destinations, immutable policy/recipe, isolated native workers, scoped execute-only database roles, result paging and legacy explicit review/resume plus configured automatic workflows. Work/Usage remain independently opt-in; this source checkpoint does not claim live deployment.
 
 [Dispatch sequences](proposals/forge-coding-agent-dispatch.md) retain ownership/lifecycle/completion/takeover diagrams with current source mapping. [Agent usage](proposals/forge-agent-usage.md) separates supported provider allowance/account activity from Forge project token/runtime totals. Codex metadata is supported; Antigravity headless allowance is explicitly unsupported. Refresh performs metadata only and never automatically resumes a quota-blocked task.
 

@@ -189,4 +189,68 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=17)
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(17,'coding_codex_warm_sessions');
 \endif
 
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=18) AS apply_0018
+\gset
+\if :apply_0018
+\ir migrations/0018_coding_grok_provider.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(18,'coding_grok_provider');
+\endif
+
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=19) AS apply_0019
+\gset
+\if :apply_0019
+\ir migrations/0019_coding_muse_provider.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(19,'coding_muse_provider');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=20
+) AS apply_0020
+\gset
+\if :apply_0020
+\ir migrations/0020_external_agent_transport.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(20,'external_agent_transport');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=21
+) AS apply_0021
+\gset
+\if :apply_0021
+\ir migrations/0021_coding_event_trace.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(21,'coding_event_trace');
+\endif
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=22
+) AS apply_0022
+\gset
+\if :apply_0022
+\ir migrations/0022_external_workflows.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(22,'external_workflows');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=23
+) AS apply_0023
+\gset
+\if :apply_0023
+\ir migrations/0023_coding_agy_unattended.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(23,'coding_agy_unattended');
+\endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=24
+) AS apply_0024
+\gset
+\if :apply_0024
+\ir migrations/0024_native_jenkins_context.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(24,'native_jenkins_context');
+\endif
+
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=25) AS apply_0025
+\gset
+\if :apply_0025
+\ir migrations/0025_native_delivery_repair.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(25,'native_delivery_repair');
+\endif
 COMMIT;

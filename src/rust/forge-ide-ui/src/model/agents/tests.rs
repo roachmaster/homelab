@@ -13,6 +13,7 @@ fn ready() -> Agents {
         mode: Some(WorkMode::Plan),
         catalog: Some(WorkCatalog {
             projects: vec![WorkProject {
+                external_workflow: None,
                 alias: "workspace".into(),
                 label: "Workspace".into(),
                 base_revision: Some("a".repeat(40)),
@@ -22,6 +23,7 @@ fn ready() -> Agents {
                 alias: "agy-primary".into(),
                 label: "Gemini".into(),
                 backend: WorkBackend::Antigravity,
+                transport: None,
                 model: "Fixture model".into(),
                 modes: vec![WorkMode::Plan, WorkMode::Review],
             }],
@@ -48,6 +50,7 @@ fn step(agents: &mut Agents, event: UiEvent, id: &str) -> Vec<UiEffect> {
 fn detail(status: WorkStatus) -> WorkTaskDetail {
     WorkTaskDetail {
         task_id: TASK.into(),
+        correlation_id: "99999999-9999-4999-8999-999999999999".into(),
         project_alias: "workspace".into(),
         base_revision: "a".repeat(40),
         mode: WorkMode::Plan,
@@ -78,6 +81,7 @@ fn detail(status: WorkStatus) -> WorkTaskDetail {
         workflow_required: false,
         workflow: None,
         review: None,
+        external_result: None,
     }
 }
 fn draft(agents: &mut Agents) {
@@ -341,6 +345,11 @@ fn polling_uses_owned_watch_and_accepts_events_beyond_task_revision() {
             revision: 5,
             status: WorkStatus::AwaitingReview,
             events: vec![WorkLogEvent {
+                event_id: "77777777-7777-4777-8777-777777777777".into(),
+                correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+                progress_verified: false,
+                external_progress: None,
+                workflow_progress: None,
                 sequence: 55,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,
@@ -369,7 +378,10 @@ fn result_pages_are_utf8_bounded_manifest_bound_and_previous_is_exact() {
     agents.task = Some(task);
     agents.selected = Some(TASK.into());
     agents.pane = Pane::Reader;
-    agents.events_loaded = true; // This test isolates paging after history was admitted.
+    agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into()); // This test isolates paging after history was admitted.
     agents.result_page("page-0".into(), None, &mut vec![]);
     for page in 0..4 {
         let offset = page * 16384;
@@ -520,6 +532,99 @@ fn usage_unknowns_keep_precision_and_refresh_is_one_explicit_profile() {
 }
 
 #[test]
+fn grok_catalog_and_usage_use_the_same_admitted_provider_path() {
+    let mut agents = ready();
+    let catalog = agents.catalog.as_mut().unwrap();
+    let profile = &mut catalog.profiles[0];
+    profile.alias = "grok-primary".into();
+    profile.label = "Grok".into();
+    profile.backend = WorkBackend::Grok;
+    profile.model = "grok-4.7".into();
+    profile.modes = vec![WorkMode::Review];
+    assert!(catalog.is_valid());
+    let wire = serde_json::to_value(&catalog).unwrap();
+    assert_eq!(wire["profiles"][0]["backend"], "grok");
+    assert_eq!(
+        serde_json::from_value::<WorkCatalog>(wire).unwrap(),
+        *catalog
+    );
+    agents.profile = "grok-primary".into();
+    agents.mode = Some(WorkMode::Review);
+
+    let mut observation = provider();
+    observation.alias = "grok-primary".into();
+    observation.label = "Grok".into();
+    observation.provider = WorkBackend::Grok;
+    observation.model = "grok-4.7".into();
+    observation.allowance.state = UsageAllowanceState::Unknown;
+    observation.allowance.reason = Some("Not reported".into());
+    let request = UsageRequest::UsageOverview {
+        request_id: "grok-usage".into(),
+        project_alias: "workspace".into(),
+    };
+    let reply = UsageResponse::UsageOverview {
+        request_id: "grok-usage".into(),
+        project_alias: "workspace".into(),
+        providers: vec![observation.clone()],
+    };
+    let wire = serde_json::to_value(&reply).unwrap();
+    assert_eq!(wire["providers"][0]["provider"], "grok");
+    let round_trip = serde_json::from_value::<UsageResponse>(wire).unwrap();
+    assert_eq!(round_trip, reply);
+    assert!(round_trip.valid_for(&request, 200));
+    assert!(!round_trip.valid_for(&request, 202));
+    let card = provider_card(&observation, true, 0, false, "workspace");
+    assert_eq!(card.state, badge("Unknown", BadgeTone::Neutral));
+    assert_eq!(
+        card.quota_state,
+        Some(badge("Not reported", BadgeTone::Neutral))
+    );
+    assert!(card.quotas.is_empty());
+    assert!(card.metrics.iter().all(|metric| metric.value == "Unknown"));
+    assert!(card
+        .details
+        .iter()
+        .any(|detail| detail.value == "Grok / fixture"));
+    agents.providers = vec![observation];
+    agents.selected_usage = Some("grok-primary".into());
+    let effects = step(&mut agents, UiEvent::RefreshAgentUsage {}, "refresh-grok");
+    assert!(
+        matches!(&effects[0], UiEffect::Usage(UsageRequest::UsageRefresh {
+        agent_profile: Some(alias), ..
+    }) if alias == "grok-primary")
+    );
+
+    // The catalog determines selectable modes; naming a backend grants nothing.
+    agents.pending_usage = None;
+    draft(&mut agents);
+    assert!(agents.can_submit());
+    let effects = step(
+        &mut agents,
+        UiEvent::SendAgentTask {
+            idempotency_key: KEY.into(),
+        },
+        "submit-grok",
+    );
+    assert!(
+        matches!(&effects[0], UiEffect::Work(WorkRequest::WorkSubmit {
+        agent_profile, mode: WorkMode::Review, ..
+    }) if agent_profile == "grok-primary")
+    );
+    let mut no_grant = ready();
+    no_grant.profile = "grok-primary".into();
+    draft(&mut no_grant);
+    assert!(!no_grant.can_submit());
+    assert!(step(
+        &mut no_grant,
+        UiEvent::SendAgentTask {
+            idempotency_key: KEY.into(),
+        },
+        "unconfigured-grok"
+    )
+    .is_empty());
+}
+
+#[test]
 fn active_agents_remove_retained_tab_selection_and_only_lock_during_uncertain_mutations() {
     let mut agents = ready();
     let retained = || ViewModel {
@@ -653,6 +758,11 @@ fn terminal_history_keeps_public_plan_and_updates_without_revision_changes() {
         .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkEvents { .. }))));
     let events = (1..=31)
         .map(|ordinal| WorkLogEvent {
+            event_id: format!("{ordinal:08x}-7777-4777-8777-777777777777"),
+            correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+            progress_verified: false,
+            external_progress: None,
+            workflow_progress: None,
             sequence: ordinal,
             kind: WorkEventKind::Checkpoint,
             created_at: TIME.into(),
@@ -730,6 +840,11 @@ fn reports_from_an_old_attempt_do_not_become_current_progress() {
     let mut agents = ready();
     agents.task = Some(detail(WorkStatus::Running));
     agents.keep_progress(vec![WorkLogEvent {
+        event_id: "77777777-7777-4777-8777-777777777777".into(),
+        correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+        progress_verified: false,
+        external_progress: None,
+        workflow_progress: None,
         sequence: 10,
         kind: WorkEventKind::Checkpoint,
         created_at: TIME.into(),
@@ -749,6 +864,11 @@ fn an_external_resume_clears_the_old_plan_once_without_restarting_history_foreve
     agents.selected = Some(TASK.into());
     agents.task = Some(detail(WorkStatus::Failed));
     agents.progress = vec![WorkLogEvent {
+        event_id: "77777777-7777-4777-8777-777777777777".into(),
+        correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+        progress_verified: false,
+        external_progress: None,
+        workflow_progress: None,
         sequence: 3,
         kind: WorkEventKind::Checkpoint,
         created_at: TIME.into(),
@@ -772,6 +892,9 @@ fn an_external_resume_clears_the_old_plan_once_without_restarting_history_foreve
     assert_eq!(agents.event_sequence, 0);
     agents.event_sequence = 9;
     agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into());
     agents.get("same".into(), &mut vec![]);
     step(
         &mut agents,
@@ -845,6 +968,9 @@ fn finished_plan(status: WorkStatus) -> Agents {
     agents.selected = Some(TASK.into());
     agents.pane = Pane::Reader;
     agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into());
     agents
 }
 fn plan_event(decision: WorkPlanDecision) -> UiEvent {
@@ -1188,6 +1314,7 @@ fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_r
     );
 }
 
+mod history;
 mod review;
 mod workflow;
 

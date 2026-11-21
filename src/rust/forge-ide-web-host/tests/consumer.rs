@@ -51,7 +51,8 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":9,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":12,"files":files}))
+                .unwrap(),
         )
         .unwrap();
         Self(p)
@@ -1757,7 +1758,7 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 10] {
+    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -3056,6 +3057,10 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
                 "awaiting_review",
                 "needs_reconcile",
                 "coding_reconciliation_receipts",
+                "Muse through PostgreSQL",
+                "ExternalReviewContextProvider",
+                "one 50-event page",
+                "external-agent-workflow.md",
             ],
             diagrams: &[
                 "/design/coding-agents/ownership.svg",

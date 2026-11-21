@@ -8,7 +8,10 @@ import re
 from types import MappingProxyType
 import unicodedata
 
-from work_policy import POLICY_DIGEST, POLICY_ID
+from work_policy import (POLICY_DIGEST, POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIES,
+                         native_policy_digest, native_policy_matches)
+from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL, POLICIES as EXTERNAL_POLICIES
+from work_external_flow_config import freeze_external_workflows
 
 CONFIG_ENV_VAR = "FORGE_RUNNER_WORK_CONFIG"
 USAGE_CONFIG_ENV_VAR = "FORGE_RUNNER_USAGE_CONFIG"
@@ -22,16 +25,16 @@ MAX_LABEL_BYTES = 128
 MAX_TITLE_CHARS = 128
 MAX_TITLE_BYTES = 512
 VALID_MODES = frozenset({"plan", "review", "implement"})
-VALID_BACKENDS = frozenset({"antigravity", "codex"})
+VALID_BACKENDS = frozenset({"antigravity", "codex", "grok", "muse"})
 
 IDENTIFIER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
-PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label"}
+PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled"}
 
 
 def canonical_json_bytes(value):
@@ -120,6 +123,7 @@ class WorkProfile:
     model: str
     resource_profile: str
     label: str | None = None
+    execution_enabled: bool | None = None
 
     def __post_init__(self):
         validate_identifier(self.alias, "profile alias")
@@ -127,12 +131,24 @@ class WorkProfile:
             raise ValueError("Invalid work profile backend")
         validate_model(self.model)
         validate_identifier(self.resource_profile, "resource profile")
+        if self.resource_profile == AGY_POLICY_ID:
+            native_policy_digest(self.resource_profile, self.backend)
         if self.label is not None:
             validate_label(self.label, "profile label")
+        if self.is_external and (self.backend != "muse" or self.model != EXTERNAL_MODEL):
+            raise ValueError("Invalid external database work profile")
+        enabled = self.backend not in {"grok", "muse"} if self.execution_enabled is None else self.execution_enabled
+        if type(enabled) is not bool:
+            raise ValueError("Invalid work execution capability")
+        object.__setattr__(self, "execution_enabled", enabled)
 
     @property
     def display_label(self):
         return self.label if self.label is not None else self.alias
+
+    @property
+    def is_external(self):
+        return self.resource_profile in EXTERNAL_POLICIES
 
 
 @dataclass(frozen=True)
@@ -157,6 +173,16 @@ class PinnedRecipe:
             raise ValueError("Invalid pinned recipe mode")
         if self.generation_token_limit is not None:
             raise ValueError("Coding recipe generation_token_limit must be null")
+        if self.resource_profile in EXTERNAL_POLICIES and (
+            self.version != 2 or self.backend != "muse" or self.model != EXTERNAL_MODEL
+            or self.mode not in EXTERNAL_POLICIES[self.resource_profile][1] or self.policy_digest != EXTERNAL_POLICIES[self.resource_profile][0]
+        ):
+            raise ValueError("Invalid external database recipe")
+        if self.resource_profile == AGY_POLICY_ID and (
+            self.version != 2
+            or not native_policy_matches(self.resource_profile, self.backend, self.policy_digest)
+        ):
+            raise ValueError("Invalid unattended Antigravity recipe")
         if self.version == 1:
             if self.policy_digest is not None:
                 raise ValueError("Version 1 recipe must not carry policy_digest")
@@ -164,7 +190,8 @@ class PinnedRecipe:
             if (not isinstance(self.policy_digest, str)
                     or not DIGEST_HEX_RE.fullmatch(self.policy_digest)):
                 raise ValueError("Version 2 recipe requires a 64-hex policy_digest")
-            if self.resource_profile == POLICY_ID and self.policy_digest != POLICY_DIGEST:
+            if self.resource_profile in NATIVE_POLICIES and not native_policy_matches(
+                    self.resource_profile, self.backend, self.policy_digest):
                 raise ValueError("Version 2 recipe policy_digest does not match immutable builtin policy")
         expected = sha256_canonical(self.to_dict())
         if (not isinstance(self.digest, str)
@@ -201,7 +228,7 @@ class WorkCatalog:
 
     @property
     def allowed_profiles(self):
-        return frozenset(self._profiles)
+        return frozenset(alias for alias, profile in self._profiles.items() if profile.execution_enabled)
 
     def has_profile(self, alias):
         return isinstance(alias, str) and alias in self._profiles
@@ -213,9 +240,13 @@ class WorkCatalog:
         if mode not in VALID_MODES:
             raise ValueError("Invalid work mode")
         profile = self._profiles.get(profile_alias)
-        if profile is None:
-            raise KeyError("Unknown work profile")
-        if profile.resource_profile == POLICY_ID:
+        if profile is None or not profile.execution_enabled:
+            raise KeyError("Unavailable work profile")
+        if profile.is_external and mode not in EXTERNAL_POLICIES[profile.resource_profile][1]:
+            raise KeyError("External provider does not support this mode")
+        if profile.resource_profile in NATIVE_POLICIES or profile.is_external:
+            policy_digest = (EXTERNAL_POLICIES[profile.resource_profile][0] if profile.is_external
+                             else native_policy_digest(profile.resource_profile, profile.backend))
             payload = {
                 "version": 2,
                 "backend": profile.backend,
@@ -223,7 +254,7 @@ class WorkCatalog:
                 "resource_profile": profile.resource_profile,
                 "mode": mode,
                 "generation_token_limit": None,
-                "policy_digest": POLICY_DIGEST,
+                "policy_digest": policy_digest,
             }
             return PinnedRecipe(
                 version=2,
@@ -233,7 +264,7 @@ class WorkCatalog:
                 mode=mode,
                 generation_token_limit=None,
                 digest=sha256_canonical(payload),
-                policy_digest=POLICY_DIGEST,
+                policy_digest=policy_digest,
             )
         payload = {
             "version": 1,
@@ -296,7 +327,8 @@ class WorkflowPolicy:
         recipes={"author_plan":catalog.resolve(self.author_profile,"plan"),
                  "author_implement":catalog.resolve(self.author_profile,"implement"),
                  "reviewer_review":catalog.resolve(self.reviewer_profile,"review")}
-        if any(r.resource_profile != POLICY_ID or r.policy_digest != POLICY_DIGEST for r in recipes.values()):
+        if any(r.version != 2 or not native_policy_matches(
+                r.resource_profile, r.backend, r.policy_digest) for r in recipes.values()):
             raise ValueError("Workflow requires current immutable execution policy")
         result={"version":self.version,"author_profile":self.author_profile,"reviewer_profile":self.reviewer_profile,
                 "max_plan_revisions":self.max_plan_revisions,"max_code_revisions":repair_policy["max_rounds"],
@@ -339,6 +371,7 @@ class WorkConfig:
     project_labels: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
     repair_policy: MappingProxyType = field(default_factory=lambda:DEFAULT_REPAIR_POLICY)
     project_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
+    external_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
 
     def __post_init__(self):
         repair_policy=freeze_repair_policy(self.repair_policy)
@@ -379,6 +412,7 @@ class WorkConfig:
         object.__setattr__(self, "project_labels", MappingProxyType(copied_labels))
         object.__setattr__(self,"repair_policy",repair_policy)
         object.__setattr__(self,"project_workflows",freeze_workflows(self.project_workflows,projects,copied_profiles,modes))
+        object.__setattr__(self,"external_workflows",freeze_external_workflows(self.external_workflows,projects,copied_profiles,modes))
 
     def project_label(self, alias):
         return self.project_labels.get(alias, alias)
@@ -434,12 +468,15 @@ def parse_work_config(raw):
         if (not isinstance(spec, dict)
                 or not PROFILE_REQUIRED_KEYS <= set(spec.keys()) <= PROFILE_ALLOWED_KEYS):
             raise ValueError("Invalid work profile definition")
+        if "execution_enabled" in spec and type(spec["execution_enabled"]) is not bool:
+            raise ValueError("Invalid work execution capability")
         profiles[alias] = WorkProfile(
             alias=alias,
             backend=spec["backend"],
             model=spec["model"],
             resource_profile=spec["resource_profile"],
             label=spec.get("label"),
+            execution_enabled=spec.get("execution_enabled"),
         )
     raw_project_labels = raw.get("project_labels", {})
     if not isinstance(raw_project_labels, dict):
@@ -459,6 +496,7 @@ def parse_work_config(raw):
         project_labels=MappingProxyType(project_labels),
         repair_policy=freeze_repair_policy(raw.get("repair_policy",{})),
         project_workflows=raw.get("project_workflows",{}),
+        external_workflows=raw.get("external_workflows",{}),
     )
 
 

@@ -1,4 +1,8 @@
 """Independent delivery audit: real local Git, typed worker leases, Jenkins uncertainty."""
+<<<<<<< HEAD
+=======
+from dataclasses import replace
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -15,8 +19,11 @@ def identity_request():
     return {'action_id':str(uuid4()),'workflow_id':str(uuid4()),'correlation_id':str(uuid4()),
         'project_alias':'homelab','candidate_commit':'c'*40,'candidate_tree':'d'*40,
         'integration_base':'a'*40,'base_revision':'a'*40,'gate_manifest_sha256':'e'*64,
+<<<<<<< HEAD
         'branch_scope':'branch/'+delivery.canonical_branch_slug('feat/owned'),
         'source_branch':'feat/owned',
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         'prepare_action_id':str(uuid4()),'source_task_id':str(uuid4()),
         'source_assignment_id':str(uuid4()),'source_sha256':'f'*64}
 
@@ -57,15 +64,22 @@ class TrustedJenkinsTest(unittest.TestCase):
         self.temp=TemporaryDirectory(prefix='forge-delivery-audit-');self.addCleanup(self.temp.cleanup)
         self.config=configuration(self.temp.name);self.config.results_root.mkdir()
         self.jenkins=Mock();self.port=delivery.TrustedDeliveryPort(self.config,self.jenkins)
+<<<<<<< HEAD
         self.request=identity_request();self.record={k:self.request[k] for k in ('action_id','workflow_id','candidate_commit','candidate_tree','correlation_id','branch_scope')}
+=======
+        self.request=identity_request();self.record={k:self.request[k] for k in ('action_id','workflow_id','candidate_commit','candidate_tree','correlation_id')}
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         self.record.update(expected_main='a'*40,gate_manifest_sha256='e'*64,verification_profile=delivery.PROFILE)
         self.port._submission=Mock(return_value=(Path(self.temp.name),self.record))
         self.require=Mock()
     def write_result(self,**changes):
         result={**self.record,'status':'passed','cleanup_confirmed':True,
             'checks':[{'index':index,'argv':list(argv),'returncode':0} for index,argv in enumerate(delivery.CHECKS)],
+<<<<<<< HEAD
             'cache':{'enabled':True,'restore_status':'hit_branch','publish_status':'published'},
             'stages':[{'name':'check_0','status':'passed','elapsed_ms':120}],
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             'request_sha256':hashlib.sha256(delivery.canonical(self.record)+b'\n').hexdigest()}
         result.update(changes);path=self.config.results_root/(self.request['action_id']+'.json')
         delivery.durable_json(path,result);return result
@@ -91,17 +105,23 @@ class TrustedJenkinsTest(unittest.TestCase):
             self.write_result();passed=self.port.verify(self.request,self.require)
             self.assertEqual(passed['status'],'passed');self.assertEqual(passed['receipt']['result'],'SUCCESS')
             self.assertEqual(passed['receipt']['candidate_tree'],self.request['candidate_tree'])
+<<<<<<< HEAD
             self.assertEqual(passed['receipt']['branch_scope'],self.request['branch_scope'])
             self.assertEqual(passed['receipt']['cache']['restore_status'],'hit_branch')
             self.assertEqual(passed['receipt']['stages'][0]['name'],'check_0')
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             for changed in ({'checks':[]},{'checks':[{'index':0,'argv':list(delivery.CHECKS[0]),'returncode':0}]},
                             {'cleanup_confirmed':False},{'status':'failed'}):
                 with self.subTest(changed=changed):
                     self.write_result(**changed);self.assertEqual(self.port.verify(self.request,self.require)['status'],'failed')
             self.write_result(candidate_tree='b'*40)
             with self.assertRaises(ValueError):self.port.verify(self.request,self.require)
+<<<<<<< HEAD
             self.write_result(branch_scope='branch/'+delivery.canonical_branch_slug('feat/other'))
             with self.assertRaises(ValueError):self.port.verify(self.request,self.require)
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             self.write_result();self.jenkins.find.return_value=self.observed_build(result='FAILURE')
             self.assertEqual(self.port.verify(self.request,self.require)['status'],'failed')
     def cancel_request(self):
@@ -130,6 +150,7 @@ class TrustedJenkinsTest(unittest.TestCase):
         self.assertEqual(self.port.cancel(self.cancel_request(),self.require)['status'],'pending')
 
 
+<<<<<<< HEAD
 class SubmissionBranchScopeGuardTest(unittest.TestCase):
     def test_submission_requires_valid_branch_scope_and_keeps_jenkins_parameters_unchanged(self):
         with TemporaryDirectory(prefix='forge-submission-scope-') as root:
@@ -178,6 +199,8 @@ class SubmissionBranchScopeGuardTest(unittest.TestCase):
                 self.assertEqual(direct_record['branch_scope'],'branch/'+delivery.canonical_branch_slug('feat/direct'))
 
 
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 class TypedDeliveryWorkerTest(unittest.TestCase):
     def test_typed_lease_is_passed_to_owner_scoped_dao_and_receipt_committed(self):
         request=identity_request();lease=ExternalDeliveryLease(request['action_id'],request['workflow_id'],'homelab','source',1,str(uuid4()),'2099-01-01T00:00:00Z',request)
@@ -204,6 +227,7 @@ class TypedDeliveryWorkerTest(unittest.TestCase):
 class LocalGitSanitizerTest(unittest.TestCase):
     def git(self,repository,*args,data=None):
         return subprocess.run(['/usr/bin/git','-C',str(repository),*args],input=data,check=True,capture_output=True).stdout
+<<<<<<< HEAD
 
     def _setup_repo_fixture(self,root):
         config=configuration(root);base_repo=Path(root)/'author';base_repo.mkdir()
@@ -241,6 +265,18 @@ class LocalGitSanitizerTest(unittest.TestCase):
     def test_candidate_keeps_tree_but_drops_private_author_history_and_preserves_source_ref(self):
         with TemporaryDirectory(prefix='forge-clean-candidate-') as root:
             config,base_repo,remote,canonical,base,_base_tree,port=self._setup_repo_fixture(root)
+=======
+    def test_candidate_keeps_tree_but_drops_private_author_history_and_preserves_source_ref(self):
+        with TemporaryDirectory(prefix='forge-clean-candidate-') as root:
+            config=configuration(root);base_repo=Path(root)/'author';base_repo.mkdir()
+            self.git(base_repo,'init','--quiet','--initial-branch=main');self.git(base_repo,'config','user.name','Fixture');self.git(base_repo,'config','user.email','fixture@localhost')
+            (base_repo/'app.py').write_text('base\n');(base_repo/'Makefile').write_text('ci:\n\ttrue\n')
+            self.git(base_repo,'add','.');self.git(base_repo,'commit','--quiet','-m','Public base')
+            base=self.git(base_repo,'rev-parse','HEAD').decode().strip()
+            remote=Path(root)/'remote.git';self.git(base_repo,'clone','--quiet','--bare',str(base_repo),str(remote))
+            canonical=Path(config.projects['homelab']['canonical_repo']);self.git(base_repo,'clone','--quiet',str(remote),str(canonical))
+            self.git(canonical,'update-ref','refs/forge/verified-main',base)
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             (base_repo/'private.txt').write_text('Private transient design artifact\n')
             self.git(base_repo,'add','.');self.git(base_repo,'commit','--quiet','-m','Private author notes and metadata')
             private_commit=self.git(base_repo,'rev-parse','HEAD').decode().strip()
@@ -249,8 +285,18 @@ class LocalGitSanitizerTest(unittest.TestCase):
             self.git(base_repo,'commit','--quiet','-m','Private author final metadata')
             raw=self.git(base_repo,'rev-parse','HEAD').decode().strip();tree=self.git(base_repo,'rev-parse','HEAD^{tree}').decode().strip()
             self.git(base_repo,'push','--quiet',str(remote),'HEAD:refs/heads/feature')
+<<<<<<< HEAD
             request=identity_request();request.pop('branch_scope',None);request.pop('source_branch',None)
             request.update(base_revision=base,candidate_commit=raw,candidate_tree=tree)
+=======
+            config.verifier.write_text('# Pinned trusted helper\n');config.verifier.chmod(0o600)
+            class LocalPort(delivery.TrustedDeliveryPort):
+                def source_head(inner,project):return base
+                def git(inner,repository,*args,**kwargs):
+                    args=tuple(str(remote) if x=='https://github.com/fixture/project.git' else x for x in args)
+                    return super().git(repository,*args,**kwargs)
+            port=LocalPort(config,Mock());request=identity_request();request.update(base_revision=base,candidate_commit=raw,candidate_tree=tree)
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             real_read=delivery.read_private
             def owned(path,**kwargs):
                 if kwargs.get('owner')==0:kwargs['owner']=os.geteuid()
@@ -259,8 +305,11 @@ class LocalGitSanitizerTest(unittest.TestCase):
                 result=port.prepare_candidate(request,Mock())
                 self.assertEqual(port.prepare_candidate(request,Mock()),result)
             clean=result['candidate_commit'];self.assertNotEqual(clean,raw)
+<<<<<<< HEAD
             self.assertEqual(result['source_branch'],'feature')
             self.assertEqual(result['branch_scope'],'branch/'+delivery.canonical_branch_slug('feature'))
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             self.assertEqual(self.git(canonical,'show','-s','--format=%P',clean).decode().strip(),base)
             self.assertEqual(self.git(canonical,'rev-parse',clean+'^{tree}').decode().strip(),tree)
             for forbidden in (raw,private_commit):
@@ -270,6 +319,7 @@ class LocalGitSanitizerTest(unittest.TestCase):
             self.assertEqual(hashlib.sha256(diff).hexdigest(),result['diff_sha256'])
             self.assertIn('Makefile',{x['path'] for x in result['protected_gate_changes']})
 
+<<<<<<< HEAD
     def test_remote_branch_scope_cross_workflow_reuse_isolation_spoofing_and_detached(self):
         with TemporaryDirectory(prefix='forge-branch-scope-') as root:
             _config,repo,remote,_canonical,base,base_tree,port=self._setup_repo_fixture(root)
@@ -343,6 +393,8 @@ class LocalGitSanitizerTest(unittest.TestCase):
             self.assertEqual((detached_old['source_branch'],detached_old['branch_scope']),(None,'detached'))
 
 
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 class GuardedMergeTest(unittest.TestCase):
     def fixture(self,root):
         request=identity_request();request['verification']={k:request[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256')}
@@ -381,7 +433,10 @@ class GuardedMergeTest(unittest.TestCase):
             port.git.assert_any_call(port.config.projects['homelab']['canonical_repo'],'merge-base','--is-ancestor','c'*40,'f'*40)
             port.api.assert_not_called()
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 class ObservedSourceImportTest(unittest.TestCase):
     git=LocalGitSanitizerTest.git
 
@@ -423,6 +478,9 @@ class ObservedSourceImportTest(unittest.TestCase):
             self.assertEqual(len(fetches),1);self.assertIn('--no-tags',fetches[0]);self.assertIn('--no-write-fetch-head',fetches[0])
             self.assertEqual(port.source_head('homelab'),newer)
             self.assertEqual(len([args for args in commands if 'fetch' in args]),1)
+<<<<<<< HEAD
 
 
 if __name__=='__main__': unittest.main()
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49

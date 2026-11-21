@@ -29,10 +29,13 @@ LOG = logging.getLogger('forge-external-delivery')
 SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
 REPOSITORY = re.compile('[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')
+<<<<<<< HEAD
 BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
 BRANCH_SLUG_RE = re.compile(r'[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 BRANCH_SCOPE_RE = re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 EPHEMERAL_BRANCH_PREFIX = 'forge/external-candidate-'
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 PROFILE = 'forge-sdlc-jenkins-v1'
 CHECKS = (('/usr/bin/make', 'ci'), ('/usr/bin/make', 'ui-qa'),
           ('/usr/bin/python3', '-B', '-m', 'unittest', 'discover', '-s',
@@ -74,6 +77,7 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
 
 
+<<<<<<< HEAD
 def validate_branch_name(value):
     if (not isinstance(value, str) or not BRANCH_NAME_RE.fullmatch(value)
             or '..' in value or '//' in value or '@{' in value
@@ -128,11 +132,26 @@ def validate_branch_scope(scope, *, candidate_commit, expected_main):
     raise ValueError('Invalid delivery branch scope')
 
 
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 def protected_delivery_gate(path):
     return (protected_gate_path(path) or path.startswith('deploy/mission-control/jenkins/')
             or path.rsplit('/', 1)[-1] == 'work_external_delivery.py')
 
 
+<<<<<<< HEAD
+=======
+def jenkins_gate_manifest(config, files):
+    """Compute the source map and operator-owned installed verifier identity."""
+    protected = {path: value for path, value in files.items() if protected_delivery_gate(path)}
+    source_digest = hashlib.sha256(canonical(protected)).hexdigest()
+    helper_digest = hashlib.sha256(read_private(config.verifier, owner=0, maximum=1024 * 1024)).hexdigest()
+    gate = hashlib.sha256(canonical({'version': 1, 'provider': 'jenkins', 'profile': PROFILE,
+        'checks': CHECKS, 'verifier_sha256': helper_digest, 'source_gate_sha256': source_digest})).hexdigest()
+    return source_digest, helper_digest, gate
+
+
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 def read_private(path, *, maximum=65536, owner=None):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, 'rb') as stream:
@@ -191,7 +210,11 @@ class DeliveryConfig:
         required = {'owner', 'worker_id', 'database', 'projects', 'state_root', 'spool_root',
             'results_root', 'github_config_dir', 'jenkins_binary', 'jenkins_binary_sha256',
             'jenkins_config', 'verifier'}
+<<<<<<< HEAD
         if not isinstance(raw, dict) or set(raw) != required:
+=======
+        if not isinstance(raw, dict) or not required <= set(raw) <= required | {'jenkins_job'}:
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             raise ValueError('Invalid delivery configuration fields')
         if not isinstance(raw['owner'], str) or not 1 <= len(raw['owner']) <= 128:
             raise ValueError('Invalid delivery owner')
@@ -220,8 +243,16 @@ class DeliveryConfig:
         if any(not p.is_absolute() or '..' in p.parts for p in values.values()):
             raise ValueError('Delivery paths must be explicit absolute paths')
         digest(raw['jenkins_binary_sha256'])
+<<<<<<< HEAD
         return cls(raw['owner'], raw['worker_id'], MappingProxyType(dict(database)),
             MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'])
+=======
+        job = raw.get('jenkins_job', 'forge-exact-candidate')
+        if not isinstance(job, str) or job not in {'forge-exact-candidate', 'forge-native-candidate'}:
+            raise ValueError('Invalid fixed Jenkins job')
+        return cls(raw['owner'], raw['worker_id'], MappingProxyType(dict(database)),
+            MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'], jenkins_job=job)
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 
 class ForgeJenkinsPort:
@@ -351,6 +382,7 @@ class TrustedDeliveryPort:
             raise ValueError('Unsafe delivery state')
         return path
 
+<<<<<<< HEAD
     def _remote_branch_heads(self, repository, remote):
         output = self.git(
             repository,
@@ -437,6 +469,13 @@ class TrustedDeliveryPort:
         intended = {k: request.get(k) for k in ('workflow_id', 'project_alias', 'source_task_id',
             'source_assignment_id', 'source_sha256', 'base_revision', 'candidate_commit', 'candidate_tree')}
         intended['source_branch'] = requested_branch
+=======
+    def prepare_candidate(self, request, require_lease):
+        directory = self.directory(request)
+        result_path = directory / 'prepared.json'
+        intended = {k: request.get(k) for k in ('workflow_id', 'project_alias', 'source_task_id',
+            'source_assignment_id', 'source_sha256', 'base_revision', 'candidate_commit', 'candidate_tree')}
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         identity = hashlib.sha256(canonical(intended)).hexdigest()
         if result_path.exists():
             previous = json.loads(read_private(result_path, owner=os.geteuid()))
@@ -486,11 +525,15 @@ class TrustedDeliveryPort:
                 raise ValueError('External source exceeds checkout bounds')
             artifact_guard(name, data)
             files[name] = [mode, blob]
+<<<<<<< HEAD
         protected = {path: value for path, value in files.items() if protected_delivery_gate(path)}
         source_digest = hashlib.sha256(canonical(protected)).hexdigest()
         helper_digest = hashlib.sha256(read_private(self.config.verifier, owner=0, maximum=1024 * 1024)).hexdigest()
         gate = hashlib.sha256(canonical({'version': 1, 'provider': 'jenkins', 'profile': PROFILE,
             'checks': CHECKS, 'verifier_sha256': helper_digest, 'source_gate_sha256': source_digest})).hexdigest()
+=======
+        source_digest, _helper_digest, gate = jenkins_gate_manifest(self.config, files)
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         base_tree = self.git(repository, 'rev-parse', expected + '^{tree}').decode().strip()
         if base_tree == claimed_tree:
             clean = expected
@@ -500,6 +543,7 @@ class TrustedDeliveryPort:
                    'GIT_COMMITTER_DATE': '@' + str(epoch) + ' +0000'}
             clean = self.git(repository, 'commit-tree', claimed_tree, '-p', expected,
                 data=('Verified Forge workflow ' + request['workflow_id'] + '\n').encode(), env=env).decode().strip()
+<<<<<<< HEAD
         resolved_source_branch, branch_scope = self._resolve_branch_scope(
             repository,
             remote,
@@ -509,6 +553,8 @@ class TrustedDeliveryPort:
             requested_branch=requested_branch,
             require_lease=require_lease,
         )
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         require_lease()
         reference = 'refs/forge/external-candidates/' + request['action_id']
         self.git(repository, 'update-ref', reference, clean)
@@ -526,7 +572,10 @@ class TrustedDeliveryPort:
                 gate_changes.append({'path': name, 'finding_id': 'gate-' + hashlib.sha256(path).hexdigest()[:16]})
         result = {'candidate_commit': sha(clean), 'candidate_tree': claimed_tree,
             'integration_base': expected, 'author_candidate_commit': raw,
+<<<<<<< HEAD
             'source_branch': resolved_source_branch, 'branch_scope': branch_scope,
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             'diff_sha256': hashlib.sha256(patch).hexdigest(), 'verification_profile': PROFILE,
             'gate_source_sha256': source_digest, 'gate_manifest_sha256': gate,
             'protected_gate_changes': gate_changes, 'no_change': clean == expected,
@@ -541,6 +590,7 @@ class TrustedDeliveryPort:
 
     def _submission(self, request):
         import grp
+<<<<<<< HEAD
         candidate_commit = sha(request['candidate_commit'])
         expected_main = sha(request['integration_base'])
         raw_scope = request.get('branch_scope')
@@ -568,6 +618,8 @@ class TrustedDeliveryPort:
                 source_branch=raw_branch,
             )
 
+=======
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         prepared = self.config.state_root / 'actions' / uid(request['prepare_action_id']) / 'candidate.bundle'
         bundle = read_private(prepared, owner=os.geteuid(), maximum=128 * 1024 * 1024)
         path = self.config.spool_root / uid(request['action_id'])
@@ -579,8 +631,13 @@ class TrustedDeliveryPort:
             raise ValueError('Unsafe CI submission')
         record = {'version': 1, 'action_id': uid(request['action_id']),
             'workflow_id': uid(request['workflow_id']), 'project_alias': request['project_alias'],
+<<<<<<< HEAD
             'candidate_commit': candidate_commit, 'candidate_tree': sha(request['candidate_tree']),
             'expected_main': expected_main, 'branch_scope': branch_scope,
+=======
+            'candidate_commit': sha(request['candidate_commit']), 'candidate_tree': sha(request['candidate_tree']),
+            'expected_main': sha(request['integration_base']),
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
             'bundle_sha256': hashlib.sha256(bundle).hexdigest(), 'verification_profile': PROFILE,
             'correlation_id': uid(request['correlation_id'])}
@@ -635,19 +692,31 @@ class TrustedDeliveryPort:
         result_file = self.config.results_root / (request['action_id'] + '.json')
         if not result_file.exists():
             return {'status': 'failed', 'receipt': receipt, 'summary': 'The finished Jenkins build has no trusted verification receipt.'}
+<<<<<<< HEAD
         raw = read_private(result_file, owner=0, maximum=262144)
         result = json.loads(raw)
         expected = {k: record[k] for k in ('action_id', 'workflow_id', 'candidate_commit', 'candidate_tree',
                     'expected_main', 'branch_scope', 'gate_manifest_sha256', 'verification_profile', 'correlation_id')}
+=======
+        raw = read_private(result_file, owner=0)
+        result = json.loads(raw)
+        expected = {k: record[k] for k in ('action_id', 'workflow_id', 'candidate_commit', 'candidate_tree',
+                    'expected_main', 'gate_manifest_sha256', 'verification_profile', 'correlation_id')}
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         if any(result.get(k) != v for k, v in expected.items()) or result.get('request_sha256') != hashlib.sha256(canonical(record) + b'\n').hexdigest():
             raise ValueError('Trusted CI receipt source mismatch')
         receipt.update({'check_receipt_sha256': hashlib.sha256(raw).hexdigest(),
             'cleanup_confirmed': result.get('cleanup_confirmed') is True,
+<<<<<<< HEAD
             'checks': result.get('checks'), 'log_sha256': result.get('log_sha256')})
         if isinstance(result.get('cache'), dict):
             receipt['cache'] = result['cache']
         if isinstance(result.get('stages'), list):
             receipt['stages'] = result['stages']
+=======
+            'checks': result.get('checks'), 'log_sha256': result.get('log_sha256'),
+            'failure': result.get('failure')})
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         checks = result.get('checks')
         complete = (isinstance(checks, list) and len(checks) == len(CHECKS)
             and all(check == {'index': index, 'argv': list(argv), 'returncode': 0}
@@ -772,7 +841,11 @@ class TrustedDeliveryPort:
                     'summary': 'Jenkins process stop requested; awaiting the trusted cleanup receipt.'}
         result_path = self.config.results_root / (target['action_id'] + '.json')
         if result_path.exists():
+<<<<<<< HEAD
             raw = read_private(result_path, owner=0, maximum=262144)
+=======
+            raw = read_private(result_path, owner=0)
+>>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             result = json.loads(raw)
             if result.get('action_id') == target['action_id'] and result.get('cleanup_confirmed') is True:
                 return {'status': 'cancelled', 'receipt': {**receipt, 'cleanup_confirmed': True,

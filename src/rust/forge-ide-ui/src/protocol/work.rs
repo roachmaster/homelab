@@ -384,12 +384,16 @@ impl WorkPublication {
 pub enum WorkBackend {
     Antigravity,
     Codex,
+    Grok,
+    Muse,
 }
 impl WorkBackend {
     pub fn label(self) -> &'static str {
         match self {
             Self::Antigravity => "Gemini / Antigravity",
             Self::Codex => "Codex",
+            Self::Grok => "Grok",
+            Self::Muse => "Muse Code",
         }
     }
 }
@@ -471,6 +475,8 @@ pub struct WorkProject {
     pub base_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<WorkWorkflowPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_workflow: Option<WorkWorkflowPolicy>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -480,6 +486,13 @@ pub struct WorkProfile {
     pub backend: WorkBackend,
     pub model: String,
     pub modes: Vec<WorkMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<WorkTransport>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkTransport {
+    ExternalDb,
 }
 impl WorkProfile {
     pub fn is_valid(&self) -> bool {
@@ -512,6 +525,9 @@ impl WorkCatalog {
             && self.profiles.len() <= 64
             && self.projects.iter().all(|p| {
                 p.workflow.as_ref().is_none_or(WorkWorkflowPolicy::is_valid)
+                    && p.external_workflow
+                        .as_ref()
+                        .is_none_or(WorkWorkflowPolicy::is_valid)
                     && valid_work_name(&p.alias, 64)
                     && valid_work_label(&p.label, 128)
                     && p.base_revision
@@ -540,6 +556,7 @@ impl WorkCatalog {
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskSummary {
     pub task_id: String,
+    pub correlation_id: String,
     pub project_alias: String,
     pub base_revision: String,
     pub mode: WorkMode,
@@ -559,6 +576,7 @@ pub struct WorkTaskSummary {
 impl WorkTaskSummary {
     pub fn is_valid(&self) -> bool {
         valid_chat_id(&self.task_id)
+            && valid_chat_id(&self.correlation_id)
             && valid_work_name(&self.project_alias, 64)
             && valid_work_hex(&self.base_revision, 40)
             && valid_work_name(&self.agent_profile, 64)
@@ -612,6 +630,7 @@ impl WorkResultManifest {
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskDetail {
     pub task_id: String,
+    pub correlation_id: String,
     pub project_alias: String,
     pub base_revision: String,
     pub mode: WorkMode,
@@ -642,11 +661,35 @@ pub struct WorkTaskDetail {
     pub workflow: Option<WorkWorkflowSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<WorkReviewSummary>,
+    /// Authenticated external artifact; carries no native process or workspace proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_result: Option<WorkExternalResult>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkExternalResult {
+    pub assignment_id: String,
+    pub provider: String,
+    pub sha256: String,
+    pub content: String,
+    pub submitted_at: String,
+    pub summary: String,
+}
+impl WorkExternalResult {
+    pub fn is_valid(&self) -> bool {
+        valid_chat_id(&self.assignment_id)
+            && self.provider == "muse-db"
+            && valid_work_hex(&self.sha256, 64)
+            && valid_chat_text(&self.content, 256 * 1024)
+            && valid_work_timestamp(&self.submitted_at)
+            && valid_chat_text(&self.summary, 4096)
+    }
 }
 impl WorkTaskDetail {
     pub fn summary(&self) -> WorkTaskSummary {
         WorkTaskSummary {
             task_id: self.task_id.clone(),
+            correlation_id: self.correlation_id.clone(),
             project_alias: self.project_alias.clone(),
             base_revision: self.base_revision.clone(),
             mode: self.mode,
@@ -662,6 +705,20 @@ impl WorkTaskDetail {
     }
     pub fn is_valid(&self) -> bool {
         self.summary().is_valid()
+            && self.external_result.as_ref().is_none_or(|r| {
+                r.is_valid()
+                    && self.attempt.is_none()
+                    && self.result.is_none()
+                    && self.reconciliation_receipt_id.is_none()
+                    && self.publication.is_none()
+                    && self.review.is_none()
+                    && self.review_required != Some(true)
+                    && self
+                        .workflow
+                        .as_ref()
+                        .is_none_or(|w| w.kind == WorkWorkflowKind::ExternalDatabase)
+                    && (!self.workflow_required || self.workflow.is_some())
+            })
             && self
                 .workflow
                 .as_ref()
@@ -692,11 +749,61 @@ impl WorkTaskDetail {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkLogEvent {
+    pub event_id: String,
+    pub correlation_id: String,
     pub sequence: u64,
     pub kind: WorkEventKind,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<WorkProgress>,
+    /// The service verified this native attempt belongs to the selected task.
+    #[serde(default)]
+    pub progress_verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_progress: Option<WorkExternalProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_progress: Option<WorkWorkflowProgress>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkWorkflowProgress {
+    pub workflow_id: String,
+    pub phase: WorkWorkflowPhase,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub related_task_id: Option<String>,
+}
+impl WorkWorkflowProgress {
+    pub fn is_valid(&self) -> bool {
+        valid_chat_id(&self.workflow_id)
+            && self.related_task_id.as_deref().is_none_or(valid_chat_id)
+            && valid_chat_text(&self.summary, 4096)
+            && self
+                .summary
+                .chars()
+                .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkExternalProgress {
+    pub provider: String,
+    pub assignment_id: String,
+    pub generation: u32,
+    pub summary: String,
+}
+impl WorkExternalProgress {
+    pub fn is_valid(&self) -> bool {
+        self.provider == "muse-db"
+            && valid_chat_id(&self.assignment_id)
+            && (1..=3).contains(&self.generation)
+            && valid_chat_text(&self.summary, 4096)
+            && self
+                .summary
+                .chars()
+                .all(|c| !c.is_control() || matches!(c, '\n' | '\t'))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1449,13 +1556,37 @@ impl WorkResponse {
                     && valid_work_revision(*revision)
                     && events.len() <= *limit
                     && events.iter().all(|e| {
-                        valid_work_revision(e.sequence)
+                        valid_chat_id(&e.event_id)
+                            && valid_chat_id(&e.correlation_id)
+                            && valid_work_revision(e.sequence)
                             && e.sequence > *after_sequence
                             && valid_work_timestamp(&e.created_at)
                             && e.progress
                                 .as_ref()
                                 .is_none_or(|p| e.kind == WorkEventKind::Checkpoint && p.is_valid())
+                            && e.external_progress
+                                .as_ref()
+                                .is_none_or(|p| e.kind == WorkEventKind::Checkpoint && p.is_valid())
+                            && e.workflow_progress
+                                .as_ref()
+                                .is_none_or(|p| e.kind == WorkEventKind::Checkpoint && p.is_valid())
+                            && [
+                                e.progress.is_some(),
+                                e.external_progress.is_some(),
+                                e.workflow_progress.is_some(),
+                            ]
+                            .into_iter()
+                            .filter(|v| *v)
+                            .count()
+                                <= 1
+                            && (!e.progress_verified || e.progress.is_some())
                     })
+                    && events
+                        .iter()
+                        .map(|e| &e.event_id)
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        == events.len()
                     && events.windows(2).all(|p| p[0].sequence < p[1].sequence)
                     && *next_sequence == events.last().map_or(*after_sequence, |e| e.sequence)
             }
@@ -1688,6 +1819,27 @@ where
 mod tests {
     use super::*;
     #[test]
+    fn configured_backends_have_stable_wire_names_and_labels() {
+        for (backend, wire, label) in [
+            (
+                WorkBackend::Antigravity,
+                "antigravity",
+                "Gemini / Antigravity",
+            ),
+            (WorkBackend::Codex, "codex", "Codex"),
+            (WorkBackend::Grok, "grok", "Grok"),
+            (WorkBackend::Muse, "muse", "Muse Code"),
+        ] {
+            assert_eq!(serde_json::to_value(backend).unwrap(), wire);
+            assert_eq!(
+                serde_json::from_value::<WorkBackend>(wire.into()).unwrap(),
+                backend
+            );
+            assert_eq!(backend.label(), label);
+        }
+        assert!(serde_json::from_str::<WorkBackend>("\"unconfigured\"").is_err());
+    }
+    #[test]
     fn timestamps_and_cursors_are_canonical_and_bounded() {
         assert!(valid_work_timestamp("2024-02-29T12:00:00.100Z"));
         assert!(!valid_work_timestamp("2023-02-29T12:00:00Z"));
@@ -1711,6 +1863,11 @@ mod tests {
             revision: 2,
             status: WorkStatus::Running,
             events: vec![WorkLogEvent {
+                event_id: "77777777-7777-4777-8777-777777777777".into(),
+                correlation_id: "99999999-9999-4999-8999-999999999999".into(),
+                progress_verified: false,
+                external_progress: None,
+                workflow_progress: None,
                 sequence: 5,
                 kind: WorkEventKind::Checkpoint,
                 progress: None,
@@ -1729,7 +1886,9 @@ mod progress_tests {
     #[test]
     fn public_progress_is_optional_bounded_and_has_no_completion_authority() {
         let legacy = r#"{"sequence":1,"kind":"queued","created_at":"2026-11-19T00:00:00Z"}"#;
-        assert!(serde_json::from_str::<WorkLogEvent>(legacy)
+        assert!(serde_json::from_str::<WorkLogEvent>(legacy).is_err());
+        let current = serde_json::json!({"event_id":"77777777-7777-4777-8777-777777777777","correlation_id":"99999999-9999-4999-8999-999999999999","sequence":1,"kind":"queued","created_at":"2026-11-19T00:00:00Z"});
+        assert!(serde_json::from_value::<WorkLogEvent>(current)
             .unwrap()
             .progress
             .is_none());

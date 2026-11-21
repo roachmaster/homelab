@@ -24,8 +24,136 @@ fn configure(agents: &mut Agents) {
     catalog.profiles.push(reviewer);
     agents.choose_mode();
 }
-fn summary(phase: WorkWorkflowPhase) -> WorkWorkflowSummary {
+fn add_external(agents: &mut Agents) {
+    agents.catalog.as_mut().unwrap().profiles.push(WorkProfile {
+        alias: "muse-db-primary".into(),
+        label: "Muse database runner".into(),
+        backend: WorkBackend::Muse,
+        model: "External runner".into(),
+        modes: vec![WorkMode::Plan, WorkMode::Review],
+        transport: Some(WorkTransport::ExternalDb),
+    });
+}
+
+#[test]
+fn external_assignment_is_explicit_and_does_not_bypass_native_workflow() {
+    let mut agents = ready();
+    configure(&mut agents);
+    add_external(&mut agents);
+    draft(&mut agents);
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, false);
+    assert!(
+        !view
+            .choices
+            .iter()
+            .find(|b| b.id == "agents-profile")
+            .unwrap()
+            .disabled
+    );
+    step(
+        &mut agents,
+        UiEvent::SelectAgentProfile {
+            value: "muse-db-primary".into(),
+        },
+        "external",
+    );
+    assert_eq!(agents.profile, "muse-db-primary");
+    assert!(agents.workflow_policy().is_none());
+    assert!(agents.can_submit());
+    step(
+        &mut agents,
+        UiEvent::SelectAgentProfile {
+            value: "codex-primary".into(),
+        },
+        "wrong-role",
+    );
+    assert_eq!(agents.profile, "muse-db-primary");
+    let effects = step(
+        &mut agents,
+        UiEvent::SendAgentTask {
+            idempotency_key: KEY.into(),
+        },
+        "send",
+    );
+    assert!(
+        matches!(&effects[0], UiEffect::Work(WorkRequest::WorkSubmit {
+        agent_profile, workflow_policy_digest: None, mode: WorkMode::Plan, auto_repair: false, ..
+    }) if agent_profile == "muse-db-primary")
+    );
+    agents.pending = None;
+    step(
+        &mut agents,
+        UiEvent::SelectAgentProfile {
+            value: "agy-primary".into(),
+        },
+        "native",
+    );
+    assert_eq!(agents.profile, "agy-primary");
+    assert!(agents.workflow_policy().is_some());
+    step(
+        &mut agents,
+        UiEvent::SelectAgentMode {
+            value: "implement".into(),
+        },
+        "no-bypass",
+    );
+    assert_eq!(agents.mode, Some(WorkMode::Plan));
+}
+
+#[test]
+fn external_artifact_is_safe_to_read_and_never_admits_native_acceptance() {
+    let mut agents = ready();
+    agents.pane = Pane::Reader;
+    let mut task = detail(WorkStatus::AwaitingReview);
+    task.attempt = None;
+    task.agent_profile = "muse-db-primary".into();
+    task.external_result = Some(WorkExternalResult {
+        assignment_id: KEY.into(),
+        provider: "muse-db".into(),
+        sha256: "e".repeat(64),
+        content: "# External plan\n<script>alert(1)</script>".into(),
+        submitted_at: TIME.into(),
+        summary: "Plan submitted".into(),
+    });
+    assert!(task.is_valid());
+    let mut review_claim = task.clone();
+    review_claim.review_required = Some(true);
+    assert!(!review_claim.is_valid());
+    let mut forged = task.clone();
+    forged.attempt = detail(WorkStatus::AwaitingReview).attempt;
+    assert!(
+        !forged.is_valid(),
+        "external artifacts cannot carry native process claims"
+    );
+    agents.task = Some(task);
+    assert!(!agents.can_accept());
+    assert!(!agents.can_resume());
+    assert!(!agents.finished_plan());
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, false);
+    assert!(view
+        .visibility
+        .iter()
+        .any(|v| v.id == "agents-external-result-panel" && v.visible));
+    let result = view
+        .transcripts
+        .iter()
+        .find(|t| t.id == "agents-external-result")
+        .unwrap();
+    assert_eq!(result.messages.len(), 1);
+    assert!(!result.messages[0]
+        .rendered_html
+        .as_deref()
+        .unwrap_or("")
+        .contains("<script>"));
+}
+pub(super) fn summary(phase: WorkWorkflowPhase) -> WorkWorkflowSummary {
     WorkWorkflowSummary {
+        kind: WorkWorkflowKind::Native,
+        reviewer_task_id: None,
+        candidate_commit: None,
+        merge_commit: None,
         workflow_id: KEY.into(),
         policy_digest: "c".repeat(64),
         phase,
@@ -208,6 +336,9 @@ fn workflow_review_and_hosted_progress_poll_detail_without_owner_prompts() {
     assert!(agents.processing());
     let mut effects = vec![];
     agents.events_loaded = true;
+    agents.history_loaded = true;
+    agents.history_task = Some(TASK.into());
+    agents.history_correlation = Some("99999999-9999-4999-8999-999999999999".into());
     agents.schedule("phase-watch".into(), &mut effects);
     assert!(matches!(&effects[0], UiEffect::AgentsWatch { .. }));
     let effects = step(

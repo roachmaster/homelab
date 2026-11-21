@@ -259,6 +259,9 @@ impl UiModel {
                 | UiEvent::AgentsRefresh {}
                 | UiEvent::AgentsNext {}
                 | UiEvent::AgentsPrevious {}
+                | UiEvent::AgentHistoryFirst { .. }
+                | UiEvent::AgentHistoryPrevious { .. }
+                | UiEvent::AgentHistoryNext { .. }
                 | UiEvent::AgentsDiscardDraft {}
                 | UiEvent::SelectAgentProject { .. }
                 | UiEvent::SelectAgentProfile { .. }
@@ -786,6 +789,9 @@ impl UiModel {
             | UiEvent::AgentsRefresh {}
             | UiEvent::AgentsNext {}
             | UiEvent::AgentsPrevious {}
+            | UiEvent::AgentHistoryFirst { .. }
+            | UiEvent::AgentHistoryPrevious { .. }
+            | UiEvent::AgentHistoryNext { .. }
             | UiEvent::AgentsDiscardDraft {}
             | UiEvent::SelectAgentProject { .. }
             | UiEvent::SelectAgentProfile { .. }

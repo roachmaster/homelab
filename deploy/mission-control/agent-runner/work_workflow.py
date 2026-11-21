@@ -17,7 +17,7 @@ from uuid import UUID,uuid4
 from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import PinnedRecipe,sha256_canonical,prepare_title
-from work_policy import POLICY_ID,POLICY_DIGEST
+from work_policy import POLICY_ID,POLICY_DIGEST,NATIVE_POLICIES,native_policy_matches
 from work_store import ADVISORY_LOCK_SALT
 
 LOG=logging.getLogger('forge-workflow')
@@ -37,6 +37,17 @@ NATIVE_DEADLINE_NOTE=(
 def recipe_from_snapshot(snapshot,key):
     entry=snapshot['recipes'][key];value=entry['recipe']
     return PinnedRecipe(**value,digest=entry['digest'])
+
+
+def _ready_for_recipe(rows,project_alias,profile_alias,mode,recipe):
+    """Match each role to its own frozen execution identity, never another worker."""
+    if recipe.version!=2 or not native_policy_matches(recipe.resource_profile,recipe.backend,recipe.policy_digest):
+        return False
+    return any(row.get('policy_digest')==recipe.policy_digest
+        and any(x.get('alias')==project_alias for x in row['projects'])
+        and any(x.get('alias')==profile_alias and x.get('backend')==recipe.backend
+            and x.get('model')==recipe.model and mode in x.get('modes',[]) for x in row['profiles'])
+        for row in rows)
 
 
 @dataclass(frozen=True)
@@ -250,15 +261,12 @@ class WorkflowStore:
             if cursor.fetchone()['used']>=NATIVE_DEADLINE_RETRIES:raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            cursor.execute("SELECT projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'",
-                           (self.store.owner,POLICY_DIGEST))
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",
+                           (self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]))
             ready=cursor.fetchall()
             for role,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 required=recipe_from_snapshot(p,entry)
-                if (required.resource_profile!=POLICY_ID or required.policy_digest!=POLICY_DIGEST or not any(
-                    any(project.get('alias')==project_alias for project in row['projects']) and any(
-                        profile.get('alias')==role and profile.get('backend')==required.backend and profile.get('model')==required.model
-                        and mode in profile.get('modes',[]) for profile in row['profiles']) for row in ready)):
+                if not _ready_for_recipe(ready,project_alias,role,mode,required):
                     raise Rejected(503,'unavailable')
             authority=BoundNativeRetryAuthority(self.store,cursor,w['workflow_id'],task_id,attempt['attempt_id'],task['revision'])
             resume_note=NATIVE_DEADLINE_NOTE+('\nOperator context: '+note if note else '')
@@ -284,7 +292,7 @@ class WorkflowStore:
               AND t.cancelled_at IS NULL AND t.workflow_review_id IS NULL AND a.result_sha256 IS NULL
               AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL
               AND a.finished_at>=a.deadline_at AND r.created_at>=a.deadline_at
-              AND a.pinned_recipe->>'policy_digest'=%s
+              AND a.pinned_recipe->>'policy_digest'=ANY(%s)
               AND t.agent_profile=w.snapshot->>'author_profile'
               AND t.recipe_digest=w.snapshot->'recipes'->'author_implement'->>'digest'
               AND EXISTS(SELECT 1 FROM forge_agent.coding_events e WHERE(e.owner_id,e.project_alias,e.task_id)=(t.owner_id,t.project_alias,t.id)
@@ -292,7 +300,7 @@ class WorkflowStore:
                 AND e.payload->>'reason' IN('deadline_exceeded','stopped_without_publication') AND e.created_at>=a.deadline_at)
               AND NOT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions x WHERE x.workflow_id=w.workflow_id
                  AND x.kind='decide' AND x.source_key LIKE 'native-deadline-retry:%%')
-              ORDER BY r.created_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),POLICY_DIGEST))
+              ORDER BY r.created_at DESC LIMIT 64""",(self.store.owner,list(self.store.allowed_projects),[x[0] for x in NATIVE_POLICIES.values()]))
             candidates=cursor.fetchall()
         for task in candidates:
             try:
@@ -401,10 +409,10 @@ class WorkflowStore:
                 or budget['stagnant_rounds']>=budget['policy']['max_stagnant_rounds'])):raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='code_review',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            cursor.execute("SELECT projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,POLICY_DIGEST));ready=cursor.fetchall()
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
             for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 recipe=recipe_from_snapshot(p,entry)
-                if not any(any(x.get('alias')==project_alias for x in row['projects']) and any(x.get('alias')==profile and x.get('backend')==recipe.backend and x.get('model')==recipe.model and mode in x.get('modes',[]) for x in row['profiles']) for row in ready):
+                if not _ready_for_recipe(ready,project_alias,profile,mode,recipe):
                     raise Rejected(503,'unavailable')
             cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='reviewing',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(workflow_review_id,))
             cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='pending',worker_id=NULL,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(action['action_id'],))
@@ -503,10 +511,10 @@ class WorkflowStore:
             if cursor.fetchone()['latest']!=q['review_no']:raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            cursor.execute("SELECT projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,POLICY_DIGEST));ready=cursor.fetchall()
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
             for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 required=recipe_from_snapshot(p,entry)
-                if not any(any(x.get('alias')==project_alias for x in row['projects']) and any(x.get('alias')==profile and x.get('backend')==required.backend and x.get('model')==required.model and mode in x.get('modes',[]) for x in row['profiles']) for row in ready):raise Rejected(503,'unavailable')
+                if not _ready_for_recipe(ready,project_alias,profile,mode,required):raise Rejected(503,'unavailable')
             authority=BoundPreparationRetryAuthority(self.store,cursor,w['workflow_id'],task_id,task['latest_attempt_id'],task['revision'],review_id)
             return self.store.review_decide(project_alias=project_alias,task_id=task_id,expected_revision=expected_revision,
                 review_id=review_id,decision='retry_infrastructure',agent_profile=None,note=note,idempotency_key=idempotency_key,_authority=authority)
@@ -607,10 +615,10 @@ class WorkflowStore:
             if cursor.fetchone()['used']:raise Rejected(409,'not_reviewable')
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='checks',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s",(w['workflow_id'],))
             self._grant(cursor,w,p['author_profile'],'implement');self._grant(cursor,w,p['reviewer_profile'],'review')
-            cursor.execute("SELECT projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=%s AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,POLICY_DIGEST));ready=cursor.fetchall()
+            cursor.execute("SELECT policy_digest,projects,profiles FROM forge_agent.coding_worker_readiness WHERE owner_id=%s AND policy_digest=ANY(%s) AND observed_at>=clock_timestamp()-interval '90 seconds'",(self.store.owner,[x[0] for x in NATIVE_POLICIES.values()]));ready=cursor.fetchall()
             for profile,mode,entry in ((p['author_profile'],'implement','author_implement'),(p['reviewer_profile'],'review','reviewer_review')):
                 required=recipe_from_snapshot(p,entry)
-                if not any(any(x.get('alias')==project_alias for x in row['projects']) and any(x.get('alias')==profile and x.get('backend')==required.backend and x.get('model')==required.model and mode in x.get('modes',[]) for x in row['profiles']) for row in ready):raise Rejected(503,'unavailable')
+                if not _ready_for_recipe(ready,project_alias,profile,mode,required):raise Rejected(503,'unavailable')
             cursor.execute("""INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,task_id,attempt_id,plan_decision_id,scope_plan_decision_id,reconciliation_receipt_id,
               base_revision,workspace_digest,parent_result_sha256,source_revision,review_no,round,stagnant_rounds,infrastructure_retries,previous_review_id,
               findings,verified_finding_ids,verification,summary,phase,owner_decision)
@@ -686,6 +694,9 @@ class WorkflowStore:
                     elif q and q['status'] in {'pending','checking','retry_infrastructure'}:self._phase(cursor,w,'checks')
                     elif q and q['status']=='repair':self._phase(cursor,w,'repair')
                     elif q and q['status']=='approved':
+                        if q['repair_task_id'] is not None:
+                            self._phase(cursor,w,'repair')
+                            continue
                         cursor.execute("SELECT publication_id,status FROM forge_agent.coding_publications WHERE review_id=%s ORDER BY created_at DESC LIMIT 1",(q['review_id'],));publication=cursor.fetchone()
                         if publication and publication['status']=='published':
                             cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE source_publication_id=%s AND kind='merge' AND status IN('pending','leased')) AS active",(publication['publication_id'],))
@@ -695,7 +706,7 @@ class WorkflowStore:
             cursor.execute("SELECT enabled,phase FROM forge_agent.coding_workflows WHERE workflow_id=%s",(w['workflow_id'],));active=cursor.fetchone()
             if not active or not active['enabled'] or active['phase'] in {'completed','cancelled','escalated'}:continue
             cursor.execute("""SELECT p.*,q.candidate_commit,q.gate_manifest_sha256 FROM forge_agent.coding_publications p JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id,t.latest_attempt_id)=(p.owner_id,p.project_alias,p.task_id,p.attempt_id)
-              JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.owner_decision->>'closed_by'='peer_reviewer'
+              JOIN forge_agent.coding_reviews q ON q.review_id=p.review_id WHERE t.workflow_id=%s AND p.status='published' AND q.status='approved' AND q.repair_task_id IS NULL AND q.owner_decision->>'closed_by'='peer_reviewer'
               AND (SELECT h.required_green FROM forge_agent.coding_hosted_checks h WHERE h.publication_id=p.publication_id AND h.candidate_commit=p.commit_sha ORDER BY h.observed_at DESC,h.observation_id DESC LIMIT 1) IS TRUE ORDER BY p.created_at DESC""",(w['workflow_id'],))
             for p in cursor.fetchall():
                 if not w['snapshot']['auto_merge']:continue
@@ -836,12 +847,19 @@ class WorkflowStore:
 
 
 class WorkflowCoordinator:
-    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=30):
+    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=30,external_maintenance=None,external_workflow=None,clock=time.monotonic):
+        if external_maintenance is not None and not callable(external_maintenance):
+            raise TypeError('External maintenance requires an injected callback')
         self.store=store;self.worker_id=worker_id;self.interval_seconds=interval_seconds;self.stop=threading.Event();self._thread=None
+        self._external_workflow=external_workflow;self._external_maintenance=external_maintenance;self._clock=clock;self._next_external=float('-inf')
     def run_once(self):
+        if self._external_maintenance is not None and self._clock()>=self._next_external:
+            self._next_external=self._clock()+30
+            self._external_maintenance()
+        external_changed=self._external_workflow.run_once() if self._external_workflow is not None else False
         job=self.store.claim(self.worker_id)
         if job:self.store.process(job)
-        return job is not None
+        return job is not None or external_changed
     def retry_native_timeout(self,**request):
         return self.store.retry_native_timeout(**request)
     def retry_peer_verdict(self,**request):
@@ -871,6 +889,7 @@ class WorkflowCoordinator:
 
 
 class WorkflowCoordinatorFactory:
-    def __init__(self,config,catalog,store):self.config=config;self.catalog=catalog;self.store=store
+    def __init__(self,config,catalog,store,*,external_maintenance=None,external_workflow=None):
+        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance;self.external_workflow=external_workflow
     def create(self):
-        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store))
+        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store),external_maintenance=self.external_maintenance,external_workflow=self.external_workflow)

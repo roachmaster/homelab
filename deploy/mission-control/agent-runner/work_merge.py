@@ -183,12 +183,15 @@ class GitHubExactTreeMergeProvider:
 
 
 class MergeWorker:
-    def __init__(self, config, store, provider, *, source_sync, stop=None):
+    def __init__(self, config, store, provider, *, source_sync, stop=None, native_ci=None, repair_sources=None):
         self.config, self.store, self.provider = config, store, provider
         self.stop = stop if stop is not None else threading.Event()
         self.source_sync = source_sync
+        self.native_ci, self.repair_sources = native_ci, repair_sources
 
     def process(self, job):
+        if self.native_ci is not None:
+            job = self.native_ci.publication_job(job)
         for name in ("merge_id", "workflow_id", "task_id", "review_id", "lease_token", "target_publication_id", "source_publication_id"):
             uuid(job[name])
         if (not self.config.merge_enabled or job.get("merge_method") != "merge"
@@ -245,6 +248,10 @@ class MergeWorker:
                 try:
                     require_lease()
                     remote_merged = intent is not None and self.provider.reconcile(job, intent)
+                    # Reaching this line proves either no write was attempted,
+                    # or the exact proposed merge is absent from observed main.
+                    # If reconciliation raises, no repair event is admitted.
+                    no_merge_confirmed = not remote_merged
                     merged = False
                     if remote_merged:
                         try:
@@ -253,6 +260,34 @@ class MergeWorker:
                         except Exception:
                             mutable = True
                     code = error.code if isinstance(error, PublicationError) else "merge_unavailable"
+                    current_main = (self.provider._main(job) if no_merge_confirmed
+                        and self.repair_sources is not None else None)
+                    main_raced = intent is not None and current_main is not None and current_main != intent['expected_main']
+                    if (no_merge_confirmed and self.repair_sources is not None
+                            and (code in {'merge_main_requires_reverification', 'reference_not_fast_forward'} or main_raced)):
+                        # A read-only exact-reference reconciliation above has
+                        # ruled out a successful main update. Preserve the
+                        # approved candidate; a new unapproved source receipt
+                        # alone may start the bounded author repair cycle.
+                        outcome = self.repair_sources.prepare(job, current_main, require_lease)
+                        require_lease()
+                        try:
+                            self.store.native_merge_failure(job, outcome)
+                        except Exception as admission_error:
+                            from work_worker_store import OutcomeConflictError
+                            if isinstance(admission_error, OutcomeConflictError):
+                                self.store.merge_finish(job, 'handoff', {'candidate_commit': job['candidate_commit'],
+                                    'merge_commit': None, 'pr_url': job['pr_url'],
+                                    'summary': 'Merge repair stopped: the existing bounded repair budget or admission guard rejected another round.'})
+                            elif (isinstance(admission_error, (OSError, TimeoutError))
+                                    or type(admission_error).__module__.startswith('psycopg2')
+                                    and type(admission_error).__name__ in {'OperationalError', 'InterfaceError'}):
+                                # Replay only the exact durable DB outcome;
+                                # never repeat source preparation or a push.
+                                self.store.native_merge_failure(job, outcome)
+                            else:
+                                raise
+                        return
                     self.store.merge_finish(job, "merged" if merged else "needs_reconcile" if mutable else "handoff",
                         {"candidate_commit": job["candidate_commit"],
                          "merge_commit": intent["merge_commit"] if intent else None,

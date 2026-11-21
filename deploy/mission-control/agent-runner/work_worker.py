@@ -19,10 +19,12 @@ from work_executor import (
 from work_policy import POLICY, POLICY_DIGEST
 from work_sessions import AntigravitySessionProvider, CodexSessionProvider
 from work_review_context import ReviewContextError, ReviewContextProvider
+from work_build_context import BuildContextProvider
 from work_consumer_cache import configured_consumer_caches
 from work_candidate_source import ReviewCandidateSourceProvider
 from work_peer_context import PeerReviewContextProvider, PeerReviewCandidateSourceProvider
 from work_source_revision import SelectedSourceRevisionProvider
+from work_external_review_context import ExternalReviewContextProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
@@ -110,7 +112,7 @@ class CodingWorker:
 
     def __init__(self, config, store, runner_provider, workspace_provider, supervisor,
                  *, collector=None, clock=time.monotonic, stop=None, usage_normalizer=None,
-                 review_context_provider=None, peer_context_provider=None):
+                 review_context_provider=None, peer_context_provider=None, external_context_provider=None):
         self.config, self.store = config, store
         self.runner, self.workspaces, self.supervisor = runner_provider, workspace_provider, supervisor
         self.collector, self.clock = collector, clock
@@ -118,13 +120,14 @@ class CodingWorker:
         self.usage_normalizer = usage_normalizer
         self.review_contexts = review_context_provider
         self.peer_contexts = peer_context_provider
+        self.external_contexts = external_context_provider
         self.incarnation = str(uuid4())
         self._last_advertisement = float("-inf")
 
     def advertise(self):
         if self.clock() - self._last_advertisement >= ADVERTISE_SECONDS:
             self.store.advertise(self.config.worker_id, self.incarnation, self.workspaces.projects(),
-                                 self.config.advertised_profiles(), POLICY_DIGEST)
+                                 self.config.advertised_profiles(), self.config.policy_digest)
             self._last_advertisement = self.clock()
 
     def reconcile_pending(self):
@@ -323,6 +326,12 @@ class CodingWorker:
                                 plan_context=arguments.get("plan_context"), feedback_context=arguments.get("feedback_context"))
                         except Exception:
                             raise ExecutionError("needs_reconcile", "The complete workflow feedback could not be verified.") from None
+                    if lease["mode"]=="review" and self.external_contexts is not None:
+                        try:
+                            context=self.external_contexts.acquire(lease,workspace)
+                            if context is not None:arguments["external_context"]=context
+                        except Exception:
+                            raise ExecutionError("needs_reconcile","The complete external review context is unavailable.") from None
                     outcome = self.runner.run(lease, workspace, stop, **arguments)
                     proof = outcome.stop_proof
                 if self.stop.is_set() and not cancelled.is_set():
@@ -364,6 +373,9 @@ class CodingWorker:
     def run_once(self):
         self.reconcile_pending()
         self.advertise()
+        if not self.config.allowed_profiles:
+            self.collect_usage()
+            return False
         lease = self.store.claim(self.config.worker_id, self.incarnation, list(self.config.allowed_profiles))
         if lease is not None:
             self.process(lease)
@@ -404,7 +416,7 @@ class CodingWorkerFactory:
                  supervisor_factory=None, session_factory=None, codex_session_factory=None,
                  collector_factory=None, clock=time.monotonic, stop=None,
                  usage_normalizer=None, review_context_factory=None, peer_context_factory=None,
-                 source_revision_factory=SelectedSourceRevisionProvider):
+                 source_revision_factory=SelectedSourceRevisionProvider, external_context_factory=None):
         if not isinstance(config, WorkerConfig) or not callable(store_factory):
             raise TypeError("Coding worker requires frozen configuration and a store factory")
         self.config, self.store_factory = validated_copy(config), store_factory
@@ -420,13 +432,16 @@ class CodingWorkerFactory:
                                    if "codex" in config.binaries else None))
         self.workspace_factory = workspace_factory
         self.source_revision_factory = source_revision_factory
+        self.external_context_factory = external_context_factory or (lambda store: ExternalReviewContextProvider(store,_workspace_git))
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None
                                    else lambda config: SystemdSupervisor(
                                        config, consumer_cache_provider=configured_consumer_caches(config)))
         self.collector_factory, self.clock, self.stop = collector_factory, clock, stop
         self.usage_normalizer = usage_normalizer
         self.review_context_factory = (review_context_factory if review_context_factory is not None
-                                       else ReviewContextProvider)
+            else lambda store: ReviewContextProvider(store, build_provider=BuildContextProvider(
+                store, self.config.state_root, self.config.build_results_root)
+                if self.config.build_results_root is not None else None))
         self.peer_context_factory = (peer_context_factory if peer_context_factory is not None else
             lambda store: PeerReviewContextProvider(store, PeerReviewCandidateSourceProvider(self.config, _workspace_git)))
 
@@ -444,7 +459,8 @@ class CodingWorkerFactory:
         peer_contexts = self.peer_context_factory(store)
         return CodingWorker(self.config, store, runner, workspaces, supervisor, collector=collector,
                             clock=self.clock, stop=self.stop, usage_normalizer=self.usage_normalizer,
-                            review_context_provider=review_contexts, peer_context_provider=peer_contexts)
+                            review_context_provider=review_contexts, peer_context_provider=peer_contexts,
+                            external_context_provider=self.external_context_factory(store) if self.config.external_reviews else None)
 
 
 def default_store_factory(config):
