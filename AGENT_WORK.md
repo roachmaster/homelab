@@ -24,8 +24,23 @@
   ordinary Submit for a versioned replacement with the same original prompt and
   acceptance criteria, then Cancel the already stopped predecessor through the
   normal revision/idempotency API. Preserve all failed-run history.
-- **delivery:** In progress; no new policy is live and no task was resumed yet.
-  Do not claim that existing `ask: []` settings amount to full CLI auto-approval.
+- **delivery:** Source `9139bf7` is published and its API/Gemini worker are live
+  as release `20261121T175111Z-9139bf7-main`, schema23. Existing P10 worker,
+  publisher, external delivery, host, source agent and Jenkins process identities
+  were preserved. The dedicated worker shares trusted task metadata/workspace
+  roots with the existing publisher and has its own worker ID/readiness. Each
+  model still sees only its own isolated attempt scratch. Old `ask: []` settings
+  alone must not be described as full CLI auto-approval.
+- **actual recovery:** Normal portal Submit created replacement cache task
+  `81f71bf0-5d92-4fed-b282-f8fd51f27f49`, then normal Cancel retired the stopped
+  P10 predecessor. Its attempt/history/workspace and frozen workflow remain.
+  Actual attempt `3529f7aa-5daf-4642-b6b3-7f76c617dd85` ran with
+  `--dangerously-skip-permissions`; live PID/mount inspection confirmed UID1000,
+  zero effective capabilities, NoNewPrivs and read-only settings/Plan workspace.
+  The CLI explicitly logged auto-approval and the previously denied installed
+  CI-file read succeeded. Its first 24,375-byte Plan finished at18:06 UTC.
+  A genuine Codex review requested a branch-cache correction; Gemini resumed
+  automatically in Plan revision1, still under the new policy.
 - **source verification:** Integrated backend suite695/695 passed (411.462s),
   followed by the final six PostgreSQL cases including the additional native
   review/feedback regression. Independent backend and SQL reviews approved the
@@ -33,6 +48,12 @@
   are unchanged. Reuse only the matching previously verified Rust binaries and
   ABI12 assets; do not claim a new full Jenkins build for this Python/SQL fix.
   A fresh strict schema22 backup/owned restore passed before production DDL.
+  A fresh strict schema23 backup/owned restore also passed before activation;
+  all45 tables, ownership, roles/credentials/ACL/defaults/HBA and old migration
+  rows were preserved. The old live-host probe's unconditional online-Muse
+  assertion fails legitimately when Muse stops advertising; do not fabricate a
+  heartbeat to make it green. At18:05 its last genuine heartbeat was17:59 UTC,
+  with both the external repair and archive Plan still queued.
 - **evidence:** `/mnt/data/homelab-build/gemini-unattended-20261121`.
 - **source/CI boundary:** Native admission is still bound to the actual
   `a3968c1` merge receipt and unchanged `refs/forge/verified-main`. Give the
