@@ -289,7 +289,12 @@ class NativeJenkinsTest(unittest.TestCase):
         binding = self.local_pass()
         if branch_scope:
             binding['request']['branch_scope'] = 'main'
-            durable_json(self.provider._directory(binding['request']['action_id'])/'native-binding.json',binding)
+        else:
+            # New invocations always supply cache scope. Reconstruct only the
+            # frozen legacy request shape whose retired transport is tested.
+            binding['request'].pop('branch_scope', None)
+            binding['request'].pop('source_branch', None)
+        durable_json(self.provider._directory(binding['request']['action_id'])/'native-binding.json',binding)
         request = binding['request']
         record = {'version':1,'action_id':request['action_id'],'workflow_id':request['workflow_id'],
             'project_alias':request['project_alias'],'candidate_commit':request['candidate_commit'],
