@@ -1,5 +1,32 @@
 # Shared Agent Work Checkpoint
 
+## Active: Jenkins Rust I/O and Forge CLI — 2026-11-21
+
+- **scope:** Implement an optional reusable Jenkins `IoClient` capability with
+  exported typed config, factories and registrar, then consume it through the
+  existing Forge CLI's admitted command path. Follow Wire Forge Providers and
+  Expose Forge Capability. Preserve existing default/minimal dependency profiles.
+- **authorization:** User requested this module and Mission Control credentials.
+  The earlier Grok/GitHub workflow run remains stopped; no new remote workflow,
+  push or automatic merge is authorized by this task. Native Jenkins installation
+  and GitHub service-user access are already verified in the section below.
+- **ownership:** Root owns integration/workspace/lock/architecture guard, local
+  token provisioning and live read-only acceptance. Separate adapter and CLI
+  worktrees own their respective files. Reviewers inspect without writing.
+- **source:** Integration is based on local Jenkins provisioning commit `2b92ca5`
+  and canonical main `a3968c1`. Live Forge schema17/policy8/ABI9 is unchanged.
+- **auth:** Jenkins uses preemptive Basic username/API-token authentication. One
+  named Mission Control token was provisioned through Jenkins's existing token
+  API and cookie-bound CSRF flow, expires2027-05-20, and inherits the existing
+  `forge-admin` account permissions. Its value stays in private files outside Git.
+  The CLI config defaults to read-only; that policy does not narrow server rights.
+- **progress:** Public adapter skeleton `0870d94` and workspace/lock checkpoints
+  are imported. Fake/native transport tests, independent consumer proof, CLI
+  admission/help tests, dependency guards and actual CLI-to-Jenkins reads remain
+  required. Do not report completion before those checks and independent review.
+
+## Retained earlier checkpoint
+
 - **task_id:** `portal-chat-retirement-muse-20261120`
 - **objective:** Remove Chat from the portal while preserving saved data. Install Muse Code, then follow the user's steering to use their consumer Muse email account as the primary integration.
 - **authorized_scope:** User requested Chat retirement, Muse installation and agent registration, then selected email as the primary Muse transport at `roachmaster@muse.ai`. Investigate and test that email route with an explicitly scoped first message. Prior deployment/publication authority remains; no subscription purchase or pay-as-you-go fallback. Existing Gemini-author/Codex-reviewer defaults and historical workflows remain.
