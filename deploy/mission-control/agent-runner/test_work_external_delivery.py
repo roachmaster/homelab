@@ -227,3 +227,45 @@ class GuardedMergeTest(unittest.TestCase):
             self.assertEqual(result['receipt']['observed_main'],'f'*40)
             port.git.assert_any_call(port.config.projects['homelab']['canonical_repo'],'merge-base','--is-ancestor','c'*40,'f'*40)
             port.api.assert_not_called()
+
+class ObservedSourceImportTest(unittest.TestCase):
+    git=LocalGitSanitizerTest.git
+
+    def test_observed_remote_main_imports_missing_object_without_moving_source_authority(self):
+        with TemporaryDirectory(prefix='forge-source-import-') as root:
+            config=configuration(root);author=Path(root)/'author';author.mkdir()
+            self.git(author,'init','--quiet','--initial-branch=main')
+            self.git(author,'config','user.name','Fixture');self.git(author,'config','user.email','fixture@localhost')
+            (author/'app.py').write_text('public base\n');self.git(author,'add','.')
+            self.git(author,'commit','--quiet','-m','Original public main')
+            base=self.git(author,'rev-parse','HEAD').decode().strip()
+            remote=Path(root)/'remote.git';self.git(author,'clone','--quiet','--bare',str(author),str(remote))
+            canonical=Path(config.projects['homelab']['canonical_repo'])
+            self.git(author,'clone','--quiet',str(remote),str(canonical))
+            self.git(canonical,'update-ref','refs/forge/verified-main',base)
+            fetch_head=canonical/'.git/FETCH_HEAD';fetch_head.write_bytes(b'Existing unrelated fetch receipt\n')
+            refs_before=self.git(canonical,'show-ref')
+            # Another trusted publisher advances remote main after our checkout.
+            (author/'app.py').write_text('independently published newer main\n');self.git(author,'add','.')
+            self.git(author,'commit','--quiet','-m','New public main not in canonical')
+            newer=self.git(author,'rev-parse','HEAD').decode().strip()
+            self.git(author,'push','--quiet',str(remote),'HEAD:refs/heads/main')
+            with self.assertRaises(subprocess.CalledProcessError):self.git(canonical,'cat-file','-e',newer+'^{commit}')
+            commands=[]
+            class LocalSource(delivery.TrustedDeliveryPort):
+                def git(inner,repository,*args,**kwargs):
+                    commands.append(args)
+                    args=tuple(str(remote) if x=='https://github.com/fixture/project.git' else x for x in args)
+                    return super().git(repository,*args,**kwargs)
+            port=LocalSource(config,Mock())
+            port.api=Mock(return_value={'ref':'refs/heads/main','object':{'type':'commit','sha':newer}})
+            self.assertEqual(port.source_head('homelab'),newer)
+            self.assertEqual(self.git(canonical,'rev-parse','--verify',newer+'^{commit}').decode().strip(),newer)
+            self.assertEqual(self.git(canonical,'rev-parse','HEAD').decode().strip(),base)
+            self.assertEqual(self.git(canonical,'rev-parse','refs/forge/verified-main').decode().strip(),base)
+            self.assertEqual(self.git(canonical,'show-ref'),refs_before)
+            self.assertEqual(fetch_head.read_bytes(),b'Existing unrelated fetch receipt\n')
+            fetches=[args for args in commands if 'fetch' in args]
+            self.assertEqual(len(fetches),1);self.assertIn('--no-tags',fetches[0]);self.assertIn('--no-write-fetch-head',fetches[0])
+            self.assertEqual(port.source_head('homelab'),newer)
+            self.assertEqual(len([args for args in commands if 'fetch' in args]),1)

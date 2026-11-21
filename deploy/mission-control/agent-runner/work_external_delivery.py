@@ -270,7 +270,18 @@ class TrustedDeliveryPort:
         result = self.api(project_alias, 'GET', 'git/ref/heads/main')
         if result.get('ref') != 'refs/heads/main' or result.get('object', {}).get('type') != 'commit':
             raise ValueError('Invalid source ref')
-        return sha(result['object']['sha'])
+        observed = sha(result['object']['sha'])
+        repository = self.config.projects[project_alias]['canonical_repo']
+        try:
+            available = self.git(repository, 'rev-parse', '--verify', observed + '^{commit}').decode().strip()
+        except PublicationError:
+            remote = 'https://github.com/' + self.config.projects[project_alias]['repository'] + '.git'
+            self.git(repository, '-c', 'credential.helper=!/usr/bin/gh auth git-credential',
+                     'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', remote, observed)
+            available = self.git(repository, 'rev-parse', '--verify', observed + '^{commit}').decode().strip()
+        if available != observed:
+            raise ValueError('Configured source object identity changed')
+        return observed
 
     def directory(self, request):
         uid(request['action_id']); uid(request['workflow_id'])
