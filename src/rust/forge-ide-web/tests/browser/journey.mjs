@@ -3342,6 +3342,26 @@ async function agentsJourney() {
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
     await oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic);
+    relay.enableExternal();
+    await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+    if(await page.locator('#agents-back').isVisible())await page.locator('#agents-back').click();
+    await page.locator('#agents-new').click();
+    await check(page.locator('#agents-manual-assignment')).toBeVisible();
+    await page.locator('#agents-profile').selectOption('muse-db-primary');
+    await check(page.locator('#agents-compose-help')).toContainText('Muse owns its runner');
+    await page.locator('#agents-prompt').fill('Create a bounded external plan using the database handoff.');
+    await page.locator('#agents-criteria').fill('Return the plan without source or merge authority.');
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-external-result-panel')).toBeVisible();
+    await check(page.locator('#agents-external-result h1')).toHaveText('External Muse plan');
+    await check(page.locator('#agents-external-result script,#agents-external-result img')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>globalThis.__externalExecuted),undefined);
+    for(const id of ['agents-progress-panel','agents-result-panel','agents-accept','agents-resume','agents-plan-actions'])await check(page.locator('#'+id)).toBeHidden();
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'external artifact fits the viewport');
+    }
+    await screenshot(page,'ide-agents-external-muse.png');
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);

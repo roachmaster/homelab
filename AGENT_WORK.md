@@ -1,5 +1,21 @@
 # Shared Agent Work Checkpoint
 
+## Current: External Muse database handoff — 2026-11-21
+
+- **authorization:** User selected an independently operated Muse runner that
+  monitors PostgreSQL. Set up the database integration directly; do not launch
+  Muse Code or email. Preserve the existing Muse login, reads, defaults and HBA.
+- **ownership:** Root integrates Rust/UI and deploys. Separate worktrees own
+  the additive SQL contract and the Python provider. An independent reviewer
+  checks fencing, privileges and the verified-backup helper.
+- **boundary:** External assignments and artifacts use their own provider and
+  receipts. They never manufacture native attempts, stopped-process evidence,
+  workspace reconciliation, review approvals or CI results. Native Muse stays
+  disabled. GitHub Actions stays disabled; Jenkins orchestration remains separate.
+- **delivery:** In progress. Readiness requires an external runner heartbeat;
+  enabling database permissions alone does not establish runner availability.
+- **evidence:** `/mnt/data/homelab-build/muse-db-enable-20261121`.
+
 ## Current: Main deployed with preserved Muse access — 2026-11-21
 
 - **authorization:** User requested merging the remaining branches and following

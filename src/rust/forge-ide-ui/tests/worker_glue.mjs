@@ -34,7 +34,7 @@ async function harness(respond, initialMode = 'normal') {
         const compiled = await WebAssembly.instantiate(...args);
         const actual = compiled.instance.exports;
         return { instance: { exports: { ...actual,
-          abi_version: () => mode === 'legacy' ? 1 : mode === 'previous' ? 9 : actual.abi_version(),
+          abi_version: () => mode === 'legacy' ? 1 : mode === 'previous' ? 10 : actual.abi_version(),
           dispatch_input: () => mode === 'zero' ? 0 : actual.dispatch_input(),
           output_len: () => mode === 'malformed' ? 1 : actual.output_len(),
         } } };

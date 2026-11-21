@@ -214,6 +214,12 @@ pub fn ide_document() -> Document {
                                 component!(button "agents-result-next", "Next result page", "next_agent_result"),
                             ]),
                         ]),
+                        component!(region "agents-external-result-panel"; [
+                            component!(heading "agents-external-result-heading", "Muse result"),
+                            component!(caption "agents-external-result-summary", ""),
+                            component!(caption "agents-external-result-help", "Returned by the external runner. This artifact does not prove source verification, review approval or merge."),
+                            component!(transcript "agents-external-result", "External Muse artifact", "You", "Muse", ""),
+                        ]),
                         component!(region "agents-publication"; [
                             component!(status "agents-publication-status", ""),
                             component!(text "agents-publication-summary", ""),

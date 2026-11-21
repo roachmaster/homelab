@@ -6,7 +6,7 @@
 //! Host order: reserve_input(len), copy exactly len bytes through memory.buffer,
 //! dispatch_input(), copy output_ptr/output_len bytes, release_output(). Refresh
 //! JavaScript memory views after every call; reentry returns 0, never panics.
-//! ABI 10 adds the strict Grok provider contract to the retired-Chat portal.
+//! ABI 11 adds typed external database transport and artifact presentation.
 //! Deploy the generated script/HTML/CSS and WASM as one verified asset bundle;
 //! this local ABI version is separate from the unchanged HTTP report protocol.
 use forge_ide_ui::{protocol::MAX_MESSAGE_BYTES, UiModel};
@@ -42,7 +42,7 @@ impl Write for BoundedBytes {
 #[allow(unsafe_code)]
 #[no_mangle]
 pub extern "C" fn abi_version() -> u32 {
-    10
+    11
 }
 
 /// Returns zero on invalid size/reentry. Reserving invalidates previous input.

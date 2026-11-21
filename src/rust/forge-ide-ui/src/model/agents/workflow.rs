@@ -25,6 +25,12 @@ impl Agents {
         task_badge(task.status)
     }
     pub(super) fn workflow_policy(&self) -> Option<&WorkWorkflowPolicy> {
+        if self.external_assignment() {
+            return None;
+        }
+        self.project_policy()
+    }
+    fn project_policy(&self) -> Option<&WorkWorkflowPolicy> {
         self.catalog
             .as_ref()?
             .projects
@@ -32,6 +38,23 @@ impl Agents {
             .find(|p| p.alias == self.project)?
             .workflow
             .as_ref()
+    }
+    pub(super) fn external_assignment(&self) -> bool {
+        self.profile()
+            .is_some_and(|p| p.transport == Some(WorkTransport::ExternalDb))
+    }
+    fn external_available(&self) -> bool {
+        self.catalog.as_ref().is_some_and(|c| {
+            c.profiles
+                .iter()
+                .any(|p| p.transport == Some(WorkTransport::ExternalDb))
+        })
+    }
+    pub(super) fn profile_selectable(&self, profile: &WorkProfile) -> bool {
+        self.project_policy().is_none_or(|p| {
+            profile.alias == p.author_profile
+                || profile.transport == Some(WorkTransport::ExternalDb)
+        })
     }
     pub(super) fn autonomous(&self) -> bool {
         self.task
@@ -70,6 +93,13 @@ impl Agents {
         })
     }
     pub(super) fn blocks_manual_event(&self, event: &UiEvent) -> bool {
+        if let UiEvent::SelectAgentProfile { value } = event {
+            return !self.catalog.as_ref().is_some_and(|c| {
+                c.profiles
+                    .iter()
+                    .any(|p| p.alias == *value && self.profile_selectable(p))
+            });
+        }
         (self.workflow_policy().is_some()
             && matches!(
                 event,
@@ -102,7 +132,10 @@ impl Agents {
         let workflow = self.task.as_ref().and_then(|t| t.workflow.as_ref());
         let autonomous = self.autonomous();
         view.visibility.extend([
-            visible("agents-manual-assignment", compose && policy.is_none()),
+            visible(
+                "agents-manual-assignment",
+                compose && (policy.is_none() || self.external_available()),
+            ),
             visible("agents-assignment-workflow", compose && policy.is_some()),
             visible("agents-workflow", reader && autonomous),
             visible(
@@ -112,7 +145,7 @@ impl Agents {
             visible("agents-cancel", reader && self.can_cancel()),
         ]);
         view.texts.extend([
-            text("agents-compose-help",if policy.is_some(){"The configured author and reviewer carry this assignment through peer review, required checks and merge."}else{"Runs in the background. Review the result before accepting it."}),
+            text("agents-compose-help",if self.external_assignment(){"Muse owns its runner. PostgreSQL carries the assignment and returned artifact; this transport does not authorize a merge."}else if policy.is_some(){"The configured author and reviewer carry this assignment through peer review, required checks and merge."}else{"Runs in the background. Review the result before accepting it."}),
             text("agents-assignment-roles",policy.map_or_else(String::new,|p|format!("{} authors · {} reviews",self.role_label(&p.author_profile),self.role_label(&p.reviewer_profile)))),
             text("agents-assignment-policy",policy.map_or_else(String::new,|p|if !self.workflow_submission_ready(){"The configured workflow is unavailable. Refresh after its roles, policy and workers are ready.".into()}else{format!("Up to {} plan revisions · {} code revisions · {}",p.max_plan_revisions,p.max_code_revisions,if p.auto_merge{"Merge after required checks"}else{"Project merge policy"})})),
             text("agents-workflow-roles",workflow.map_or_else(String::new,|w|format!("{} authors · {} reviews",self.role_label(&w.author_profile),self.role_label(&w.reviewer_profile)))),

@@ -484,6 +484,13 @@ pub struct WorkProfile {
     pub backend: WorkBackend,
     pub model: String,
     pub modes: Vec<WorkMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<WorkTransport>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkTransport {
+    ExternalDb,
 }
 impl WorkProfile {
     pub fn is_valid(&self) -> bool {
@@ -646,6 +653,29 @@ pub struct WorkTaskDetail {
     pub workflow: Option<WorkWorkflowSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review: Option<WorkReviewSummary>,
+    /// Authenticated external artifact; carries no native process or workspace proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_result: Option<WorkExternalResult>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkExternalResult {
+    pub assignment_id: String,
+    pub provider: String,
+    pub sha256: String,
+    pub content: String,
+    pub submitted_at: String,
+    pub summary: String,
+}
+impl WorkExternalResult {
+    pub fn is_valid(&self) -> bool {
+        valid_chat_id(&self.assignment_id)
+            && self.provider == "muse-db"
+            && valid_work_hex(&self.sha256, 64)
+            && valid_chat_text(&self.content, 256 * 1024)
+            && valid_work_timestamp(&self.submitted_at)
+            && valid_chat_text(&self.summary, 4096)
+    }
 }
 impl WorkTaskDetail {
     pub fn summary(&self) -> WorkTaskSummary {
@@ -666,6 +696,15 @@ impl WorkTaskDetail {
     }
     pub fn is_valid(&self) -> bool {
         self.summary().is_valid()
+            && self.external_result.as_ref().is_none_or(|r| {
+                r.is_valid()
+                    && self.attempt.is_none()
+                    && self.result.is_none()
+                    && self.reconciliation_receipt_id.is_none()
+                    && self.publication.is_none()
+                    && !self.workflow_required
+                    && self.workflow.is_none()
+            })
             && self
                 .workflow
                 .as_ref()

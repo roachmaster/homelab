@@ -1797,6 +1797,15 @@ impl Agents {
                 active && reader && self.result_digest.is_some(),
             ),
             visible(
+                "agents-external-result-panel",
+                active
+                    && reader
+                    && self
+                        .task
+                        .as_ref()
+                        .is_some_and(|t| t.external_result.is_some()),
+            ),
+            visible(
                 "agents-review",
                 active
                     && reader
@@ -2317,6 +2326,7 @@ impl Agents {
                 options: self.catalog.as_ref().map_or_else(Vec::new, |c| {
                     c.profiles
                         .iter()
+                        .filter(|p| self.profile_selectable(p))
                         .map(|p| OptionView {
                             value: p.alias.clone(),
                             label: model_title(&p.label, &p.model),
@@ -2493,6 +2503,31 @@ impl Agents {
             } else {
                 vec![]
             },
+        });
+        let external = self.task.as_ref().and_then(|t| t.external_result.as_ref());
+        view.texts.push(text(
+            "agents-external-result-summary",
+            external.map_or_else(String::new, |r| {
+                format!(
+                    "Muse · {} · {}",
+                    relative_time(&r.submitted_at, self.now_ms),
+                    r.summary
+                )
+            }),
+        ));
+        view.transcripts.push(TranscriptBinding {
+            id: "agents-external-result",
+            conversation: 0,
+            assistant_label: Some("Muse"),
+            messages: external.map_or_else(Vec::new, |r| {
+                vec![TranscriptMessage {
+                    role: ChatRole::Assistant,
+                    content: r.content.clone(),
+                    rendered_html: render_markdown(&r.content),
+                    notice: None,
+                    header: None,
+                }]
+            }),
         });
         self.project_workflow(view, compose, reader);
     }

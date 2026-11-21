@@ -262,6 +262,7 @@ fn retired_mail_replies_cannot_steal_a_pending_agents_request_or_replay_mutation
                 alias: "agy-primary".into(),
                 label: "Gemini".into(),
                 backend: WorkBackend::Antigravity,
+                transport: None,
                 model: "Fixture".into(),
                 modes: vec![WorkMode::Plan],
             }],

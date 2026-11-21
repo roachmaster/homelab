@@ -71,6 +71,9 @@ function detail(t) {
   const processing = ['running', 'cancel_requested'].includes(t.status);
   const fields = summary(t);
   delete fields.workflow_phase;
+  if(t.external_result)return {...fields,prompt:t.prompt,acceptance_criteria:t.acceptance_criteria,
+    attempt:null,result:null,reconciliation_receipt_id:null,workflow_required:false,
+    external_result:t.external_result};
   return {
     ...fields, prompt: t.prompt, acceptance_criteria: t.acceptance_criteria,
     attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? t.public_summary ?? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
@@ -143,7 +146,9 @@ export async function startAgentsRelay() {
         send(200, 'work_listed', { project_alias: project, tasks: page.map(summary), next_cursor: available.length > page.length ? page.at(-1).task_id : null }); return;
       }
       if (input.kind === 'work_submit') {
-        if(faults.autonomousPolicy){
+        const external=input.agent_profile==='muse-db-primary';
+        if(external && (input.workflow_policy_digest!=null||!['plan','review'].includes(input.mode))){failed(400,'invalid_request');return;}
+        if(faults.autonomousPolicy && !external){
           if(input.workflow_policy_digest!==workflowPolicy.policy_digest||input.mode!=='plan'||input.agent_profile!==workflowPolicy.author_profile||input.auto_repair===true){failed(400,'invalid_request');return;}
           workflowSubmissions.push({...input});
         }
@@ -153,6 +158,11 @@ export async function startAgentsRelay() {
           const next = task('queued', tasks.size, input); tasks.set(next.task_id, next);
           receipt = { task_id: next.task_id, project_alias: project, revision: 1, status: 'queued', recipe_digest: next.recipe_digest };
           receipts.set(input.idempotency_key, receipt);
+          if(external){
+            next.status='awaiting_review';next.revision=3;
+            const content='# External Muse plan\n\nDatabase handoff fixture.\n<script>globalThis.__externalExecuted=true</script>';
+            next.external_result={assignment_id:randomUUID(),provider:'muse-db',sha256:createHash('sha256').update(content).digest('hex'),content,submitted_at:time,summary:'External plan returned'};
+          }
         }
         if (faults.dropNextSubmit) { faults.dropNextSubmit = false; response.destroy(); return; }
         send(202, 'work_submitted', receipt); return;
@@ -271,6 +281,7 @@ export async function startAgentsRelay() {
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
     planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,
     enableAutonomy(){faults.autonomousPolicy=true;},
+    enableExternal(){profiles.push({alias:'muse-db-primary',label:'Muse database runner',backend:'muse',model:'External runner',modes:['plan','review'],transport:'external_db'});},
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},
     workflowPhase(taskId,phase){
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
