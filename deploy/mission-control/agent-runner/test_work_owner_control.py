@@ -98,10 +98,13 @@ class OwnerContinuationTest(unittest.TestCase):
   rec=self.publish(new,'Owner continuation corrected source.');self.db.queue_review(new,rec);job=self.db.review_claim('owner-checks')
   result={'disposition':'repair' if fails else 'awaiting_review','candidate_commit':'e'*40,'gate_manifest_sha256':'e'*64,
    'findings':[{'finding_id':'still-broken','category':'source','summary':'One check still fails.'}] if fails else [],
-   'verified_finding_ids':[],'fingerprint':'1'*64,'summary':'Owner continuation checked.','cleanup_confirmed':True,
+   'verified_finding_ids':['ci-2'],'fingerprint':'1'*64,'summary':'Owner continuation checked.','cleanup_confirmed':True,
    'verification':{'checks_passed':not fails,'candidate_workspace_digest':'c'*64,'repair_requires_new_workspace':False,'cleanup_confirmed':True,'integration_base':'a'*40,
-    'checks':[{'check_id':'make-ci','status':'failed' if fails else 'passed','head_sha':'e'*40}]}}
+    'checks':[{'check_id':'make-ci','status':'passed','head_sha':'e'*40}]+([{'check_id':'other-fixed-gate','status':'failed','head_sha':'e'*40}] if fails else [])}}
   finished=self.db.review_finish(job,result)
+  with closing(self.cluster.connect('postgres')) as connection,connection.cursor() as cursor:
+   cursor.execute('SELECT stagnant_rounds FROM forge_agent.coding_review_budget WHERE root_task_id=(SELECT coalesce(repair_root_task_id,id) FROM forge_agent.coding_tasks WHERE id=%s)',(new.task_id,))
+   self.assertEqual(cursor.fetchone()[0],0) # Real verified check progress resets the canonical ledger.
   if fails:return source,new,job,finished
   self.coordinator.run_once();critic=self.claim('codex-v2');self.assertIsNotNone(critic);target=json.loads(self.db.read_review_target(critic)['target_json'])
   attested=[f['finding_id'] for f in target['findings'] if f.get('status','open')=='open'] if decision=='approve' else []
