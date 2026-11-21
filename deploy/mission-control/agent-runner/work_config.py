@@ -8,7 +8,8 @@ import re
 from types import MappingProxyType
 import unicodedata
 
-from work_policy import POLICY_DIGEST, POLICY_ID
+from work_policy import (POLICY_DIGEST, POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIES,
+                         native_policy_digest, native_policy_matches)
 from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL, POLICIES as EXTERNAL_POLICIES
 from work_external_flow_config import freeze_external_workflows
 
@@ -130,6 +131,8 @@ class WorkProfile:
             raise ValueError("Invalid work profile backend")
         validate_model(self.model)
         validate_identifier(self.resource_profile, "resource profile")
+        if self.resource_profile == AGY_POLICY_ID:
+            native_policy_digest(self.resource_profile, self.backend)
         if self.label is not None:
             validate_label(self.label, "profile label")
         if self.is_external and (self.backend != "muse" or self.model != EXTERNAL_MODEL):
@@ -175,6 +178,11 @@ class PinnedRecipe:
             or self.mode not in EXTERNAL_POLICIES[self.resource_profile][1] or self.policy_digest != EXTERNAL_POLICIES[self.resource_profile][0]
         ):
             raise ValueError("Invalid external database recipe")
+        if self.resource_profile == AGY_POLICY_ID and (
+            self.version != 2
+            or not native_policy_matches(self.resource_profile, self.backend, self.policy_digest)
+        ):
+            raise ValueError("Invalid unattended Antigravity recipe")
         if self.version == 1:
             if self.policy_digest is not None:
                 raise ValueError("Version 1 recipe must not carry policy_digest")
@@ -182,7 +190,8 @@ class PinnedRecipe:
             if (not isinstance(self.policy_digest, str)
                     or not DIGEST_HEX_RE.fullmatch(self.policy_digest)):
                 raise ValueError("Version 2 recipe requires a 64-hex policy_digest")
-            if self.resource_profile == POLICY_ID and self.policy_digest != POLICY_DIGEST:
+            if self.resource_profile in NATIVE_POLICIES and not native_policy_matches(
+                    self.resource_profile, self.backend, self.policy_digest):
                 raise ValueError("Version 2 recipe policy_digest does not match immutable builtin policy")
         expected = sha256_canonical(self.to_dict())
         if (not isinstance(self.digest, str)
@@ -235,8 +244,9 @@ class WorkCatalog:
             raise KeyError("Unavailable work profile")
         if profile.is_external and mode not in EXTERNAL_POLICIES[profile.resource_profile][1]:
             raise KeyError("External provider does not support this mode")
-        if profile.resource_profile == POLICY_ID or profile.is_external:
-            policy_digest = EXTERNAL_POLICIES[profile.resource_profile][0] if profile.is_external else POLICY_DIGEST
+        if profile.resource_profile in NATIVE_POLICIES or profile.is_external:
+            policy_digest = (EXTERNAL_POLICIES[profile.resource_profile][0] if profile.is_external
+                             else native_policy_digest(profile.resource_profile, profile.backend))
             payload = {
                 "version": 2,
                 "backend": profile.backend,
@@ -317,7 +327,8 @@ class WorkflowPolicy:
         recipes={"author_plan":catalog.resolve(self.author_profile,"plan"),
                  "author_implement":catalog.resolve(self.author_profile,"implement"),
                  "reviewer_review":catalog.resolve(self.reviewer_profile,"review")}
-        if any(r.resource_profile != POLICY_ID or r.policy_digest != POLICY_DIGEST for r in recipes.values()):
+        if any(r.version != 2 or not native_policy_matches(
+                r.resource_profile, r.backend, r.policy_digest) for r in recipes.values()):
             raise ValueError("Workflow requires current immutable execution policy")
         result={"version":self.version,"author_profile":self.author_profile,"reviewer_profile":self.reviewer_profile,
                 "max_plan_revisions":self.max_plan_revisions,"max_code_revisions":repair_policy["max_rounds"],

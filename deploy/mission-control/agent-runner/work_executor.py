@@ -21,7 +21,7 @@ import time
 from uuid import UUID
 
 from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
-from work_policy import POLICY
+from work_policy import POLICY, AGY_POLICY_ID
 from work_native_auth import AuthCleanupError, AuthLease
 from work_muse import MuseEvents, argv as muse_argv, BINARY_SHA256 as MUSE_BINARY_SHA256, stage_auth as stage_muse_auth
 from work_process import terminate_and_reap
@@ -749,6 +749,32 @@ class CliParser:
                           "Agent response is ready for explicit review acceptance.", proof)
 
 
+def _agy_settings(config, *, implement, unattended):
+    ancestor_reads = ["read_file(" + str(path) + ")" for path in (
+        config.account.home / "repos/AGENTS.md",
+        config.account.home / "repos/mission-control/AGENTS.md")]
+    workspace_reads = ["read_file(" + str(path) + ")" for path in (CHILD_WORKSPACE, CHILD_STATE)]
+    workspace_writes = (["write_file(" + str(path) + ")" for path in (
+        CHILD_WORKSPACE, CHILD_STATE)] if implement else [])
+    return {"useG1Credits": False, "permissions": {
+        "allow": [*ancestor_reads, *workspace_reads, *workspace_writes,
+                  "command(*)", "read_url(*)", *(["read_file(*)"] if unattended else [])],
+        "ask": [],
+        "deny": ["mcp(*)", "execute_url(*)", *([] if implement else ["write_file(*)"])],
+    }}
+
+
+def _agy_argv(binary, model, *, implement, unattended, conversation_id=None):
+    argv = (str(binary), *(("--dangerously-skip-permissions",) if unattended else ()),
+        "--settings", str(CHILD_STATE / "settings.json"),
+        "--mode", "accept-edits" if implement else "plan", "--model", model,
+        "--input-format", "stream-json", "--output-format", "stream-json",
+        "--print-timeout", str(POLICY["max_wall_seconds"]) + "s", "--disable-slash-commands")
+    if conversation_id is not None:
+        argv += ("--conversation", conversation_id)
+    return argv
+
+
 class SystemdSupervisor:
     """Trusted parent launches and verifies root-managed per-attempt cgroups."""
 
@@ -778,6 +804,29 @@ class SystemdSupervisor:
             raise ExecutionError("failed", "The external execution boundary is unavailable.")
         if invocation.backend == "codex":
             _validate_codex_argv(lease, invocation)
+        if invocation.backend == "antigravity":
+            unattended = self.config.resource_profile == AGY_POLICY_ID
+            if not unattended and "--dangerously-skip-permissions" in invocation.argv:
+                raise ExecutionError("failed", "P10 cannot bypass Antigravity permissions.")
+            if unattended:
+                conversation_id = invocation.session.conversation_id if invocation.session is not None else None
+                expected = _agy_argv(invocation.argv[0], lease["recipe"]["model"],
+                    implement=lease["mode"] == "implement", unattended=True,
+                    conversation_id=conversation_id)
+                if (not verify_recipe(self.config, lease) or invocation.external_sandbox
+                        or invocation.implement != (lease["mode"] == "implement") or invocation.argv != expected):
+                    raise ExecutionError("failed", "Unattended Antigravity invocation does not match its pinned policy.")
+                expected_settings = json.dumps(_agy_settings(self.config,
+                    implement=invocation.implement, unattended=True)).encode("utf-8")
+                try:
+                    descriptor = os.open(invocation.scratch / "settings.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    with os.fdopen(descriptor, "rb") as source:
+                        metadata = os.fstat(source.fileno())
+                        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size != len(expected_settings)
+                                or source.read(len(expected_settings) + 1) != expected_settings):
+                            raise ValueError()
+                except (OSError, ValueError):
+                    raise ExecutionError("failed", "Unattended Antigravity settings do not match the immutable policy.") from None
         if invocation.backend == "grok":
             expected = grok_argv(invocation.argv[0], lease["recipe"]["model"], CHILD_WORKSPACE,
                 CHILD_STATE / "prompt.txt", lease["attempt_id"], CHILD_STATE / "grok-leader.sock",
@@ -1251,29 +1300,13 @@ class CommandRunnerProvider:
                        "actuation are not provisioned. Use the available coding tools rather "
                        "than requesting additional tool access.")
             settings = scratch / "settings.json"
-            ancestor_reads = ["read_file(" + str(path) + ")" for path in (
-                self.config.account.home / "repos/AGENTS.md",
-                self.config.account.home / "repos/mission-control/AGENTS.md")]
-            workspace_reads = ["read_file(" + str(path) + ")" for path in (
-                CHILD_WORKSPACE, CHILD_STATE)]
-            workspace_writes = (["write_file(" + str(path) + ")" for path in (
-                CHILD_WORKSPACE, CHILD_STATE)] if implement else [])
-            settings.write_text(json.dumps({
-                "useG1Credits": False,
-                "permissions": {
-                    "allow": [*ancestor_reads, *workspace_reads, *workspace_writes,
-                              "command(*)", "read_url(*)"],
-                    "ask": [],
-                    "deny": ["mcp(*)", "execute_url(*)",
-                             *([] if implement else ["write_file(*)"])],
-                },
-            }), encoding="utf-8")
+            unattended = self.config.resource_profile == AGY_POLICY_ID
+            settings.write_text(json.dumps(_agy_settings(self.config,
+                implement=implement, unattended=unattended)), encoding="utf-8")
             settings.chmod(0o600)
-            argv = (str(actual), "--settings", str(CHILD_STATE / "settings.json"), "--mode", "accept-edits" if implement else "plan",
-                    "--model", lease["recipe"]["model"], "--input-format", "stream-json", "--output-format",
-                    "stream-json", "--print-timeout", str(POLICY["max_wall_seconds"]) + "s", "--disable-slash-commands")
-            if session is not None and session.conversation_id is not None:
-                argv += ("--conversation", session.conversation_id)
+            argv = _agy_argv(actual, lease["recipe"]["model"], implement=implement,
+                unattended=unattended,
+                conversation_id=session.conversation_id if session is not None else None)
             payload = json.dumps({"event": "user", "message": {"content": prompt}},
                                  ensure_ascii=False).encode("utf-8") + b"\n"
         elif backend == "grok":

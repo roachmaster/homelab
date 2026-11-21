@@ -47,3 +47,35 @@ POLICY_DIGEST = hashlib.sha256(
     json.dumps(_POLICY, sort_keys=True, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
 POLICY = MappingProxyType({**_POLICY, "adapter_versions": MappingProxyType(_POLICY["adapter_versions"])})
+
+# An explicitly selected sibling policy; never change P10 or replay its recipes
+# with the additional permission bypass. Existing Codex reviewer recipes remain
+# bound to their original identity and execution semantics.
+AGY_POLICY_ID = "forge-coding-agy-unattended-v1"
+_AGY_POLICY = {**_POLICY, "id": AGY_POLICY_ID,
+               "antigravity_tool_policy": "unattended-supervised-v1"}
+AGY_POLICY_DIGEST = hashlib.sha256(
+    json.dumps(_AGY_POLICY, sort_keys=True, separators=(",", ":")).encode("utf-8")
+).hexdigest()
+AGY_POLICY = MappingProxyType({**_AGY_POLICY,
+    "adapter_versions": MappingProxyType(_AGY_POLICY["adapter_versions"])})
+NATIVE_POLICIES = MappingProxyType({
+    POLICY_ID: (POLICY_DIGEST, POLICY),
+    AGY_POLICY_ID: (AGY_POLICY_DIGEST, AGY_POLICY),
+})
+
+
+def native_policy_digest(resource_profile, backend):
+    """Select a known immutable policy for its supported native backend."""
+    if (resource_profile not in NATIVE_POLICIES
+            or backend not in {"antigravity", "codex", "grok", "muse"}
+            or resource_profile == AGY_POLICY_ID and backend != "antigravity"):
+        raise ValueError("Unavailable native execution policy")
+    return NATIVE_POLICIES[resource_profile][0]
+
+
+def native_policy_matches(resource_profile, backend, digest):
+    try:
+        return native_policy_digest(resource_profile, backend) == digest
+    except (TypeError, ValueError):
+        return False

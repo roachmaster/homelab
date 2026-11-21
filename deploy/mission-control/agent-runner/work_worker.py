@@ -126,7 +126,7 @@ class CodingWorker:
     def advertise(self):
         if self.clock() - self._last_advertisement >= ADVERTISE_SECONDS:
             self.store.advertise(self.config.worker_id, self.incarnation, self.workspaces.projects(),
-                                 self.config.advertised_profiles(), POLICY_DIGEST)
+                                 self.config.advertised_profiles(), self.config.policy_digest)
             self._last_advertisement = self.clock()
 
     def reconcile_pending(self):

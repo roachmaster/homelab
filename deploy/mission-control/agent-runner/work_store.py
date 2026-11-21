@@ -26,7 +26,7 @@ from work_config import (
     validate_identifier,
     validate_owner,
 )
-from work_policy import POLICY_DIGEST, POLICY_ID
+from work_policy import POLICY_DIGEST, POLICY_ID, NATIVE_POLICIES, native_policy_matches
 from work_feedback import validate_findings
 
 register_uuid()
@@ -348,7 +348,7 @@ class WorkStore:
                 if rev is None or (isinstance(rev, str) and SHA1_HEX_RE.fullmatch(rev)):
                     advertised_revisions[alias] = rev
 
-            if row["policy_digest"] != POLICY_DIGEST:
+            if row["policy_digest"] not in {entry[0] for entry in NATIVE_POLICIES.values()}:
                 continue
             raw_profiles = row["profiles"] if isinstance(row["profiles"], list) else []
             for entry in raw_profiles:
@@ -356,7 +356,8 @@ class WorkStore:
                     continue
                 alias = entry.get("alias")
                 profile = config.profiles.get(alias)
-                if profile is None or not profile.execution_enabled or profile.resource_profile != POLICY_ID:
+                if (profile is None or not profile.execution_enabled
+                        or not native_policy_matches(profile.resource_profile, profile.backend, row["policy_digest"])):
                     continue
                 if entry.get("backend") != profile.backend or entry.get("model") != profile.model:
                     continue
@@ -1375,7 +1376,7 @@ class WorkStore:
                 recipe = resolve_recipe(mode)
                 if not isinstance(recipe, PinnedRecipe) or recipe.mode != mode or recipe.generation_token_limit is not None:
                     raise ValueError("Plan resolver returned an invalid pinned recipe")
-                if recipe.version != 2 or recipe.resource_profile != POLICY_ID or recipe.policy_digest != POLICY_DIGEST:
+                if recipe.version != 2 or not native_policy_matches(recipe.resource_profile, recipe.backend, recipe.policy_digest):
                     raise Rejected(503,"unavailable")
                 recipe_json, recipe_digest = recipe.to_dict(), recipe.digest
             self._require_transition_authority(cursor,task,_authority,"plan")
@@ -1559,7 +1560,7 @@ class WorkStore:
                 if next(iter(cursor.fetchone().values())) is None:raise Rejected(409,'not_reviewable')
             elif decision=='repair':
                 if resolve_recipe is not None:recipe=resolve_recipe()
-                if not isinstance(recipe,PinnedRecipe) or recipe.mode!='implement' or recipe.resource_profile!=POLICY_ID or recipe.policy_digest!=POLICY_DIGEST:
+                if not isinstance(recipe,PinnedRecipe) or recipe.mode!='implement' or not native_policy_matches(recipe.resource_profile,recipe.backend,recipe.policy_digest):
                     raise Rejected(503,'unavailable')
                 ledger={x['finding_id']:x for x in review['findings'] if x.get('status','open')=='open'}
                 ledger.update({x['finding_id']:x for x in findings})
@@ -1610,7 +1611,7 @@ class WorkStore:
             if task.get("workflow_required"):raise Rejected(409,"not_reviewable")
             if task['status']!='completed' or task['mode']!='implement':raise Rejected(409,'not_reviewable')
             if resolve_recipe is not None:recipe=resolve_recipe()
-            if not isinstance(recipe,PinnedRecipe) or recipe.mode!='implement' or recipe.resource_profile!=POLICY_ID or recipe.policy_digest!=POLICY_DIGEST:
+            if not isinstance(recipe,PinnedRecipe) or recipe.mode!='implement' or not native_policy_matches(recipe.resource_profile,recipe.backend,recipe.policy_digest):
                 raise Rejected(503,'unavailable')
             cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND candidate_commit=%s ORDER BY review_no DESC LIMIT 1 FOR UPDATE",
                 (self._owner,project_alias,task_id,candidate_commit))
