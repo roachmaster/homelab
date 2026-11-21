@@ -6,7 +6,7 @@ worker, through durable actions. Model output never invokes those ports.
 """
 from contextlib import contextmanager
 from uuid import UUID,uuid4
-import copy,hashlib,json
+import copy,hashlib,json,unicodedata
 from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import PinnedRecipe,prepare_title,sha256_canonical
@@ -419,8 +419,12 @@ class ExternalWorkflowStore:
     def _escalate(self,cursor,w,reason):
         self._cancel_children(cursor,w)
 
-        w['enabled']=False;w['state']['escalation_reason']=reason[:4096]
-        self._save(cursor,w,reason[:4096],phase='escalated')
+        # The public workflow DTO caps this field in UTF-8 bytes, not characters.
+        # Keep the complete review artifact separately and preserve whole codepoints.
+        safe=''.join(c for c in reason if unicodedata.category(c)!='Cc' or c in '\r\n\t')
+        bounded=safe.encode('utf-8')[:2048].decode('utf-8',errors='ignore')
+        w['enabled']=False;w['state']['escalation_reason']=bounded
+        self._save(cursor,w,bounded,phase='escalated')
 
     def _cleanup_action(self,cursor,w,action):
         return self._action(cursor,w,'cancel',str(action['action_id']),{'target_action_id':str(action['action_id']),'target_kind':action['kind'],'target_request':action['intent'],'target_receipt':(action['result'] or {}).get('receipt',{})})

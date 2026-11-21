@@ -133,3 +133,12 @@ Private author history stays in quarantine. After independent approval and all
 three exact-source gates, the worker publishes this clean candidate and performs
 a non-forced main update. Main movement requires fresh integration, review and
 checks; lost merge acknowledgements are reconciled against real main ancestry.
+
+A genuine access/scope exception or exhausted revision budget ends the workflow
+as **Needs attention** with its reason and complete evidence retained. Open the
+linked author/reviewer tasks from the root history to inspect the latest artifact
+and findings. After correcting the access or scope issue, submit a new Plan with
+the original request, preserved artifact and relevant findings. The old workflow
+remains escalated with its original budget and audit history; this recovery does
+not silently reset its counters, approvals or merge authority. There is currently
+no in-place Resume/Revise action for an escalated external workflow.

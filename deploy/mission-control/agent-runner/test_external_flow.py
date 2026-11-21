@@ -106,11 +106,11 @@ class ExternalFlowPGTest(unittest.TestCase):
   flow=service._store._external.workflow;flow.run_once();action=self.delivery.claim('owned-delivery')
   self.assertEqual(action.kind,'source');self.delivery.checkpoint(action,{'status':'passed','receipt':{'base_revision':'a'*40},'summary':'Configured main source'})
   flow.run_once();return service,receipt,flow,job
- def review(self,flow,decision='approve',attest=None):
+ def review(self,flow,decision='approve',attest=None,summary='Independent review complete.'):
   lease=self.db.claim('review-worker',self.inc,['codex-v2']);self.assertIsNotNone(lease)
   envelope=self.db.read_external_review_context(lease);target=validate_target(envelope['target_json'],envelope['target_sha256'])
   with self.assertRaises(WorkerAccessError):self.db.read_external_review_context({**lease.to_dict(),'attempt_token':str(uuid4())})
-  value={'version':1,**{k:target[k] for k in ('workflow_id','review_id','reviewer_task_id','source_assignment_id','source_sha256','target_kind')},'context_sha256':envelope['target_sha256'],'decision':decision,'summary':'Independent review complete.','findings':[],'attested_finding_ids':attest or []}
+  value={'version':1,**{k:target[k] for k in ('workflow_id','review_id','reviewer_task_id','source_assignment_id','source_sha256','target_kind')},'context_sha256':envelope['target_sha256'],'decision':decision,'summary':summary,'findings':[],'attested_finding_ids':attest or []}
   if decision=='revise':value['findings']=[{'finding_id':'boundary-1','category':'source','summary':'Correct the documented provider ownership.'}]
   text=canonical(value).decode();self.db.append_result(lease,0,text);proof=make_stop_proof(lease.unit_name)
   self.db.publish(lease,'awaiting_review',{'sha256':hashlib.sha256(text.encode()).hexdigest(),'byte_count':len(text.encode()),'chunk_count':1},None,'Review complete',proof)
@@ -286,3 +286,21 @@ class ExternalFlowPGTest(unittest.TestCase):
   task=self.rows('SELECT revision FROM forge_agent.coding_tasks WHERE id=%s',(lease.task_id,))[0]
   with self.assertRaises(Rejected):service.accept(WorkAccept('homelab',UUID(lease.task_id),task['revision'],'manual-accept','Do not bypass structured workflow verdict.'))
   self.assertTrue(flow.run_once());self.assertEqual(self.rows('SELECT phase FROM forge_external_workflow.workflows')[0]['phase'],'plan_review')
+
+ def test_multibyte_budget_escalation_reason_remains_public_dto_compatible(self):
+  service,root,flow,_=self.submit_plan()
+  for n in range(3):self.review(flow,'revise');self.author(flow,'Revised plan '+str(n))
+  complete_summary='🧭'*512  # Exactly2048 UTF-8 bytes before the server adds its reason prefix.
+  self.review(flow,'revise',summary=complete_summary)
+  w=self.rows('SELECT * FROM forge_external_workflow.workflows')[0]
+  reason=w['state']['escalation_reason'];self.assertEqual(w['phase'],'escalated')
+  self.assertTrue(reason.startswith('The plan revision budget is exhausted. '))
+  self.assertLessEqual(len(reason.encode('utf-8')),2048)
+  self.assertEqual(reason.encode('utf-8').decode('utf-8'),reason)
+  with service._store._transaction() as cursor:public=flow.project(cursor,'homelab',UUID(root['task_id']))
+  self.assertEqual(public['escalation_reason'],reason);self.assertEqual(public['phase'],'escalated')
+  self.assertFalse(public['can_cancel'])
+  last=self.rows('SELECT verdict FROM forge_external_workflow.reviews ORDER BY created_at DESC LIMIT 1')[0]
+  self.assertEqual(last['verdict']['summary'],complete_summary)
+  event=self.rows("SELECT payload FROM forge_agent.coding_events WHERE task_id=%s AND event_kind='checkpoint' ORDER BY sequence DESC LIMIT 1",(root['task_id'],))[0]
+  self.assertEqual(event['payload']['summary'],reason)
