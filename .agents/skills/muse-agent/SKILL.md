@@ -21,6 +21,11 @@ result hash for a workspace reconciliation digest.
 
 Review claim-token fencing, bounded expiry retries, scoped submission columns,
 atomic event/receipt commits, duplicate replay and cancellation before admission.
+Bind the complete producer/owner/project/task/revision/kind/payload intent for
+idempotency. Check authorization before replay, and retain owner, generation,
+token and unexpired-lease predicates on every mutation. Review the documented
+migration0020 gaps; passing happy-path fixtures does not qualify its privileged
+SQL or external implementation/review receipts.
 Keep external data separate from native work profiles and frozen P10 recipes.
 An externally supplied plan must become a bound independent-review artifact,
 not a new plan prompt waiting for its own result.

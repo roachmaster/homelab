@@ -35,11 +35,39 @@ paths require a separate reviewed implementation rather than disabled flags.
 | Kind | Proposal data | Current behavior |
 | --- | --- | --- |
 | `submit_plan` | Project, base revision, bounded plan and distinct reviewer | Validation only |
-| `publish_result` | Bounded UTF-8 chunks and awaiting-review outcome | Validation only; publication rejected |
+| `publish_result` | Bounded UTF-8 chunks, awaiting-review outcome and optional bounded summary | Validation only; publication rejected |
 | `progress` | Bounded nonempty summary | Validation only; no task event |
 
 Digests are data, not execution or approval authority. No external model is
 implicitly selected and no native P10 recipe is minted for these messages.
+The optional summary follows the existing4096-byte UTF-8 text limit. It remains
+untrusted display data and cannot contain admission, lifecycle or receipt fields.
+
+## Review of the proposed migration0020 revision
+
+The later feature revision proposed typed SQL submission, random claim tokens,
+three-attempt expiry handling and an atomic result-admission function. Its27
+focused tests passed without skips against owned disposable PostgreSQL16. That
+coverage did not establish the authority boundaries required for deployment.
+Only the bounded optional result summary and its pure validation regressions
+are retained from that revision. Its SQL, roles, service, coordinator hooks and
+external completion path are not installed or merged into runtime source.
+
+| Remaining gap | Required behavior before a separate implementation can be admitted |
+| --- | --- |
+| Producer scope | Derive allowed owners, projects and target tasks from authenticated grants; caller-supplied identifiers cannot grant authority. |
+| Incomplete replay identity | Bind producer, correlation, owner, project, task, expected revision, kind and payload digest. A changed target must conflict even when the text matches. |
+| Receipt replay before authorization | Authenticate and check target scope before returning an existing receipt; a known row UUID or arbitrary token cannot disclose another owner's receipt. |
+| Incomplete lease fence | Every release, rejection, progress application and completion must check owner, claim identity, generation, token and unexpired lease, and must check the affected-row result. |
+| Progress races | Lock and validate the current task revision/state and project binding in the same transaction as event sequence allocation and row completion. |
+| External and native provenance mixed | Keep external artifacts separate from native P10 execution capability and workspace reconciliation. Text hashes and a renamed proof cannot establish implementation source or execution. |
+| Plan not delivered | Opening a workflow with a stub prompt leaves the actual submitted plan unpublished. Bind the supplied plan itself to independent review without requiring a second unrelated result submission. |
+| New SQL authority not fully verified | Exact owner, ACL, security-definer/search-path and function-body expectations must cover each new privileged operation and reject deliberate drift. |
+
+Implementation and review artifacts also need exact approved-plan and source
+identity checks. A green plan/revision text fixture cannot qualify a complete
+implementation, independent review, CI or merge flow. The existing native
+receipt contracts and migration1–19 verifiers are preserved unchanged.
 
 ## Intended ownership and sequence
 
@@ -77,7 +105,8 @@ only a wake hint. JavaScript renders state and forwards actions.
 - Fence every claim/renew/release/finish with owner, random token, generation and
   unexpired lease; check compare-and-set results and bound crash-driven retries.
 - Atomically commit the applied row, receipt, task transition and event. Repeated
-  correlations replay the exact receipt; changed payloads conflict. Reject stale,
+  correlations replay the exact authorized receipt; changed identity, target,
+  kind or payload conflicts. Check authorization before replay and reject stale,
   cancelled, completed or unrelated tasks.
 - Admit an externally supplied plan as a bound review artifact; submitting its
   text as another Plan prompt does not deliver that artifact or advance review.

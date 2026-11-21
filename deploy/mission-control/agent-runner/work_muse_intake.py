@@ -85,7 +85,7 @@ def validate_submit_plan(payload):
 
 def validate_publish_result(payload):
     """Validate a publish_result payload; returns the joined result text."""
-    _object(payload, {"chunks"}, {"outcome"})
+    _object(payload, {"chunks"}, {"outcome", "summary"})
     outcome = payload.get("outcome", "awaiting_review")
     if outcome != "awaiting_review":
         raise IntakeError("publish_result outcome must be awaiting_review")
@@ -101,7 +101,10 @@ def validate_publish_result(payload):
     content = "".join(chunks)
     if _utf8_size(content) > MAX_PAYLOAD_BYTES:
         raise IntakeError("Result exceeds intake payload limit")
-    return {"content": content, "outcome": outcome}
+    summary = payload.get("summary")
+    if summary is not None:
+        summary = _clean_text(summary, "summary", max_bytes=MAX_SUMMARY_BYTES)
+    return {"content": content, "outcome": outcome, "summary": summary}
 
 
 def validate_progress(payload):

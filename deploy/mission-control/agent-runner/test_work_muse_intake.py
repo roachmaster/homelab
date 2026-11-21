@@ -60,16 +60,29 @@ class IntakeValidationTest(unittest.TestCase):
         result = validate_publish_result({"chunks": ["hello ", "world"]})
         self.assertEqual(result["content"], "hello world")
         self.assertEqual(result["outcome"], "awaiting_review")
+        self.assertIsNone(result["summary"])
+        self.assertEqual(validate_publish_result({"chunks": ["done"], "summary": "All done."})["summary"], "All done.")
         for payload in (
             {"chunks": []},
             {"chunks": ["x" * (16384 + 1)]},
             {"chunks": ["ok", "bad\0nul"]},
             {"chunks": ["ok"], "outcome": "failed"},
+            {"chunks": ["ok"], "summary": "x" * 4097},
+            {"chunks": ["ok"], "summary": 42},
             {"chunks": "not a list"},
             {"outcome": "awaiting_review"},
         ):
             with self.subTest(payload=str(payload)[:40]), self.assertRaises(IntakeError):
                 validate_publish_result(payload)
+
+    def test_result_summary_obeys_utf8_bounds_and_cannot_grant_authority(self):
+        self.assertEqual(validate_publish_result({"chunks": ["done"], "summary": "é" * 2048})["summary"], "é" * 2048)
+        for summary in ("é" * 2049, " ", "bad\0", "bad\x1b", "bad\ud800"):
+            with self.subTest(summary=repr(summary)[:30]), self.assertRaises(IntakeError):
+                validate_publish_result({"chunks": ["done"], "summary": summary})
+        for field in ("producer", "owner_id", "task_id", "expected_revision", "status", "claim_token", "receipt", "stop_proof"):
+            with self.subTest(field=field), self.assertRaises(IntakeError):
+                validate_publish_result({"chunks": ["done"], field: "untrusted"})
 
     def test_progress_valid_and_rejects(self):
         self.assertEqual(validate_progress({"summary": "Working on it."})["summary"], "Working on it.")
@@ -176,6 +189,17 @@ class DormantBoundaryTest(unittest.TestCase):
             with self.assertRaises(IntakeError):
                 validate_progress({"summary": content})
 
+    def test_validated_result_with_summary_still_has_no_completion_authority(self):
+        worker, intake = Mock(), Mock()
+        config = parse_intake_config(raw_config())
+        payload = {"chunks": ["# Proposed plan"], "summary": "Ready for review."}
+        self.assertEqual(validate_publish_result(payload)["summary"], "Ready for review.")
+        row = SimpleNamespace(task_id=uuid4(), payload=payload)
+        with self.assertRaises(ExternalIntakeUnsupported):
+            apply_publish_result(worker, config, uuid4(), row)
+        self.assertEqual(worker.mock_calls, [])
+        self.assertEqual(intake.mock_calls, [])
+
 
 @unittest.skipUnless(PG16_AVAILABLE, "Requires non-root disposable PostgreSQL16")
 class DormantIntakePostgresTest(unittest.TestCase):
@@ -192,8 +216,10 @@ class DormantIntakePostgresTest(unittest.TestCase):
             cursor.execute("SELECT count(*) FROM pg_roles WHERE rolname='muse_events'")
             self.assertEqual(cursor.fetchone()[0], 0)
             cursor.execute("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-                           "WHERE n.nspname='forge_coding_worker_api' "
-                           "AND p.proname IN ('claim_task','claim_intake','finish_intake','release_intake')")
+                           "WHERE n.nspname IN ('forge_coding_worker_api','forge_agent') "
+                           "AND p.proname IN ('claim_task','claim_intake','finish_intake','release_intake',"
+                           "'submit_muse_intake','claim_muse_intake','release_muse_intake',"
+                           "'reject_muse_intake','admit_muse_result')")
             self.assertEqual(cursor.fetchone()[0], 0)
 
 
