@@ -253,4 +253,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=25)
 \ir migrations/0025_native_delivery_repair.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(25,'native_delivery_repair');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=26) AS apply_0026
+\gset
+\if :apply_0026
+\ir migrations/0026_coding_owner_continuation.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(26,'coding_owner_continuation');
+\endif
 COMMIT;

@@ -96,6 +96,7 @@ def historical_registry(root, maximum):
     registry.write_text(script)
     grant=root/"management/grant-runner.sql"
     value=grant.read_text()
+    if maximum<26:value=value.split("-- M26:")[0]
     if maximum<25:value=value.split("-- M25:")[0]
     if maximum<24:value=value.split("-- M24:")[0]
     if maximum<22:value=value.split("-- M22:")[0]
@@ -323,7 +324,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 25)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -462,7 +463,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 25)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -522,7 +523,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 25)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -582,7 +583,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 25)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
