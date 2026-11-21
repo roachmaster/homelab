@@ -136,7 +136,7 @@ def qualify_remoting(path, expected_sha256, account):
 
 def native_installation_plan(pipeline, verifier):
     """Pure selection: legacy helper/config/job bytes are never changed."""
-    if (not isinstance(pipeline, dict) or pipeline.get('version') != 1
+    if (not isinstance(pipeline, dict) or type(pipeline.get('version')) is not int or pipeline['version'] != 1
             or pipeline.get('build_user') != 'forge_ci'
             or pipeline.get('verification_profile') != 'forge-sdlc-jenkins-v1'
             or pipeline.get('projects') != ['homelab']

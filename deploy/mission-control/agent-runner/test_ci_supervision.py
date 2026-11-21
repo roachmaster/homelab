@@ -354,14 +354,14 @@ class SupervisionBoundaryTest(unittest.TestCase):
             return result, order, preflight.call_count, child.call_count
 
     def test_supervised_cancellation_writes_failed_receipt_after_confirmed_uid_cleanup(self):
-            result, order, preflights, children = self.receipt_fixture()
-            self.assertEqual([item[0] for item in order], ['cleanup', 'cleanup', 'receipt'])
-            self.assertEqual(result['status'], 'failed')
-            self.assertEqual(result['failure'], 'cancelled_or_timed_out')
-            self.assertTrue(result['cleanup_confirmed'])
-            self.assertEqual(result['checks'], [])
-            self.assertEqual(order[-1][1], result)
-            self.assertEqual((preflights,children),(0,1))
+        result, order, preflights, children = self.receipt_fixture()
+        self.assertEqual([item[0] for item in order], ['cleanup', 'cleanup', 'receipt'])
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['failure'], 'cancelled_or_timed_out')
+        self.assertTrue(result['cleanup_confirmed'])
+        self.assertEqual(result['checks'], [])
+        self.assertEqual(order[-1][1], result)
+        self.assertEqual((preflights,children),(0,1))
 
     def test_native_ancestor_failure_receipt_precedes_all_fixed_checks_and_confirms_cleanup(self):
         result,order,preflights,children = self.receipt_fixture(require_main=True,
@@ -396,6 +396,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
             with self.subTest(value=invalid),self.assertRaises(ValueError):
                 SETUP.native_installation_plan({**pipeline,'require_main_ancestor':invalid},source)
         with self.assertRaises(ValueError):SETUP.native_installation_plan(pipeline,b'wrong helper')
+        with self.assertRaises(ValueError):SETUP.native_installation_plan({**pipeline,'version':True},source)
 
     def test_native_only_provisioning_never_restarts_or_replaces_the_legacy_job_executor(self):
         user=SimpleNamespace(pw_uid=43210)
