@@ -132,6 +132,8 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
     def test_schema_function_and_database_authority_are_rejected(self):
         self.fixture_reader()
         for grant, revoke in (
+            ("GRANT CREATE ON SCHEMA public TO muse_events",
+             "REVOKE CREATE ON SCHEMA public FROM muse_events"),
             ("GRANT CREATE ON SCHEMA forge_agent TO muse_events",
              "REVOKE CREATE ON SCHEMA forge_agent FROM muse_events"),
             ("GRANT USAGE ON SCHEMA forge_coding_worker_api TO muse_events",
@@ -148,6 +150,14 @@ class MuseReadAccessPostgresTest(unittest.TestCase):
                 finally:
                     self.cluster.admin_exec(revoke)
                 self.assert_verifies()
+        self.cluster.admin_exec(
+            "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner GRANT SELECT ON TABLES TO PUBLIC")
+        try:
+            self.assert_rejected()
+        finally:
+            self.cluster.admin_exec(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner REVOKE SELECT ON TABLES FROM PUBLIC")
+        self.assert_verifies()
 
     def test_membership_and_elevated_role_attributes_are_rejected(self):
         self.fixture_reader()
