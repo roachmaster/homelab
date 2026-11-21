@@ -133,7 +133,7 @@ for (const mode of ['legacy', 'previous']) {
     assert.equal(h.messages.length, messages);
   } finally { h.close(); }
 }
-console.log('Generated worker rejects legacy ABI 1 and previous ABI 9 before session or inspection effects.');
+console.log('Generated worker rejects legacy ABI 1 and previous ABI 11 before session or inspection effects.');
 
 {
   const h = await harness(request => request.kind === 'resume' ? json(paired(request)) : json(inspected(request)));
