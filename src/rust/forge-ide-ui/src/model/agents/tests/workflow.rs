@@ -107,6 +107,9 @@ fn external_artifact_is_safe_to_read_and_never_admits_native_acceptance() {
         summary: "Plan submitted".into(),
     });
     assert!(task.is_valid());
+    let mut review_claim = task.clone();
+    review_claim.review_required = Some(true);
+    assert!(!review_claim.is_valid());
     let mut forged = task.clone();
     forged.attempt = detail(WorkStatus::AwaitingReview).attempt;
     assert!(

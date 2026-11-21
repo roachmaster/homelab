@@ -702,6 +702,8 @@ impl WorkTaskDetail {
                     && self.result.is_none()
                     && self.reconciliation_receipt_id.is_none()
                     && self.publication.is_none()
+                    && self.review.is_none()
+                    && self.review_required != Some(true)
                     && !self.workflow_required
                     && self.workflow.is_none()
             })
