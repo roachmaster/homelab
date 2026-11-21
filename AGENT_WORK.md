@@ -9,19 +9,45 @@
 - **ownership:** Separate worktrees own the injected native Jenkins provider,
   scoped cancellation/status persistence checks and operational review. Root
   owns configuration, integration, documentation, verification and activation.
-- **implementation:** In progress. Keep the three frozen logical gate IDs while
-  explicitly selecting Jenkins behind the verification port. Bind the native
-  review manifest to a separate exact-source Jenkins manifest and durable action
-  journal. Reuse the Rust Jenkins IoClient and installed trusted supervisor;
-  never convert queue acceptance into success. Run all fixed gates once and
-  reobserve their exact receipt at publication and merge.
+- **implementation:** Explicit publisher selection injects one native Jenkins
+  owner for local checks and later receipt observation. The three frozen logical
+  gate IDs, execution policies and workflow digest stay unchanged. A private
+  binding connects the native review manifest to the separate exact-source
+  Jenkins manifest, actual workflow/task/attempt/correlation and durable action.
+  Reuse the Rust Jenkins IoClient and installed trusted supervisor. Run every
+  fixed gate once per admitted verification action; publication and merge
+  reobserve its genuine receipt. A separately admitted bounded verification
+  retry can run again. New M24 APIs expose only scoped CI identity/status, with
+  no direct table-read grant. Fair restart scanning, exact bundle recovery,
+  conservative post-submit cleanup and notification draining are implemented.
 - **source:** Native publication already imports and merges actual remote main
   before checks and independent code review. Keep the old author source receipt
   and verified-main reference until a real successful native merge advances it.
   No raw workflow snapshot edits, fabricated approvals or budget resets.
 - **active task:** Cache task `81f71bf0-5d92-4fed-b282-f8fd51f27f49`
   passed independent Plan review after three revisions and started implementing
-  at18:24 UTC. The existing workflow remains authoritative.
+  at18:24 UTC. Its frozen deadline stopped attempt `daba0ba7` at18:54:12. The
+  existing event-driven recovery automatically resumed the same task at18:54:18
+  in attempt `f4154965`, revision17, preserving the work and Plan counters. No
+  manual resume, reset or approval was supplied. The publisher was stopped while
+  idle for this cutover; the author, API and other services keep their identities.
+- **verification:** Independent SQL/native regressions60/60 and final affected
+  backend tests67/67 passed. Independent final provider review passed65/65;
+  six offline deployment-template checks passed. Full backend discovery passed
+  716/716 in400.918s; the final67-test run covers the later scope/listener
+  refinement. New module is included in normal setup-runner installation.
+  Rust tree and ABI12 assets remain byte-identical; no Rust
+  rebuild or new browser run is claimed for this Python/SQL change.
+- **deployment:** Activate only after the final reviewed source is on remote
+  main, strict schema24 verification and a fresh owned backup/restore pass.
+  The schema23 pre-DDL proof is run `38e6e3fa944f`,45 tables, strict=true. An
+  earlier cleanup timeout remains failed evidence; only a confirmed dedicated
+  LISTEN connection was cleared, leaving Gemini's model/lease intact. Deploy
+  only publisher source/config plus the service-local Jenkins group and spool
+  grant; preserve other services and the installed binary/helper. Activation
+  receipts stay private so a later documentation push cannot invalidate the
+  active candidate's exact-main ancestry. Actual production Jenkins/cold-warm
+  cache success must be proven separately, never inferred from fixture tests.
 - **evidence:** `/mnt/data/homelab-build/native-jenkins-20261121`.
 
 ## Current: Unattended Gemini execution and task monitoring — 2026-11-21
