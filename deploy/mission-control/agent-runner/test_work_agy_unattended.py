@@ -1,6 +1,7 @@
 """Versioned AGY permission admission and the actual supervisor boundary."""
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -130,6 +131,7 @@ class UnattendedSupervisorTest(unittest.TestCase):
                 self.assertEqual(invocation.argv.count('--dangerously-skip-permissions'), 1)
                 self.assertEqual(invocation.argv[invocation.argv.index('--mode') + 1], 'accept-edits' if mode == 'implement' else 'plan')
                 settings = json.loads((invocation.scratch / 'settings.json').read_text())
+                self.assertEqual((invocation.scratch / 'settings.json').stat().st_mode & 0o777, 0o400)
                 self.assertFalse(settings['useG1Credits'])
                 self.assertIn('read_file(*)', settings['permissions']['allow'])
                 self.assertEqual(settings['permissions']['ask'], [])
@@ -140,8 +142,11 @@ class UnattendedSupervisorTest(unittest.TestCase):
                 self.assertIn('--reuid=1000', command)
                 hidden = next(x for x in command if x.startswith('--property=InaccessiblePaths='))
                 self.assertIn(str(config.database.host), hidden)
+                protected = next(x for x in command if x.startswith('--property=BindReadOnlyPaths='))
+                self.assertIn(str(invocation.scratch / 'settings.json') + ':/run/forge-coding-attempt/settings.json', protected)
+                readonly = next(x for x in command if x.startswith('--property=ReadOnlyPaths='))
+                self.assertIn('-/run/forge-coding-attempt/settings.json', readonly)
                 if mode != 'implement':
-                    readonly = next(x for x in command if x.startswith('--property=ReadOnlyPaths='))
                     self.assertIn('/run/forge-coding-workspace', readonly)
                     self.assertIn('write_file(*)', settings['permissions']['deny'])
 
@@ -162,7 +167,40 @@ class UnattendedSupervisorTest(unittest.TestCase):
             settings = invocation.scratch / 'settings.json'
             content = json.loads(settings.read_text())
             content['useG1Credits'] = True
+            settings.chmod(0o600)
             settings.write_text(json.dumps(content))
+            settings.chmod(0o400)
+            with self.assertRaises(ExecutionError):
+                supervisor.argv(value, invocation)
+
+    def test_parent_rejects_changed_settings_identity_or_billing_before_launch(self):
+        with TemporaryDirectory(prefix='forge-agy-settings-') as root:
+            config = selected_config(root)
+            supervisor = SystemdSupervisor(config)
+            provider = CommandRunnerProvider(config, supervisor)
+            provider.prepare()
+            value = selected_lease(config)
+            workspace = WorkspaceLease(Path(root) / 'task', config.projects['homelab'],
+                config.projects['homelab'] / '.git/worktrees/fixture', value['task_id'], 'a' * 40)
+            invocation = provider.invocation(value, workspace)
+            settings = invocation.scratch / 'settings.json'
+            original = settings.read_bytes()
+            with self.assertRaises(ExecutionError):
+                supervisor.argv(value, replace(invocation, scratch=Path(root) / 'different-attempt'))
+            settings.chmod(0o600)
+            with self.assertRaises(ExecutionError):
+                supervisor.argv(value, invocation)
+            settings.chmod(0o400)
+            linked = invocation.scratch / 'other-link'
+            os.link(settings, linked)
+            with self.assertRaises(ExecutionError):
+                supervisor.argv(value, invocation)
+            linked.unlink()
+            settings.unlink()
+            replacement = invocation.scratch / 'replacement'
+            replacement.write_bytes(original)
+            replacement.chmod(0o400)
+            settings.symlink_to(replacement)
             with self.assertRaises(ExecutionError):
                 supervisor.argv(value, invocation)
 

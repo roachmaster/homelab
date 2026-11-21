@@ -814,6 +814,8 @@ class SystemdSupervisor:
                     implement=lease["mode"] == "implement", unattended=True,
                     conversation_id=conversation_id)
                 if (not verify_recipe(self.config, lease) or invocation.external_sandbox
+                        or invocation.scratch != self.config.state_root / "attempts" / _uuid(lease["attempt_id"])
+                        or invocation.scratch.is_symlink()
                         or invocation.implement != (lease["mode"] == "implement") or invocation.argv != expected):
                     raise ExecutionError("failed", "Unattended Antigravity invocation does not match its pinned policy.")
                 expected_settings = json.dumps(_agy_settings(self.config,
@@ -822,7 +824,9 @@ class SystemdSupervisor:
                     descriptor = os.open(invocation.scratch / "settings.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
                     with os.fdopen(descriptor, "rb") as source:
                         metadata = os.fstat(source.fileno())
-                        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_size != len(expected_settings)
+                        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1
+                                or metadata.st_uid != os.geteuid() or stat.S_IMODE(metadata.st_mode) != 0o400
+                                or metadata.st_size != len(expected_settings)
                                 or source.read(len(expected_settings) + 1) != expected_settings):
                             raise ValueError()
                 except (OSError, ValueError):
@@ -876,6 +880,10 @@ class SystemdSupervisor:
         if native_state is not None:
             bindings.append(str(native_state))
         readonly_bindings = [str(path) for path in readonly]
+        if invocation.backend == "antigravity" and self.config.resource_profile == AGY_POLICY_ID:
+            # The child can use all provisioned tools but cannot rewrite its
+            # parent-selected permissions or enable paid-credit fallback.
+            readonly_bindings.append(str(invocation.scratch / "settings.json") + ":" + str(CHILD_STATE / "settings.json"))
         if invocation.backend == "grok":
             for relative in ("prompt.txt", "home/.grok/config.toml", "home/.grok/managed_config.toml", "home/.grok/auth.json"):
                 source = invocation.scratch / relative
@@ -952,6 +960,8 @@ class SystemdSupervisor:
         immutable_native = ([native_state / "config.toml", native_state / "rules", native_state / "plugins",
                              native_state / "packages", native_state / "antigravity-cli/settings.json",
                              native_state / "antigravity-cli/forge-settings.json"] if native_state is not None else [])
+        if invocation.backend == "antigravity" and self.config.resource_profile == AGY_POLICY_ID:
+            immutable_native.append(CHILD_STATE / "settings.json")
         if invocation.backend == "grok":
             immutable_native.extend(CHILD_STATE / "home/.grok" / name for name in ("config.toml", "managed_config.toml", "auth.json"))
         if verification:
@@ -1303,7 +1313,7 @@ class CommandRunnerProvider:
             unattended = self.config.resource_profile == AGY_POLICY_ID
             settings.write_text(json.dumps(_agy_settings(self.config,
                 implement=implement, unattended=unattended)), encoding="utf-8")
-            settings.chmod(0o600)
+            settings.chmod(0o400 if unattended else 0o600)
             argv = _agy_argv(actual, lease["recipe"]["model"], implement=implement,
                 unattended=unattended,
                 conversation_id=session.conversation_id if session is not None else None)
