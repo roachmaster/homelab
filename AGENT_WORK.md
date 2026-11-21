@@ -20,10 +20,25 @@
   API and cookie-bound CSRF flow, expires2027-05-20, and inherits the existing
   `forge-admin` account permissions. Its value stays in private files outside Git.
   The CLI config defaults to read-only; that policy does not narrow server rights.
-- **progress:** Public adapter skeleton `0870d94` and workspace/lock checkpoints
-  are imported. Fake/native transport tests, independent consumer proof, CLI
-  admission/help tests, dependency guards and actual CLI-to-Jenkins reads remain
-  required. Do not report completion before those checks and independent review.
+- **progress:** Complete locally. All accepted adapter commits through `a6266cf`
+  and CLI commits through `fc86d02` are imported and independently approved.
+  Public register/freeze/factory/provider substitution, 18 adapter boundary/native
+  HTTP cases, independent Cargo consumer, CLI admission/private-file/FIFO/help
+  cases and default/minimal feature profiles passed. Integrated targeted tests,
+  Clippy with denied warnings, formatting and the architecture/dependency guard
+  passed. New dependency selection does not expand existing default consumers.
+- **live_cli:** Runtime Rust source is `8990b1f`; installed command is
+  `/home/lrocha/.local/bin/forge`, pointing to its versioned artifact. SHA256
+  `64bd0315744b3ccd51079f2e3221e015feed3ba6b3d4774538b5742c3b55b2b7`.
+  With the private Mission Control config, status reported Jenkins2.580.2 with
+  security enabled and executor count0; jobs reported count0. A build request was
+  denied by read-only policy; an absent queue item returned the typed not-found
+  error. No build or GitHub workflow was submitted. Source/evidence remain local;
+  no remote push or main merge was performed.
+- **evidence:** `/mnt/data/homelab-build/forge-jenkins-io-20261121/live-cli-verification.json`
+  records the exact artifact and nonsecret outcomes. Token provisioning intent,
+  secret recovery receipt and safe report remain under the protected
+  `/var/lib/forge-provisioning/jenkins` directory. No token value is committed.
 
 ## Retained earlier checkpoint
 

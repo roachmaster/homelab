@@ -4,6 +4,7 @@ The [current implementation reference](../design/implementation-status.md) and [
 
 ## Current design references
 
+- [Jenkins I/O client and Forge CLI](forge-jenkins.md): optional typed adapter, factory/provider wiring, token authentication and bounded operations.
 - [Generated browser boundary](proposals/forge-ide-ui.md), [portal Home](proposals/forge-portal-landing.md), [managed editing](proposals/forge-ide-inline-edit.md).
 - [Chat/Mail PostgreSQL dispatch](forge-postgres-inference-dispatch.md), [service inventory](forge-ide-system-inventory.yaml).
 - [Game framework](proposals/forge-game-engine.md), [physics](proposals/forge-game-physics.md), [asset pipeline](proposals/forge-game-asset-pipeline.md), [snapshot](proposals/forge-game-snapshot.md), [debug/trace](proposals/forge-game-debug.md), [replay](proposals/forge-game-debug.md#full-replay-and-historical-assets), [worker ownership](proposals/forge-worker-ownership.md).

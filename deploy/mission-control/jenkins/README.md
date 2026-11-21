@@ -87,6 +87,39 @@ separate work. The stopped Grok workflow remains stopped.
 
 GitHub CLI reference: [credential-helper setup](https://cli.github.com/manual/gh_auth_setup-git).
 
+## Mission Control Rust client
+
+The [`forge-jenkins` capability](../../../src/rust/forge-jenkins/README.md) now
+provides typed Jenkins I/O through exported factories and registrars. The
+[Forge CLI integration](../../../docs/architecture/forge-jenkins.md) adds six
+explicitly selected Jenkins commands and retains existing admission and provider
+boundaries. Its installed local command can read the controller:
+
+```sh
+forge --jenkins-config "$HOME/.config/forge/jenkins/mission-control.json" jenkins.status
+forge --jenkins-config "$HOME/.config/forge/jenkins/mission-control.json" jenkins.jobs
+```
+
+`provision-client-token.py` created the named **Mission Control - Forge CLI** token
+through Jenkins's native API, with a180-day expiration (2027-05-20). It used the
+existing administrator password only for the provisioning request, retaining the
+CSRF crumb's session cookie. Runtime calls use Basic username/API-token auth,
+never that password. The token inherits the existing administrator account's
+permissions. Client mutation policy defaults tofalse; it is not a narrower
+server-side role. Configuration and token files are private and outside Git.
+
+The reviewed provisioner durably saves its intent before issuing the token, saves
+a protected secret receipt for delivery recovery, and refuses to repeat an
+uncertain creation. Operator-home writes run after permanently dropping UID/GID;
+token/intent values never enter command arguments or logs. Successful reruns
+reuse and verify the same receipt instead of creating another token.
+
+Live acceptance verified status, an empty job list, explicit mutation denial and
+a typed absent-queue response. No build, pipeline or GitHub workflow was started.
+The native service, existing security settings and stopped Grok run remain as
+recorded above. Replacing the automatic workflow's verification provider with
+Jenkins remains separate from this client implementation.
+
 Official references: [Linux installation](https://www.jenkins.io/doc/book/installing/linux/),
 [systemd overrides](https://www.jenkins.io/doc/book/system-administration/systemd-services/),
 [headless init hooks](https://www.jenkins.io/doc/book/managing/groovy-hook-scripts/).
