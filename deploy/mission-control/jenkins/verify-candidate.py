@@ -613,6 +613,8 @@ def _safe_rmtree(path):
     if not stat.S_ISDIR(info.st_mode) or not shutil.rmtree.avoids_symlink_attacks:
         raise ValueError('Unsafe CI directory removal')
     def _make_writable(func, target, _exc):
+        if isinstance(_exc[1], InterruptedError):
+            raise _exc[1]
         target_path = Path(target)
         parent = target_path.parent
         try:
@@ -622,6 +624,8 @@ def _safe_rmtree(path):
             entry_info = target_path.lstat()
             if stat.S_ISDIR(entry_info.st_mode):
                 os.chmod(target_path, entry_info.st_mode | 0o700)
+        except InterruptedError:
+            raise
         except OSError:
             pass
         func(target)
@@ -706,6 +710,8 @@ def _copy_tree_from_build(src_root, dst_root, *, expected_uid, prefix_rel, exclu
                         os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                         dir_fd=src_dir_fd,
                     )
+                except InterruptedError:
+                    raise
                 except OSError as error:
                     raise UnsafeArtifactError('Rejected symlink or unreadable artifact entry') from error
                 info = os.fstat(entry_fd)
@@ -802,6 +808,8 @@ def _copy_tree_to_build(src_root, dst_root, *, expected_owner, target_uid, targe
                         os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                         dir_fd=src_dir_fd,
                     )
+                except InterruptedError:
+                    raise
                 except OSError as error:
                     raise CorruptSnapshotError('Snapshot contains symlink or unreadable entry') from error
                 info = os.fstat(entry_fd)
@@ -959,14 +967,22 @@ class LocalCargoCacheProvider(CargoCachePort):
         for name in os.listdir(root):
             if name.startswith('.staging-'):
                 candidate = root / name
-                try:
-                    info = candidate.lstat()
-                    if stat.S_ISDIR(info.st_mode):
-                        _safe_rmtree(candidate)
-                    else:
-                        candidate.unlink()
-                except OSError:
-                    pass
+                info = candidate.lstat()
+                if info.st_uid != self.expected_owner:
+                    raise ValueError('Unsafe CI cache staging ownership')
+                if stat.S_ISDIR(info.st_mode):
+                    regular_directory(candidate, owner=self.expected_owner)
+                    _safe_rmtree(candidate)
+                else:
+                    candidate.unlink()
+
+    def _ensure_entry_directory(self, root, key):
+        entry_dir = root
+        for name in ('scopes', key.project_alias, key.scope_dir, key.compat_key):
+            entry_dir = entry_dir / name
+            entry_dir.mkdir(mode=0o700, exist_ok=True)
+            regular_directory(entry_dir, owner=self.expected_owner)
+        return entry_dir
 
     def _scope_has_other_compat_key(self, scope_path, compat_key):
         if not scope_path.exists() or scope_path.is_symlink() or not scope_path.is_dir():
@@ -1057,6 +1073,8 @@ class LocalCargoCacheProvider(CargoCachePort):
 
         try:
             with self._cache_lock() as root:
+                self._cleanup_orphaned_staging(root)
+                self._reconcile_snapshots_locked(root)
                 entry_dir, status_label, expected_scope, is_seed = self._select_candidate_entry(root, key)
                 if entry_dir is None:
                     reason = 'compat_key_mismatch' if status_label == 'incompatible' else 'no_matching_entry'
@@ -1124,6 +1142,8 @@ class LocalCargoCacheProvider(CargoCachePort):
                             or observed_max_art != meta.get('max_artifact_mtime_ns')
                             or observed_max_fp != meta.get('max_fingerprint_mtime_ns')):
                         raise CorruptSnapshotError('Restored files or mtimes diverged from snapshot metadata')
+                except InterruptedError:
+                    raise
                 except (OSError, ValueError, KeyError, TypeError, CorruptSnapshotError) as error:
                     _reset_scratch_targets(layout, account)
                     return CacheRestoreOutcome(
@@ -1184,6 +1204,8 @@ class LocalCargoCacheProvider(CargoCachePort):
                 if not is_seed:
                     try:
                         _atomic_write_json(entry_dir / 'last_used.json', {'last_used_at_ns': restore_now_ns})
+                    except InterruptedError:
+                        raise
                     except OSError:
                         pass
 
@@ -1195,6 +1217,8 @@ class LocalCargoCacheProvider(CargoCachePort):
                     source_scope=expected_scope,
                     snapshot_id=snapshot_id,
                 )
+        except InterruptedError:
+            raise
         except (OSError, ValueError) as error:
             _reset_scratch_targets(layout, account)
             return CacheRestoreOutcome(
@@ -1223,6 +1247,7 @@ class LocalCargoCacheProvider(CargoCachePort):
         try:
             with self._cache_lock() as root:
                 self._cleanup_orphaned_staging(root)
+                self._reconcile_snapshots_locked(root)
                 published_at_ns = time.time_ns()
                 staging = root / ('.staging-' + action_id)
                 if staging.exists() or staging.is_symlink():
@@ -1321,8 +1346,7 @@ class LocalCargoCacheProvider(CargoCachePort):
                 meta['manifest_sha256'] = _snapshot_manifest_digest(meta)
                 _atomic_write_json(staging / 'meta.json', meta, mode=0o600)
 
-                entry_dir = root / 'scopes' / key.project_alias / key.scope_dir / key.compat_key
-                entry_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+                entry_dir = self._ensure_entry_directory(root, key)
                 snapshot_id = f'{published_at_ns}-{action_id}'
                 snapshot_dir = entry_dir / snapshot_id
                 if snapshot_dir.exists() or snapshot_dir.is_symlink():
@@ -1330,6 +1354,11 @@ class LocalCargoCacheProvider(CargoCachePort):
                 os.replace(staging, snapshot_dir)
                 staging = None
                 _fsync_dir(entry_dir)
+                # Atomic current.json replacement is the publication commit.
+                # All artifacts and metadata are complete before this point.
+                # Cancellation before replacement preserves the old pointer;
+                # after replacement the new known-good snapshot may remain, but
+                # InterruptedError still makes the supervisor fail the action.
                 _atomic_write_json(
                     entry_dir / 'current.json',
                     {
@@ -1345,19 +1374,8 @@ class LocalCargoCacheProvider(CargoCachePort):
                     {'last_used_at_ns': published_at_ns},
                     mode=0o600,
                 )
-                # Remove superseded snapshot directories inside this entry.
-                for name in os.listdir(entry_dir):
-                    if name in {'current.json', 'last_used.json', snapshot_id}:
-                        continue
-                    old = entry_dir / name
-                    try:
-                        if old.is_dir() and not old.is_symlink():
-                            _safe_rmtree(old)
-                        else:
-                            old.unlink()
-                    except OSError:
-                        pass
-
+                # Reconciliation under the same lock removes all superseded
+                # snapshots before retention computes bounded storage totals.
                 pruned = self._prune_locked(root, protected_entry=entry_dir)
                 return CachePublishOutcome(
                     status='published',
@@ -1369,10 +1387,14 @@ class LocalCargoCacheProvider(CargoCachePort):
                     cache_entry_count=pruned.cache_entry_count,
                     snapshot_id=snapshot_id,
                 )
+        except InterruptedError:
+            raise
         except (OSError, ValueError) as error:
             if staging is not None and (staging.exists() or staging.is_symlink()):
                 try:
                     _safe_rmtree(staging)
+                except InterruptedError:
+                    raise
                 except OSError:
                     pass
             return CachePublishOutcome(
@@ -1381,48 +1403,93 @@ class LocalCargoCacheProvider(CargoCachePort):
                 reason=type(error).__name__ + ': ' + str(error)[:160],
             )
 
-    def _collect_entries_locked(self, root):
-        entries = []
+    def _entry_directories_locked(self, root):
+        """Walk only supervisor-owned directories, never a symlink ancestor."""
         scopes_dir = root / 'scopes'
-        if not scopes_dir.exists() or scopes_dir.is_symlink():
-            return entries
+        if not scopes_dir.exists() and not scopes_dir.is_symlink():
+            return
+        regular_directory(scopes_dir, owner=self.expected_owner)
         for project_name in sorted(os.listdir(scopes_dir)):
             project_dir = scopes_dir / project_name
-            if project_dir.is_symlink() or not project_dir.is_dir():
-                continue
+            regular_directory(project_dir, owner=self.expected_owner)
             for scope_name in sorted(os.listdir(project_dir)):
                 scope_dir = project_dir / scope_name
-                if scope_dir.is_symlink() or not scope_dir.is_dir():
-                    continue
+                regular_directory(scope_dir, owner=self.expected_owner)
                 for compat_name in sorted(os.listdir(scope_dir)):
                     entry_dir = scope_dir / compat_name
-                    if entry_dir.is_symlink() or not entry_dir.is_dir():
-                        continue
-                    current_path = entry_dir / 'current.json'
-                    if not current_path.exists() or current_path.is_symlink():
-                        continue
-                    try:
-                        pointer = json.loads(read_file(current_path, owner=self.expected_owner, maximum=16384))
-                        published_at_ns = int(pointer['published_at_ns'])
-                        total_bytes = int(pointer['total_bytes'])
-                        last_used_ns = published_at_ns
-                        last_used_path = entry_dir / 'last_used.json'
-                        if last_used_path.exists() and not last_used_path.is_symlink():
-                            lu = json.loads(read_file(last_used_path, owner=self.expected_owner, maximum=4096))
-                            if _is_strict_int(lu.get('last_used_at_ns')):
-                                last_used_ns = max(last_used_ns, lu['last_used_at_ns'])
-                        entries.append({
-                            'project': project_name,
-                            'scope_dir': scope_name,
-                            'compat_key': compat_name,
-                            'path': entry_dir,
-                            'is_main': scope_name == 'main',
-                            'published_at_ns': published_at_ns,
-                            'last_used_at_ns': last_used_ns,
-                            'total_bytes': max(0, total_bytes),
-                        })
-                    except (OSError, ValueError, KeyError, TypeError):
-                        continue
+                    regular_directory(entry_dir, owner=self.expected_owner)
+                    yield project_name, scope_name, compat_name, entry_dir
+
+    def _read_pointer_locked(self, entry_dir):
+        pointer = json.loads(read_file(entry_dir / 'current.json', owner=self.expected_owner, maximum=16384))
+        if (not isinstance(pointer, dict)
+                or not isinstance(pointer.get('snapshot_id'), str)
+                or not re.fullmatch(r'[0-9]+-[0-9a-f-]{36}', pointer['snapshot_id'])
+                or not _is_strict_int(pointer.get('published_at_ns'))
+                or pointer['published_at_ns'] < 0
+                or not _is_strict_int(pointer.get('total_bytes'))
+                or pointer['total_bytes'] < 0):
+            raise ValueError('Invalid CI cache pointer')
+        regular_directory(entry_dir / pointer['snapshot_id'], owner=self.expected_owner)
+        return pointer
+
+    def _reconcile_snapshots_locked(self, root):
+        """Collect incomplete publications before reporting retention totals.
+
+        The global cache lock excludes a live publisher. An entry with no valid
+        pointer is an abandoned pre-commit publication. Within a committed
+        entry, only its pointed snapshot is live; crash leftovers and previous
+        snapshots are garbage. Removal failures propagate instead of allowing
+        unaccounted bytes to disappear from inventory. rmtree is fd-based and
+        never follows a link; every traversed ancestor is checked above.
+        """
+        scopes_dir = root / 'scopes'
+        for _project, _scope, _compat, entry_dir in list(self._entry_directories_locked(root)):
+            try:
+                pointer = self._read_pointer_locked(entry_dir)
+            except InterruptedError:
+                raise
+            except (OSError, ValueError, KeyError, TypeError):
+                _safe_rmtree(entry_dir)
+                self._remove_empty_parents(entry_dir, scopes_dir)
+                continue
+            for name in os.listdir(entry_dir):
+                if name in {'current.json', 'last_used.json', pointer['snapshot_id']}:
+                    continue
+                orphan = entry_dir / name
+                info = orphan.lstat()
+                if info.st_uid != self.expected_owner:
+                    raise ValueError('Unsafe CI cache orphan ownership')
+                if stat.S_ISDIR(info.st_mode):
+                    regular_directory(orphan, owner=self.expected_owner)
+                    _safe_rmtree(orphan)
+                else:
+                    # Unlink a link itself; never open its target.
+                    orphan.unlink()
+
+    def _collect_entries_locked(self, root):
+        self._reconcile_snapshots_locked(root)
+        entries = []
+        for project_name, scope_name, compat_name, entry_dir in self._entry_directories_locked(root):
+            pointer = self._read_pointer_locked(entry_dir)
+            published_at_ns = pointer['published_at_ns']
+            last_used_ns = published_at_ns
+            last_used_path = entry_dir / 'last_used.json'
+            if last_used_path.exists() or last_used_path.is_symlink():
+                lu = json.loads(read_file(last_used_path, owner=self.expected_owner, maximum=4096))
+                if not isinstance(lu, dict) or not _is_strict_int(lu.get('last_used_at_ns')):
+                    raise ValueError('Invalid CI cache last-use metadata')
+                last_used_ns = max(last_used_ns, lu['last_used_at_ns'])
+            entries.append({
+                'project': project_name,
+                'scope_dir': scope_name,
+                'compat_key': compat_name,
+                'path': entry_dir,
+                'is_main': scope_name == 'main',
+                'published_at_ns': published_at_ns,
+                'last_used_at_ns': last_used_ns,
+                'total_bytes': pointer['total_bytes'],
+            })
         return entries
 
     def _inventory_locked(self, root):
@@ -1436,6 +1503,8 @@ class LocalCargoCacheProvider(CargoCachePort):
             try:
                 if parent.exists() and not parent.is_symlink() and not os.listdir(parent):
                     parent.rmdir()
+            except InterruptedError:
+                raise
             except OSError:
                 break
 
@@ -1462,7 +1531,9 @@ class LocalCargoCacheProvider(CargoCachePort):
                or sum(item['total_bytes'] for item in remaining) > self.config.max_total_bytes):
             candidates = [item for item in remaining if item['path'] != protected_entry]
             if not candidates:
-                candidates = list(remaining)
+                # An active publication is protected even under a tighter
+                # operator retention policy. Never delete its current snapshot.
+                break
             candidates.sort(key=lambda item: (
                 1 if item['is_main'] else 0,
                 item['last_used_at_ns'],
@@ -1772,6 +1843,8 @@ def _read_ui_qa_stages(qa_root, *, expected_uid):
     """Safely extract ui-qa stage durations from build-owned QA_OUTPUT_ROOT after quiescence."""
     try:
         root_fd = os.open(qa_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except InterruptedError:
+        raise
     except OSError:
         return None
     try:
@@ -1811,6 +1884,8 @@ def _read_ui_qa_stages(qa_root, *, expected_uid):
                     'duration_ms': item['duration_ms'],
                 }
         return summary or None
+    except InterruptedError:
+        raise
     except (OSError, ValueError, KeyError, TypeError):
         return None
     finally:

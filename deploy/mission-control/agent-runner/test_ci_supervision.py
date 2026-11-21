@@ -56,6 +56,40 @@ class SupervisionBoundaryTest(unittest.TestCase):
             with patch.object(CI.subprocess, 'run', side_effect=[SimpleNamespace(returncode=x) for x in results]):
                 with self.assertRaises(RuntimeError): CI.kill_build_user(account)
 
+    def test_cache_copy_telemetry_and_rmtree_wrappers_propagate_cancellation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'artifact').write_bytes(b'known-good')
+            original_open = CI.os.open
+            def interrupt_artifact(path, *args, **kwargs):
+                if path == 'artifact':
+                    raise InterruptedError('file copy cancelled')
+                return original_open(path, *args, **kwargs)
+            with patch.object(CI.os, 'open', side_effect=interrupt_artifact):
+                with self.assertRaises(InterruptedError):
+                    CI._copy_tree_from_build(
+                        source, root / 'staging', expected_uid=os.getuid(), prefix_rel='target',
+                    )
+                with self.assertRaises(InterruptedError):
+                    CI._copy_tree_to_build(
+                        source, root / 'restored', expected_owner=os.getuid(),
+                        target_uid=os.getuid(), target_gid=os.getgid(), prefix_rel='target',
+                    )
+            with patch.object(CI.os, 'open', side_effect=InterruptedError('telemetry cancelled')):
+                with self.assertRaises(InterruptedError):
+                    CI._read_ui_qa_stages(root, expected_uid=os.getuid())
+            original_unlink = CI.os.unlink
+            def interrupt_unlink(path, *args, **kwargs):
+                if path == 'artifact':
+                    raise InterruptedError('cleanup cancelled')
+                return original_unlink(path, *args, **kwargs)
+            with patch.object(CI.os, 'unlink', side_effect=interrupt_unlink):
+                with self.assertRaises(InterruptedError):
+                    CI._safe_rmtree(source)
+            self.assertTrue((source / 'artifact').is_file())
+
     def test_bounded_observation_enforces_limit_and_exit_status(self):
         env = {'PATH': '/usr/bin:/bin'}
         self.assertEqual(CI.bounded_output(['/usr/bin/python3', '-c', 'print("ok")'], env=env), b'ok\n')
@@ -1301,6 +1335,185 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         self.assertEqual(r_after_clear['status'], 'passed', log_after)
         self.assertEqual(r_after_clear['cache']['restore_status'], 'miss')
         self.assertGreaterEqual(next(s for s in r_after_clear['stages'] if s['name'] == 'check_0')['cargo_compiling_units'], 2)
+
+    def _local_cache_provider(self, **overrides):
+        raw = {'enabled': True, 'root': str(self.cache_root), **overrides}
+        return CI.LocalCargoCacheProvider(
+            CI.CargoCacheConfig.parse(raw, trusted_prefix=self.root),
+            expected_owner=os.getuid(), expected_group=os.getgid(),
+        )
+
+    def test_cancellation_in_cache_restore_publish_lru_and_telemetry_fails_supervisor(self):
+        # Exercise real cache snapshots through the root supervisor seam, not a
+        # stand-in cache port. A cancelled optional cache operation is not a miss.
+        for operation in ('restore_copy', 'publish_copy', 'restore_lru', 'telemetry', 'staging_cleanup', 'orphan_cleanup'):
+            with self.subTest(operation=operation):
+                scope = 'branch/' + CI.canonical_branch_slug('cancel/' + operation)
+                seed, _, _ = self._run_supervisor(
+                    commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+                )
+                entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+                before = (entry / 'current.json').read_bytes()
+                if operation == 'restore_copy':
+                    fault = patch.object(CI, '_copy_tree_to_build', side_effect=InterruptedError('restore cancelled'))
+                elif operation == 'publish_copy':
+                    fault = patch.object(CI, '_copy_tree_from_build', side_effect=InterruptedError('publish cancelled'))
+                elif operation == 'telemetry':
+                    fault = patch.object(CI, '_read_ui_qa_stages', side_effect=InterruptedError('telemetry cancelled'))
+                elif operation in {'staging_cleanup', 'orphan_cleanup'}:
+                    garbage = (self.cache_root / '.staging-cancel-fixture'
+                               if operation == 'staging_cleanup' else entry / 'orphan-cancel-fixture')
+                    garbage.mkdir(mode=0o700)
+                    original_remove = CI._safe_rmtree
+                    def interrupt_cleanup(path):
+                        if path == garbage:
+                            raise InterruptedError('cache cleanup cancelled')
+                        return original_remove(path)
+                    fault = patch.object(CI, '_safe_rmtree', side_effect=interrupt_cleanup)
+                else:
+                    original_write = CI._atomic_write_json
+                    def interrupt_lru(path, *args, **kwargs):
+                        if path.name == 'last_used.json':
+                            raise InterruptedError('LRU cancelled')
+                        return original_write(path, *args, **kwargs)
+                    fault = patch.object(CI, '_atomic_write_json', side_effect=interrupt_lru)
+                with fault:
+                    result, _, _ = self._run_supervisor(
+                        commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+                    )
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['failure'], 'cancelled_or_timed_out')
+                self.assertTrue(result['cleanup_confirmed'])
+                self.assertEqual(result['cache']['publish_status'], 'skipped_cancelled')
+                self.assertEqual((entry / 'current.json').read_bytes(), before)
+                self.assertFalse((self.work / 'active').exists())
+
+    def test_cancellation_pointer_commit_boundary_is_explicit_and_never_passes(self):
+        scope = 'branch/' + CI.canonical_branch_slug('cancel/commit-boundary')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        before = (entry / 'current.json').read_bytes()
+        original_write = CI._atomic_write_json
+        for after_commit in (False, True):
+            with self.subTest(after_commit=after_commit):
+                def interrupt_pointer(path, *args, **kwargs):
+                    if path == entry / 'current.json':
+                        if after_commit:
+                            original_write(path, *args, **kwargs)
+                        raise InterruptedError('pointer publication cancelled')
+                    return original_write(path, *args, **kwargs)
+                with patch.object(CI, '_atomic_write_json', side_effect=interrupt_pointer):
+                    result, _, _ = self._run_supervisor(
+                        commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+                    )
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['failure'], 'cancelled_or_timed_out')
+                self.assertTrue(result['cleanup_confirmed'])
+                after = (entry / 'current.json').read_bytes()
+                if after_commit:
+                    self.assertNotEqual(after, before)
+                else:
+                    self.assertEqual(after, before)
+                # Before commit, retain the old snapshot. After commit, the new
+                # fully written snapshot is valid even though the action failed.
+                current = entry / json.loads(after)['snapshot_id']
+                self.assertTrue((current / 'meta.json').is_file())
+                self._local_cache_provider().prune()
+                self.assertEqual((entry / 'current.json').read_bytes(), after)
+                self.assertEqual(
+                    sorted(p.name for p in entry.iterdir() if p.is_dir()),
+                    [current.name],
+                )
+                before = after
+
+    def test_crash_after_snapshot_rename_collects_abandoned_and_superseded_storage(self):
+        class SimulatedCrash(BaseException):
+            pass
+
+        scope = 'branch/' + CI.canonical_branch_slug('crash/existing')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        before = (entry / 'current.json').read_bytes()
+        abandoned_scope = 'branch/' + CI.canonical_branch_slug('crash/abandoned')
+        original_write = CI._atomic_write_json
+        def crash_before_pointer(path, *args, **kwargs):
+            if path.name == 'current.json':
+                raise SimulatedCrash('process died after snapshot rename')
+            return original_write(path, *args, **kwargs)
+
+        # Neither a previous pointer nor an empty new scope may hide renamed
+        # snapshots from later operations on unrelated scopes.
+        for crashed_scope in (scope, abandoned_scope):
+            with patch.object(CI, '_atomic_write_json', side_effect=crash_before_pointer):
+                with self.assertRaises(SimulatedCrash):
+                    self._run_supervisor(
+                        commit=self.base_commit, expected_main='0' * 40, branch_scope=crashed_scope,
+                    )
+            if crashed_scope == scope:
+                self.assertEqual(len([p for p in entry.iterdir() if p.is_dir()]), 2)
+        self.assertEqual((entry / 'current.json').read_bytes(), before)
+        # Starting the second crashed build already collected the first orphan.
+        self.assertEqual(len([p for p in entry.iterdir() if p.is_dir()]), 1)
+        abandoned = self.cache_root / 'scopes/homelab' / CI.scope_directory_name(abandoned_scope)
+        self.assertTrue(abandoned.exists())
+        result, _, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40,
+            branch_scope='branch/' + CI.canonical_branch_slug('crash/unrelated'),
+        )
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual((entry / 'current.json').read_bytes(), before)
+        self.assertEqual(len([p for p in entry.iterdir() if p.is_dir()]), 1)
+        self.assertFalse(abandoned.exists())
+        inventory = self._local_cache_provider().prune()
+        pointed_bytes = sum(
+            json.loads(p.read_text())['total_bytes']
+            for p in self.cache_root.rglob('current.json')
+        )
+        self.assertEqual(inventory.cache_total_bytes, pointed_bytes)
+        self.assertEqual(inventory.cache_entry_count, 2)
+        expired = self._local_cache_provider(max_age_seconds=60).prune(
+            now_ns=time.time_ns() + 120 * 1_000_000_000,
+        )
+        self.assertEqual(expired.cache_entry_count, 0)
+        self.assertEqual(expired.cache_total_bytes, 0)
+
+    def test_orphan_gc_is_link_safe_and_does_not_hide_cleanup_failures(self):
+        scope = 'branch/' + CI.canonical_branch_slug('gc/safety')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        pointer = (entry / 'current.json').read_bytes()
+        outside = self.root / 'outside'
+        outside.mkdir()
+        marker = outside / 'preserve'
+        marker.write_text('never delete outside cache')
+        (entry / 'orphan-link').symlink_to(outside, target_is_directory=True)
+        self._local_cache_provider().prune()
+        self.assertTrue(marker.is_file())
+        self.assertFalse((entry / 'orphan-link').is_symlink())
+        self.assertEqual((entry / 'current.json').read_bytes(), pointer)
+
+        orphan = entry / 'orphan-directory'
+        orphan.mkdir(mode=0o700)
+        original_remove = CI._safe_rmtree
+        for error in (OSError('injected deletion failure'), InterruptedError('cleanup cancelled')):
+            def fail_orphan(path):
+                if path == orphan:
+                    raise error
+                return original_remove(path)
+            with patch.object(CI, '_safe_rmtree', side_effect=fail_orphan):
+                with self.assertRaises(type(error)):
+                    self._local_cache_provider().prune()
+            self.assertTrue(orphan.is_dir())
+            self.assertEqual((entry / 'current.json').read_bytes(), pointer)
+        self._local_cache_provider().prune()
+        self.assertFalse(orphan.exists())
+
+        # An ancestor symlink is rejected, rather than traversed to an outside
+        # cache-like directory. No production owner guard is bypassed here.
+        (self.cache_root / 'scopes/linked-project').symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            self._local_cache_provider().prune()
+        self.assertTrue(marker.is_file())
 
     def test_end_to_end_delivery_prepare_submission_to_supervisor_reuse_and_extra_guards(self):
         import grp

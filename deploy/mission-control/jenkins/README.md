@@ -292,7 +292,18 @@ after strict two-phase timestamp validation:
   `seed_from_main = true`, `timeout_seconds = 2700`.
 - **Eviction**: Expired entries (`> max_age_seconds`) are removed first, then LRU
   entries until `entry_count <= max_entries` and `total_bytes <= max_total_bytes`,
-  evicting non-`main` scopes before `main`.
+  evicting non-`main` scopes before `main`. The active publication is protected.
+- **Crash recovery**: Under the exclusive cache lock, restore, publication and
+  retention remove staging directories, entries without a valid current pointer,
+  and snapshots not referenced by that pointer before reporting storage totals.
+  Cache-scope directories must remain supervisor-owned and non-writable by
+  other users. Cleanup errors remain visible; symlinks are never traversed.
+- **Cancellation**: `InterruptedError` propagates through optional cache and
+  telemetry handlers into a failed cancellation receipt after confirmed cleanup.
+  Atomic replacement of `current.json` is the publication commit point: a
+  cancellation before replacement preserves the previous pointer; after
+  replacement the fully written new snapshot may remain. Neither case allows
+  the cancelled verification to report success.
 - **Systemd**: `setup-ci.py` adds `/mnt/data/forge-homelab/ci-cache` to
   `ReadWritePaths` in `forge-jenkins-ci-agent.service` while keeping
   `ProtectSystem=strict`.
