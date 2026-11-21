@@ -24,7 +24,11 @@ thirteen coding lifecycle tables, schema `USAGE` and database `CONNECT`. The
 [read-access contract](../../deploy/mission-control/sql/README.md#optional-muse-read-access)
 checks that exact capability without changing account credentials or granting
 writes, function execution, task ownership or approval authority. The localhost
-SCRAM HBA rule remains in place. This observation capability is independent of
+SCRAM HBA rule remains in place. The pre-existing default for future tables
+created by `forge_agent_owner` in schema `forge_agent` also retains
+non-grantable `SELECT` for this reader; global, other-owner/schema/type,
+write, grant-option or extra-grantee defaults are rejected. The thirteen
+current-table reads remain explicit. This observation capability is independent of
 the unimplemented external intake below; it creates no consumer or watcher.
 
 ## Rejected authority path

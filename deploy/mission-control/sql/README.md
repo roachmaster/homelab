@@ -94,7 +94,12 @@ non-grantable `SELECT` on these thirteen tables:
 
 The check rejects extra table or column grants, writes, grant options, API or
 function execution, ownership, elevated role flags, memberships and default
-privileges that extend this scope. Existing `INHERIT` or `NOINHERIT` configuration
+privileges that extend this scope. The existing owner/schema-scoped table
+default is the sole exception: `forge_agent_owner` in schema `forge_agent`
+grants non-grantable `SELECT` on future tables to `muse_events`. Its exact
+catalog row is required and retained, not replaced by a global grant. New
+tables still require an explicit update to the current-table allowlist before
+strict verification admits them. Existing `INHERIT` or `NOINHERIT` configuration
 is retained; neither adds authority without memberships. Historical catalog
 snapshots accept only the exact owner-issued Muse read ACL while preserving all
 other fields and ACL entries. Missing required reads fail verification without

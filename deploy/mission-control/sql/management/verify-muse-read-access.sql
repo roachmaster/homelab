@@ -88,6 +88,15 @@ BEGIN
             END IF;
         END LOOP;
     END LOOP;
+    -- Preserve the operator's existing owner/schema-scoped future-table read.
+    -- No global, other-owner, other-schema/type, extra grantee or grant option
+    -- is admitted by this exact catalog row. Current tables remain the thirteen above.
+    IF NOT EXISTS(SELECT FROM pg_default_acl d
+        WHERE d.defaclrole=owner_role AND d.defaclnamespace='forge_agent'::regnamespace
+          AND d.defaclobjtype='r'
+          AND d.defaclacl=ARRAY['muse_events=r/forge_agent_owner'::aclitem]) THEN
+        RAISE EXCEPTION 'Missing or unexpected authorized Muse future-table read default';
+    END IF;
     IF EXISTS(SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema'
           AND (p.proowner=reader OR has_function_privilege(reader,p.oid,'EXECUTE')))
@@ -95,9 +104,10 @@ BEGIN
         WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema' AND c.relkind='S'
           AND (c.relowner=reader OR has_sequence_privilege(reader,c.oid,'USAGE,SELECT,UPDATE')))
        OR EXISTS(SELECT FROM pg_default_acl d,LATERAL aclexplode(d.defaclacl) a
-        WHERE a.grantee IN(reader,0) AND (d.defaclnamespace=0 OR d.defaclnamespace IN
-            (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' ESCAPE '\'
-              AND nspname<>'information_schema'))) THEN
+        WHERE a.grantee IN(reader,0)
+          AND NOT(d.defaclrole=owner_role AND d.defaclnamespace='forge_agent'::regnamespace
+              AND d.defaclobjtype='r'
+              AND d.defaclacl=ARRAY['muse_events=r/forge_agent_owner'::aclitem])) THEN
         RAISE EXCEPTION 'Unexpected Muse reader function, sequence or default privileges';
     END IF;
 END;

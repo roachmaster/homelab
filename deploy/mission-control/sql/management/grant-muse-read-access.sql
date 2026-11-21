@@ -26,5 +26,8 @@ GRANT SELECT ON
     forge_agent.coding_workflow_actions,
     forge_agent.coding_attempts
 TO muse_events;
+-- Match the pre-existing permission for future tables from this owner/schema.
+ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent
+    GRANT SELECT ON TABLES TO muse_events;
 \ir verify-muse-read-access.sql
 COMMIT;
