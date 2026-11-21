@@ -317,6 +317,18 @@ worker releases and explicitly select its resource profile before accepting new
 work; previous policy IDs/digests retain their identity and are refused by the
 new worker, never silently upgraded or automatically replayed.
 
+The separately selected `forge-coding-agy-unattended-v1` policy adds explicit
+headless auto-approval for Gemini/Antigravity. Set that resource on the API
+profile and matching dedicated worker's top-level `resource_profile`; the worker
+must contain only Antigravity profiles. Migration23 admits its exact backend and
+policy digest. Its invocation adds `--dangerously-skip-permissions` and permits
+file reads exposed by the outer namespace. Plan/review source remains read-only;
+implementation keeps its owned workspace, supervision and normal publication
+checks. P10 policy bytes, default worker selection and frozen Codex/Muse reviewer
+recipes remain unchanged. Do not describe unattended CLI approval as root access
+or as enforcement of the old CLI deny rules. See the
+[unattended execution boundary](../../../docs/architecture/coding-admission.md#unattended-gemini-execution).
+
 Supported `ide.work.*` destinations on authenticated `POST /v1/dispatch`
 (version `1` Forge headers, 16 KiB raw request bound):
 

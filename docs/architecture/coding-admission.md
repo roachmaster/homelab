@@ -6,8 +6,9 @@ One assignment automatically advances through planning, independent agent review
 bounded revision, implementation, checks and authorized merge. The manual decision
 operations documented below remain available for manual and legacy tasks.
 
-**Source checkpoint:21 November2026.** Current source uses schema22, native
-`forge-coding-v10`, external `forge-external-db-v2` and atomic browser ABI12.
+**Source checkpoint:21 November2026.** Current source supports schema23, native
+`forge-coding-v10`, the opt-in `forge-coding-agy-unattended-v1` Gemini policy,
+external `forge-external-db-v2` and atomic browser ABI12.
 The [external author/reviewer workflow](external-agent-workflow.md) implements
 Muse's PostgreSQL assignments, real native Codex review tasks, bounded revisions,
 exact-source Jenkins verification and trusted automatic merge. Each root envelope
@@ -47,6 +48,30 @@ A fresh worker advertisement establishes readiness; a launcher does not.
 Pure DTOs, policy values and reducers do not need empty registrars. Configuration
 and factory selection determine effects; worker code never retrieves dependencies
 from a global registry.
+
+## Unattended Gemini execution
+
+`forge-coding-agy-unattended-v1` is an explicit Antigravity-only policy selected
+through the configured API profile and a matching worker's `resource_profile`.
+The CLI receives `--dangerously-skip-permissions` and can read files exposed by
+its outer execution namespace without a headless approval prompt. The installed
+AGY1.5.12 help and the [headless CLI contract](https://antigravity.google/docs/cli/headless)
+define this flag as automatic approval of tool requests. It is not a root login
+or permission to publish source without the normal workflow.
+
+The systemd supervisor retains the unprivileged UID, capability drop, hidden
+database/configuration paths, bounded lifetime, cancellation and observed scope
+cleanup. Plan/review source remains read-only; implementation writes use the
+owned task workspace. CLI permission settings must not be treated as the outer
+filesystem boundary when automatic approval is enabled.
+
+The P10 policy and digest remain unchanged. Its workers still use the original
+scoped tool rules, and frozen Codex/Muse reviewer recipes remain valid. A worker
+selected for the new policy accepts only its exact AGY recipe; profile names or
+an agent's text do not grant unattended execution. Switching a blocked task to
+the new policy uses ordinary Resume with its current revision, a genuine stopped
+workspace reconciliation receipt and an idempotency key. Previous attempts and
+their original permission outcomes remain in history.
 
 ## Single gateway and wire contract
 

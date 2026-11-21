@@ -1,5 +1,47 @@
 # Shared Agent Work Checkpoint
 
+## Current: Unattended Gemini execution and task monitoring — 2026-11-21
+
+- **authorization:** User requests monitoring the submitted tasks and making
+  Gemini run with full access, then explicitly directs inspection of
+  `work_executor.py`. Existing task publication/review/CI rules remain in force.
+- **observed cause:** Cache-planning task
+  `b5f3e148-1857-427c-8f26-6afa91a2093c` stopped with `blocked_permission`
+  at17:11. Its retained AGY conversation identifies a denied ReadFile of
+  `/usr/local/libexec/forge-ci-check`, outside the generated tool read allowlist.
+  The installed AGY1.5.12 help verifies `--dangerously-skip-permissions`; P10
+  deliberately excludes that flag and must retain its historical identity.
+- **implementation:** Add the separately versioned
+  `forge-coding-agy-unattended-v1` policy and explicit worker selection. Keep
+  native P10, Codex reviewer execution and frozen Muse workflow recipes intact.
+  New Gemini tasks use unattended CLI approval under the existing outer process
+  boundary. Plan/review source stays read-only; implementation remains owned
+  by the approved task workspace. No root account or publication bypass.
+- **ownership:** Backend policy/adapter work, additive SQL migration23 and
+  deployment templates have separate writers/worktrees. Root integrates,
+  reviews, verifies and deploys. The blocked root owns an immutable P10 native
+  workflow, so generic Resume is correctly refused. After a genuine fix, use
+  ordinary Submit for a versioned replacement with the same original prompt and
+  acceptance criteria, then Cancel the already stopped predecessor through the
+  normal revision/idempotency API. Preserve all failed-run history.
+- **delivery:** In progress; no new policy is live and no task was resumed yet.
+  Do not claim that existing `ask: []` settings amount to full CLI auto-approval.
+- **source verification:** Integrated backend suite695/695 passed (411.462s),
+  followed by the final six PostgreSQL cases including the additional native
+  review/feedback regression. Independent backend and SQL reviews approved the
+  change. P10 policy/digest and Rust tree `f4fb31cf271e3799688f539e4b28b5e7d96f7800`
+  are unchanged. Reuse only the matching previously verified Rust binaries and
+  ABI12 assets; do not claim a new full Jenkins build for this Python/SQL fix.
+  A fresh strict schema22 backup/owned restore passed before production DDL.
+- **evidence:** `/mnt/data/homelab-build/gemini-unattended-20261121`.
+- **source/CI boundary:** Native admission is still bound to the actual
+  `a3968c1` merge receipt and unchanged `refs/forge/verified-main`. Give the
+  replacement explicit read-only context for the current f26 deployed Jenkins
+  helper; do not pretend its checkout is current main. The native workflow's
+  configured hosted-check names still target the legacy GitHub path; only the
+  external Muse workflow currently has trusted Jenkins delivery. Do not enable
+  GitHub Actions or describe this permission fix as native Jenkins integration.
+
 ## Current: Complete the agent workflow and event history — 2026-11-21
 
 - **authorization:** User explicitly requests finishing the system rather than
