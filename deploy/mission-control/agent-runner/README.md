@@ -691,3 +691,30 @@ metadata-only preflight rejects executable project configuration before auth or
 process acquisition, while read-only managed policy blocks unmanaged hooks,
 MCP servers and marketplace installs. The immutable config disables `.envrc`
 loading; the outer supervisor forwards no parent API-key environment.
+
+
+### Muse native source capability (policy10 / migration0019)
+
+Muse email remains the primary integration. The pinned native Muse Code adapter
+is merged as a separate **default-disabled** capability, without enabling any
+live execution profile or changing the configured author/reviewer roles.
+`execution_enabled` defaults false for Muse in both API and worker configuration.
+A metadata-only `usage_only_profiles` selection can expose a manual-refresh
+usage card without a binary execution registration, work grant or advertisement.
+There is no background Muse allowance polling; absent allowance stays Not
+reported, and no paid API fallback is provisioned.
+
+The selected path is `WorkProfile` → immutable recipe → `CodingWorkerFactory` →
+`CommandRunnerProvider`. Native execution uses a fresh isolated HOME and MSP
+JSONL per attempt, a pinned executable, fixed Meta-provider argv, the existing
+outer supervisor and Muse's unchanged nested sandbox. A retained-dirfd/inode
+credential lease is released only after proven scope stop. Setup failures clean
+up their owned auth copy; uncertain process/inode cleanup requires reconciliation.
+Manual metadata refresh owns the same credential lifetime and a bounded process
+group. Source/fake/disposable-PG checks do not qualify live account allowance or
+nested shell functionality and do not activate the capability.
+
+Combined policy10 and additive migration0019 preserve Grok policy9/migration0018
+and every earlier immutable recipe, receipt and migration. See the [Muse provider
+design](../../../docs/architecture/muse-code-provider.md) for the fixed command,
+accounting convention, lifecycle and activation boundary.

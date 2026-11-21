@@ -385,6 +385,7 @@ pub enum WorkBackend {
     Antigravity,
     Codex,
     Grok,
+    Muse,
 }
 impl WorkBackend {
     pub fn label(self) -> &'static str {
@@ -392,6 +393,7 @@ impl WorkBackend {
             Self::Antigravity => "Gemini / Antigravity",
             Self::Codex => "Codex",
             Self::Grok => "Grok",
+            Self::Muse => "Muse Code",
         }
     }
 }

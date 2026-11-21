@@ -20,8 +20,10 @@ import subprocess
 import time
 from uuid import UUID
 
-from work_grok import AuthCleanupError as GrokAuthCleanupError, AuthLease as GrokAuthLease, GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
+from work_grok import GrokEvents, argv as grok_argv, CONFIG as GROK_CONFIG, MANAGED_POLICY as GROK_MANAGED_POLICY, validate_project_subset as validate_grok_project_subset, stage_auth as stage_grok_auth, BINARY_SHA256 as GROK_BINARY_SHA256
 from work_policy import POLICY
+from work_native_auth import AuthCleanupError, AuthLease
+from work_muse import MuseEvents, argv as muse_argv, BINARY_SHA256 as MUSE_BINARY_SHA256, stage_auth as stage_muse_auth
 from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
 from work_sessions import SessionError, SessionSelection
@@ -305,7 +307,7 @@ class Invocation:
     plan_file: Path | None = None
     readonly_files: tuple[Path, ...] = ()
     external_sandbox: bool = False
-    grok_auth: GrokAuthLease | None = None
+    native_auth: AuthLease | None = None
 
 
 @dataclass(frozen=True)
@@ -502,7 +504,7 @@ class CliParser:
     """Incremental bounded machine-event parser, retaining no tool arguments/thoughts."""
 
     def __init__(self, backend, *, expected_conversation_id=None):
-        if backend not in {"antigravity", "codex", "grok"}:
+        if backend not in {"antigravity", "codex", "grok", "muse"}:
             raise ValueError("Invalid CLI backend")
         self.backend = backend
         self.buffer = bytearray()
@@ -521,6 +523,7 @@ class CliParser:
         self._stderr_blocked = set()
         self._stderr_denied = False
         self._grok_events = GrokEvents(expected_conversation_id) if backend == "grok" else None
+        self._muse_events = MuseEvents() if backend == "muse" else None
         if expected_conversation_id is not None:
             self._session(expected_conversation_id)
 
@@ -594,6 +597,18 @@ class CliParser:
             self.saw_work = parsed.saw_work
             if parsed.failure is not None:
                 self._record_failure_text(parsed.failure)
+        elif self.backend == "muse":
+            try:
+                self._muse_events.record(value)
+            except (ValueError, TypeError, AttributeError):
+                raise ExecutionError("failed", "The coding agent returned malformed Muse machine output.") from None
+            events = self._muse_events
+            if events.session is not None:
+                self._session(events.session)
+            self.response, self.usage, self.complete = events.response, events.usage, events.complete
+            self.saw_work = events.saw_work
+            if events.failure is not None:
+                self._record_failure_text(events.failure)
         else:
             self._codex(value)
 
@@ -696,6 +711,9 @@ class CliParser:
         if self._grok_events is not None and self._grok_events.cancelled:
             return CliOutcome("cancelled", "", self.conversation_id, self.usage,
                               "Grok cancelled the run and its process scope stopped.", proof)
+        if self._muse_events is not None and self._muse_events.cancelled:
+            return CliOutcome("cancelled", "", self.conversation_id, self.usage,
+                              "The Muse run was cancelled and its process scope stopped.", proof)
         if returncode != 0 or self.failure is not None:
             for status in self._stderr_blocked:
                 self._record_failure(status)
@@ -753,7 +771,7 @@ class SystemdSupervisor:
         if not UNIT_RE.fullmatch(unit) or unit != unit_name(lease["attempt_id"]):
             raise ExecutionError("failed", "Invalid attempt supervision identity.")
         account = self.config.account
-        if invocation.backend not in {"antigravity", "codex", "grok", "verification"}:
+        if invocation.backend not in {"antigravity", "codex", "grok", "muse", "verification"}:
             raise ExecutionError("failed", "The selected process scope is unavailable.")
         if type(invocation.external_sandbox) is not bool or invocation.external_sandbox and invocation.backend != "codex":
             raise ExecutionError("failed", "The external execution boundary is unavailable.")
@@ -777,8 +795,13 @@ class SystemdSupervisor:
                             raise ValueError()
                 except (OSError, ValueError):
                     raise ExecutionError("failed", "The immutable Grok execution policy is unavailable.") from None
+        if invocation.backend == "muse":
+            expected = muse_argv(invocation.argv[0], lease["recipe"]["model"], CHILD_WORKSPACE,
+                                 CHILD_STATE / "prompt.txt", implement=invocation.implement)
+            if invocation.argv != expected or invocation.session is not None or invocation.external_sandbox:
+                raise ExecutionError("failed", "The Muse execution boundary does not match its pinned policy.")
         verification = invocation.backend == "verification"
-        native_state = (None if verification or invocation.backend == "grok" else account.home /
+        native_state = (None if verification or invocation.backend in {"grok", "muse"} else account.home /
                         (".gemini" if invocation.backend == "antigravity" else ".codex"))
         binary = Path(invocation.argv[0])
         readonly = [invocation.workspace.repository, binary]
@@ -808,6 +831,11 @@ class SystemdSupervisor:
                 source = invocation.scratch / relative
                 if source.is_file():
                     readonly_bindings.append(str(source) + ":" + str(CHILD_STATE / relative))
+        if invocation.backend == "muse":
+            auth = invocation.scratch / "home/.config/muse/auth.json"
+            if auth.is_file():
+                readonly_bindings.append(str(auth) + ":" + str(CHILD_STATE / "home/.config/muse/auth.json"))
+            readonly_bindings.append(str(invocation.scratch / "prompt.txt") + ":" + str(CHILD_STATE / "prompt.txt"))
         if invocation.plan_file is not None:
             if (invocation.plan_file.parent != invocation.scratch
                     or invocation.plan_file.name not in {"approved-plan.md", "previous-plan.md"}
@@ -885,7 +913,7 @@ class SystemdSupervisor:
             immutable_native.append(CHILD_WORKSPACE)
         properties.append("ReadOnlyPaths=" + " ".join("-" + str(path) for path in immutable_native))
         environment = {
-            "HOME": str(CHILD_STATE / "home") if verification or invocation.backend == "grok" else str(account.home),
+            "HOME": str(CHILD_STATE / "home") if verification or invocation.backend in {"grok", "muse"} else str(account.home),
             "USER": account.user, "LOGNAME": account.user,
             "PATH": ":".join([*(str(path) for path in stable_tools), "/usr/local/bin", "/usr/bin", "/bin"]),
             "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
@@ -901,6 +929,9 @@ class SystemdSupervisor:
                 "GROK_LOG_FILE": str(CHILD_STATE / "grok-native.log"),
                 "GROK_SHARED_DAEMON": "0", "GROK_SESSION_REGISTRY": "0", "GROK_DISABLE_AUTOUPDATER": "1",
                 "GROK_MEMORY": "0", "GROK_WORKFLOWS": "0", "GROK_EXTERNAL_OTEL": "0"})
+        if invocation.backend == "muse":
+            environment["XDG_CONFIG_HOME"] = str(CHILD_STATE / "home/.config")
+            environment["MUSE_AUTH_PATH"] = str(CHILD_STATE / "home/.config/muse/auth.json")
         return self._root(
             "/usr/bin/systemd-run", "--quiet", "--wait", "--pipe", "--collect",
             "--expand-environment=no", "--unit=" + unit, "--uid=0", "--gid=0",
@@ -966,7 +997,7 @@ class CommandRunnerProvider:
             return self.codex_sessions
         return None
 
-    def _retain_grok_auth_cleanup(self, scratch, identity):
+    def _retain_native_auth_cleanup(self, scratch, identity):
         """Nonsecret recovery witness outside the child's writable state alias.
 
         This is evidence for explicit reconciliation, never deletion authority.
@@ -999,6 +1030,8 @@ class CommandRunnerProvider:
             self._binary_hashes[backend] = (actual, hashlib.sha256(actual.read_bytes()).digest())
             if backend == "grok" and self._binary_hashes[backend][1].hex() != GROK_BINARY_SHA256:
                 raise ValueError("Configured Grok executable does not match its pinned version")
+            if backend == "muse" and self._binary_hashes[backend][1].hex() != MUSE_BINARY_SHA256:
+                raise ValueError("Muse executable does not match its pinned adapter version")
 
     def invocation(self, lease, workspace, *, progress=False, plan_context=None, feedback_context=None, peer_context=None,
                    peer_feedback_context=None):
@@ -1164,7 +1197,7 @@ class CommandRunnerProvider:
             if feedback_context.legacy_resume_note:
                 prompt += "\nOWNER RESUME FEEDBACK:\n" + feedback_context.legacy_resume_note
         peer_feedback_file = None
-        grok_auth = None
+        native_auth = None
         if lease.get("workflow_feedback_review_id") is not None:
             if (not isinstance(peer_feedback_context, WorkflowFeedbackContext)
                     or peer_feedback_context.workflow_id != lease.get("workflow_id")
@@ -1227,8 +1260,8 @@ class CommandRunnerProvider:
             native = scratch / "home/.grok"
             native.mkdir(parents=True, mode=0o700, exist_ok=True)
             try:
-                grok_auth = stage_grok_auth(self.config.account, native / "auth.json") or None
-                if not grok_auth:
+                native_auth = stage_grok_auth(self.config.account, native / "auth.json") or None
+                if not native_auth:
                     raise ValueError("Grok account is not authenticated")
                 (native / "config.toml").write_text(GROK_CONFIG, encoding="utf-8")
                 (native / "config.toml").chmod(0o400)
@@ -1239,22 +1272,53 @@ class CommandRunnerProvider:
                     stream.write(prompt.encode("utf-8"))
             except BaseException as error:
                 try:
-                    identity = (error.identity if isinstance(error, GrokAuthCleanupError)
-                                else grok_auth.identity if grok_auth is not None and not grok_auth.cleanup() else None)
+                    identity = (error.identity if isinstance(error, AuthCleanupError)
+                                else native_auth.identity if native_auth is not None and not native_auth.cleanup() else None)
                     if identity is not None:
                         try:
-                            self._retain_grok_auth_cleanup(scratch, identity)
+                            self._retain_native_auth_cleanup(scratch, identity)
                         except OSError:
                             pass
                         raise ExecutionError("needs_reconcile", "Copied Grok authentication requires explicit reconciliation.") from None
                 finally:
-                    if grok_auth is not None:
-                        grok_auth.close()
+                    if native_auth is not None:
+                        native_auth.close()
                 if isinstance(error, (OSError, ValueError)):
                     raise ExecutionError("blocked_auth", "The approved Grok native state is unavailable.") from None
                 raise
             argv = grok_argv(actual, lease["recipe"]["model"], CHILD_WORKSPACE, CHILD_STATE / "prompt.txt",
                 lease["attempt_id"], CHILD_STATE / "grok-leader.sock", implement=implement)
+            payload = b""
+        elif backend == "muse":
+            if getattr(self.supervisor, "enforces_coding_sandbox", False) is not True:
+                raise ExecutionError("failed", "Muse requires the approved outer execution boundary.")
+            native = scratch / "home/.config/muse"
+            native.mkdir(parents=True, mode=0o700, exist_ok=True)
+            try:
+                native_auth = stage_muse_auth(self.config.account, native / "auth.json") or None
+                if native_auth is None:
+                    raise ValueError("Muse account is not authenticated")
+                descriptor = os.open(scratch / "prompt.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                with os.fdopen(descriptor, "wb") as stream:
+                    stream.write(prompt.encode("utf-8"))
+            except BaseException as error:
+                try:
+                    identity = (error.identity if isinstance(error, AuthCleanupError)
+                                else native_auth.identity if native_auth is not None and not native_auth.cleanup() else None)
+                    if identity is not None:
+                        try:
+                            self._retain_native_auth_cleanup(scratch, identity)
+                        except OSError:
+                            pass
+                        raise ExecutionError("needs_reconcile", "Copied Muse authentication requires explicit reconciliation.") from None
+                finally:
+                    if native_auth is not None:
+                        native_auth.close()
+                if isinstance(error, (OSError, ValueError)):
+                    raise ExecutionError("blocked_auth", "The selected Muse native state is unavailable.") from None
+                raise
+            argv = muse_argv(actual, lease["recipe"]["model"], CHILD_WORKSPACE,
+                             CHILD_STATE / "prompt.txt", implement=implement)
             payload = b""
         else:
             external_sandbox = (getattr(self.supervisor, "enforces_coding_sandbox", False) is True
@@ -1271,7 +1335,7 @@ class CommandRunnerProvider:
             payload = prompt.encode("utf-8")
         return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file,
                           tuple(path for path in (feedback_file, peer_file, peer_feedback_file) if path is not None),
-                          external_sandbox if backend == "codex" else False, grok_auth)
+                          external_sandbox if backend == "codex" else False, native_auth)
 
     def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None, peer_context=None,
             peer_feedback_context=None):
@@ -1292,14 +1356,14 @@ class CommandRunnerProvider:
         def finalize_credential(safe):
             nonlocal credential_finalized
             credential_finalized = True
-            if invocation.grok_auth is None:
+            if invocation.native_auth is None:
                 return True
-            if safe and invocation.grok_auth.cleanup():
+            if safe and invocation.native_auth.cleanup():
                 return True
             try:
-                self._retain_grok_auth_cleanup(invocation.scratch, invocation.grok_auth.identity)
+                self._retain_native_auth_cleanup(invocation.scratch, invocation.native_auth.identity)
             except OSError:
-                LOG.warning("Grok copied authentication recovery witness could not be saved")
+                LOG.warning("Native copied authentication recovery witness could not be saved")
             return False
 
         def settled(outcome):
@@ -1313,7 +1377,7 @@ class CommandRunnerProvider:
                                   summary="Agent or launcher stop could not be verified; review is required.")
             if not finalize_credential(launcher_stopped and outcome.stop_proof.get("scope_stopped") is True):
                 outcome = replace(outcome, status="needs_reconcile", text="",
-                                  summary="Copied Grok authentication requires explicit reconciliation after scope stop.")
+                                  summary="Copied native authentication requires explicit reconciliation after scope stop.")
             if (outcome.status == "awaiting_review" and not stop.is_set()
                     and active_invocation.session is not None and session_provider is not None):
                 try:
@@ -1502,13 +1566,13 @@ class CommandRunnerProvider:
                         if progress is not None:
                             progress.close()
                     finally:
-                        if invocation.grok_auth is not None:
+                        if invocation.native_auth is not None:
                             try:
                                 if not credential_finalized and not finalize_credential(
                                         launcher_stopped and (not spawn_attempted or bool(final_proof and final_proof.get("scope_stopped") is True))):
-                                    raise ExecutionError("needs_reconcile", "Copied Grok authentication requires explicit reconciliation after scope stop.")
+                                    raise ExecutionError("needs_reconcile", "Copied native authentication requires explicit reconciliation after scope stop.")
                             finally:
-                                invocation.grok_auth.close()
+                                invocation.native_auth.close()
 
 
 def utf8_chunks(content, maximum=CHUNK_BYTES):
