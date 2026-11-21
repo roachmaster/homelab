@@ -130,6 +130,10 @@ class ExternalFlowPGTest(unittest.TestCase):
   manifest=canonical({'version':1,'candidate_commit':'b'*40,'candidate_tree':'d'*40,'base_revision':'a'*40,'summary':'Implementation complete.'}).decode()
   job=self.author(flow,manifest);self.assertEqual(job['external_context']['stage'],'implement')
   self.assertIn('approved_plan',job['external_context']);self.assertEqual(job['external_context']['base_revision'],'a'*40)
+  self.assertIn('claim.external_context_json',job['prompt']);self.assertIn('claim.external_context_sha256',job['prompt'])
+  self.assertIn('ONLY the exact JSON object',job['prompt']);self.assertIn('Preserve existing work',job['prompt'])
+  self.assertEqual(hashlib.sha256(job['external_context_json'].encode()).hexdigest(),job['external_context_sha256'])
+  self.assertEqual(json.loads(job['external_context_json']),job['external_context'])
   return self.prepared(flow)
  def test_complete_actual_native_review_delivery_lifecycle(self):
   service,root,flow,job=self.submit_plan('# Full plan\n'+'ownership detail '*1200)

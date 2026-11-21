@@ -350,13 +350,24 @@ class ExternalWorkflowStore:
         self._queue_author(cursor,w,'plan' if kind=='plan' else 'implement',source,feedback)
         return True
 
+    @staticmethod
+    def _author_prompt(mode):
+        common=("Read the COMPLETE claim.external_context. First verify SHA-256 of the exact UTF-8 claim.external_context_json equals claim.external_context_sha256, "
+                "then parse that canonical JSON as external_context. It contains the original request_prompt and acceptance_criteria, approved_plan, previous_artifact, feedback, base_revision and result_contract. "
+                "Follow the approved Plan and independent feedback at the supplied exact base_revision. Preserve existing work and your feature branch across revisions; rebase it when the trusted base changes. "
+                "Do not merge main or manufacture native process proofs, review approval, Jenkins results or merge receipts. ")
+        return common+("Revise the complete Plan using the supplied feedback; finish with the full revised Plan text."
+                       if mode=='plan' else
+                       "Implement and verify the approved Plan, publish the preserved feature candidate, and finish with ONLY the exact JSON object specified by external_context.result_contract "
+                       "(version,candidate_commit,candidate_tree,base_revision,summary). No Markdown fences or extra prose; report the actual commit/tree and supplied base_revision.")
+
     def _queue_author(self,cursor,w,mode,source,feedback):
         task_id=uuid4();root=self._task(cursor,w,w['root_task_id']);recipe=w['snapshot']['recipes']['author_plan' if mode=='plan' else 'author_implement']
         phase=('plan_revision' if feedback else 'plan') if mode=='plan' else ('repair' if feedback else 'implement')
         w['active_task_id']=task_id
         # Workflow authorization is persisted before the v2 SQL enqueue checks it.
         self._insert_task(cursor,w,task_id,mode,w['author_profile'],recipe,
-            'Revise the complete supplied plan using independent review feedback.' if mode=='plan' else 'Implement and verify the approved supplied plan. Publish a feature candidate; do not merge main.',
+            self._author_prompt(mode),
             root['acceptance_criteria'],w['state'].get('base_revision',root['base_revision']),'author')
         self._save(cursor,w,'Muse '+('revision' if feedback else 'implementation')+' queued from the reviewed artifact.',phase=phase,related_task_id=task_id)
         context={'version':2,'workflow_id':str(w['workflow_id']),'stage':mode,'request_prompt':root['prompt'],'acceptance_criteria':root['acceptance_criteria'],
