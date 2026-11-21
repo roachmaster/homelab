@@ -10,6 +10,15 @@ use std::{collections::BTreeMap, rc::Rc};
 pub enum JenkinsCommand {
     Status,
     Jobs,
+    QueueList,
+    RecentBuilds {
+        job: String,
+        limit: u8,
+    },
+    StopBuild {
+        job: String,
+        number: u64,
+    },
     Build {
         job: String,
         parameters: BTreeMap<String, String>,
@@ -31,6 +40,9 @@ impl JenkinsCommand {
         match self {
             Self::Status => CommandKind::JenkinsStatus,
             Self::Jobs => CommandKind::JenkinsJobs,
+            Self::QueueList => CommandKind::JenkinsQueueList,
+            Self::RecentBuilds { .. } => CommandKind::JenkinsRecentBuilds,
+            Self::StopBuild { .. } => CommandKind::JenkinsStopBuild,
             Self::Build { .. } => CommandKind::JenkinsBuild,
             Self::Queue { .. } => CommandKind::JenkinsQueue,
             Self::BuildStatus { .. } => CommandKind::JenkinsBuildStatus,
@@ -43,6 +55,9 @@ impl JenkinsCommand {
         let request = match self {
             Self::Status => Request::Controller,
             Self::Jobs => Request::Jobs,
+            Self::QueueList => Request::QueueList,
+            Self::RecentBuilds { job, limit } => Request::RecentBuilds { job, limit },
+            Self::StopBuild { job, number } => Request::StopBuild { job, number },
             Self::Build { job, parameters } => Request::Build { job, parameters },
             Self::Queue { id } => Request::Queue { id },
             Self::BuildStatus { job, number } => Request::BuildStatus { job, number },
@@ -90,6 +105,47 @@ impl<C> DescribeCommand for JenkinsTask<C> {
                 name: "jenkins.jobs",
                 help: "List jobs visible to the configured Jenkins account",
                 arguments: &[],
+            },
+            CommandDescriptor {
+                name: "jenkins.queue-list",
+                help: "Read up to 50 queued builds and selected public parameters as JSON",
+                arguments: &[],
+            },
+            CommandDescriptor {
+                name: "jenkins.recent-builds",
+                help: "Read recent builds and selected public parameters as JSON; never resubmit automatically",
+                arguments: &[
+                    ArgumentDescriptor {
+                        name: "job",
+                        help: "Job name, with folders separated by /",
+                        data_type: DataType::Text,
+                        presence: Presence::Required,
+                    },
+                    ArgumentDescriptor {
+                        name: "limit",
+                        help: "Maximum build count, 1 through 50",
+                        data_type: DataType::U64,
+                        presence: Presence::Optional { default: Some("50") },
+                    },
+                ],
+            },
+            CommandDescriptor {
+                name: "jenkins.stop-build",
+                help: "Request graceful build stop; acceptance does not prove the build stopped",
+                arguments: &[
+                    ArgumentDescriptor {
+                        name: "job",
+                        help: "Job name, with folders separated by /",
+                        data_type: DataType::Text,
+                        presence: Presence::Required,
+                    },
+                    ArgumentDescriptor {
+                        name: "number",
+                        help: "Positive build number",
+                        data_type: DataType::U64,
+                        presence: Presence::Required,
+                    },
+                ],
             },
             CommandDescriptor {
                 name: "jenkins.build",
@@ -164,6 +220,9 @@ impl<C: IoClient<Request = Request, Response = Response, Error = Error>> Task fo
             (&response, expected),
             (Response::Controller(_), CommandKind::JenkinsStatus)
                 | (Response::Jobs(_), CommandKind::JenkinsJobs)
+                | (Response::QueueList(_), CommandKind::JenkinsQueueList)
+                | (Response::RecentBuilds(_), CommandKind::JenkinsRecentBuilds)
+                | (Response::StopRequested, CommandKind::JenkinsStopBuild)
                 | (Response::Queued(_), CommandKind::JenkinsBuild)
                 | (Response::Queue(_), CommandKind::JenkinsQueue)
                 | (Response::Build(_), CommandKind::JenkinsBuildStatus)
@@ -183,6 +242,9 @@ where
     for (name, kind) in [
         ("jenkins.status", CommandKind::JenkinsStatus),
         ("jenkins.jobs", CommandKind::JenkinsJobs),
+        ("jenkins.queue-list", CommandKind::JenkinsQueueList),
+        ("jenkins.recent-builds", CommandKind::JenkinsRecentBuilds),
+        ("jenkins.stop-build", CommandKind::JenkinsStopBuild),
         ("jenkins.build", CommandKind::JenkinsBuild),
         ("jenkins.queue", CommandKind::JenkinsQueue),
         ("jenkins.build-status", CommandKind::JenkinsBuildStatus),

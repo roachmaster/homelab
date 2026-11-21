@@ -140,6 +140,7 @@ relative to the configuration file's directory:
   "username": "forge-admin",
   "token_file": "mission-control.token",
   "allow_mutations": false,
+  "observed_parameters": ["FORGE_ACTION_ID"],
   "timeout_seconds": 10,
   "max_response_bytes": 1048576
 }
@@ -172,6 +173,24 @@ The registered commands are:
 - `jenkins.queue ID`: one queue observation, without background polling.
 - `jenkins.build-status JOB NUMBER`: one build observation.
 - `jenkins.cancel ID`: request queue cancellation; requires mutation opt-in.
+- `jenkins.queue-list`: one JSON queue snapshot, at most50 items.
+- `jenkins.recent-builds JOB [LIMIT]`: one JSON recent-build snapshot; default50,
+  range1–50, including observed queue IDs and selected public parameters.
+- `jenkins.stop-build JOB NUMBER`: request graceful stop of a known build;
+  requires mutation opt-in; emits `stop=requested_not_confirmed`.
+
+The two snapshot commands emit one JSON object, without a text prefix:
+
+```json
+{"items":[{"id":21,"job":"team/pipeline","parameters":{"FORGE_ACTION_ID":"example"},"executable":null}],"truncated":false}
+{"job":"team/pipeline","builds":[{"number":8,"queue_id":21,"building":true,"result":null,"parameters":{"FORGE_ACTION_ID":"example"}}],"truncated":false}
+```
+
+`observed_parameters` is an optional public-name allowlist and defaults to empty.
+Never select secret/token names. Unselected parameters and password/secret
+parameter classes are omitted. Selected values must be bounded strings; no raw
+action payload is printed. A snapshot with `truncated:true`, a failed snapshot or
+a missing action in a limited history cannot justify blindly repeating a write.
 
 Queue acceptance is not build completion. Cancellation output is a request
 acknowledgement, not proof that a running build stopped. An uncertain write

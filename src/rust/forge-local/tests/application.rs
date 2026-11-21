@@ -356,6 +356,9 @@ mod native_disk {
                 #[cfg(feature = "jenkins")]
                 CommandKind::JenkinsStatus
                 | CommandKind::JenkinsJobs
+                | CommandKind::JenkinsQueueList
+                | CommandKind::JenkinsRecentBuilds
+                | CommandKind::JenkinsStopBuild
                 | CommandKind::JenkinsBuild
                 | CommandKind::JenkinsQueue
                 | CommandKind::JenkinsBuildStatus

@@ -37,8 +37,8 @@ let controller = client.acquire()?.execute(Request::Controller)?;
 ```
 
 Supported prepared requests are controller information, job listing, build
-submission with optional parameters, queue inspection, build inspection and queue
-cancellation. `Request::validate` is pure and reusable by an application Task
+submission with optional parameters, queue inspection, build inspection, bounded
+queue/recent-build snapshots, queue cancellation and graceful build-stop requests. `Request::validate` is pure and reusable by an application Task
 before executing an injected client. Slash-separated job names represent Jenkins
 folders; each segment is encoded separately. Empty/dot segments, zero IDs and
 oversized parameters are rejected before I/O. JSON responses project typed DTOs;
@@ -57,7 +57,9 @@ Mutation calls are disabled by default. Explicit `Config::with_mutations(true)`
 permits them. HTTP201 plus a same-origin, exact-context canonical queue Location
 means **accepted into Jenkins's queue**, not a finished build. `CancelRequested`
 means the cancellation request was accepted, not proof that a running build
-stopped. Build-submit timeouts, server failures, lost/invalid acceptance receipts
+stopped. `StopRequested` likewise acknowledges only a graceful `POST .../stop`
+request; callers must observe `building=false` separately. No `/term` or `/kill`
+endpoint is used. Build-submit timeouts, server failures, lost/invalid acceptance receipts
 and cancellation uncertainty return `MutationUncertain`; reconcile instead of
 blindly retrying. Neither this adapter nor Ureq3 performs implicit retries.
 Unexpected write response statuses, including unverified 2xx/3xx responses,
@@ -76,6 +78,24 @@ The blocking deadline does not preempt host computation or an injected transport
 Native factory instances own the Ureq agent/pool; a cloned client shares that
 agent's owned pool, and dropping all clones releases it. No daemon is started.
 
+For reconciliation after an uncertain submission, `QueueList` reads at most50
+items and `RecentBuilds { job, limit }` reads 1–50 recent builds. Both request one
+extra item through Jenkins's `tree` range syntax and return `truncated` rather
+than claiming the bounded snapshot is complete. A truncated or failed read does
+not prove that a submitted action is absent. The host owns action identity,
+matching, subsequent observations and retry decisions; this adapter never
+resubmits or polls.
+
+Snapshot `parameters` are empty by default. Select **public** correlation names
+using `Config::with_observed_parameters(["MY_ACTION_ID"])`; at most64 unique ASCII
+identifier names are accepted. Only selected string values of at most4096bytes,
+without control characters, are returned. Password/secret parameter classes are
+omitted, and ambiguous duplicate selected parameters fail closed. Each response
+has the configured byte limit; list counts, action/parameter counts, job URLs and
+identities are validated. Queue job URLs must identify a canonical job below the
+configured same-origin Jenkins context and are never followed. No credential or
+arbitrary unselected parameter is included in the projected DTO's Debug/JSON.
+
 Verification includes injected transport boundary tests, real owned-loopback HTTP
 tests and the separate Cargo consumer under `tests/consumer`, which imports public
 library exports and proves register→freeze→create→provider→execute, dependency
@@ -86,4 +106,6 @@ host separately. No build is submitted by the test suite or examples.
 
 References: [Jenkins scripted-client authentication](https://www.jenkins.io/doc/book/system-administration/authenticating-scripted-clients/),
 [CSRF and API tokens](https://www.jenkins.io/doc/book/security/csrf-protection/),
-[remote access API](https://www.jenkins.io/doc/book/using/remote-access-api/).
+[remote access API](https://www.jenkins.io/doc/book/using/remote-access-api/),
+[asynchronous build abort](https://www.jenkins.io/doc/book/using/aborting-a-build/),
+and [official tree-range parser](https://github.com/jenkinsci/stapler/blob/master/core/src/main/java/org/kohsuke/stapler/export/NamedPathPruner.java).

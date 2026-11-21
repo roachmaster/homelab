@@ -9,8 +9,15 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use forge_bootstrap::{PreparedGroup, RegistrationError};
 use forge_io_client::IoClient;
 use forge_provider::Factory;
-use serde::Deserialize;
-use std::{collections::BTreeMap, error, fmt, marker::PhantomData, time::Duration};
+use serde::{Deserialize, Serialize};
+mod observation;
+pub use observation::{BuildSummary, QueueListing, QueueSummary, RecentBuildListing};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error, fmt,
+    marker::PhantomData,
+    time::Duration,
+};
 use url::{Host, Url};
 
 #[cfg(feature = "http")]
@@ -23,6 +30,18 @@ pub use http::{register_http, HttpClient, HttpClientFactory};
 pub enum Request {
     Controller,
     Jobs,
+    /// Bounded queue snapshot, including explicitly selected public parameters.
+    QueueList,
+    /// Bounded newest-build snapshot; `limit` must be between 1 and 50.
+    RecentBuilds {
+        job: String,
+        limit: u8,
+    },
+    /// Request graceful cancellation of one known build, without polling.
+    StopBuild {
+        job: String,
+        number: u64,
+    },
     Build {
         job: String,
         parameters: BTreeMap<String, String>,
@@ -42,6 +61,10 @@ pub enum Request {
 pub enum Response {
     Controller(ControllerInfo),
     Jobs(Vec<JobSummary>),
+    QueueList(QueueListing),
+    RecentBuilds(RecentBuildListing),
+    /// Jenkins accepted the request; the build may still be running.
+    StopRequested,
     Queued(QueueReceipt),
     Queue(QueueItem),
     Build(BuildInfo),
@@ -63,7 +86,7 @@ pub struct JobSummary {
 pub struct QueueReceipt {
     pub id: u64,
 }
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Executable {
     pub number: u64,
 }
@@ -192,6 +215,7 @@ impl Limits {
 pub struct Config {
     endpoint: Url,
     allow_mutations: bool,
+    observed_parameters: BTreeSet<String>,
     limits: Limits,
 }
 impl Config {
@@ -236,12 +260,35 @@ impl Config {
         Ok(Self {
             endpoint,
             allow_mutations: false,
+            observed_parameters: BTreeSet::new(),
             limits: Limits::default(),
         })
     }
     pub fn with_mutations(mut self, enabled: bool) -> Self {
         self.allow_mutations = enabled;
         self
+    }
+    /// Select public correlation parameters that list operations may return.
+    /// Empty by default. Do not select credentials or secret parameter names.
+    /// Password parameter types are never returned, even if explicitly selected.
+    pub fn with_observed_parameters(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, Error> {
+        let mut selected = BTreeSet::new();
+        for name in names {
+            let name = name.into();
+            if name.is_empty()
+                || name.len() > 128
+                || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                || selected.len() >= 64
+                || !selected.insert(name)
+            {
+                return Err(Error::Configuration);
+            }
+        }
+        self.observed_parameters = selected;
+        Ok(self)
     }
     pub fn with_limits(
         mut self,
@@ -432,6 +479,20 @@ impl Request {
         let (method, path) = match self {
             Request::Controller => (Method::Get, "api/json?tree=useSecurity,numExecutors".into()),
             Request::Jobs => (Method::Get, "api/json?tree=jobs[name,color]".into()),
+            Request::QueueList => (
+                Method::Get,
+                observation::tree_path("queue/api/json", "items[id,task[name,url],actions[parameters[_class,name,value]],executable[number]]{0,51}"),
+            ),
+            Request::RecentBuilds { job, limit } => {
+                if !(1..=50).contains(limit) { return Err(Error::InvalidRequest); }
+                (Method::Get, observation::tree_path(
+                    &(job_path(job)? + "api/json"),
+                    &format!("builds[number,queueId,building,result,actions[parameters[_class,name,value]]]{{0,{}}}", u16::from(*limit) + 1),
+                ))
+            }
+            Request::StopBuild { job, number } => (
+                Method::Post, format!("{}{}/stop", job_path(job)?, positive(*number)?),
+            ),
             Request::Build { job, parameters } => {
                 let job = job_path(job)?;
                 if parameters.len() > 64
@@ -546,6 +607,31 @@ where
                     .ok_or(Error::MutationUncertain)?;
                 Ok(Response::Queued(QueueReceipt { id }))
             }
+            Request::StopBuild { job, number } => {
+                // Jenkins aborts asynchronously. Never follow a redirect or
+                // turn an acknowledgement into proof that execution stopped.
+                if response.status == 302 {
+                    let location = response
+                        .headers
+                        .get("location")
+                        .ok_or(Error::MutationUncertain)?;
+                    let build_url = self
+                        .config
+                        .endpoint
+                        .join(&format!("{}{}/", job_path(&job)?, number))
+                        .map_err(|_| Error::MutationUncertain)?;
+                    if location.is_empty()
+                        || location.len() > 4096
+                        || location.chars().any(char::is_control)
+                        || build_url.join(location).ok().as_ref() != Some(&build_url)
+                    {
+                        return Err(Error::MutationUncertain);
+                    }
+                } else if !matches!(response.status, 200 | 201 | 202 | 204) {
+                    return Err(Error::MutationUncertain);
+                }
+                Ok(Response::StopRequested)
+            }
             Request::CancelQueue { .. } => {
                 // Jenkins redirects successful cancellation to the queue page.
                 // The redirect is never followed and grants no target authority.
@@ -619,6 +705,19 @@ where
                             .map_err(|_| Error::InvalidResponse)?;
                         Ok(Response::Jobs(jobs.jobs))
                     }
+                    Request::QueueList => observation::queue_listing(
+                        &response.body,
+                        &self.config.endpoint,
+                        &self.config.observed_parameters,
+                    )
+                    .map(Response::QueueList),
+                    Request::RecentBuilds { job, limit } => observation::recent_builds(
+                        &response.body,
+                        job,
+                        limit,
+                        &self.config.observed_parameters,
+                    )
+                    .map(Response::RecentBuilds),
                     Request::Queue { id } => {
                         let queue: QueueItem = serde_json::from_slice(&response.body)
                             .map_err(|_| Error::InvalidResponse)?;

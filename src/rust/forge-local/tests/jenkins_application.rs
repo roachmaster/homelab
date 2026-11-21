@@ -22,6 +22,20 @@ impl IoClient for Selected {
         self.calls.borrow_mut().push(request.clone());
         Ok(match request {
             Request::Jobs if !self.wrong_response => Response::Jobs(vec![]),
+            Request::QueueList if !self.wrong_response => {
+                Response::QueueList(forge_jenkins::QueueListing {
+                    items: vec![],
+                    truncated: false,
+                })
+            }
+            Request::RecentBuilds { job, .. } if !self.wrong_response => {
+                Response::RecentBuilds(forge_jenkins::RecentBuildListing {
+                    job,
+                    builds: vec![],
+                    truncated: false,
+                })
+            }
+            Request::StopBuild { .. } if !self.wrong_response => Response::StopRequested,
             Request::Build { .. } => Response::Queued(QueueReceipt { id: 17 }),
             Request::CancelQueue { .. } => Response::CancelRequested,
             _ => Response::Controller(ControllerInfo {
@@ -60,7 +74,7 @@ fn selected_shared_port_runs_only_after_admitted_matching_validated_command() {
             .iter()
             .filter(|c| c.route.destination().starts_with("jenkins."))
             .count(),
-        6
+        9
     );
     assert!(calls.borrow().is_empty());
     assert!(app
@@ -85,6 +99,20 @@ fn selected_shared_port_runs_only_after_admitted_matching_validated_command() {
     for (name, command) in [
         ("jenkins.queue", JenkinsCommand::Queue { id: 0 }),
         ("jenkins.cancel", JenkinsCommand::Cancel { id: 0 }),
+        (
+            "jenkins.recent-builds",
+            JenkinsCommand::RecentBuilds {
+                job: "suite".into(),
+                limit: 51,
+            },
+        ),
+        (
+            "jenkins.stop-build",
+            JenkinsCommand::StopBuild {
+                job: "suite".into(),
+                number: 0,
+            },
+        ),
         (
             "jenkins.build-status",
             JenkinsCommand::BuildStatus {
@@ -128,6 +156,43 @@ fn selected_shared_port_runs_only_after_admitted_matching_validated_command() {
         Output::Jenkins(Response::Queued(QueueReceipt { id: 17 }))
     );
     assert_eq!(
+        app.invoke(
+            route("jenkins.queue-list"),
+            Command::Jenkins(JenkinsCommand::QueueList)
+        )
+        .unwrap(),
+        Output::Jenkins(Response::QueueList(forge_jenkins::QueueListing {
+            items: vec![],
+            truncated: false
+        }))
+    );
+    assert_eq!(
+        app.invoke(
+            route("jenkins.recent-builds"),
+            Command::Jenkins(JenkinsCommand::RecentBuilds {
+                job: "team/pipeline".into(),
+                limit: 4
+            })
+        )
+        .unwrap(),
+        Output::Jenkins(Response::RecentBuilds(forge_jenkins::RecentBuildListing {
+            job: "team/pipeline".into(),
+            builds: vec![],
+            truncated: false
+        }))
+    );
+    assert_eq!(
+        app.invoke(
+            route("jenkins.stop-build"),
+            Command::Jenkins(JenkinsCommand::StopBuild {
+                job: "team/pipeline".into(),
+                number: 3
+            })
+        )
+        .unwrap(),
+        Output::Jenkins(Response::StopRequested)
+    );
+    assert_eq!(
         &*calls.borrow(),
         &[
             Request::Controller,
@@ -135,6 +200,15 @@ fn selected_shared_port_runs_only_after_admitted_matching_validated_command() {
             Request::Build {
                 job: "team/pipeline".into(),
                 parameters
+            },
+            Request::QueueList,
+            Request::RecentBuilds {
+                job: "team/pipeline".into(),
+                limit: 4
+            },
+            Request::StopBuild {
+                job: "team/pipeline".into(),
+                number: 3
             },
         ]
     );

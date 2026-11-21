@@ -71,6 +71,8 @@ struct FileConfig {
     token_file: PathBuf,
     #[serde(default)]
     allow_mutations: bool,
+    #[serde(default)]
+    observed_parameters: Vec<String>,
     #[serde(default = "default_timeout")]
     timeout_seconds: u64,
     #[serde(default = "default_body_limit")]
@@ -152,6 +154,7 @@ impl ConfiguredClient {
         let credentials = Credentials::new(selected.username, token)?;
         let config = Config::new(selected.endpoint)?
             .with_mutations(selected.allow_mutations)
+            .with_observed_parameters(selected.observed_parameters)?
             .with_limits(
                 Duration::from_secs(selected.timeout_seconds),
                 selected.max_response_bytes,
@@ -179,6 +182,9 @@ pub(crate) fn is_jenkins(kind: CommandKind) -> bool {
         kind,
         CommandKind::JenkinsStatus
             | CommandKind::JenkinsJobs
+            | CommandKind::JenkinsQueueList
+            | CommandKind::JenkinsRecentBuilds
+            | CommandKind::JenkinsStopBuild
             | CommandKind::JenkinsBuild
             | CommandKind::JenkinsQueue
             | CommandKind::JenkinsBuildStatus
@@ -201,14 +207,14 @@ pub(crate) fn decode(kind: CommandKind, args: &[OsString]) -> Result<Command, St
         .map(|arg| arg.to_str().ok_or("Jenkins arguments must be UTF-8"))
         .collect::<Result<_, _>>()?;
     let command = match kind {
-        CommandKind::JenkinsStatus | CommandKind::JenkinsJobs => {
+        CommandKind::JenkinsStatus | CommandKind::JenkinsJobs | CommandKind::JenkinsQueueList => {
             if !words.is_empty() {
                 return Err("this Jenkins command takes no arguments".into());
             }
-            if kind == CommandKind::JenkinsStatus {
-                JenkinsCommand::Status
-            } else {
-                JenkinsCommand::Jobs
+            match kind {
+                CommandKind::JenkinsStatus => JenkinsCommand::Status,
+                CommandKind::JenkinsJobs => JenkinsCommand::Jobs,
+                _ => JenkinsCommand::QueueList,
             }
         }
         CommandKind::JenkinsBuild => {
@@ -248,13 +254,33 @@ pub(crate) fn decode(kind: CommandKind, args: &[OsString]) -> Result<Command, St
                 JenkinsCommand::Cancel { id }
             }
         }
-        CommandKind::JenkinsBuildStatus => {
-            if words.len() != 2 || words[0].starts_with('-') {
-                return Err("jenkins.build-status needs JOB NUMBER".into());
+        CommandKind::JenkinsRecentBuilds => {
+            if !(1..=2).contains(&words.len()) || words[0].starts_with('-') {
+                return Err("jenkins.recent-builds needs JOB [LIMIT]".into());
             }
-            JenkinsCommand::BuildStatus {
+            let limit = if words.len() == 2 {
+                positive(words[1])?
+            } else {
+                50
+            };
+            if limit > 50 {
+                return Err("recent build limit must be between 1 and 50".into());
+            }
+            JenkinsCommand::RecentBuilds {
                 job: words[0].to_owned(),
-                number: positive(words[1])?,
+                limit: limit as u8,
+            }
+        }
+        CommandKind::JenkinsBuildStatus | CommandKind::JenkinsStopBuild => {
+            if words.len() != 2 || words[0].starts_with('-') {
+                return Err("this Jenkins command needs JOB NUMBER".into());
+            }
+            let job = words[0].to_owned();
+            let number = positive(words[1])?;
+            if kind == CommandKind::JenkinsStopBuild {
+                JenkinsCommand::StopBuild { job, number }
+            } else {
+                JenkinsCommand::BuildStatus { job, number }
             }
         }
         _ => return Err("not a Jenkins operation".into()),
@@ -326,6 +352,15 @@ pub(crate) fn format_output(value: Response) -> String {
                 .unwrap_or_else(|| "not_reported".into())
         ),
         Response::CancelRequested => "cancellation=requested_not_confirmed\n".into(),
+        Response::StopRequested => "stop=requested_not_confirmed\n".into(),
+        Response::QueueList(list) => format!(
+            "{}\n",
+            serde_json::to_string(&list).expect("string-only JSON projection")
+        ),
+        Response::RecentBuilds(list) => format!(
+            "{}\n",
+            serde_json::to_string(&list).expect("string-only JSON projection")
+        ),
     }
 }
 

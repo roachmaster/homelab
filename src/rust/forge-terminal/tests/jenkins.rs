@@ -71,6 +71,9 @@ fn metadata_help_and_invalid_preparation_never_read_configuration_or_token() {
     for args in [
         vec!["--help"],
         vec!["help", "jenkins.status"],
+        vec!["help", "jenkins.queue-list"],
+        vec!["help", "jenkins.recent-builds"],
+        vec!["help", "jenkins.stop-build"],
         vec!["jenkins.build", "--help"],
         vec!["node.info"],
     ] {
@@ -85,6 +88,10 @@ fn metadata_help_and_invalid_preparation_never_read_configuration_or_token() {
     for args in [
         vec!["jenkins.queue", "0"],
         vec!["jenkins.cancel", "-1"],
+        vec!["jenkins.queue-list", "--all"],
+        vec!["jenkins.recent-builds", "suite", "0"],
+        vec!["jenkins.recent-builds", "suite", "51"],
+        vec!["jenkins.stop-build", "suite", "0"],
         vec!["jenkins.build", "job", "NAME=one", "NAME=two"],
         vec!["jenkins.build-status", "../outside", "1"],
     ] {
@@ -260,4 +267,84 @@ fn config_and_token_fifos_are_rejected_before_waiting_for_a_writer() {
         assert_eq!(output.status.code(), Some(1));
         assert!(String::from_utf8_lossy(&output.stderr).contains("configuration"));
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn reconciliation_and_stop_use_admitted_frontdoor_with_filtered_json_and_explicit_mutations() {
+    let fixture = Fixture::new();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = format!("http://{}/", listener.local_addr().unwrap());
+    let config = fixture.config(&endpoint);
+    let mut selected: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config).unwrap()).unwrap();
+    selected["allow_mutations"] = serde_json::json!(true);
+    selected["observed_parameters"] = serde_json::json!(["FORGE_ACTION_ID"]);
+    fs::write(&config, serde_json::to_vec(&selected).unwrap()).unwrap();
+    let server = thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let mut requests = vec![];
+        while requests.len() < 3 && Instant::now() < deadline {
+            match listener.accept() {
+                Ok((mut connection, _)) => {
+                    connection
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    let mut bytes = Vec::new();
+                    let mut byte = [0];
+                    while !bytes.ends_with(b"\r\n\r\n") && bytes.len() < 16384 {
+                        connection.read_exact(&mut byte).unwrap();
+                        bytes.push(byte[0]);
+                    }
+                    let request = String::from_utf8(bytes).unwrap();
+                    let (status, body) = match requests.len() {
+                        0 => ("200 OK", serde_json::json!({"items":[{"id":21,"task":{"name":"suite","url":format!("{endpoint}job/team/job/suite/")},"actions":[{"parameters":[{"name":"FORGE_ACTION_ID","value":"action-21"},{"name":"TOKEN","value":"secret-never-returned"}]}]}]}).to_string()),
+                        1 => ("200 OK", serde_json::json!({"builds":[{"number":8,"queueId":21,"building":true,"result":null,"actions":[{"parameters":[{"name":"FORGE_ACTION_ID","value":"action-21"}]}]}]}).to_string()),
+                        _ => ("302 Found", String::new()),
+                    };
+                    write!(connection,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nLocation: /job/team/job/suite/8/\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+                    requests.push(request);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5))
+                }
+                Err(error) => panic!("owned listener failed: {error}"),
+            }
+        }
+        requests
+    });
+    for (args, key) in [
+        (vec!["jenkins.queue-list"], "items"),
+        (vec!["jenkins.recent-builds", "team/suite", "2"], "builds"),
+    ] {
+        let output = invocation(&config, &args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(json["truncated"], false);
+        assert_eq!(json[key][0]["parameters"]["FORGE_ACTION_ID"], "action-21");
+        let visible = String::from_utf8(output.stdout).unwrap();
+        assert!(!visible.contains("secret-never-returned"));
+        assert!(!visible.contains("fixture-api-token"));
+    }
+    let stopped = invocation(&config, &["jenkins.stop-build", "team/suite", "8"]);
+    assert!(
+        stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(stopped.stdout).unwrap(),
+        "stop=requested_not_confirmed\n"
+    );
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 3, "one invocation each; no hidden retries");
+    assert!(requests[0].starts_with("GET /queue/api/json?tree="));
+    assert!(requests[1].starts_with("GET /job/team/job/suite/api/json?tree="));
+    assert!(requests[2].starts_with("POST /job/team/job/suite/8/stop "));
 }

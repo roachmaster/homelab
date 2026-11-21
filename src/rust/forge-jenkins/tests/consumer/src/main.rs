@@ -27,7 +27,7 @@ impl IoClient for SelectedTransport {
         Ok(HttpResponse {
             status: 200,
             headers: BTreeMap::new(),
-            body: br#"{"jobs":[]}"#.to_vec(),
+            body: if request.url.contains("queue/api/json") { br#"{"items":[]}"#.to_vec() } else { br#"{"jobs":[]}"#.to_vec() },
         })
     }
 }
@@ -73,6 +73,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(!std::ptr::eq(&*first, &*second));
     assert_eq!(first.execute(Request::Jobs)?, Response::Jobs(vec![]));
     assert_eq!(calls.get(), 2);
+    let Response::QueueList(snapshot) = first.execute(Request::QueueList)? else { panic!("typed queue snapshot") };
+    assert!(snapshot.items.is_empty());
+    assert!(!snapshot.truncated);
+    assert_eq!(calls.get(), 3);
     let group = register(
         Config::new("https://configured.example/jenkins/")?,
         Credentials::new("caller", "fixture-token")?,

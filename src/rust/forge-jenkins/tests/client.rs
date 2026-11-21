@@ -390,3 +390,208 @@ fn registrar_preserves_dependency_defers_creation_and_rejects_duplicate_without_
     assert_eq!(client.execute(Request::Jobs), Ok(Response::Jobs(vec![])));
     assert_eq!(calls.borrow().len(), 1);
 }
+
+#[test]
+fn reconciliation_lists_encode_bounded_tree_and_only_project_selected_public_parameters() {
+    let config = config()
+        .with_observed_parameters(["FORGE_ACTION_ID", "PASSWORD"])
+        .unwrap();
+    let (client, calls) = configured(
+        config,
+        vec![
+            reply(
+                200,
+                r#"{"items":[{"id":71,"task":{"name":"space & café?","url":"http://127.0.0.1:18084/jenkins/job/folder/job/space%20%26%20caf%C3%A9%3F/"},"actions":[{}, {"parameters":[{"_class":"hudson.model.StringParameterValue","name":"FORGE_ACTION_ID","value":"action-1"},{"_class":"hudson.model.PasswordParameterValue","name":"PASSWORD","value":"hidden-password"},{"name":"TOKEN","value":"private-token"},{"name":"OTHER","value":{"arbitrary":"ignored"}}]}],"executable":{"number":9}}]}"#,
+                &[],
+            ),
+            reply(
+                200,
+                r#"{"builds":[{"number":9,"queueId":71,"building":false,"result":"SUCCESS","actions":[{"parameters":[{"name":"FORGE_ACTION_ID","value":"action-1"},{"name":"TOKEN","value":"private-token"}]}]},{"number":8,"queueId":-1,"building":true,"result":null,"actions":[]}] }"#,
+                &[],
+            ),
+        ],
+    );
+    let Response::QueueList(list) = client.execute(Request::QueueList).unwrap() else {
+        panic!()
+    };
+    assert_eq!(list.items[0].job, "folder/space & café?");
+    assert_eq!(
+        list.items[0].parameters,
+        BTreeMap::from([("FORGE_ACTION_ID".into(), "action-1".into())])
+    );
+    assert_eq!(list.items[0].executable.as_ref().unwrap().number, 9);
+    assert!(!list.truncated);
+    assert!(!format!("{list:?}").contains("private-token"));
+    assert!(!serde_json::to_string(&list)
+        .unwrap()
+        .contains("hidden-password"));
+    let Response::RecentBuilds(builds) = client
+        .execute(Request::RecentBuilds {
+            job: "folder/space & café?".into(),
+            limit: 1,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(builds.truncated);
+    assert_eq!(builds.builds.len(), 1);
+    assert_eq!(builds.builds[0].queue_id, Some(71));
+    assert_eq!(builds.builds[0].parameters, list.items[0].parameters);
+    let calls = calls.borrow();
+    assert!(calls.iter().all(|call| call.method == Method::Get));
+    let queue_url = url::Url::parse(&calls[0].url).unwrap();
+    assert_eq!(queue_url.path(), "/jenkins/queue/api/json");
+    assert_eq!(queue_url.query_pairs().collect::<Vec<_>>(), vec![("tree".into(), "items[id,task[name,url],actions[parameters[_class,name,value]],executable[number]]{0,51}".into())]);
+    let build_url = url::Url::parse(&calls[1].url).unwrap();
+    assert_eq!(
+        build_url.path(),
+        "/jenkins/job/folder/job/space%20%26%20caf%C3%A9%3F/api/json"
+    );
+    assert_eq!(
+        build_url.query_pairs().next().unwrap().1,
+        "builds[number,queueId,building,result,actions[parameters[_class,name,value]]]{0,2}"
+    );
+}
+
+#[test]
+fn parameter_projection_defaults_empty_and_rejects_ambiguous_or_oversized_selected_data() {
+    let body = r#"{"builds":[{"number":1,"building":false,"actions":[{"parameters":[{"name":"TOKEN","value":"never-observed"}]}]}]}"#;
+    let (client, _) = configured(config(), vec![reply(200, body, &[])]);
+    let Response::RecentBuilds(list) = client
+        .execute(Request::RecentBuilds {
+            job: "suite".into(),
+            limit: 50,
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(list.builds[0].parameters.is_empty());
+    assert_eq!(list.builds[0].queue_id, None);
+    for parameters in [
+        serde_json::json!([{"name":"PUBLIC","value":9}]),
+        serde_json::json!([{"name":"PUBLIC","value":"a"},{"name":"PUBLIC","value":"b"}]),
+        serde_json::json!([{"name":"PUBLIC","value":"x".repeat(4097)}]),
+        serde_json::json!([{"name":"PUBLIC","value":"unsafe\nline"}]),
+        serde_json::json!((0..65)
+            .map(|i| serde_json::json!({"name": format!("NAME{i}"),"value":"a"}))
+            .collect::<Vec<_>>()),
+    ] {
+        let body = serde_json::json!({"builds":[{"number":1,"building":false,"actions":[{"parameters":parameters}]}]}).to_string();
+        let (client, _) = configured(
+            config().with_observed_parameters(["PUBLIC"]).unwrap(),
+            vec![reply(200, &body, &[])],
+        );
+        assert_eq!(
+            client.execute(Request::RecentBuilds {
+                job: "suite".into(),
+                limit: 50
+            }),
+            Err(Error::InvalidResponse)
+        );
+    }
+    for names in [
+        vec![""],
+        vec!["PUBLIC", "PUBLIC"],
+        vec!["bad\nname"],
+        vec!["bad-name"],
+    ] {
+        assert!(config().with_observed_parameters(names).is_err());
+    }
+}
+
+#[test]
+fn queue_identity_context_and_snapshot_limits_are_enforced() {
+    for input in [
+        "https://other.example/jenkins/job/suite/",
+        "http://127.0.0.1:18084/job/suite/",
+        "http://user:pass@127.0.0.1:18084/jenkins/job/suite/",
+        "http://127.0.0.1:18084/jenkins/job/suite/?token=x",
+        "http://127.0.0.1:18084/jenkins/job/one%2Ftwo/",
+        "http://127.0.0.1:18084/jenkins/queue/item/1/",
+    ] {
+        let body = serde_json::json!({"items":[{"id":1,"task":{"name":"suite","url":input},"actions":[]}]}).to_string();
+        let (client, _) = configured(config(), vec![reply(200, &body, &[])]);
+        assert_eq!(
+            client.execute(Request::QueueList),
+            Err(Error::InvalidResponse)
+        );
+    }
+    for count in [50, 51, 52] {
+        let items: Vec<_> = (1..=count).map(|id| serde_json::json!({"id":id,"task":{"name":"suite","url":"http://127.0.0.1:18084/jenkins/job/suite/"},"actions":[]})).collect();
+        let body = serde_json::json!({"items":items}).to_string();
+        let (client, _) = configured(config(), vec![reply(200, &body, &[])]);
+        let result = client.execute(Request::QueueList);
+        if count == 52 {
+            assert_eq!(result, Err(Error::InvalidResponse));
+        } else {
+            let Response::QueueList(list) = result.unwrap() else {
+                panic!()
+            };
+            assert_eq!(list.items.len(), 50);
+            assert_eq!(list.truncated, count == 51);
+        }
+    }
+    let (client, calls) = configured(config(), vec![]);
+    for limit in [0, 51, 255] {
+        assert_eq!(
+            client.execute(Request::RecentBuilds {
+                job: "suite".into(),
+                limit
+            }),
+            Err(Error::InvalidRequest)
+        );
+    }
+    assert!(calls.borrow().is_empty());
+}
+
+#[test]
+fn stop_build_requires_mutation_policy_and_never_claims_execution_stopped_or_retries() {
+    let request = || Request::StopBuild {
+        job: "team/suite".into(),
+        number: 8,
+    };
+    let (client, calls) = configured(config(), vec![]);
+    assert_eq!(client.execute(request()), Err(Error::MutationDenied));
+    assert!(calls.borrow().is_empty());
+    for status in [200, 201, 202, 204, 302] {
+        let (client, calls) = configured(
+            config().with_mutations(true),
+            vec![reply(
+                status,
+                "",
+                &[("location", "/jenkins/job/team/job/suite/8/")],
+            )],
+        );
+        assert_eq!(client.execute(request()), Ok(Response::StopRequested));
+        assert_eq!(calls.borrow().len(), 1);
+        assert_eq!(calls.borrow()[0].method, Method::Post);
+        assert!(calls.borrow()[0]
+            .url
+            .ends_with("/job/team/job/suite/8/stop"));
+    }
+    for response in [
+        Err(TransportError::Timeout),
+        Err(TransportError::Unavailable),
+        reply(503, "internal-secret", &[]),
+        reply(302, "", &[("location", "/login")]),
+        reply(
+            302,
+            "",
+            &[("location", "https://other.example/job/team/job/suite/8/")],
+        ),
+        reply(302, "", &[("location", "/jenkins/job/team/job/suite/9/")]),
+        reply(
+            302,
+            "",
+            &[("location", "/jenkins/job/team/job/suite/8/?secret=x")],
+        ),
+    ] {
+        let (client, calls) = configured(config().with_mutations(true), vec![response]);
+        let error = client.execute(request()).unwrap_err();
+        assert_eq!(error, Error::MutationUncertain);
+        assert!(!format!("{error:?}").contains("secret"));
+        assert_eq!(calls.borrow().len(), 1);
+    }
+}

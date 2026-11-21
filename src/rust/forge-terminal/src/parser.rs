@@ -162,6 +162,9 @@ pub fn decode(info: &CommandInfo, args: &[OsString]) -> Result<Command, String> 
         #[cfg(feature = "jenkins")]
         CommandKind::JenkinsStatus
         | CommandKind::JenkinsJobs
+        | CommandKind::JenkinsQueueList
+        | CommandKind::JenkinsRecentBuilds
+        | CommandKind::JenkinsStopBuild
         | CommandKind::JenkinsBuild
         | CommandKind::JenkinsQueue
         | CommandKind::JenkinsBuildStatus
