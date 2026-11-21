@@ -84,3 +84,10 @@ COMMIT;
 
 -- M20: scoped external DB API only.
 \ir grant-external-agent.sql
+
+-- M21: scoped trace projection; keep historical fixtures below this marker.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=21) AS has_task_events
+\gset
+\if :has_task_events
+\ir grant-task-events.sql
+\endif

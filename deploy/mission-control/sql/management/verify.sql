@@ -678,6 +678,8 @@ ORDER BY version;
 
 \ir verify-muse-read-access.sql
 
+\ir verify-task-events.sql
+
 \ir verify-feedback.sql
 
 \ir verify-autonomy.sql

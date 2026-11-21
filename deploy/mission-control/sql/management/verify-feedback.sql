@@ -1,4 +1,5 @@
 \ir verify-muse-read-access.sql
+\ir verify-task-events.sql
 -- Exact M15 catalog, immutable artifact and narrow-role verification. Included in readonly verify.sql.
 DO $feedback_verify$
 DECLARE expected record;actual jsonb;role_name text;privilege_name text;allowed text[];fn jsonb;
@@ -67,6 +68,14 @@ SELECT jsonb_build_object('columns',(SELECT jsonb_agg(jsonb_build_array(a.attnam
    actual:=jsonb_set(actual,'{acl}',coalesce((SELECT jsonb_agg(entry ORDER BY ord)
      FROM jsonb_array_elements(actual->'acl') WITH ORDINALITY AS acl(entry,ord)
      WHERE entry IS DISTINCT FROM to_jsonb('muse_events=r/forge_agent_owner'::text)),'[]'::jsonb));
+ END IF;
+ -- M21 additions are verified exactly before removing only those additions
+ -- from this frozen historical snapshot. Every other historical field survives.
+ IF expected.name='coding_tasks' AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=21) THEN
+   actual:=jsonb_set(actual,'{columns}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'columns') WITH ORDINALITY AS part(entry,ord) WHERE entry->>0<>'correlation_id'),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{constraints}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'constraints') WITH ORDINALITY AS part(entry,ord) WHERE entry->>0<>'coding_tasks_correlation_id_key'),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{indexes}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'indexes') WITH ORDINALITY AS part(entry,ord) WHERE entry->>0<>'coding_tasks_correlation_id_key'),'[]'::jsonb));
+   actual:=jsonb_set(actual,'{triggers}',coalesce((SELECT jsonb_agg(entry ORDER BY ord) FROM jsonb_array_elements(actual->'triggers') WITH ORDINALITY AS part(entry,ord) WHERE entry->>0<>'coding_tasks_trace_immutable'),'[]'::jsonb));
  END IF;
  IF actual IS DISTINCT FROM expected.data THEN RAISE EXCEPTION 'Feedback schema drift: %',expected.name;END IF;
  END LOOP;

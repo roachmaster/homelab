@@ -41,7 +41,7 @@ BEGIN
  IF actual IS DISTINCT FROM expected OR EXISTS(SELECT FROM aclexplode(p.proacl) a WHERE a.grantee=0 OR a.privilege_type<>'EXECUTE' OR a.is_grantable OR a.grantor<>'forge_agent_owner'::regrole) THEN RAISE EXCEPTION 'External function ACL drift: %',e.signature;END IF;
  END LOOP;
  SELECT count(*) INTO n FROM pg_proc WHERE pronamespace IN('forge_external_agent'::regnamespace,'forge_external_agent_api'::regnamespace);
- IF n<>20 THEN RAISE EXCEPTION 'Unexpected external functions';END IF;
+ IF n<>(20+CASE WHEN EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=21) THEN 1 ELSE 0 END) THEN RAISE EXCEPTION 'Unexpected external functions';END IF;
  FOR e IN SELECT * FROM(VALUES('forge_external_agent',ARRAY['forge_agent_owner']::name[]),('forge_external_agent_api',CASE WHEN NOT external_enabled THEN ARRAY['forge_agent_owner','forge_agent']::name[] ELSE ARRAY['forge_agent_owner','forge_agent','muse_events']::name[] END)) AS schemas(name,roles) LOOP
  SELECT array_agg(r.rolname ORDER BY r.rolname) INTO actual FROM pg_namespace n,LATERAL aclexplode(n.nspacl) a JOIN pg_roles r ON r.oid=a.grantee WHERE n.nspname=e.name AND a.privilege_type='USAGE' AND NOT a.is_grantable;
  SELECT array_agg(x ORDER BY x) INTO expected FROM unnest(e.roles) x;

@@ -211,4 +211,13 @@ SELECT NOT EXISTS (
 \ir migrations/0020_external_agent_transport.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(20,'external_agent_transport');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=21
+) AS apply_0021
+\gset
+\if :apply_0021
+\ir migrations/0021_coding_event_trace.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(21,'coding_event_trace');
+\endif
 COMMIT;
