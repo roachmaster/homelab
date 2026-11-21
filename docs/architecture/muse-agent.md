@@ -7,7 +7,7 @@ injects its narrow DAO into WorkStore. The old [intake prototype](proposals/muse
 remains dormant and is not this protocol.
 
 The configured profile is `muse-db-primary`, backend `muse`, model metadata
-`external-runner`, resource `forge-external-db-v1`, with explicit
+`external-runner`, resource `forge-external-db-v2` for automatic workflows, with explicit
 `execution_enabled: true`. The external policy digest is SHA-256 of that resource
 identifier. It is separate from frozen native P10. Native `muse-primary` stays
 disabled, and native workers cannot claim external recipes. Existing AGY/Codex
@@ -36,12 +36,12 @@ at most 4096 UTF-8 bytes. These are report-transport bounds, not generation-toke
 limits. No native attempt, systemd proof, workspace digest or reconciliation
 receipt is manufactured.
 
-The terminal task status is `awaiting_review`: an actual artifact has arrived.
-This transport does not turn the artifact into an approved Plan or trusted code
-candidate. External Implement, native Resume/Plan decisions/repair targeting this
-provider, automatic independent-review context delivery, and a Jenkins/candidate
-bridge are not implemented. A Review artifact cannot approve another task or
-merge code. The existing native autonomous flow remains separate.
+The raw transport status `awaiting_review` means an actual artifact has arrived.
+For a configured M22 project, the separate external workflow automatically
+dispatches independent review and continues through implementation and trusted
+delivery below. A standalone v1 report retains its manual transport semantics.
+A Muse Review artifact cannot approve another task or merge code. Native attempts
+and external assignments remain distinct sources of evidence.
 
 ```mermaid
 sequenceDiagram
@@ -122,3 +122,62 @@ They cover admission rollback, duplicate/disabled-profile replay, scoped
 readiness, native-claim exclusion, real external artifacts without native
 receipts, escaped response-size bounds and lease recovery. No real Muse/model,
 email, account or paid API request is needed to verify this transport.
+
+## Automatic external SDLC (M22)
+
+Configured projects now use `forge-external-db-v2` for new Muse Plan and
+Implement assignments. The original v1 intent and recipe remain frozen. An
+existing submitted v1 Plan is adopted by its real task/assignment/artifact
+identities; it is never rewritten into a native execution attempt.
+
+The typed `external_workflows` project configuration selects distinct external
+Muse author and native Codex reviewer profiles, freezes all three recipes, and
+records three plan revisions, three implementation corrections and automatic
+merge delegation. The API coordinator performs database work only. A separate
+reconciler-owned delivery worker holds the Git/Jenkins ports. Native Muse CLI
+execution and email remain disabled.
+
+A submitted Plan automatically queues an independent native read-only reviewer.
+The complete immutable artifact, original request and acceptance criteria are
+staged as `external-review.json`, outside the small task prompt. Code reviewers
+also receive the approved Plan and exact clean candidate/tree/diff identity.
+They return a structured verdict bound to the review, source assignment, artifact
+hash and context hash. Their native attempt must actually stop, publish all
+chunks and reconcile before a verdict can move the workflow. Invalid/oversized
+JSON receives one same-source reviewer correction; a second invalid response is
+a recorded human exception. Ordinary revision verdicts return full feedback to
+Muse, with a maximum of three author revisions per stage.
+
+After Plan approval Muse receives an Implement assignment and a separate full
+execution context in the SQL claim response (`external_context`, canonical
+`external_context_json` and `external_context_sha256`). It preserves its feature
+branch and returns only this implementation manifest through the existing
+bounded `finish` operation:
+
+```json
+{"version":1,"candidate_commit":"<40 lowercase hex>","candidate_tree":"<40 lowercase hex>","base_revision":"<supplied trusted base>","summary":"Implementation and verification report"}
+```
+
+The delivery worker fetches and sanitizes the candidate into a clean Forge
+commit, preserving its exact tree while excluding untrusted author Git history.
+Independent Codex review must attest every protected gate change. Trusted Jenkins
+checks and merge receipts must match that same candidate/tree/gate manifest.
+Changed main triggers bounded source refresh, rebase, renewed independent review
+and CI. Only a trusted exact-source merge receipt completes the root workflow.
+GitHub Actions remain disabled.
+
+The portal projects one root envelope with linked child reviews, phase,
+revision counts, candidate and merge commits. Every server transition appends a
+root checkpoint with the same correlation ID; these are server workflow events,
+not invented Muse progress or native stop/review evidence.
+
+Cancellation stops admission and requests native child cancellation without
+claiming the process has stopped. A durable `cancel` delivery action reconciles
+and stops an owned Jenkins queue/build even after author access is revoked or
+the workflow becomes terminal. It retains the original action ID and last real
+receipt; cleanup still requires the existing scoped delivery grant. Once the
+merge intent is committed, cancellation is disabled until that exact remote
+write is reconciled.
+
+The [external workflow sequence and operator contract](external-agent-workflow.md)
+describes the complete boundary and bootstrap configuration.
