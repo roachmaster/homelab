@@ -1,6 +1,6 @@
 # Autonomous agent author and reviewer workflow
 
-**Status: implemented in source; rollout pending verification.** This extends the source
+**Status: base lifecycle deployed; native Jenkins provider added in source.** This extends the
 [review and repair lifecycle](forge-agent-feedback-loop.md). The earlier manual
 approval path remains for legacy/manual tasks. The intended new default for a
 configured project delegates ordinary planning, review, execution and merge to
@@ -24,9 +24,11 @@ provider merges automatically under the project's recorded delegation. The user
 explicitly authorized that merge stage. A successful model response never
 constitutes a merge receipt.
 
-Profiles express roles, not hardcoded model names. A future Muse adapter can fill
-an author or reviewer role after its capabilities and execution contract are
-implemented and verified. This design does not claim Muse is already installed.
+Profiles express roles, not hardcoded model names. Muse now has a separate
+[external database workflow](../external-agent-workflow.md); it does not borrow
+native attempts or stopped-process evidence. Native Gemini's current
+[Jenkins provider and sequence](../forge-jenkins.md#native-gemini-workflow)
+retain this author/reviewer separation and the existing frozen gate identities.
 
 ## Ownership and factory/provider composition
 
@@ -123,17 +125,21 @@ plan disagreement is not a reason to ask the human to create a plan from scratch
 sequenceDiagram
     participant A as Author worker
     participant DB as Workflow and review store
-    participant V as Independent fixed verifier
+    participant V as Trusted fixed verifier
+    participant J as Jenkins through Rust IoClient
     participant R as Independent agent reviewer
     participant C as Trusted coordinator
     participant P as Trusted publisher / merger
     participant GH as GitHub
     A->>DB: Stop and reconcile actual implementation
     DB-->>V: Verify exact candidate with fixed gates
+    V->>V: Integrate current main and persist exact source / manifests
+    V->>J: Submit once with durable correlated intent
+    J-->>V: Full fixed suite and exact-source cleanup receipt
     alt Reproducible check failure within repair policy
         V->>DB: Source-bound diagnostic feedback
         DB-->>A: Correct the same authorized scope
-    else Local checks pass
+    else All fixed checks pass
         V->>DB: Candidate, gate digest and check witnesses
         DB-->>R: Readonly code review, approved Plan and findings
         R->>DB: Source-bound verdict from stopped reviewer task
@@ -141,7 +147,8 @@ sequenceDiagram
         C->>DB: Record peer approval or queue bounded repair
         DB-->>P: Publish exact approved candidate
         P->>GH: Feature branch and PR
-        GH-->>P: Required workflow/job outcomes on exact head
+        P->>J: Reobserve the same exact-candidate build
+        J-->>P: Required gates successful, cleanup confirmed
         P->>DB: Persist deterministic merge intent before remote mutation
         P->>GH: Create merge commit with exact candidate tree
         P->>GH: Advance main with force=false
@@ -205,9 +212,15 @@ The coding-worker configuration also selects
 `"merge_enabled": true`. These are additions to their existing validated
 configurations. Both role profiles must have the required project/mode grants.
 The existing repair policy bounds code revisions and names required hosted
-checks. Models and account configuration remain explicit profile settings.
+checks. Those names remain logical compatibility IDs. Mission Control explicitly
+selects `"hosted_provider": "jenkins"` and a private
+`"jenkins_delivery_config"`; GitHub Actions stays disabled. All three fixed
+gates run once before independent code review, and later stages reobserve the
+same source-bound Jenkins receipt. Models and account configuration remain
+explicit profile settings. Migration24 adds narrow reconciler CI context/status
+ports without rewriting frozen workflows or granting direct table access.
 
-Rollout requires the matching M15/M16 database migrations, policy 7 workers and
+The original rollout required matching M15/M16 database migrations, policy7 workers and
 atomic ABI 8 host/generated assets. Drain or preserve old active leases before
 switching versions. Verify normal service startup and source selection before
 opening new admission. Preserve historical receipts and native workspaces;
