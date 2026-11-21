@@ -28,6 +28,7 @@ from work_process import terminate_and_reap
 from work_progress import ProgressError, ProgressReader, ProgressSinkError, provision as provision_progress
 from work_sessions import SessionError, SessionSelection
 from work_review_context import MAX_FEEDBACK_BYTES, ReviewContext
+from work_build_context import BuildContext, BUILD_INFO_SCRIPT
 from work_consumer_cache import ConsumerCacheError
 from work_candidate_source import CandidateSourceError, linked_candidate_input
 from work_peer_context import PeerReviewContext, WorkflowFeedbackContext
@@ -902,7 +903,7 @@ class SystemdSupervisor:
             readonly_bindings.append(str(invocation.plan_file) + ":" + str(CHILD_STATE / invocation.plan_file.name))
         for path in invocation.readonly_files:
             if (not isinstance(path, Path) or path.parent != invocation.scratch
-                    or path.name not in {"review-feedback.json", "agent-review.json", "agent-review-feedback.json", "external-review.json", "verify.py"}
+                    or path.name not in {"review-feedback.json", "agent-review.json", "agent-review-feedback.json", "external-review.json", "verify.py", "build-info.json", "build.log", "build_info.py"}
                     or path.is_symlink() or not path.is_file()):
                 raise ExecutionError("failed", "The immutable execution context is unavailable.")
             readonly_bindings.append(str(path) + ":" + str(CHILD_STATE / path.name))
@@ -1250,6 +1251,7 @@ class CommandRunnerProvider:
                        + "The original assignment above is retained context. Read the exact saved plan at "
                        + str(CHILD_STATE / plan_file.name) + ".\nREVIEW FEEDBACK:\n" + note)
         feedback_file = None
+        build_files = ()
         if lease.get("feedback_id") is not None and feedback_context is None:
             raise ExecutionError("needs_reconcile", "The admitted repair feedback is unavailable.")
         if feedback_context is not None:
@@ -1277,6 +1279,28 @@ class CommandRunnerProvider:
                        "on each repair turn because the trusted independent verifier still runs ALL fixed CI.")
             if feedback_context.legacy_resume_note:
                 prompt += "\nOWNER RESUME FEEDBACK:\n" + feedback_context.legacy_resume_note
+            if feedback_context.build is not None:
+                build = feedback_context.build
+                try:
+                    if not isinstance(build, BuildContext):
+                        raise ValueError('Invalid build context type')
+                    build.validate(lease.get('feedback_id'), lease.get('feedback_sha256'))
+                    paths = []
+                    for name, data in (('build-info.json', build.metadata), ('build.log', build.log),
+                                       ('build_info.py', BUILD_INFO_SCRIPT)):
+                        path = scratch / name
+                        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+                        with os.fdopen(fd, 'wb') as stream:
+                            stream.write(data)
+                        paths.append(path)
+                    build_files = tuple(paths)
+                except (OSError, ValueError, KeyError, TypeError):
+                    raise ExecutionError('needs_reconcile', 'The exact build inspection context is unavailable.') from None
+                prompt += ('\n\nBUILD REFERENCE: Use python3 -I -B '
+                    + str(CHILD_STATE / 'build_info.py') + ' status for this build and '
+                    'logs --offset 0 --limit 16384 to inspect its paginated log. '
+                    'Investigate with the CLI, fix the source, and report completion; '
+                    'the owned branch is published automatically from your stopped result.')
         peer_feedback_file = None
         native_auth = None
         if lease.get("workflow_feedback_review_id") is not None:
@@ -1399,7 +1423,7 @@ class CommandRunnerProvider:
             )
             payload = prompt.encode("utf-8")
         return Invocation(argv, payload, backend, workspace.path, scratch, workspace, implement, session, plan_file,
-                          tuple(path for path in (feedback_file, peer_file, peer_feedback_file, external_file) if path is not None),
+                          tuple(path for path in (feedback_file, peer_file, peer_feedback_file, external_file) if path is not None) + build_files,
                           external_sandbox if backend == "codex" else False, native_auth)
 
     def run(self, lease, workspace, stop, *, report_progress=None, plan_context=None, feedback_context=None, peer_context=None,

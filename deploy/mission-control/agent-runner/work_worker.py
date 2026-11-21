@@ -19,6 +19,7 @@ from work_executor import (
 from work_policy import POLICY, POLICY_DIGEST
 from work_sessions import AntigravitySessionProvider, CodexSessionProvider
 from work_review_context import ReviewContextError, ReviewContextProvider
+from work_build_context import BuildContextProvider
 from work_consumer_cache import configured_consumer_caches
 from work_candidate_source import ReviewCandidateSourceProvider
 from work_peer_context import PeerReviewContextProvider, PeerReviewCandidateSourceProvider
@@ -438,7 +439,9 @@ class CodingWorkerFactory:
         self.collector_factory, self.clock, self.stop = collector_factory, clock, stop
         self.usage_normalizer = usage_normalizer
         self.review_context_factory = (review_context_factory if review_context_factory is not None
-                                       else ReviewContextProvider)
+            else lambda store: ReviewContextProvider(store, build_provider=BuildContextProvider(
+                store, self.config.state_root, self.config.build_results_root)
+                if self.config.build_results_root is not None else None))
         self.peer_context_factory = (peer_context_factory if peer_context_factory is not None else
             lambda store: PeerReviewContextProvider(store, PeerReviewCandidateSourceProvider(self.config, _workspace_git)))
 
