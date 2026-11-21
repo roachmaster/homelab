@@ -520,12 +520,10 @@ impl Agents {
             }
             UiEvent::AgentsRefresh {} => {
                 if work && self.pending.is_none() {
-                    if self.catalog.is_none() {
-                        self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
-                    } else if self.pane == Pane::Reader {
+                    if self.pane == Pane::Reader && self.catalog.is_some() {
                         self.get(id, effects);
                     } else {
-                        self.list(id, Direction::Current, effects);
+                        self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
                     }
                 }
                 if usage {
@@ -1632,6 +1630,18 @@ impl Agents {
         let reader = self.pane == Pane::Reader;
         let locked = self.locked();
         let pending = self.pending.is_some();
+        view.badges.push(BadgeBinding {
+            id: "agents-muse-db-state",
+            badge: if self.catalog.as_ref().is_some_and(|c| {
+                c.profiles.iter().any(|p| {
+                    p.backend == WorkBackend::Muse && p.transport == Some(WorkTransport::ExternalDb)
+                })
+            }) {
+                badge("Runner available", BadgeTone::Success)
+            } else {
+                badge("No runner heartbeat", BadgeTone::Neutral)
+            },
+        });
         if active {
             for binding in &mut view.visibility {
                 if matches!(

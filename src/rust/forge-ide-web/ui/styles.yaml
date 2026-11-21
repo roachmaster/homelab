@@ -2638,14 +2638,14 @@
         - ["gap", "12px"]
         - ["margin-top", "20px"]
         - ["min-width", "0"]
-    - selector: "#agents-muse-email>h2"
+    - selector: "#agents-muse-db>h2"
       declarations:
         - ["font-size", "1rem"]
         - ["margin-bottom", "6px"]
-    - selector: "#agents-muse-email-recipient,#agents-muse-email-sender"
+    - selector: "#agents-muse-db-help"
       declarations:
         - ["overflow-wrap", "anywhere"]
-    - selector: "#agents-muse-email-capabilities"
+    - selector: "#agents-muse-db-capabilities"
       declarations:
         - ["font-size", ".875rem"]
         - ["line-height", "1.5"]

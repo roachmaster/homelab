@@ -195,7 +195,9 @@ impl Agents {
                 }
             }
             for binding in &mut view.choices {
-                if matches!(binding.id, "agents-profile" | "agents-mode") {
+                if binding.id == "agents-mode"
+                    || binding.id == "agents-profile" && !self.external_available()
+                {
                     binding.disabled = true;
                 }
             }

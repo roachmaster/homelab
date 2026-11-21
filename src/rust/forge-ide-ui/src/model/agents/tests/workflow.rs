@@ -41,6 +41,16 @@ fn external_assignment_is_explicit_and_does_not_bypass_native_workflow() {
     configure(&mut agents);
     add_external(&mut agents);
     draft(&mut agents);
+    let mut view = ViewModel::default();
+    agents.project(&mut view, true, true, false);
+    assert!(
+        !view
+            .choices
+            .iter()
+            .find(|b| b.id == "agents-profile")
+            .unwrap()
+            .disabled
+    );
     step(
         &mut agents,
         UiEvent::SelectAgentProfile {

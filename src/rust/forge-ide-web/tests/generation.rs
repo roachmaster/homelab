@@ -855,7 +855,7 @@ fn portal_chat_retirement_removes_entry_controls_and_transport_but_preserves_wor
 }
 
 #[test]
-fn muse_email_directory_is_contact_data_without_native_actions_or_usage_metrics() {
+fn external_muse_directory_has_no_native_actions_or_fabricated_usage() {
     let config = config();
     let bindings = config
         .transport
@@ -866,18 +866,17 @@ fn muse_email_directory_is_contact_data_without_native_actions_or_usage_metrics(
     let assets = build(config);
     let html = std::str::from_utf8(&assets.files["index.html"]).unwrap();
     let card = html
-        .split_once("id=\"agents-muse-email\"")
+        .split_once("id=\"agents-muse-db\"")
         .unwrap()
         .1
         .split_once("</section>")
         .unwrap()
         .0;
     for text in [
-        "Muse Email",
-        "Email · manual contact",
-        "roachmaster@muse.ai",
-        "Your verified Gmail sender",
-        "not integrated with Forge",
+        "Muse",
+        "PostgreSQL · external runner",
+        "No runner heartbeat",
+        "Muse owns its runner.",
     ] {
         assert!(card.contains(text), "contact detail {text}");
     }

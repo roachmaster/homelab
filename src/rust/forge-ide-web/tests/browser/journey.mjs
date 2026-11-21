@@ -2771,21 +2771,20 @@ async function oversizedDormantWorkspaceJourney(page, context, fixture, relay, t
   }
 }
 
-async function museEmailDirectoryJourney(page) {
-  process.stderr.write('QA_CHECK muse_email_directory\n');
+async function museDatabaseDirectoryJourney(page) {
+  process.stderr.write('QA_CHECK muse_database_directory\n');
   const viewport=page.viewportSize();
-  const card=page.locator('#agents-overview #agents-external-agents > #agents-muse-email');
+  const card=page.locator('#agents-overview #agents-external-agents > #agents-muse-db');
   await check(card).toBeVisible();
-  await check(card.getByRole('heading',{name:'Muse Email',exact:true})).toBeVisible();
-  await check(card).toContainText('Email · manual contact');
-  await check(card).toContainText('To: roachmaster@muse.ai');
-  await check(card.locator('#agents-muse-email-sender')).toHaveText('Your verified Gmail sender');
+  await check(card.getByRole('heading',{name:'Muse',exact:true})).toBeVisible();
+  await check(card).toContainText('PostgreSQL · external runner');
+  await check(card.locator('#agents-muse-db-state')).toHaveText('No runner heartbeat');
   await check(card).not.toContainText(/@gmail\.com/i);
-  await check(card).toContainText('Manual email contact. Sender identity verified; sending, replies and background task tracking are not integrated with Forge.');
+  await check(card).toContainText('Muse owns its runner. Forge dispatches assignments and receives plans and review reports through PostgreSQL.');
   await check(card.locator('button,a,input,textarea,select,[contenteditable],[data-action]')).toHaveCount(0);
   await check(card.locator('meter,progress,.fg-quota,.fg-metric,[data-card-id]')).toHaveCount(0);
   await check(card).not.toContainText(/\b(?:Idle|Ready|Quota|Tokens?)\b/i);
-  await check(page.locator('#agents-providers #agents-muse-email')).toHaveCount(0);
+  await check(page.locator('#agents-providers #agents-muse-db')).toHaveCount(0);
   await check(page.locator('#agents-profile option').filter({hasText:/muse/i})).toHaveCount(0);
   for(const width of [320,390,1440]){
     await page.setViewportSize({width,height:844});
@@ -2803,7 +2802,7 @@ async function museEmailDirectoryJourney(page) {
         if([...range.getClientRects()].some(rect=>rect.left< -1 || rect.right>innerWidth+1))return false;
       }
       return true;
-    }),true,'both contact addresses wrap without clipped text');
+    }),true,'external runner details wrap without clipped text');
   }
   if(viewport)await page.setViewportSize(viewport);
   await page.locator('#agents-heading').scrollIntoViewIfNeeded();
@@ -2898,7 +2897,7 @@ async function agentsJourney() {
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
     await check(cards).toHaveCount(3);
-    await museEmailDirectoryJourney(page);
+    await museDatabaseDirectoryJourney(page);
     await grokProviderJourney(page);
     await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
     await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
@@ -2938,7 +2937,7 @@ async function agentsJourney() {
     // persisted public plan/history rather than waiting for a state revision.
     await seed.locator('.fg-row-select').click();
     await check(page.locator('#agents-reader')).toBeVisible();
-    await check(page.locator('#agents-muse-email')).toBeHidden();
+    await check(page.locator('#agents-muse-db')).toBeHidden();
     await check(page.locator('#agents-task-status')).toContainText('Ready for review');
     await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
     await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
@@ -2948,7 +2947,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-overview')).toBeVisible();
 
     await page.locator('#agents-new').click();
-    await check(page.locator('#agents-muse-email')).toBeHidden();
+    await check(page.locator('#agents-muse-db')).toBeHidden();
     // Keep the existing result-acceptance journey on a Review task. Finished
     // Plan tasks now use the explicit artifact-bound decision flow below.
     await page.locator('#agents-mode').selectOption('review');
