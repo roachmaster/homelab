@@ -11,7 +11,7 @@ from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
-from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40
+from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64
 
 TERMINAL={'completed','cancelled','escalated'}
 MAX_NATIVE_VERDICT=65536
@@ -60,6 +60,16 @@ class ExternalWorkflowStore:
         if w['state'].get('candidate'):result['candidate_commit']=w['state']['candidate']['candidate_commit']
         if w['state'].get('merge_receipt'):result['merge_commit']=w['state']['merge_receipt']['merge_commit']
         return result
+
+    def forbid_manual_control(self,project,task_id):
+        if not self.manages(project):return
+        with self._transaction() as cursor:
+            cursor.execute('''SELECT w.author_profile FROM forge_external_workflow.tasks x JOIN forge_external_workflow.workflows w USING(workflow_id)
+              WHERE(x.owner_id,x.project_alias,x.task_id)=(%s,%s,%s)''',(self.owner,project,task_id))
+            row=cursor.fetchone()
+            if row:
+                self._scope(cursor,project,row['author_profile'],active=False)
+                raise Rejected(409,'not_reviewable')
 
     def related_task(self,cursor,project,workflow_id,task_id):
         cursor.execute('SELECT EXISTS(SELECT FROM forge_external_workflow.tasks WHERE(owner_id,project_alias,workflow_id,task_id)=(%s,%s,%s,%s)) AS belongs',(self.owner,project,workflow_id,task_id))
@@ -174,7 +184,9 @@ class ExternalWorkflowStore:
             cursor.execute('''UPDATE forge_external_workflow.actions SET status='failed',lease_token=NULL,lease_role=NULL,lease_until=NULL,
               result=%s,updated_at=clock_timestamp() WHERE action_id=%s AND status IN('queued','leased')
               AND(deadline_at<=clock_timestamp() OR generation>=10000) RETURNING *''',(Json({'status':'failed','receipt':{},'summary':'The bounded trusted delivery retry deadline was exhausted.'}),action['action_id']))
-            return cursor.fetchone() or action
+            expired=cursor.fetchone()
+            if expired and action['kind']=='verify':self._cleanup_action(cursor,w,action)
+            return expired or action
         root=self._task(cursor,w,w['root_task_id'])
         intent={**request,'workflow_id':str(w['workflow_id']),'project_alias':w['project_alias'],'correlation_id':str(root['correlation_id'])}
         action_id=uuid4();intent['action_id']=str(action_id)
@@ -225,7 +237,10 @@ class ExternalWorkflowStore:
             candidate=a['result']['receipt']
             for key in ('candidate_commit','candidate_tree','integration_base'):
                 if not isinstance(candidate.get(key),str) or not HEX40.fullmatch(candidate[key]):raise ValueError('Unverified delivery candidate')
-            if candidate['candidate_tree']!=manifest['candidate_tree']:raise ValueError('Prepared tree differs from author candidate')
+            if candidate['candidate_tree']!=manifest['candidate_tree'] or candidate['integration_base']!=w['state']['base_revision']:raise ValueError('Prepared source differs from author candidate or trusted base')
+            if any(not isinstance(candidate.get(key),str) or not HEX64.fullmatch(candidate[key]) for key in ('diff_sha256','gate_source_sha256','gate_manifest_sha256')):raise ValueError('Candidate lacks exact gate/diff digests')
+            changes=candidate.get('protected_gate_changes')
+            if not isinstance(changes,list) or len(changes)>256 or any(not isinstance(change,dict) or not isinstance(change.get('finding_id'),str) for change in changes):raise ValueError('Invalid protected gate change manifest')
             w['state']['candidate']=candidate
             w['state']['candidate_source']={'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256']}
             self._queue_review(cursor,w,task,artifact,'code');return True
@@ -243,7 +258,7 @@ class ExternalWorkflowStore:
             raise ValueError('Invalid candidate source identity')
         return value
 
-    def _queue_review(self,cursor,w,task,artifact,kind,*,retry=0):
+    def _queue_review(self,cursor,w,task,artifact,kind,*,retry=0,correction=None):
         task_id,review_id=uuid4(),uuid4()
         recipe=w['snapshot']['recipes']['reviewer_review']
         root=self._task(cursor,w,w['root_task_id'])
@@ -256,6 +271,7 @@ class ExternalWorkflowStore:
                 'candidate':candidate,'required_attestations':[x['finding_id'] for x in candidate.get('protected_gate_changes',[])] if candidate else []}
         raw=canonical(target).decode();digest=hashlib.sha256(raw.encode()).hexdigest();validate_target(raw,digest)
         prompt='Independently review the complete external '+kind+' artifact supplied in external-review.json. Return only the bound structured verdict; do not edit or publish source.'
+        if correction:prompt+=' Previous review could not be consumed: '+correction[:1024]+' Correct the JSON contract against the complete unchanged source; do not echo Markdown or manufacture approval.'
         self._insert_task(cursor,w,task_id,'review',w['reviewer_profile'],recipe,prompt,'Review the full supplied artifact and current source; verify every protected gate change.',target['review_base_revision'],'reviewer')
         cursor.execute('''INSERT INTO forge_external_workflow.reviews(review_id,workflow_id,owner_id,project_alias,source_task_id,source_assignment_id,source_sha256,target_kind,reviewer_task_id,target_json,target_sha256)
           VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''',(review_id,w['workflow_id'],self.owner,w['project_alias'],task['id'],artifact['assignment_id'],artifact['sha256'],kind,task_id,raw,digest))
@@ -290,7 +306,8 @@ class ExternalWorkflowStore:
         if not review or review['status']!='reviewing':raise ValueError('External workflow review binding changed')
         critic=self._task(cursor,w,review['reviewer_task_id']);task=self._task(cursor,w,review['source_task_id']);source=self._artifact(cursor,w,task)
         if not source or source['assignment_id']!=str(review['source_assignment_id']) or source['sha256']!=review['source_sha256']:raise ValueError('External source changed while reviewing')
-        result=self._native_artifact(cursor,w,critic)
+        try:result=self._native_artifact(cursor,w,critic)
+        except (ValueError,TypeError,KeyError):return self._retry_review(cursor,w,review,task,source,'Native reviewer result was oversized or did not match its immutable publication receipt.')
         if result is None:
             if critic['status'] in {'failed','needs_reconcile','quota_blocked','blocked_auth','blocked_permission','cancelled'}:
                 return self._retry_review(cursor,w,review,task,source,'Native reviewer could not finish: '+critic['status'])
@@ -318,7 +335,7 @@ class ExternalWorkflowStore:
         if w['state'].get('review_retries',0)>=1:
             self._escalate(cursor,w,summary);return True
         cursor.execute("UPDATE forge_external_workflow.reviews SET status='retry',updated_at=clock_timestamp() WHERE review_id=%s",(review['review_id'],))
-        self._queue_review(cursor,w,task,source,review['target_kind'],retry=1);return True
+        self._queue_review(cursor,w,task,source,review['target_kind'],retry=1,correction=summary);return True
 
     def _accept_task(self,cursor,w,task):
         if task['status']=='completed':return
@@ -359,6 +376,7 @@ class ExternalWorkflowStore:
         if a['status'] not in {'completed','failed'}:return False
         result=a['result']
         if a['status']=='failed':
+            self._cleanup_action(cursor,w,a)
             source=self._artifact(cursor,w,self._task(cursor,w))
             return self._revise(cursor,w,'code',{'summary':'Trusted verification failed: '+result['summary'],'findings':[]},source)
         receipt=result['receipt'];candidate=w['state']['candidate']
@@ -393,6 +411,9 @@ class ExternalWorkflowStore:
         w['enabled']=False;w['state']['escalation_reason']=reason[:4096]
         self._save(cursor,w,reason[:4096],phase='escalated')
 
+    def _cleanup_action(self,cursor,w,action):
+        return self._action(cursor,w,'cancel',str(action['action_id']),{'target_action_id':str(action['action_id']),'target_kind':action['kind'],'target_request':action['intent'],'target_receipt':(action['result'] or {}).get('receipt',{})})
+
     def _cancel_children(self,cursor,w):
         cursor.execute("""SELECT t.* FROM forge_agent.coding_tasks t JOIN forge_external_workflow.tasks x
           ON(x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id)
@@ -409,8 +430,7 @@ class ExternalWorkflowStore:
         cleanup=cursor.fetchall()
         cursor.execute("""UPDATE forge_external_workflow.actions SET status='failed',result=%s,lease_token=NULL,lease_role=NULL,lease_until=NULL,
           updated_at=clock_timestamp() WHERE workflow_id=%s AND status IN('queued','leased')""",(Json({'status':'failed','receipt':{},'summary':'Workflow admission stopped before delivery completed.'}),w['workflow_id']))
-        for action in cleanup:
-            self._action(cursor,w,'cancel',str(action['action_id']),{'target_action_id':str(action['action_id']),'target_kind':action['kind'],'target_request':action['intent'],'target_receipt':(action['result'] or {}).get('receipt',{})})
+        for action in cleanup:self._cleanup_action(cursor,w,action)
 
     def _cancel_locked(self,cursor,w,note):
         if w['phase']=='merging':raise Rejected(409,'not_cancellable')

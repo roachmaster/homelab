@@ -101,7 +101,7 @@ class ExternalReviewContextProvider:
         if target['target_kind']=='code':
             candidate=target['candidate']
             tree=self.git(workspace.path,'rev-parse','--verify','HEAD^{tree}').decode().strip()
-            diff=self.git(workspace.path,'diff','--binary','--no-ext-diff',candidate['integration_base'],candidate['candidate_commit'],'--')
+            diff=self.git(workspace.path,'diff','--binary','--no-ext-diff','--no-textconv','--no-color','--diff-algorithm=myers','--no-renames',candidate['integration_base'],candidate['candidate_commit'],'--')
             if tree!=candidate['candidate_tree'] or hashlib.sha256(diff).hexdigest()!=candidate['diff_sha256']:
                 raise ValueError('External candidate differs from independent review target')
         return ExternalReviewContext(envelope['target_json'].encode(),envelope['target_sha256'],target['reviewer_task_id'],target['review_id'],target['workflow_id'],target['target_kind'])

@@ -25,6 +25,7 @@ class ExternalDeliveryStore:
         try:
             with closing(self._connect()) as connection:
                 with connection,connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL lock_timeout='5s'");cursor.execute("SET LOCAL statement_timeout='10s'")
                     cursor.execute('SELECT forge_external_workflow_delivery_api.'+name+'('+','.join(['%s']*len(args))+')',args)
                     return cursor.fetchone()[0]
         except Exception as error:

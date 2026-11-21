@@ -310,8 +310,13 @@ class WorkService:
             limit_bytes=command.limit_bytes,
         )
 
+    def _external_control_guard(self,command):
+        flow=getattr(getattr(self._store,'_external',None),'workflow',None)
+        if flow is not None:flow.forbid_manual_control(command.project_alias,command.task_id)
+
     def accept(self, command):
         self._require_project(command.project_alias)
+        self._external_control_guard(command)
         return self._store.accept(
             project_alias=command.project_alias,
             task_id=command.task_id,
@@ -322,6 +327,7 @@ class WorkService:
 
     def resume(self, command):
         self._require_project(command.project_alias)
+        self._external_control_guard(command)
         if command.agent_profile not in self._config.profiles:
             raise Rejected(403, "denied")
 
@@ -349,6 +355,7 @@ class WorkService:
 
     def plan_decide(self, command):
         self._require_project(command.project_alias)
+        self._external_control_guard(command)
 
         def resolve_recipe(mode):
             if (mode not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
@@ -364,6 +371,7 @@ class WorkService:
 
     def review_decide(self, command):
         self._require_project(command.project_alias)
+        self._external_control_guard(command)
         def resolve_recipe():
             if ("implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
                     or not self._config.profiles[command.agent_profile].execution_enabled
@@ -377,6 +385,7 @@ class WorkService:
 
     def repair(self, command):
         self._require_project(command.project_alias)
+        self._external_control_guard(command)
         if "implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles:
             raise Rejected(403, "denied")
 
