@@ -92,6 +92,81 @@ class SupervisionBoundaryTest(unittest.TestCase):
             imported = git('-C', str(source), 'for-each-ref', '--format=%(refname)').strip()
             self.assertTrue(imported.startswith(b'refs/forge-ci-import/forge/external-candidates/'))
 
+    def test_target_mapping_preserves_readonly_source_and_only_excludes_generated_outputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / 'source'; scratch = root / 'scratch'
+            source.mkdir(); scratch.mkdir(); (scratch / 'target').mkdir()
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'GIT_CONFIG_NOSYSTEM': '1',
+                'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_AUTHOR_NAME': 'Owned fixture',
+                'GIT_COMMITTER_NAME': 'Owned fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
+                'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
+            def git(*args):
+                return subprocess.check_output(['/usr/bin/git', '-C', str(source), '-c', 'core.hooksPath=/dev/null', *args], env=env, stderr=subprocess.DEVNULL)
+            git('init', '--quiet')
+            parents = ['src/rust', 'src/rust/space [pkg]', 'src/rust/space [pkg]/tests/consumer']
+            for relative in parents:
+                parent = source / relative; parent.mkdir(parents=True, exist_ok=True)
+                (parent / 'Cargo.toml').write_text('immutable fixture')
+            git('add', '.'); git('commit', '--quiet', '-m', 'Readonly source fixture')
+            workspace_target = source / 'src/rust/target'; workspace_target.symlink_to(scratch / 'target')
+            generated = CI.map_cargo_targets(source, scratch, parents,
+                SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()))
+            self.assertEqual(len(generated), 2)
+            self.assertNotEqual(generated[0].resolve(), generated[1].resolve())
+            CI.exclude_generated_outputs(source, [workspace_target, *generated])
+            self.assertEqual(git('status', '--porcelain', '--untracked-files=all'), b'')
+            for relative in parents:
+                (source / relative).chmod(0o555)
+            try:
+                (generated[0] / 'consumer-artifact').write_text('only scratch changes')
+                self.assertEqual((generated[0].resolve() / 'consumer-artifact').read_text(), 'only scratch changes')
+                if os.geteuid() != 0:
+                    with self.assertRaises(PermissionError):
+                        (source / parents[1] / 'forbidden-source-output').write_text('no')
+                self.assertEqual(git('status', '--porcelain', '--untracked-files=all'), b'')
+                (source / parents[1] / 'Cargo.toml').write_text('tracked source changed')
+                self.assertIn(b'Cargo.toml', git('status', '--porcelain', '--untracked-files=all'))
+            finally:
+                for relative in parents: (source / relative).chmod(0o755)
+
+    def test_target_mapping_rejects_tracked_outputs_and_symlink_ancestors_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); source = root / 'source'; scratch = root / 'scratch'
+            source.mkdir(); scratch.mkdir(); (source / 'pkg').mkdir()
+            target = source / 'pkg/target'; target.write_text('preserved tracked content')
+            account = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with self.assertRaises(ValueError):
+                CI.map_cargo_targets(source, scratch, ['pkg'], account)
+            self.assertEqual(target.read_text(), 'preserved tracked content')
+            self.assertFalse((scratch / 'package-targets').exists())
+            target.unlink(); (source / 'alias').symlink_to(source / 'pkg')
+            for relative in ['alias', '../outside', '/absolute']:
+                with self.assertRaises(ValueError):
+                    CI.map_cargo_targets(source, scratch, [relative], account)
+
+    def test_check_network_namespace_is_created_before_loopback_setup_and_uid_drop(self):
+        account = SimpleNamespace(pw_uid=43210, pw_gid=43211)
+        calls = []
+        library = SimpleNamespace(prctl=Mock(return_value=0))
+        def loopback(argv, **options):
+            self.assertEqual(argv, ['/usr/sbin/ip', 'link', 'set', 'dev', 'lo', 'up'])
+            self.assertTrue(options['check']); self.assertEqual(options['timeout'], 5)
+            self.assertEqual(options['env'], {'PATH': '/usr/sbin:/usr/bin:/bin'})
+            calls.append('loopback')
+        with patch.object(CI.os, 'unshare', side_effect=lambda flags: calls.append(('network', flags))), \
+             patch.object(CI.subprocess, 'run', side_effect=loopback), \
+             patch.object(CI.os, 'setgroups', side_effect=lambda groups: calls.append(('groups', groups))), \
+             patch.object(CI.os, 'setgid', side_effect=lambda gid: calls.append(('gid', gid))), \
+             patch.object(CI.os, 'setuid', side_effect=lambda uid: calls.append(('uid', uid))), \
+             patch.object(CI.os, 'umask'), patch.object(CI.ctypes, 'CDLL', return_value=library):
+            CI.child_identity(account)()
+        self.assertEqual(calls, [('network', os.CLONE_NEWNET), 'loopback', ('groups', []), ('gid', 43211), ('uid', 43210)])
+        library.prctl.assert_called_once_with(38, 1, 0, 0, 0)
+        with patch.object(CI.os, 'unshare', side_effect=PermissionError('owned failure fixture')), \
+             patch.object(CI.os, 'setuid') as setuid:
+            with self.assertRaises(PermissionError): CI.child_identity(account)()
+            setuid.assert_not_called()
+
     def test_restrictive_service_umask_keeps_explicit_traversal_and_receipt_readability(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -199,6 +274,8 @@ class SupervisionBoundaryTest(unittest.TestCase):
                 if 'init' in command:
                     (source / 'src/rust/forge-ide-web/tests/browser').mkdir(parents=True)
                     (source / 'Makefile').write_text('fixture')
+                    (source / '.git/info').mkdir(parents=True)
+                    (source / '.git/info/exclude').write_text('')
                 return SimpleNamespace(returncode=0)
             order = []
             def receipt(_path, result, _group):

@@ -69,8 +69,19 @@ def regular_directory(path, *, owner):
         raise ValueError('Unsafe CI directory')
 
 
+def private_network():
+    # The trusted supervisor retains host networking. Every candidate check gets
+    # its own empty network namespace; only that namespace's loopback is raised.
+    os.unshare(os.CLONE_NEWNET)
+    subprocess.run(['/usr/sbin/ip', 'link', 'set', 'dev', 'lo', 'up'],
+        env={'PATH': '/usr/sbin:/usr/bin:/bin'}, check=True, timeout=5,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, close_fds=True)
+
+
 def child_identity(account):
     def apply():
+        private_network()
         os.setgroups([])
         os.setgid(account.pw_gid)
         os.setuid(account.pw_uid)
@@ -191,6 +202,48 @@ def import_verified_bundle(bundle, source, env):
         stderr=subprocess.DEVNULL, timeout=60)
 
 
+def map_cargo_targets(source, scratch, manifest_parents, account):
+    # Parents come only from the complete validated Git tree, never rglob across
+    # injected dependency links or candidate-selected filesystem destinations.
+    mappings = []
+    for relative in sorted(set(manifest_parents)):
+        if relative != '.' and (relative.startswith('/')
+                or any(part in {'', '.', '..'} for part in relative.split('/'))):
+            raise ValueError('Unsafe Cargo manifest directory')
+        parent = source
+        for part in (() if relative == '.' else relative.split('/')):
+            parent = parent / part
+            if not stat.S_ISDIR(parent.lstat().st_mode):
+                raise ValueError('Cargo parent is not a plain source directory')
+        target = parent / 'target'
+        if target.exists() or target.is_symlink():
+            if (target == source / 'src/rust/target' and target.is_symlink()
+                    and target.readlink() == scratch / 'target'):
+                continue
+            raise ValueError('Candidate includes a Cargo output path')
+        mappings.append((relative, target))
+    output = scratch / 'package-targets'
+    output.mkdir(mode=0o700)
+    os.chown(output, account.pw_uid, account.pw_gid)
+    for relative, target in mappings:
+        owned = output / hashlib.sha256(relative.encode('utf-8')).hexdigest()
+        owned.mkdir(mode=0o700)
+        os.chown(owned, account.pw_uid, account.pw_gid)
+        target.symlink_to(owned, target_is_directory=True)
+    return [target for _relative, target in mappings]
+
+
+def exclude_generated_outputs(source, paths):
+    # Only exact generated untracked outputs are ignored. Git's cached source
+    # inventory remains intact, including any tracked file with a similar name.
+    patterns = []
+    for path in paths:
+        relative = path.relative_to(source).as_posix()
+        patterns.append('/' + ''.join('\\' + c if c in '\\*?[]!# ' else c for c in relative))
+    with (source / '.git/info/exclude').open('a', encoding='utf-8') as stream:
+        stream.write('\n# Trusted CI generated output links only.\n' + '\n'.join(patterns) + '\n')
+
+
 def create_job_directory(path):
     path.mkdir(mode=0o711, exist_ok=False)
     path.chmod(0o711)  # The Jenkins service deliberately inherits umask0077.
@@ -307,6 +360,7 @@ def execute_locked(action, config):
                 raise ValueError('CI tree mismatch')
             rows = bounded_output(['/usr/bin/git', '-C', str(source), 'ls-tree', '-r', '-l', '-z', '--full-tree', request['candidate_commit']], env=safe_env)
             protected = {}
+            manifest_parents = []
             count = 0
             total = 0
             for record in rows.split(b'\0'):
@@ -322,6 +376,8 @@ def execute_locked(action, config):
                         or any(ord(c) < 32 for c in path) or path.startswith('/')
                         or any(part in {'', '.', '..'} for part in path.split('/'))):
                     raise ValueError('CI source contains links or exceeds checkout bounds')
+                if Path(path).name == 'Cargo.toml':
+                    manifest_parents.append(str(Path(path).parent))
                 if protected_gate_path(path):
                     protected[path] = [mode, blob]
             helper_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
@@ -345,6 +401,9 @@ def execute_locked(action, config):
             if target_link.exists() or target_link.is_symlink():
                 raise ValueError('Candidate includes build output')
             target_link.symlink_to(scratch / 'target', target_is_directory=True)
+            generated = [node_modules, target_link]
+            generated.extend(map_cargo_targets(source, scratch, manifest_parents, account))
+            exclude_generated_outputs(source, generated)
             for current, directories, files in os.walk(source, followlinks=False):
                 os.chmod(current, 0o755)
                 for name in files:
