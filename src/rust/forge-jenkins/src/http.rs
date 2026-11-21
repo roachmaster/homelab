@@ -34,12 +34,16 @@ impl Factory<HttpTransport> for HttpFactory {
             .proxy(None)
             .build()
             .into();
-        Ok(HttpTransport { agent })
+        Ok(HttpTransport {
+            agent,
+            limits: self.limits,
+        })
     }
 }
 #[derive(Clone)]
 pub struct HttpTransport {
     agent: ureq::Agent,
+    limits: Limits,
 }
 
 pub fn factory(config: Config, credentials: Credentials) -> Result<HttpClientFactory, Error> {
@@ -65,12 +69,17 @@ impl IoClient for HttpTransport {
     type Response = HttpResponse;
     type Error = TransportError;
     fn execute(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
+        let timeout = request.limits.timeout.min(self.limits.timeout);
+        let max_body = request
+            .limits
+            .max_response_bytes
+            .min(self.limits.max_response_bytes);
         let mut response = match request.method {
             Method::Get => self
                 .agent
                 .get(&request.url)
                 .config()
-                .timeout_global(Some(request.limits.timeout))
+                .timeout_global(Some(timeout))
                 .build()
                 .header("Authorization", request.authorization())
                 .header("Accept", "application/json")
@@ -79,7 +88,7 @@ impl IoClient for HttpTransport {
                 .agent
                 .post(&request.url)
                 .config()
-                .timeout_global(Some(request.limits.timeout))
+                .timeout_global(Some(timeout))
                 .build()
                 .header("Authorization", request.authorization())
                 .header("Accept", "application/json")
@@ -118,7 +127,7 @@ impl IoClient for HttpTransport {
         response
             .body_mut()
             .as_reader()
-            .take(request.limits.max_response_bytes as u64 + 1)
+            .take(max_body as u64 + 1)
             .read_to_end(&mut body)
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::TimedOut
@@ -132,7 +141,7 @@ impl IoClient for HttpTransport {
                     TransportError::Unavailable
                 }
             })?;
-        if body.len() > request.limits.max_response_bytes {
+        if body.len() > max_body {
             return Err(TransportError::BodyLimit);
         }
         Ok(HttpResponse {

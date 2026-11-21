@@ -70,6 +70,8 @@ startup configuration. Defaults: total10-second I/O deadline, 1MiB response-body
 limit, 32KiB response-header limit. The native transport disables ambient proxies
 and all redirects, including credential forwarding; JSON-returned URLs are never
 followed. Queue acceptance Locations are validated and reduced to a positive ID.
+When a custom native factory and typed client specify different budgets, each
+request uses the shorter deadline and smaller response limit of the two.
 The blocking deadline does not preempt host computation or an injected transport.
 Native factory instances own the Ureq agent/pool; a cloned client shares that
 agent's owned pool, and dropping all clones releases it. No daemon is started.
