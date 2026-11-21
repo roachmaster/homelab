@@ -1,5 +1,17 @@
 use std::process::Command;
 
+#[cfg(not(feature = "jenkins"))]
+#[test]
+fn omitted_jenkins_feature_rejects_selection_before_reading_configuration() {
+    let output = Command::new(env!("CARGO_BIN_EXE_forge"))
+        .args(["--jenkins-config", "/missing/private/config", "--help"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("without jenkins"));
+    assert!(output.stdout.is_empty());
+}
+
 #[test]
 fn actual_binary_node_help_and_bad_command() {
     let binary = env!("CARGO_BIN_EXE_forge");

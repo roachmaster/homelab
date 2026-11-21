@@ -117,3 +117,64 @@ use checked process ID/time/counter formatting (at most 42 ASCII bytes), followe
 by the application's checked instance suffix. This is best-effort restart
 separation, not durable globally unique identity or authentication. No caller
 `--user` identity override is exposed.
+
+## Optional Jenkins client
+
+Build with `--features jenkins` to add Jenkins support to the existing `forge`
+binary. Default builds omit the adapter and its HTTP/TLS dependencies. The
+terminal selects Jenkins only when `--jenkins-config PATH` is supplied; node,
+disk and local jobs keep their existing defaults.
+
+```sh
+make run FEATURES=jenkins ARGS='--no-disk --jenkins-config /private/jenkins.json jenkins.status'
+make run FEATURES=jenkins ARGS='--no-disk --jenkins-config /private/jenkins.json jenkins.jobs'
+make run FEATURES=jenkins ARGS='--no-disk --jenkins-config /private/jenkins.json help jenkins.build'
+```
+
+The configuration is a bounded JSON object. A token path may be absolute or
+relative to the configuration file's directory:
+
+```json
+{
+  "endpoint": "http://127.0.0.1:18084/",
+  "username": "forge-admin",
+  "token_file": "mission-control.token",
+  "allow_mutations": false,
+  "timeout_seconds": 10,
+  "max_response_bytes": 1048576
+}
+```
+
+Use a Jenkins API token, which authenticates with username/token HTTP Basic.
+Its value belongs in the token file, never arguments or committed configuration.
+On Unix, the token must be an owned regular file with mode0600/0400, one link,
+and at most4096bytes. The configuration must be a regular file owned by the
+current user or root, without group/world write access, and at most16KiB. Symlink
+and FIFO inputs are rejected. This terminal slice fails closed for credential
+files on platforms where it does not verify private ACLs.
+
+The terminal stages a selected lazy-client factory, freezes it, and injects one
+shared ready port into the application. Every command follows registered header
+and variant admission into a task that prepares the typed Jenkins request. Only
+the first admitted Jenkins execution reads configuration/token files and creates
+the native client through the public factory. Successful configuration is reused
+for that application lifetime; restart the CLI to adopt changed credentials.
+Construction failures may be retried by a later explicit command; requests are
+never automatically retried. Global help, command help, command discovery and
+session help do not read the configuration or token and make no Jenkins calls.
+
+The registered commands are:
+
+- `jenkins.status`: controller response, version, security and executor count.
+- `jenkins.jobs`: jobs visible to the configured account.
+- `jenkins.build JOB [NAME=VALUE ...]`: explicit build parameters, with folders
+  separated by `/`; requires `allow_mutations:true`.
+- `jenkins.queue ID`: one queue observation, without background polling.
+- `jenkins.build-status JOB NUMBER`: one build observation.
+- `jenkins.cancel ID`: request queue cancellation; requires mutation opt-in.
+
+Queue acceptance is not build completion. Cancellation output is a request
+acknowledgement, not proof that a running build stopped. An uncertain write
+outcome must be reconciled instead of blindly repeated. Session Jenkins
+arguments split on whitespace only, without shell quoting or expansion; use an
+ordinary argv invocation for job names or parameter values containing spaces.
