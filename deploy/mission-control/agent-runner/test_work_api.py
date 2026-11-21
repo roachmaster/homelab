@@ -481,6 +481,21 @@ class WorkDecodeTest(unittest.TestCase):
 
 
 class WorkHttpApiTest(unittest.TestCase):
+    def test_external_control_uses_only_the_injected_ready_port(self):
+        config = work_config.parse_work_config(sample_raw_config())
+        store = Mock()
+        store._external.workflow.cancel.side_effect = AssertionError('private store collaborator was not selected')
+        flow = Mock()
+        receipt = {'project_alias': 'homelab', 'task_id': str(TASK_ID),
+                   'base_revision': 1, 'revision': 2, 'status': 'cancelled'}
+        flow.cancel.return_value = receipt
+        service = work_api.WorkService(config, config.catalog(), store, external_workflow=flow)
+        command = work_api.WorkCancel('homelab', TASK_ID, 1, 'selected-control')
+        self.assertEqual(service.cancel(command), receipt)
+        flow.cancel.assert_called_once_with(project_alias='homelab', task_id=TASK_ID,
+            expected_revision=1, idempotency_key='selected-control')
+        store.cancel.assert_not_called()
+
     def _service_with_mock_store(self):
         config = work_config.parse_work_config(sample_raw_config())
         fake_store = Mock()

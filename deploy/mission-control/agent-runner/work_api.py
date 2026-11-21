@@ -193,7 +193,7 @@ class WorkPublicationRetry:
 class WorkService:
     """Authorized application service coordinating configured grants, catalog, and store."""
 
-    def __init__(self, config, catalog, store):
+    def __init__(self, config, catalog, store, *, external_workflow=None):
         if not isinstance(config, WorkConfig):
             raise TypeError("WorkService requires a frozen WorkConfig")
         if not isinstance(catalog, WorkCatalog):
@@ -203,6 +203,10 @@ class WorkService:
         self._config = config
         self._catalog = catalog
         self._store = store
+        if external_workflow is not None and any(not callable(getattr(external_workflow, name, None))
+                for name in ('cancel', 'forbid_manual_control')):
+            raise TypeError('WorkService requires a ready external workflow control port')
+        self._external_workflow = external_workflow
         self.workflow_worker=None
 
     def _require_project(self, project_alias):
@@ -289,7 +293,7 @@ class WorkService:
 
     def cancel(self, command):
         self._require_project(command.project_alias)
-        flow=getattr(getattr(self._store,'_external',None),'workflow',None)
+        flow=self._external_workflow
         if flow is not None:
             receipt=flow.cancel(project_alias=command.project_alias,task_id=command.task_id,expected_revision=command.expected_revision,idempotency_key=command.idempotency_key)
             if receipt is not None:return receipt
@@ -311,7 +315,7 @@ class WorkService:
         )
 
     def _external_control_guard(self,command):
-        flow=getattr(getattr(self._store,'_external',None),'workflow',None)
+        flow=self._external_workflow
         if flow is not None:flow.forbid_manual_control(command.project_alias,command.task_id)
 
     def accept(self, command):
@@ -440,14 +444,15 @@ class WorkServiceFactory:
             repair_policy=self._config.repair_policy,
             external_port=external,
         )
-        service=WorkService(self._config,catalog,store)
         flow=getattr(external,'workflow',None) if external is not None else None
         if self._config.external_workflows:
             if flow is None:raise ValueError('External workflow provider is unavailable')
             flow.bind_store(store)
+        selected_flow=flow if self._config.external_workflows else None
+        service=WorkService(self._config,catalog,store,external_workflow=selected_flow)
         from work_workflow import WorkflowCoordinatorFactory
         maintenance = {"external_maintenance": store.maintain_external} if external is not None else {}
-        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=flow if self._config.external_workflows else None,**maintenance).create()
+        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=selected_flow,**maintenance).create()
         return service
 
 
