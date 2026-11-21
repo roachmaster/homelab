@@ -3361,6 +3361,8 @@ async function agentsJourney() {
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'external artifact fits the viewport');
     }
     await screenshot(page,'ide-agents-external-muse.png');
+    await page.locator('#agents-back').click();
+    await check(page.locator('#agents-muse-db-state')).toHaveText('Runner available');
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);
