@@ -55,81 +55,108 @@ state or infer CI completion. The stopped Grok workflow remains stopped.
 
 ## Native Gemini workflow
 
-The publisher's explicit `hosted_provider: "jenkins"` selects the native Jenkins
-verification provider and its shared check runner. `jenkins_delivery_config`
-names a private operator-owned delivery configuration with the pinned Rust CLI,
-installed verifier, spool, results and credentials. Bootstrap constructs and
-injects these collaborators; review and merge handlers do not select a transport
-or look up a registry. Existing configurations retain the historical
-`github-actions` default, but Mission Control selects Jenkins.
+Bootstrap selects `hosted_provider: "jenkins"` and
+`native_delivery_mode: "branch-first-v1"`. `jenkins_delivery_config` selects the
+pinned Rust CLI, native verifier/job and private credentials. Ready ports are
+injected into the publisher; handlers never look up a transport registry.
+Existing configurations retain `github-actions` and `integrate-first-v1`
+defaults. The external Muse job/verifier remains separately pinned.
 
 The native Plan/Implement recipe, execution policy, independent Codex reviewer
-and frozen workflow budgets remain unchanged. The logical gate names `check`,
-`pr-fast-gate` and `real-browser` remain compatibility identifiers; new
-observations explicitly identify Jenkins as their provider. They do not claim
-that a GitHub Actions run occurred.
+and frozen budgets stay unchanged. Logical gate names `check`, `pr-fast-gate`
+and `real-browser` remain compatibility IDs; observations identify Jenkins.
 
 ```mermaid
 sequenceDiagram
     actor U as Owner
-    participant P as PostgreSQL workflow/outbox
-    participant G as Gemini native worker
+    participant P as PostgreSQL workflow/events
+    participant G as Gemini
     participant C as Codex reviewer
-    participant V as Trusted publisher
-    participant J as Rust Jenkins IoClient
-    participant CI as Jenkins / isolated verifier
+    participant V as Trusted branch/CI/merge worker
     participant GH as GitHub repository
-    U->>P: Submit task with frozen project policy
+    participant J as Jenkins through Rust IoClient
+    U->>P: Submit assignment
     P->>G: Plan / bounded revisions
     G->>P: Immutable Plan result
     P->>C: Independent Plan review
-    C->>P: Source-bound approval or revision
-    P->>G: Approved implementation
-    G->>P: Stopped, reconciled implementation result
-    P->>V: Leased verification review
-    V->>GH: Fetch current main
-    V->>V: Integrate main and freeze exact candidate
-    V->>P: Acquire scoped CI context
-    V->>V: Persist candidate bundle and native/Jenkins manifest binding
-    V->>V: Persist submission intent before POST
-    V->>J: Submit fixed correlated job / reconcile uncertainty
-    J->>CI: forge-exact-candidate
-    CI->>CI: make ci + make ui-qa + backend suite
-    CI-->>V: Exact-source root-owned result and cleanup proof
-    V->>P: Record actual verification result
-    P->>C: Independent exact-candidate code review
-    C->>P: Approval or bounded repair
-    P->>V: Authorized publication
-    V->>GH: Push candidate and create/update PR
-    V->>V: Reobserve same Jenkins receipt at publication and merge
-    V->>GH: Guarded exact-tree main update
-    V->>P: Real merge receipt and completion
+    C->>P: Approve exact Plan
+    P->>G: Implement
+    G->>P: Stop and reconcile source
+    P->>V: Lease verification
+    V->>GH: Push exact source to its owned branch
+    GH-->>V: Confirm remote head
+    V->>P: Commit idempotent branch_pushed event
+    P-->>V: Event receipt under current lease
+    V->>J: Submit correlated exact-source build
+    J->>J: Main-ancestor preflight, then all fixed gates
+    J-->>V: Actual build result and cleanup proof
+    alt Build fails
+        V->>P: Failure event and bounded author repair
+        P->>G: Actual build reference / saved source
+        G->>G: CLI status and paginated logs; correct source
+        G->>P: Stopped correction restarts push/event/build
+    else Build passes
+        V->>P: Record exact-source verification
+        P->>C: Independent full-candidate code review
+        C->>P: Approval or bounded repair
+        P->>V: Authorized publication / merge
+        V->>GH: PR for already-pushed checked branch
+        V->>J: Reobserve same build receipt
+        V->>GH: Guarded exact-tree main update
+        alt Main update confirmed
+            V->>P: Merge receipt and completion
+        else Confirmed merge failure
+            V->>P: New unapproved repair source and failure event
+            P->>G: Resume with actual build reference
+        end
+    end
 ```
 
-The full fixed suite runs once per admitted verification action. Later stages
-reobserve the same correlated build and root-owned source/cleanup receipt.
-Changed source or an explicitly admitted bounded verification retry needs a new
-action and verification. No task-controlled command, URL, path or
-credential is accepted as a Jenkins parameter.
+Jenkins runs all fixed commands once per admitted verification action. Later
+publication/merge stages reobserve the same action. Changed source or an
+explicitly admitted bounded retry requires a fresh action. Native and Jenkins
+manifest digests retain their distinct contracts and immutable binding.
 
-Two manifest identities have distinct purposes. The native manifest preserves
-the reviewed candidate's existing authorization contract. The Jenkins manifest
-binds the exact tree, installed verifier and all fixed gates. A private immutable
-mapping binds both to the actual workflow, task, attempt and candidate. Neither
-digest is substituted for the other or written over a historical receipt.
+Migration24 supplies narrow CI context/status functions. Migration25 adds the
+committed branch-pushed event, authenticated build-context reader, bounded merge
+failure repair and once-only replay of a genuinely stopped pre-CI conflict.
+Existing recipes, Plan counters and historical receipts are preserved. The
+committed event receipt and live review lease are required before Jenkins.
 
-Migration 24 supplies narrowly scoped native CI context/status functions to the
-reconciler. It adds no table-read permission or model database access. Live lease
-authority is required to admit CI; status reads let the trusted publisher clean
-up its own durable actions after cancellation or restart. Stop requests remain
-pending until Jenkins and the verifier establish actual cleanup. A lost POST
-acknowledgement triggers correlated queue/build reads, never a blind resubmission.
+The native job `forge-native-candidate` first checks that pinned current main is
+an ancestor of the pushed source. An outdated branch produces a real failed
+build receipt before expensive compilation. Gemini gets an explicitly
+unapproved source containing the real Git merge result: nonconflicting main
+files and any unresolved conflict markers. It corrects that source through its
+normal CLI/file-edit scope, then the next stopped result is pushed and tested.
 
-The author's original source base remains receipt-owned. Before verification,
-native candidate preparation fetches and integrates actual remote main. Checks
-and independent review apply to that integrated candidate. Only a genuine
-successful native merge advances `refs/forge/verified-main`; switching the
-verification provider does not manufacture a source receipt.
+Confirmed merge failure returns through the same bounded repair loop. Unknown
+remote write acknowledgements are reconciled before admitting a new writer.
+Code review compares the complete candidate with actual main, including feature
+code inherited through unapproved repair seeds. Only a genuine successful native
+merge advances `refs/forge/verified-main`.
+
+Restart reuses the prepared source SHA, committed branch event and journaled CI
+action. A durable intent precedes each remote write; an uncertain push/build is
+never blindly repeated. Cancellation waits for actual queue/process cleanup.
+
+## Agent build inspection CLI
+
+The worker's explicit `build_results_root` selects a worker-owned artifact reader.
+Its scoped database port binds the current repair feedback to its source review.
+The reader verifies the private action, actual root receipt and log hashes.
+Only sanitized immutable evidence enters the attempt; the raw results root is
+masked from model processes. No Jenkins/database credentials enter the scope.
+
+```sh
+python3 -I -B /run/forge-coding-attempt/build_info.py status
+python3 -I -B /run/forge-coding-attempt/build_info.py logs --offset 0 --limit 16384
+```
+
+`status` reports the actual job/build/action, source/main identities and outcome.
+`logs` reports `text`, `next_offset` and `eof`; the agent reads the pages it needs,
+up to 64KiB each from a bounded 64MiB log. The prompt carries the build reference
+and CLI command instead of embedding a long diagnostic transcript.
 
 ## Authentication and transport
 

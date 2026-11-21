@@ -1,5 +1,49 @@
 # Shared Agent Work Checkpoint
 
+## Current: Push, build, merge and return failures to Gemini — 2026-11-21
+
+- **authorization:** User specifies the actual delivery loop: Gemini's code is
+  pushed, an event starts Jenkins, successful CI proceeds to merge, and failures
+  return an event/build reference to Gemini for CLI investigation and repair.
+  Keep independent code review and the existing bounded budgets. Normal source
+  conflicts must not require a human to manage the integration manually.
+- **ownership:** Separate worktrees own native branch/CI/merge providers, M25
+  SQL/DAO/event transitions, and the separate native Jenkins job/operator staging.
+  Root owns configuration, the attempt-scoped build inspection CLI, integration,
+  documentation and live qualification. Preserve receipt-bound task workspaces.
+- **implementation:** Explicit `branch-first-v1` publisher selection pushes the
+  exact owned source, records the idempotent database event and requires its
+  receipt before Jenkins. A separate native-only job checks expected-main
+  ancestry before the full unchanged gates. Build or confirmed merge failure
+  produces bounded repair; genuine Git conflict results become explicitly
+  unapproved source with current-main files and markers preserved. Fresh source
+  must pass Jenkins and independent review again. Unknown write acknowledgements
+  remain read-only reconciliation, without a duplicate push or new writer.
+- **agent I/O:** Explicit `build_results_root` injects a worker-owned reader.
+  The current lease/feedback binds the source review, actual action/job/build,
+  private sidecar and root receipt/log hashes. `build_info.py status|logs` supplies
+  sanitized paginated evidence; no large log is inserted into the prompt. Raw
+  CI results are masked. Dependencies are created/injected at bootstrap.
+- **history:** M25 adds four narrow functions and no tables/roles. Preserve M1–24,
+  P10 and AGY policy identities, old source receipts, Plan/code counters and
+  immutable approvals. A typed once-only replay admits the actual stopped
+  pre-CI conflict after deployment; it consumes the existing infrastructure
+  allowance and preserves the original failed receipt. No raw status reset.
+- **verification:** SQL/native35 final contracts and99 broader regressions,
+  independently reviewed backend77 tests, Jenkins19 tests and build-CLI/worker49
+  tests passed. Full integrated discovery passed749/749 in491.293s; the final
+  28-test loop/context/PostgreSQL run passed after the additional inherited-code
+  regression. Seven offline ops checks passed. A real inherited-feature regression confirms
+  review compares against actual main rather than the unapproved repair seed.
+- **deployment:** Pending final source publication and strict25 restore proof.
+  Fresh strict24 backup/owned restore run `8cc36dc2c1e9` verified45 tables.
+  Stage only API/publisher/Gemini source; API env/config stays byte-identical,
+  Gemini adds the build root and publisher selects the separate native job.
+  Preserve the external job's5b28 verifier and token/config identities. Record
+  activation and real CI/repair evidence privately after the final main push,
+  avoiding a documentation push that would invalidate a frozen candidate.
+- **evidence:** `/mnt/data/homelab-build/push-build-merge-20261121`.
+
 ## Current: Native Gemini workflow on Jenkins — 2026-11-21
 
 - **authorization:** User requests updating Gemini's native workflow after the

@@ -132,13 +132,15 @@ sequenceDiagram
     participant P as Trusted publisher / merger
     participant GH as GitHub
     A->>DB: Stop and reconcile actual implementation
-    DB-->>V: Verify exact candidate with fixed gates
-    V->>V: Integrate current main and persist exact source / manifests
+    DB-->>V: Lease exact stopped source
+    V->>GH: Push owned source branch
+    V->>DB: Commit branch_pushed event
+    DB-->>V: Event receipt before Jenkins admission
     V->>J: Submit once with durable correlated intent
     J-->>V: Full fixed suite and exact-source cleanup receipt
     alt Reproducible check failure within repair policy
-        V->>DB: Source-bound diagnostic feedback
-        DB-->>A: Correct the same authorized scope
+        V->>DB: Actual build reference and bounded repair event
+        DB-->>A: Inspect build CLI and correct source
     else All fixed checks pass
         V->>DB: Candidate, gate digest and check witnesses
         DB-->>R: Readonly code review, approved Plan and findings
@@ -146,7 +148,7 @@ sequenceDiagram
         DB-->>C: Validate verdict and delegated authority
         C->>DB: Record peer approval or queue bounded repair
         DB-->>P: Publish exact approved candidate
-        P->>GH: Feature branch and PR
+        P->>GH: PR for already-pushed checked branch
         P->>J: Reobserve the same exact-candidate build
         J-->>P: Required gates successful, cleanup confirmed
         P->>DB: Persist deterministic merge intent before remote mutation
@@ -157,6 +159,15 @@ sequenceDiagram
         DB-->>C: Complete workflow and retain source history
     end
 ```
+
+Mission Control selects `native_delivery_mode: "branch-first-v1"`. A confirmed
+merge failure also emits an author-repair event with the actual Jenkins build
+reference. Unresolved integration content is a new unapproved source, retaining
+the real conflict markers and nonconflicting main changes. Each correction
+returns through push/event/build and independent review. M25 records those
+transitions without resetting budgets; the existing owner-scoped CLI exposes
+only that repair's build metadata and sanitized log pages. See the
+[current delivery sequence](../forge-jenkins.md#native-gemini-workflow).
 
 The merge commit's tree is the reviewed and checked candidate tree. Its parents
 are the observed main head and the approved PR head. The provider first proves

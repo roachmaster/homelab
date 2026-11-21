@@ -28,7 +28,13 @@ artifact cache.
 
 External Muse delivery uses the typed Rust Jenkins client through the trusted
 delivery worker. Native Gemini uses the publisher's explicit `jenkins` provider
-selection and private `jenkins_delivery_config`. See the
+selection, `native_delivery_mode: "branch-first-v1"`, and private
+`jenkins_delivery_config`. Its separate `forge-native-candidate` job is installed
+with `setup-ci.py --native-only --execute` and the existing private client
+configuration. This preserves the original job/verifier for frozen external
+work. The native job checks current-main ancestry before compilation; a stale
+branch fails as a real build and returns to the agent with its build reference.
+See the
 [native workflow sequence and manifest contract](../../../docs/architecture/forge-jenkins.md#native-gemini-workflow).
 This changes no historical workflow recipe or GitHub Actions setting. Submission
 acceptance is not a successful build: guarded merge requires real full-suite

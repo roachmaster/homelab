@@ -421,6 +421,18 @@ admitted verification action before independent code review. Publication and
 merge reobserve the same exact-source
 receipt instead of rerunning the suite. An immutable private mapping binds the
 native review manifest to the installed verifier's separate Jenkins manifest.
+With `native_delivery_mode: "branch-first-v1"`, the stopped source is first
+pushed to its owned branch; a committed scoped `branch_pushed` event precedes
+Jenkins admission. The separate native job checks main ancestry before expensive
+gates. A real build failure or a positively confirmed merge failure emits bounded
+repair feedback with an actual build reference. Integration conflicts are
+preserved in a new unapproved source, then corrected and tested again. Independent
+review compares the complete change against actual main, including inherited
+unapproved code. Migration25 supplies these events, merge-failure transitions and
+the authenticated build-context reader without changing frozen execution recipes.
+The worker's optional `build_results_root` injects a validated artifact reader;
+`build_info.py status` and paginated `logs` expose only that repair's sanitized
+immutable evidence. The raw results directory is masked from the model.
 Migration24's scoped context/status APIs supply actual workflow/task correlation
 and cancellation state without granting reconciler table access. Journals precede
 POST; uncertain submissions are reconciled without duplicate jobs. Restart and
@@ -440,7 +452,8 @@ The optional service template remains `forge-publication-worker.service` using
 trusted `FORGE_PUBLICATION_CONFIG`: `worker_config`, approved `repositories`,
 `github_config_dir`, optional fixed `checks` and `required_hosted_checks`, plus
 `hosted_provider` (historical default `github-actions`) and
-`jenkins_delivery_config` (required only for `jenkins`). Jenkins selection requires
+`jenkins_delivery_config` (required only for `jenkins`) and `native_delivery_mode`
+(default `integrate-first-v1`; `branch-first-v1` requires Jenkins). Jenkins selection requires
 all three unchanged fixed commands and logical gate identities. Install
 the verified immutable release and configure the matching trusted providers only
 after schema verification and final CI/backend/28-group actual-browser gates.
