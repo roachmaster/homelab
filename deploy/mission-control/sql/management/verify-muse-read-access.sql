@@ -46,8 +46,12 @@ BEGIN
     IF direct_count<>1 OR EXISTS(SELECT FROM pg_namespace n,LATERAL aclexplode(n.nspacl) a
         WHERE n.nspname='forge_agent' AND a.grantee=reader
           AND (a.grantor<>owner_role OR a.privilege_type<>'USAGE' OR a.is_grantable))
-       OR EXISTS(SELECT FROM pg_namespace n WHERE n.nspname LIKE 'forge\_%' ESCAPE '\'
-          AND (n.nspowner=reader OR (n.nspname<>'forge_agent' AND has_schema_privilege(reader,n.oid,'USAGE,CREATE')))) THEN
+       OR EXISTS(SELECT FROM pg_namespace n
+          WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema'
+            AND (n.nspowner=reader OR has_schema_privilege(reader,n.oid,'CREATE')
+              OR (n.nspname NOT IN('forge_agent','public') AND has_schema_privilege(reader,n.oid,'USAGE'))
+              OR (n.nspname<>'forge_agent' AND EXISTS(
+                  SELECT FROM aclexplode(n.nspacl) a WHERE a.grantee=reader)))) THEN
         RAISE EXCEPTION 'Unexpected direct Muse reader schema ACL';
     END IF;
     FOREACH privilege_name IN ARRAY allowed_tables LOOP
@@ -56,7 +60,8 @@ BEGIN
         END IF;
     END LOOP;
     FOR relation IN SELECT c.*,n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname LIKE 'forge\_%' ESCAPE '\' AND c.relkind IN('r','p','v','m','f') LOOP
+        WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema'
+          AND c.relkind IN('r','p','v','m','f') LOOP
         permitted := relation.nspname='forge_agent' AND relation.relname=ANY(allowed_tables)
                      AND relation.relkind IN('r','p');
         IF relation.relowner=reader THEN RAISE EXCEPTION 'Muse reader owns application relation'; END IF;
@@ -84,14 +89,15 @@ BEGIN
         END LOOP;
     END LOOP;
     IF EXISTS(SELECT FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-        WHERE n.nspname LIKE 'forge\_%' ESCAPE '\'
+        WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema'
           AND (p.proowner=reader OR has_function_privilege(reader,p.oid,'EXECUTE')))
        OR EXISTS(SELECT FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-        WHERE n.nspname LIKE 'forge\_%' ESCAPE '\' AND c.relkind='S'
+        WHERE n.nspname NOT LIKE 'pg\_%' ESCAPE '\' AND n.nspname<>'information_schema' AND c.relkind='S'
           AND (c.relowner=reader OR has_sequence_privilege(reader,c.oid,'USAGE,SELECT,UPDATE')))
        OR EXISTS(SELECT FROM pg_default_acl d,LATERAL aclexplode(d.defaclacl) a
-        WHERE a.grantee=reader AND (d.defaclnamespace=0 OR d.defaclnamespace IN
-            (SELECT oid FROM pg_namespace WHERE nspname LIKE 'forge\_%' ESCAPE '\'))) THEN
+        WHERE a.grantee IN(reader,0) AND (d.defaclnamespace=0 OR d.defaclnamespace IN
+            (SELECT oid FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' ESCAPE '\'
+              AND nspname<>'information_schema'))) THEN
         RAISE EXCEPTION 'Unexpected Muse reader function, sequence or default privileges';
     END IF;
 END;
