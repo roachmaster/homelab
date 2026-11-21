@@ -4,10 +4,6 @@ Native Jenkins LTS and Java 21 are installed by an explicit local systemd job.
 This does not submit a Forge coding workflow, push GitHub source or trigger CI.
 Review `install.py` and `bootstrap.groovy` before installing them into the
 root-owned `/var/lib/forge-provisioning/jenkins/source` directory and invoking
-<<<<<<< HEAD
-the installer as root. The current installation is a controller foundation;
-build agents and replacement Forge/GitHub verification adapters are separate work.
-=======
 the installer as root. The installation now also has a dedicated CI agent and
 the trusted `forge-exact-candidate` pipeline described below.
 
@@ -25,10 +21,11 @@ outputs. Jenkins and model credentials are outside that boundary.
 
 The configured wall deadline is 2,700 seconds after a measured cold smoke build
 took 29m 29s. Preserve that production value when preparing future configuration;
-the original installer default was 1,800 seconds. Compile targets are still per
-action until the separately assigned Cargo-cache feature is verified and merged.
-Do not describe the existing registry/toolchain/browser caches as a compiled
-artifact cache.
+`setup-ci.py` now defaults to 2,700 seconds (the original installer default was
+1,800 seconds). Persistent local compiled Cargo artifact caching is implemented
+below under `/mnt/data/forge-homelab/ci-cache` (activated on Mission Control
+when the updated `setup-ci.py` and verifiers are deployed). Do not describe the
+existing registry/toolchain/browser caches as a compiled artifact cache.
 
 External Muse delivery uses the typed Rust Jenkins client through the trusted
 delivery worker. Native Gemini uses the publisher's explicit `jenkins` provider
@@ -51,7 +48,6 @@ Jenkins group. Reviewers and native model processes receive neither credentials
 nor publication authority. Restart cleanup uses the publisher's durable action
 journals and scoped database status, preserving uncertain actions without
 duplicate submission.
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 The service listens only on `127.0.0.1:18084`. Its persisted home is
 `/mnt/data/forge-homelab/jenkins`. The installer masks package auto-start until
@@ -102,13 +98,8 @@ On 2026-11-21 the operator explicitly authorized sharing the existing main
 account's GitHub credentials with the `jenkins` Unix user. The reviewed
 `connect-github.py` job copied only the active `github.com` account and selected
 SSH identity into `/var/lib/jenkins`, its actual Unix home. The Jenkins data
-<<<<<<< HEAD
-directory is a separate path. Credential files are Jenkins-owned mode 0600 inside
-mode 0700 directories. No secret contents are in this repository or job output.
-=======
 directory is a separate path. Credential files are Jenkins-owned mode0600 inside
 mode0700 directories. No secret contents are in this repository or job output.
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 The GitHub-specific SSH configuration requires the selected key, noninteractive
 authentication and strict verification against the operator's existing GitHub
@@ -118,11 +109,7 @@ changes execute in a child permanently switched to Jenkins UID/GID with empty
 supplementary groups. Root only reads the authorized source credentials and
 writes the protected provisioning report. No sudo/group membership is added.
 
-<<<<<<< HEAD
-Local job `forge-jenkins-github-access-20261121.service` succeeded at 00:11:24 UTC.
-=======
 Local job `forge-jenkins-github-access-20261121.service` succeeded at00:11:24UTC.
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 GitHub API identity and SSH authentication both identify `roachmaster`. GitHub
 reports read/write access to `roachmaster/homelab`; HTTPS and SSH `git ls-remote`
 both returned main `a3968c17841bddc533fa76f1df491542930a9987`. These were read-only
@@ -136,26 +123,17 @@ sudo -H -u jenkins sh -c 'cd "$HOME" && gh api user --jq .login'
 sudo -H -u jenkins sh -c 'cd "$HOME" && git ls-remote git@github.com:roachmaster/homelab.git refs/heads/main'
 ```
 
-<<<<<<< HEAD
-=======
 This configures service-user Git and CLI authentication. Jenkins credential-store
 entries and the CI pipeline were separate follow-up work; the pipeline is now
 installed as described above. The stopped Grok workflow remains stopped.
 
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 GitHub CLI reference: [credential-helper setup](https://cli.github.com/manual/gh_auth_setup-git).
 
 ## Mission Control Rust client
 
-<<<<<<< HEAD
-The [`forge-jenkins` capability](../../../src/rust/forge-jenkins/README.md) provides
-typed Jenkins I/O through exported factories and registrars. The
-[Forge CLI integration](../../../docs/architecture/forge-jenkins.md) adds six
-=======
 The [`forge-jenkins` capability](../../../src/rust/forge-jenkins/README.md) now
 provides typed Jenkins I/O through exported factories and registrars. The
 [Forge CLI integration](../../../docs/architecture/forge-jenkins.md) adds bounded
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 explicitly selected Jenkins commands and retains existing admission and provider
 boundaries. Its installed local command can read the controller:
 
@@ -165,24 +143,40 @@ forge --jenkins-config "$HOME/.config/forge/jenkins/mission-control.json" jenkin
 ```
 
 `provision-client-token.py` created the named **Mission Control - Forge CLI** token
-<<<<<<< HEAD
-through Jenkins's native API, with a 180-day expiration (2027-05-20). It used the
+through Jenkins's native API, with a180-day expiration (2027-05-20). It used the
 existing administrator password only for the provisioning request, retaining the
 CSRF crumb's session cookie. Runtime calls use Basic username/API-token auth,
-never that password.
+never that password. The token inherits the existing administrator account's
+permissions. Client mutation policy defaults tofalse; it is not a narrower
+server-side role. Configuration and token files are private and outside Git.
+
+The reviewed provisioner durably saves its intent before issuing the token, saves
+a protected secret receipt for delivery recovery, and refuses to repeat an
+uncertain creation. Operator-home writes run after permanently dropping UID/GID;
+token/intent values never enter command arguments or logs. Successful reruns
+reuse and verify the same receipt instead of creating another token.
+
+Initial client acceptance verified status, the then-empty job list, explicit
+mutation denial and a typed absent-queue response. Later pipeline acceptance ran
+a real full-suite Jenkins smoke build; its source and results are recorded in
+`AGENT_WORK.md`. That smoke result is not a CI receipt for a current task. The
+native service's security settings and stopped Grok run remain as recorded above.
 
 ## Persistent local Cargo build caching
 
-`verify-candidate.py` (installed to `/usr/local/libexec/forge-ci-check`) manages
-persistent local Cargo build caching under `/mnt/data/forge-homelab/ci-cache`
-without changing any CI gate, adding external artifact servers, or granting
-candidate code additional privileges or network access.
+`verify-candidate.py` (installed to `/usr/local/libexec/forge-ci-check` for
+`forge-exact-candidate` and `/usr/local/libexec/forge-native-ci-check` for
+`forge-native-candidate`) manages persistent local Cargo build caching under
+`/mnt/data/forge-homelab/ci-cache` without changing any CI gate, adding external
+artifact servers, or granting candidate code additional privileges or network
+access.
 
 ### Provider wiring and isolation boundaries
 
 - **Typed configuration (`CargoCacheConfig`)** is parsed and validated effect-free
-  at bootstrap from `/etc/forge-ci/pipeline.json` (`cargo_cache`). `root` must be
-  an absolute, non-symlink path strictly under `/mnt/data/forge-homelab`.
+  at bootstrap from `/etc/forge-ci/pipeline.json` (and inherited into
+  `/etc/forge-ci/native-pipeline.json` by `setup-ci.py --native-only`). `root`
+  must be an absolute, non-symlink path strictly under `/mnt/data/forge-homelab`.
 - **Substitutable port (`CargoCachePort`)**: `CargoCacheFactory` freezes
   `CargoCacheConfig` before any disk or process effect and selects either
   `LocalCargoCacheProvider` (when `enabled: true`) or `NullCargoCacheProvider`
@@ -202,26 +196,31 @@ candidate code additional privileges or network access.
   (`publish_status: "skipped_unsafe_artifact"`), preserving any prior known-good
   snapshot.
 
-### Trusted remote source-branch scoping
+### Trusted source-branch scoping
 
 Branch cache identities are derived exclusively by trusted delivery components
-(`work_external_delivery.py:TrustedDeliveryPort.prepare_candidate` and
-`_submission`), propagated immutably through PostgreSQL and submitter-owned
-`request.json` (without changing Jenkins job parameters in `ci-node.groovy`), and
-verified fail-closed by `verify-candidate.py` before any cache or filesystem access:
+(`work_external_delivery.py:TrustedDeliveryPort.prepare_candidate`,
+`work_native_jenkins.py:NativeJenkinsVerification._prepare`, and
+`TrustedDeliveryPort._submission`), propagated immutably through submitter-owned
+`request.json` (without changing Jenkins job parameters in `ci-node.groovy` or
+`native-ci-job.groovy`), and verified fail-closed by `verify-candidate.py` before
+any cache or filesystem access:
 
 - **`main`**: Allowed **only** when `candidate_commit == expected_main` (exact
   `main` verification). Writes to `scopes/<project>/main/<compat_key>`.
-- **`branch/<slug>`**: Resolved from trusted remote `refs/heads/*` via
-  `git ls-remote --heads` (ignoring ephemeral `refs/heads/forge/external-candidate-*`
-  refs). An optional author manifest `source_branch` is accepted only when
+- **`branch/<slug>`**: Resolved for external delivery from trusted remote
+  `refs/heads/*` via `git ls-remote --heads` (ignoring ephemeral
+  `refs/heads/forge/external-candidate-*` refs), or for native branch-first
+  delivery from the publisher's verified pushed branch receipt (`forge/task-*`).
+  An optional external author manifest `source_branch` is accepted only when
   independently verified against the remote branch tip or verified ancestry
   (`merge-base --is-ancestor`); spoofing another branch or claiming `main` fails
   closed before submission. Slugs use `<sanitized-prefix>-<sha256(branch)[:16]>`
   to prevent path traversal and collisions (`feat/a-b` vs `feat-a/b`). Writes only
   to `scopes/<project>/branch--<slug>/<compat_key>`.
 - **`detached`**: Selected when zero or multiple remote heads match an explicit-free
-  candidate. Strictly **non-writable** (`publish_status: "skipped_unscoped"`).
+  candidate (or non-`main` legacy integrate-first runs without a published branch).
+  Strictly **non-writable** (`publish_status: "skipped_unscoped"`).
 - **Read-only `main` seeding**: When `seed_from_main: true`, a cold `branch/<slug>`
   or `detached` run may copy `main`'s matching `<compat_key>` snapshot as a
   read-only seed (`restore_status: "hit_main_seed"`) without ever modifying `main`.
@@ -299,7 +298,8 @@ after strict two-phase timestamp validation:
   `ProtectSystem=strict`.
 - **Operator cache clear**: `setup-ci.py` installs `clear-ci-cache.py` to
   `/usr/local/sbin/forge-ci-cache-clear` (`0755 root:root`, deliberately excluded
-  from `/etc/sudoers.d/forge-ci-check`). Clear under `executor.lock` + `cache.lock`:
+  from `/etc/sudoers.d/forge-ci-check` and `/etc/sudoers.d/forge-native-ci-check`).
+  Clear under `executor.lock` + `cache.lock`:
 
 ```sh
 # Clear all cached scopes
@@ -320,33 +320,6 @@ The next Jenkins build automatically falls back to a clean rebuild (`restore_sta
 - `branch_scope`: echoed validated scope (bound in `work_external_delivery.py:verify()`)
 - `cache`: `{enabled, provider, project_alias, branch_scope, compat_key, restore_status, restore_fallback_reason, restore_elapsed_ms, restored_bytes, restored_files, publish_status, publish_elapsed_ms, published_bytes, published_files, evicted_entries, cache_total_bytes, cache_entry_count}`
 - `stages`: ordered stage timings (`prepare_source`, `cache_restore`, `check_0`, `check_1`, `check_2`, `verify_source_clean`, `cache_publish`, `cleanup`), with `check_0` and `check_1` reporting Cargo-parsed `cargo_compiling_units`, `cargo_finished_count`, and `cargo_compile_ms` (explicitly marked `cargo_reported_cumulative_phase_ms`, distinct from wall-clock stage `elapsed_ms`), plus `ui_qa_stages` from `run.json` on `check_1`.
-
-### CI routing note
-
-GitHub Actions remain disabled. External delivery verification executes exclusively
-through local Jenkins (`forge-exact-candidate`). Legacy native publication code on
-the `a3968c1` receipt-bound baseline (`work_publication.py` / `work_hosted_checks.py`)
-still references disabled GitHub hosted checks and is not modified by this task.
-=======
-through Jenkins's native API, with a180-day expiration (2027-05-20). It used the
-existing administrator password only for the provisioning request, retaining the
-CSRF crumb's session cookie. Runtime calls use Basic username/API-token auth,
-never that password. The token inherits the existing administrator account's
-permissions. Client mutation policy defaults tofalse; it is not a narrower
-server-side role. Configuration and token files are private and outside Git.
-
-The reviewed provisioner durably saves its intent before issuing the token, saves
-a protected secret receipt for delivery recovery, and refuses to repeat an
-uncertain creation. Operator-home writes run after permanently dropping UID/GID;
-token/intent values never enter command arguments or logs. Successful reruns
-reuse and verify the same receipt instead of creating another token.
-
-Initial client acceptance verified status, the then-empty job list, explicit
-mutation denial and a typed absent-queue response. Later pipeline acceptance ran
-a real full-suite Jenkins smoke build; its source and results are recorded in
-`AGENT_WORK.md`. That smoke result is not a CI receipt for a current task. The
-native service's security settings and stopped Grok run remain as recorded above.
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 Official references: [Linux installation](https://www.jenkins.io/doc/book/installing/linux/),
 [systemd overrides](https://www.jenkins.io/doc/book/system-administration/systemd-services/),

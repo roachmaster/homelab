@@ -24,13 +24,10 @@ BASE = Path('/opt/forge-ci')
 NODE_MODULES = BASE / 'node_modules'
 PRIVATE = Path('/var/lib/forge-provisioning/jenkins-ci')
 CONFIG = Path('/etc/forge-ci')
-<<<<<<< HEAD
 DEFAULT_TIMEOUT_SECONDS = 2700
 DEFAULT_CARGO_CACHE_MAX_BYTES = 20 * 1024 * 1024 * 1024
 DEFAULT_CARGO_CACHE_MAX_ENTRIES = 8
 DEFAULT_CARGO_CACHE_MAX_AGE_SECONDS = 14 * 86400
-=======
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -141,7 +138,6 @@ def qualify_remoting(path, expected_sha256, account):
             raise ValueError('Installed remoting does not expose required flags')
 
 
-<<<<<<< HEAD
 def render_pipeline_config(*, operator, spool, state_root, toolchain, registry, modules, verifier_sha256):
     return {
         'version': 1,
@@ -198,7 +194,8 @@ TimeoutStopSec=30
 [Install]
 WantedBy=multi-user.target
 '''
-=======
+
+
 def native_installation_plan(pipeline, verifier):
     """Pure selection: legacy helper/config/job bytes are never changed."""
     if (not isinstance(pipeline, dict) or type(pipeline.get('version')) is not int or pipeline['version'] != 1
@@ -269,7 +266,6 @@ def execute_native(client_path, operator):
         'no_job_submitted': True}
     install(PRIVATE / 'native-provisioned.json', (json.dumps(report, indent=2) + '\n').encode(), mode=0o600)
     print(json.dumps(report))
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 
 def execute(client_path, operator):
@@ -307,7 +303,6 @@ def execute(client_path, operator):
             shutil.copytree(source, destination, symlinks=True)
             root_readable_tree(destination)
     verifier = (HERE / 'verify-candidate.py').read_bytes()
-<<<<<<< HEAD
     verifier_sha256 = hashlib.sha256(verifier).hexdigest()
     clear_helper = (HERE / 'clear-ci-cache.py').read_bytes()
     clear_helper_sha256 = hashlib.sha256(clear_helper).hexdigest()
@@ -321,14 +316,6 @@ def execute(client_path, operator):
     # Operator cache clear tool is root-only and deliberately NOT added to jenkins sudoers.
     directory(Path('/usr/local/sbin'))
     install(Path('/usr/local/sbin/forge-ci-cache-clear'), clear_helper, mode=0o755)
-=======
-    release = BASE / ('verifier-' + hashlib.sha256(verifier).hexdigest()[:16])
-    directory(release)
-    install(release / 'verify-candidate.py', verifier, mode=0o755)
-    directory(Path('/usr/local/libexec'))
-    wrapper = Path('/usr/local/libexec/forge-ci-check')
-    install(wrapper, verifier, mode=0o755)
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
     rule = b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-ci-check *\n'
     staged_rule = PRIVATE / 'sudoers-check'
     install(staged_rule, rule, mode=0o440)
@@ -341,7 +328,6 @@ def execute(client_path, operator):
     directory(spool, user.pw_uid, jenkins.pw_gid, 0o750)
     directory(state_root / 'ci-results', 0, user.pw_gid, 0o750)
     directory(state_root / 'ci-work', 0, build.pw_gid, 0o711)
-<<<<<<< HEAD
     directory(state_root / 'ci-cache', 0, 0, 0o700)
     directory(state_root / 'jenkins-agent', jenkins.pw_uid, jenkins.pw_gid, 0o700)
     pipeline = render_pipeline_config(
@@ -353,15 +339,6 @@ def execute(client_path, operator):
         modules=modules,
         verifier_sha256=verifier_sha256,
     )
-=======
-    directory(state_root / 'jenkins-agent', jenkins.pw_uid, jenkins.pw_gid, 0o700)
-    pipeline = {'version': 1, 'build_user': 'forge_ci', 'submitter_user': operator,
-        'spool_root': str(spool), 'results_root': str(state_root / 'ci-results'),
-        'work_root': str(state_root / 'ci-work'), 'toolchain': str(toolchain),
-        'cargo_registry': str(registry), 'node_modules': str(modules),
-        'projects': ['homelab'], 'verification_profile': 'forge-sdlc-jenkins-v1',
-        'timeout_seconds': 1800, 'verifier_sha256': hashlib.sha256(verifier).hexdigest()}
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
     install(CONFIG / 'pipeline.json', (json.dumps(pipeline, indent=2) + '\n').encode())
     script = (HERE / 'ci-node.groovy').read_text()
     response = request(client, 'scriptText', body=urllib.parse.urlencode({'script': script}).encode())
@@ -373,52 +350,16 @@ def execute(client_path, operator):
     jar = request(client, 'jnlpJars/agent.jar')
     install(BASE / 'agent.jar', jar)
     qualify_remoting(BASE / 'agent.jar', hashlib.sha256(jar).hexdigest(), build)
-<<<<<<< HEAD
     unit = render_agent_unit()
-=======
-    unit = '''[Unit]
-Description=Forge isolated Jenkins CI executor
-After=jenkins.service
-Requires=jenkins.service
-[Service]
-User=jenkins
-Group=jenkins
-WorkingDirectory=/mnt/data/forge-homelab/jenkins-agent
-ExecStart=/usr/bin/java -jar /opt/forge-ci/agent.jar -url http://127.0.0.1:18084/ -name forge-mission-control-ci -secret @/etc/forge-ci/agent-secret -webSocket -workDir /mnt/data/forge-homelab/jenkins-agent
-Restart=on-failure
-RestartSec=5
-UMask=0077
-ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
-PrivateMounts=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-IPAddressDeny=any
-IPAddressAllow=localhost
-InaccessiblePaths=/mnt/data/forge-homelab/jenkins /mnt/data/forge-homelab/postgres /etc/jenkins /etc/homelab-forge /var/lib/jenkins/.config /var/lib/jenkins/.ssh
-ReadWritePaths=/mnt/data/forge-homelab/jenkins-agent /mnt/data/forge-homelab/ci-work /mnt/data/forge-homelab/ci-results /var/lib/forge-ci
-KillMode=control-group
-TimeoutStopSec=30
-[Install]
-WantedBy=multi-user.target
-'''
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
     install(Path('/etc/systemd/system/forge-jenkins-ci-agent.service'), unit.encode())
     subprocess.run(['systemctl', 'daemon-reload'], check=True)
     subprocess.run(['systemctl', 'enable', '--now', 'forge-jenkins-ci-agent.service'],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     report = {'version': 1, 'node': info['node'], 'job': info['job'],
         'controller_executors': 0, 'separate_build_user': build.pw_name,
-<<<<<<< HEAD
         'fixed_helper_sha256': verifier_sha256,
         'clear_helper_sha256': clear_helper_sha256,
         'cargo_cache_root': str(state_root / 'ci-cache'),
-=======
-        'fixed_helper_sha256': hashlib.sha256(verifier).hexdigest(),
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         'agent_jar_sha256': hashlib.sha256(jar).hexdigest(),
         'no_job_submitted': True}
     install(PRIVATE / 'provisioned.json', (json.dumps(report, indent=2) + '\n').encode(), mode=0o600)
@@ -430,16 +371,9 @@ if __name__ == '__main__':
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--client-config', type=Path, required=True)
     parser.add_argument('--operator', default='lrocha')
-<<<<<<< HEAD
-    options = parser.parse_args()
-    if not options.execute:
-        parser.error('Explicit --execute is required')
-    execute(options.client_config, options.operator)
-=======
     parser.add_argument('--native-only', action='store_true',
                         help='Add the separate branch-first job; preserve the installed legacy executor/job')
     options = parser.parse_args()
     if not options.execute:
         parser.error('Explicit --execute is required')
     (execute_native if options.native_only else execute)(options.client_config, options.operator)
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49

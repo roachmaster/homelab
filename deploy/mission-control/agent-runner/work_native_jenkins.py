@@ -17,7 +17,7 @@ from uuid import UUID, uuid5
 
 from work_executor import unit_name
 from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
-    LeaseLost, canonical, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
+    LeaseLost, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
 from work_publication_checks import VerificationFailure
 from work_publication_clients import PublicationError, branch_name
@@ -237,12 +237,7 @@ class NativeJenkinsVerification:
                     'native_gate_manifest_sha256': native_gate}
         action = str(uuid5(UUID(scope['workflow_id']), VERSION + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
         prepare = str(uuid5(UUID(action), 'candidate-bundle'))
-        request = {**scope, 'action_id': action, 'prepare_action_id': prepare,
-            'candidate_commit': head, 'candidate_tree': tree, 'integration_base': expected_main,
-            'gate_manifest_sha256': gate}
-        binding = {'version': VERSION, 'scope': scope, 'request': request,
-            'native_gate_manifest_sha256': native_gate, 'jenkins_gate_source_sha256': source,
-            'verifier_sha256': helper, 'transport_sha256': self._transport_digest()}
+        publication = None
         if getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1':
             path = self.delivery.config.state_root / 'branches' / (scope['review_id'] + '.json')
             publication = json.loads(read_private(path, owner=os.geteuid()))
@@ -252,6 +247,20 @@ class NativeJenkinsVerification:
             publication['event_id'] = uid(event['event_id'])
             if publication.get('scope') != scope or publication.get('candidate_commit') != head:
                 raise PublicationError('native_branch_identity_changed')
+        source_branch = ('main' if head == expected_main
+                         else publication['branch'] if publication is not None else None)
+        branch_scope = derive_branch_scope(
+            candidate_commit=head, expected_main=expected_main, source_branch=source_branch,
+        )
+        request = {**scope, 'action_id': action, 'prepare_action_id': prepare,
+            'candidate_commit': head, 'candidate_tree': tree, 'integration_base': expected_main,
+            'branch_scope': branch_scope, 'gate_manifest_sha256': gate}
+        if source_branch is not None:
+            request['source_branch'] = source_branch
+        binding = {'version': VERSION, 'scope': scope, 'request': request,
+            'native_gate_manifest_sha256': native_gate, 'jenkins_gate_source_sha256': source,
+            'verifier_sha256': helper, 'transport_sha256': self._transport_digest()}
+        if publication is not None:
             binding['source_publication'] = publication
         directory = self._directory(action)
         directory.mkdir(parents=True, mode=0o700, exist_ok=True)

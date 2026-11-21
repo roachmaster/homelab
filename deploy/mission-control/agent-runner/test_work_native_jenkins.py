@@ -121,6 +121,8 @@ class NativeJenkinsTest(unittest.TestCase):
 
     def test_one_real_candidate_action_is_reused_by_hosted_and_merge_observation(self):
         binding = self.local_pass()
+        self.assertEqual(binding['request']['branch_scope'], 'main')
+        self.assertEqual(binding['request']['source_branch'], 'main')
         self.assertEqual(self.driver.submissions, 1)
         self.assertEqual(self.git._git(self.repository,'rev-parse','HEAD').decode().strip(), self.head)
         for job in (self.hosted, {**self.hosted,'source_review_id':None,'review_id':self.scope['review_id']}):
@@ -277,6 +279,12 @@ class NativeJenkinsTest(unittest.TestCase):
         self.active = False
         for _ in range(5):self.provider.reconcile_once(limit=8)
         self.assertTrue((directory/'cancel-observation.json').exists())
+
+    def test_non_main_integrate_first_candidate_uses_non_writable_detached_branch_scope(self):
+        detached_job = {**self.job, 'integration_base': '0' * 40}
+        binding = self.provider._prepare(detached_job, self.repository)
+        self.assertEqual(binding['request']['branch_scope'], 'detached')
+        self.assertNotIn('source_branch', binding['request'])
 
 
 class NativeFactoryTest(unittest.TestCase):
