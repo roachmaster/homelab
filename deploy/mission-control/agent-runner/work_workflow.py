@@ -216,6 +216,8 @@ class WorkflowStore:
                 if previous['status']!='completed' or not previous['finish_receipt']:raise Rejected(409,'reconcile_required')
                 return dict(previous['finish_receipt']['receipt'])
             if task['revision']!=expected_revision:raise Rejected(409,'revision_conflict')
+            from work_owner_control import owner_continuation_used
+            if owner_continuation_used(cursor, task['workflow_id']):raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s AND owner_id=%s AND project_alias=%s FOR UPDATE',
                            (task['workflow_id'],self.store.owner,project_alias))
             w=cursor.fetchone()
@@ -464,6 +466,8 @@ class WorkflowStore:
             if prior:
                 if prior['action']!='review_decide' or prior['intent_digest']!=intent:raise Rejected(409,'idempotency_conflict')
                 return dict(prior['receipt_json'])
+            from work_owner_control import owner_continuation_used
+            if owner_continuation_used(cursor, task['workflow_id']):raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE',
                            (self.store.owner,project_alias,task_id,review_id));q=cursor.fetchone()
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR UPDATE',
@@ -566,6 +570,8 @@ class WorkflowStore:
                 if prior['intent']!=intent:raise Rejected(409,'idempotency_conflict')
                 if prior['status']!='completed' or not prior['finish_receipt']:raise Rejected(409,'reconcile_required')
                 return dict(prior['finish_receipt']['receipt'])
+            from work_owner_control import owner_continuation_used
+            if owner_continuation_used(cursor, task['workflow_id']):raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE',
                            (self.store.owner,project_alias,task_id,review_id));q=cursor.fetchone()
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR UPDATE',
@@ -874,7 +880,12 @@ class WorkflowStore:
         else:
             source=self._code_review_source(cursor,review,task,authority)
             budget=self._exhausted_code_budget(cursor,task,source) if decision=='revise' else None
-            if budget is not None:
+            from work_owner_control import owner_continuation_used
+            owner_spent = decision == 'revise' and owner_continuation_used(cursor, w['workflow_id'])
+            if owner_spent:
+                authority.validate(cursor,task,'code')
+                receipt=self._code_handoff(cursor,w,review,'owner_continuation_exhausted',budget)
+            elif budget is not None:
                 authority.validate(cursor,task,'code')
                 receipt=self._code_handoff(cursor,w,review,'repair_budget_exhausted',budget)
             else:
