@@ -17,6 +17,16 @@ migrations1–19, exact receipt replay and P10 policy are unchanged. Proposed
 persistence lives in the [storage contract](proposals/muse-intake-storage.md),
 outside executable migrations.
 
+## Existing read-only observation
+
+The operator-managed `muse_events` account retains its authorized read access to
+thirteen coding lifecycle tables, schema `USAGE` and database `CONNECT`. The
+[read-access contract](../../deploy/mission-control/sql/README.md#optional-muse-read-access)
+checks that exact capability without changing account credentials or granting
+writes, function execution, task ownership or approval authority. The localhost
+SCRAM HBA rule remains in place. This observation capability is independent of
+the unimplemented external intake below; it creates no consumer or watcher.
+
 ## Rejected authority path
 
 The incoming implementation fabricated a `systemd` receipt asserting

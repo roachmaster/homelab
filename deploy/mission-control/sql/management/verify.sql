@@ -673,6 +673,9 @@ SELECT version, name, applied_at
 FROM forge_agent.schema_migrations
 ORDER BY version;
 
+-- Validate the optional reader before adjusting only its reviewed ACL entry.
+\ir verify-muse-read-access.sql
+
 \ir verify-feedback.sql
 
 \ir verify-autonomy.sql
