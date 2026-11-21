@@ -921,7 +921,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.cluster.admin_exec(drift)
                 result = self.cluster.run_sql_script(script)
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("claim policy predicates", result.stderr)
+                self.assertIn("Unattended AGY function drift: forge_coding_worker_api.claim", result.stderr)
             finally:
                 self.cluster.admin_exec(function)
         self.cluster.apply_and_verify()
