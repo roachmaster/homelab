@@ -836,9 +836,15 @@ class WorkflowStore:
 
 
 class WorkflowCoordinator:
-    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=30):
+    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=30,external_maintenance=None,clock=time.monotonic):
+        if external_maintenance is not None and not callable(external_maintenance):
+            raise TypeError('External maintenance requires an injected callback')
         self.store=store;self.worker_id=worker_id;self.interval_seconds=interval_seconds;self.stop=threading.Event();self._thread=None
+        self._external_maintenance=external_maintenance;self._clock=clock;self._next_external=float('-inf')
     def run_once(self):
+        if self._external_maintenance is not None and self._clock()>=self._next_external:
+            self._next_external=self._clock()+30
+            self._external_maintenance()
         job=self.store.claim(self.worker_id)
         if job:self.store.process(job)
         return job is not None
@@ -871,6 +877,7 @@ class WorkflowCoordinator:
 
 
 class WorkflowCoordinatorFactory:
-    def __init__(self,config,catalog,store):self.config=config;self.catalog=catalog;self.store=store
+    def __init__(self,config,catalog,store,*,external_maintenance=None):
+        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance
     def create(self):
-        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store))
+        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store),external_maintenance=self.external_maintenance)

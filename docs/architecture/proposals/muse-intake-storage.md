@@ -1,6 +1,7 @@
 # Proposed external Muse submission storage
 
-This is an unimplemented contract, not an executable migration. No migration
+This is an archived, unimplemented intake contract, not the current
+[Muse DB provider](../muse-agent.md) or an executable migration. No migration
 number, database role or consumer is allocated. Migrations1–19 and their strict
 catalog/privilege verifiers remain unchanged.
 
@@ -31,7 +32,7 @@ Every future privileged SQL function needs exact catalog/body/ACL expectations
 and negative drift tests, alongside expiry, replay and cross-owner tests.
 
 The later migration0020 feature proposal remains unaccepted; it is not copied
-into executable migrations. See the [reviewed gaps](../muse-agent.md#review-of-the-proposed-migration0020-revision).
+into executable migrations. See the [reviewed gaps](muse-intake-rejected.md#review-of-the-proposed-migration0020-revision).
 
 Payload validation and text hashes cannot stand in for external execution or
 source evidence. No task transition, event, review or reconciliation occurs

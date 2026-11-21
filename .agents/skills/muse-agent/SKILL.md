@@ -1,31 +1,41 @@
 ---
 name: muse-agent
-description: Review or extend the proposed external Muse intake design. Its DTOs and validators are dormant; use the manual email transport for current Muse assignments.
+description: Integrate or review the external Muse database provider. Muse owns its runner; Forge admits scoped database assignments and honest artifacts without launching Muse CLI or email.
 ---
 
-# External Muse intake design
+# External Muse database provider
 
 Start with [Wire Forge Providers](../wire-forge-providers/SKILL.md) and the
-[Muse intake proposal](../../../docs/architecture/muse-agent.md).
+[Muse DB contract](../../../docs/architecture/muse-agent.md).
 
-Email remains the primary, operator-invoked Muse integration. The separately
-merged native Muse Code adapter defaults disabled. External email intake has no
-live watcher, database login, schema migration, worker registration or service.
-Its consumer and store operations reject before acquiring ports. Changing a
-profile or borrowing existing worker credentials cannot enable this scaffold.
+Use `muse-db-primary` with resource `forge-external-db-v1`, explicit enablement,
+model metadata `external-runner` and portal transport `external_db`. Native
+`muse-primary` remains disabled under frozen P10. Do not enable the old
+[external intake prototype](../../../docs/architecture/proposals/muse-intake-rejected.md).
 
-A future implementation needs a typed external-result receipt with authenticated
-producer, owner/project/task revision, exact source/content digests and genuine
-execution provenance. Never invent a systemd stop proof or substitute a text
-result hash for a workspace reconciliation digest.
+The external runner owns execution and uses the scoped PostgreSQL capabilities,
+advertise, claim, renew/progress, finish/release and artifact functions. Preserve
+the existing read permissions/default and narrow authentication rule. Scope
+checks precede replay; every mutation requires the bound principal, task intent,
+generation, token, revision, lease and deadline. Notifications only wake a durable
+queue scan. Never give the runner arbitrary table-write or native worker access.
 
-Review claim-token fencing, bounded expiry retries, scoped submission columns,
-atomic event/receipt commits, duplicate replay and cancellation before admission.
-Bind the complete producer/owner/project/task/revision/kind/payload intent for
-idempotency. Check authorization before replay, and retain owner, generation,
-token and unexpired-lease predicates on every mutation. Review the documented
-migration0020 gaps; passing happy-path fixtures does not qualify its privileged
-SQL or external implementation/review receipts.
-Keep external data separate from native work profiles and frozen P10 recipes.
-An externally supplied plan must become a bound independent-review artifact,
-not a new plan prompt waiting for its own result.
+Bootstrap selects effect-free factories and injects a narrow ExternalWorkPort.
+Task/event/assignment admission is atomic inside the owning WorkStore cursor.
+The existing coordinator owns bounded database-only expiry maintenance, including
+when the portal is closed. No local Muse CLI process or email/usage poller is
+part of this provider.
+
+External Plan/Review artifacts appear as `external_result` with `provider:
+muse-db`, their actual digest/content/time and bounded summary. Never manufacture
+native attempts, systemd stop proofs or workspace reconciliation receipts. The
+256KiB artifact and 4KiB summary limits protect report transport, not model token
+budgets. Implement, independent artifact-context review and Jenkins/candidate
+integration require a separate bridge; awaiting_review is not approval or merge.
+Progress summaries remain database-only in this slice; portal task status and
+the final external artifact are visible without inventing native progress IDs.
+
+Preserve native AGY/Codex workflows and historical recipes. Keep idempotent task
+receipt lookup before current admission checks. Test selected-instance use,
+atomic rollback, cross-scope and stale-lease denial, honest readiness/artifacts,
+response bounds and shutdown using fake ports and isolated PostgreSQL.

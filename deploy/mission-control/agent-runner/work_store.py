@@ -1,7 +1,7 @@
 """PostgreSQL DAO for Forge coding-job durable admission, execution queries, and control."""
 
 from contextlib import closing, contextmanager
-from datetime import UTC
+from datetime import UTC, datetime
 import json
 import psycopg2
 import re
@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from psycopg2.extras import Json, RealDictCursor, register_uuid
 
 from queue_store import Rejected
+from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, MODES as EXTERNAL_MODES
 from work_config import (
     DEFAULT_MAX_PENDING,
     DEFAULT_REPAIR_POLICY,freeze_repair_policy,
@@ -196,7 +197,7 @@ def _parse_result_cursor(cursor):
 class WorkStore:
     """Owner- and project-scoped durable store for coding jobs, results, and control receipts."""
 
-    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None):
+    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None, external_port=None):
         self._repair_policy=freeze_repair_policy(repair_policy or DEFAULT_REPAIR_POLICY)
         self._owner = validate_owner(owner)
         if not isinstance(allowed_projects, (frozenset, set, tuple, list)):
@@ -213,6 +214,12 @@ class WorkStore:
         self._allowed_projects = frozen_projects
         self._connect_factory = connect_factory
         self._max_pending = max_pending
+        if external_port is not None and (
+            not isinstance(external_port.profiles, frozenset)
+            or not all(callable(getattr(external_port, name, None)) for name in ("enqueue", "catalogue", "artifact_by_task", "reconcile"))
+        ):
+            raise TypeError("External work requires an explicit scoped port")
+        self._external = external_port
 
     @property
     def owner(self):
@@ -230,14 +237,21 @@ class WorkStore:
         if project_alias not in self._allowed_projects:
             raise Rejected(403, "denied")
 
+    def maintain_external(self):
+        if self._external is not None:
+            with self._transaction() as cursor:
+                self._external.reconcile(cursor)
+
     @contextmanager
-    def _transaction(self, *, read_only=False):
+    def _transaction(self, *, read_only=False, repeatable_read=False):
         try:
             with closing(self._connect_factory()) as connection:
                 with connection:
                     with connection.cursor(cursor_factory=RealDictCursor) as cursor:
                         if read_only:
                             cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                        elif repeatable_read:
+                            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
                         cursor.execute("SELECT pg_catalog.set_config('forge.coding_owner',%s,true)",(self._owner,))
                         yield cursor
         except psycopg2.Error as error:
@@ -259,6 +273,7 @@ class WorkStore:
                 ORDER BY observed_at DESC, worker_id ASC
             """, (WORKER_FRESHNESS_SECONDS, self._owner))
             rows = cursor.fetchall()
+            external = self._external.catalogue(cursor) if self._external is not None else ()
 
         if not rows:
             worker_status = "unknown"
@@ -269,6 +284,18 @@ class WorkStore:
 
         advertised_revisions = {}
         advertised_profile_modes = {}
+        for entry in external:
+            profile = config.profiles.get(entry.profile_alias)
+            if (entry.project_alias not in config.allowed_projects or profile is None
+                    or not profile.is_external or not profile.execution_enabled):
+                continue
+            if entry.observed_at is not None and (observed_at is None or datetime.fromisoformat(entry.observed_at.replace("Z", "+00:00")) > datetime.fromisoformat(observed_at.replace("Z", "+00:00"))):
+                observed_at = entry.observed_at
+            if entry.is_fresh:
+                worker_status = "ready"
+                advertised_profile_modes.setdefault(entry.profile_alias, set()).update(EXTERNAL_MODES & config.allowed_modes)
+            elif worker_status == "unknown":
+                worker_status = "offline"
         for row in rows:
             if not row["is_fresh"]:
                 continue
@@ -333,6 +360,7 @@ class WorkStore:
                 "backend": profile.backend,
                 "model": profile.model,
                 "modes": [m for m in MODE_ORDER if m in modes],
+                **({"transport": "external_db"} if profile.is_external else {}),
             })
         return {
             "projects": projects,
@@ -433,6 +461,10 @@ class WorkStore:
                 )
                 VALUES (%s, %s, %s, 1, 'queued', %s)
             """, (self._owner, project_alias, task_id, Json(receipt)))
+            if recipe.resource_profile == EXTERNAL_POLICY_ID:
+                if self._external is None or agent_profile not in self._external.profiles:
+                    raise Rejected(503, "unavailable")
+                self._external.enqueue(cursor, project_alias, task_id)
             cursor.execute("SELECT pg_catalog.pg_notify(%s, '')", (NOTIFY_CHANNEL,))
             return receipt
 
@@ -440,7 +472,11 @@ class WorkStore:
         self._require_project(project_alias)
         if not isinstance(task_id, UUID):
             raise Rejected(400, "invalid_request")
-        with self._transaction(read_only=True) as cursor:
+        # External artifact authorization retains a scoped FOR SHARE fence.
+        # Allow that lock while retaining one coherent task/artifact snapshot;
+        # this read path performs no data mutations. Native-only configs stay RO.
+        read_mode = {"repeatable_read": True} if self._external is not None else {"read_only": True}
+        with self._transaction(**read_mode) as cursor:
             cursor.execute("""
                 SELECT id, project_alias, base_revision, mode, agent_profile,
                        recipe_digest, status, revision, created_at,
@@ -529,6 +565,10 @@ class WorkStore:
                 detail["review"]=review
             if "title" not in detail:
                 detail["title"] = prepare_title(row["prompt"])
+            if self._external is not None and row["agent_profile"] in self._external.profiles:
+                artifact = self._external.artifact_by_task(cursor, project_alias, task_id)
+                if artifact is not None:
+                    detail["external_result"] = artifact
             return detail
 
     def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None):

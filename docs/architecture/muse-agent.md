@@ -1,133 +1,124 @@
-# External Muse intake proposal
+# Muse database provider
 
-Status: **dormant design and validation scaffold; no runtime integration**.
-Muse email remains the primary manual transport. The separate
-[native Muse Code adapter](muse-code-provider.md) defaults disabled. Neither
-capability is enabled by this consolidation.
+Forge supports an external Muse runner through PostgreSQL. Muse owns its runner
+and compute; Mission Control does not launch its CLI or send email. Bootstrap
+selects a scoped external provider through the normal WorkService factory and
+injects its narrow DAO into WorkStore. The old [intake prototype](proposals/muse-intake-rejected.md)
+remains dormant and is not this protocol.
 
-The proposal would bind untrusted external plans, progress and results to the
-existing independently reviewed SDLC. Source retains payload validators, frozen
-configuration DTOs, UTF-8 chunking and digest calculation. Factory, consumer and
-store operations reject before acquiring database, process, account or worker
-ports. Setting `enabled: true` is rejected; no work capability is advertised.
+The configured profile is `muse-db-primary`, backend `muse`, model metadata
+`external-runner`, resource `forge-external-db-v1`, with explicit
+`execution_enabled: true`. The external policy digest is SHA-256 of that resource
+identifier. It is separate from frozen native P10. Native `muse-primary` stays
+disabled, and native workers cannot claim external recipes. Existing AGY/Codex
+project workflows retain their configured roles and immutable policy identities.
 
-There is no installed consumer, background watcher, new database role, M20
-migration, task-event writer or worker API grant. Existing coordinator/WorkerDB,
-migrations1–19, exact receipt replay and P10 policy are unchanged. Proposed
-persistence lives in the [storage contract](proposals/muse-intake-storage.md),
-outside executable migrations.
+## Admission, dispatch and artifacts
 
-## Existing read-only observation
+A task submitted through the existing portal/API creates its ordinary durable
+`coding_tasks` row, queued event and external assignment in one transaction.
+Idempotent receipt lookup happens before recipe resolution or enqueue, including
+when a profile is subsequently disabled. Changed intent conflicts. Scope grants
+bind the authenticated database principal, service, owner, project and profile;
+caller-supplied names do not grant authority.
 
-The operator-managed `muse_events` account retains its authorized read access to
-thirteen coding lifecycle tables, schema `USAGE` and database `CONNECT`. The
-[read-access contract](../../deploy/mission-control/sql/README.md#optional-muse-read-access)
-checks that exact capability without changing account credentials or granting
-writes, function execution, task ownership or approval authority. The localhost
-SCRAM HBA rule remains in place. The pre-existing default for future tables
-created by `forge_agent_owner` in schema `forge_agent` also retains
-non-grantable `SELECT` for this reader; global, other-owner/schema/type,
-write, grant-option or extra-grantee defaults are rejected. The thirteen
-current-table reads remain explicit. This observation capability is independent of
-the unimplemented external intake below; it creates no consumer or watcher.
+The task picker exposes an external profile only after a fresh scoped heartbeat.
+It emits `transport: external_db`; its display model does not assert a discovered
+model version or account allowance. The existing trusted project revision is
+used. An installation with no known project revision cannot invent one merely
+because the external runner advertised. Account usage configuration stays
+separate: this provider does not request native Muse quota or model metadata.
 
-## Rejected authority path
+External Plan and Review modes return text artifacts. Their detail projection is
+`external_result`, containing `assignment_id`, `provider: muse-db`, `sha256`,
+`content`, `submitted_at` and `summary`. Content is at most 256KiB and the summary
+at most 4096 UTF-8 bytes. These are report-transport bounds, not generation-token
+limits. No native attempt, systemd proof, workspace digest or reconciliation
+receipt is manufactured.
 
-The incoming implementation fabricated a `systemd` receipt asserting
-`scope_stopped: true` without observing a process scope. It passed a text-result
-hash as a workspace reconciliation digest. Those hooks and its specific-task
-claim API were removed completely. Validated text cannot prove execution or
-source ownership, even when reviewed later.
-
-Original claims also lacked owner/token fencing and expiry retry limits. Broad
-INSERT rights admitted producer-controlled lifecycle fields. Progress events
-were neither atomic with completion nor safe against duplicate replay. These
-paths require a separate reviewed implementation rather than disabled flags.
-
-## Retained data contracts
-
-| Kind | Proposal data | Current behavior |
-| --- | --- | --- |
-| `submit_plan` | Project, base revision, bounded plan and distinct reviewer | Validation only |
-| `publish_result` | Bounded UTF-8 chunks, awaiting-review outcome and optional bounded summary | Validation only; publication rejected |
-| `progress` | Bounded nonempty summary | Validation only; no task event |
-
-Digests are data, not execution or approval authority. No external model is
-implicitly selected and no native P10 recipe is minted for these messages.
-The optional summary follows the existing4096-byte UTF-8 text limit. It remains
-untrusted display data and cannot contain admission, lifecycle or receipt fields.
-
-## Review of the proposed migration0020 revision
-
-The later feature revision proposed typed SQL submission, random claim tokens,
-three-attempt expiry handling and an atomic result-admission function. Its27
-focused tests passed without skips against owned disposable PostgreSQL16. That
-coverage did not establish the authority boundaries required for deployment.
-Only the bounded optional result summary and its pure validation regressions
-are retained from that revision. Its SQL, roles, service, coordinator hooks and
-external completion path are not installed or merged into runtime source.
-
-| Remaining gap | Required behavior before a separate implementation can be admitted |
-| --- | --- |
-| Producer scope | Derive allowed owners, projects and target tasks from authenticated grants; caller-supplied identifiers cannot grant authority. |
-| Incomplete replay identity | Bind producer, correlation, owner, project, task, expected revision, kind and payload digest. A changed target must conflict even when the text matches. |
-| Receipt replay before authorization | Authenticate and check target scope before returning an existing receipt; a known row UUID or arbitrary token cannot disclose another owner's receipt. |
-| Incomplete lease fence | Every release, rejection, progress application and completion must check owner, claim identity, generation, token and unexpired lease, and must check the affected-row result. |
-| Progress races | Lock and validate the current task revision/state and project binding in the same transaction as event sequence allocation and row completion. |
-| External and native provenance mixed | Keep external artifacts separate from native P10 execution capability and workspace reconciliation. Text hashes and a renamed proof cannot establish implementation source or execution. |
-| Plan not delivered | Opening a workflow with a stub prompt leaves the actual submitted plan unpublished. Bind the supplied plan itself to independent review without requiring a second unrelated result submission. |
-| New SQL authority not fully verified | Exact owner, ACL, security-definer/search-path and function-body expectations must cover each new privileged operation and reject deliberate drift. |
-
-Implementation and review artifacts also need exact approved-plan and source
-identity checks. A green plan/revision text fixture cannot qualify a complete
-implementation, independent review, CI or merge flow. The existing native
-receipt contracts and migration1–19 verifiers are preserved unchanged.
-
-## Intended ownership and sequence
+The terminal task status is `awaiting_review`: an actual artifact has arrived.
+This transport does not turn the artifact into an approved Plan or trusted code
+candidate. External Implement, native Resume/Plan decisions/repair targeting this
+provider, automatic independent-review context delivery, and a Jenkins/candidate
+bridge are not implemented. A Review artifact cannot approve another task or
+merge code. The existing native autonomous flow remains separate.
 
 ```mermaid
 sequenceDiagram
-    participant External as External Muse transport
-    participant Intake as Future authenticated intake
-    participant DB as Durable submission and outbox
-    participant Admission as Trusted external receipt verifier
-    participant SDLC as Existing independent SDLC
-    External->>Intake: untrusted bounded envelope
-    Intake->>DB: scoped idempotent submission
-    DB-->>Admission: wake hint and authoritative durable row
-    Admission->>Admission: verify identity, lease fence, revision and provenance
-    alt current implementation
-        Admission-->>External: unsupported; no task or worker mutation
-    else separately implemented and reviewed contract
-        Admission->>DB: atomic receipt and admitted event
-        DB-->>SDLC: exact bound artifact for independent review
-    end
+    participant Portal as Portal / Rust
+    participant Service as WorkService + injected external port
+    participant DB as PostgreSQL
+    participant Muse as External Muse runner
+    participant Coordinator as Owned workflow coordinator
+    Portal->>Service: submit Plan or Review / exact intent
+    Service->>DB: transaction: task + queued event + assignment
+    DB-->>Muse: LISTEN wake hint
+    Muse->>DB: advertise, scoped claim
+    DB-->>Muse: intent, generation, token, lease
+    Muse->>DB: renew / progress / bounded finish
+    DB->>DB: artifact + receipt + awaiting_review event atomically
+    Coordinator->>DB: bounded lease/deadline/cancellation reconciliation
+    Portal->>Service: get task
+    Service->>DB: scoped external artifact read
+    Service-->>Portal: external_result / awaiting_review
 ```
 
-Bootstrap would inject scoped transport/store ports through explicit factories.
-The producer would have submission authority only, without native worker or
-reconciler credentials. PostgreSQL remains durable authority; LISTEN/NOTIFY is
-only a wake hint. JavaScript renders state and forwards actions.
+## Runner SQL interface
 
-## Requirements before activation
+Connect using the operator-provisioned account. Do not embed credentials in
+prompts, task payloads, logs or the repository. The existing thirteen read grants,
+owner/schema-scoped future-table SELECT default, database connectivity and
+localhost SCRAM rule remain intact. New external operations use only the
+reviewed function allowlist; private assignment/artifact tables are not directly
+writable by the runner.
 
-- Define a typed external-attempt receipt binding authenticated producer,
-  correlation, owner/project/task revision, approved plan and exact source and
-  content digests. Reject implementation/review without verified provenance.
-- Restrict producer admission to permitted tasks and submission columns.
-  Producers cannot set status, attempts, claim owner/token, expiry or results.
-- Fence every claim/renew/release/finish with owner, random token, generation and
-  unexpired lease; check compare-and-set results and bound crash-driven retries.
-- Atomically commit the applied row, receipt, task transition and event. Repeated
-  correlations replay the exact authorized receipt; changed identity, target,
-  kind or payload conflicts. Check authorization before replay and reject stale,
-  cancelled, completed or unrelated tasks.
-- Admit an externally supplied plan as a bound review artifact; submitting its
-  text as another Plan prompt does not deliver that artifact or advance review.
-- Preserve independent reviews, revision budgets, verification and trusted
-  publication. External output cannot approve itself or merge.
-- Test expiry races, crashes, replay, cross-project attempts, partial results and
-  cancellation using isolated PostgreSQL and fake transports.
+```sql
+SELECT forge_external_agent_api.capabilities();
+SELECT forge_external_agent_api.advertise('homelab', 'muse-db-primary', 'my-runner');
+LISTEN forge_external_agent_jobs;
+SELECT forge_external_agent_api.claim('homelab', 'muse-db-primary');
+```
 
-Current regressions prove dormant entrypoints acquire no ports, cannot publish
-or reconcile, and install no intake authority. No real email or model calls run.
+Subscribe before scanning and rescan after reconnecting. Notifications are wake
+hints; durable rows determine whether work exists. Advertise regularly before
+the 90-second freshness window expires. A null claim means no eligible work.
+The runner binds the returned assignment ID, generation and secret token as
+parameters to subsequent calls; it must not log the token.
+
+```sql
+SELECT forge_external_agent_api.renew($1::uuid, $2::integer, $3::uuid);
+SELECT forge_external_agent_api.progress($1::uuid, $2::integer, $3::uuid, $4::text);
+SELECT forge_external_agent_api.finish($1::uuid, $2::integer, $3::uuid, $4::text, $5::text);
+SELECT forge_external_agent_api.release($1::uuid, $2::integer, $3::uuid);
+SELECT forge_external_agent_api.artifact($1::uuid);
+```
+
+A claim carries a bounded five-minute lease and an overall 24-hour deadline.
+Renewal cannot extend the deadline. Up to three generations are allowed;
+expired claims return to queued or fail when the budget/deadline is exhausted.
+The existing owned coordinator runs scoped database maintenance at most once
+per 30 seconds even when no portal page is open. No extra Muse process, account
+poller or email watcher runs on Mission Control.
+
+Finish binds the exact scope, generation, token, content digest and summary.
+Retry the same finish only to reconcile a lost acknowledgement; changed content
+or stale authority fails. Progress and completion events commit with their row
+changes. Progress summaries are database-only in this slice; the portal shows
+task status and the final external artifact, without a native progress or attempt
+projection. Cancellation fences further mutations. The external runner owns
+stopping its computation; a database receipt does not claim that Mission Control
+observed or killed an external process.
+
+## Construction and verification
+
+WorkServiceFactory selects ExternalWorkProviderFactory only for configured
+external profiles. Factory construction is effect-free. WorkStore owns each
+connection/transaction cursor and supplies that cursor to the external port;
+workers do not look up registries. The existing coordinator owns maintenance
+lifetime and quiesces through its normal close path before scoped ports close.
+
+Tests use substituted factories, fake ports and owned socket-only PostgreSQL.
+They cover admission rollback, duplicate/disabled-profile replay, scoped
+readiness, native-claim exclusion, real external artifacts without native
+receipts, escaped response-size bounds and lease recovery. No real Muse/model,
+email, account or paid API request is needed to verify this transport.

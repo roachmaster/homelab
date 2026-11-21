@@ -10,6 +10,7 @@ from uuid import UUID
 import chat_history_api as common
 from queue_store import Rejected
 from work_config import VALID_MODES, WorkCatalog, WorkConfig
+from work_external_policy import MODES as EXTERNAL_MODES
 from work_store import (
     RESULT_MAX_LIMIT_BYTES,
     RESULT_MIN_LIMIT_BYTES,
@@ -219,7 +220,10 @@ class WorkService:
             raise Rejected(403, "denied")
 
         def resolve_recipe():
-            if not self._config.profiles[command.agent_profile].execution_enabled:
+            profile = self._config.profiles[command.agent_profile]
+            if not profile.execution_enabled:
+                raise Rejected(403, "denied")
+            if profile.is_external and (command.mode not in EXTERNAL_MODES or command.auto_repair):
                 raise Rejected(403, "denied")
             try:
                 return self._catalog.resolve(command.agent_profile, command.mode)
@@ -243,6 +247,11 @@ class WorkService:
         )
 
     def _workflow_snapshot(self,project,mode,profile,digest):
+        selected = self._config.profiles[profile]
+        if selected.is_external:
+            if digest is not None:
+                raise Rejected(409, "result_mismatch")
+            return None
         policy=self._config.project_workflows.get(project)
         if policy is None:
             if digest is not None:raise Rejected(409,"result_mismatch")
@@ -309,7 +318,8 @@ class WorkService:
             raise Rejected(403, "denied")
 
         def resolve_recipe(mode):
-            if not self._config.profiles[command.agent_profile].execution_enabled:
+            profile = self._config.profiles[command.agent_profile]
+            if not profile.execution_enabled or profile.is_external:
                 raise Rejected(403, "denied")
             try:
                 return self._catalog.resolve(command.agent_profile, mode)
@@ -334,7 +344,8 @@ class WorkService:
 
         def resolve_recipe(mode):
             if (mode not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
-                    or not self._config.profiles[command.agent_profile].execution_enabled):
+                    or not self._config.profiles[command.agent_profile].execution_enabled
+                    or self._config.profiles[command.agent_profile].is_external):
                 raise Rejected(403, "denied")
             try:
                 return self._catalog.resolve(command.agent_profile, mode)
@@ -347,7 +358,8 @@ class WorkService:
         self._require_project(command.project_alias)
         def resolve_recipe():
             if ("implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
-                    or not self._config.profiles[command.agent_profile].execution_enabled):
+                    or not self._config.profiles[command.agent_profile].execution_enabled
+                    or self._config.profiles[command.agent_profile].is_external):
                 raise Rejected(403,"denied")
             try:
                 return self._catalog.resolve(command.agent_profile,"implement")
@@ -361,7 +373,8 @@ class WorkService:
             raise Rejected(403, "denied")
 
         def resolve_recipe():
-            if not self._config.profiles[command.agent_profile].execution_enabled:
+            if (not self._config.profiles[command.agent_profile].execution_enabled
+                    or self._config.profiles[command.agent_profile].is_external):
                 raise Rejected(403, "denied")
             try:
                 return self._catalog.resolve(command.agent_profile, "implement")
@@ -377,7 +390,7 @@ class WorkService:
 class WorkServiceFactory:
     """Effect-free startup factory producing a ready WorkService or None when unconfigured."""
 
-    def __init__(self, config, connect_factory=None):
+    def __init__(self, config, connect_factory=None, *, external_factory=None):
         if config is not None:
             if not isinstance(config, WorkConfig):
                 raise TypeError("WorkServiceFactory requires a frozen WorkConfig or None")
@@ -387,21 +400,33 @@ class WorkServiceFactory:
             raise TypeError("connect_factory must be callable or None")
         self._config = config
         self._connect_factory = connect_factory
+        if external_factory is not None and not callable(external_factory):
+            raise TypeError("External work factory must be callable")
+        self._external_factory = external_factory
 
     def create(self):
         if self._config is None:
             return None
         catalog = self._config.catalog()
+        external = None
+        if any(p.is_external for p in self._config.profiles.values()):
+            if self._external_factory is not None:
+                external = self._external_factory(self._config)
+            else:
+                from work_external import ExternalWorkProviderFactory
+                external = ExternalWorkProviderFactory(self._config).create()
         store = WorkStore(
             self._config.owner,
             self._config.allowed_projects,
             self._connect_factory,
             max_pending=self._config.max_pending,
             repair_policy=self._config.repair_policy,
+            external_port=external,
         )
         service=WorkService(self._config,catalog,store)
         from work_workflow import WorkflowCoordinatorFactory
-        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store).create()
+        maintenance = {"external_maintenance": store.maintain_external} if external is not None else {}
+        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,**maintenance).create()
         return service
 
 

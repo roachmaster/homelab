@@ -9,6 +9,7 @@ from types import MappingProxyType
 import unicodedata
 
 from work_policy import POLICY_DIGEST, POLICY_ID
+from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL
 
 CONFIG_ENV_VAR = "FORGE_RUNNER_WORK_CONFIG"
 USAGE_CONFIG_ENV_VAR = "FORGE_RUNNER_USAGE_CONFIG"
@@ -130,6 +131,8 @@ class WorkProfile:
         validate_identifier(self.resource_profile, "resource profile")
         if self.label is not None:
             validate_label(self.label, "profile label")
+        if self.is_external and (self.backend != "muse" or self.model != EXTERNAL_MODEL):
+            raise ValueError("Invalid external database work profile")
         enabled = self.backend not in {"grok", "muse"} if self.execution_enabled is None else self.execution_enabled
         if type(enabled) is not bool:
             raise ValueError("Invalid work execution capability")
@@ -138,6 +141,10 @@ class WorkProfile:
     @property
     def display_label(self):
         return self.label if self.label is not None else self.alias
+
+    @property
+    def is_external(self):
+        return self.resource_profile == EXTERNAL_POLICY_ID
 
 
 @dataclass(frozen=True)
@@ -162,6 +169,11 @@ class PinnedRecipe:
             raise ValueError("Invalid pinned recipe mode")
         if self.generation_token_limit is not None:
             raise ValueError("Coding recipe generation_token_limit must be null")
+        if self.resource_profile == EXTERNAL_POLICY_ID and (
+            self.version != 2 or self.backend != "muse" or self.model != EXTERNAL_MODEL
+            or self.mode not in EXTERNAL_MODES or self.policy_digest != EXTERNAL_POLICY_DIGEST
+        ):
+            raise ValueError("Invalid external database recipe")
         if self.version == 1:
             if self.policy_digest is not None:
                 raise ValueError("Version 1 recipe must not carry policy_digest")
@@ -220,7 +232,10 @@ class WorkCatalog:
         profile = self._profiles.get(profile_alias)
         if profile is None or not profile.execution_enabled:
             raise KeyError("Unavailable work profile")
-        if profile.resource_profile == POLICY_ID:
+        if profile.is_external and mode not in EXTERNAL_MODES:
+            raise KeyError("External provider does not support this mode")
+        if profile.resource_profile in {POLICY_ID, EXTERNAL_POLICY_ID}:
+            policy_digest = EXTERNAL_POLICY_DIGEST if profile.is_external else POLICY_DIGEST
             payload = {
                 "version": 2,
                 "backend": profile.backend,
@@ -228,7 +243,7 @@ class WorkCatalog:
                 "resource_profile": profile.resource_profile,
                 "mode": mode,
                 "generation_token_limit": None,
-                "policy_digest": POLICY_DIGEST,
+                "policy_digest": policy_digest,
             }
             return PinnedRecipe(
                 version=2,
@@ -238,7 +253,7 @@ class WorkCatalog:
                 mode=mode,
                 generation_token_limit=None,
                 digest=sha256_canonical(payload),
-                policy_digest=POLICY_DIGEST,
+                policy_digest=policy_digest,
             )
         payload = {
             "version": 1,
