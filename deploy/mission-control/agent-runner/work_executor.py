@@ -868,6 +868,7 @@ class SystemdSupervisor:
                   Path("/run/dbus/system_bus_socket"), Path(f"/run/user/{account.uid}/bus"),
                   self.config.state_root, self.config.workspace_root]
         for path in (self.config.database.passfile, self.config.source_path,
+                     self.config.build_results_root,
                      self.config.usage.hmac_key_file if self.config.usage else None):
             if path is not None:
                 hidden.append(path)

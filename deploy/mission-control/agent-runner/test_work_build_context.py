@@ -44,7 +44,8 @@ def fixture():
             'gate_manifest_sha256': source['gate_manifest_sha256'], 'delivery_failure': failure}
         request = {'action_id': action, 'workflow_id': workflow, 'candidate_commit': 'a' * 40,
             'candidate_tree': 'e' * 40, 'integration_base': 'f' * 40,
-            'gate_manifest_sha256': '1' * 64, 'correlation_id': str(uuid4())}
+            'gate_manifest_sha256': '1' * 64, 'correlation_id': str(uuid4()),
+            'task_id': task, 'attempt_id': attempt, 'project_alias': 'fixture'}
         secret = 'ghp_' + 'A' * 36
         log = ('first line\n' + secret + '\n' + 'last line\n' * 2000).encode()
         result = {k: request[k] for k in ('action_id', 'workflow_id', 'candidate_commit',
@@ -73,7 +74,7 @@ def fixture():
             reads.append((path, owner))
             return read_regular(path, owner=os.geteuid(), maximum=maximum)
         provider = BuildContextProvider(store, state, results, reader=owned_fixture_reader)
-        lease = {'workflow_id': workflow, 'task_id': str(uuid4())}
+        lease = {'workflow_id': workflow, 'task_id': str(uuid4()), 'project_alias': 'fixture'}
         yield root, provider, store, lease, feedback, envelope, results, action, reads
 
 
@@ -104,10 +105,11 @@ class BuildContextTest(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError): cli('logs')
 
     def test_other_feedback_workflow_build_and_tampered_root_log_are_denied(self):
-        for changed in ('feedback', 'workflow', 'build', 'root-log', 'manifest'):
+        for changed in ('feedback', 'workflow', 'project', 'build', 'root-log', 'manifest'):
             with self.subTest(changed=changed), fixture() as (_root, provider, store, lease, feedback, envelope, results, action, _reads):
                 if changed == 'feedback': envelope['feedback_id'] = str(uuid4())
                 elif changed == 'workflow': lease['workflow_id'] = str(uuid4())
+                elif changed == 'project': lease['project_alias'] = 'another-project'
                 elif changed == 'build': envelope['delivery_failure']['build']['build_number'] += 1
                 elif changed == 'root-log': (results / (action + '.log')).write_bytes(b'forged CI log')
                 else: envelope['candidate_commit'] = '9' * 40
@@ -136,6 +138,7 @@ class BuildContextTest(unittest.TestCase):
         for foreign in (False, True):
             with self.subTest(foreign=foreign), TemporaryDirectory() as directory:
                 config, lease, workspace, envelope = review_fixture(directory)
+                config = replace(config, build_results_root=Path(directory) / 'private-ci-results')
                 ready = validate_context(lease, workspace, envelope)
                 log = b'Jenkins fixture diagnostic\n'
                 metadata = {'feedback_id': ready.feedback_id, 'feedback_sha256': ready.sha256,
@@ -153,6 +156,8 @@ class BuildContextTest(unittest.TestCase):
                 self.assertEqual(files['build.log'].read_bytes(), log)
                 argv = runner.supervisor.argv(lease, invocation)
                 readonly = next(arg for arg in argv if arg.startswith('--property=BindReadOnlyPaths='))
+                hidden = next(arg for arg in argv if arg.startswith('--property=InaccessiblePaths='))
+                self.assertIn(str(config.build_results_root), hidden)
                 self.assertIn(str(files['build_info.py']), readonly)
                 self.assertIn(b'build_info.py', invocation.stdin)
                 self.assertNotIn(log, invocation.stdin)

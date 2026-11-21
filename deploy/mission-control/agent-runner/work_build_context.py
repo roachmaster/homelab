@@ -149,7 +149,11 @@ class BuildContextProvider:
         observation = json.loads(self.read(action_root / 'observation.json', owner=os.geteuid()))
         receipt = observation.get('receipt', {})
         request = binding['request']
-        if (request['action_id'] != action or request['workflow_id'] != lease['workflow_id']
+        scope = binding.get('scope', request)
+        if (scope.get('task_id') != envelope['source_task_id']
+                or scope.get('attempt_id') != envelope['source_attempt_id']
+                or scope.get('project_alias') != lease['project_alias']
+                or request['action_id'] != action or request['workflow_id'] != lease['workflow_id']
                 or request['candidate_commit'] != failure['tested_candidate']
                 or any(receipt.get(k) != v for k, v in {'action_id': action,
                     'job': build['job'], 'build_number': build['build_number'], 'queue_id': build['queue_id']}.items())):
