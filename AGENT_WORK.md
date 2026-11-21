@@ -1,6 +1,31 @@
 # Shared Agent Work Checkpoint
 
-## Current: External Muse database handoff — 2026-11-21
+## Current: Merge Muse's completed plan — 2026-11-21
+
+- **authorization:** User requested merging Muse's work. GitHub has no Muse
+  feature branch or open PR; the completed deliverable is its immutable Plan
+  artifact for task `7699599c-b5d0-4118-9bb0-3f8f917c5843`.
+- **source:** The 14,180-byte artifact was verified against SHA256
+  `9bb7fc6d7b937f6fd4213fd09644e2a2e81af4e1ce93823519616712033455aa`.
+  Original content and provenance remain in PostgreSQL and private evidence
+  under `/mnt/data/homelab-build/merge-muse-plan-20261121`.
+- **delivery:** Import the reviewed task-correlation/event-envelope proposal and
+  link it from the documentation indexes. Retain Muse's design while correcting
+  bounded paging, strict request/response compatibility, external progress,
+  migration locks/verifiers and frozen intent identities. This is a design merge;
+  no migration, runtime implementation or deployment belongs to this change.
+- **runtime observation:** Muse has submitted its plan and advertised a real
+  heartbeat. The task remains `awaiting_review` without a workflow/reviewer link.
+  Publishing this source proposal does not manufacture a native review receipt,
+  approve implementation or change database task state. The external-to-review
+  runtime bridge remains unfinished. Preserve the live schema20/ABI11/P10 release,
+  Muse access, verified-main ref and the stop on GitHub Actions.
+- **verification:** Independent review approved the proposal after all substantive
+  findings were corrected. Original-artifact digest, UTF-8/LF,75 local links and
+  Git whitespace checks passed. Runtime code is unchanged; no migration, model
+  task, service change or database write was performed for this merge.
+
+## Retained: External Muse database handoff — 2026-11-21
 
 - **authorization:** User selected an independently operated Muse runner that
   monitors PostgreSQL. Set up the database integration directly; do not launch

@@ -15,6 +15,10 @@ Start with the [current implementation reference](design/implementation-status.m
 
 ## Coding agents and usage
 
+[Task correlation and event envelopes](architecture/proposals/forge-task-event-envelope.md)
+is Muse's reviewed design proposal for durable trace identities and a paged task
+timeline. Implementation and rollout remain pending.
+
 [Coding-agent workflow](architecture/coding-admission.md) documents the implemented source: catalog-backed Agents view, durable assignments, scoped native CLI workers, full-result paging, explicit acceptance and receipt-gated resume. Work/Usage are independent opt-in capabilities; deployment verification is pending.
 
 [Dispatch and sequence design](architecture/proposals/forge-coding-agent-dispatch.md) maps the current role/supervisor/provider boundaries to the retained UML. [Agent usage](architecture/proposals/forge-agent-usage.md) covers supported Codex metadata, Antigravity's explicit unsupported headless allowance, real per-job counters, account/project separation and metadata-only refresh. No local inference output-token cap is inherited.

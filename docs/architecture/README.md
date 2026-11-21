@@ -1,6 +1,6 @@
 # Forge architecture
 
-The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 19 November 2026; distinguish source capabilities from what a live host enables.
+The [current implementation reference](../design/implementation-status.md) and [framework checkpoint](forge-framework-blueprint.md#current-implementation) are the starting points. Updated 21 November 2026; distinguish source capabilities from what a live host enables.
 
 ## Current design references
 
@@ -11,6 +11,10 @@ The [current implementation reference](../design/implementation-status.md) and [
 - [Implementation roadmap](../roadmap/forge-framework.md), [source component and transition contracts](../design/forge-ide-components/README.md), [current layouts](../design/forge-ide-wireframes/README.md).
 
 ## Coding-agent dispatch and usage
+
+[Task correlation and event envelopes](proposals/forge-task-event-envelope.md)
+imports Muse's reviewed plan for per-task trace IDs, generated event IDs, derived
+event correlations and bounded history. Implementation and rollout are pending.
 
 [Current coding-agent workflow](coding-admission.md) covers the implemented Agents UI, nine Work destinations, immutable policy/recipe, isolated native workers, scoped execute-only database roles, result paging and explicit review/resume. Work/Usage remain independently opt-in; this source checkpoint does not claim live deployment.
 
