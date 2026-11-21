@@ -148,6 +148,105 @@ fn real_body_limit_and_total_deadline_are_enforced() {
 }
 
 #[test]
+fn total_deadline_includes_response_body_and_retains_timeout_type() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = Vec::new();
+        let mut block = [0; 1024];
+        while !request.windows(4).any(|x| x == b"\r\n\r\n") {
+            let count = socket.read(&mut block).unwrap();
+            assert!(count > 0);
+            request.extend_from_slice(&block[..count]);
+        }
+        socket
+            .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 35\r\n\r\n{")
+            .unwrap();
+        socket.flush().unwrap();
+        thread::sleep(Duration::from_millis(250));
+        let _ = socket.write_all(b"delayed body");
+    });
+    assert_eq!(
+        client(
+            format!("http://{address}/"),
+            Duration::from_millis(60),
+            1024
+        )
+        .execute(Request::Controller),
+        Err(Error::Timeout)
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn injected_native_factory_cannot_extend_typed_client_request_budget() {
+    let (endpoint, request, server) = fixture(
+        wire("200 OK", "", r#"{"jobs":[]}"#),
+        Duration::from_millis(250),
+    );
+    let config = Config::new(endpoint)
+        .unwrap()
+        .with_limits(Duration::from_millis(60), 1024)
+        .unwrap();
+    let transport =
+        forge_jenkins::http::HttpFactory::new(forge_jenkins::Limits::default()).unwrap();
+    let ((), factory) = Registry::new()
+        .register(
+            forge_jenkins::register(
+                config,
+                Credentials::new("operator", "fixture-token").unwrap(),
+                transport,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    assert_eq!(
+        factory.create().unwrap().execute(Request::Jobs),
+        Err(Error::Timeout)
+    );
+    request.recv().unwrap();
+    server.join().unwrap();
+}
+
+#[test]
+fn native_build_submission_returns_only_owned_queue_receipt() {
+    let (endpoint, request, server) = fixture(
+        wire("201 Created", "Location: /queue/item/11/\r\n", ""),
+        Duration::ZERO,
+    );
+    let ((), factory) = Registry::new()
+        .register(
+            register_http(
+                Config::new(endpoint).unwrap().with_mutations(true),
+                Credentials::new("operator", "fixture-token").unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    assert_eq!(
+        factory.create().unwrap().execute(Request::Build {
+            job: "folder/suite".into(),
+            parameters: std::collections::BTreeMap::from([("NAME".into(), "a&b".into())])
+        }),
+        Ok(Response::Queued(forge_jenkins::QueueReceipt { id: 11 }))
+    );
+    let captured = String::from_utf8(request.recv().unwrap()).unwrap();
+    assert!(captured.starts_with("POST /job/folder/job/suite/buildWithParameters HTTP/1.1\r\n"));
+    assert!(captured.ends_with("NAME=a%26b"));
+    server.join().unwrap();
+}
+
+#[test]
 fn oversized_header_and_duplicate_queue_location_are_rejected() {
     let huge = format!("X-Filler: {}\r\n", "x".repeat(33000));
     let (endpoint, request, server) = fixture(
