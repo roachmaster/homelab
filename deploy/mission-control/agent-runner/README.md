@@ -416,8 +416,9 @@ observations explicitly name Jenkins. No GitHub Actions run is required or
 claimed. Missing/pending/failed/stale checks block final acceptance.
 Publication and verification retries append new runs and retain prior failures.
 
-The native Jenkins check runner executes the complete fixed suite once before
-independent code review. Publication and merge reobserve the same exact-source
+The native Jenkins check runner executes the complete fixed suite once per
+admitted verification action before independent code review. Publication and
+merge reobserve the same exact-source
 receipt instead of rerunning the suite. An immutable private mapping binds the
 native review manifest to the installed verifier's separate Jenkins manifest.
 Migration24's scoped context/status APIs supply actual workflow/task correlation

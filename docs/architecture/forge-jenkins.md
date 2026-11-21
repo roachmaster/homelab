@@ -106,9 +106,10 @@ sequenceDiagram
     V->>P: Real merge receipt and completion
 ```
 
-The full fixed suite runs once for an immutable candidate. Later stages reobserve
-the same correlated build and root-owned source/cleanup receipt. Changed source
-needs a new action and verification. No task-controlled command, URL, path or
+The full fixed suite runs once per admitted verification action. Later stages
+reobserve the same correlated build and root-owned source/cleanup receipt.
+Changed source or an explicitly admitted bounded verification retry needs a new
+action and verification. No task-controlled command, URL, path or
 credential is accepted as a Jenkins parameter.
 
 Two manifest identities have distinct purposes. The native manifest preserves
