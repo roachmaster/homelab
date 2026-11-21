@@ -53,8 +53,21 @@ class WorkflowProjectionTests(_BaseFlow):
         self.assertIsNone(detail['attempt'])
         self.assertIsNone(detail['result'])
         events = store.events(project_alias='homelab',task_id=root['task_id'])['events']
-        self.assertEqual(events[-1]['workflow_progress']['phase'],'completed')
+        # The workflow checkpoint precedes the root task's distinct terminal
+        # event within the same transaction. A terminal event is not a
+        # native progress report or a checkpoint-shaped payload.
+        terminal = events[-1]
+        self.assertEqual(terminal['kind'],'completed')
+        self.assertNotIn('progress',terminal)
+        self.assertNotIn('external_progress',terminal)
+        self.assertNotIn('workflow_progress',terminal)
+        completed = [e for e in events if e.get('workflow_progress',{}).get('phase')=='completed']
+        self.assertEqual(len(completed),1)
+        self.assertEqual(completed[0]['workflow_progress']['workflow_id'],detail['workflow']['workflow_id'])
+        self.assertLess(completed[0]['sequence'],terminal['sequence'])
         self.assertEqual(events[-1]['correlation_id'],detail['correlation_id'])
+        self.assertTrue(all(e['correlation_id']==detail['correlation_id'] for e in events))
+        self.assertEqual(len({e['event_id'] for e in events}),len(events))
         self.assertEqual(len(store.list_tasks(project_alias='homelab')['tasks']),1)
 
 
