@@ -114,6 +114,7 @@ class WorkerConfig:
     autonomous_projects: frozenset[str] = frozenset()
     codex_session_ttl_seconds: int = 1800
     usage_only_profiles: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
+    external_reviews: bool = False
 
     @property
     def allowed_profiles(self):
@@ -131,7 +132,7 @@ class WorkerConfig:
 def parse_config(raw, *, source_path=None):
     raw = _object(raw, {"worker_id", "owner", "database", "account", "workspace_root",
                         "state_root", "projects", "profiles", "binaries"},
-                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds", "usage_only_profiles"})
+                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds", "usage_only_profiles", "external_reviews"})
     worker_id = identifier(raw["worker_id"])
     owner = raw["owner"]
     if (not isinstance(owner, str) or not owner.strip() or len(owner) > 128
@@ -156,6 +157,8 @@ def parse_config(raw, *, source_path=None):
     if not isinstance(projects, dict) or not 1 <= len(projects) <= 64:
         raise ValueError("Invalid coding worker project catalog")
     projects = {identifier(alias): absolute_path(path) for alias, path in projects.items()}
+    external_reviews=raw.get("external_reviews",False)
+    if type(external_reviews) is not bool:raise ValueError("Invalid external review capability")
     autonomous = raw.get("autonomous_projects", [])
     if (not isinstance(autonomous, list) or any(not isinstance(alias, str) for alias in autonomous)
             or len(set(autonomous)) != len(autonomous) or not set(autonomous) <= projects.keys()):
@@ -224,7 +227,7 @@ def parse_config(raw, *, source_path=None):
         worker_id, owner, database, account, workspace_root, state_root,
         MappingProxyType(projects), MappingProxyType(frozen_profiles), MappingProxyType(binaries),
         allow_implement, usage, absolute_path(source_path) if source_path is not None else None,
-        frozenset(autonomous), codex_session_ttl_seconds, MappingProxyType(selected_usage),
+        frozenset(autonomous), codex_session_ttl_seconds, MappingProxyType(selected_usage), external_reviews=external_reviews,
     )
 
 
@@ -288,6 +291,7 @@ def validated_copy(config):
         "binaries": {key: str(value) for key, value in config.binaries.items()},
         "allow_implement": config.allow_implement,
         "autonomous_projects": sorted(config.autonomous_projects),
+        "external_reviews": config.external_reviews,
         "codex_session_ttl_seconds": config.codex_session_ttl_seconds,
         "usage_only_profiles": {key: {"backend": value.backend, "model": value.model, "binary": str(value.binary)}
                                 for key, value in config.usage_only_profiles.items()},

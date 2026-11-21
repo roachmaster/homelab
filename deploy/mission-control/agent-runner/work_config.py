@@ -9,7 +9,8 @@ from types import MappingProxyType
 import unicodedata
 
 from work_policy import POLICY_DIGEST, POLICY_ID
-from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL
+from work_external_policy import POLICY_ID as EXTERNAL_POLICY_ID, POLICY_DIGEST as EXTERNAL_POLICY_DIGEST, MODES as EXTERNAL_MODES, MODEL as EXTERNAL_MODEL, POLICIES as EXTERNAL_POLICIES
+from work_external_flow_config import freeze_external_workflows
 
 CONFIG_ENV_VAR = "FORGE_RUNNER_WORK_CONFIG"
 USAGE_CONFIG_ENV_VAR = "FORGE_RUNNER_USAGE_CONFIG"
@@ -30,7 +31,7 @@ PRINTABLE_ASCII_128_RE = re.compile(r"[ -~]{1,128}")
 DIGEST_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 CONFIG_REQUIRED_KEYS = frozenset({"owner", "allowed_projects", "allowed_modes", "profiles"})
-CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows"}
+CONFIG_ALLOWED_KEYS = CONFIG_REQUIRED_KEYS | {"max_pending", "project_labels", "repair_policy", "project_workflows", "external_workflows"}
 PROFILE_REQUIRED_KEYS = frozenset({"backend", "model", "resource_profile"})
 PROFILE_ALLOWED_KEYS = PROFILE_REQUIRED_KEYS | {"label", "execution_enabled"}
 
@@ -144,7 +145,7 @@ class WorkProfile:
 
     @property
     def is_external(self):
-        return self.resource_profile == EXTERNAL_POLICY_ID
+        return self.resource_profile in EXTERNAL_POLICIES
 
 
 @dataclass(frozen=True)
@@ -169,9 +170,9 @@ class PinnedRecipe:
             raise ValueError("Invalid pinned recipe mode")
         if self.generation_token_limit is not None:
             raise ValueError("Coding recipe generation_token_limit must be null")
-        if self.resource_profile == EXTERNAL_POLICY_ID and (
+        if self.resource_profile in EXTERNAL_POLICIES and (
             self.version != 2 or self.backend != "muse" or self.model != EXTERNAL_MODEL
-            or self.mode not in EXTERNAL_MODES or self.policy_digest != EXTERNAL_POLICY_DIGEST
+            or self.mode not in EXTERNAL_POLICIES[self.resource_profile][1] or self.policy_digest != EXTERNAL_POLICIES[self.resource_profile][0]
         ):
             raise ValueError("Invalid external database recipe")
         if self.version == 1:
@@ -232,10 +233,10 @@ class WorkCatalog:
         profile = self._profiles.get(profile_alias)
         if profile is None or not profile.execution_enabled:
             raise KeyError("Unavailable work profile")
-        if profile.is_external and mode not in EXTERNAL_MODES:
+        if profile.is_external and mode not in EXTERNAL_POLICIES[profile.resource_profile][1]:
             raise KeyError("External provider does not support this mode")
-        if profile.resource_profile in {POLICY_ID, EXTERNAL_POLICY_ID}:
-            policy_digest = EXTERNAL_POLICY_DIGEST if profile.is_external else POLICY_DIGEST
+        if profile.resource_profile == POLICY_ID or profile.is_external:
+            policy_digest = EXTERNAL_POLICIES[profile.resource_profile][0] if profile.is_external else POLICY_DIGEST
             payload = {
                 "version": 2,
                 "backend": profile.backend,
@@ -359,6 +360,7 @@ class WorkConfig:
     project_labels: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
     repair_policy: MappingProxyType = field(default_factory=lambda:DEFAULT_REPAIR_POLICY)
     project_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
+    external_workflows: MappingProxyType = field(default_factory=lambda:MappingProxyType({}))
 
     def __post_init__(self):
         repair_policy=freeze_repair_policy(self.repair_policy)
@@ -399,6 +401,7 @@ class WorkConfig:
         object.__setattr__(self, "project_labels", MappingProxyType(copied_labels))
         object.__setattr__(self,"repair_policy",repair_policy)
         object.__setattr__(self,"project_workflows",freeze_workflows(self.project_workflows,projects,copied_profiles,modes))
+        object.__setattr__(self,"external_workflows",freeze_external_workflows(self.external_workflows,projects,copied_profiles,modes))
 
     def project_label(self, alias):
         return self.project_labels.get(alias, alias)
@@ -482,6 +485,7 @@ def parse_work_config(raw):
         project_labels=MappingProxyType(project_labels),
         repair_policy=freeze_repair_policy(raw.get("repair_policy",{})),
         project_workflows=raw.get("project_workflows",{}),
+        external_workflows=raw.get("external_workflows",{}),
     )
 
 

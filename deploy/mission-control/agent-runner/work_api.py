@@ -249,7 +249,11 @@ class WorkService:
     def _workflow_snapshot(self,project,mode,profile,digest):
         selected = self._config.profiles[profile]
         if selected.is_external:
-            if digest is not None:
+            policy=self._config.external_workflows.get(project)
+            if policy is not None:
+                if mode!='plan' or profile!=policy.author_profile or digest!=policy.snapshot(self._catalog)['policy_digest']:
+                    raise Rejected(409,'result_mismatch')
+            elif digest is not None:
                 raise Rejected(409, "result_mismatch")
             return None
         policy=self._config.project_workflows.get(project)
@@ -285,6 +289,10 @@ class WorkService:
 
     def cancel(self, command):
         self._require_project(command.project_alias)
+        flow=getattr(getattr(self._store,'_external',None),'workflow',None)
+        if flow is not None:
+            receipt=flow.cancel(project_alias=command.project_alias,task_id=command.task_id,expected_revision=command.expected_revision,idempotency_key=command.idempotency_key)
+            if receipt is not None:return receipt
         return self._store.cancel(
             project_alias=command.project_alias,
             task_id=command.task_id,
@@ -424,9 +432,13 @@ class WorkServiceFactory:
             external_port=external,
         )
         service=WorkService(self._config,catalog,store)
+        flow=getattr(external,'workflow',None) if external is not None else None
+        if self._config.external_workflows:
+            if flow is None:raise ValueError('External workflow provider is unavailable')
+            flow.bind_store(store)
         from work_workflow import WorkflowCoordinatorFactory
         maintenance = {"external_maintenance": store.maintain_external} if external is not None else {}
-        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,**maintenance).create()
+        service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=flow if self._config.external_workflows else None,**maintenance).create()
         return service
 
 

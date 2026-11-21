@@ -836,18 +836,19 @@ class WorkflowStore:
 
 
 class WorkflowCoordinator:
-    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=30,external_maintenance=None,clock=time.monotonic):
+    def __init__(self,store,*,worker_id='workflow-coordinator',interval_seconds=30,external_maintenance=None,external_workflow=None,clock=time.monotonic):
         if external_maintenance is not None and not callable(external_maintenance):
             raise TypeError('External maintenance requires an injected callback')
         self.store=store;self.worker_id=worker_id;self.interval_seconds=interval_seconds;self.stop=threading.Event();self._thread=None
-        self._external_maintenance=external_maintenance;self._clock=clock;self._next_external=float('-inf')
+        self._external_workflow=external_workflow;self._external_maintenance=external_maintenance;self._clock=clock;self._next_external=float('-inf')
     def run_once(self):
         if self._external_maintenance is not None and self._clock()>=self._next_external:
             self._next_external=self._clock()+30
             self._external_maintenance()
+        external_changed=self._external_workflow.run_once() if self._external_workflow is not None else False
         job=self.store.claim(self.worker_id)
         if job:self.store.process(job)
-        return job is not None
+        return job is not None or external_changed
     def retry_native_timeout(self,**request):
         return self.store.retry_native_timeout(**request)
     def retry_peer_verdict(self,**request):
@@ -877,7 +878,7 @@ class WorkflowCoordinator:
 
 
 class WorkflowCoordinatorFactory:
-    def __init__(self,config,catalog,store,*,external_maintenance=None):
-        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance
+    def __init__(self,config,catalog,store,*,external_maintenance=None,external_workflow=None):
+        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance;self.external_workflow=external_workflow
     def create(self):
-        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store),external_maintenance=self.external_maintenance)
+        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store),external_maintenance=self.external_maintenance,external_workflow=self.external_workflow)

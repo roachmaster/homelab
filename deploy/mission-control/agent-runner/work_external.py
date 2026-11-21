@@ -54,11 +54,14 @@ class ExternalWorkPort(Protocol):
 
 
 class ExternalWorkDAO:
-    def __init__(self, owner, profiles):
+    def __init__(self, owner, profiles, workflow=None):
+        self.workflow=workflow
         self.owner = owner
         self.profiles = frozenset(profiles)
 
     def enqueue(self, cursor, project_alias, task_id):
+        if self.workflow is not None and self.workflow.manages(project_alias):
+            return self.workflow.admit(cursor,project_alias,task_id)
         cursor.execute(
             "SELECT forge_external_agent_api.enqueue(%s,%s,%s) AS assignment_id",
             (self.owner, project_alias, task_id),
@@ -112,4 +115,6 @@ class ExternalWorkProviderFactory:
         self.config = config
 
     def create(self):
-        return ExternalWorkDAO(self.config.owner, (p.alias for p in self.config.profiles.values() if p.is_external))
+        from work_external_workflow import ExternalWorkflowStore
+        flow=ExternalWorkflowStore(self.config,self.config.catalog()) if self.config.external_workflows else None
+        return ExternalWorkDAO(self.config.owner, (p.alias for p in self.config.profiles.values() if p.is_external),flow)

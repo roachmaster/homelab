@@ -46,7 +46,7 @@ CREATE TABLE forge_external_workflow.reviews(
 CREATE TABLE forge_external_workflow.actions(
  action_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),workflow_id uuid NOT NULL REFERENCES forge_external_workflow.workflows,
  owner_id text NOT NULL,project_alias text NOT NULL,workflow_revision bigint NOT NULL,
- kind text NOT NULL CHECK(kind IN('source','prepare','verify','merge')),source_key text NOT NULL,
+ kind text NOT NULL CHECK(kind IN('source','prepare','verify','merge','cancel')),source_key text NOT NULL,
  intent jsonb NOT NULL CHECK(jsonb_typeof(intent)='object' AND octet_length(intent::text)<=65536),
  status text NOT NULL DEFAULT 'queued' CHECK(status IN('queued','leased','completed','failed')),
  result jsonb,checkpoint_digest text,checkpoint_token uuid,checkpoint_generation integer,checkpoint_role name,
@@ -172,10 +172,10 @@ BEGIN
  PERFORM 1 FROM forge_external_workflow.delivery_grants WHERE worker_role=session_user AND owner_id=p_owner AND enabled FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'Delivery scope denied' USING ERRCODE='42501';END IF;
  SELECT x.* INTO a FROM forge_external_workflow.actions x JOIN forge_external_workflow.workflows w USING(workflow_id)
- WHERE x.owner_id=p_owner AND w.enabled AND w.phase NOT IN('completed','cancelled','escalated') AND w.revision=x.workflow_revision
+ WHERE x.owner_id=p_owner AND(x.kind='cancel' OR(w.enabled AND w.phase NOT IN('completed','cancelled','escalated') AND w.revision=x.workflow_revision))
  AND(x.status='queued' OR(x.status='leased' AND x.lease_until<=clock_timestamp())) AND x.poll_after<=clock_timestamp() AND x.deadline_at>clock_timestamp() AND x.generation<10000
  AND EXISTS(SELECT FROM forge_external_workflow.delivery_grants g WHERE g.worker_role=session_user AND(g.owner_id,g.project_alias)=(x.owner_id,x.project_alias) AND g.enabled)
- AND EXISTS(SELECT FROM forge_external_agent.scope_grants g WHERE(g.owner_id,g.project_alias,g.profile_alias)=(w.owner_id,w.project_alias,w.author_profile) AND g.enabled)
+ AND(x.kind='cancel' OR EXISTS(SELECT FROM forge_external_agent.scope_grants g WHERE(g.owner_id,g.project_alias,g.profile_alias)=(w.owner_id,w.project_alias,w.author_profile) AND g.enabled))
  ORDER BY x.created_at,x.action_id FOR UPDATE OF x,w SKIP LOCKED LIMIT 1;
  IF NOT FOUND THEN RETURN NULL;END IF;
  PERFORM forge_external_workflow.delivery_lock(a.action_id);
@@ -191,8 +191,9 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'Delivery action denied' USING ERRCODE='42501';END IF;
  PERFORM 1 FROM forge_external_workflow.delivery_grants g WHERE g.worker_role=session_user AND(g.owner_id,g.project_alias)=(a.owner_id,a.project_alias) AND g.enabled FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'Delivery scope denied' USING ERRCODE='42501';END IF;
+ IF a.kind<>'cancel' THEN
  PERFORM 1 FROM forge_external_agent.scope_grants g JOIN forge_external_workflow.workflows w ON(g.owner_id,g.project_alias,g.profile_alias)=(w.owner_id,w.project_alias,w.author_profile) WHERE w.workflow_id=a.workflow_id AND g.enabled FOR SHARE OF g,w;
- IF NOT FOUND THEN RAISE EXCEPTION 'External delivery grant denied' USING ERRCODE='42501';END IF;
+ IF NOT FOUND THEN RAISE EXCEPTION 'External delivery grant denied' USING ERRCODE='42501';END IF;END IF;
  RETURN a;
 END;
 $fn$;
@@ -202,7 +203,7 @@ DECLARE a forge_external_workflow.actions%ROWTYPE;
 BEGIN
  a:=forge_external_workflow.delivery_lock(p_id);
  IF p_generation IS NULL OR p_token IS NULL OR a.status<>'leased' OR a.generation<>p_generation OR a.lease_token IS DISTINCT FROM p_token OR a.lease_role<>session_user OR a.lease_until<=clock_timestamp() OR a.deadline_at<=clock_timestamp()
- OR NOT EXISTS(SELECT FROM forge_external_workflow.workflows WHERE workflow_id=a.workflow_id AND enabled AND revision=a.workflow_revision AND phase NOT IN('completed','cancelled','escalated')) THEN RAISE EXCEPTION 'Stale delivery lease' USING ERRCODE='P0009';END IF;
+ OR(a.kind<>'cancel' AND NOT EXISTS(SELECT FROM forge_external_workflow.workflows WHERE workflow_id=a.workflow_id AND enabled AND revision=a.workflow_revision AND phase NOT IN('completed','cancelled','escalated'))) THEN RAISE EXCEPTION 'Stale delivery lease' USING ERRCODE='P0009';END IF;
  UPDATE forge_external_workflow.actions SET lease_until=least(clock_timestamp()+interval '90 seconds',deadline_at),updated_at=clock_timestamp() WHERE action_id=p_id;RETURN true;
 END;
 $fn$;
@@ -212,12 +213,12 @@ DECLARE a forge_external_workflow.actions%ROWTYPE;d text;s text;
 BEGIN
  a:=forge_external_workflow.delivery_lock(p_id);
  IF p_result IS NULL OR jsonb_typeof(p_result)<>'object' OR p_result-ARRAY['status','receipt','summary']<>'{}' OR NOT(p_result?&ARRAY['status','receipt','summary']) OR jsonb_typeof(p_result->'receipt')<>'object' OR jsonb_typeof(p_result->'summary')<>'string' OR octet_length(p_result::text)>65536 OR octet_length(p_result->>'summary')>4096 THEN RAISE EXCEPTION 'Invalid delivery receipt' USING ERRCODE='22023';END IF;
- s:=p_result->>'status';IF s NOT IN('pending','passed','failed','merged','main_changed') OR(s='merged' AND a.kind<>'merge') OR(s='passed' AND a.kind='merge') OR(s='main_changed' AND a.kind NOT IN('prepare','merge')) THEN RAISE EXCEPTION 'Invalid delivery status' USING ERRCODE='22023';END IF;
+ s:=p_result->>'status';IF s NOT IN('pending','passed','failed','merged','main_changed','cancelled') OR(s='cancelled' AND a.kind<>'cancel') OR(a.kind='cancel' AND s NOT IN('pending','cancelled','failed')) OR(s='merged' AND a.kind<>'merge') OR(s='passed' AND a.kind='merge') OR(s='main_changed' AND a.kind NOT IN('prepare','merge')) THEN RAISE EXCEPTION 'Invalid delivery status' USING ERRCODE='22023';END IF;
  d:=encode(sha256(convert_to(p_result::text,'UTF8')),'hex');
  IF a.checkpoint_generation=p_generation AND a.checkpoint_token=p_token AND a.checkpoint_role=session_user THEN
  IF a.checkpoint_digest IS DISTINCT FROM d THEN RAISE EXCEPTION 'Delivery checkpoint conflict' USING ERRCODE='P0009';END IF;RETURN a.result;END IF;
  PERFORM forge_external_workflow_delivery_api.renew(p_id,p_generation,p_token);
- UPDATE forge_external_workflow.actions SET status=CASE WHEN s='pending' THEN 'queued' WHEN s IN('passed','merged') THEN 'completed' ELSE 'failed' END,result=p_result,checkpoint_digest=d,checkpoint_token=p_token,checkpoint_generation=p_generation,checkpoint_role=session_user,lease_token=NULL,lease_role=NULL,lease_until=NULL,poll_after=clock_timestamp()+interval '5 seconds',updated_at=clock_timestamp() WHERE action_id=p_id;
+ UPDATE forge_external_workflow.actions SET status=CASE WHEN s='pending' THEN 'queued' WHEN s IN('passed','merged','cancelled') THEN 'completed' ELSE 'failed' END,result=p_result,checkpoint_digest=d,checkpoint_token=p_token,checkpoint_generation=p_generation,checkpoint_role=session_user,lease_token=NULL,lease_role=NULL,lease_until=NULL,poll_after=clock_timestamp()+interval '5 seconds',updated_at=clock_timestamp() WHERE action_id=p_id;
  PERFORM pg_notify('forge_coding_jobs','');RETURN p_result;
 END;
 $fn$;

@@ -658,6 +658,13 @@ class WorkerDB:
             result=cursor.fetchone()[0]
         return None if result is None else dict(result)
 
+    def read_external_review_context(self,lease):
+        attempt,token=_extract_attempt_creds(lease)
+        with self._worker_cursor() as cursor:
+            cursor.execute("SELECT forge_external_workflow_worker_api.read_context(%s,%s)",(attempt,token))
+            value=cursor.fetchone()[0]
+        return value
+
     def read_review_target(self,lease):
         attempt,token=_extract_attempt_creds(lease)
         with self._worker_cursor() as cursor:
