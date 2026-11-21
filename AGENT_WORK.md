@@ -1,6 +1,52 @@
 # Shared Agent Work Checkpoint
 
-## Active: Jenkins Rust I/O and Forge CLI — 2026-11-21
+## Current: Reviewed source consolidation — 2026-11-21
+
+- **authorization:** The user explicitly requested all feature branches be
+  consolidated into main and deleted afterward. This supersedes the earlier
+  local-only publication restriction for this source consolidation. The earlier
+  stop on GitHub workflows remains in force; repository Actions are disabled.
+- **delivery:** Jenkins installation/client/CLI, Grok adapter and portal support,
+  reviewed native Muse compatibility, and previously delivered feature histories
+  are consolidated. Preserve newer accepted source when old branches contain
+  equivalent patches. The three historical private-sender branches and the new
+  Muse intake branch use audited sanitized source coverage; their raw histories
+  are retained locally in the protected backup and preserved worktrees rather
+  than becoming main ancestors.
+- **boundaries:** Source supports P10, additive schema19 and matched ABI10.
+  Migrations1–18 and frozen historical policy/receipt identities are preserved.
+  Native Muse and Grok execution remain default-disabled; Muse email is primary
+  and native metadata refresh is explicit. The new external Muse intake is a
+  dormant design/validation scaffold: no automatic consumer, database authority,
+  service or external completion receipts are activated. Fabricated process-stop
+  proofs from its original prototype were removed.
+- **live:** This is a manual source consolidation, not an autonomous workflow
+  approval or deployment. The portal remains the a3968c1 release with
+  schema17/policy8/ABI9. Do not advance verified-main or manufacture database,
+  publication or hosted-check receipts. No Jenkins build or new model task was
+  submitted. Existing native Jenkins and installed CLI evidence is retained below.
+- **verification:** Full fixed `make ci` passed, including debug/release tests,
+  Clippy, docs, minimal-feature profiles and deterministic generated assets/WASM.
+  All28 actual browser acceptance groups passed with successful cleanup on
+  code commit3006529. The expanded browser journey uses a270-second overall
+  deadline within its existing300-second supervisor; individual assertions are
+  unchanged. The full590-case backend/assets/Studio run had zero skips and one
+  installer omission, then all19 final focused cases passed after publishing the
+  three missing native modules, including that regression and12 new dormant
+  intake cases. Production stores, workers, SQL and compiled Rust inputs are
+  byte-identical to their full-gate inputs; only the tested installer fix,
+  dormant scaffold, browser harness budget and documentation were added later.
+- **preservation:** Keep all linked worktrees, receipt-owned snapshots and dirty
+  files. After remote main acknowledgement, detach feature worktrees at their
+  same commits and delete only reviewed branch refs using exact remote leases.
+  Protected inventory, source audits, test reports, source-equivalence proofs,
+  Git bundles and final publication/cleanup receipts live under
+  `/mnt/data/homelab-build/merge-all-20261121`; none are runtime authority.
+- **next:** Main is the sole branch after verified publication and cleanup.
+  Deploying schema19/ABI10 or implementing the external Muse intake requires its
+  own appropriately verified activation; do not treat this merge as activation.
+
+## Retained Jenkins implementation checkpoint — 2026-11-21
 
 - **scope:** Implement an optional reusable Jenkins `IoClient` capability with
   exported typed config, factories and registrar, then consume it through the
