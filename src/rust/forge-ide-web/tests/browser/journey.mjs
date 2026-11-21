@@ -3731,6 +3731,9 @@ async function sha256(path) {
 }
 const passed = await runHarness({
   args: process.argv.slice(2),
+  // The expanded portal/provider journeys share this full-suite budget. Keep
+  // individual assertions bounded and allow cleanup before the 300s supervisor.
+  deadlineMs: 270_000,
   async setup(currentReport, directory) {
     report = currentReport;
     output = directory;

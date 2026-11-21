@@ -18,6 +18,9 @@ owned fixture, then launches headless Chrome with its sandbox **enabled**. It se
 the fixed full browser suite; Cargo package/feature overrides cannot narrow it.
 No credentials, configuration, user project or running service is required. Only
 new disposable localhost fixtures and ephemeral test TLS identities are used.
+The expanded full journey has a 270-second deadline within the Python
+supervisor's 300-second limit. Individual assertions keep their existing bounds;
+deadline failure still stops the sequence and cleans up owned resources.
 
 Every invocation prints `QA_OUTPUT <directory>` and allocates a **new** run under
 ignored `src/rust/target/ui-qa/`. Set `QA_OUTPUT_ROOT=/absolute/owned-output-parent`
