@@ -52,3 +52,27 @@
 - **peer_verdict_recovery:** Reviewer task `4c086980-b7a1-4bbf-9f35-03af0f842323`, attempt `fc572966-bf83-4c75-8112-6f3537e8645b`, peer review `196c1901-6aed-49c9-9a41-f1bc562f85b0`. A bounded peer-only correctness-to-source interpretation retained the unchanged revise verdict and open finding; it could not approve or reset budgets.
 - **source_delivery_recovery:** Linked repair `3b272474-ac89-48a8-80df-bd3c56872787`, stopped attempt `18946940-aa65-44bb-9737-8eb4bf5b906c`, failed review `7568a7af-1829-44a3-9062-cc43f2f20b57`. Source acquisition, same-lease workspace waiting, once-only stopped-source delivery and serialized review admission retained failure history, infrastructure count 1, source revision and substantive budgets. These infrastructure corrections preceded the later automatic completion.
 - **last_updated:** 2026-11-20; completed workflow and final runtime activation verified.
+## Operator stop and headless Jenkins — 2026-11-21
+
+- **scope:** User stopped/paused the Grok/GitHub workflow work and requested a
+  Jenkins installation job with headless setup. No new GitHub workflow was
+  submitted. Grok source, staged artifacts and failed-check evidence remain saved.
+- **stopped_run:** The normal owner cancellation API stopped workflow
+  `389907bd-42d0-42ed-a693-383e24887405`; its task/result/review history remains.
+  No native coding tasks remained queued or running. The pending P8 hotfix and
+  Grok P9/schema18 rollout were not deployed. Live Forge remains at `a3968c1`,
+  schema17/policy8/ABI9.
+- **jenkins:** Native Jenkins LTS2.580.2 and Java21 were installed by a bounded
+  local systemd provisioning job. `jenkins.service` is enabled and running, with
+  persistent home `/mnt/data/forge-homelab/jenkins` and private loopback port18084.
+  A systemd credential created the administrator headlessly. No credential
+  contents are in source or job output.
+- **verification:** Authenticated API200, anonymous API403, signup disabled,
+  inbound TCP agent port disabled, controller executors0, CSRF active, loopback
+  binding and actual restart persistence passed. Two initial job failures and
+  their corrections are retained in private provisioning evidence. Final local
+  job `forge-jenkins-verify-20261120.service` succeeded at23:59:39UTC onNov20.
+- **handoff:** See `deploy/mission-control/jenkins/README.md` for access, reviewed
+  source and evidence paths. Jenkins build agents/pipelines and replacement Forge
+  verification/publication adapters have not been assigned or configured. Do not
+  resume the stopped Grok/GitHub work without a new user instruction.
