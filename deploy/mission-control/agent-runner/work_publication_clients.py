@@ -6,6 +6,7 @@ GitHub authentication remains in the trusted publisher's existing gh account.
 
 from dataclasses import dataclass
 import json
+import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -65,7 +66,7 @@ def uuid(value):
 
 
 def branch_name(job):
-    return "forge/task-" + uuid(job.get("target_publication_id") or job["publication_id"])
+    return "forge/task-" + uuid(job.get("branch_publication_id") or job.get("target_publication_id") or job["publication_id"])
 
 
 def command(argv, *, env, cwd=None, data=None, timeout=60):
@@ -242,6 +243,13 @@ class GitRepositoryProvider:
         return self.execute([*argv, *args], env=parent_environment(self.config), timeout=timeout)
 
     def prepare(self, job, snapshot):
+        return self._prepare(job, snapshot, integrate=True)
+
+    def prepare_source(self, job, snapshot):
+        """Materialize authored bytes without incorporating untested main bytes."""
+        return self._prepare(job, snapshot, integrate=False)
+
+    def _prepare(self, job, snapshot, *, integrate):
         if snapshot.workspace_digest != job["workspace_digest"]:
             raise PublicationError("workspace_changed")
         directory = self.config.state_root / uuid(job["publication_id"])
@@ -259,6 +267,32 @@ class GitRepositoryProvider:
         repository = directory / "repository"
         if repository.is_symlink():
             raise PublicationError("publication_state_changed")
+        prepared = directory / 'prepared-source.json'
+        if not integrate and prepared.exists():
+            from work_external_delivery import read_private
+            receipt = json.loads(read_private(prepared, owner=os.geteuid()))
+            if receipt.get('identity') != identity:
+                raise PublicationError('publication_state_changed')
+            head, main = receipt.get('candidate_commit'), receipt.get('expected_main')
+            if not isinstance(head, str) or not SHA.fullmatch(head) or not isinstance(main, str) or not SHA.fullmatch(main):
+                raise PublicationError('publication_state_changed')
+            tested = directory / 'repository.tested'
+            selected = tested if (directory / 'local-seed-install.json').exists() and tested.exists() else repository
+            if selected.is_symlink() or not selected.is_dir():
+                raise PublicationError('publication_state_changed')
+            self.verify(selected, head)
+            expected = {entry.path: ['120000' if entry.kind == 'link' else '100755' if entry.executable else '100644',
+                hashlib.sha1(b'blob '+str(len(entry.data)).encode()+b'\0'+entry.data).hexdigest()] for entry in snapshot.files}
+            actual = {}
+            for row in self._git(selected, 'ls-tree', '-r', '-z', '--full-tree', head).split(b'\0'):
+                if row:
+                    description,path = row.split(b'\t',1)
+                    mode,kind,blob = description.decode().split()
+                    if kind != 'blob':raise PublicationError('publication_state_changed')
+                    actual[path.decode()] = [mode,blob]
+            if (actual != expected or self._git(selected,'rev-parse','FETCH_HEAD').decode().strip() != main):
+                raise PublicationError('publication_state_changed')
+            return selected,head
         if repository.exists():
             shutil.rmtree(repository)  # Only this stopped, identity-bound private clone.
         self._git(None, "clone", "--quiet", "--no-local", "--no-checkout", "--",
@@ -300,19 +334,26 @@ class GitRepositoryProvider:
             else:
                 raise PublicationError("unsafe_artifact_type")
         self._git(repository, "add", "--all", "--", ".")
-        if not self._git(repository, "diff", "--cached", "--name-only", "-z"):
+        changed = bool(self._git(repository, "diff", "--cached", "--name-only", "-z"))
+        if not changed and (integrate or not (job.get('parent_task_id') and job.get('feedback_id'))):
             raise PublicationError("no_source_changes")
-        self._git(repository, "commit", "--quiet", "--no-gpg-sign", "-m", "Forge implementation " + uuid(job["task_id"]))
+        if changed:
+            self._git(repository, "commit", "--quiet", "--no-gpg-sign", "-m", "Forge implementation " + uuid(job["task_id"]))
         remote = self.remote_url_factory(job["project_alias"])
         self._git(repository, "fetch", "--quiet", "--no-tags", "--", remote, "refs/heads/main", network=True, timeout=120)
-        try:
-            self._git(repository, "merge", "--no-edit", "--no-gpg-sign", "FETCH_HEAD")
-        except PublicationError:
-            raise PublicationError("main_merge_conflict") from None
+        if integrate:
+            try:
+                self._git(repository, "merge", "--no-edit", "--no-gpg-sign", "FETCH_HEAD")
+            except PublicationError:
+                raise PublicationError("main_merge_conflict") from None
         head = self._git(repository, "rev-parse", "HEAD").decode().strip()
         if not SHA.fullmatch(head):
             raise PublicationError("invalid_publication_commit")
         self.verify(repository, head)
+        if not integrate:
+            from work_external_delivery import durable_json
+            durable_json(prepared, {'version': 1, 'identity': identity, 'candidate_commit': head,
+                'expected_main': self._git(repository,'rev-parse','FETCH_HEAD').decode().strip()})
         return repository, head
 
     def verify(self, repository, expected):

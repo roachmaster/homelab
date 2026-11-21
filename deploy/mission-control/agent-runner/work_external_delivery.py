@@ -143,7 +143,7 @@ class DeliveryConfig:
         required = {'owner', 'worker_id', 'database', 'projects', 'state_root', 'spool_root',
             'results_root', 'github_config_dir', 'jenkins_binary', 'jenkins_binary_sha256',
             'jenkins_config', 'verifier'}
-        if not isinstance(raw, dict) or set(raw) != required:
+        if not isinstance(raw, dict) or not required <= set(raw) <= required | {'jenkins_job'}:
             raise ValueError('Invalid delivery configuration fields')
         if not isinstance(raw['owner'], str) or not 1 <= len(raw['owner']) <= 128:
             raise ValueError('Invalid delivery owner')
@@ -172,8 +172,11 @@ class DeliveryConfig:
         if any(not p.is_absolute() or '..' in p.parts for p in values.values()):
             raise ValueError('Delivery paths must be explicit absolute paths')
         digest(raw['jenkins_binary_sha256'])
+        job = raw.get('jenkins_job', 'forge-exact-candidate')
+        if not isinstance(job, str) or job not in {'forge-exact-candidate', 'forge-native-candidate'}:
+            raise ValueError('Invalid fixed Jenkins job')
         return cls(raw['owner'], raw['worker_id'], MappingProxyType(dict(database)),
-            MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'])
+            MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'], jenkins_job=job)
 
 
 class ForgeJenkinsPort:
@@ -473,7 +476,8 @@ class TrustedDeliveryPort:
             raise ValueError('Trusted CI receipt source mismatch')
         receipt.update({'check_receipt_sha256': hashlib.sha256(raw).hexdigest(),
             'cleanup_confirmed': result.get('cleanup_confirmed') is True,
-            'checks': result.get('checks'), 'log_sha256': result.get('log_sha256')})
+            'checks': result.get('checks'), 'log_sha256': result.get('log_sha256'),
+            'failure': result.get('failure')})
         checks = result.get('checks')
         complete = (isinstance(checks, list) and len(checks) == len(CHECKS)
             and all(check == {'index': index, 'argv': list(argv), 'returncode': 0}

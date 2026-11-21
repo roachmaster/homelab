@@ -20,7 +20,7 @@ from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFact
     LeaseLost, canonical, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
 from work_publication_checks import VerificationFailure
-from work_publication_clients import PublicationError
+from work_publication_clients import PublicationError, branch_name
 from work_review import gate_source_digest
 from work_verification import VerificationMetadata, gate_manifest_sha256, project_verification
 
@@ -88,6 +88,114 @@ class NativeJenkinsVerification:
             'results': str(selected.results_root), 'verifier': str(selected.verifier),
         })).hexdigest()
 
+    def publish_source(self, job, repository, stop=None):
+        """Publish only this leased stopped source, before starting Jenkins."""
+        context = self.store.native_ci_acquire_context(job)
+        scope = self._scope(context, job)
+        if (context.get('active') is not True or self.stop.is_set() or stop is not None and stop.is_set()
+                or not self.store.review_renew(job)):
+            raise PublicationError('native_branch_scope_inactive')
+        head = sha(job['candidate_commit'])
+        self.git.verify(repository, head)
+        selected = {**job, 'branch_publication_id': scope['review_id']}
+        receipt = {'version': 'forge-native-branch-v1', 'scope': scope,
+            'candidate_commit': head, 'branch_publication_id': scope['review_id'],
+            'branch': branch_name(selected)}
+        path = self.delivery.config.state_root / 'branches' / (scope['review_id'] + '.json')
+        existing = path.exists()
+        if existing:
+            if json.loads(read_private(path, owner=os.geteuid())) != receipt:
+                raise PublicationError('native_branch_identity_changed')
+        remote = self.git.remote_head(selected)
+        if remote not in {None, head}:
+            raise PublicationError('native_branch_identity_changed')
+        if remote != head:
+            if existing:
+                # The first push could have succeeded and lost its ACK. Only
+                # an exact remote observation can finish this durable intent.
+                raise PublicationError('native_branch_requires_reconcile')
+            durable_json(path, receipt)
+            if self.stop.is_set() or stop is not None and stop.is_set() or not self.store.review_renew(job):
+                raise PublicationError('native_branch_scope_inactive')
+            try:
+                self.git.push(selected, repository, head)
+            except Exception:
+                if self.git.remote_head(selected) != head:
+                    raise PublicationError('native_branch_requires_reconcile') from None
+            if self.git.remote_head(selected) != head:
+                raise PublicationError('native_branch_requires_reconcile')
+        elif not existing:
+            # A branch with no parent intent cannot be adopted implicitly.
+            raise PublicationError('native_branch_identity_changed')
+        event_path = path.with_suffix('.event.json')
+        event = self.store.native_branch_published(job, receipt)
+        if (not isinstance(event, dict) or set(event) != {'event_id', 'correlation_id'}
+                or uid(event['correlation_id']) != scope['correlation_id']):
+            raise PublicationError('native_branch_event_unconfirmed')
+        uid(event['event_id'])
+        if event_path.exists():
+            if json.loads(read_private(event_path)) != event:
+                raise PublicationError('native_branch_event_changed')
+        else:
+            durable_json(event_path, event)
+        return {**receipt, 'event_id': event['event_id']}
+
+    def publication_job(self, job):
+        """Resolve the early owned branch from the immutable original receipt."""
+        original = job.get('source_review_id') or job['review_id']
+        manifest = self.candidates.read(original)
+        binding = manifest.get('native_ci')
+        if not isinstance(binding, dict) or 'source_publication' not in binding:
+            return job
+        source = binding['source_publication']
+        if (manifest.get('review_id') != original or manifest.get('task_id') != job['task_id']
+                or manifest.get('candidate_commit') != job['candidate_commit']
+                or source.get('scope') != binding.get('scope')
+                or source.get('candidate_commit') != job['candidate_commit']
+                or source.get('branch_publication_id') != original
+                or self._read(binding['request']['action_id']) != binding):
+            raise PublicationError('native_branch_identity_changed')
+        selected = {**job, 'branch_publication_id': uid(original)}
+        if source.get('branch') != branch_name(selected):
+            raise PublicationError('native_branch_identity_changed')
+        return selected
+
+    def build_reference(self, job):
+        """Read the genuine fixed-check build bound to this tested candidate."""
+        original = job.get('source_review_id') or job['review_id']
+        manifest = self.candidates.read(original)
+        binding = manifest.get('native_ci')
+        if (manifest.get('review_id') != original or manifest.get('task_id') != job['task_id']
+                or manifest.get('candidate_commit') != job['candidate_commit']
+                or not isinstance(binding, dict)
+                or self._read(binding['request']['action_id']) != binding):
+            raise PublicationError('native_ci_existing_binding_required')
+        path = self._directory(binding['request']['action_id']) / 'observation.json'
+        observation = json.loads(read_private(path, owner=os.geteuid()))
+        receipt = observation.get('receipt', {})
+        if (observation.get('status') != 'passed' or receipt.get('cleanup_confirmed') is not True
+                or type(receipt.get('build_number')) is not int or receipt['build_number'] < 1):
+            raise PublicationError('native_ci_completed_build_required')
+        return {'provider': 'jenkins', 'job': self.delivery.config.jenkins_job, 'action_id': binding['request']['action_id'],
+                'queue_id': receipt.get('queue_id'), 'build_number': receipt['build_number']}
+
+    def failure_context(self, job):
+        """Expose only genuine correlated build metadata for author feedback."""
+        index = json.loads(read_private(self._index(job['review_id']), owner=os.geteuid()))
+        binding = self._read(uid(index['action_id']))
+        if (binding['scope']['review_id'] != job['review_id']
+                or binding['request']['candidate_commit'] != job['candidate_commit']):
+            raise PublicationError('native_ci_binding_changed')
+        result = json.loads(read_private(self._directory(binding['request']['action_id']) / 'observation.json'))
+        receipt = result.get('receipt', {})
+        if type(receipt.get('build_number')) is not int or receipt['build_number'] < 1:
+            return None
+        return {'version': 1, 'tested_candidate': job['candidate_commit'],
+            'current_main': job['integration_base'], 'conflict_paths': [],
+            'build': {'provider': 'jenkins', 'job': self.delivery.config.jenkins_job,
+                'action_id': binding['request']['action_id'], 'queue_id': receipt.get('queue_id'),
+                'build_number': receipt['build_number']}}
+
     def _index(self, review_id):
         return self.delivery.config.state_root / 'reviews' / (uid(review_id) + '.json')
 
@@ -135,6 +243,16 @@ class NativeJenkinsVerification:
         binding = {'version': VERSION, 'scope': scope, 'request': request,
             'native_gate_manifest_sha256': native_gate, 'jenkins_gate_source_sha256': source,
             'verifier_sha256': helper, 'transport_sha256': self._transport_digest()}
+        if getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1':
+            path = self.delivery.config.state_root / 'branches' / (scope['review_id'] + '.json')
+            publication = json.loads(read_private(path, owner=os.geteuid()))
+            event = json.loads(read_private(path.with_suffix('.event.json'), owner=os.geteuid()))
+            if uid(event['correlation_id']) != scope['correlation_id']:
+                raise PublicationError('native_branch_event_changed')
+            publication['event_id'] = uid(event['event_id'])
+            if publication.get('scope') != scope or publication.get('candidate_commit') != head:
+                raise PublicationError('native_branch_identity_changed')
+            binding['source_publication'] = publication
         directory = self._directory(action)
         directory.mkdir(parents=True, mode=0o700, exist_ok=True)
         path = directory / 'native-binding.json'
@@ -150,13 +268,20 @@ class NativeJenkinsVerification:
             reference = 'refs/forge/native-ci/' + action
             if bundle.exists() or bundle.is_symlink():
                 read_private(bundle, owner=os.geteuid(), maximum=128 * 1024 * 1024)
-                advertised = self.git._git(repository, 'bundle', 'list-heads', str(bundle)).decode().strip()
-                if advertised != head + ' ' + reference:
+                advertised = set(self.git._git(repository, 'bundle', 'list-heads', str(bundle)).decode().splitlines())
+                expected_refs = {head + ' ' + reference}
+                if 'source_publication' in binding:
+                    expected_refs.add(expected_main + ' ' + reference + '-main')
+                if advertised != expected_refs:
                     raise PublicationError('native_ci_bundle_changed')
                 self.git._git(repository, 'bundle', 'verify', str(bundle))
             else:
                 self.git._git(repository, 'update-ref', reference, head)
-                self.git._git(repository, 'bundle', 'create', str(bundle), reference)
+                references = [reference]
+                if 'source_publication' in binding:
+                    self.git._git(repository, 'update-ref', reference + '-main', expected_main)
+                    references.append(reference + '-main')
+                self.git._git(repository, 'bundle', 'create', str(bundle), *references)
                 bundle.chmod(0o600)
             # Complete durable identity is present before the shared driver can
             # journal or send its first POST. No native commit is rewritten.
@@ -233,13 +358,25 @@ class NativeJenkinsVerification:
         inferred_code = ('verification_process_unavailable' if any(x in summary for x in (
             'cancelled_or_timed_out', 'verification_unavailable', 'deadline_exceeded', 'no trusted verification receipt'))
             else 'verification_failed')
-        return project_verification(self.config.checks,
+        report = project_verification(self.config.checks,
             code=code if code is not None else None if passed else inferred_code,
             returncode=0 if passed else 1, output=str(result.get('summary', '')).encode('utf-8'),
             evidence_digest=hashlib.sha256(canonical({'binding': binding, 'receipt': receipt})).hexdigest(),
             cleanup_confirmed=clean, metadata=metadata)
+        if type(receipt.get('build_number')) is int:
+            reference = ('Jenkins build #' + str(receipt['build_number']) + ' (action '
+                + binding['request']['action_id'] + '). ')
+            report = replace(report, summary=reference + report.summary,
+                findings=tuple({**finding, 'reproduction': reference + finding.get('reproduction', '')}
+                               for finding in report.findings))
+        if receipt.get('failure') == 'main_ancestor_required':
+            report = replace(report, category='source', code='main_ancestor_required',
+                checks=tuple({**check, 'status': 'not_run'} for check in report.checks))
+        return report
 
     def run(self, job, repository, stop):
+        if getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1':
+            self.publish_source(job, repository, stop)
         binding = self._prepare(job, repository)
         deadline = self.clock() + self.timeout
 
@@ -287,6 +424,7 @@ class NativeJenkinsVerification:
         return binding
 
     def observe(self, job):
+        job = self.publication_job(job)
         self._pr(job)
         original = job.get('source_review_id') or job['review_id']
         manifest = self.candidates.read(original)
@@ -322,6 +460,7 @@ class NativeJenkinsVerification:
         status = result['status']
         checks = tuple({'name': name, 'status': 'success' if status == 'passed' else 'pending' if status == 'pending' else 'failure',
             'head_sha': job['candidate_commit'], 'provider': 'jenkins',
+            'job': self.delivery.config.jenkins_job,
             'action_id': binding['request']['action_id'], 'queue_id': receipt.get('queue_id'),
             'build_number': receipt.get('build_number')} for name in LOGICAL_CHECKS)
         findings = ()
@@ -392,6 +531,9 @@ def create_native_jenkins(config, store, git, candidates, supervisor, *, client=
             or tuple(config.checks) != CHECKS
             or {x[2] for x in config.required_hosted_checks} != set(LOGICAL_CHECKS)):
         raise ValueError('Native Jenkins configuration does not match publication scope')
+    if (getattr(config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1'
+            and selected.jenkins_job != 'forge-native-candidate'):
+        raise ValueError('Branch-first delivery requires the isolated native Jenkins job')
     for alias, repository in config.repositories.items():
         project = selected.projects.get(alias)
         if (project is None or project['repository'] != repository
