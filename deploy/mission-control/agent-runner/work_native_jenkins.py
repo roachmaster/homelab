@@ -5,6 +5,7 @@ checks reobserve that action; they cannot start another build. Parent-owned
 sidecars retain the native-to-Jenkins gate binding and restart cleanup intent.
 """
 from dataclasses import replace
+from contextlib import contextmanager
 import hashlib
 import json
 import logging
@@ -40,6 +41,19 @@ class NativeJenkinsVerification:
         self.wait = wait if wait is not None else self.stop.wait
         self.timeout, self.cleanup_timeout = timeout, cleanup_timeout
         self._action_iterator = None
+
+    @contextmanager
+    def listen_scope(self, drain):
+        """Drain the owner's existing notification socket during long CI waits."""
+        previous = self.wait
+        def bounded_wait(timeout):
+            drain()
+            return previous(timeout)
+        self.wait = bounded_wait
+        try:
+            yield
+        finally:
+            self.wait = previous
 
     def _scope(self, value, job):
         if (not isinstance(value, dict) or value.get('owner_id') != self.config.worker.owner
@@ -276,6 +290,8 @@ class NativeJenkinsVerification:
         self._pr(job)
         original = job.get('source_review_id') or job['review_id']
         manifest = self.candidates.read(original)
+        if manifest.get('review_id') != original:
+            raise PublicationError('native_ci_review_changed')
         binding = manifest.get('native_ci')
         if not isinstance(binding, dict) or self._read(binding['request']['action_id']) != binding:
             raise PublicationError('native_ci_existing_binding_required')
@@ -285,6 +301,7 @@ class NativeJenkinsVerification:
             raise PublicationError('native_ci_candidate_changed')
         normalized = {**job, 'review_id': original, 'attempt_id': manifest['attempt_id'],
             'workspace_digest': manifest['workspace_digest']}
+        self._scope(binding['scope'], {**normalized, 'owner_id': self.config.worker.owner})
         repository, _head = self.candidates.acquire(normalized)
         source_job = {**normalized, 'integration_base': manifest['integration_base']}
         source = self._source(source_job, repository)

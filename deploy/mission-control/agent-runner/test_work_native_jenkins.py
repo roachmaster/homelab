@@ -1,5 +1,6 @@
 """Native Jenkins ownership, exact-source reuse and restart-cleanup contracts."""
 from dataclasses import replace
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -15,7 +16,7 @@ from uuid import uuid4
 from test_work_executor import raw_config
 from work_external_delivery import CHECKS, canonical, durable_json
 from work_native_jenkins import NativeJenkinsVerification, VERSION
-from work_publication import PublicationWorkerFactory
+from work_publication import PublicationWorker, PublicationWorkerFactory
 from work_publication_checks import VerificationFailure
 from work_publication_clients import PublicationError
 from work_publication_config import PublicationConfig
@@ -122,7 +123,7 @@ class NativeJenkinsTest(unittest.TestCase):
         binding = self.local_pass()
         self.assertEqual(self.driver.submissions, 1)
         self.assertEqual(self.git._git(self.repository,'rev-parse','HEAD').decode().strip(), self.head)
-        for job in (self.hosted, {**self.hosted,'source_review_id':None,'review_id':str(uuid4())}):
+        for job in (self.hosted, {**self.hosted,'source_review_id':None,'review_id':self.scope['review_id']}):
             report = self.provider.observe(job)
             self.assertEqual(report.status, 'passed')
             self.assertEqual({x['provider'] for x in report.checks}, {'jenkins'})
@@ -130,6 +131,52 @@ class NativeJenkinsTest(unittest.TestCase):
             self.assertEqual({x['action_id'] for x in report.checks}, {binding['request']['action_id']})
         self.assertEqual(self.driver.submissions, 1)
         self.assertEqual(self.client._api.call_count, 4)
+
+    def test_missing_review_or_copied_foreign_scope_cannot_reuse_a_green_action(self):
+        binding = self.local_pass()
+        with self.assertRaises(PublicationError):
+            self.provider.observe({**self.hosted,'source_review_id':str(uuid4())})
+        self.assertEqual(self.driver.submissions,1)
+        for key in ('review_id','task_id','attempt_id'):
+            foreign = {**self.scope,key:str(uuid4())}
+            foreign_job = {**self.job,**foreign,'publication_id':foreign['review_id']}
+            self.store.native_ci_acquire_context.side_effect = lambda _,s=foreign: {**s,'active':True}
+            # Isolate the fixture's review index so each single changed scope
+            # field reaches observe rather than failing preparation first.
+            with patch.object(self.provider,'_index',return_value=self.root/(str(uuid4())+'.json')):
+                other = self.provider._prepare(foreign_job,self.repository)
+            self.candidates.read.return_value = {**self.manifest,'native_ci':other}
+            self.store.native_ci_binding.side_effect = lambda _,s=foreign: {**s,'active':True}
+            with self.subTest(key=key), self.assertRaises(PublicationError):
+                self.provider.observe(self.hosted)
+        self.assertEqual(self.driver.submissions,1)
+
+    def test_notification_poll_is_scoped_to_the_owned_publisher_listener(self):
+        events = []
+        listener = object()
+        @contextmanager
+        def listen():
+            events.append('enter')
+            try:yield listener
+            finally:events.append('exit')
+        self.store.listen = listen
+        stop = threading.Event()
+        worker = PublicationWorker(self.config,self.store,Mock(),self.git,self.provider,Mock(),
+            candidates=self.candidates,stop=stop,native_ci=self.provider)
+        original = self.provider.wait
+        def once():
+            self.provider.wait(.01)
+            stop.set()
+            return True
+        worker.run_once = once
+        worker.run_forever()
+        self.store.wait.assert_called_once_with(listener,0)
+        self.assertEqual(events,['enter','exit'])
+        self.assertIs(self.provider.wait,original)
+        with self.assertRaises(RuntimeError):
+            with self.provider.listen_scope(lambda:None):
+                raise RuntimeError('owned listener failed')
+        self.assertIs(self.provider.wait,original)
 
     def test_missing_local_binding_or_submission_journal_cannot_start_hosted_ci(self):
         binding = self.local_pass()

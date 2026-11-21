@@ -186,15 +186,18 @@ class PublicationWorker:
             try:
                 listener = self.store.listen() if hasattr(self.store, "listen") else nullcontext(None)
                 with listener as committed:
-                    # Subscribe before scanning. Notifications wake this owner;
-                    # leases and source-bound rows still authorize every action.
-                    while not self.stop.is_set():
-                        if self.run_once():
-                            continue
-                        if committed is not None:
-                            self.store.wait(committed, 5)
-                        else:
-                            self.stop.wait(5)
+                    ci_listener = (self.native_ci.listen_scope(lambda: self.store.wait(committed, 0))
+                        if self.native_ci is not None and committed is not None else nullcontext())
+                    with ci_listener:
+                        # Subscribe before scanning. Notifications wake this owner;
+                        # leases and source-bound rows still authorize every action.
+                        while not self.stop.is_set():
+                            if self.run_once():
+                                continue
+                            if committed is not None:
+                                self.store.wait(committed, 5)
+                            else:
+                                self.stop.wait(5)
             except Exception:
                 LOG.warning("Publication queue unavailable; no remote action replayed")
             self.stop.wait(5)
