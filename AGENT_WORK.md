@@ -1,5 +1,29 @@
 # Shared Agent Work Checkpoint
 
+## Current: Native Gemini workflow on Jenkins — 2026-11-21
+
+- **authorization:** User requests updating Gemini's native workflow after the
+  identified legacy GitHub-check dependency. Use Jenkins for full verification,
+  keep independent Codex review and automatic guarded merge. GitHub Actions
+  remains disabled. Preserve current tasks, immutable history and review budgets.
+- **ownership:** Separate worktrees own the injected native Jenkins provider,
+  scoped cancellation/status persistence checks and operational review. Root
+  owns configuration, integration, documentation, verification and activation.
+- **implementation:** In progress. Keep the three frozen logical gate IDs while
+  explicitly selecting Jenkins behind the verification port. Bind the native
+  review manifest to a separate exact-source Jenkins manifest and durable action
+  journal. Reuse the Rust Jenkins IoClient and installed trusted supervisor;
+  never convert queue acceptance into success. Run all fixed gates once and
+  reobserve their exact receipt at publication and merge.
+- **source:** Native publication already imports and merges actual remote main
+  before checks and independent code review. Keep the old author source receipt
+  and verified-main reference until a real successful native merge advances it.
+  No raw workflow snapshot edits, fabricated approvals or budget resets.
+- **active task:** Cache task `81f71bf0-5d92-4fed-b282-f8fd51f27f49`
+  passed independent Plan review after three revisions and started implementing
+  at18:24 UTC. The existing workflow remains authoritative.
+- **evidence:** `/mnt/data/homelab-build/native-jenkins-20261121`.
+
 ## Current: Unattended Gemini execution and task monitoring — 2026-11-21
 
 - **authorization:** User requests monitoring the submitted tasks and making

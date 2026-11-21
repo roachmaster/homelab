@@ -43,12 +43,92 @@ The terminal formats that outcome using its existing console I/O boundary.
 | `jenkins.queue` | GET one queue item | One observation; absent flags remain unknown |
 | `jenkins.build-status` | GET one numbered build | One observation; no background polling |
 | `jenkins.cancel` | POST queue cancellation | Request accepted; no claim that a running build stopped |
+| `jenkins.queue-list` | GET a bounded queue snapshot | Correlation observation, including a truncation flag |
+| `jenkins.recent-builds` | GET up to50 numbered builds for one configured job | Correlation observation, including a truncation flag |
+| `jenkins.stop-build` | POST a numbered build's stop action | Request accepted; cleanup must still be observed |
 
 Mutations are denied by default. An explicit client configuration opt-in is
 required for build or cancellation. Unexpected/lost write receipts, transport
 errors and timeouts require reconciliation, with no automatic retry. This client
-does not replace Forge's durable workflow engine or GitHub verification provider.
-It does not automatically resume the stopped Grok workflow or start CI jobs.
+is used by Forge's durable delivery providers; it does not itself own workflow
+state or infer CI completion. The stopped Grok workflow remains stopped.
+
+## Native Gemini workflow
+
+The publisher's explicit `hosted_provider: "jenkins"` selects the native Jenkins
+verification provider and its shared check runner. `jenkins_delivery_config`
+names a private operator-owned delivery configuration with the pinned Rust CLI,
+installed verifier, spool, results and credentials. Bootstrap constructs and
+injects these collaborators; review and merge handlers do not select a transport
+or look up a registry. Existing configurations retain the historical
+`github-actions` default, but Mission Control selects Jenkins.
+
+The native Plan/Implement recipe, execution policy, independent Codex reviewer
+and frozen workflow budgets remain unchanged. The logical gate names `check`,
+`pr-fast-gate` and `real-browser` remain compatibility identifiers; new
+observations explicitly identify Jenkins as their provider. They do not claim
+that a GitHub Actions run occurred.
+
+```mermaid
+sequenceDiagram
+    actor U as Owner
+    participant P as PostgreSQL workflow/outbox
+    participant G as Gemini native worker
+    participant C as Codex reviewer
+    participant V as Trusted publisher
+    participant J as Rust Jenkins IoClient
+    participant CI as Jenkins / isolated verifier
+    participant GH as GitHub repository
+    U->>P: Submit task with frozen project policy
+    P->>G: Plan / bounded revisions
+    G->>P: Immutable Plan result
+    P->>C: Independent Plan review
+    C->>P: Source-bound approval or revision
+    P->>G: Approved implementation
+    G->>P: Stopped, reconciled implementation result
+    P->>V: Leased verification review
+    V->>GH: Fetch current main
+    V->>V: Integrate main and freeze exact candidate
+    V->>P: Acquire scoped CI context
+    V->>V: Persist candidate bundle and native/Jenkins manifest binding
+    V->>V: Persist submission intent before POST
+    V->>J: Submit fixed correlated job / reconcile uncertainty
+    J->>CI: forge-exact-candidate
+    CI->>CI: make ci + make ui-qa + backend suite
+    CI-->>V: Exact-source root-owned result and cleanup proof
+    V->>P: Record actual verification result
+    P->>C: Independent exact-candidate code review
+    C->>P: Approval or bounded repair
+    P->>V: Authorized publication
+    V->>GH: Push candidate and create/update PR
+    V->>V: Reobserve same Jenkins receipt at publication and merge
+    V->>GH: Guarded exact-tree main update
+    V->>P: Real merge receipt and completion
+```
+
+The full fixed suite runs once for an immutable candidate. Later stages reobserve
+the same correlated build and root-owned source/cleanup receipt. Changed source
+needs a new action and verification. No task-controlled command, URL, path or
+credential is accepted as a Jenkins parameter.
+
+Two manifest identities have distinct purposes. The native manifest preserves
+the reviewed candidate's existing authorization contract. The Jenkins manifest
+binds the exact tree, installed verifier and all fixed gates. A private immutable
+mapping binds both to the actual workflow, task, attempt and candidate. Neither
+digest is substituted for the other or written over a historical receipt.
+
+Migration24 supplies narrowly scoped native CI context/status functions to the
+reconciler. It adds no table-read permission or model database access. Live lease
+authority is required to admit CI; status reads let the trusted publisher clean
+up its own durable actions after cancellation or restart. Stop requests remain
+pending until Jenkins and the verifier establish actual cleanup. A lost POST
+acknowledgement triggers correlated queue/build reads, never a blind resubmission.
+
+The author's original source base remains receipt-owned. Before verification,
+native candidate preparation fetches and integrates actual remote main. Checks
+and independent review apply to that integrated candidate. Only a genuine
+successful native merge advances `refs/forge/verified-main`; switching the
+verification provider does not manufacture a source receipt.
 
 ## Authentication and transport
 
@@ -88,10 +168,11 @@ for native service and credential setup. Source/transport fixtures, the separate
 public consumer, CLI admission/private-file tests and live read-only acceptance
 are distinct evidence. Fake HTTP tests never submit a real Jenkins build.
 
-Mission Control's installed `forge` command has been qualified against Jenkins
-2.580.2: controller/security/executor fields matched, jobs returned an empty list,
-read-only policy rejected build submission and an absent queue item mapped to
-the typed not-found outcome. Native tests cover mutation receipts using owned
-fixtures; live acceptance submitted no real build. The implementation and
-deployment sources are committed locally on `feature/forge-jenkins-io`; the
-stopped GitHub automation has not been resumed.
+Mission Control's installed `forge` command is qualified against Jenkins2.580.2.
+The `forge-exact-candidate` job runs on the dedicated single-executor
+`forge-mission-control-ci` node; the controller retains zero executors. External
+Muse delivery already uses that job. A real full-suite smoke build passed on
+2026-11-21; it proves only its recorded source, not a later task's candidate.
+Native-provider tests use owned fixtures and do not impersonate production
+model approvals or Jenkins results. Deployment and live-task evidence are
+recorded in `AGENT_WORK.md`.

@@ -4,8 +4,43 @@ Native Jenkins LTS and Java 21 are installed by an explicit local systemd job.
 This does not submit a Forge coding workflow, push GitHub source or trigger CI.
 Review `install.py` and `bootstrap.groovy` before installing them into the
 root-owned `/var/lib/forge-provisioning/jenkins/source` directory and invoking
-the installer as root. The current installation is a controller foundation;
-build agents and replacement Forge/GitHub verification adapters are separate work.
+the installer as root. The installation now also has a dedicated CI agent and
+the trusted `forge-exact-candidate` pipeline described below.
+
+## Current CI pipeline
+
+The exclusive `forge-mission-control-ci` node has one executor and label
+`forge-ci`; controller executors remain zero. `forge-jenkins-ci-agent.service`
+connects through WebSocket. `forge-exact-candidate` invokes the root-owned
+`/usr/local/libexec/forge-ci-check` wrapper with seven validated correlation and
+source parameters. The installed verifier reads a digest-bound bundle, verifies
+the exact commit/tree and fixed gate manifest, then runs `make ci`, `make ui-qa`
+and the complete Python backend suite. Candidate commands run as the dedicated
+unprivileged `forge_ci` account with private network, read-only source and owned
+outputs. Jenkins and model credentials are outside that boundary.
+
+The configured wall deadline is2700seconds after a measured cold smoke build
+took29m29s. Preserve that production value when preparing future configuration;
+the original installer default was1800seconds. Compile targets are still per
+action until the separately assigned Cargo-cache feature is verified and merged.
+Do not describe the existing registry/toolchain/browser caches as a compiled
+artifact cache.
+
+External Muse delivery uses the typed Rust Jenkins client through the trusted
+delivery worker. Native Gemini uses the publisher's explicit `jenkins` provider
+selection and private `jenkins_delivery_config`. See the
+[native workflow sequence and manifest contract](../../../docs/architecture/forge-jenkins.md#native-gemini-workflow).
+This changes no historical workflow recipe or GitHub Actions setting. Submission
+acceptance is not a successful build: guarded merge requires real full-suite
+success, exact source receipts, independent review and confirmed process cleanup.
+
+Production spool and result paths are configured privately. Give only the
+trusted publisher the dedicated spool/state write paths and its local
+`SupplementaryGroups=jenkins` access; do not add the operator globally to the
+Jenkins group. Reviewers and native model processes receive neither credentials
+nor publication authority. Restart cleanup uses the publisher's durable action
+journals and scoped database status, preserving uncertain actions without
+duplicate submission.
 
 The service listens only on `127.0.0.1:18084`. Its persisted home is
 `/mnt/data/forge-homelab/jenkins`. The installer masks package auto-start until
@@ -82,8 +117,8 @@ sudo -H -u jenkins sh -c 'cd "$HOME" && git ls-remote git@github.com:roachmaster
 ```
 
 This configures service-user Git and CLI authentication. Jenkins credential-store
-entries, SCM jobs, plugins, build agents and trigger/pipeline configuration remain
-separate work. The stopped Grok workflow remains stopped.
+entries and the CI pipeline were separate follow-up work; the pipeline is now
+installed as described above. The stopped Grok workflow remains stopped.
 
 GitHub CLI reference: [credential-helper setup](https://cli.github.com/manual/gh_auth_setup-git).
 
@@ -91,7 +126,7 @@ GitHub CLI reference: [credential-helper setup](https://cli.github.com/manual/gh
 
 The [`forge-jenkins` capability](../../../src/rust/forge-jenkins/README.md) now
 provides typed Jenkins I/O through exported factories and registrars. The
-[Forge CLI integration](../../../docs/architecture/forge-jenkins.md) adds six
+[Forge CLI integration](../../../docs/architecture/forge-jenkins.md) adds bounded
 explicitly selected Jenkins commands and retains existing admission and provider
 boundaries. Its installed local command can read the controller:
 
@@ -114,11 +149,11 @@ uncertain creation. Operator-home writes run after permanently dropping UID/GID;
 token/intent values never enter command arguments or logs. Successful reruns
 reuse and verify the same receipt instead of creating another token.
 
-Live acceptance verified status, an empty job list, explicit mutation denial and
-a typed absent-queue response. No build, pipeline or GitHub workflow was started.
-The native service, existing security settings and stopped Grok run remain as
-recorded above. Replacing the automatic workflow's verification provider with
-Jenkins remains separate from this client implementation.
+Initial client acceptance verified status, the then-empty job list, explicit
+mutation denial and a typed absent-queue response. Later pipeline acceptance ran
+a real full-suite Jenkins smoke build; its source and results are recorded in
+`AGENT_WORK.md`. That smoke result is not a CI receipt for a current task. The
+native service's security settings and stopped Grok run remain as recorded above.
 
 Official references: [Linux installation](https://www.jenkins.io/doc/book/installing/linux/),
 [systemd overrides](https://www.jenkins.io/doc/book/system-administration/systemd-services/),
