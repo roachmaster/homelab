@@ -19,9 +19,9 @@ and the complete Python backend suite. Candidate commands run as the dedicated
 unprivileged `forge_ci` account with private network, read-only source and owned
 outputs. Jenkins and model credentials are outside that boundary.
 
-The configured wall deadline is2700seconds after a measured cold smoke build
-took29m29s. Preserve that production value when preparing future configuration;
-the original installer default was1800seconds. Compile targets are still per
+The configured wall deadline is 2,700 seconds after a measured cold smoke build
+took 29m 29s. Preserve that production value when preparing future configuration;
+the original installer default was 1,800 seconds. Compile targets are still per
 action until the separately assigned Cargo-cache feature is verified and merged.
 Do not describe the existing registry/toolchain/browser caches as a compiled
 artifact cache.

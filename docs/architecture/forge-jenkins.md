@@ -44,7 +44,7 @@ The terminal formats that outcome using its existing console I/O boundary.
 | `jenkins.build-status` | GET one numbered build | One observation; no background polling |
 | `jenkins.cancel` | POST queue cancellation | Request accepted; no claim that a running build stopped |
 | `jenkins.queue-list` | GET a bounded queue snapshot | Correlation observation, including a truncation flag |
-| `jenkins.recent-builds` | GET up to50 numbered builds for one configured job | Correlation observation, including a truncation flag |
+| `jenkins.recent-builds` | GET up to 50 numbered builds for one configured job | Correlation observation, including a truncation flag |
 | `jenkins.stop-build` | POST a numbered build's stop action | Request accepted; cleanup must still be observed |
 
 Mutations are denied by default. An explicit client configuration opt-in is
@@ -118,7 +118,7 @@ binds the exact tree, installed verifier and all fixed gates. A private immutabl
 mapping binds both to the actual workflow, task, attempt and candidate. Neither
 digest is substituted for the other or written over a historical receipt.
 
-Migration24 supplies narrowly scoped native CI context/status functions to the
+Migration 24 supplies narrowly scoped native CI context/status functions to the
 reconciler. It adds no table-read permission or model database access. Live lease
 authority is required to admit CI; status reads let the trusted publisher clean
 up its own durable actions after cancellation or restart. Stop requests remain
@@ -169,7 +169,7 @@ for native service and credential setup. Source/transport fixtures, the separate
 public consumer, CLI admission/private-file tests and live read-only acceptance
 are distinct evidence. Fake HTTP tests never submit a real Jenkins build.
 
-Mission Control's installed `forge` command is qualified against Jenkins2.580.2.
+Mission Control's installed `forge` command is qualified against Jenkins 2.580.2.
 The `forge-exact-candidate` job runs on the dedicated single-executor
 `forge-mission-control-ci` node; the controller retains zero executors. External
 Muse delivery already uses that job. A real full-suite smoke build passed on

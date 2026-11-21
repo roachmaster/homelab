@@ -217,10 +217,10 @@ selects `"hosted_provider": "jenkins"` and a private
 `"jenkins_delivery_config"`; GitHub Actions stays disabled. All three fixed
 gates run once before independent code review, and later stages reobserve the
 same source-bound Jenkins receipt. Models and account configuration remain
-explicit profile settings. Migration24 adds narrow reconciler CI context/status
+explicit profile settings. Migration 24 adds narrow reconciler CI context/status
 ports without rewriting frozen workflows or granting direct table access.
 
-The original rollout required matching M15/M16 database migrations, policy7 workers and
+The original rollout required matching M15/M16 database migrations, policy 7 workers and
 atomic ABI 8 host/generated assets. Drain or preserve old active leases before
 switching versions. Verify normal service startup and source selection before
 opening new admission. Preserve historical receipts and native workspaces;
