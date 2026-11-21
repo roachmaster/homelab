@@ -60,6 +60,8 @@ means the cancellation request was accepted, not proof that a running build
 stopped. Build-submit timeouts, server failures, lost/invalid acceptance receipts
 and cancellation uncertainty return `MutationUncertain`; reconcile instead of
 blindly retrying. Neither this adapter nor Ureq3 performs implicit retries.
+Unexpected write response statuses, including unverified 2xx/3xx responses,
+remain uncertain; explicit 401/403 and 404 rejections retain their typed errors.
 
 Only numeric loopback HTTP endpoints are accepted for local Mission Control.
 Other endpoints require HTTPS with the native transport's standard trusted roots.

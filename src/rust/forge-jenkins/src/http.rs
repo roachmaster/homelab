@@ -69,12 +69,18 @@ impl IoClient for HttpTransport {
             Method::Get => self
                 .agent
                 .get(&request.url)
+                .config()
+                .timeout_global(Some(request.limits.timeout))
+                .build()
                 .header("Authorization", request.authorization())
                 .header("Accept", "application/json")
                 .call(),
             Method::Post => self
                 .agent
                 .post(&request.url)
+                .config()
+                .timeout_global(Some(request.limits.timeout))
+                .build()
                 .header("Authorization", request.authorization())
                 .header("Accept", "application/json")
                 .header(
@@ -94,8 +100,8 @@ impl IoClient for HttpTransport {
             if header_bytes > 32768 {
                 return Err(TransportError::InvalidResponse);
             }
-            if matches!(name.as_str(), "location" | "x-jenkins") {
-                if headers
+            if matches!(name.as_str(), "location" | "x-jenkins")
+                && headers
                     .insert(
                         name.as_str().to_owned(),
                         value
@@ -104,9 +110,8 @@ impl IoClient for HttpTransport {
                             .to_owned(),
                     )
                     .is_some()
-                {
-                    return Err(TransportError::InvalidResponse);
-                }
+            {
+                return Err(TransportError::InvalidResponse);
             }
         }
         let mut body = Vec::new();
@@ -116,7 +121,12 @@ impl IoClient for HttpTransport {
             .take(request.limits.max_response_bytes as u64 + 1)
             .read_to_end(&mut body)
             .map_err(|error| {
-                if error.kind() == std::io::ErrorKind::TimedOut {
+                if error.kind() == std::io::ErrorKind::TimedOut
+                    || error
+                        .get_ref()
+                        .and_then(|error| error.downcast_ref::<ureq::Error>())
+                        .is_some_and(|error| matches!(error, ureq::Error::Timeout(_)))
+                {
                     TransportError::Timeout
                 } else {
                     TransportError::Unavailable
