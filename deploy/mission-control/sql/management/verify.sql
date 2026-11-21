@@ -3,6 +3,9 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+-- Validate the M23 replacement before any historical-catalog normalization.
+\ir verify-agy-unattended.sql
+
 DO $verify$
 DECLARE
     relation text;
@@ -162,7 +165,7 @@ BEGIN
           AND 'search_path=pg_catalog, pg_temp' = ANY(p.proconfig)
           AND position(
               $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2','forge-coding-v3','forge-coding-v4','forge-coding-v5','forge-coding-v6','forge-coding-v7','forge-coding-v8','forge-coding-v9','forge-coding-v10')$predicate$
-              IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
+              IN pg_catalog.regexp_replace(replace(p.prosrc, ', ''forge-coding-agy-unattended-v1''', ''), '[[:space:]]+', '', 'g')
           ) > 0
           AND position(
               $predicate$(t.pinned_recipe->>'policy_digest')=r.policy_digest$predicate$
@@ -503,6 +506,12 @@ BEGIN
         ) THEN
             RAISE EXCEPTION 'Invalid constraint index % on forge_agent.%',
                 expected.conname, expected.relname;
+        END IF;
+        -- M23's exact native recipe constraint is checked above. Remove only
+        -- its new allowlist token for the frozen predecessor token comparison.
+        IF expected.relname='coding_attempts' AND expected.conname='coding_attempts_pinned_recipe_check'
+           AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=23) THEN
+            actual_expression:=replace(actual_expression, ', ''forge-coding-agy-unattended-v1''::text', '');
         END IF;
         IF expected.definition IS NOT NULL THEN
             actual_tokens := ARRAY(

@@ -228,4 +228,13 @@ SELECT NOT EXISTS (
 \ir migrations/0022_external_workflows.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(22,'external_workflows');
 \endif
+
+SELECT NOT EXISTS (
+    SELECT 1 FROM forge_agent.schema_migrations WHERE version=23
+) AS apply_0023
+\gset
+\if :apply_0023
+\ir migrations/0023_coding_agy_unattended.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(23,'coding_agy_unattended');
+\endif
 COMMIT;
