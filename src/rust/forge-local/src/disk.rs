@@ -1,5 +1,6 @@
 //! Disk use-case preparation is outside the concrete filesystem client.
-use super::{descriptor_for, Bindings, BootstrapError, Command, CommandKind, Output, RunError};
+use super::{BootstrapError, Command, CommandKind, Output, RunError};
+use crate::application::{descriptor_for, Bindings};
 use forge_command::{ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence};
 use forge_io_client::IoClient;
 use forge_kernel::disk::{DiskError, DiskRequest, DiskResponse};
