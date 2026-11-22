@@ -5,6 +5,7 @@ review approval; the admitted owner/reviewer decision authorizes publication.
 """
 
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -16,7 +17,7 @@ import threading
 import time
 
 from work_executor import WorkspaceLease, WorkspaceBusyError
-from work_publication_clients import DIGEST, SHA, PublicationError, uuid
+from work_publication_clients import DIGEST, SHA, PublicationError, SourceIntegrationConflict, uuid
 from work_publication_checks import VerificationFailure
 from work_repair_policy import RepairObservation, RepairPolicy, decide_repair, failure_fingerprint
 from work_verification import VerificationReport, diagnostic_text, gate_manifest_sha256, project_verification
@@ -245,11 +246,13 @@ class ReviewedCandidateProvider:
 class ReviewWorker:
     """One leased verification; SQL alone admits repair/publication successors."""
     def __init__(self, config, store, snapshots, git, checks, candidates, *, stop=None,
-                 policy_decider=decide_repair, hosted_checks=None):
+                 policy_decider=decide_repair, hosted_checks=None, native_ci=None, repair_sources=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.candidates, self.policy_decider = checks, candidates, policy_decider
         self.stop = stop if stop is not None else threading.Event()
         self.hosted_checks = hosted_checks
+        self.native_ci = native_ci
+        self.repair_sources = repair_sources
 
     def _finish(self, job, outcome):
         try:
@@ -325,6 +328,7 @@ class ReviewWorker:
         requires_new = False
         integration_base = job["base_revision"]
         report = None
+        delivery_failure, native_binding, tested_head = None, None, None
         stage = "acquire_review"
         try:
             with self._locked(job):
@@ -341,13 +345,22 @@ class ReviewWorker:
                     stage = "snapshot"
                     snapshot = self._snapshot(check_job, require_lease, lost)
                     stage = "prepare"
-                    repository, head = self.git.prepare(check_job, snapshot)
+                    branch_first = getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1'
+                    prepare = self.git.prepare_source if branch_first else self.git.prepare
+                    try:
+                        repository, head = prepare(check_job, snapshot)
+                    except SourceIntegrationConflict as conflict:
+                        self._finish_source_conflict(job,conflict,require_lease)
+                        return
                     integration_base = self.git._git(repository, "rev-parse", "FETCH_HEAD").decode().strip()
                     requires_new = _source_map(snapshot.files) != _tree_map(self.git, repository, head)
                     candidate_digest = WorkspaceLease(repository, self.config.worker.projects[job["project_alias"]],
                         repository / ".git", job["task_id"], head).digest()
                 require_lease()
                 source_gate_digest = gate_source_digest(self.git, repository, head)
+                check_job = {**check_job, 'candidate_commit': head, 'integration_base': integration_base,
+                    'gate_manifest_sha256': gate_manifest_sha256(self.config.checks,
+                        self.config.required_hosted_checks, source_gate_digest)}
                 changed = self.git._git(repository, "diff", "--name-only", "-z", job["base_revision"], head).split(b"\0")
                 gate_changes = any(protected_gate_path(path.decode("utf-8")) for path in changed if path)
                 stage = "checks"
@@ -359,6 +372,24 @@ class ReviewWorker:
                     report = error.report
                 self.git.verify(repository, head)
                 require_lease()
+                tested_head = head
+                if self.native_ci is not None:
+                    native_binding = self.native_ci.evidence(check_job, repository)
+                    if not report.checks_passed:
+                        delivery_failure = self.native_ci.failure_context(check_job)
+                if (report.code == 'main_ancestor_required' and report.cleanup_confirmed
+                        and self.repair_sources is not None and delivery_failure is not None):
+                    stage = 'prepare_delivery_repair'
+                    seed = self.repair_sources.prepare_local(check_job, repository, native_binding,
+                        delivery_failure['build'], require_lease)
+                    repository = seed['repository']
+                    head, candidate_digest = seed['candidate_commit'], seed['candidate_workspace_digest']
+                    integration_base, source_gate_digest = seed['integration_base'], seed['gate_source_sha256']
+                    requires_new, delivery_failure = True, seed['delivery_failure']
+                    report = replace(report, findings=tuple(seed['findings']),
+                        summary=seed['findings'][0]['summary'], evidence_digest=seed['evidence_digest'])
+                    self.git.verify(repository, head)
+                    require_lease()
                 policy = repair_policy(job)
                 # Output markers are diagnostic data. On any failed run no
                 # finding closes from partial/forged stdout. Gate edits also
@@ -390,6 +421,10 @@ class ReviewWorker:
                     "candidate_workspace_digest": candidate_digest,
                     "repair_requires_new_workspace": requires_new, "integration_base": integration_base,
                     "checks_passed": report.checks_passed}
+                if native_binding is not None:
+                    manifest['native_ci'] = native_binding
+                if delivery_failure is not None:
+                    manifest['delivery_failure'] = delivery_failure
                 if report.cleanup_confirmed:
                     self.candidates.record(job, manifest)
                 outcome = {"disposition": disposition, "reason": reason, "candidate_commit": head,
@@ -400,14 +435,17 @@ class ReviewWorker:
                         "repair_requires_new_workspace": requires_new, "toolchain": report.toolchain,
                         "integration_base": integration_base, "cleanup_confirmed": report.cleanup_confirmed,
                         "gate_changes_require_review": gate_changes,
-                        "checks": [{**check, "head_sha": head} for check in report.checks]}}
+                        "checks": [{**check, "head_sha": tested_head or head} for check in report.checks]}}
+                if delivery_failure is not None:
+                    outcome['verification']['delivery_failure'] = delivery_failure
                 require_lease()
                 self._finish(job, outcome)
         except Exception as error:
             if not lost.is_set():
                 code = ("workspace_busy" if isinstance(error, WorkspaceBusyError) else
                         error.code if isinstance(error, PublicationError) else "review_unavailable")
-                uncertain = code in {"prior_verification_scope_unstopped", "verification_scope_unstopped"}
+                uncertain = code in {"prior_verification_scope_unstopped", "verification_scope_unstopped",
+                                     "native_branch_requires_reconcile"}
                 try:
                     self._finish(job, {"disposition": "needs_reconcile" if uncertain else "handoff", "reason": code,
                         "candidate_commit": head, "gate_manifest_sha256": gate_manifest_sha256(
@@ -423,6 +461,40 @@ class ReviewWorker:
         finally:
             done.set()
             heartbeat.join(timeout=12)
+
+    def _finish_source_conflict(self,job,conflict,require_lease):
+        """Persist honest pre-CI source feedback, with no push/build identity."""
+        require_lease();repository=conflict.repository;head=conflict.candidate_commit
+        self.git.verify(repository,head)
+        details={'version':1,'authored_commit':conflict.authored_commit,'current_main':conflict.integration_base,
+            'candidate_commit':head,'conflict_paths':list(conflict.conflict_paths)}
+        evidence=hashlib.sha256(json.dumps(details,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        finding={'finding_id':'source-integration-'+evidence[:24],'category':'source','check_id':'main-integration',
+            'path':conflict.conflict_paths[0],'diagnostic_code':'main_merge_conflict',
+            'summary':'Resolve the preserved private three-way conflict against current main; no branch was pushed and no Jenkins build ran.',
+            'reproduction':'Inspect git diff '+conflict.integration_base+' HEAD and both commit parents; retain nonconflicting current-main files.',
+            'expected':'Resolve source, then pass fresh fixed checks and independent code review.',
+            'actual':diagnostic_text(json.dumps(details,sort_keys=True)), 'evidence_digest':evidence,'status':'open'}
+        gate_source=gate_source_digest(self.git,repository,head)
+        gate=gate_manifest_sha256(self.config.checks,self.config.required_hosted_checks,gate_source)
+        digest=WorkspaceLease(repository,self.config.worker.projects[job['project_alias']],repository/'.git',job['task_id'],head).source_digest()
+        manifest={'version':1,'review_id':job['review_id'],'task_id':job['task_id'],'attempt_id':job['attempt_id'],
+            'base_revision':job['base_revision'],'workspace_digest':job['workspace_digest'],'candidate_commit':head,
+            'gate_manifest_sha256':gate,'gate_source_sha256':gate_source,'candidate_workspace_digest':digest,
+            'repair_requires_new_workspace':True,'integration_base':conflict.integration_base,'checks_passed':False,
+            'source_integration':details}
+        self.candidates.record(job,manifest)
+        observation=RepairObservation('source',repair_round=job.get('round',0),stagnant_rounds=job.get('stagnant_rounds',0),
+            infrastructure_retries=job.get('infrastructure_retries',0),verified_progress=False,checks_passed=False,cleanup_confirmed=True)
+        disposition=self.policy_decider(observation,repair_policy(job)).disposition
+        if disposition=='repair'and not job.get('auto_repair',False):disposition='handoff'
+        require_lease()
+        self._finish(job,{'disposition':disposition,'reason':'main_merge_conflict','candidate_commit':head,
+            'gate_manifest_sha256':gate,'findings':[finding],'verified_finding_ids':[],
+            'fingerprint':failure_fingerprint('main-integration','main_merge_conflict',finding['path'],finding['summary']),
+            'summary':finding['summary'],'verification':{'checks_passed':False,'candidate_workspace_digest':digest,
+                'repair_requires_new_workspace':True,'integration_base':conflict.integration_base,'cleanup_confirmed':True,
+                'toolchain':'Not run: source conflict before CI','checks':[],'source_integration':details}})
 
     def _process_source(self, job):
         """One owner-authorized legacy repair import, never approval or publish."""

@@ -2,6 +2,8 @@
 //! application ingress. No task/client lookup, shell execution or remote transport.
 pub mod console;
 pub mod help;
+#[cfg(feature = "jenkins")]
+mod jenkins;
 #[cfg(feature = "jobs")]
 mod jobs;
 pub mod parser;
@@ -26,6 +28,13 @@ Session: one command per line; paths are literal remaining text, not shell synta
 Use help, help COMMAND or COMMAND --help; exit or quit ends a session.\n\
 Jobs are volatile and only advance through jobs.step; no work runs while waiting for input.\n\
 No remote-node, shell, create or delete commands are implemented.\n";
+
+#[cfg(feature = "jenkins")]
+const JENKINS_HELP: &str = "\nJenkins: --jenkins-config PATH selects private file configuration.\n\
+Jenkins commands are optional and use the configured account; writes require explicit allow_mutations.\n\
+Session Jenkins arguments use whitespace separation, without shell quoting or expansion.\n";
+#[cfg(not(feature = "jenkins"))]
+const JENKINS_HELP: &str = "";
 
 struct Failure {
     code: u8,
@@ -74,6 +83,13 @@ where
     C: IoClient<Request = ConsoleRequest, Response = ConsoleResponse, Error = io::Error>,
 {
     let options = parse_options(args).map_err(Failure::usage)?;
+    #[cfg(feature = "jenkins")]
+    let jenkins = options
+        .jenkins_config
+        .as_ref()
+        .map(|path| jenkins::configured(path.clone()))
+        .transpose()
+        .map_err(Failure::usage)?;
     #[cfg(feature = "jobs")]
     let enable_jobs = options.jobs;
     let (config, mode) = options
@@ -82,11 +98,36 @@ where
     #[cfg(feature = "jobs")]
     let assembled = if enable_jobs {
         let base = jobs::fresh_base().map_err(Failure::runtime)?;
-        Application::bootstrap_with_jobs(config, forge_local::jobs::JobsConfig::local(base))
+        let jobs = forge_local::jobs::JobsConfig::local(base);
+        #[cfg(feature = "jenkins")]
+        {
+            if let Some(client) = jenkins {
+                Application::bootstrap_with_jobs_and_jenkins(config, jobs, client)
+            } else {
+                Application::bootstrap_with_jobs(config, jobs)
+            }
+        }
+        #[cfg(not(feature = "jenkins"))]
+        Application::bootstrap_with_jobs(config, jobs)
+    } else {
+        #[cfg(feature = "jenkins")]
+        {
+            if let Some(client) = jenkins {
+                Application::bootstrap_with_jenkins(config, client)
+            } else {
+                Application::bootstrap(config)
+            }
+        }
+        #[cfg(not(feature = "jenkins"))]
+        Application::bootstrap(config)
+    };
+    #[cfg(all(not(feature = "jobs"), feature = "jenkins"))]
+    let assembled = if let Some(client) = jenkins {
+        Application::bootstrap_with_jenkins(config, client)
     } else {
         Application::bootstrap(config)
     };
-    #[cfg(not(feature = "jobs"))]
+    #[cfg(all(not(feature = "jobs"), not(feature = "jenkins")))]
     let assembled = Application::bootstrap(config);
     let app = assembled.map_err(|error| {
         if error.is_configuration() {
@@ -144,7 +185,10 @@ where
         .map_err(|error| Failure::runtime(error.to_string()))?;
     write(
         console,
-        ConsoleRequest::WriteOut(format!("{STARTUP_HELP}\n{}", help::catalog(&commands))),
+        ConsoleRequest::WriteOut(format!(
+            "{STARTUP_HELP}{JENKINS_HELP}\n{}",
+            help::catalog(&commands)
+        )),
     )
 }
 fn find_command<'a>(commands: &'a [CommandInfo], name: &str) -> Result<&'a CommandInfo, Failure> {
@@ -265,6 +309,8 @@ where
 /// bytes (non-ASCII/control bytes escaped), never lossy-converted or executed.
 pub fn format_output(output: Output) -> String {
     match output {
+        #[cfg(feature = "jenkins")]
+        Output::Jenkins(output) => jenkins::format_output(output),
         #[cfg(feature = "jobs")]
         Output::Jobs(output) => jobs::format_output(output),
         Output::Commands(commands) => help::catalog(&commands),

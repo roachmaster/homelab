@@ -3,6 +3,12 @@
 BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
+-- Validate the M23 replacement before any historical-catalog normalization.
+\ir verify-owner-continuation.sql
+\ir verify-agy-unattended.sql
+\ir verify-native-jenkins.sql
+\ir verify-native-delivery.sql
+
 DO $verify$
 DECLARE
     relation text;
@@ -126,6 +132,12 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Forge coding Codex warm sessions migration 0017 is missing';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=18 AND name='coding_grok_provider') THEN
+        RAISE EXCEPTION 'Forge Grok provider migration 0018 is missing';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=19 AND name='coding_muse_provider') THEN
+        RAISE EXCEPTION 'Forge Muse provider migration 0019 is missing';
+    END IF;
     FOR expected IN
         SELECT * FROM (VALUES ('progress_attempt_id', 'uuid'), ('progress_sequence', 'integer')) AS columns(name, type)
     LOOP
@@ -155,8 +167,8 @@ BEGIN
           AND p.prosecdef
           AND 'search_path=pg_catalog, pg_temp' = ANY(p.proconfig)
           AND position(
-              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2','forge-coding-v3','forge-coding-v4','forge-coding-v5','forge-coding-v6','forge-coding-v7','forge-coding-v8')$predicate$
-              IN pg_catalog.regexp_replace(p.prosrc, '[[:space:]]+', '', 'g')
+              $predicate$(t.pinned_recipe->>'resource_profile')IN('forge-coding-v1','forge-coding-v2','forge-coding-v3','forge-coding-v4','forge-coding-v5','forge-coding-v6','forge-coding-v7','forge-coding-v8','forge-coding-v9','forge-coding-v10')$predicate$
+              IN pg_catalog.regexp_replace(replace(p.prosrc, ', ''forge-coding-agy-unattended-v1''', ''), '[[:space:]]+', '', 'g')
           ) > 0
           AND position(
               $predicate$(t.pinned_recipe->>'policy_digest')=r.policy_digest$predicate$
@@ -348,7 +360,7 @@ BEGIN
                  AND (pinned_recipe ? 'version'::text)
                  AND (pinned_recipe ? 'backend'::text)
                  AND (jsonb_typeof((pinned_recipe -> 'backend'::text)) = 'string'::text)
-                 AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text]))
+                 AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text, 'grok'::text, 'muse'::text]))
                  AND (pinned_recipe ? 'model'::text)
                  AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text)
                  AND (octet_length((pinned_recipe ->> 'model'::text)) >= 1)
@@ -415,7 +427,7 @@ BEGIN
             ('coding_worker_readiness', 'coding_worker_readiness_pkey', 'p', $def$PRIMARY KEY (worker_role, owner_id, worker_id)$def$),
             ('coding_worker_readiness', 'coding_worker_readiness_policy_digest_check', 'c', $def$CHECK ((policy_digest ~ '^[0-9a-f]{64}$'::text))$def$),
             ('coding_attempts', 'coding_attempts_agent_profile_check', 'c', $def$CHECK ((agent_profile ~ '^[A-Za-z0-9_.-]{1,64}$'::text))$def$),
-            ('coding_attempts', 'coding_attempts_pinned_recipe_check', 'c', $def$CHECK ((((jsonb_typeof(pinned_recipe) = 'object'::text) AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb) AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) AND ((pinned_recipe -> 'version'::text) = '2'::jsonb) AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text])) AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text) AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1) AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128)) AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text, 'forge-coding-v3'::text, 'forge-coding-v4'::text, 'forge-coding-v5'::text, 'forge-coding-v6'::text, 'forge-coding-v7'::text, 'forge-coding-v8'::text])) AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text])) AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text) AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),
+            ('coding_attempts', 'coding_attempts_pinned_recipe_check', 'c', $def$CHECK ((((jsonb_typeof(pinned_recipe) = 'object'::text) AND ((pinned_recipe - ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) = '{}'::jsonb) AND (pinned_recipe ?& ARRAY['version'::text, 'backend'::text, 'model'::text, 'resource_profile'::text, 'mode'::text, 'generation_token_limit'::text, 'policy_digest'::text]) AND ((pinned_recipe -> 'version'::text) = '2'::jsonb) AND ((pinned_recipe ->> 'backend'::text) = ANY (ARRAY['antigravity'::text, 'codex'::text, 'grok'::text, 'muse'::text])) AND (jsonb_typeof((pinned_recipe -> 'model'::text)) = 'string'::text) AND ((octet_length((pinned_recipe ->> 'model'::text)) >= 1) AND (octet_length((pinned_recipe ->> 'model'::text)) <= 128)) AND ((pinned_recipe ->> 'resource_profile'::text) = ANY (ARRAY['forge-coding-v1'::text, 'forge-coding-v2'::text, 'forge-coding-v3'::text, 'forge-coding-v4'::text, 'forge-coding-v5'::text, 'forge-coding-v6'::text, 'forge-coding-v7'::text, 'forge-coding-v8'::text, 'forge-coding-v9'::text, 'forge-coding-v10'::text])) AND ((pinned_recipe ->> 'mode'::text) = ANY (ARRAY['plan'::text, 'review'::text, 'implement'::text])) AND (jsonb_typeof((pinned_recipe -> 'generation_token_limit'::text)) = 'null'::text) AND ((pinned_recipe ->> 'policy_digest'::text) ~ '^[0-9a-f]{64}$'::text)) IS TRUE))$def$),
             ('coding_attempts', 'coding_attempts_recipe_digest_check', 'c', $def$CHECK ((recipe_digest ~ '^[0-9a-f]{64}$'::text))$def$),
             ('coding_attempts', 'coding_attempts_pkey', 'p', $def$PRIMARY KEY (owner_id, project_alias, task_id, attempt_id)$def$),
             ('coding_attempts', 'coding_attempts_task_fk', 'f', $def$FOREIGN KEY (owner_id, project_alias, task_id) REFERENCES forge_agent.coding_tasks(owner_id, project_alias, id)$def$),
@@ -497,6 +509,12 @@ BEGIN
         ) THEN
             RAISE EXCEPTION 'Invalid constraint index % on forge_agent.%',
                 expected.conname, expected.relname;
+        END IF;
+        -- M23's exact native recipe constraint is checked above. Remove only
+        -- its new allowlist token for the frozen predecessor token comparison.
+        IF expected.relname='coding_attempts' AND expected.conname='coding_attempts_pinned_recipe_check'
+           AND EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=23) THEN
+            actual_expression:=replace(actual_expression, ', ''forge-coding-agy-unattended-v1''::text', '');
         END IF;
         IF expected.definition IS NOT NULL THEN
             actual_tokens := ARRAY(
@@ -666,6 +684,15 @@ $verify$;
 SELECT version, name, applied_at
 FROM forge_agent.schema_migrations
 ORDER BY version;
+
+-- Validate the optional reader before adjusting only its reviewed ACL entry.
+\ir verify-external-agent.sql
+
+\ir verify-muse-read-access.sql
+
+\ir verify-task-events.sql
+
+\ir verify-external-workflows.sql
 
 \ir verify-feedback.sql
 

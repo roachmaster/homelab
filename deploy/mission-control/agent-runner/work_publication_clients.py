@@ -6,6 +6,7 @@ GitHub authentication remains in the trusted publisher's existing gh account.
 
 from dataclasses import dataclass
 import json
+import hashlib
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -55,6 +56,16 @@ class PublicationError(RuntimeError):
         super().__init__(code)
 
 
+
+class SourceIntegrationConflict(PublicationError):
+    """Actual private three-way conflict, committed only as unverified evidence."""
+    def __init__(self,repository,candidate,authored,main,paths):
+        super().__init__('main_merge_conflict')
+        self.repository,self.candidate_commit=repository,candidate
+        self.authored_commit,self.integration_base=authored,main
+        self.conflict_paths=tuple(paths)
+
+
 def uuid(value):
     try:
         if not isinstance(value, str) or str(UUID(value)) != value:
@@ -65,7 +76,7 @@ def uuid(value):
 
 
 def branch_name(job):
-    return "forge/task-" + uuid(job.get("target_publication_id") or job["publication_id"])
+    return "forge/task-" + uuid(job.get("branch_publication_id") or job.get("target_publication_id") or job["publication_id"])
 
 
 def command(argv, *, env, cwd=None, data=None, timeout=60):
@@ -242,6 +253,13 @@ class GitRepositoryProvider:
         return self.execute([*argv, *args], env=parent_environment(self.config), timeout=timeout)
 
     def prepare(self, job, snapshot):
+        return self._prepare(job, snapshot, branch_first=False)
+
+    def prepare_source(self, job, snapshot):
+        """Integrate current main privately before the source push/event/build."""
+        return self._prepare(job, snapshot, branch_first=True)
+
+    def _prepare(self, job, snapshot, *, branch_first):
         if snapshot.workspace_digest != job["workspace_digest"]:
             raise PublicationError("workspace_changed")
         directory = self.config.state_root / uuid(job["publication_id"])
@@ -259,6 +277,44 @@ class GitRepositoryProvider:
         repository = directory / "repository"
         if repository.is_symlink():
             raise PublicationError("publication_state_changed")
+        prepared = directory / 'prepared-source.json'
+        if branch_first and prepared.exists():
+            from work_external_delivery import read_private
+            receipt = json.loads(read_private(prepared, owner=os.geteuid()))
+            if receipt.get('identity') != identity:
+                raise PublicationError('publication_state_changed')
+            head, main = receipt.get('candidate_commit'), receipt.get('expected_main')
+            if not isinstance(head, str) or not SHA.fullmatch(head) or not isinstance(main, str) or not SHA.fullmatch(main):
+                raise PublicationError('publication_state_changed')
+            tested = directory / 'repository.tested'
+            selected = tested if (directory / 'local-seed-install.json').exists() and tested.exists() else repository
+            if selected.is_symlink() or not selected.is_dir():
+                raise PublicationError('publication_state_changed')
+            self.verify(selected, head)
+            expected = {entry.path: ['120000' if entry.kind == 'link' else '100755' if entry.executable else '100644',
+                hashlib.sha1(b'blob '+str(len(entry.data)).encode()+b'\0'+entry.data).hexdigest()] for entry in snapshot.files}
+            version = receipt.get('version')
+            authored = head if version == 1 else receipt.get('authored_commit')
+            if type(version) is not int or version not in (1,2) or not isinstance(authored,str)or not SHA.fullmatch(authored):
+                raise PublicationError('publication_state_changed')
+            actual = self._tree_entries(selected,authored)
+            if actual != expected or self._git(selected,'rev-parse','FETCH_HEAD').decode().strip() != main:
+                raise PublicationError('publication_state_changed')
+            if version == 2:
+                if (receipt.get('integration')!='current-main-three-way-v1'
+                    or self._git(selected,'rev-parse',authored+'^{tree}').decode().strip()!=receipt.get('authored_tree')
+                    or self._git(selected,'rev-parse',head+'^{tree}').decode().strip()!=receipt.get('candidate_tree')):
+                    raise PublicationError('publication_state_changed')
+                self._git(selected,'merge-base','--is-ancestor',authored,head)
+                self._git(selected,'merge-base','--is-ancestor',main,head)
+                paths=receipt.get('conflict_paths')
+                if not isinstance(paths,list)or len(paths)>32 or any(not isinstance(path,str)for path in paths):
+                    raise PublicationError('publication_state_changed')
+                for path in paths:safe_relative(path)
+                if paths:raise SourceIntegrationConflict(selected,head,authored,main,paths)
+            # Existing v1/pushed/build receipts retain their exact old source.
+            # They are never silently upgraded into another candidate.
+            return selected,head
         if repository.exists():
             shutil.rmtree(repository)  # Only this stopped, identity-bound private clone.
         self._git(None, "clone", "--quiet", "--no-local", "--no-checkout", "--",
@@ -300,20 +356,52 @@ class GitRepositoryProvider:
             else:
                 raise PublicationError("unsafe_artifact_type")
         self._git(repository, "add", "--all", "--", ".")
-        if not self._git(repository, "diff", "--cached", "--name-only", "-z"):
+        changed = bool(self._git(repository, "diff", "--cached", "--name-only", "-z"))
+        if not changed and (not branch_first or not (job.get('parent_task_id') and job.get('feedback_id'))):
             raise PublicationError("no_source_changes")
-        self._git(repository, "commit", "--quiet", "--no-gpg-sign", "-m", "Forge implementation " + uuid(job["task_id"]))
+        if changed:
+            self._git(repository, "commit", "--quiet", "--no-gpg-sign", "-m", "Forge implementation " + uuid(job["task_id"]))
+        authored=self._git(repository,'rev-parse','HEAD').decode().strip()
+        authored_tree=self._git(repository,'rev-parse','HEAD^{tree}').decode().strip()
         remote = self.remote_url_factory(job["project_alias"])
         self._git(repository, "fetch", "--quiet", "--no-tags", "--", remote, "refs/heads/main", network=True, timeout=120)
+        main=self._git(repository,'rev-parse','FETCH_HEAD').decode().strip()
+        conflicts=[]
         try:
+            # Three-way integration is owned exclusively by this private clone.
+            # The native worktree and its admitted base/receipt stay unchanged.
             self._git(repository, "merge", "--no-edit", "--no-gpg-sign", "FETCH_HEAD")
         except PublicationError:
-            raise PublicationError("main_merge_conflict") from None
+            if not branch_first:raise PublicationError('main_merge_conflict')from None
+            conflicts=[path.decode('utf-8')for path in self._git(repository,'diff','--name-only','--diff-filter=U','-z').split(b'\0')if path]
+            if not conflicts:raise PublicationError('main_merge_unavailable')from None
+            if len(conflicts)>32:raise PublicationError('main_merge_conflicts_out_of_scope')from None
+            for path in conflicts:safe_relative(path)
+            # Preserve actual unresolved markers and nonconflicting main files,
+            # with both genuine parents. This is never approval or CI evidence.
+            self._git(repository,'add','--all','--','.')
+            self._git(repository,'commit','--quiet','--no-gpg-sign','-m','Unverified Forge current-main integration conflict; resolve before review')
         head = self._git(repository, "rev-parse", "HEAD").decode().strip()
-        if not SHA.fullmatch(head):
-            raise PublicationError("invalid_publication_commit")
+        if not SHA.fullmatch(head):raise PublicationError("invalid_publication_commit")
         self.verify(repository, head)
+        self._git(repository,'merge-base','--is-ancestor',main,head)
+        if branch_first:
+            from work_external_delivery import durable_json
+            durable_json(prepared, {'version':2,'integration':'current-main-three-way-v1','identity':identity,
+                'authored_commit':authored,'authored_tree':authored_tree,'candidate_commit':head,
+                'candidate_tree':self._git(repository,'rev-parse','HEAD^{tree}').decode().strip(),
+                'expected_main':main,'conflict_paths':conflicts})
+        if conflicts:raise SourceIntegrationConflict(repository,head,authored,main,conflicts)
         return repository, head
+
+    def _tree_entries(self,repository,head):
+        result={}
+        for row in self._git(repository,'ls-tree','-r','-z','--full-tree',head).split(b'\0'):
+            if row:
+                description,path=row.split(b'\t',1);mode,kind,blob=description.decode().split()
+                if kind!='blob':raise PublicationError('publication_state_changed')
+                result[path.decode()]=[mode,blob]
+        return result
 
     def verify(self, repository, expected):
         if (self._git(repository, "rev-parse", "HEAD").decode().strip() != expected

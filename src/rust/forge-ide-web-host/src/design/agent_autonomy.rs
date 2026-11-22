@@ -8,11 +8,11 @@ pub(super) const BODY: &[Node] = &[
     element!(Section [Class = "design-section", AriaLabelledby = "autonomy-flow-title"];
         element!(H2 [Id = "autonomy-flow-title"]; text("The normal workflow")),
         element!(Ol [Class = "contract-steps"];
-            element!(Li; element!(Strong; text("Author a plan.")), text(" The configured author, initially Gemini, receives the assignment and acceptance criteria in its scoped workspace.")),
+            element!(Li; element!(Strong; text("Author a plan.")), text(" The configured native author or external Muse runner receives the assignment and acceptance criteria through its admitted provider.")),
             element!(Li; element!(Strong; text("Review the exact plan.")), text(" The independent read-only reviewer, initially Codex, returns a structured approval or concrete revision findings bound to that artifact. PostgreSQL commits the result and admits the next stage.")),
             element!(Li; element!(Strong; text("Revise within the frozen budget.")), text(" The author receives the reviewer findings. Up to three plan revisions are allowed by the initial policy; unresolved findings then escalate to the operator.")),
             element!(Li; element!(Strong; text("Implement and review the candidate.")), text(" An approved plan automatically starts implementation. Independent code review and fixed verification checks return source-bound findings to the author within the configured code-revision budget.")),
-            element!(Li; element!(Strong; text("Publish, check and merge.")), text(" Trusted providers publish the exact reviewed candidate. Required hosted checks must pass on that head before the trusted merger advances main and records the remote receipt. The agent cannot push or merge.")),
+            element!(Li; element!(Strong; text("Publish, check and merge.")), text(" Trusted providers publish the exact reviewed candidate. The external database workflow requires the fixed Jenkins gates to pass on that exact commit/tree/gate manifest before the trusted merger advances main and records the remote receipt. Native workflows retain their own frozen verification provider. The agent cannot push or merge.")),
         ),
     ),
     element!(Section [Class = "design-section", AriaLabelledby = "autonomy-boundaries-title"];
@@ -28,7 +28,8 @@ pub(super) const BODY: &[Node] = &[
     element!(Section [Class = "design-section", AriaLabelledby = "autonomy-exceptions-title"];
         element!(H2 [Id = "autonomy-exceptions-title"]; text("Human exceptions and retained history")),
         element!(P; text("Cancel remains available only while the admitted workflow permits it. Exhausted revision budgets, quota/authentication stops, changed scope, conflicting remote state or uncertain cleanup preserve the artifacts and expose an escalation reason. Recovery is explicit and source-bound; ordinary Plan Resume, Approve and Accept controls are not part of this autonomous path.")),
-        element!(P; text("Legacy assignments retain their manual lifecycle and historical policy. Missing autonomous context cannot fall back to manual approval. A workflow is shown as complete only after its trusted merge receipt is recorded, not when an author says the task is finished.")),
+        element!(P; text("Legacy/manual assignments retain their historical policy and applicable controls. Eligible external-v1 Plans are adopted through a real M22 binding and independent native review; an artifact alone never becomes approval. Missing autonomous context cannot fall back to manual approval. A workflow is shown as complete only after its trusted merge receipt is recorded, not when an author says the task is finished.")),
+        element!(P; element!(A [Href = "/design/coding-agents#external-workflow"]; text("Muse database workflow, factories and task history →"))),
         element!(A [Href = "/design/agent-feedback-loop"]; text("Review the underlying feedback and repair boundaries →")),
         element!(P;
             element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/forge-autonomous-agent-workflow.md"]; text("Sequence and component diagram source →")),

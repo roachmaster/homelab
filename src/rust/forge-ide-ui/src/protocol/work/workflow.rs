@@ -65,6 +65,8 @@ impl WorkWorkflowPhase {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkWorkflowSummary {
+    #[serde(default)]
+    pub kind: WorkWorkflowKind,
     pub workflow_id: String,
     pub policy_digest: String,
     pub phase: WorkWorkflowPhase,
@@ -77,10 +79,32 @@ pub struct WorkWorkflowSummary {
     #[serde(deserialize_with = "super::required_nullable")]
     pub escalation_reason: Option<String>,
     pub can_cancel: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer_task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_commit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit: Option<String>,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkWorkflowKind {
+    #[default]
+    Native,
+    ExternalDatabase,
 }
 impl WorkWorkflowSummary {
     pub fn is_valid(&self) -> bool {
         valid_chat_id(&self.workflow_id)
+            && self.reviewer_task_id.as_deref().is_none_or(valid_chat_id)
+            && self
+                .candidate_commit
+                .as_deref()
+                .is_none_or(|s| valid_work_hex(s, 40))
+            && self
+                .merge_commit
+                .as_deref()
+                .is_none_or(|s| valid_work_hex(s, 40))
             && valid_work_hex(&self.policy_digest, 64)
             && valid_work_name(&self.author_profile, 64)
             && valid_work_name(&self.reviewer_profile, 64)

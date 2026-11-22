@@ -1,6 +1,7 @@
 //! Owned coding-task and usage UI state. Network/DOM work stays at typed ports.
 use super::*;
 use crate::markdown::render_markdown;
+mod history;
 mod presentation;
 mod workflow;
 use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
@@ -58,6 +59,14 @@ pub(super) struct Agents {
     events_loaded: bool,
     events_more: bool,
     progress: Vec<WorkLogEvent>,
+    history: Vec<WorkLogEvent>,
+    history_task: Option<String>,
+    history_correlation: Option<String>,
+    history_cursor: u64,
+    history_bookmarks: Vec<u64>,
+    history_next: Option<u64>,
+    history_loaded: bool,
+    history_request: Option<history::HistoryRequest>,
     result: String,
     result_digest: Option<String>,
     result_attempt: Option<String>,
@@ -281,6 +290,10 @@ impl Agents {
         }
     }
     fn schedule(&mut self, id: String, effects: &mut Vec<UiEffect>) {
+        if self.active && self.pending.is_none() && self.task.is_some() && !self.history_loaded {
+            self.history_page(id, Direction::Current, 0, effects);
+            return;
+        }
         if self.active
             && self.pending.is_none()
             && self.task.is_some()
@@ -350,6 +363,7 @@ impl Agents {
     pub fn network_failed(&mut self, id: &str, watch: String, effects: &mut Vec<UiEffect>) {
         if self.pending.as_ref().is_some_and(|r| r.request_id() == id) {
             let request = self.pending.take().expect("checked request");
+            self.history_request = None;
             if request.is_mutation() {
                 self.retry = Some(request);
                 self.status =
@@ -520,12 +534,11 @@ impl Agents {
             }
             UiEvent::AgentsRefresh {} => {
                 if work && self.pending.is_none() {
-                    if self.catalog.is_none() {
-                        self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
-                    } else if self.pane == Pane::Reader {
+                    if self.pane == Pane::Reader && self.catalog.is_some() {
+                        self.events_loaded = false;
                         self.get(id, effects);
                     } else {
-                        self.list(id, Direction::Current, effects);
+                        self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
                     }
                 }
                 if usage {
@@ -534,6 +547,37 @@ impl Agents {
             }
             UiEvent::AgentsNext {} if work => self.list(id, Direction::Next, effects),
             UiEvent::AgentsPrevious {} if work => self.list(id, Direction::Previous, effects),
+            UiEvent::AgentHistoryFirst {
+                task_id,
+                correlation_id,
+                after_sequence,
+            } if work => {
+                if self.history_action_valid(&task_id, &correlation_id, after_sequence) {
+                    self.history_page(id, Direction::Current, 0, effects);
+                }
+            }
+            UiEvent::AgentHistoryPrevious {
+                task_id,
+                correlation_id,
+                after_sequence,
+            } if work => {
+                if self.history_action_valid(&task_id, &correlation_id, after_sequence) {
+                    if let Some(cursor) = self.history_bookmarks.last().copied() {
+                        self.history_page(id, Direction::Previous, cursor, effects);
+                    }
+                }
+            }
+            UiEvent::AgentHistoryNext {
+                task_id,
+                correlation_id,
+                after_sequence,
+            } if work => {
+                if self.history_action_valid(&task_id, &correlation_id, after_sequence) {
+                    if let Some(cursor) = self.history_next {
+                        self.history_page(id, Direction::Next, cursor, effects);
+                    }
+                }
+            }
             UiEvent::SelectAgentProject { value } => {
                 if self
                     .catalog
@@ -637,6 +681,24 @@ impl Agents {
                         .is_some_and(|r| {
                             r.parent_task_id.as_ref() == Some(&task_id)
                                 || r.repair_task_id.as_ref() == Some(&task_id)
+                        })
+                    || self
+                        .task
+                        .as_ref()
+                        .and_then(|t| t.workflow.as_ref())
+                        .and_then(|w| w.reviewer_task_id.as_ref())
+                        == Some(&task_id)
+                    || self
+                        .history
+                        .iter()
+                        .filter_map(|e| e.workflow_progress.as_ref())
+                        .any(|p| {
+                            p.related_task_id.as_ref() == Some(&task_id)
+                                && self
+                                    .task
+                                    .as_ref()
+                                    .and_then(|t| t.workflow.as_ref())
+                                    .is_some_and(|w| w.workflow_id == p.workflow_id)
                         })
                 {
                     self.pending = None;
@@ -1256,6 +1318,9 @@ impl Agents {
             return;
         }
         self.pending = None;
+        if matches!(&response, WorkResponse::WorkFailed { .. }) {
+            self.history_request = None;
+        }
         match response {
             WorkResponse::WorkCatalog {
                 projects,
@@ -1316,6 +1381,22 @@ impl Agents {
                 self.get(id, effects);
             }
             WorkResponse::WorkOpened { task, .. } => {
+                if self.task.as_ref().is_some_and(|old| {
+                    old.task_id == task.task_id
+                        && old.project_alias == task.project_alias
+                        && old.correlation_id != task.correlation_id
+                }) {
+                    self.warning = true;
+                    self.status="The task correlation changed unexpectedly. Refresh to recover the authoritative task.".into();
+                    return;
+                }
+                if self.history_task.as_deref() != Some(task.task_id.as_str())
+                    || self.history_correlation.as_deref() != Some(task.correlation_id.as_str())
+                {
+                    self.clear_history();
+                    self.history_task = Some(task.task_id.clone());
+                    self.history_correlation = Some(task.correlation_id.clone());
+                }
                 let manifest = task.result.clone();
                 let changed = self.task.as_ref().is_none_or(|t| {
                     t.task_id != task.task_id
@@ -1392,10 +1473,35 @@ impl Agents {
                 events,
                 ..
             } => {
+                if self.task.as_ref().is_none_or(|task| {
+                    events
+                        .iter()
+                        .any(|event| event.correlation_id != task.correlation_id)
+                }) {
+                    self.history_request = None;
+                    self.warning = true;
+                    self.status="Event history did not match the selected task correlation. Refresh to retry.".into();
+                    return;
+                }
+                if let Some(page) = self.history_request.take() {
+                    let updates = !events.is_empty();
+                    self.accept_history(page, events, next_sequence);
+                    if self
+                        .task
+                        .as_ref()
+                        .is_some_and(|t| t.revision != revision || t.status != status || updates)
+                    {
+                        self.get(id, effects);
+                    } else {
+                        self.schedule(id, effects);
+                    }
+                    return;
+                }
                 self.event_sequence = next_sequence;
                 self.events_loaded = true;
                 self.events_more = events.len() == 50;
                 let updates = !events.is_empty();
+                self.update_history(&events);
                 self.keep_progress(events);
                 if self
                     .task
@@ -1627,10 +1733,23 @@ impl Agents {
         view.badges.clear();
         view.metric_cards.clear();
         view.transcripts.clear();
+        view.timelines.clear();
         let compose = self.pane == Pane::Compose;
         let reader = self.pane == Pane::Reader;
         let locked = self.locked();
         let pending = self.pending.is_some();
+        view.badges.push(BadgeBinding {
+            id: "agents-muse-db-state",
+            badge: if self.catalog.as_ref().is_some_and(|c| {
+                c.profiles.iter().any(|p| {
+                    p.backend == WorkBackend::Muse && p.transport == Some(WorkTransport::ExternalDb)
+                })
+            }) {
+                badge("Runner available", BadgeTone::Success)
+            } else {
+                badge("No runner heartbeat", BadgeTone::Neutral)
+            },
+        });
         if active {
             for binding in &mut view.visibility {
                 if matches!(
@@ -1789,6 +1908,15 @@ impl Agents {
             visible(
                 "agents-result-panel",
                 active && reader && self.result_digest.is_some(),
+            ),
+            visible(
+                "agents-external-result-panel",
+                active
+                    && reader
+                    && self
+                        .task
+                        .as_ref()
+                        .is_some_and(|t| t.external_result.is_some()),
             ),
             visible(
                 "agents-review",
@@ -2245,6 +2373,14 @@ impl Agents {
         }
         for (id, linked) in [
             (
+                "agents-workflow-reviewer",
+                self.task
+                    .as_ref()
+                    .and_then(|t| t.workflow.as_ref())
+                    .and_then(|w| w.reviewer_task_id.as_ref())
+                    .filter(|id| self.task.as_ref().is_some_and(|task| task.task_id != **id)),
+            ),
+            (
                 "agents-parent-task",
                 review.and_then(|r| r.parent_task_id.as_ref()),
             ),
@@ -2309,6 +2445,7 @@ impl Agents {
                 options: self.catalog.as_ref().map_or_else(Vec::new, |c| {
                     c.profiles
                         .iter()
+                        .filter(|p| self.profile_selectable(p))
                         .map(|p| OptionView {
                             value: p.alias.clone(),
                             label: model_title(&p.label, &p.model),
@@ -2482,7 +2619,33 @@ impl Agents {
                 vec![]
             },
         });
+        let external = self.task.as_ref().and_then(|t| t.external_result.as_ref());
+        view.texts.push(text(
+            "agents-external-result-summary",
+            external.map_or_else(String::new, |r| {
+                format!(
+                    "Muse · {} · {}",
+                    relative_time(&r.submitted_at, self.now_ms),
+                    r.summary
+                )
+            }),
+        ));
+        view.transcripts.push(TranscriptBinding {
+            id: "agents-external-result",
+            conversation: 0,
+            assistant_label: Some("Muse"),
+            messages: external.map_or_else(Vec::new, |r| {
+                vec![TranscriptMessage {
+                    role: ChatRole::Assistant,
+                    content: r.content.clone(),
+                    rendered_html: render_markdown(&r.content),
+                    notice: None,
+                    header: None,
+                }]
+            }),
+        });
         self.project_workflow(view, compose, reader);
+        self.project_history(view, active && work && reader);
     }
 }
 fn mode_value(mode: WorkMode) -> &'static str {

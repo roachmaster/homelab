@@ -1,0 +1,30 @@
+[Unit]
+Description=Forge leased Jenkins verification and guarded external source delivery
+Requires=postgresql@16-main.service jenkins.service
+After=postgresql@16-main.service jenkins.service forge-jenkins-ci-agent.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=lrocha
+Group=lrocha
+SupplementaryGroups=jenkins
+ExecStart=/usr/bin/python3 -B /opt/homelab-forge/agent-runner/work_external_delivery.py --config /home/lrocha/.config/forge/external-delivery.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+KillMode=control-group
+NoNewPrivileges=yes
+UMask=0077
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/mnt/data/forge-homelab/external-delivery/state /mnt/data/forge-homelab/external-delivery/submissions
+# Only isolated objects/refs are imported. This worker never moves verified-main
+# and never edits the canonical checkout or linked author/reviewer worktrees.
+ReadWritePaths=/home/lrocha/repos/homelab/.git
+
+[Install]
+WantedBy=multi-user.target

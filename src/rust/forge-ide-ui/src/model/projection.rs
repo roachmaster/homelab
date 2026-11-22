@@ -1109,6 +1109,7 @@ impl UiModel {
             transcripts: vec![],
             badges: vec![],
             metric_cards: vec![],
+            timelines: vec![],
         };
         view.buttons.push(ButtonBinding {
             id: "open-workbench",

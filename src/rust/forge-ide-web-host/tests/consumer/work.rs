@@ -54,7 +54,7 @@ fn task_request(kind: &str) -> Value {
 }
 
 fn summary() -> Value {
-    json!({"task_id":TASK,"project_alias":PROJECT,"base_revision":"a".repeat(40),"mode":"plan",
+    json!({"task_id":TASK,"correlation_id":OTHER,"project_alias":PROJECT,"base_revision":"a".repeat(40),"mode":"plan",
         "agent_profile":"agy-plan-v1","recipe_digest":"b".repeat(64),"status":"queued",
         "revision":1,"created_at":STAMP})
 }
@@ -434,7 +434,7 @@ fn work_selected_singleton_relays_all_five_operations_and_immutable_retry_receip
     let events = reply(
         "work_events",
         json!({"project_alias":PROJECT,"task_id":TASK,"status":"queued",
-        "revision":1,"events":[{"sequence":1,"kind":"queued","created_at":STAMP}],"next_sequence":1}),
+        "revision":1,"events":[{"event_id":"00000000-0000-4000-8000-000000000001","correlation_id":OTHER,"sequence":1,"kind":"queued","created_at":STAMP}],"next_sequence":1}),
     );
     let cancel = reply(
         "work_cancel_recorded",
@@ -611,13 +611,16 @@ fn work_checks_event_order_cursors_filters_and_receipt_revisions() {
     let mut events = reply(
         "work_events",
         json!({"project_alias":PROJECT,"task_id":TASK,"revision":2,
-        "status":"cancelled","events":[{"sequence":1,"kind":"queued","created_at":STAMP},
-        {"sequence":2,"kind":"cancelled","created_at":STAMP}],"next_sequence":2}),
+        "status":"cancelled","events":[{"event_id":"00000000-0000-4000-8000-000000000001","correlation_id":OTHER,"sequence":1,"kind":"queued","created_at":STAMP},
+        {"event_id":"00000000-0000-4000-8000-000000000002","correlation_id":OTHER,"sequence":2,"kind":"cancelled","created_at":STAMP}],"next_sequence":2}),
     );
     let mut cases = Vec::new();
     for kind in [
         "reverse",
         "duplicate",
+        "duplicate_event_id",
+        "invalid_event_id",
+        "missing_correlation",
         "zero",
         "cursor",
         "scope",
@@ -628,6 +631,17 @@ fn work_checks_event_order_cursors_filters_and_receipt_revisions() {
         match kind {
             "reverse" => bad["event"]["events"].as_array_mut().unwrap().reverse(),
             "duplicate" => bad["event"]["events"][1]["sequence"] = json!(1),
+            "duplicate_event_id" => {
+                bad["event"]["events"][1]["event_id"] =
+                    bad["event"]["events"][0]["event_id"].clone()
+            }
+            "invalid_event_id" => bad["event"]["events"][0]["event_id"] = json!("not-a-uuid"),
+            "missing_correlation" => {
+                bad["event"]["events"][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("correlation_id");
+            }
             "zero" => bad["event"]["events"][0]["sequence"] = json!(0),
             "cursor" => bad["event"]["next_sequence"] = json!(1),
             "scope" => bad["event"]["project_alias"] = json!("foreign"),
@@ -703,7 +717,7 @@ fn work_checks_event_order_cursors_filters_and_receipt_revisions() {
     let accepted = reply(
         "work_events",
         json!({"project_alias":PROJECT,"task_id":TASK,"revision":2,
-        "status":"cancelled","events":[{"sequence":2,"kind":"cancelled","created_at":STAMP}],"next_sequence":2}),
+        "status":"cancelled","events":[{"event_id":"00000000-0000-4000-8000-000000000002","correlation_id":OTHER,"sequence":2,"kind":"cancelled","created_at":STAMP}],"next_sequence":2}),
     );
     assert_reply(&host, "ide.work.events", after, &auth, 200, accepted);
     worker.join().unwrap();
@@ -858,7 +872,7 @@ fn work_catalog_intersects_independent_grants_and_accepts_execution_event_sequen
     let events = reply(
         "work_events",
         json!({"project_alias":PROJECT,"task_id":TASK,"revision":8,"status":"running",
-        "events":[{"sequence":12,"kind":"checkpoint","created_at":STAMP}],"next_sequence":12}),
+        "events":[{"event_id":"00000000-0000-4000-8000-000000000012","correlation_id":OTHER,"sequence":12,"kind":"checkpoint","created_at":STAMP}],"next_sequence":12}),
     );
     let worker = backend(
         upstream,

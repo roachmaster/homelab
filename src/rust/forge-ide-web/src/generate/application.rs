@@ -89,6 +89,7 @@ pub fn ide_document() -> Document {
                         component!(status "agents-task-status", ""),
                         component!(caption "agents-task-mode", ""),
                         component!(caption "agents-attempt", ""),
+                        component!(caption "agents-task-correlation", ""),
                         component!(region "agents-workflow"; [
                             component!(row [
                                 component!(heading "agents-workflow-heading", "Autonomous workflow"),
@@ -98,6 +99,10 @@ pub fn ide_document() -> Document {
                             component!(caption "agents-workflow-revisions", ""),
                             component!(text "agents-workflow-escalation", ""),
                             component!(caption "agents-workflow-help", ""),
+                            component!(button "agents-workflow-reviewer", "Open independent review", "open_agent_task"),
+                            component!(disclosure "agents-workflow-source-details", "Verified source"; [
+                                component!(caption "agents-workflow-source", ""),
+                            ]),
                             component!(document_link "agents-workflow-docs", "Workflow design →", AutonomousAgents),
                         ]),
                         component!(region "agents-verification"; [
@@ -142,6 +147,22 @@ pub fn ide_document() -> Document {
                                 component!(button "agents-result-previous", "Previous result page", "previous_agent_result"),
                                 component!(button "agents-result-next", "Next result page", "next_agent_result"),
                             ]),
+                        ]),
+                        component!(region "agents-external-result-panel"; [
+                            component!(heading "agents-external-result-heading", "Muse result"),
+                            component!(caption "agents-external-result-summary", ""),
+                            component!(caption "agents-external-result-help", "Returned by the external runner. This artifact does not prove source verification, review approval or merge."),
+                            component!(transcript "agents-external-result", "External Muse artifact", "You", "Muse", ""),
+                        ]),
+                        component!(region "agents-history-panel"; [
+                            component!(heading "agents-history-heading", "Event history"),
+                            component!(caption "agents-history-range", ""),
+                            component!(row [
+                                component!(button "agents-history-first", "First events", "agent_history_first"),
+                                component!(button "agents-history-previous", "Previous events", "agent_history_previous"),
+                                component!(button "agents-history-next", "Next events", "agent_history_next"),
+                            ]),
+                            component!(timeline "agents-history", "Task event history"),
                         ]),
                         component!(region "agents-publication"; [
                             component!(status "agents-publication-status", ""),

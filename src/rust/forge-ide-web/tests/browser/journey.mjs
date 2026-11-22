@@ -2771,21 +2771,20 @@ async function oversizedDormantWorkspaceJourney(page, context, fixture, relay, t
   }
 }
 
-async function museEmailDirectoryJourney(page) {
-  process.stderr.write('QA_CHECK muse_email_directory\n');
+async function museDatabaseDirectoryJourney(page) {
+  process.stderr.write('QA_CHECK muse_database_directory\n');
   const viewport=page.viewportSize();
-  const card=page.locator('#agents-overview #agents-external-agents > #agents-muse-email');
+  const card=page.locator('#agents-overview #agents-external-agents > #agents-muse-db');
   await check(card).toBeVisible();
-  await check(card.getByRole('heading',{name:'Muse Email',exact:true})).toBeVisible();
-  await check(card).toContainText('Email · manual contact');
-  await check(card).toContainText('To: roachmaster@muse.ai');
-  await check(card.locator('#agents-muse-email-sender')).toHaveText('Your verified Gmail sender');
+  await check(card.getByRole('heading',{name:'Muse',exact:true})).toBeVisible();
+  await check(card).toContainText('PostgreSQL · external runner');
+  await check(card.locator('#agents-muse-db-state')).toHaveText('No runner heartbeat');
   await check(card).not.toContainText(/@gmail\.com/i);
-  await check(card).toContainText('Manual email contact. Sender identity verified; sending, replies and background task tracking are not integrated with Forge.');
+  await check(card).toContainText('Muse owns its runner. Forge dispatches assignments and receives plans and review reports through PostgreSQL.');
   await check(card.locator('button,a,input,textarea,select,[contenteditable],[data-action]')).toHaveCount(0);
   await check(card.locator('meter,progress,.fg-quota,.fg-metric,[data-card-id]')).toHaveCount(0);
   await check(card).not.toContainText(/\b(?:Idle|Ready|Quota|Tokens?)\b/i);
-  await check(page.locator('#agents-providers #agents-muse-email')).toHaveCount(0);
+  await check(page.locator('#agents-providers #agents-muse-db')).toHaveCount(0);
   await check(page.locator('#agents-profile option').filter({hasText:/muse/i})).toHaveCount(0);
   for(const width of [320,390,1440]){
     await page.setViewportSize({width,height:844});
@@ -2803,8 +2802,58 @@ async function museEmailDirectoryJourney(page) {
         if([...range.getClientRects()].some(rect=>rect.left< -1 || rect.right>innerWidth+1))return false;
       }
       return true;
-    }),true,'both contact addresses wrap without clipped text');
+    }),true,'external runner details wrap without clipped text');
   }
+  if(viewport)await page.setViewportSize(viewport);
+  await page.locator('#agents-heading').scrollIntoViewIfNeeded();
+}
+
+async function grokProviderJourney(page) {
+  process.stderr.write('QA_CHECK grok_configured_provider\n');
+  const viewport=page.viewportSize();
+  const card=page.locator('#agents-providers article[data-card-id="grok-primary"]');
+  await check(card.locator('.fg-metric-select')).toHaveText('Grok');
+  await check(card.locator('.fg-metric-header > .fg-badge')).toHaveText('Unknown');
+  await check(card.locator('.fg-metric-observation > .fg-badge')).toHaveText('Unknown');
+  await check(card.locator('.fg-quota-unavailable')).toContainText('Not reported');
+  await check(card.locator('.fg-quota-unavailable')).toContainText('No verified allowance observation.');
+  await check(card.locator('meter,progress')).toHaveCount(0);
+  await check(card.locator('.fg-metric dd')).toHaveText(['Unknown','Unknown','Unknown','Unknown']);
+  for(const width of [320,390,1440]){
+    await page.setViewportSize({width,height:844});
+    await card.scrollIntoViewIfNeeded();
+    await check(card).toBeInViewport();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,
+      'configured Grok usage fits phone and desktop viewports');
+    assert.equal(await card.locator('.fg-metric dd').evaluateAll(nodes=>nodes.every(node=>{
+      const range=document.createRange();range.selectNodeContents(node);
+      return range.getClientRects().length===1;
+    })),true,'unknown token observations stay on one readable line');
+    assert.equal(await card.evaluate(node=>{
+      const bounds=node.getBoundingClientRect();
+      if(bounds.left< -1 || bounds.right>innerWidth+1)return false;
+      const walker=document.createTreeWalker(node,NodeFilter.SHOW_TEXT);
+      for(let text=walker.nextNode();text;text=walker.nextNode()){
+        if(!text.textContent.trim())continue;
+        const range=document.createRange();range.selectNodeContents(text);
+        if([...range.getClientRects()].some(rect=>rect.left< -1 || rect.right>innerWidth+1))return false;
+      }
+      return true;
+    }),true,'Grok card labels and unknown metrics remain readable');
+  }
+  await card.locator('.fg-metric-select').focus();
+  await page.keyboard.press('Enter');
+  const details=card.locator('details.fg-metric-details');
+  const disclosure=details.locator('summary');
+  await check(disclosure).toBeVisible();
+  await disclosure.focus();
+  await page.keyboard.press('Enter');
+  await check(details).toHaveJSProperty('open',true);
+  await check(details).toContainText('Grok / owned-browser-fixture');
+  await check(details).toContainText('grok-4.7');
+  await page.keyboard.press('Enter');
+  await check(details).toHaveJSProperty('open',false);
+  await page.locator('#agents-providers article[data-card-id="agy-primary"] .fg-metric-select').click();
   if(viewport)await page.setViewportSize(viewport);
   await page.locator('#agents-heading').scrollIntoViewIfNeeded();
 }
@@ -2847,8 +2896,9 @@ async function agentsJourney() {
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
     const codexCard = page.locator('#agents-providers article[data-card-id="codex-primary"]');
-    await check(cards).toHaveCount(2);
-    await museEmailDirectoryJourney(page);
+    await check(cards).toHaveCount(3);
+    await museDatabaseDirectoryJourney(page);
+    await grokProviderJourney(page);
     await check(geminiCard.locator('.fg-metric-select')).toHaveText('Gemini');
     await check(codexCard.locator('.fg-metric-select')).toHaveText('Codex');
     await check(geminiCard.locator('.fg-quota-unavailable')).toContainText('does not expose account allowance');
@@ -2887,7 +2937,7 @@ async function agentsJourney() {
     // persisted public plan/history rather than waiting for a state revision.
     await seed.locator('.fg-row-select').click();
     await check(page.locator('#agents-reader')).toBeVisible();
-    await check(page.locator('#agents-muse-email')).toBeHidden();
+    await check(page.locator('#agents-muse-db')).toBeHidden();
     await check(page.locator('#agents-task-status')).toContainText('Ready for review');
     await check(page.locator('#agents-plan')).toContainText('Public fixture plan');
     await check(page.locator('#agents-progress')).toContainText('Public fixture milestone');
@@ -2897,7 +2947,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-overview')).toBeVisible();
 
     await page.locator('#agents-new').click();
-    await check(page.locator('#agents-muse-email')).toBeHidden();
+    await check(page.locator('#agents-muse-db')).toBeHidden();
     // Keep the existing result-acceptance journey on a Review task. Finished
     // Plan tasks now use the explicit artifact-bound decision flow below.
     await page.locator('#agents-mode').selectOption('review');
@@ -3291,6 +3341,99 @@ async function agentsJourney() {
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
     await oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic);
+    relay.enableExternal();
+    await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
+    if(await page.locator('#agents-back').isVisible())await page.locator('#agents-back').click();
+    await page.locator('#agents-new').click();
+    await check(page.locator('#agents-manual-assignment')).toBeVisible();
+    await page.locator('#agents-profile').selectOption('muse-db-primary');
+    await check(page.locator('#agents-compose-help')).toContainText('Muse owns its runner');
+    await page.locator('#agents-prompt').fill('Create a bounded external plan using the database handoff.');
+    await page.locator('#agents-criteria').fill('Return the plan without source or merge authority.');
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-external-result-panel')).toBeVisible();
+    await check(page.locator('#agents-external-result h1')).toHaveText('External Muse plan');
+    await check(page.locator('#agents-external-result script,#agents-external-result img')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>globalThis.__externalExecuted),undefined);
+    for(const id of ['agents-progress-panel','agents-result-panel','agents-accept','agents-resume','agents-plan-actions'])await check(page.locator('#'+id)).toBeHidden();
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'external artifact fits the viewport');
+    }
+    await screenshot(page,'ide-agents-external-muse.png');
+    await page.locator('#agents-back').click();
+    await check(page.locator('#agents-muse-db-state')).toHaveText('Runner available');
+    // The full envelope history is separate from the bounded current-attempt milestones.
+    const historyTaskId=relay.addHistory();
+    await page.locator('#agents-refresh').click();
+    await page.locator(`#agents-tasks [data-row-id="${historyTaskId}"] .fg-row-select`).click();
+    await check(page.locator('#agents-task-correlation')).toContainText('Correlation ·');
+    await check(page.locator('#agents-history > li')).toHaveCount(50);
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    const eventDetails=page.locator('#agents-history > li').first().locator('details');
+    await eventDetails.locator('summary').focus();await page.keyboard.press('Enter');
+    await check(eventDetails).toHaveJSProperty('open',true);
+    const eventNode=await eventDetails.elementHandle();
+    await page.locator('#agents-refresh').click();
+    await check(eventDetails).toHaveJSProperty('open',true);
+    assert.equal(await eventNode.evaluate(node=>node.isConnected),true,'event disclosure nodes survive refresh');
+    await check(page.locator('#agents-history script,#agents-history img')).toHaveCount(0);
+    assert.equal(await page.evaluate(()=>globalThis.__historyExecuted),undefined);
+    relay.faults.denyNextEvents=true;
+    await page.locator('#agents-history-next').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    await check(page.locator('#agents-history-next')).toBeEnabled();
+    await page.locator('#agents-history-next').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 51–61');
+    await check(page.locator('#agents-history > li')).toHaveCount(11);
+    await check(page.locator('#agents-history-next')).toBeDisabled();
+    await page.locator('#agents-history-previous').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    await page.locator('#agents-history-next').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 51–61');
+    await page.locator('#agents-history-first').click();
+    await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    for(const width of [320,390,1440]){
+      await page.setViewportSize({width,height:844});
+      assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'event metadata and summaries fit the viewport');
+    }
+    await page.setViewportSize({width:390,height:844});
+    await page.locator('#agents-history-panel').scrollIntoViewIfNeeded();
+    await screenshot(page,'ide-agents-event-history.png');
+    await page.locator('#agents-back').click();
+    relay.enableExternalWorkflow();
+    await respondToLeaveWarning(() => page.reload({waitUntil:'domcontentloaded'}), 'leave');
+    await page.locator('#agents-new').click();
+    await page.locator('#agents-profile').selectOption('muse-db-primary');
+    await check(page.locator('#agents-compose-help')).toContainText('advance this assignment automatically');
+    await page.locator('#agents-prompt').fill('Run the external database workflow through independent review and verified merge.');
+    await page.locator('#agents-criteria').fill('Preserve the envelope history and source receipts with no manual approvals.');
+    await page.locator('#agents-send').click();
+    await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    const externalWorkflowTask=relay.latestWorkflowTaskId;
+    for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
+      relay.workflowPhase(externalWorkflowTask,phase);await page.locator('#agents-refresh').click();
+      await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+      if(phase==='code_review'){
+        await check(page.locator('#agents-workflow-reviewer')).toBeVisible();
+        const linkedEvent=page.locator('#agents-history > li').filter({hasText:'Trusted fixture workflow: code_review.'});
+        await check(linkedEvent).toHaveCount(1);
+        await linkedEvent.locator('summary').click();
+        await linkedEvent.locator('.fg-timeline-related').click();
+        await check(page.locator('#agents-task-title')).toHaveText('Independent external workflow review');
+        await check(page.locator('#agents-workflow-reviewer')).toBeHidden();
+        await page.locator('#agents-back').click();
+        await check(page.locator('#agents-tasks')).not.toContainText('Independent external workflow review');
+        await page.locator(`#agents-tasks [data-row-id="${externalWorkflowTask}"] .fg-row-select`).click();
+        await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+      }
+      for(const id of ['agents-accept','agents-resume','agents-plan-actions','agents-review-actions'])await check(page.locator('#'+id)).toBeHidden();
+    }
+    await check(page.locator('#agents-history')).toContainText('Trusted fixture workflow: completed.');
+    await check(page.locator('#agents-workflow-source')).toContainText('Merged commit');
+    for(const id of ['agents-progress-panel','agents-result-panel'])await check(page.locator('#'+id)).toBeHidden();
+    await screenshot(page,'ide-agents-external-workflow.png');
+
     assert(checkpoints >= 9, 'all task mutations and exact plan decisions checkpoint before IO');
     assert.equal(traffic.businessCalls().mail, 0, 'the complete Agents workflow sends no retired Mail requests');
     await assertNoRetiredMail(page);
@@ -3680,6 +3823,9 @@ async function sha256(path) {
 }
 const passed = await runHarness({
   args: process.argv.slice(2),
+  // The expanded portal/provider journeys share this full-suite budget. Keep
+  // individual assertions bounded and allow cleanup before the 300s supervisor.
+  deadlineMs: 270_000,
   async setup(currentReport, directory) {
     report = currentReport;
     output = directory;

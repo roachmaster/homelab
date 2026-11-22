@@ -18,6 +18,8 @@ pub struct Options {
     #[cfg(feature = "jobs")]
     pub jobs: bool,
     pub mode: Mode,
+    #[cfg(feature = "jenkins")]
+    pub jenkins_config: Option<std::path::PathBuf>,
     #[cfg(feature = "disk")]
     pub directory: Option<PathBuf>,
     #[cfg(feature = "disk")]
@@ -57,6 +59,8 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
         #[cfg(feature = "jobs")]
         jobs: true,
         mode: Mode::Help,
+        #[cfg(feature = "jenkins")]
+        jenkins_config: None,
         #[cfg(feature = "disk")]
         directory: None,
         #[cfg(feature = "disk")]
@@ -77,6 +81,22 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
                 .ok_or("--node-id needs a value")?
                 .into_string()
                 .map_err(|_| "--node-id must be UTF-8")?;
+        } else if argument == "--jenkins-config" {
+            #[cfg(feature = "jenkins")]
+            {
+                if options.jenkins_config.is_some() {
+                    return Err("--jenkins-config was supplied twice".into());
+                }
+                let value = args.next().ok_or("--jenkins-config needs a path")?;
+                if value.is_empty() {
+                    return Err("--jenkins-config needs a nonempty path".into());
+                }
+                options.jenkins_config = Some(std::path::PathBuf::from(value));
+            }
+            #[cfg(not(feature = "jenkins"))]
+            return Err(
+                "--jenkins-config is unavailable: this binary was built without jenkins".into(),
+            );
         } else if argument == "--no-jobs" {
             if jobs_seen {
                 return Err("--no-jobs was supplied twice".into());
@@ -139,6 +159,16 @@ pub fn parse_options(args: Vec<OsString>) -> Result<Options, String> {
 /// mapping does not execute a task/client; the application bridge checks again.
 pub fn decode(info: &CommandInfo, args: &[OsString]) -> Result<Command, String> {
     match info.kind {
+        #[cfg(feature = "jenkins")]
+        CommandKind::JenkinsStatus
+        | CommandKind::JenkinsJobs
+        | CommandKind::JenkinsQueueList
+        | CommandKind::JenkinsRecentBuilds
+        | CommandKind::JenkinsStopBuild
+        | CommandKind::JenkinsBuild
+        | CommandKind::JenkinsQueue
+        | CommandKind::JenkinsBuildStatus
+        | CommandKind::JenkinsCancel => crate::jenkins::decode(info.kind, args),
         #[cfg(feature = "jobs")]
         CommandKind::JobSubmit
         | CommandKind::JobInspect
@@ -241,6 +271,19 @@ pub fn session_arguments(line: &str) -> Vec<OsString> {
 /// Session-only option splitting follows the selected registered kind, not a
 /// separate destination catalog. All other remainders stay literal path text.
 pub fn decode_session(info: &CommandInfo, args: &[OsString]) -> Result<Command, String> {
+    #[cfg(feature = "jenkins")]
+    if crate::jenkins::is_jenkins(info.kind) {
+        let mut words = Vec::new();
+        for arg in args {
+            words.extend(
+                arg.to_str()
+                    .ok_or("Jenkins arguments must be UTF-8")?
+                    .split_whitespace()
+                    .map(OsString::from),
+            );
+        }
+        return decode(info, &words);
+    }
     #[cfg(feature = "jobs")]
     if crate::jobs::is_job(info.kind) {
         let mut words = Vec::new();

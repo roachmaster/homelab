@@ -9,6 +9,7 @@ import { join } from 'node:path';
 const time = '2026-11-19T18:00:00Z';
 const project = 'workspace';
 const base = 'a'.repeat(40);
+const externalWorkflowPolicy={policy_digest:'d'.repeat(64),author_profile:'muse-db-primary',reviewer_profile:'codex-primary',max_plan_revisions:3,max_code_revisions:3,auto_merge:true};
 const workflowPolicy={policy_digest:'c'.repeat(64),author_profile:'agy-primary',reviewer_profile:'codex-primary',max_plan_revisions:3,max_code_revisions:3,auto_merge:true};
 const publicPlan = '## Public fixture plan\n\n1. Inspect approved files.\n2. Implement the change.\n3. Verify the result.\n\nLiteral <script>window.__forgeProgressExecuted = true</script> stays text.';
 const publicMilestone = 'Public fixture milestone: implementation complete; running verification. <script>window.__forgeProgressExecuted = true</script>';
@@ -21,12 +22,13 @@ const digest = createHash('sha256').update(bytes).digest('hex');
 const profiles = [
   { alias: 'agy-primary', label: 'Gemini', backend: 'antigravity', model: 'Gemini fixture', modes: ['plan', 'review', 'implement'] },
   { alias: 'codex-primary', label: 'Codex', backend: 'codex', model: 'Codex fixture', modes: ['plan', 'review', 'implement'] },
+  { alias: 'grok-primary', label: 'Grok', backend: 'grok', model: 'grok-4.7', modes: ['review'] },
 ];
 
 function task(status, number, input = {}) {
   const taskId = number === 0 ? '11111111-1111-4111-8111-111111111111' : randomUUID();
   const item = {
-    task_id: taskId, project_alias: project, base_revision: base, mode: input.mode ?? 'review',
+    task_id: taskId, correlation_id:randomUUID(), project_alias: project, base_revision: base, mode: input.mode ?? 'review',
     agent_profile: input.agent_profile ?? 'agy-primary', recipe_digest: 'b'.repeat(64),
     status, revision: status === 'awaiting_review' ? 3 : 1,
     created_at: `2026-11-19T18:00:${String(number).padStart(2, '0')}Z`,
@@ -36,7 +38,8 @@ function task(status, number, input = {}) {
   };
   if(input.workflow_policy_digest){
     item.workflow_required=true;
-    item.workflow={workflow_id:randomUUID(),policy_digest:workflowPolicy.policy_digest,phase:'plan_review',author_profile:workflowPolicy.author_profile,reviewer_profile:workflowPolicy.reviewer_profile,plan_revisions:0,max_plan_revisions:3,code_revisions:0,max_code_revisions:3,escalation_reason:null,can_cancel:true};
+    const policy=input.agent_profile==='muse-db-primary'?externalWorkflowPolicy:workflowPolicy;
+    item.workflow={kind:input.agent_profile==='muse-db-primary'?'external_database':'native',workflow_id:randomUUID(),policy_digest:policy.policy_digest,phase:'plan_review',author_profile:policy.author_profile,reviewer_profile:policy.reviewer_profile,plan_revisions:0,max_plan_revisions:3,code_revisions:0,max_code_revisions:3,escalation_reason:null,can_cancel:true};
   }
   event(item, 'queued');
   if (status !== 'queued') {
@@ -47,7 +50,8 @@ function task(status, number, input = {}) {
   return item;
 }
 function event(t, kind, report) {
-  const item = { sequence: ++t.sequence, kind, created_at: time };
+  const item = { event_id:randomUUID(), correlation_id:t.correlation_id, sequence: ++t.sequence, kind, created_at: time };
+  if (report?.attempt_id===t.attempt_id) item.progress_verified=true;
   if (report) item.progress = report;
   t.events.push(item);
 }
@@ -61,7 +65,7 @@ function progress(t) {
 }
 function summary(t) {
   return {
-    ...Object.fromEntries(['task_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]])),
+    ...Object.fromEntries(['task_id', 'correlation_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]])),
     workflow_required:t.workflow_required===true,
     workflow_phase:t.workflow?.phase??null,
   };
@@ -70,6 +74,9 @@ function detail(t) {
   const processing = ['running', 'cancel_requested'].includes(t.status);
   const fields = summary(t);
   delete fields.workflow_phase;
+  if(t.external_result)return {...fields,prompt:t.prompt,acceptance_criteria:t.acceptance_criteria,
+    attempt:null,result:null,reconciliation_receipt_id:null,workflow_required:t.workflow_required===true,workflow:t.workflow??null,
+    external_result:t.external_result};
   return {
     ...fields, prompt: t.prompt, acceptance_criteria: t.acceptance_criteria,
     attempt: t.status === 'queued' ? null : { attempt_id: t.attempt_id, worker_id: 'fixture-worker', phase: processing ? 'running' : 'stopped', started_at: time, finished_at: processing ? null : time, summary: processing ? t.public_summary ?? 'The fixture agent is working.' : 'Fixture process scope stopped.' },
@@ -84,12 +91,13 @@ function usage(alias, tasks) {
   const p = profiles.find(item => item.alias === alias);
   const active = [...tasks.values()].find(t => t.agent_profile === alias && ['running', 'cancel_requested'].includes(t.status));
   const codex = p.backend === 'codex';
+  const grok = p.backend === 'grok';
   return {
-    alias, label: p.label, provider: p.backend, model: p.model, worker_state: active ? 'running' : 'idle', active_task_id: active?.task_id ?? null,
+    alias, label: p.label, provider: p.backend, model: p.model, worker_state: active ? 'running' : grok ? 'unknown' : 'idle', active_task_id: active?.task_id ?? null,
     snapshot_state: codex ? 'fresh' : 'unknown', observed_at: codex ? time : null, source: 'owned-browser-fixture', version: '1', last_error: null, refresh_pending: false,
-    allowance: { state: codex ? 'available' : 'unsupported', reason: codex ? null : 'Headless allowance unavailable', ordinary_usage_allowed: codex ? true : null,
+    allowance: { state: codex ? 'available' : grok ? 'unknown' : 'unsupported', reason: codex ? null : grok ? 'Not reported' : 'Headless allowance unavailable', ordinary_usage_allowed: codex ? true : null,
       buckets: codex ? [{ key: 'fixture-window', label: 'Provider window', used_percent: 12.5, window_minutes: 90, resets_at: '2026-11-19T19:30:00Z' }] : [] },
-    jobs: { scope: 'forge_project', input_tokens: codex ? '9007199254740993' : null, output_tokens: codex ? '5' : null, cached_input_tokens: codex ? '2' : null, total_tokens: codex ? '9007199254740998' : null, known_attempts: codex ? 1 : 0, unknown_attempts: codex ? 0 : 1, elapsed_ms: codex ? '1000' : null },
+    jobs: { scope: 'forge_project', input_tokens: codex ? '9007199254740993' : null, output_tokens: codex ? '5' : null, cached_input_tokens: codex ? '2' : null, total_tokens: codex ? '9007199254740998' : null, known_attempts: codex ? 1 : 0, unknown_attempts: codex || grok ? 0 : 1, elapsed_ms: codex ? '1000' : null },
     account_activity: { state: 'unknown', lifetime_tokens: null, daily: [] },
   };
 }
@@ -105,7 +113,7 @@ export async function startAgentsRelay() {
   const controls = new Map();
   const calls = [];
   const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
-    dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false };
+    dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false,externalWorkflow:false,denyNextEvents:false };
   const planDecisions = [], reviewDecisions = [], publicationRevisions = [], workflowSubmissions=[];
   let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
@@ -122,7 +130,7 @@ export async function startAgentsRelay() {
       const send = (status, kind, fields = {}) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ protocol_version: 1, event: { kind, request_id: requestId, ...fields } })); };
       const failed = (status, code) => send(status, input.kind.startsWith('usage_') ? 'usage_failed' : 'work_failed', { code });
       if (input.kind === 'work_catalog') {
-        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time }); return;
+        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}),...(faults.externalWorkflow?{external_workflow:externalWorkflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time }); return;
       }
       if (input.project_alias !== project) { failed(403, 'denied'); return; }
       if (input.kind === 'usage_overview' || input.kind === 'usage_detail') {
@@ -134,14 +142,16 @@ export async function startAgentsRelay() {
         refreshes++; send(202, 'usage_refresh_queued', { project_alias: project, refresh_id: randomUUID(), profiles: [input.agent_profile], coalesced: false }); return;
       }
       if (input.kind === 'work_list') {
-        const ordered = [...tasks.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.task_id.localeCompare(b.task_id));
+        const ordered = [...tasks.values()].filter(t=>!t.internal).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.task_id.localeCompare(b.task_id));
         const after = input.cursor ? ordered.findIndex(t => t.task_id === input.cursor) + 1 : 0;
         const available = ordered.slice(after).filter(t => !input.status_filter || t.status === input.status_filter);
         const page = available.slice(0, input.limit ?? 20);
         send(200, 'work_listed', { project_alias: project, tasks: page.map(summary), next_cursor: available.length > page.length ? page.at(-1).task_id : null }); return;
       }
       if (input.kind === 'work_submit') {
-        if(faults.autonomousPolicy){
+        const external=input.agent_profile==='muse-db-primary';
+        if(external && (faults.externalWorkflow?(input.workflow_policy_digest!==externalWorkflowPolicy.policy_digest||input.mode!=='plan'||input.auto_repair===true):(input.workflow_policy_digest!=null||!['plan','review'].includes(input.mode)))){failed(400,'invalid_request');return;}
+        if(faults.autonomousPolicy && !external){
           if(input.workflow_policy_digest!==workflowPolicy.policy_digest||input.mode!=='plan'||input.agent_profile!==workflowPolicy.author_profile||input.auto_repair===true){failed(400,'invalid_request');return;}
           workflowSubmissions.push({...input});
         }
@@ -151,6 +161,11 @@ export async function startAgentsRelay() {
           const next = task('queued', tasks.size, input); tasks.set(next.task_id, next);
           receipt = { task_id: next.task_id, project_alias: project, revision: 1, status: 'queued', recipe_digest: next.recipe_digest };
           receipts.set(input.idempotency_key, receipt);
+          if(external){
+            next.status='awaiting_review';next.revision=3;
+            const content='# External Muse plan\n\nDatabase handoff fixture.\n<script>globalThis.__externalExecuted=true</script>';
+            next.external_result={assignment_id:randomUUID(),provider:'muse-db',sha256:createHash('sha256').update(content).digest('hex'),content,submitted_at:time,summary:'External plan returned'};
+          }
         }
         if (faults.dropNextSubmit) { faults.dropNextSubmit = false; response.destroy(); return; }
         send(202, 'work_submitted', receipt); return;
@@ -181,6 +196,7 @@ export async function startAgentsRelay() {
         send(200, 'work_opened', { task: detail(selected) }); return;
       }
       if (input.kind === 'work_events') {
+        if(faults.denyNextEvents){faults.denyNextEvents=false;failed(503,'unavailable');return;}
         if (selected.status === 'running' && !selected.progress_emitted) progress(selected);
         else if (selected.status === 'running' && !faults.holdProgressCompletion) {
           selected.status = 'awaiting_review'; selected.revision++; event(selected, 'awaiting_review');
@@ -269,11 +285,23 @@ export async function startAgentsRelay() {
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
     planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,
     enableAutonomy(){faults.autonomousPolicy=true;},
+    enableExternal(){if(profiles.some(p=>p.alias==='muse-db-primary'))return;profiles.push({alias:'muse-db-primary',label:'Muse database runner',backend:'muse',model:'External runner',modes:['plan','review'],transport:'external_db'});},
+    enableExternalWorkflow(){faults.externalWorkflow=true;profiles.find(p=>p.alias==='muse-db-primary').modes=['plan','review','implement'];},
+    addHistory(){const next=task('awaiting_review',tasks.size,{prompt:'Complete event history fixture'});next.events=[];next.sequence=0;for(let i=1;i<=61;i++)event(next,'checkpoint',{attempt_id:next.attempt_id,sequence:Math.min(i,128),stage:i===1?'plan':'progress',summary:`History checkpoint ${i}. Literal <img src=x onerror=globalThis.__historyExecuted=true> remains text.`});tasks.set(next.task_id,next);return next.task_id;},
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},
     workflowPhase(taskId,phase){
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
       selected.workflow.phase=phase;selected.workflow.can_cancel=!['completed','cancelled','merging'].includes(phase);
       selected.workflow.plan_revisions=1;
+      selected.workflow.reviewer_task_id=null;
+      if(selected.workflow.kind==='external_database' && ['plan_review','code_review'].includes(phase)){
+        const reviewer=task('awaiting_review',tasks.size,{mode:'review',agent_profile:'codex-primary',prompt:'Independent external workflow review'});reviewer.internal=true;reviewer.workflow_required=true;reviewer.workflow={...selected.workflow,reviewer_task_id:reviewer.task_id};tasks.set(reviewer.task_id,reviewer);selected.workflow.reviewer_task_id=reviewer.task_id;
+      }
+      const record={event_id:randomUUID(),correlation_id:selected.correlation_id,sequence:++selected.sequence,kind:'checkpoint',created_at:time,workflow_progress:{workflow_id:selected.workflow.workflow_id,phase,summary:`Trusted fixture workflow: ${phase}.`}};
+      if(selected.workflow.reviewer_task_id)record.workflow_progress.related_task_id=selected.workflow.reviewer_task_id;
+      selected.events.push(record);selected.revision++;
+      if(['checks','code_review','merging','completed'].includes(phase))selected.workflow.candidate_commit='e'.repeat(40);
+      if(phase==='completed')selected.workflow.merge_commit='f'.repeat(40);
       selected.workflow.escalation_reason=phase==='escalated'?'Revision budget exhausted; artifacts preserved.':null;
       if(phase==='completed')selected.status='completed';
     },

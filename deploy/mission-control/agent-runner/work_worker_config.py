@@ -6,13 +6,13 @@ from pathlib import Path
 import re
 from types import MappingProxyType
 
-from work_policy import POLICY_ID
+from work_policy import POLICY_ID, AGY_POLICY_ID, NATIVE_POLICIES, native_policy_digest
 
 CONFIG_ENV = "FORGE_CODING_WORKER_CONFIG"
 MAX_CONFIG_BYTES = 64 * 1024
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 MODES = frozenset({"plan", "review", "implement"})
-BACKENDS = frozenset({"antigravity", "codex"})
+BACKENDS = frozenset({"antigravity", "codex", "grok", "muse"})
 
 
 def identifier(value):
@@ -73,12 +73,28 @@ class WorkerProfile:
     backend: str
     model: str
     modes: tuple[str, ...]
+    execution_enabled: bool | None = None
+
+    def __post_init__(self):
+        enabled = self.backend not in {"grok", "muse"} if self.execution_enabled is None else self.execution_enabled
+        if type(enabled) is not bool:
+            raise ValueError("Invalid coding execution capability")
+        object.__setattr__(self, "execution_enabled", enabled)
 
 
 @dataclass(frozen=True)
 class UsageConfig:
     hmac_key_file: Path
     interval_seconds: int = 300
+
+
+@dataclass(frozen=True)
+class UsageOnlyProfile:
+    """A metadata port selection, deliberately without execution modes."""
+    alias: str
+    backend: str
+    model: str
+    binary: Path
 
 
 @dataclass(frozen=True)
@@ -97,24 +113,32 @@ class WorkerConfig:
     source_path: Path | None = field(default=None, compare=False)
     autonomous_projects: frozenset[str] = frozenset()
     codex_session_ttl_seconds: int = 1800
+    usage_only_profiles: MappingProxyType = field(default_factory=lambda: MappingProxyType({}))
+    external_reviews: bool = False
+    resource_profile: str = POLICY_ID
+    build_results_root: Path | None = None
+
+    @property
+    def policy_digest(self):
+        return NATIVE_POLICIES[self.resource_profile][0]
 
     @property
     def allowed_profiles(self):
-        return tuple(self.profiles)
+        return tuple(alias for alias, profile in self.profiles.items() if profile.execution_enabled)
 
     def advertised_profiles(self):
         return [
             {"alias": profile.alias, "backend": profile.backend, "model": profile.model,
              "modes": [mode for mode in profile.modes if mode != "implement" or self.allow_implement]}
             for profile in self.profiles.values()
-            if any(mode != "implement" or self.allow_implement for mode in profile.modes)
+            if profile.execution_enabled and any(mode != "implement" or self.allow_implement for mode in profile.modes)
         ]
 
 
 def parse_config(raw, *, source_path=None):
     raw = _object(raw, {"worker_id", "owner", "database", "account", "workspace_root",
                         "state_root", "projects", "profiles", "binaries"},
-                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds"})
+                  {"allow_implement", "usage", "autonomous_projects", "codex_session_ttl_seconds", "usage_only_profiles", "external_reviews", "resource_profile", "build_results_root"})
     worker_id = identifier(raw["worker_id"])
     owner = raw["owner"]
     if (not isinstance(owner, str) or not owner.strip() or len(owner) > 128
@@ -139,6 +163,8 @@ def parse_config(raw, *, source_path=None):
     if not isinstance(projects, dict) or not 1 <= len(projects) <= 64:
         raise ValueError("Invalid coding worker project catalog")
     projects = {identifier(alias): absolute_path(path) for alias, path in projects.items()}
+    external_reviews=raw.get("external_reviews",False)
+    if type(external_reviews) is not bool:raise ValueError("Invalid external review capability")
     autonomous = raw.get("autonomous_projects", [])
     if (not isinstance(autonomous, list) or any(not isinstance(alias, str) for alias in autonomous)
             or len(set(autonomous)) != len(autonomous) or not set(autonomous) <= projects.keys()):
@@ -157,11 +183,15 @@ def parse_config(raw, *, source_path=None):
     if not isinstance(profiles, dict) or not 1 <= len(profiles) <= 64:
         raise ValueError("Invalid coding worker profile catalog")
     frozen_profiles = {}
+    resource_profile = raw.get("resource_profile", POLICY_ID)
+    if not isinstance(resource_profile, str) or resource_profile not in NATIVE_POLICIES:
+        raise ValueError("Invalid coding worker execution policy")
     for alias, value in profiles.items():
         alias = identifier(alias)
-        value = _object(value, {"backend", "model", "modes"})
+        value = _object(value, {"backend", "model", "modes"}, {"execution_enabled"})
         if not isinstance(value["backend"], str) or value["backend"] not in BACKENDS:
             raise ValueError("Invalid coding worker backend")
+        native_policy_digest(resource_profile, value["backend"])
         model = value["model"]
         if (not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 128
                 or any(not 32 <= ord(character) < 127 for character in model)):
@@ -170,7 +200,12 @@ def parse_config(raw, *, source_path=None):
         if (not isinstance(modes, list) or not modes or any(not isinstance(mode, str) for mode in modes)
                 or not set(modes) <= MODES or len(set(modes)) != len(modes)):
             raise ValueError("Invalid coding worker modes")
-        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes))
+        enabled = value.get("execution_enabled", value["backend"] not in {"grok", "muse"})
+        if type(enabled) is not bool:
+            raise ValueError("Invalid coding execution capability")
+        frozen_profiles[alias] = WorkerProfile(alias, value["backend"], model, tuple(modes), enabled)
+    if resource_profile == AGY_POLICY_ID and (external_reviews or raw.get("usage_only_profiles")):
+        raise ValueError("Unattended Antigravity worker cannot own other agent capabilities")
     binaries = raw["binaries"]
     if not isinstance(binaries, dict) or set(binaries) != {profile.backend for profile in frozen_profiles.values()}:
         raise ValueError("Coding binaries must exactly match selected backends")
@@ -185,11 +220,28 @@ def parse_config(raw, *, source_path=None):
     codex_session_ttl_seconds = raw.get("codex_session_ttl_seconds", 1800)
     if type(codex_session_ttl_seconds) is not int or not 0 <= codex_session_ttl_seconds <= 3600:
         raise ValueError("Invalid coding Codex session TTL")
+    usage_only = raw.get("usage_only_profiles", {})
+    if (not isinstance(usage_only, dict) or len(usage_only) + len(frozen_profiles) > 64
+            or set(usage_only) & frozen_profiles.keys() or usage_only and usage is None):
+        raise ValueError("Invalid usage-only profile selection")
+    selected_usage = {}
+    for alias, value in usage_only.items():
+        alias = identifier(alias)
+        value = _object(value, {"backend", "model", "binary"})
+        if value["backend"] != "muse":
+            raise ValueError("Unsupported usage-only provider")
+        model = value["model"]
+        if (not isinstance(model, str) or not model.strip() or len(model.encode("utf-8")) > 128
+                or any(not 32 <= ord(character) < 127 for character in model)):
+            raise ValueError("Invalid usage-only model")
+        selected_usage[alias] = UsageOnlyProfile(alias, "muse", model, absolute_path(value["binary"]))
     return WorkerConfig(
         worker_id, owner, database, account, workspace_root, state_root,
         MappingProxyType(projects), MappingProxyType(frozen_profiles), MappingProxyType(binaries),
         allow_implement, usage, absolute_path(source_path) if source_path is not None else None,
-        frozenset(autonomous), codex_session_ttl_seconds,
+        frozenset(autonomous), codex_session_ttl_seconds, MappingProxyType(selected_usage),
+        external_reviews=external_reviews, resource_profile=resource_profile,
+        build_results_root=absolute_path(raw["build_results_root"]) if raw.get("build_results_root") is not None else None,
     )
 
 
@@ -218,18 +270,16 @@ def load_config(path):
 
 def verify_recipe(config, lease):
     """Pure grant and policy check, repeated before workspace acquisition/spawn."""
-    from work_policy import POLICY_DIGEST
-
     profile = config.profiles.get(lease["agent_profile"])
     recipe = lease["recipe"]
-    if (profile is None or lease["project_alias"] not in config.projects
+    if (profile is None or not profile.execution_enabled or lease["project_alias"] not in config.projects
             or lease["mode"] not in profile.modes
             or lease["mode"] == "implement" and not config.allow_implement):
         return False
     return recipe == {
         "version": 2, "backend": profile.backend, "model": profile.model,
-        "resource_profile": POLICY_ID, "mode": lease["mode"],
-        "generation_token_limit": None, "policy_digest": POLICY_DIGEST,
+        "resource_profile": config.resource_profile, "mode": lease["mode"],
+        "generation_token_limit": None, "policy_digest": config.policy_digest,
     }
 
 
@@ -248,12 +298,17 @@ def validated_copy(config):
                     "gid": config.account.gid, "home": str(config.account.home)},
         "workspace_root": str(config.workspace_root), "state_root": str(config.state_root),
         "projects": {key: str(value) for key, value in config.projects.items()},
-        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes)}
+        "profiles": {key: {"backend": value.backend, "model": value.model, "modes": list(value.modes), "execution_enabled": value.execution_enabled}
                      for key, value in config.profiles.items()},
         "binaries": {key: str(value) for key, value in config.binaries.items()},
         "allow_implement": config.allow_implement,
         "autonomous_projects": sorted(config.autonomous_projects),
+        "external_reviews": config.external_reviews,
+        "resource_profile": config.resource_profile,
+        "build_results_root": str(config.build_results_root) if config.build_results_root is not None else None,
         "codex_session_ttl_seconds": config.codex_session_ttl_seconds,
+        "usage_only_profiles": {key: {"backend": value.backend, "model": value.model, "binary": str(value.binary)}
+                                for key, value in config.usage_only_profiles.items()},
     }
     if config.usage is not None:
         raw["usage"] = {"hmac_key_file": str(config.usage.hmac_key_file),

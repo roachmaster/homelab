@@ -15,6 +15,15 @@ Start with the [current implementation reference](design/implementation-status.m
 
 ## Coding agents and usage
 
+[Task correlation and event envelopes](architecture/proposals/forge-task-event-envelope.md)
+documents implemented M21 trace identities and the ABI12 bounded task reader.
+The full correlation and every typed event are available through explicit paging;
+live activation remains release-controlled.
+
+[External author and native reviewer SDLC](architecture/external-agent-workflow.md)
+documents the implemented M22 Muse database → native Codex review → Jenkins →
+trusted merge flow, including bounded revision, cancellation and lost-ack recovery.
+
 [Coding-agent workflow](architecture/coding-admission.md) documents the implemented source: catalog-backed Agents view, durable assignments, scoped native CLI workers, full-result paging, explicit acceptance and receipt-gated resume. Work/Usage are independent opt-in capabilities; deployment verification is pending.
 
 [Dispatch and sequence design](architecture/proposals/forge-coding-agent-dispatch.md) maps the current role/supervisor/provider boundaries to the retained UML. [Agent usage](architecture/proposals/forge-agent-usage.md) covers supported Codex metadata, Antigravity's explicit unsupported headless allowance, real per-job counters, account/project separation and metadata-only refresh. No local inference output-token cap is inherited.

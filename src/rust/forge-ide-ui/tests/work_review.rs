@@ -203,7 +203,7 @@ fn zero_repair_budget_keeps_initial_review_readable_without_authorizing_rounds()
 
 #[test]
 fn legacy_review_requirement_is_optional_typed_and_never_defaults_to_false() {
-    let value = serde_json::json!({"task_id":TASK,"project_alias":"homelab","base_revision":"a".repeat(40),"mode":"implement","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),"status":"awaiting_review","revision":7,"created_at":"2026-11-20T12:00:00Z","prompt":"Approved implementation","acceptance_criteria":"Run required checks"});
+    let value = serde_json::json!({"task_id":TASK,"correlation_id":REVIEW,"project_alias":"homelab","base_revision":"a".repeat(40),"mode":"implement","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),"status":"awaiting_review","revision":7,"created_at":"2026-11-20T12:00:00Z","prompt":"Approved implementation","acceptance_criteria":"Run required checks"});
     let task: WorkTaskDetail = serde_json::from_value(value.clone()).unwrap();
     assert!(task.is_valid());
     assert_eq!(task.review_required, None);
@@ -271,7 +271,7 @@ fn autonomous_policy_and_phase_contracts_are_strict_and_request_digest_is_plan_o
 #[test]
 fn task_summary_workflow_metadata_is_additive_typed_and_consistent() {
     let value = serde_json::json!({
-        "task_id":TASK,"project_alias":"homelab","base_revision":"a".repeat(40),
+        "task_id":TASK,"correlation_id":REVIEW,"project_alias":"homelab","base_revision":"a".repeat(40),
         "mode":"plan","agent_profile":"agy-primary","recipe_digest":"b".repeat(64),
         "status":"awaiting_review","revision":2,"created_at":"2026-11-20T00:00:00Z"
     });

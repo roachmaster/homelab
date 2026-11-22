@@ -24,6 +24,8 @@ from work_consumer_cache import configured_consumer_caches
 from work_hosted_checks import GitHubHostedChecksProvider
 from work_merge import GitHubExactTreeMergeProvider, MergeWorker
 from work_source_revision import VerifiedSourceSyncProvider
+from work_native_jenkins import create_native_jenkins
+from work_native_repair import BranchFirstRepairProvider
 
 LOG = logging.getLogger("forge-publication")
 
@@ -52,11 +54,13 @@ def validate_job(config, job):
 
 
 class PublicationWorker:
-    def __init__(self, config, store, snapshots, git, checks, pull_requests, *, candidates, reviewer=None, merger=None, stop=None):
+    def __init__(self, config, store, snapshots, git, checks, pull_requests, *, candidates, reviewer=None, merger=None, stop=None,
+                 native_ci=None):
         self.config, self.store, self.snapshots, self.git = config, store, snapshots, git
         self.checks, self.pull_requests = checks, pull_requests
         self.candidates, self.reviewer = candidates, reviewer
         self.merger = merger
+        self.native_ci = native_ci
         self.stop = stop if stop is not None else threading.Event()
 
     @contextmanager
@@ -104,6 +108,8 @@ class PublicationWorker:
                 if head != job["candidate_commit"]:
                     raise PublicationError("review_candidate_changed")
                 self.git.verify(repository, head)
+                if self.native_ci is not None:
+                    job = self.native_ci.publication_job(job)
                 require_lease()
                 branch = branch_name(job)
                 if not self.store.publication_finish(job, "publishing", "Isolated fixed checks passed.",
@@ -160,6 +166,8 @@ class PublicationWorker:
     def run_once(self):
         if self.stop.is_set():
             return False
+        if self.native_ci is not None:
+            self.native_ci.reconcile_once()
         if self.reviewer is not None:
             review = self.store.review_claim(self.config.worker.worker_id[:54] + "-reviewer")
             if review is not None:
@@ -181,15 +189,18 @@ class PublicationWorker:
             try:
                 listener = self.store.listen() if hasattr(self.store, "listen") else nullcontext(None)
                 with listener as committed:
-                    # Subscribe before scanning. Notifications wake this owner;
-                    # leases and source-bound rows still authorize every action.
-                    while not self.stop.is_set():
-                        if self.run_once():
-                            continue
-                        if committed is not None:
-                            self.store.wait(committed, 5)
-                        else:
-                            self.stop.wait(5)
+                    ci_listener = (self.native_ci.listen_scope(lambda: self.store.wait(committed, 0))
+                        if self.native_ci is not None and committed is not None else nullcontext())
+                    with ci_listener:
+                        # Subscribe before scanning. Notifications wake this owner;
+                        # leases and source-bound rows still authorize every action.
+                        while not self.stop.is_set():
+                            if self.run_once():
+                                continue
+                            if committed is not None:
+                                self.store.wait(committed, 5)
+                            else:
+                                self.stop.wait(5)
             except Exception:
                 LOG.warning("Publication queue unavailable; no remote action replayed")
             self.stop.wait(5)
@@ -200,9 +211,11 @@ class PublicationWorkerFactory:
                  snapshot_factory=WorkspaceSnapshotProvider, git_factory=GitRepositoryProvider,
                  supervisor_factory=None, checks_factory=IsolatedCheckRunner,
                  pull_request_factory=GitHubPullRequestClient, candidate_factory=ReviewedCandidateProvider,
-                 reviewer_factory=ReviewWorker, hosted_factory=GitHubHostedChecksProvider,
+                 reviewer_factory=ReviewWorker, hosted_factory=None,
                  merge_provider_factory=GitHubExactTreeMergeProvider, merge_worker_factory=MergeWorker,
-                 source_sync_factory=VerifiedSourceSyncProvider, stop=None):
+                 source_sync_factory=VerifiedSourceSyncProvider,
+                 repair_source_factory=BranchFirstRepairProvider,
+                 native_jenkins_factory=create_native_jenkins, stop=None):
         if not isinstance(config, PublicationConfig) or not callable(store_factory):
             raise TypeError("Publication requires frozen config and a store factory")
         if (type(config.merge_enabled) is not bool or config.merge_method != "merge"
@@ -217,8 +230,10 @@ class PublicationWorkerFactory:
         self.pull_request_factory = pull_request_factory
         self.candidate_factory, self.reviewer_factory = candidate_factory, reviewer_factory
         self.hosted_factory = hosted_factory
+        self.native_jenkins_factory = native_jenkins_factory
         self.merge_provider_factory, self.merge_worker_factory = merge_provider_factory, merge_worker_factory
         self.source_sync_factory = source_sync_factory
+        self.repair_source_factory = repair_source_factory
 
     def create(self):
         self.config.state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -228,19 +243,36 @@ class PublicationWorkerFactory:
         workspaces.prepare()
         supervisor = self.supervisor_factory(self.config.worker)
         store, snapshots = self.store_factory(self.config), self.snapshot_factory(workspaces)
-        git, checks = self.git_factory(self.config), self.checks_factory(self.config, supervisor)
+        git = self.git_factory(self.config)
         candidates = self.candidate_factory(self.config, git)
         pulls = self.pull_request_factory(self.config)
-        hosted = self.hosted_factory(self.config, client=pulls)
-        reviewer = self.reviewer_factory(self.config, store, snapshots, git, checks, candidates,
-                                        stop=self.stop, hosted_checks=hosted)
+        native_ci = None
+        if self.hosted_factory is None and self.config.hosted_provider == 'jenkins':
+            native_ci = self.native_jenkins_factory(self.config, store, git, candidates, supervisor, client=pulls, stop=self.stop)
+            checks = hosted = native_ci
+        else:
+            checks = self.checks_factory(self.config, supervisor)
+            hosted = (self.hosted_factory or GitHubHostedChecksProvider)(self.config, client=pulls)
+        reviewer_options = {'stop': self.stop, 'hosted_checks': hosted}
+        repair_sources = None
+        if native_ci is not None:
+            reviewer_options['native_ci'] = native_ci
+            if getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1':
+                repair_sources = self.repair_source_factory(self.config, git, candidates, native_ci)
+                reviewer_options['repair_sources'] = repair_sources
+        reviewer = self.reviewer_factory(self.config, store, snapshots, git, checks, candidates, **reviewer_options)
+        merge_options = {'stop': self.stop}
+        if native_ci is not None:
+            merge_options['native_ci'] = native_ci
+        if repair_sources is not None:
+            merge_options['repair_sources'] = repair_sources
         merger = (self.merge_worker_factory(self.config, store,
                     self.merge_provider_factory(self.config, pulls, git, candidates, hosted),
-                    source_sync=self.source_sync_factory(self.config, git), stop=self.stop)
+                    source_sync=self.source_sync_factory(self.config, git), **merge_options)
                   if self.config.merge_enabled else None)
         return PublicationWorker(self.config, store, snapshots, git, checks,
                                  pulls, candidates=candidates,
-                                 reviewer=reviewer, merger=merger, stop=self.stop)
+                                 reviewer=reviewer, merger=merger, stop=self.stop, native_ci=native_ci)
 
 
 def default_store_factory(config):

@@ -9,7 +9,11 @@ adapts inspection and bounded source reads to the remote agent; native credentia
 
 The [workbench guide](WORKBENCH.md) describes the compact toolbar, report-keyed
 project-wide file/symbol search, numbered source windows, Outline, Problems and
+<<<<<<< HEAD
 reversible keyboard/narrow panes. The current atomic portal bundle uses local ABI 10.
+=======
+reversible keyboard/narrow panes. The current atomic portal bundle uses local ABI 12.
+>>>>>>> a1ee6f64ee377a6c3640b86d70de5ece8373aacc
 
 ## Authoring and build boundary
 

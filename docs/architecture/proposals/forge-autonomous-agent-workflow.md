@@ -1,6 +1,6 @@
 # Autonomous agent author and reviewer workflow
 
-**Status: implemented in source; rollout pending verification.** This extends the source
+**Status: base lifecycle deployed; native Jenkins provider added in source.** This extends the
 [review and repair lifecycle](forge-agent-feedback-loop.md). The earlier manual
 approval path remains for legacy/manual tasks. The intended new default for a
 configured project delegates ordinary planning, review, execution and merge to
@@ -24,9 +24,11 @@ provider merges automatically under the project's recorded delegation. The user
 explicitly authorized that merge stage. A successful model response never
 constitutes a merge receipt.
 
-Profiles express roles, not hardcoded model names. A future Muse adapter can fill
-an author or reviewer role after its capabilities and execution contract are
-implemented and verified. This design does not claim Muse is already installed.
+Profiles express roles, not hardcoded model names. Muse now has a separate
+[external database workflow](../external-agent-workflow.md); it does not borrow
+native attempts or stopped-process evidence. Native Gemini's current
+[Jenkins provider and sequence](../forge-jenkins.md#native-gemini-workflow)
+retain this author/reviewer separation and the existing frozen gate identities.
 
 ## Ownership and factory/provider composition
 
@@ -123,25 +125,32 @@ plan disagreement is not a reason to ask the human to create a plan from scratch
 sequenceDiagram
     participant A as Author worker
     participant DB as Workflow and review store
-    participant V as Independent fixed verifier
+    participant V as Trusted fixed verifier
+    participant J as Jenkins through Rust IoClient
     participant R as Independent agent reviewer
     participant C as Trusted coordinator
     participant P as Trusted publisher / merger
     participant GH as GitHub
     A->>DB: Stop and reconcile actual implementation
-    DB-->>V: Verify exact candidate with fixed gates
+    DB-->>V: Lease exact stopped source
+    V->>GH: Push owned source branch
+    V->>DB: Commit branch_pushed event
+    DB-->>V: Event receipt before Jenkins admission
+    V->>J: Submit once with durable correlated intent
+    J-->>V: Full fixed suite and exact-source cleanup receipt
     alt Reproducible check failure within repair policy
-        V->>DB: Source-bound diagnostic feedback
-        DB-->>A: Correct the same authorized scope
-    else Local checks pass
+        V->>DB: Actual build reference and bounded repair event
+        DB-->>A: Inspect build CLI and correct source
+    else All fixed checks pass
         V->>DB: Candidate, gate digest and check witnesses
         DB-->>R: Readonly code review, approved Plan and findings
         R->>DB: Source-bound verdict from stopped reviewer task
         DB-->>C: Validate verdict and delegated authority
         C->>DB: Record peer approval or queue bounded repair
         DB-->>P: Publish exact approved candidate
-        P->>GH: Feature branch and PR
-        GH-->>P: Required workflow/job outcomes on exact head
+        P->>GH: PR for already-pushed checked branch
+        P->>J: Reobserve the same exact-candidate build
+        J-->>P: Required gates successful, cleanup confirmed
         P->>DB: Persist deterministic merge intent before remote mutation
         P->>GH: Create merge commit with exact candidate tree
         P->>GH: Advance main with force=false
@@ -150,6 +159,15 @@ sequenceDiagram
         DB-->>C: Complete workflow and retain source history
     end
 ```
+
+Mission Control selects `native_delivery_mode: "branch-first-v1"`. A confirmed
+merge failure also emits an author-repair event with the actual Jenkins build
+reference. Unresolved integration content is a new unapproved source, retaining
+the real conflict markers and nonconflicting main changes. Each correction
+returns through push/event/build and independent review. M25 records those
+transitions without resetting budgets; the existing owner-scoped CLI exposes
+only that repair's build metadata and sanitized log pages. See the
+[current delivery sequence](../forge-jenkins.md#native-gemini-workflow).
 
 The merge commit's tree is the reviewed and checked candidate tree. Its parents
 are the observed main head and the approved PR head. The provider first proves
@@ -205,9 +223,15 @@ The coding-worker configuration also selects
 `"merge_enabled": true`. These are additions to their existing validated
 configurations. Both role profiles must have the required project/mode grants.
 The existing repair policy bounds code revisions and names required hosted
-checks. Models and account configuration remain explicit profile settings.
+checks. Those names remain logical compatibility IDs. Mission Control explicitly
+selects `"hosted_provider": "jenkins"` and a private
+`"jenkins_delivery_config"`; GitHub Actions stays disabled. All three fixed
+gates run once before independent code review, and later stages reobserve the
+same source-bound Jenkins receipt. Models and account configuration remain
+explicit profile settings. Migration 24 adds narrow reconciler CI context/status
+ports without rewriting frozen workflows or granting direct table access.
 
-Rollout requires the matching M15/M16 database migrations, policy 7 workers and
+The original rollout required matching M15/M16 database migrations, policy 7 workers and
 atomic ABI 8 host/generated assets. Drain or preserve old active leases before
 switching versions. Verify normal service startup and source selection before
 opening new admission. Preserve historical receipts and native workspaces;
@@ -386,3 +410,40 @@ same owner-scoped transaction advisory lock before their SQL functions. This
 serializes the two initial review producers without new table grants or schema.
 Both coding-worker and publication-service facades must receive this update;
 the lock is not a substitute for the existing scoped SQL checks and task leases.
+
+## Explicit owner continuation after a code budget handoff
+
+An owner may use the existing authenticated `WorkResume` request once for an
+escalated workflow with a persisted, genuine independent code `revise` verdict
+and exhausted-budget receipt. This is an explicit exception; automatic scans do
+not call it. `WorkServiceFactory` injects the ready `NativeOwnerControl` port,
+which verifies the frozen recipes, Plan, reviewer artifact, source checks, role
+grants and native-worker readiness inside the existing project/task transaction.
+Admission requires the schema26 owner-continuation capability. Older database
+installations fail closed rather than queueing work without the canonical repair
+fences. Ordinary manual task Resume keeps its previous behavior.
+
+The caller supplies a fresh genuine stopped-workspace reconciliation for the
+**same native source digest** and a context note of at most 1536 UTF-8 bytes. A
+corrected Git ref in that note is context for the new author claim; it cannot
+replace old workspace files, attempt receipts or candidate evidence. The server
+loads all peer findings itself and merges their ledger normally. Canonical
+feedback for the same task remains `native_receipt`, while the old linked repair
+lineage remains unchanged. A linked child's incompatible workflow-feedback
+pointer is cleared only on the new task admission; immutable old attempts and
+the full peer target/verdict remain preserved.
+
+A fixed completed `owner-code-resume:<workflow-id>` action, standard Resume
+control receipt and resumed event commit together. Their immutable intent binds
+the owner/project/task/revision, reconciliation, Plan/source/reviewer hashes and
+spent counters. Exact retries return the stored result before current-state
+guards; a changed request conflicts. Admission does not alter repair, stagnation,
+Plan or infrastructure budgets, creates no additional task and sets
+`auto_repair=false`.
+
+This one owner turn grants no further automatic writer: deadline recovery,
+verifier repair, code `revise` and merge-failure repair hand off again even if
+verified progress resets the ordinary stagnation counter. The newly corrected
+candidate can still pass fresh fixed checks and independent review and proceed
+through the existing exact-head hosted checks and trusted merge. The owner turn
+is never an approval, successful build, stopped process or merge receipt.

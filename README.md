@@ -44,6 +44,11 @@ The [earlier UI report snapshot](docs/architecture/proposals/forge-ide-ui.pdf) u
 
 ## Run the local Forge system
 
+The optional [Jenkins I/O client](src/rust/forge-jenkins/README.md) plugs into the
+existing terminal with `FEATURES=jenkins` and explicit `--jenkins-config` startup
+selection. Its [architecture reference](docs/architecture/forge-jenkins.md)
+describes factory/provider assembly, token authentication and command admission.
+
 From the repository root with stable Rust, GNU Make and Python 3.9+. UI generation/CI also requires Node20+ and the `wasm32-unknown-unknown` Rust target:
 
 ```bash

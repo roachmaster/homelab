@@ -18,6 +18,24 @@ pub struct ViewModel {
     pub transcripts: Vec<TranscriptBinding>,
     pub badges: Vec<BadgeBinding>,
     pub metric_cards: Vec<MetricCardsBinding>,
+    pub timelines: Vec<TimelineBinding>,
+}
+/// Keyed, presentation-only event rows. Rust owns identity, state and paging.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TimelineBinding {
+    pub id: &'static str,
+    pub rows: Vec<TimelineRow>,
+    pub empty_message: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TimelineRow {
+    pub event_id: String,
+    pub badge: BadgeView,
+    pub time: TimeView,
+    pub summary: String,
+    pub details: Vec<Property>,
+    pub related_action: Option<RowAction>,
+    pub related_disabled: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TranscriptBinding {
@@ -326,6 +344,21 @@ pub struct MetricProperty {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
+    AgentHistoryFirst {
+        task_id: String,
+        correlation_id: String,
+        after_sequence: u64,
+    },
+    AgentHistoryPrevious {
+        task_id: String,
+        correlation_id: String,
+        after_sequence: u64,
+    },
+    AgentHistoryNext {
+        task_id: String,
+        correlation_id: String,
+        after_sequence: u64,
+    },
     DecideAgentReview {
         task_id: String,
         expected_revision: u64,

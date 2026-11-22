@@ -317,6 +317,18 @@ worker releases and explicitly select its resource profile before accepting new
 work; previous policy IDs/digests retain their identity and are refused by the
 new worker, never silently upgraded or automatically replayed.
 
+The separately selected `forge-coding-agy-unattended-v1` policy adds explicit
+headless auto-approval for Gemini/Antigravity. Set that resource on the API
+profile and matching dedicated worker's top-level `resource_profile`; the worker
+must contain only Antigravity profiles. Migration23 admits its exact backend and
+policy digest. Its invocation adds `--dangerously-skip-permissions` and permits
+file reads exposed by the outer namespace. Plan/review source remains read-only;
+implementation keeps its owned workspace, supervision and normal publication
+checks. P10 policy bytes, default worker selection and frozen Codex/Muse reviewer
+recipes remain unchanged. Do not describe unattended CLI approval as root access
+or as enforcement of the old CLI deny rules. See the
+[unattended execution boundary](../../../docs/architecture/coding-admission.md#unattended-gemini-execution).
+
 Supported `ide.work.*` destinations on authenticated `POST /v1/dispatch`
 (version `1` Forge headers, 16 KiB raw request bound):
 
@@ -372,27 +384,79 @@ never close findings or authorize publication, and no DB/GitHub credentials ente
 the agent scope.
 
 `PublicationWorkerFactory` composes `ReviewWorker`, `ReviewedCandidateProvider`,
-fixed isolated checks, existing workspace/snapshot/Git/GitHub ports and a hosted
-observer in the existing publication process. The check scope has no publication
+the explicitly selected verification provider, existing workspace/snapshot/Git
+and pull-request ports in the publication process. Mission Control selects
+Jenkins through `hosted_provider: "jenkins"` and a private
+`jenkins_delivery_config`. The check scope has no publication
 credentials; it records the actual toolchain, source/gate manifest, findings and
 cleanup proof. Source failures can return to the selected agent only within the
 owner's frozen policy. Infrastructure, quota, scope and uncertain-stop outcomes
 remain distinct. Workers never query a global registry.
 
-**A local pass pauses for an independent owner decision.** In Agents, inspect
+**Legacy manual tasks pause for an independent owner decision.** In Agents, inspect
 the exact candidate and findings; attest each resolved finding explicitly with
 a note, then approve. The API binds the decision to the task revision/review and
 retains the owner receipt privately. Neither model success nor repair opt-in is
 publication approval. Both normal queueing and missed-callback recovery require
 the same reviewed candidate authorization.
 
+Autonomous native workflows send the checked exact candidate to the configured
+independent Codex reviewer. Approval advances automatically; revision findings
+return to Gemini within the frozen budget. The owner is involved only for a
+genuine escalation. No manual approval bypass applies to autonomous tasks.
+
 Trusted providers publish a nonforce `forge/task-<publication-id>` feature branch
-and **draft PR to main** from the verified candidate; they never push main,
-force-push, deploy or merge. Existing remote-head receipts constrain updates and
-unknown acknowledgements are reconciled by reads. The observer records required
-`check`, `pr-fast-gate` and `real-browser` outcomes under their workflow identities
-on the exact PR head. Missing/pending/failed/stale checks block final acceptance.
+and **draft PR to main** from the verified candidate. A separately configured
+trusted merger updates main only after independent approval and exact-source
+verification; native agents cannot merge. Existing remote-head receipts constrain
+updates and unknown acknowledgements are reconciled by reads. The observer records
+the frozen logical `check`, `pr-fast-gate` and `real-browser` outcomes on the exact
+candidate. With Jenkins selected, these identify the full fixed suite, and the
+observations explicitly name Jenkins. No GitHub Actions run is required or
+claimed. Missing/pending/failed/stale checks block final acceptance.
 Publication and verification retries append new runs and retain prior failures.
+
+The native Jenkins check runner executes the complete fixed suite once per
+admitted verification action before independent code review. Publication and
+merge reobserve the same exact-source
+receipt instead of rerunning the suite. An immutable private mapping binds the
+native review manifest to the installed verifier's separate Jenkins manifest.
+With `native_delivery_mode: "branch-first-v1"`, the publisher materializes the
+exact stopped source in its private clone, then performs an ordinary three-way
+merge of fetched current main before pushing its owned branch. The native
+workspace, admitted base and stop/reconciliation receipts stay unchanged. A v2
+prepared-source receipt separately pins the authored commit/tree, observed main,
+and integrated candidate/tree. Restart reuses that exact candidate even if main
+has advanced; historical v1/pushed receipts are never rewritten. A committed
+scoped `branch_pushed` event precedes Jenkins admission. The separate native job checks main ancestry before expensive
+gates. A pre-push integration conflict instead records a new unapproved source
+containing the genuine conflict markers and both parents, with typed source
+findings, no passed checks and no fabricated build reference. No branch, event or
+Jenkins job is submitted for that source. A real build failure or a positively
+confirmed merge failure emits bounded repair feedback with an actual build reference. Integration conflicts are
+preserved in a new unapproved source, then corrected and tested again. Independent
+review compares the complete change against actual main, including inherited
+unapproved code. Migration25 supplies these events, merge-failure transitions and
+the authenticated build-context reader without changing frozen execution recipes.
+The worker's optional `build_results_root` injects a validated artifact reader;
+`build_info.py status` and paginated `logs` expose only that repair's sanitized
+immutable evidence. The raw results directory is masked from the model.
+Migration24's scoped context/status APIs supply actual workflow/task correlation
+and cancellation state without granting reconciler table access. Journals precede
+POST; uncertain submissions are reconciled without duplicate jobs. Restart and
+cancel cleanup are scoped to owned actions and require actual stop proof. See
+[the native sequence and source contract](../../../docs/architecture/forge-jenkins.md#native-gemini-workflow).
+
+An owner can request one verification-only recovery through the existing
+`ide.work.review.decide` / `retry_infrastructure` command when an explicitly
+continued author result stopped at the preflight main-ancestry failure. The
+injected native owner-control port verifies the stopped artifact, original
+owner authority, real failed verification and spent recovery history. It appends
+a fresh local review of that same artifact against current main; it does not
+start another author, approve source or renew automatic repair allowance.
+The failed review and build remain intact. A durable, once-only owner action
+and normal control receipt make exact request replay safe; fresh full CI,
+independent review and guarded merge are still required.
 
 A later correction to a Completed task uses `ide.work.repair` with an explicit
 approved-project candidate. If that legacy parent has no bound review, trusted
@@ -405,7 +469,11 @@ authorization is never accepted as a browser command field.
 
 The optional service template remains `forge-publication-worker.service` using
 trusted `FORGE_PUBLICATION_CONFIG`: `worker_config`, approved `repositories`,
-`github_config_dir`, optional fixed `checks` and `required_hosted_checks`. Install
+`github_config_dir`, optional fixed `checks` and `required_hosted_checks`, plus
+`hosted_provider` (historical default `github-actions`) and
+`jenkins_delivery_config` (required only for `jenkins`) and `native_delivery_mode`
+(default `integrate-first-v1`; `branch-first-v1` requires Jenkins). Jenkins selection requires
+all three unchanged fixed commands and logical gate identities. Install
 the verified immutable release and configure the matching trusted providers only
 after schema verification and final CI/backend/28-group actual-browser gates.
 When delegated autonomous merge is enabled, the trusted publisher also needs
@@ -672,3 +740,49 @@ This transport adds no PostgreSQL outbox, background reply worker, new coding
 backend or automatic workflow stage. The design distinguishes the implemented
 receipt boundary from that future integration, with sequence diagrams and
 failure semantics: [Muse email transport](../../../docs/architecture/muse-email-transport.md).
+
+### Grok opt-in provider (policy9 / migration0018)
+
+The Grok1.0.92 adapter follows the existing selected worker factory, scoped
+workspace, lease, supervision and independent review path. Source support does
+not enable execution: Grok `execution_enabled` defaults false in both API and
+worker profiles. Qualify the actual account/allowance, controlled config and
+nested/outer sandbox before an operator explicitly enables matching profiles.
+Antigravity/Codex remain unchanged. Usage-only listing is independent of that
+execution grant and reports Not reported, with no consumer OAuth polling.
+
+See [the Grok provider design](../../../docs/architecture/grok-coding-provider.md)
+for exact documented flags, isolated state, fresh-session policy, terminal-only
+cache accounting, cancellation semantics and additive migration coverage.
+Native folder trust is limited to ordinary repository instructions: a fixed
+metadata-only preflight rejects executable project configuration before auth or
+process acquisition, while read-only managed policy blocks unmanaged hooks,
+MCP servers and marketplace installs. The immutable config disables `.envrc`
+loading; the outer supervisor forwards no parent API-key environment.
+
+
+### Muse native source capability (policy10 / migration0019)
+
+Muse email remains the primary integration. The pinned native Muse Code adapter
+is merged as a separate **default-disabled** capability, without enabling any
+live execution profile or changing the configured author/reviewer roles.
+`execution_enabled` defaults false for Muse in both API and worker configuration.
+A metadata-only `usage_only_profiles` selection can expose a manual-refresh
+usage card without a binary execution registration, work grant or advertisement.
+There is no background Muse allowance polling; absent allowance stays Not
+reported, and no paid API fallback is provisioned.
+
+The selected path is `WorkProfile` → immutable recipe → `CodingWorkerFactory` →
+`CommandRunnerProvider`. Native execution uses a fresh isolated HOME and MSP
+JSONL per attempt, a pinned executable, fixed Meta-provider argv, the existing
+outer supervisor and Muse's unchanged nested sandbox. A retained-dirfd/inode
+credential lease is released only after proven scope stop. Setup failures clean
+up their owned auth copy; uncertain process/inode cleanup requires reconciliation.
+Manual metadata refresh owns the same credential lifetime and a bounded process
+group. Source/fake/disposable-PG checks do not qualify live account allowance or
+nested shell functionality and do not activate the capability.
+
+Combined policy10 and additive migration0019 preserve Grok policy9/migration0018
+and every earlier immutable recipe, receipt and migration. See the [Muse provider
+design](../../../docs/architecture/muse-code-provider.md) for the fixed command,
+accounting convention, lifecycle and activation boundary.

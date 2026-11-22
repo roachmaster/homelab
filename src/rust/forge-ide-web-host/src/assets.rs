@@ -439,7 +439,11 @@ impl Assets {
         };
         let m: Manifest = serde_json::from_slice(&read("manifest.json", 16384)?)
             .map_err(|_| HostError::Configuration("asset manifest"))?;
+<<<<<<< HEAD
         if m.format_version != 1 || m.abi_version != 10 || m.files.len() != 5 {
+=======
+        if m.format_version != 1 || m.abi_version != 12 || m.files.len() != 5 {
+>>>>>>> a1ee6f64ee377a6c3640b86d70de5ece8373aacc
             return Err(HostError::Configuration("asset versions/count"));
         }
         let mut loaded = BTreeMap::new();
@@ -623,7 +627,11 @@ mod tests {
             fs::write(
                 path.join("manifest.json"),
                 serde_json::to_vec(
+<<<<<<< HEAD
                     &json!({"format_version": 1, "abi_version": 10, "files": files}),
+=======
+                    &json!({"format_version": 1, "abi_version": 12, "files": files}),
+>>>>>>> a1ee6f64ee377a6c3640b86d70de5ece8373aacc
                 )
                 .unwrap(),
             )
