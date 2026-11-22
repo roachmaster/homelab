@@ -1,10 +1,8 @@
 //! Deliberately narrow HTTP/1.1 adapter. No chunking, upgrades, keepalive or CORS.
 use crate::{
-    history,
     service::{Command, Rejection},
     workspace, Host, HostError,
 };
-use forge_ide_ui::protocol::{ChatRunRequest, MailRequest};
 use forge_ingress_contract::{Header, RouteKey};
 use std::{
     collections::BTreeMap,
@@ -319,18 +317,13 @@ fn command(
     if crate::studio::is_destination(destination)
         || crate::work::handles(destination)
         || crate::usage::handles(destination)
-        || history::is_destination(destination)
-        || ChatRunRequest::is_destination(destination)
-        || MailRequest::is_destination(destination)
     {
         let (status, body) = if crate::studio::is_destination(destination) {
             host.studio_dispatch(&header, &r.body, &context)?
         } else if crate::work::handles(destination) {
             host.work_dispatch(&header, &r.body, &context)?
-        } else if crate::usage::handles(destination) {
-            host.usage_dispatch(&header, &r.body, &context)?
         } else {
-            host.postgres_dispatch(&header, &r.body, &context)?
+            host.usage_dispatch(&header, &r.body, &context)?
         };
         if body.len() > host.config.limits.response_bytes {
             return Err(Rejection::Limit);

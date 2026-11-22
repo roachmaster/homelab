@@ -125,6 +125,11 @@ class DisposablePostgresCluster:
             owner=False,
         )
 
+    def reset_jenkins_tables(self):
+        self.admin_exec(
+            "TRUNCATE forge_agent.jenkins_events, forge_agent.jenkins_event_deliveries, "
+            "forge_agent.jenkins_observations CASCADE", owner=False)
+
     def grant_worker(self, owner_id, project_alias, agent_profile, modes=("plan", "review", "implement"),
                      *, worker_role="forge_coding_worker"):
         with closing(self.connect("postgres")) as connection:

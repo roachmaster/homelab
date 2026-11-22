@@ -8,7 +8,8 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from work_peer_review import (PeerReviewError, parse_review_target,
-                              parse_review_verdict, validate_review_target)
+                              parse_review_verdict, validate_review_target,
+                              IncompleteApprovalError, validate_live_review_verdict)
 
 
 def sha(text):
@@ -60,6 +61,65 @@ def verdict(value, decision="approve"):
 
 
 class PeerReviewContractTest(unittest.TestCase):
+    def test_live_approval_requires_all_open_ids_without_changing_historical_parser(self):
+        source = target('code')
+        source['findings'] = [finding('open-' + str(n)) for n in range(8)] + [{**finding('already'), 'status': 'verified'}]
+        parsed = bind(source)
+        value = verdict(parsed)
+        value['attested_finding_ids'] = ['open-' + str(n) for n in range(3)]
+        raw = json.dumps(value)
+        self.assertEqual(parse_review_verdict(raw, parsed), value)
+        with self.assertRaises(IncompleteApprovalError) as caught:
+            validate_live_review_verdict(raw, parsed)
+        self.assertEqual(caught.exception.missing_finding_ids, tuple('open-' + str(n) for n in range(3, 8)))
+        self.assertEqual(caught.exception.verdict, value)
+        value['attested_finding_ids'] = ['open-' + str(n) for n in range(8)]
+        self.assertEqual(validate_live_review_verdict(json.dumps(value), parsed), value)
+        value['source_attempt_id'] = str(uuid4())
+        with self.assertRaises(PeerReviewError) as invalid:
+            validate_live_review_verdict(json.dumps(value), parsed)
+        self.assertNotIsInstance(invalid.exception, IncompleteApprovalError)
+
+    def test_live_plan_revise_and_escalate_do_not_require_approval_attestations(self):
+        for kind in ('plan', 'code'):
+            source = target(kind)
+            if kind == 'code':
+                source['findings'] = [finding()]
+            parsed = bind(source)
+            for decision in ('revise', 'escalate') + (('approve',) if kind == 'plan' else ()):
+                with self.subTest(kind=kind, decision=decision):
+                    value = verdict(parsed, decision)
+                    self.assertEqual(validate_live_review_verdict(json.dumps(value), parsed), parse_review_verdict(json.dumps(value), parsed))
+
+    def test_long_correction_note_is_bounded_and_retains_full_target_instruction(self):
+        from work_reviewer_correction import correction_note
+        identities = [str(n).zfill(64) for n in range(32)]
+        note = correction_note(identities, identities[3:], 'a' * 64)
+        self.assertLessEqual(len(note.encode()), 2048)
+        self.assertIn('ALL target findings whose status is open', note)
+        self.assertIn('a' * 64, note)
+        self.assertIn('Missing count: 29', note)
+        self.assertTrue(note.endswith('Return ONLY the same exact source-bound JSON verdict, no Markdown.'))
+        small = correction_note(identities[:8], identities[3:8], 'b' * 64)
+        for identity in identities[:8]:
+            self.assertIn(identity, small)
+        self.assertTrue(small.endswith('Return ONLY the same exact source-bound JSON verdict, no Markdown.'))
+
+    def test_selected_correction_factory_is_injected_without_constructing_default(self):
+        from types import SimpleNamespace
+        from work_workflow import WorkflowStoreFactory
+        selected = SimpleNamespace(correct=lambda *a: None, resume=lambda c: None)
+        acquired = []
+        class Selected:
+            def __init__(self, flow):
+                acquired.append(flow)
+            def create(self):
+                return selected
+        with patch('work_reviewer_correction.ReviewerCorrectionFactory', side_effect=AssertionError('unused default')):
+            flow = WorkflowStoreFactory(None, None, object(), reviewer_correction_factory=Selected).create()
+        self.assertIs(flow.reviewer_correction, selected)
+        self.assertEqual(acquired, [flow])
+
     def test_only_peer_correctness_wire_alias_is_normalized_without_mutating_raw(self):
         from work_feedback import validate_findings
         parsed = bind(target("code"))

@@ -26,6 +26,13 @@ GRANT SELECT ON
     forge_agent.coding_workflow_actions,
     forge_agent.coding_attempts
 TO muse_events;
+DO $jenkins_reads$
+BEGIN
+    IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=27 AND name='jenkins_events') THEN
+        GRANT SELECT ON forge_agent.jenkins_events,forge_agent.jenkins_event_deliveries,forge_agent.jenkins_observations TO muse_events;
+    END IF;
+END;
+$jenkins_reads$;
 -- Match the pre-existing permission for future tables from this owner/schema.
 ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent
     GRANT SELECT ON TABLES TO muse_events;

@@ -4,7 +4,7 @@ DO $muse_read_verify$
 DECLARE
     reader oid;
     owner_role oid := 'forge_agent_owner'::regrole;
-    allowed_tables constant text[] := ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts'];
+    allowed_tables text[] := ARRAY['coding_events', 'coding_plan_decisions', 'coding_result_chunks', 'coding_reconciliation_receipts', 'coding_publications', 'coding_hosted_checks', 'coding_feedback', 'coding_reviews', 'coding_tasks', 'coding_workflows', 'coding_workflow_reviews', 'coding_workflow_actions', 'coding_attempts'];
     relation record;
     permitted boolean;
     privilege_name text;
@@ -12,6 +12,9 @@ DECLARE
 BEGIN
     SELECT oid INTO reader FROM pg_roles WHERE rolname='muse_events';
     IF reader IS NULL THEN RETURN; END IF;
+    IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=27 AND name='jenkins_events') THEN
+        allowed_tables:=allowed_tables||ARRAY['jenkins_events','jenkins_event_deliveries','jenkins_observations'];
+    END IF;
     IF current_database()<>'forge_agent' THEN
         RAISE EXCEPTION 'Muse reader contract requires forge_agent database';
     END IF;
@@ -90,7 +93,7 @@ BEGIN
     END LOOP;
     -- Preserve the operator's existing owner/schema-scoped future-table read.
     -- No global, other-owner, other-schema/type, extra grantee or grant option
-    -- is admitted by this exact catalog row. Current tables remain the thirteen above.
+    -- is admitted by this exact catalog row. M27 adds only its three scoped tables.
     IF NOT EXISTS(SELECT FROM pg_default_acl d
         WHERE d.defaclrole=owner_role AND d.defaclnamespace='forge_agent'::regnamespace
           AND d.defaclobjtype='r'

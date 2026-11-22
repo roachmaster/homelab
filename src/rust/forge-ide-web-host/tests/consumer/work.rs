@@ -33,6 +33,49 @@ fn configured(files: &Files, upstream: &TcpListener) -> Host {
     host_with_config(value).0
 }
 
+#[test]
+fn organized_work_list_keeps_authenticated_scope_and_validates_current_workflow_projection() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut root = summary();
+    root["status"] = json!("awaiting_review");
+    root["workflow_required"] = json!(true);
+    root["workflow_phase"] = json!("code_review");
+    root["workflow_enabled"] = json!(true);
+    root["updated_at"] = json!("2026-11-19T19:00:00Z");
+    let response = reply(
+        "work_listed",
+        json!({"project_alias":PROJECT,"tasks":[root],"next_cursor":null,
+        "scope_counts":{"active":1,"attention":2,"history":3,"all":6}}),
+    );
+    let worker = backend(
+        upstream,
+        vec![(200, response.clone()), (200, response.clone())],
+    );
+    let mut request = common("work_list");
+    request["status_filter"] = json!("active");
+    assert_reply(
+        &host,
+        "ide.work.list",
+        request.clone(),
+        &auth,
+        200,
+        response,
+    );
+    request["status_filter"] = json!("attention");
+    assert_reply(
+        &host,
+        "ide.work.list",
+        request,
+        &auth,
+        503,
+        failure("unavailable"),
+    );
+    worker.join().unwrap();
+}
+
 fn common(kind: &str) -> Value {
     json!({"kind":kind,"request_id":"request-1","project_alias":PROJECT})
 }

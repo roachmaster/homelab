@@ -106,7 +106,65 @@ fn full_dormant_snapshot_round_trips_without_run_polling_or_manual_reactivation(
     }
 }
 #[test]
-fn stale_chat_mutations_and_callbacks_cannot_change_dormant_data_or_emit_io() {
+fn legacy_workspace_snapshots_with_mail_or_missing_chat_restore_cleanly_without_io() {
+    let mut model = connected();
+    let legacy_with_mail: WorkspaceSnapshot = serde_json::from_value(json!({
+        "chat": {
+            "selected": 0,
+            "model_id": "gpt-oss-120b",
+            "conversations": [{
+                "draft": "Keep this unsent follow-up.",
+                "chat_id": "11111111-1111-4111-8111-111111111111",
+                "revision": 8,
+                "messages": [
+                    {"role": "user", "content": "Saved question"},
+                    {"role": "assistant", "content": "Saved answer"}
+                ]
+            }]
+        },
+        "mail": {"active": true, "draft": "legacy top-level mail field", "nested": [1, 2, 3]},
+        "workbench": null,
+        "workbench_open": false
+    }))
+    .unwrap();
+    assert!(legacy_with_mail.is_valid());
+    let output = event(
+        &mut model,
+        UiEvent::RestoreWorkspace {
+            snapshot: legacy_with_mail.clone(),
+        },
+    );
+    assert!(output.effects.is_empty());
+    let restored = output.workspace.as_ref().unwrap();
+    assert_eq!(restored.chat, legacy_with_mail.chat);
+    let serialized = serde_json::to_value(restored).unwrap();
+    let keys: Vec<&str> = serialized
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, ["chat", "workbench", "workbench_open"]);
+
+    let minimal: WorkspaceSnapshot = serde_json::from_value(json!({
+        "workbench": null,
+        "workbench_open": true
+    }))
+    .unwrap();
+    assert!(minimal.is_valid());
+    assert_eq!(minimal.chat, ChatSnapshot::default());
+    let mut second = connected();
+    let output = event(&mut second, UiEvent::RestoreWorkspace { snapshot: minimal });
+    assert!(output.effects.is_empty());
+    assert!(output
+        .view
+        .visibility
+        .iter()
+        .any(|b| b.id == "workbench" && b.visible));
+}
+
+#[test]
+fn removed_chat_events_are_rejected_at_codec_boundary_without_mutating_dormant_data() {
     let mut model = connected();
     let saved = snapshot(false);
     event(
@@ -115,51 +173,32 @@ fn stale_chat_mutations_and_callbacks_cannot_change_dormant_data_or_emit_io() {
             snapshot: saved.clone(),
         },
     );
-    for intent in [
-        UiEvent::NewChat {},
-        UiEvent::SelectChat { value: "0".into() },
-        UiEvent::SetChatDraft {
-            conversation: 0,
-            value: "overwrite".into(),
-        },
-        UiEvent::SelectChatModel {
-            value: "other".into(),
-        },
-        UiEvent::SendChat {},
-        UiEvent::SendPersistentChat {
-            chat_id: "11111111-1111-4111-8111-111111111111".into(),
-        },
-        UiEvent::CancelChatRun {},
-        UiEvent::RetryChatSubmit {},
-        UiEvent::ShowChatHistory {},
-        UiEvent::MoreChatHistory {},
-        UiEvent::ManageSavedChat {},
-        UiEvent::ConfirmChatDelete {},
-        UiEvent::KeepChatLongTerm {},
-        UiEvent::ApplyEdit {
-            proposal_id: "old-proposal".into(),
-        },
-        UiEvent::DiscardEdit {},
-        UiEvent::EditResult {
-            request_id: "old".into(),
-            outcome: EditOutcome::Error {
-                category: FailureKind::Unavailable,
-            },
-        },
-        UiEvent::ChatResult {
-            request_id: "old".into(),
-            outcome: ChatOutcome::Answer {
-                content: "late result".into(),
-            },
-        },
-        UiEvent::ChatRun(ChatRunResponse::ChatRunModelsListed {
-            request_id: "old".into(),
-            default_model_id: "gpt-oss-20b".into(),
-            models: vec![],
-        }),
+    for raw in [
+        json!({"kind": "new_chat"}),
+        json!({"kind": "select_chat", "value": "0"}),
+        json!({"kind": "set_chat_draft", "conversation": 0, "value": "overwrite"}),
+        json!({"kind": "select_chat_model", "value": "other"}),
+        json!({"kind": "send_chat"}),
+        json!({"kind": "send_persistent_chat", "chat_id": "11111111-1111-4111-8111-111111111111"}),
+        json!({"kind": "cancel_chat_run"}),
+        json!({"kind": "retry_chat_submit"}),
+        json!({"kind": "show_chat_history"}),
+        json!({"kind": "more_chat_history"}),
+        json!({"kind": "manage_saved_chat"}),
+        json!({"kind": "confirm_chat_delete"}),
+        json!({"kind": "keep_chat_long_term"}),
+        json!({"kind": "apply_edit", "proposal_id": "old-proposal"}),
+        json!({"kind": "discard_edit"}),
+        json!({"kind": "edit_result", "request_id": "old", "outcome": {"kind": "error", "category": "unavailable"}}),
+        json!({"kind": "chat_result", "request_id": "old", "outcome": {"kind": "answer", "content": "late result"}}),
+        json!({"kind": "chat_run_models_listed", "request_id": "old", "default_model_id": "gpt-oss-20b", "models": []}),
     ] {
-        let output = event(&mut model, intent);
-        assert!(output.effects.is_empty());
-        assert_eq!(output.workspace.as_ref().unwrap().chat, saved.chat);
+        assert!(
+            serde_json::from_value::<UiEvent>(raw.clone()).is_err(),
+            "removed Chat event must not deserialize: {raw}"
+        );
     }
+    let output = model.output(None);
+    assert!(output.effects.is_empty());
+    assert_eq!(output.workspace.as_ref().unwrap().chat, saved.chat);
 }

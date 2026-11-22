@@ -47,6 +47,14 @@ class PeerReviewError(ValueError):
         super().__init__("Invalid or unbound agent review artifact.")
 
 
+class IncompleteApprovalError(PeerReviewError):
+    """A fully bound verdict needs another real review, never inferred closure."""
+    def __init__(self, verdict, missing_finding_ids):
+        super().__init__()
+        self.verdict = deepcopy(verdict)
+        self.missing_finding_ids = tuple(sorted(missing_finding_ids))
+
+
 def _require(condition):
     if not condition:
         raise PeerReviewError()
@@ -207,3 +215,13 @@ def parse_review_verdict(raw, target):
         return result
     except (ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
         raise PeerReviewError() from None
+
+
+def validate_live_review_verdict(raw, target):
+    """Live approval closure; historical verdict parsing remains compatible."""
+    verdict = parse_review_verdict(raw, target)
+    required = {f['finding_id'] for f in target['findings'] if f.get('status', 'open') == 'open'}
+    missing = required - set(verdict['attested_finding_ids'])
+    if target['target_kind'] == 'code' and verdict['decision'] == 'approve' and missing:
+        raise IncompleteApprovalError(verdict, missing)
+    return verdict

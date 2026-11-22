@@ -8,6 +8,7 @@ SET LOCAL search_path = pg_catalog;
 \ir verify-agy-unattended.sql
 \ir verify-native-jenkins.sql
 \ir verify-native-delivery.sql
+\ir verify-jenkins-events.sql
 
 DO $verify$
 DECLARE
