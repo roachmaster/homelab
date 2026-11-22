@@ -318,6 +318,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
         self.assertEqual(cfg['cargo_cache']['root'], '/mnt/data/forge-homelab/ci-cache')
         self.assertTrue(cfg['cargo_cache']['enabled'])
         self.assertTrue(cfg['cargo_cache']['seed_from_main'])
+        self.assertTrue(cfg['cargo_cache']['seed_from_siblings'])
         self.assertEqual(cfg['cargo_cache']['max_entries'], 8)
         self.assertEqual(cfg['cargo_cache']['max_total_bytes'], 20 * 1024**3)
         self.assertEqual(cfg['cargo_cache']['max_age_seconds'], 14 * 86400)
@@ -1276,12 +1277,14 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         entry_a = self._entry_dir(CI.scope_directory_name(scope_a), ra['cache']['compat_key'])
         a_pointer_before = (entry_a / 'current.json').read_bytes()
 
-        # 3. Branch B does not overwrite Branch A or main.
+        # 3. Branch B does not overwrite Branch A or main. It seeds from the
+        # most recent compatible sibling (Branch A), not from main.
         time.sleep(0.03)
         scope_b = 'branch/' + CI.canonical_branch_slug('feat/beta')
         rb, _, _ = self._run_supervisor(commit=self.base_commit, expected_main=self.base_commit, branch_scope=scope_b)
-        self.assertEqual(rb['cache']['restore_status'], 'hit_main_seed')
+        self.assertEqual(rb['cache']['restore_status'], 'hit_sibling_seed')
         self.assertEqual(rb['cache']['publish_status'], 'published')
+        self.assertEqual(next(s for s in rb['stages'] if s['name'] == 'check_0')['cargo_compiling_units'], 0)
         self.assertEqual((main_entry / 'current.json').read_bytes(), main_pointer_before)
         self.assertEqual((entry_a / 'current.json').read_bytes(), a_pointer_before)
 
@@ -1298,6 +1301,40 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             with self.subTest(bad_scope=bad_scope):
                 with self.assertRaises(ValueError):
                     self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=bad_scope)
+
+    def test_retry_on_new_branch_scope_seeds_from_sibling_without_main_entry(self):
+        # The post-mortem's cache-reuse case: two consecutive retries on
+        # different branch scopes, same compat key, no main entry at all.
+        # The second retry must report a sibling seed hit, not a miss.
+        scope_a = 'branch/' + CI.canonical_branch_slug('feat/retry-first')
+        ra, log_a, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope_a)
+        self.assertEqual(ra['status'], 'passed', log_a)
+        self.assertEqual(ra['cache']['restore_status'], 'miss')
+        self.assertEqual(ra['cache']['publish_status'], 'published')
+        entry_a = self._entry_dir(CI.scope_directory_name(scope_a), ra['cache']['compat_key'])
+        a_pointer_before = (entry_a / 'current.json').read_bytes()
+        time.sleep(0.03)
+        scope_b = 'branch/' + CI.canonical_branch_slug('feat/retry-second')
+        rb, log_b, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope_b)
+        self.assertEqual(rb['status'], 'passed', log_b)
+        self.assertEqual(rb['cache']['restore_status'], 'hit_sibling_seed')
+        self.assertEqual(rb['cache']['publish_status'], 'published')
+        self.assertEqual(next(s for s in rb['stages'] if s['name'] == 'check_0')['cargo_compiling_units'], 0)
+        self.assertEqual((entry_a / 'current.json').read_bytes(), a_pointer_before)
+
+    def test_sibling_seeding_disabled_falls_back_to_miss(self):
+        scope_a = 'branch/' + CI.canonical_branch_slug('feat/nosib-first')
+        ra, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope_a)
+        self.assertEqual(ra['cache']['publish_status'], 'published')
+        time.sleep(0.03)
+        scope_b = 'branch/' + CI.canonical_branch_slug('feat/nosib-second')
+        rb, log_b, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40, branch_scope=scope_b,
+            cache_config_override={'seed_from_siblings': False},
+        )
+        self.assertEqual(rb['status'], 'passed', log_b)
+        self.assertEqual(rb['cache']['restore_status'], 'miss')
+        self.assertEqual(rb['cache']['publish_status'], 'published')
 
     def test_null_provider_recovery_retention_and_clear_helper(self):
         # 1. NullCargoCacheProvider substitution never touches cache_root.
