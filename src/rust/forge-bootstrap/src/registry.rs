@@ -1,3 +1,5 @@
+use std::{collections::BTreeMap, error::Error, fmt};
+
 /// Controlled metadata rejection, independent of application construction errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegistrationError {
