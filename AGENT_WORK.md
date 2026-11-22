@@ -1,5 +1,22 @@
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
 
+Jenkins14 on `422db0f` failed in its first gate: the terminal startup-error
+test unconditionally expected disk-enabled diagnostics in a no-default-features
+build. Root assigns this same isolated worktree to correct the test's feature
+matrix, inspect equivalent Jenkins/jobs options and run focused terminal suites
+with all features, no defaults, jobs only and disk only. Preserve the correct
+production parser and the original failed Jenkins receipt. Root retains main,
+publication, fresh Jenkins execution and deployment ownership.
+
+The corrected matrix retains every disk-enabled diagnostic, verifies unavailable
+disk/Jenkins flags before value validation, and exercises the intentional
+no-disk idempotence without the disk feature. Jobs duplicate diagnostics remain
+feature-independent; existing binary cases verify disabled jobs still allow node
+commands. All terminal package tests pass with all features (55), no defaults
+(30), jobs only (38), and disk only (39): 162 executed, zero failed or ignored.
+Checks used stable Rust, offline/locked dependencies, two build jobs and the
+ordinary-user Gemini target. Rust formatting and `git diff --check` pass.
+
 The user authorizes pulling latest Homelab, running Jenkins, fixing failures and
 deploying the verified result to the portal. Root owns integration, real Jenkins
 execution and live deployment. `latest_source_audit` owns only this isolated

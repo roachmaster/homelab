@@ -403,6 +403,15 @@ fn startup_option_errors_name_the_exact_problem() {
             "--help/-h/--session must end the startup options",
         ),
         (vec!["--bad"], "unknown startup option; use --help"),
+    ] {
+        assert_eq!(parse_options(arguments(&args)).unwrap_err(), message);
+    }
+}
+
+#[cfg(feature = "disk")]
+#[test]
+fn disk_startup_option_errors_name_the_exact_problem() {
+    for (args, message) in [
         (vec!["--cwd"], "--cwd needs a path"),
         (vec!["--cwd", "a", "--cwd", "b"], "--cwd was supplied twice"),
         (
@@ -419,6 +428,61 @@ fn startup_option_errors_name_the_exact_problem() {
         ),
     ] {
         assert_eq!(parse_options(arguments(&args)).unwrap_err(), message);
+    }
+}
+
+#[cfg(not(feature = "disk"))]
+#[test]
+fn omitted_disk_feature_rejects_cwd_and_keeps_no_disk_idempotent() {
+    for args in [
+        vec!["--cwd"],
+        vec!["--cwd", "a"],
+        vec!["--cwd", "a", "--cwd", "b"],
+        vec!["--cwd", "x", "--no-disk"],
+        vec!["--no-disk", "--cwd", "x"],
+    ] {
+        assert_eq!(
+            parse_options(arguments(&args)).unwrap_err(),
+            "--cwd is unavailable: this binary was built without disk"
+        );
+    }
+    let (code, out, err) = execute(&["--no-disk", "--no-disk", "node.info"], b"");
+    assert_eq!(code, 0);
+    assert!(out.starts_with("node_id=local\n"));
+    assert!(err.is_empty());
+}
+
+#[cfg(feature = "jenkins")]
+#[test]
+fn jenkins_startup_option_errors_name_the_exact_problem() {
+    for (args, message) in [
+        (vec!["--jenkins-config"], "--jenkins-config needs a path"),
+        (
+            vec!["--jenkins-config", ""],
+            "--jenkins-config needs a nonempty path",
+        ),
+        (
+            vec!["--jenkins-config", "a", "--jenkins-config", "b"],
+            "--jenkins-config was supplied twice",
+        ),
+    ] {
+        assert_eq!(parse_options(arguments(&args)).unwrap_err(), message);
+    }
+}
+
+#[cfg(not(feature = "jenkins"))]
+#[test]
+fn omitted_jenkins_feature_rejects_selection_before_path_validation() {
+    for args in [
+        vec!["--jenkins-config"],
+        vec!["--jenkins-config", ""],
+        vec!["--jenkins-config", "a"],
+        vec!["--jenkins-config", "a", "--jenkins-config", "b"],
+    ] {
+        assert_eq!(
+            parse_options(arguments(&args)).unwrap_err(),
+            "--jenkins-config is unavailable: this binary was built without jenkins"
+        );
     }
 }
 
