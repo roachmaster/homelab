@@ -90,6 +90,26 @@ class SupervisionBoundaryTest(unittest.TestCase):
                     CI._safe_rmtree(source)
             self.assertTrue((source / 'artifact').is_file())
 
+    def test_cache_copy_skips_incremental_directories_at_any_depth(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'target'
+            (source / 'debug' / 'deps').mkdir(parents=True)
+            (source / 'debug' / 'incremental' / 'lib-core-abc' / 's-session').mkdir(parents=True)
+            (source / 'release' / 'incremental').mkdir(parents=True)
+            (source / 'debug' / 'deps' / 'liblib_core.rlib').write_bytes(b'rlib-bytes')
+            (source / 'debug' / 'incremental' / 'lib-core-abc' / 's-session' / 'dep-graph.bin').write_bytes(b'incremental-bytes')
+            (source / 'release' / 'incremental' / 'stale.bin').write_bytes(b'stale-bytes')
+            entries, total_bytes, file_count, _max_art, _max_fp = CI._copy_tree_from_build(
+                source, root / 'staging', expected_uid=os.getuid(), prefix_rel='target',
+                excluded_dir_names=CI.SNAPSHOT_EXCLUDED_DIR_NAMES,
+            )
+            self.assertEqual(file_count, 1)
+            self.assertEqual(total_bytes, len(b'rlib-bytes'))
+            self.assertEqual([row[0] for row in entries], ['target/debug/deps/liblib_core.rlib'])
+            self.assertFalse((root / 'staging' / 'debug' / 'incremental').exists())
+            self.assertFalse((root / 'staging' / 'release' / 'incremental').exists())
+
     def test_bounded_observation_enforces_limit_and_exit_status(self):
         env = {'PATH': '/usr/bin:/bin'}
         self.assertEqual(CI.bounded_output(['/usr/bin/python3', '-c', 'print("ok")'], env=env), b'ok\n')
@@ -1005,6 +1025,42 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         self.assertEqual(rm2['cache']['restore_status'], 'hit_main')
         check0_m2 = next(s for s in rm2['stages'] if s['name'] == 'check_0')
         self.assertEqual(check0_m2['cargo_compiling_units'], 0, logm2)
+
+    def test_published_snapshot_excludes_incremental_directories(self):
+        branch_scope = 'branch/' + CI.canonical_branch_slug('feat/no-incremental')
+        r1, log1, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40, branch_scope=branch_scope, workflow_id=str(uuid4()),
+        )
+        self.assertEqual(r1['status'], 'passed', log1)
+        self.assertEqual(r1['cache']['publish_status'], 'published')
+        self.assertGreater(r1['cache']['published_files'], 0)
+        incremental_paths = [p for p in self.cache_root.rglob('incremental') if p.is_dir()]
+        self.assertEqual(incremental_paths, [])
+
+    def test_publish_evicts_lru_entry_when_cache_full(self):
+        branch_a = 'branch/' + CI.canonical_branch_slug('feat/cache-full-a')
+        branch_b = 'branch/' + CI.canonical_branch_slug('feat/cache-full-b')
+        r1, log1, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40, branch_scope=branch_a, workflow_id=str(uuid4()),
+        )
+        self.assertEqual(r1['cache']['publish_status'], 'published', log1)
+        published_bytes = r1['cache']['published_bytes']
+        self.assertGreater(published_bytes, 0)
+        time.sleep(0.03)
+        # The second branch's snapshot cannot fit alongside the first under
+        # this cap; publish must evict the least-recently-used entry rather
+        # than skipping with skipped_capacity.
+        r2, log2, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40, branch_scope=branch_b, workflow_id=str(uuid4()),
+            cache_config_override={'max_total_bytes': published_bytes + 1024},
+        )
+        self.assertEqual(r2['status'], 'passed', log2)
+        self.assertEqual(r2['cache']['publish_status'], 'published', log2)
+        self.assertGreaterEqual(r2['cache']['evicted_entries'], 1)
+        self.assertLessEqual(r2['cache']['cache_total_bytes'], published_bytes + 1024)
+        pointers = list(self.cache_root.rglob('current.json'))
+        self.assertEqual(len(pointers), 1)
+        self.assertIn(CI.scope_directory_name(branch_b), str(pointers[0]))
 
     def test_future_dated_snapshot_falls_back_cleanly_on_source_edit_and_self_heals(self):
         branch_scope = 'branch/' + CI.canonical_branch_slug('feat/future-guard')

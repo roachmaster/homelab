@@ -38,6 +38,13 @@ DEFAULT_MAX_TOTAL_BYTES = 20 * 1024 * 1024 * 1024
 DEFAULT_MAX_ENTRIES = 8
 DEFAULT_MAX_AGE_SECONDS = 14 * 86400
 EPHEMERAL_TARGET_DIRS = frozenset({'ui-assets', 'ui-qa', 'tmp'})
+# Directory names excluded from snapshots at any depth in both the main target
+# tree and the package-targets tree. Cargo incremental artifacts only accelerate
+# rebuilds of changed crates: unchanged crates reuse deps/ plus fingerprints,
+# and changed crates rebuild cleanly without them. Snapshotting incremental/
+# costs gigabytes per entry and grows on every warm cycle, because restored
+# sessions plus the new build's sessions accumulate.
+SNAPSHOT_EXCLUDED_DIR_NAMES = frozenset({'incremental'})
 REPO_BUILD_CONFIG_PATHS = (
     '.cargo/config',
     '.cargo/config.toml',
@@ -738,11 +745,14 @@ def observe_toolchain_fingerprint(toolchain_path):
     }
 
 
-def _copy_tree_from_build(src_root, dst_root, *, expected_uid, prefix_rel, excluded_top_dirs=frozenset()):
+def _copy_tree_from_build(src_root, dst_root, *, expected_uid, prefix_rel, excluded_top_dirs=frozenset(),
+                        excluded_dir_names=frozenset()):
     """Safely copy regular files from build-owned scratch into root staging.
 
     Uses O_NOFOLLOW + fstat on every directory and file component and rejects
     symlinks, FIFOs, sockets, devices, or files not owned by expected_uid.
+    `excluded_top_dirs` skips top-level entries; `excluded_dir_names` skips
+    directories of that name at any depth.
     """
     manifest_entries = []
     total_bytes = 0
@@ -775,6 +785,8 @@ def _copy_tree_from_build(src_root, dst_root, *, expected_uid, prefix_rel, exclu
                     raise UnsafeArtifactError('Rejected artifact not owned by build user')
                 child_parts = rel_parts + (name,)
                 if stat.S_ISDIR(info.st_mode):
+                    if name in excluded_dir_names:
+                        continue
                     # Verify directory fd explicitly with O_DIRECTORY | O_NOFOLLOW.
                     sub_dir_fd = os.open(
                         name,
@@ -1310,8 +1322,10 @@ class LocalCargoCacheProvider(CargoCachePort):
             fcntl.flock(lock, fcntl.LOCK_EX)
             yield root
 
-    def _cleanup_orphaned_staging(self, root):
+    def _cleanup_orphaned_staging(self, root, *, keep=None):
         for name in os.listdir(root):
+            if name == keep:
+                continue
             if name.startswith('.staging-'):
                 candidate = root / name
                 info = candidate.lstat()
@@ -1626,12 +1640,14 @@ class LocalCargoCacheProvider(CargoCachePort):
                         expected_uid=account.pw_uid,
                         prefix_rel='target',
                         excluded_top_dirs=EPHEMERAL_TARGET_DIRS,
+                        excluded_dir_names=SNAPSHOT_EXCLUDED_DIR_NAMES,
                     )
                     p_entries, p_bytes, p_files, p_max_art, p_max_fp = _copy_tree_from_build(
                         layout.package_targets,
                         staging / 'package-targets',
                         expected_uid=account.pw_uid,
                         prefix_rel='package-targets',
+                        excluded_dir_names=SNAPSHOT_EXCLUDED_DIR_NAMES,
                     )
                 except UnsafeArtifactError as error:
                     _safe_rmtree(staging)
@@ -1695,6 +1711,21 @@ class LocalCargoCacheProvider(CargoCachePort):
 
                 entry_dir = self._ensure_entry_directory(root, key)
                 has_previous = (entry_dir / 'current.json').exists()
+                # Make room for this snapshot by evicting least-recently-used
+                # entries before giving up: with multi-gigabyte snapshots a
+                # full cache would otherwise stop publishing entirely. The
+                # entry being published to is protected so its prior
+                # known-good snapshot survives until the new one commits, and
+                # the live staging directory is never treated as orphaned.
+                pruned = self._prune_locked(
+                    root,
+                    protected_entry=entry_dir,
+                    reserve_entries=0 if has_previous else 1,
+                    reserve_bytes=total_bytes,
+                    keep_staging=staging.name,
+                )
+                self._maintenance_evicted += pruned.evicted_entries
+                baseline_bytes, baseline_count = self._inventory_locked(root)
                 retained_bytes = baseline_bytes + total_bytes
                 retained_count = baseline_count + (0 if has_previous else 1)
                 if (retained_bytes > self.config.max_total_bytes
@@ -1883,8 +1914,9 @@ class LocalCargoCacheProvider(CargoCachePort):
             except OSError:
                 break
 
-    def _prune_locked(self, root, *, protected_entry=None, now_ns=None, reserve_entries=0):
-        self._cleanup_orphaned_staging(root)
+    def _prune_locked(self, root, *, protected_entry=None, now_ns=None, reserve_entries=0, reserve_bytes=0,
+                      keep_staging=None):
+        self._cleanup_orphaned_staging(root, keep=keep_staging)
         scopes_dir = root / 'scopes'
         entries = self._collect_entries_locked(root)
         now = time.time_ns() if now_ns is None else now_ns
@@ -1902,8 +1934,9 @@ class LocalCargoCacheProvider(CargoCachePort):
                 remaining.append(item)
 
         # 2. Enforce max_entries and max_total_bytes (evict non-main LRU before main).
+        # reserve_bytes holds room for a snapshot about to be published.
         while (len(remaining) + reserve_entries > self.config.max_entries
-               or sum(item['total_bytes'] for item in remaining) > self.config.max_total_bytes):
+               or sum(item['total_bytes'] for item in remaining) + reserve_bytes > self.config.max_total_bytes):
             candidates = [item for item in remaining if item['path'] != protected_entry]
             if not candidates:
                 # An active publication is protected even under a tighter
