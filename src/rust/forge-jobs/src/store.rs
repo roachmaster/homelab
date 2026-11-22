@@ -1,4 +1,5 @@
-use crate::{check_token, Claim, JobError, JobId, JobStore, Owner, Receipt, State, Status, Work};
+use crate::jobs::check_token;
+use crate::{Claim, JobError, JobId, JobStore, Owner, Receipt, State, Status, Work};
 use cap_std::{
     ambient_authority,
     fs::{Dir, OpenOptions},
