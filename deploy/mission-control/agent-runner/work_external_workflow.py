@@ -6,11 +6,7 @@ worker, through durable actions. Model output never invokes those ports.
 """
 from contextlib import contextmanager
 from uuid import UUID,uuid4
-<<<<<<< HEAD
 import copy,hashlib,json,re,unicodedata
-=======
-import copy,hashlib,json,unicodedata
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import PinnedRecipe,prepare_title,sha256_canonical
@@ -19,18 +15,14 @@ from work_external_review_context import canonical,validate_target,parse_verdict
 
 TERMINAL={'completed','cancelled','escalated'}
 MAX_NATIVE_VERDICT=65536
-<<<<<<< HEAD
 BRANCH_NAME_RE=re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
 BRANCH_SLUG_RE=re.compile(r'[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 BRANCH_SCOPE_RE=re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
-=======
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 
 def _str(value):return str(value) if value is not None else None
 
 
-<<<<<<< HEAD
 def validate_branch_name(value):
     if (not isinstance(value,str) or not BRANCH_NAME_RE.fullmatch(value)
             or '..' in value or '//' in value or '@{' in value
@@ -80,8 +72,6 @@ def validate_branch_scope(scope,*,candidate_commit,expected_main):
     raise ValueError('Invalid workflow branch scope')
 
 
-=======
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 class ExternalWorkflowStore:
     def __init__(self,config,catalog,*,recovery_grant_provider=None):
         self.config,self.catalog=config,catalog
@@ -382,19 +372,12 @@ class ExternalWorkflowStore:
                 self._queue_review(cursor,w,task,artifact,'plan',retry=retry);return True
             try:manifest=self._candidate_manifest(artifact['content'])
             except ValueError:
-<<<<<<< HEAD
                 return self._revise(cursor,w,'code',{'summary':'Return the exact candidate JSON manifest with version,candidate_commit,candidate_tree,base_revision,summary (and optional source_branch). Preserve your existing branch and completed work.','findings':[]},artifact)
             if manifest['base_revision']!=w['state']['base_revision']:
                 return self._revise(cursor,w,'code',{'summary':'Rebase the existing implementation onto the configured base '+w['state']['base_revision']+' and return its exact candidate manifest.','findings':[]},artifact)
             request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':w['state']['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
             if manifest.get('source_branch') is not None:
                 request['source_branch']=manifest['source_branch']
-=======
-                return self._revise(cursor,w,'code',{'summary':'Return the exact candidate JSON manifest with version,candidate_commit,candidate_tree,base_revision,summary. Preserve your existing branch and completed work.','findings':[]},artifact)
-            if manifest['base_revision']!=w['state']['base_revision']:
-                return self._revise(cursor,w,'code',{'summary':'Rebase the existing implementation onto the configured base '+w['state']['base_revision']+' and return its exact candidate manifest.','findings':[]},artifact)
-            request={'source_task_id':str(task['id']),'source_assignment_id':artifact['assignment_id'],'source_sha256':artifact['sha256'],'base_revision':w['state']['base_revision'],'candidate_commit':manifest['candidate_commit'],'candidate_tree':manifest['candidate_tree']}
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             a=self._action(cursor,w,'prepare',artifact['sha256'],request)
             if a['status']=='failed':
                 if a['result']['status']=='main_changed':return self._request_rebase(cursor,w,a['result']['summary'])
@@ -405,10 +388,7 @@ class ExternalWorkflowStore:
                 if not isinstance(candidate.get(key),str) or not HEX40.fullmatch(candidate[key]):raise ValueError('Unverified delivery candidate')
             if candidate['candidate_tree']!=manifest['candidate_tree'] or candidate['integration_base']!=w['state']['base_revision']:raise ValueError('Prepared source differs from author candidate or trusted base')
             if any(not isinstance(candidate.get(key),str) or not HEX64.fullmatch(candidate[key]) for key in ('diff_sha256','gate_source_sha256','gate_manifest_sha256')):raise ValueError('Candidate lacks exact gate/diff digests')
-<<<<<<< HEAD
             self._validate_prepared_branch_scope(candidate)
-=======
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
             changes=candidate.get('protected_gate_changes')
             if not isinstance(changes,list) or len(changes)>256 or any(not isinstance(change,dict) or not isinstance(change.get('finding_id'),str) for change in changes):raise ValueError('Invalid protected gate change manifest')
             w['state']['candidate']=candidate
@@ -420,7 +400,6 @@ class ExternalWorkflowStore:
         return False
 
     @staticmethod
-<<<<<<< HEAD
     def _validate_prepared_branch_scope(candidate):
         branch_scope=validate_branch_scope(
             candidate.get('branch_scope'),
@@ -455,14 +434,6 @@ class ExternalWorkflowStore:
             branch=validate_branch_name(value['source_branch'])
             if branch=='main' and value['candidate_commit']!=value['base_revision']:
                 raise ValueError('Non-main candidate cannot claim main source branch')
-=======
-    def _candidate_manifest(text):
-        value=strict_json(text)
-        if not isinstance(value,dict) or set(value)!={'version','candidate_commit','candidate_tree','base_revision','summary'} or type(value['version']) is not int or value['version']!=1:
-            raise ValueError('Invalid candidate manifest')
-        if any(not isinstance(value[k],str) or not HEX40.fullmatch(value[k]) for k in ('candidate_commit','candidate_tree','base_revision')) or not isinstance(value['summary'],str) or len(value['summary'].encode())>4096:
-            raise ValueError('Invalid candidate source identity')
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         return value
 
     def _queue_review(self,cursor,w,task,artifact,kind,*,retry=0,correction=None):
@@ -569,11 +540,7 @@ class ExternalWorkflowStore:
         return common+("Revise the complete Plan using the supplied feedback; finish with the full revised Plan text."
                        if mode=='plan' else
                        "Implement and verify the approved Plan, publish the preserved feature candidate, and finish with ONLY the exact JSON object specified by external_context.result_contract "
-<<<<<<< HEAD
                        "(version,candidate_commit,candidate_tree,base_revision,summary, and optional source_branch). No Markdown fences or extra prose; report the actual commit/tree and supplied base_revision.")
-=======
-                       "(version,candidate_commit,candidate_tree,base_revision,summary). No Markdown fences or extra prose; report the actual commit/tree and supplied base_revision.")
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
     def _queue_author(self,cursor,w,mode,source,feedback):
         task_id=uuid4();root=self._task(cursor,w,w['root_task_id']);recipe=w['snapshot']['recipes']['author_plan' if mode=='plan' else 'author_implement']
@@ -587,11 +554,7 @@ class ExternalWorkflowStore:
         context={'version':2,'workflow_id':str(w['workflow_id']),'stage':mode,'request_prompt':root['prompt'],'acceptance_criteria':root['acceptance_criteria'],
                  'approved_plan':w['state'].get('approved_plan'),'previous_artifact':{k:source[k] for k in ('assignment_id','sha256','content')},'feedback':feedback,
                  'base_revision':w['state'].get('base_revision',root['base_revision']),
-<<<<<<< HEAD
                  'result_contract':{'version':1,'candidate_commit':'40 lowercase hex','candidate_tree':'40 lowercase hex','base_revision':'the supplied base_revision','summary':'bounded implementation report','source_branch':'optional Git feature branch name'} if mode=='implement' else 'Full revised plan text'}
-=======
-                 'result_contract':{'version':1,'candidate_commit':'40 lowercase hex','candidate_tree':'40 lowercase hex','base_revision':'the supplied base_revision','summary':'bounded implementation report'} if mode=='implement' else 'Full revised plan text'}
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         self._enqueue(cursor,w['project_alias'],task_id,context)
         w['state'].pop('active_review_id',None);w['state'].pop('candidate',None);w['state'].pop('code_review',None);w['state'].pop('candidate_source',None)
         cursor.execute('UPDATE forge_external_workflow.workflows SET state=%s WHERE workflow_id=%s',(Json(w['state']),w['workflow_id']))
@@ -609,13 +572,9 @@ class ExternalWorkflowStore:
             source=self._artifact(cursor,w,self._task(cursor,w))
             return self._revise(cursor,w,'code',{'summary':'Trusted verification failed: '+result['summary'],'findings':[]},source)
         receipt=result['receipt'];candidate=w['state']['candidate']
-<<<<<<< HEAD
         if (any(receipt.get(k)!=candidate.get(k) for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope'))
                 or receipt.get('result')!='SUCCESS'):
             raise ValueError('Jenkins receipt is not bound to the approved exact source')
-=======
-        if any(receipt.get(k)!=candidate.get(k) for k in ('candidate_commit','candidate_tree','gate_manifest_sha256')) or receipt.get('result')!='SUCCESS':raise ValueError('Jenkins receipt is not bound to the approved exact source')
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         w['state']['verification']=receipt
         self._save(cursor,w,'Independent review and exact-source Jenkins checks passed; trusted merge is starting.',phase='merging')
         return True

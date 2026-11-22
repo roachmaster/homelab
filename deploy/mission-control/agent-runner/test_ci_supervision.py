@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 """Privilege-boundary, profile-compatibility, and Cargo cache supervision checks."""
-=======
-"""Privilege-boundary and profile-compatibility checks; no privileged effects."""
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 import importlib.util
 import hashlib
 import json
@@ -13,10 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-<<<<<<< HEAD
 import time
-=======
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -25,7 +18,6 @@ from uuid import uuid4
 HERE = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location('forge_ci_supervision', HERE.parent / 'jenkins/verify-candidate.py')
 CI = importlib.util.module_from_spec(SPEC)
-<<<<<<< HEAD
 sys.modules[SPEC.name] = CI
 SPEC.loader.exec_module(CI)
 SETUP_SPEC = importlib.util.spec_from_file_location('forge_ci_provision', HERE.parent / 'jenkins/setup-ci.py')
@@ -39,12 +31,6 @@ CLEAR_SPEC.loader.exec_module(CLEAR)
 
 TOOLCHAIN = Path('/opt/forge-ci/toolchain')
 TOOLCHAIN_AVAILABLE = (TOOLCHAIN / 'bin/cargo').is_file() and (TOOLCHAIN / 'bin/rustc').is_file()
-=======
-SPEC.loader.exec_module(CI)
-SETUP_SPEC = importlib.util.spec_from_file_location('forge_ci_provision', HERE.parent / 'jenkins/setup-ci.py')
-SETUP = importlib.util.module_from_spec(SETUP_SPEC)
-SETUP_SPEC.loader.exec_module(SETUP)
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
 
 
 class SupervisionBoundaryTest(unittest.TestCase):
@@ -70,6 +56,40 @@ class SupervisionBoundaryTest(unittest.TestCase):
             with patch.object(CI.subprocess, 'run', side_effect=[SimpleNamespace(returncode=x) for x in results]):
                 with self.assertRaises(RuntimeError): CI.kill_build_user(account)
 
+    def test_cache_copy_telemetry_and_rmtree_wrappers_propagate_cancellation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'artifact').write_bytes(b'known-good')
+            original_open = CI.os.open
+            def interrupt_artifact(path, *args, **kwargs):
+                if path == 'artifact':
+                    raise InterruptedError('file copy cancelled')
+                return original_open(path, *args, **kwargs)
+            with patch.object(CI.os, 'open', side_effect=interrupt_artifact):
+                with self.assertRaises(InterruptedError):
+                    CI._copy_tree_from_build(
+                        source, root / 'staging', expected_uid=os.getuid(), prefix_rel='target',
+                    )
+                with self.assertRaises(InterruptedError):
+                    CI._copy_tree_to_build(
+                        source, root / 'restored', expected_owner=os.getuid(),
+                        target_uid=os.getuid(), target_gid=os.getgid(), prefix_rel='target',
+                    )
+            with patch.object(CI.os, 'open', side_effect=InterruptedError('telemetry cancelled')):
+                with self.assertRaises(InterruptedError):
+                    CI._read_ui_qa_stages(root, expected_uid=os.getuid())
+            original_unlink = CI.os.unlink
+            def interrupt_unlink(path, *args, **kwargs):
+                if path == 'artifact':
+                    raise InterruptedError('cleanup cancelled')
+                return original_unlink(path, *args, **kwargs)
+            with patch.object(CI.os, 'unlink', side_effect=interrupt_unlink):
+                with self.assertRaises(InterruptedError):
+                    CI._safe_rmtree(source)
+            self.assertTrue((source / 'artifact').is_file())
+
     def test_bounded_observation_enforces_limit_and_exit_status(self):
         env = {'PATH': '/usr/bin:/bin'}
         self.assertEqual(CI.bounded_output(['/usr/bin/python3', '-c', 'print("ok")'], env=env), b'ok\n')
@@ -90,7 +110,6 @@ class SupervisionBoundaryTest(unittest.TestCase):
         value = {'tests/事件.rs': ['100644', 'a' * 40], 'checks': CI.CHECKS}
         self.assertEqual(CI.canonical(value), canonical(value))
 
-<<<<<<< HEAD
     def test_branch_helpers_match_across_supervisor_delivery_and_workflow(self):
         import work_external_delivery as delivery
         import work_external_workflow as workflow
@@ -291,8 +310,6 @@ class SupervisionBoundaryTest(unittest.TestCase):
         self.assertIn(b'jenkins ALL=(root) NOPASSWD: /usr/local/libexec/forge-ci-check *\\n'.decode('unicode_escape').strip(), setup_src)
         self.assertNotIn('NOPASSWD: /usr/local/sbin/forge-ci-cache-clear', setup_src)
 
-=======
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
     def test_non_head_delivery_bundle_imports_exact_objects_before_any_checkout(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); original = root / 'original'; source = root / 'source'
@@ -320,41 +337,38 @@ class SupervisionBoundaryTest(unittest.TestCase):
             imported = git('-C', str(source), 'for-each-ref', '--format=%(refname)').strip()
             self.assertTrue(imported.startswith(b'refs/forge-ci-import/forge/external-candidates/'))
 
-<<<<<<< HEAD
-=======
     def test_ancestor_preflight_uses_both_verified_bundle_refs_without_changing_source(self):
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary); original = root/'original'; source = root/'source'
-            env = {'PATH':'/usr/bin:/bin','HOME':str(root),'GIT_CONFIG_NOSYSTEM':'1',
-                'GIT_CONFIG_GLOBAL':'/dev/null','GIT_NO_REPLACE_OBJECTS':'1',
-                'GIT_AUTHOR_NAME':'Owned fixture','GIT_COMMITTER_NAME':'Owned fixture',
-                'GIT_AUTHOR_EMAIL':'fixture@example.invalid','GIT_COMMITTER_EMAIL':'fixture@example.invalid'}
+            root = Path(temporary); original = root / 'original'; source = root / 'source'
+            env = {'PATH': '/usr/bin:/bin', 'HOME': str(root), 'GIT_CONFIG_NOSYSTEM': '1',
+                'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_NO_REPLACE_OBJECTS': '1',
+                'GIT_AUTHOR_NAME': 'Owned fixture', 'GIT_COMMITTER_NAME': 'Owned fixture',
+                'GIT_AUTHOR_EMAIL': 'fixture@example.invalid', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid'}
             def git(*args):
-                return subprocess.check_output(['/usr/bin/git','-c','core.hooksPath=/dev/null',*args],env=env,stderr=subprocess.DEVNULL).decode().strip()
-            git('init','--quiet',str(original))
-            (original/'source.txt').write_text('base')
-            git('-C',str(original),'add','source.txt');git('-C',str(original),'commit','--quiet','-m','base')
-            base = git('-C',str(original),'rev-parse','HEAD')
-            (original/'source.txt').write_text('main update')
-            git('-C',str(original),'commit','--quiet','-am','main update')
-            main = git('-C',str(original),'rev-parse','HEAD')
-            git('-C',str(original),'update-ref','refs/forge/native-ci/candidate',base)
-            git('-C',str(original),'update-ref','refs/forge/native-ci/expected-main',main)
-            bundle = root/'both.bundle'
-            git('-C',str(original),'bundle','create',str(bundle),'refs/forge/native-ci/candidate','refs/forge/native-ci/expected-main')
-            CI.import_verified_bundle(bundle,source,env)
-            before = git('-C',str(source),'for-each-ref','--format=%(refname) %(objectname)')
+                return subprocess.check_output(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null', *args], env=env, stderr=subprocess.DEVNULL).decode().strip()
+            git('init', '--quiet', str(original))
+            (original / 'source.txt').write_text('base')
+            git('-C', str(original), 'add', 'source.txt'); git('-C', str(original), 'commit', '--quiet', '-m', 'base')
+            base = git('-C', str(original), 'rev-parse', 'HEAD')
+            (original / 'source.txt').write_text('main update')
+            git('-C', str(original), 'commit', '--quiet', '-am', 'main update')
+            main = git('-C', str(original), 'rev-parse', 'HEAD')
+            git('-C', str(original), 'update-ref', 'refs/forge/native-ci/candidate', base)
+            git('-C', str(original), 'update-ref', 'refs/forge/native-ci/expected-main', main)
+            bundle = root / 'both.bundle'
+            git('-C', str(original), 'bundle', 'create', str(bundle), 'refs/forge/native-ci/candidate', 'refs/forge/native-ci/expected-main')
+            CI.import_verified_bundle(bundle, source, env)
+            before = git('-C', str(source), 'for-each-ref', '--format=%(refname) %(objectname)')
             with self.assertRaises(CI.MainAncestorRequired):
-                CI.main_ancestor_preflight(source,{'expected_main':main,'candidate_commit':base},env)
-            CI.main_ancestor_preflight(source,{'expected_main':base,'candidate_commit':main},env)
-            CI.main_ancestor_preflight(source,{'expected_main':main,'candidate_commit':main},env)
+                CI.main_ancestor_preflight(source, {'expected_main': main, 'candidate_commit': base}, env)
+            CI.main_ancestor_preflight(source, {'expected_main': base, 'candidate_commit': main}, env)
+            CI.main_ancestor_preflight(source, {'expected_main': main, 'candidate_commit': main}, env)
             with self.assertRaises(ValueError) as failed:
-                CI.main_ancestor_preflight(source,{'expected_main':'f'*40,'candidate_commit':base},env)
-            self.assertNotIsInstance(failed.exception,CI.MainAncestorRequired)
-            self.assertEqual(git('-C',str(source),'for-each-ref','--format=%(refname) %(objectname)'),before)
-            self.assertEqual([p.name for p in source.iterdir()],['.git'])
+                CI.main_ancestor_preflight(source, {'expected_main': 'f' * 40, 'candidate_commit': base}, env)
+            self.assertNotIsInstance(failed.exception, CI.MainAncestorRequired)
+            self.assertEqual(git('-C', str(source), 'for-each-ref', '--format=%(refname) %(objectname)'), before)
+            self.assertEqual([p.name for p in source.iterdir()], ['.git'])
 
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
     def test_target_mapping_preserves_readonly_source_and_only_excludes_generated_outputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); source = root / 'source'; scratch = root / 'scratch'
@@ -529,11 +543,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
                     SETUP.qualify_remoting(jar, hashlib.sha256(jar.read_bytes()).hexdigest(), account)
                 run.assert_not_called()
 
-<<<<<<< HEAD
-    def test_supervised_cancellation_writes_failed_receipt_after_confirmed_uid_cleanup(self):
-=======
     def receipt_fixture(self, *, require_main=None, preflight_error=None):
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             action = str(uuid4())
@@ -548,16 +558,10 @@ class SupervisionBoundaryTest(unittest.TestCase):
             manifest = hashlib.sha256(CI.canonical({'version': 1, 'provider': 'jenkins',
                 'profile': 'fixture', 'checks': CI.CHECKS, 'verifier_sha256': helper_digest,
                 'source_gate_sha256': hashlib.sha256(CI.canonical(protected)).hexdigest()})).hexdigest()
-<<<<<<< HEAD
             scope = 'branch/' + CI.canonical_branch_slug('feat/cancel-test')
             request = {'version': 1, 'action_id': action, 'workflow_id': str(uuid4()),
                 'project_alias': 'homelab', 'candidate_commit': 'b' * 40,
                 'candidate_tree': 'c' * 40, 'expected_main': 'd' * 40, 'branch_scope': scope,
-=======
-            request = {'version': 1, 'action_id': action, 'workflow_id': str(uuid4()),
-                'project_alias': 'homelab', 'candidate_commit': 'b' * 40,
-                'candidate_tree': 'c' * 40, 'expected_main': 'd' * 40,
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
                 'gate_manifest_sha256': manifest, 'bundle_sha256': hashlib.sha256(data).hexdigest(),
                 'verification_profile': 'fixture', 'correlation_id': str(uuid4())}
             (directory / 'request.json').write_text(json.dumps(request))
@@ -567,17 +571,11 @@ class SupervisionBoundaryTest(unittest.TestCase):
                 'projects': ['homelab'], 'verification_profile': 'fixture', 'verifier_sha256': helper_digest,
                 'toolchain': str(root / 'toolchain'), 'cargo_registry': str(root / 'registry'),
                 'node_modules': str(root / 'modules'), 'timeout_seconds': 60}
-<<<<<<< HEAD
-            build = SimpleNamespace(pw_uid=43210, pw_gid=43211, pw_name='forge_ci')
-            submitter = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
-            source = work / 'active' / 'source'
-=======
             if require_main is not None:
                 config['require_main_ancestor'] = require_main
             build = SimpleNamespace(pw_uid=43210, pw_gid=43211, pw_name='forge_ci')
             submitter = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
-            source = work / action / 'source'
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
+            source = work / 'active' / 'source'
             def git(command, **_options):
                 if 'init' in command:
                     (source / 'src/rust/forge-ide-web/tests/browser').mkdir(parents=True)
@@ -594,96 +592,89 @@ class SupervisionBoundaryTest(unittest.TestCase):
                  patch.object(CI.os, 'fchown'), patch.object(CI.subprocess, 'run', side_effect=git), \
                  patch.object(CI, 'bounded_output', side_effect=[('c' * 40).encode(), b'100644 blob ' + b'a' * 40 + b' 7\tMakefile\0']), \
                  patch.object(CI, 'kill_build_user', side_effect=lambda _account: order.append(('cleanup', None))), \
-<<<<<<< HEAD
-                 patch.object(CI, 'run_child', side_effect=InterruptedError('owned cancellation fixture')), \
-                 patch.object(CI, 'write_result', side_effect=receipt):
-                result = CI.execute_locked(action, config)
-            self.assertEqual([item[0] for item in order], ['cleanup', 'cleanup', 'receipt'])
-            self.assertEqual(result['status'], 'failed')
-            self.assertEqual(result['failure'], 'cancelled_or_timed_out')
-            self.assertTrue(result['cleanup_confirmed'])
-            self.assertEqual(result['checks'], [])
-            self.assertEqual(result['branch_scope'], scope)
-            self.assertEqual(order[-1][1], result)
-            self.assertFalse((work / 'active').exists())
-=======
                  patch.object(CI, 'main_ancestor_preflight', side_effect=preflight_error) as preflight, \
                  patch.object(CI, 'run_child', side_effect=InterruptedError('owned cancellation fixture')) as child, \
                  patch.object(CI, 'write_result', side_effect=receipt):
                 result = CI.execute_locked(action, config)
-            return result, order, preflight.call_count, child.call_count
+            self.assertFalse((work / 'active').exists())
+            return result, order, preflight.call_count, child.call_count, scope
 
     def test_supervised_cancellation_writes_failed_receipt_after_confirmed_uid_cleanup(self):
-        result, order, preflights, children = self.receipt_fixture()
+        result, order, preflights, children, scope = self.receipt_fixture()
         self.assertEqual([item[0] for item in order], ['cleanup', 'cleanup', 'receipt'])
         self.assertEqual(result['status'], 'failed')
         self.assertEqual(result['failure'], 'cancelled_or_timed_out')
         self.assertTrue(result['cleanup_confirmed'])
         self.assertEqual(result['checks'], [])
+        self.assertEqual(result['branch_scope'], scope)
         self.assertEqual(order[-1][1], result)
-        self.assertEqual((preflights,children),(0,1))
+        self.assertEqual((preflights, children), (0, 1))
 
     def test_native_ancestor_failure_receipt_precedes_all_fixed_checks_and_confirms_cleanup(self):
-        result,order,preflights,children = self.receipt_fixture(require_main=True,
-            preflight_error=CI.MainAncestorRequired())
-        self.assertEqual((preflights,children),(1,0))
-        self.assertEqual([x[0] for x in order],['cleanup','cleanup','receipt'])
-        self.assertEqual(result['status'],'failed')
-        self.assertEqual(result['failure'],'main_ancestor_required')
-        self.assertEqual(result['checks'],[])
+        result, order, preflights, children, scope = self.receipt_fixture(
+            require_main=True, preflight_error=CI.MainAncestorRequired(),
+        )
+        self.assertEqual((preflights, children), (1, 0))
+        self.assertEqual([x[0] for x in order], ['cleanup', 'cleanup', 'receipt'])
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['failure'], 'main_ancestor_required')
+        self.assertEqual(result['checks'], [])
+        self.assertEqual(result['branch_scope'], scope)
         self.assertTrue(result['cleanup_confirmed'])
-        self.assertRegex(result['log_sha256'],r'^[0-9a-f]{64}$')
-        result,_,preflights,children = self.receipt_fixture(require_main=False)
-        self.assertEqual((preflights,children),(0,1))
-        self.assertEqual(result['failure'],'cancelled_or_timed_out')
-        with patch.object(CI.pwd,'getpwnam',side_effect=AssertionError('no effect before validation')):
-            with self.assertRaises(ValueError):CI.execute_locked(str(uuid4()),{'require_main_ancestor':1})
+        self.assertRegex(result['log_sha256'], r'^[0-9a-f]{64}$')
+        result, _, preflights, children, _ = self.receipt_fixture(require_main=False)
+        self.assertEqual((preflights, children), (0, 1))
+        self.assertEqual(result['failure'], 'cancelled_or_timed_out')
+        with patch.object(CI.pwd, 'getpwnam', side_effect=AssertionError('no effect before validation')):
+            with self.assertRaises(ValueError):
+                CI.execute_locked(str(uuid4()), {'require_main_ancestor': 1})
 
     def test_native_job_plan_preserves_legacy_config_and_has_a_distinct_pinned_wrapper(self):
-        pipeline={'version':1,'build_user':'forge_ci','projects':['homelab'],
-            'verification_profile':'forge-sdlc-jenkins-v1','verifier_sha256':'a'*64}
-        original=json.loads(json.dumps(pipeline))
-        source=Path(CI.__file__).read_bytes()
-        selected=SETUP.native_installation_plan(pipeline,source)
-        self.assertEqual(pipeline,original)
+        pipeline = {'version': 1, 'build_user': 'forge_ci', 'projects': ['homelab'],
+            'verification_profile': 'forge-sdlc-jenkins-v1', 'verifier_sha256': 'a' * 64}
+        original = json.loads(json.dumps(pipeline))
+        source = Path(CI.__file__).read_bytes()
+        selected = SETUP.native_installation_plan(pipeline, source)
+        self.assertEqual(pipeline, original)
         self.assertTrue(selected['pipeline']['require_main_ancestor'])
-        self.assertEqual(selected['job'],'forge-native-candidate')
-        self.assertEqual(selected['config'],Path('/etc/forge-ci/native-pipeline.json'))
-        self.assertEqual(selected['wrapper'],Path('/usr/local/libexec/forge-native-ci-check'))
-        self.assertIn(b"CONFIG = Path('/etc/forge-ci/native-pipeline.json')",selected['helper'])
-        self.assertEqual(selected['helper_sha256'],hashlib.sha256(selected['helper']).hexdigest())
-        for invalid in ('true',1,None):
-            with self.subTest(value=invalid),self.assertRaises(ValueError):
-                SETUP.native_installation_plan({**pipeline,'require_main_ancestor':invalid},source)
-        with self.assertRaises(ValueError):SETUP.native_installation_plan(pipeline,b'wrong helper')
-        with self.assertRaises(ValueError):SETUP.native_installation_plan({**pipeline,'version':True},source)
+        self.assertEqual(selected['job'], 'forge-native-candidate')
+        self.assertEqual(selected['config'], Path('/etc/forge-ci/native-pipeline.json'))
+        self.assertEqual(selected['wrapper'], Path('/usr/local/libexec/forge-native-ci-check'))
+        self.assertIn(b"CONFIG = Path('/etc/forge-ci/native-pipeline.json')", selected['helper'])
+        self.assertEqual(selected['helper_sha256'], hashlib.sha256(selected['helper']).hexdigest())
+        for invalid in ('true', 1, None):
+            with self.subTest(value=invalid), self.assertRaises(ValueError):
+                SETUP.native_installation_plan({**pipeline, 'require_main_ancestor': invalid}, source)
+        with self.assertRaises(ValueError):
+            SETUP.native_installation_plan(pipeline, b'wrong helper')
+        with self.assertRaises(ValueError):
+            SETUP.native_installation_plan({**pipeline, 'version': True}, source)
 
     def test_native_only_provisioning_never_restarts_or_replaces_the_legacy_job_executor(self):
-        user=SimpleNamespace(pw_uid=43210)
-        pipeline={'version':1,'build_user':'forge_ci','projects':['homelab'],
-            'verification_profile':'forge-sdlc-jenkins-v1','verifier_sha256':'a'*64}
-        installed=[]
-        info={'job':'forge-native-candidate','node':'forge-mission-control-ci',
-              'controller_executors':0,'no_job_submitted':True}
-        with patch.object(SETUP.os,'geteuid',return_value=0), \
-             patch.object(SETUP.pwd,'getpwnam',return_value=user), \
-             patch.object(SETUP,'read_owned',return_value=b'{}'), \
-             patch.object(SETUP,'read_pipeline',return_value=pipeline), \
-             patch.object(SETUP,'directory'), \
-             patch.object(SETUP,'install',side_effect=lambda p,*args,**kwargs:installed.append(p)), \
-             patch.object(SETUP,'request',return_value=json.dumps(info).encode()) as request, \
-             patch.object(SETUP.subprocess,'run') as run, patch('builtins.print'):
-            SETUP.execute_native(Path('/private/client.json'),'fixture')
-        self.assertEqual(len(run.call_args_list),1)
-        self.assertEqual(run.call_args.args[0][0],'/usr/sbin/visudo')
-        self.assertNotIn(Path('/etc/forge-ci/pipeline.json'),installed)
-        self.assertNotIn(Path('/usr/local/libexec/forge-ci-check'),installed)
-        self.assertNotIn(Path('/etc/systemd/system/forge-jenkins-ci-agent.service'),installed)
-        self.assertEqual(request.call_args.args[1],'scriptText')
-        body=request.call_args.kwargs['body'].decode()
-        self.assertIn('forge-native-candidate',body)
-        self.assertNotIn('createProject%28FreeStyleProject%2C+%27forge-exact-candidate%27',body)
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
+        user = SimpleNamespace(pw_uid=43210)
+        pipeline = {'version': 1, 'build_user': 'forge_ci', 'projects': ['homelab'],
+            'verification_profile': 'forge-sdlc-jenkins-v1', 'verifier_sha256': 'a' * 64}
+        installed = []
+        info = {'job': 'forge-native-candidate', 'node': 'forge-mission-control-ci',
+              'controller_executors': 0, 'no_job_submitted': True}
+        with patch.object(SETUP.os, 'geteuid', return_value=0), \
+             patch.object(SETUP.pwd, 'getpwnam', return_value=user), \
+             patch.object(SETUP, 'read_owned', return_value=b'{}'), \
+             patch.object(SETUP, 'read_pipeline', return_value=pipeline), \
+             patch.object(SETUP, 'directory'), \
+             patch.object(SETUP, 'install', side_effect=lambda p, *args, **kwargs: installed.append(p)), \
+             patch.object(SETUP, 'request', return_value=json.dumps(info).encode()) as request, \
+             patch.object(SETUP.subprocess, 'run') as run, patch('builtins.print'):
+            SETUP.execute_native(Path('/private/client.json'), 'fixture')
+        self.assertEqual(len(run.call_args_list), 1)
+        self.assertEqual(run.call_args.args[0][0], '/usr/sbin/visudo')
+        self.assertNotIn(Path('/etc/forge-ci/pipeline.json'), installed)
+        self.assertNotIn(Path('/usr/local/libexec/forge-ci-check'), installed)
+        self.assertNotIn(Path('/etc/systemd/system/forge-jenkins-ci-agent.service'), installed)
+        self.assertEqual(request.call_args.args[1], 'scriptText')
+        body = request.call_args.kwargs['body'].decode()
+        self.assertIn('forge-native-candidate', body)
+        self.assertNotIn('createProject%28FreeStyleProject%2C+%27forge-exact-candidate%27', body)
 
     def test_real_node_import_resolves_sibling_packages_from_the_provisioned_cache_basename(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -711,7 +702,6 @@ class SupervisionBoundaryTest(unittest.TestCase):
         self.assertIn('Explicit --execute', result.stderr)
 
 
-<<<<<<< HEAD
 @unittest.skipUnless(TOOLCHAIN_AVAILABLE, 'Requires /opt/forge-ci/toolchain')
 class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
     """End-to-end tests using real git bundles and real /opt/forge-ci/toolchain/bin/cargo."""
@@ -828,8 +818,9 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         extra_env=None,
         run_child_override=None,
         workflow_id=None,
+        action=None,
     ):
-        action = str(uuid4())
+        action = action or str(uuid4())
         if checks is None:
             checks = (
                 (str(TOOLCHAIN / 'bin/cargo'), 'test', '--manifest-path', 'src/rust/Cargo.toml', '--offline'),
@@ -845,18 +836,19 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         tree = self._git('rev-parse', commit + '^{tree}').decode().strip()
         helper_digest, manifest = self._gate_manifest(commit, checks, profile=profile)
         sub_dir = self.spool / action
-        sub_dir.mkdir(mode=0o700)
-        (sub_dir / 'candidate.bundle').write_bytes(bundle)
-        (sub_dir / 'candidate.bundle').chmod(0o600)
-        req = {
-            'version': 1, 'action_id': action, 'workflow_id': workflow_id or str(uuid4()),
-            'project_alias': 'homelab', 'candidate_commit': commit, 'candidate_tree': tree,
-            'expected_main': expected_main, 'branch_scope': branch_scope,
-            'gate_manifest_sha256': manifest, 'bundle_sha256': hashlib.sha256(bundle).hexdigest(),
-            'verification_profile': profile, 'correlation_id': str(uuid4()),
-        }
-        (sub_dir / 'request.json').write_text(json.dumps(req, sort_keys=True))
-        (sub_dir / 'request.json').chmod(0o600)
+        if not sub_dir.exists():
+            sub_dir.mkdir(mode=0o700)
+            (sub_dir / 'candidate.bundle').write_bytes(bundle)
+            (sub_dir / 'candidate.bundle').chmod(0o600)
+            req = {
+                'version': 1, 'action_id': action, 'workflow_id': workflow_id or str(uuid4()),
+                'project_alias': 'homelab', 'candidate_commit': commit, 'candidate_tree': tree,
+                'expected_main': expected_main, 'branch_scope': branch_scope,
+                'gate_manifest_sha256': manifest, 'bundle_sha256': hashlib.sha256(bundle).hexdigest(),
+                'verification_profile': profile, 'correlation_id': str(uuid4()),
+            }
+            (sub_dir / 'request.json').write_text(json.dumps(req, sort_keys=True))
+            (sub_dir / 'request.json').chmod(0o600)
         cache_raw = {
             'enabled': True,
             'root': str(self.cache_root),
@@ -1346,6 +1338,504 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         self.assertEqual(r_after_clear['cache']['restore_status'], 'miss')
         self.assertGreaterEqual(next(s for s in r_after_clear['stages'] if s['name'] == 'check_0')['cargo_compiling_units'], 2)
 
+    def _local_cache_provider(self, **overrides):
+        raw = {'enabled': True, 'root': str(self.cache_root), **overrides}
+        return CI.LocalCargoCacheProvider(
+            CI.CargoCacheConfig.parse(raw, trusted_prefix=self.root),
+            expected_owner=os.getuid(), expected_group=os.getgid(),
+        )
+
+    def test_cancellation_in_cache_restore_publish_lru_and_telemetry_fails_supervisor(self):
+        # Exercise real cache snapshots through the root supervisor seam, not a
+        # stand-in cache port. A cancelled optional cache operation is not a miss.
+        for operation in ('restore_copy', 'publish_copy', 'restore_lru', 'telemetry', 'staging_cleanup', 'orphan_cleanup'):
+            with self.subTest(operation=operation):
+                scope = 'branch/' + CI.canonical_branch_slug('cancel/' + operation)
+                seed, _, _ = self._run_supervisor(
+                    commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+                )
+                entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+                before = (entry / 'current.json').read_bytes()
+                if operation == 'restore_copy':
+                    fault = patch.object(CI, '_copy_tree_to_build', side_effect=InterruptedError('restore cancelled'))
+                elif operation == 'publish_copy':
+                    fault = patch.object(CI, '_copy_tree_from_build', side_effect=InterruptedError('publish cancelled'))
+                elif operation == 'telemetry':
+                    fault = patch.object(CI, '_read_ui_qa_stages', side_effect=InterruptedError('telemetry cancelled'))
+                elif operation in {'staging_cleanup', 'orphan_cleanup'}:
+                    garbage = (self.cache_root / '.staging-cancel-fixture'
+                               if operation == 'staging_cleanup' else entry / 'orphan-cancel-fixture')
+                    garbage.mkdir(mode=0o700)
+                    original_remove = CI._safe_rmtree
+                    def interrupt_cleanup(path):
+                        if path == garbage:
+                            raise InterruptedError('cache cleanup cancelled')
+                        return original_remove(path)
+                    fault = patch.object(CI, '_safe_rmtree', side_effect=interrupt_cleanup)
+                else:
+                    original_write = CI._atomic_write_json
+                    def interrupt_lru(path, *args, **kwargs):
+                        if path.name == 'last_used.json':
+                            raise InterruptedError('LRU cancelled')
+                        return original_write(path, *args, **kwargs)
+                    fault = patch.object(CI, '_atomic_write_json', side_effect=interrupt_lru)
+                with fault:
+                    result, _, _ = self._run_supervisor(
+                        commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+                    )
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['failure'], 'cancelled_or_timed_out')
+                self.assertTrue(result['cleanup_confirmed'])
+                self.assertEqual(result['cache']['publish_status'], 'skipped_cancelled')
+                self.assertEqual((entry / 'current.json').read_bytes(), before)
+                self.assertFalse((self.work / 'active').exists())
+
+    def test_cancellation_after_pointer_replace_rolls_back_previous_snapshot(self):
+        scope = 'branch/' + CI.canonical_branch_slug('cancel/commit-boundary')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        before = (entry / 'current.json').read_bytes()
+        original_write = CI._atomic_write_json
+        for after_commit in (False, True):
+            with self.subTest(after_commit=after_commit):
+                def interrupt_pointer(path, *args, **kwargs):
+                    if path == entry / 'current.json':
+                        if after_commit:
+                            original_write(path, *args, **kwargs)
+                        raise InterruptedError('pointer publication cancelled')
+                    return original_write(path, *args, **kwargs)
+                with patch.object(CI, '_atomic_write_json', side_effect=interrupt_pointer):
+                    result, _, _ = self._run_supervisor(
+                        commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+                    )
+                self.assertEqual(result['status'], 'failed')
+                self.assertEqual(result['failure'], 'cancelled_or_timed_out')
+                self.assertTrue(result['cleanup_confirmed'])
+                after = (entry / 'current.json').read_bytes()
+                self.assertEqual(after, before)
+                self.assertEqual(result['cache']['publish_status'], 'rolled_back')
+                # Pointer replacement is provisional until cleanup and the
+                # exact successful root result are durably committed.
+                current = entry / json.loads(after)['snapshot_id']
+                self.assertTrue((current / 'meta.json').is_file())
+                self._local_cache_provider().prune()
+                self.assertEqual((entry / 'current.json').read_bytes(), after)
+                self.assertEqual(
+                    sorted(p.name for p in entry.iterdir() if p.is_dir()),
+                    [current.name],
+                )
+                before = after
+
+    def test_crash_after_snapshot_rename_collects_abandoned_and_superseded_storage(self):
+        class SimulatedCrash(BaseException):
+            pass
+
+        scope = 'branch/' + CI.canonical_branch_slug('crash/existing')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        before = (entry / 'current.json').read_bytes()
+        abandoned_scope = 'branch/' + CI.canonical_branch_slug('crash/abandoned')
+        original_write = CI._atomic_write_json
+        def crash_before_pointer(path, *args, **kwargs):
+            if path.name == 'pending-publication.json' and args[0]['result'] is None:
+                raise SimulatedCrash('process died after snapshot rename before its journal')
+            return original_write(path, *args, **kwargs)
+
+        # Neither a previous pointer nor an empty new scope may hide renamed
+        # snapshots from later operations on unrelated scopes.
+        for crashed_scope in (scope, abandoned_scope):
+            with patch.object(CI, '_atomic_write_json', side_effect=crash_before_pointer):
+                with self.assertRaises(SimulatedCrash):
+                    self._run_supervisor(
+                        commit=self.base_commit, expected_main='0' * 40, branch_scope=crashed_scope,
+                    )
+            if crashed_scope == scope:
+                self.assertEqual(len([p for p in entry.iterdir() if p.is_dir()]), 2)
+        self.assertEqual((entry / 'current.json').read_bytes(), before)
+        # Starting the second crashed build already collected the first orphan.
+        self.assertEqual(len([p for p in entry.iterdir() if p.is_dir()]), 1)
+        abandoned = self.cache_root / 'scopes/homelab' / CI.scope_directory_name(abandoned_scope)
+        self.assertTrue(abandoned.exists())
+        result, _, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40,
+            branch_scope='branch/' + CI.canonical_branch_slug('crash/unrelated'),
+        )
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual((entry / 'current.json').read_bytes(), before)
+        self.assertEqual(len([p for p in entry.iterdir() if p.is_dir()]), 1)
+        self.assertFalse(abandoned.exists())
+        inventory = self._local_cache_provider().prune()
+        pointed_bytes = sum(
+            json.loads(p.read_text())['total_bytes']
+            for p in self.cache_root.rglob('current.json')
+        )
+        self.assertEqual(inventory.cache_total_bytes, pointed_bytes)
+        self.assertEqual(inventory.cache_entry_count, 2)
+        expired = self._local_cache_provider(max_age_seconds=60).prune(
+            now_ns=time.time_ns() + 120 * 1_000_000_000,
+        )
+        self.assertEqual(expired.cache_entry_count, 0)
+        self.assertEqual(expired.cache_total_bytes, 0)
+
+    def test_publication_rolls_back_late_marker_signal_result_and_cleanup_failures(self):
+        for operation in ('late_marker', 'final_marker_signal', 'last_used', 'receipt_before_replace',
+                          'receipt_after_replace', 'receipt_fsync', 'cleanup', 'log_hash'):
+            with self.subTest(operation=operation):
+                scope = 'branch/' + CI.canonical_branch_slug('transaction/' + operation)
+                seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+                before = {}
+                publish = CI.LocalCargoCacheProvider.publish
+                def capture(provider, *args, **kwargs):
+                    before['pointer'] = (entry / 'current.json').read_bytes()
+                    before['last_used'] = (entry / 'last_used.json').read_bytes()
+                    before['snapshot'] = entry / json.loads(before['pointer'])['snapshot_id']
+                    return publish(provider, *args, **kwargs)
+                atomic = CI._atomic_write_json
+                writer = CI.write_result
+                fsync_dir = CI._fsync_dir
+                read_bytes = Path.read_bytes
+                fired = False
+                def atomic_fault(path, value, **kwargs):
+                    nonlocal fired
+                    answer = atomic(path, value, **kwargs)
+                    if not fired and (entry / 'pending-publication.json').exists():
+                        if operation == 'last_used' and path == entry / 'last_used.json':
+                            fired = True
+                            raise InterruptedError('cancel after provisional LRU write')
+                        if operation == 'late_marker' and path == entry / 'current.json':
+                            fired = True
+                            action = json.loads((entry / 'pending-publication.json').read_text())['action_id']
+                            (self.spool / action / 'cancelled').touch()
+                        if operation == 'final_marker_signal' and path == entry / 'pending-publication.json' and value['committed']:
+                            fired = True
+                            os.kill(os.getpid(), CI.signal.SIGTERM)
+                    return answer
+                def write_fault(path, result, group):
+                    nonlocal fired
+                    if not fired and result['status'] == 'passed' and operation == 'receipt_before_replace':
+                        fired = True
+                        raise InterruptedError('cancel before success receipt')
+                    with patch.object(CI.os, 'fchown'):
+                        answer = writer(path, result, group)
+                    if not fired and result['status'] == 'passed' and operation == 'receipt_after_replace':
+                        fired = True
+                        raise InterruptedError('cancel after success receipt replacement')
+                    return answer
+                def sync_fault(path):
+                    nonlocal fired
+                    if (not fired and operation == 'receipt_fsync' and path == self.results
+                            and list(self.results.glob('*.json'))[-1].exists()
+                            and (entry / 'pending-publication.json').exists()):
+                        fired = True
+                        raise OSError('result directory fsync failed after replace')
+                    return fsync_dir(path)
+                def cleanup_fault(path):
+                    nonlocal fired
+                    fired = True
+                    raise InterruptedError('cleanup interrupted after staging publication')
+                def read_fault(path):
+                    nonlocal fired
+                    if (not fired and operation == 'log_hash' and path.suffix == '.log'
+                            and (entry / 'pending-publication.json').exists()):
+                        fired = True
+                        raise InterruptedError('log hashing interrupted after cleanup')
+                    return read_bytes(path)
+                with patch.object(CI.LocalCargoCacheProvider, 'publish', capture), \
+                     patch.object(CI, '_atomic_write_json', side_effect=atomic_fault), \
+                     patch.object(CI, 'write_result', side_effect=write_fault), \
+                     patch.object(CI, '_fsync_dir', side_effect=sync_fault), \
+                     patch.object(Path, 'read_bytes', read_fault):
+                    if operation == 'cleanup':
+                        with patch.object(CI, 'cleanup_short_tmp', side_effect=cleanup_fault):
+                            with self.assertRaises(InterruptedError):
+                                self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                    elif operation == 'log_hash':
+                        with self.assertRaises(InterruptedError):
+                            self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                    else:
+                        result, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                        self.assertEqual(result['status'], 'failed')
+                        self.assertEqual(result['cache']['publish_status'], 'rolled_back')
+                        self.assertEqual(result['cache']['published_bytes'], 0)
+                self.assertTrue(fired)
+                self.assertEqual((entry / 'current.json').read_bytes(), before['pointer'])
+                self.assertEqual((entry / 'last_used.json').read_bytes(), before['last_used'])
+                self.assertTrue((before['snapshot'] / 'meta.json').is_file())
+                self._local_cache_provider().prune()
+                self.assertEqual((entry / 'current.json').read_bytes(), before['pointer'])
+
+    def test_real_process_death_recovers_before_same_action_receipt_replay(self):
+        for boundary in ('pointer', 'receipt', 'committed', 'rollback', 'predecessor_removed'):
+            with self.subTest(boundary=boundary):
+                scope = 'branch/' + CI.canonical_branch_slug('crash/' + boundary)
+                seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+                old_pointer = (entry / 'current.json').read_bytes()
+                old_snapshot = entry / json.loads(old_pointer)['snapshot_id']
+                action = str(uuid4())
+                pid = os.fork()
+                if pid == 0:
+                    atomic = CI._atomic_write_json
+                    writer = CI.write_result
+                    replacer = CI.os.replace
+                    remover = CI._safe_rmtree
+                    def die_replace(src, dst):
+                        answer = replacer(src, dst)
+                        if boundary == 'rollback' and Path(src).name == 'current.json.rollback':
+                            os._exit(73)
+                        return answer
+                    def die_remove(path):
+                        answer = remover(path)
+                        if boundary == 'predecessor_removed' and path == old_snapshot:
+                            os._exit(73)
+                        return answer
+                    def die_atomic(path, value, **kwargs):
+                        result = atomic(path, value, **kwargs)
+                        if ((boundary == 'pointer' and path == entry / 'current.json')
+                                or (boundary == 'committed' and path == entry / 'pending-publication.json' and value['committed'])):
+                            os._exit(73)  # Real death: no Python finally/rollback.
+                        return result
+                    def die_receipt(path, result, group):
+                        with patch.object(CI.os, 'fchown'):
+                            writer(path, result, group)
+                        if result['status'] == 'passed':
+                            if boundary == 'receipt':
+                                os._exit(73)
+                            if boundary == 'rollback':
+                                raise InterruptedError('abort after provisional passed receipt')
+                    try:
+                        with patch.object(CI, '_atomic_write_json', side_effect=die_atomic), \
+                             patch.object(CI, 'write_result', side_effect=die_receipt), \
+                             patch.object(CI.os, 'replace', side_effect=die_replace), \
+                             patch.object(CI, '_safe_rmtree', side_effect=die_remove):
+                            self._run_supervisor(commit=self.base_commit, expected_main='0' * 40,
+                                                 branch_scope=scope, action=action)
+                    except BaseException:
+                        os._exit(74)
+                    os._exit(75)
+                _pid, status = os.waitpid(pid, 0)
+                self.assertEqual(os.waitstatus_to_exitcode(status), 73)
+                pending = json.loads((entry / 'pending-publication.json').read_text())
+                baseline_lru = bytes.fromhex(pending['old_last_used'])
+                self.assertEqual(old_snapshot.is_dir(), boundary != 'predecessor_removed')
+                if boundary != 'rollback':
+                    self.assertNotEqual((entry / 'current.json').read_bytes(), old_pointer)
+                if boundary == 'pointer':
+                    # No result existed at crash; replay must not invent a pass.
+                    with self.assertRaises(FileExistsError):
+                        self._run_supervisor(commit=self.base_commit, expected_main='0' * 40,
+                                             branch_scope=scope, action=action)
+                else:
+                    replay, _, _ = self._run_supervisor(
+                        commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+                        action=action, run_child_override=lambda *args, **kwargs: self.fail('replay ran checks'),
+                    )
+                    self.assertEqual(replay['status'], 'passed' if boundary in {'committed', 'predecessor_removed'} else 'failed')
+                    if boundary == 'receipt':
+                        self.assertEqual(replay['cache']['publish_status'], 'rolled_back')
+                if boundary not in {'committed', 'predecessor_removed'}:
+                    self.assertEqual((entry / 'current.json').read_bytes(), old_pointer)
+                    self.assertEqual((entry / 'last_used.json').read_bytes(), baseline_lru)
+                    self.assertTrue(old_snapshot.is_dir())
+                else:
+                    self.assertNotEqual((entry / 'current.json').read_bytes(), old_pointer)
+                self._local_cache_provider().prune()
+                self.assertFalse((entry / 'pending-publication.json').exists())
+                self.assertEqual(len([p for p in entry.iterdir() if p.is_dir()]), 1)
+
+    def test_capacity_skip_preserves_every_prepublication_entry_on_cancellation(self):
+        first_scope = 'branch/' + CI.canonical_branch_slug('capacity/first')
+        first, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=first_scope)
+        entry = self._entry_dir(CI.scope_directory_name(first_scope), first['cache']['compat_key'])
+        before = (entry / 'current.json').read_bytes()
+        # The predecessor plus replacement cannot fit: optional publication
+        # skips instead of deleting the good snapshot or exceeding retention.
+        cap = json.loads(before)['total_bytes'] + 1
+        result, _, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40, branch_scope=first_scope,
+            cache_config_override={'max_total_bytes': cap},
+        )
+        self.assertEqual(result['status'], 'passed')
+        self.assertEqual(result['cache']['publish_status'], 'skipped_capacity')
+        self.assertEqual((entry / 'current.json').read_bytes(), before)
+        self.assertLessEqual(result['cache']['cache_total_bytes'], cap)
+
+    def test_unusable_unrelated_pending_cache_falls_back_but_saved_replay_fails_closed(self):
+        scope = 'branch/' + CI.canonical_branch_slug('unusable/seed')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        pointer = (entry / 'current.json').read_bytes()
+        pending = entry / 'pending-publication.json'
+        pending.write_bytes(b'{malformed-journal')
+        pending.chmod(0o600)
+        fresh, _, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40,
+            branch_scope='branch/' + CI.canonical_branch_slug('unusable/fresh'),
+        )
+        self.assertEqual(fresh['status'], 'passed')
+        self.assertEqual(len(fresh['checks']), 3)
+        self.assertEqual(fresh['cache']['restore_status'], 'corrupt_fallback')
+        self.assertEqual(fresh['cache']['publish_status'], 'skipped_error')
+        self.assertIsNone(fresh['cache']['cache_total_bytes'])
+        self.assertEqual(pending.read_bytes(), b'{malformed-journal')
+        self.assertEqual((entry / 'current.json').read_bytes(), pointer)
+        with self.assertRaises(ValueError):
+            self._run_supervisor(commit=self.base_commit, expected_main='0' * 40,
+                                 branch_scope=scope, action=seed['action_id'],
+                                 run_child_override=lambda *args, **kwargs: self.fail('unsafe replay ran checks'))
+        self.assertEqual(pending.read_bytes(), b'{malformed-journal')
+        pending.unlink()
+
+    def test_recovery_propagates_deferred_signal_before_any_new_build(self):
+        scope = 'branch/' + CI.canonical_branch_slug('recovery/cancellation')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        pending = entry / 'pending-publication.json'
+        pending.write_bytes(b'{}')
+        pending.chmod(0o600)
+        original_read = CI.read_file
+        def interrupted_read(path, **kwargs):
+            if path == pending:
+                os.kill(os.getpid(), CI.signal.SIGTERM)
+                raise OSError('unreadable pending cache metadata')
+            return original_read(path, **kwargs)
+        with patch.object(CI, 'read_file', side_effect=interrupted_read):
+            with self.assertRaises(InterruptedError):
+                self._run_supervisor(
+                    commit=self.base_commit, expected_main='0' * 40,
+                    branch_scope='branch/' + CI.canonical_branch_slug('recovery/new-source'),
+                    run_child_override=lambda *args, **kwargs: self.fail('cancelled recovery ran checks'),
+                )
+        self.assertEqual(pending.read_bytes(), b'{}')
+        pending.unlink()
+
+    def test_log_close_failure_restores_publication_beforeimages(self):
+        scope = 'branch/' + CI.canonical_branch_slug('failure/log-close')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        before = {}
+        publish = CI.LocalCargoCacheProvider.publish
+        def capture(provider, *args, **kwargs):
+            before['pointer'] = (entry / 'current.json').read_bytes()
+            before['last_used'] = (entry / 'last_used.json').read_bytes()
+            return publish(provider, *args, **kwargs)
+        fdopen = CI.os.fdopen
+        class CloseFault:
+            def __init__(inner, stream):
+                inner.stream = stream
+            def __getattr__(inner, name):
+                return getattr(inner.stream, name)
+            def __enter__(inner):
+                inner.stream.__enter__()
+                return inner
+            def __exit__(inner, *args):
+                inner.stream.__exit__(*args)
+                if (entry / 'pending-publication.json').exists():
+                    raise OSError('log close failed after publication staging')
+        def fault(fd, mode='r', *args, **kwargs):
+            path = os.readlink('/proc/self/fd/' + str(fd))
+            stream = fdopen(fd, mode, *args, **kwargs)
+            return CloseFault(stream) if path.endswith('.log') and mode == 'wb' else stream
+        with patch.object(CI.LocalCargoCacheProvider, 'publish', capture), \
+             patch.object(CI.os, 'fdopen', side_effect=fault):
+            result, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['cache']['publish_status'], 'rolled_back')
+        self.assertEqual(result['cache']['cache_entry_count'], 1)
+        self.assertGreater(result['cache']['cache_total_bytes'], 0)
+        self.assertEqual((entry / 'current.json').read_bytes(), before['pointer'])
+        self.assertEqual((entry / 'last_used.json').read_bytes(), before['last_used'])
+
+    def test_postcommit_receipt_or_gc_unavailability_does_not_downgrade_success(self):
+        for operation in ('receipt_read', 'predecessor_delete', 'journal_unlink'):
+            with self.subTest(operation=operation):
+                scope = 'branch/' + CI.canonical_branch_slug('terminal/' + operation)
+                seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+                pointer = (entry / 'current.json').read_bytes()
+                previous = entry / json.loads(pointer)['snapshot_id']
+                pending = entry / 'pending-publication.json'
+                reader = CI.read_file
+                remover = CI._safe_rmtree
+                unlink = Path.unlink
+                fired = False
+                def committed():
+                    return pending.exists() and json.loads(pending.read_text())['committed'] is True
+                def read_fault(path, **kwargs):
+                    nonlocal fired
+                    if not fired and operation == 'receipt_read' and path.parent == self.results and path.suffix == '.json' and committed():
+                        fired = True
+                        raise OSError('committed result temporarily unavailable')
+                    return reader(path, **kwargs)
+                def delete_fault(path):
+                    nonlocal fired
+                    if not fired and operation == 'predecessor_delete' and path == previous and committed():
+                        fired = True
+                        raise OSError('deferred predecessor cleanup unavailable')
+                    return remover(path)
+                def unlink_fault(path, *args, **kwargs):
+                    nonlocal fired
+                    if not fired and operation == 'journal_unlink' and path == pending and committed():
+                        fired = True
+                        raise OSError('committed journal cleanup unavailable')
+                    return unlink(path, *args, **kwargs)
+                with patch.object(CI, 'read_file', side_effect=read_fault), \
+                     patch.object(CI, '_safe_rmtree', side_effect=delete_fault), \
+                     patch.object(Path, 'unlink', unlink_fault):
+                    result, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                self.assertTrue(fired)
+                self.assertEqual(result['status'], 'passed')
+                self.assertEqual(result['cache']['publish_status'], 'published')
+                after = (entry / 'current.json').read_bytes()
+                self.assertNotEqual(after, pointer)
+                self.assertTrue(json.loads(pending.read_text())['committed'])
+                # Re-read the genuine root result and complete only deferred GC;
+                # neither another build nor an unapproved pointer is introduced.
+                self._local_cache_provider().recover_pending()
+                self.assertFalse(pending.exists())
+                self.assertEqual((entry / 'current.json').read_bytes(), after)
+                self.assertEqual(json.loads((self.results / (result['action_id'] + '.json')).read_text())['status'], 'passed')
+                self.assertFalse(previous.exists())
+
+    def test_orphan_gc_is_link_safe_and_does_not_hide_cleanup_failures(self):
+        scope = 'branch/' + CI.canonical_branch_slug('gc/safety')
+        seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+        entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+        pointer = (entry / 'current.json').read_bytes()
+        outside = self.root / 'outside'
+        outside.mkdir()
+        marker = outside / 'preserve'
+        marker.write_text('never delete outside cache')
+        (entry / 'orphan-link').symlink_to(outside, target_is_directory=True)
+        self._local_cache_provider().prune()
+        self.assertTrue(marker.is_file())
+        self.assertFalse((entry / 'orphan-link').is_symlink())
+        self.assertEqual((entry / 'current.json').read_bytes(), pointer)
+
+        orphan = entry / 'orphan-directory'
+        orphan.mkdir(mode=0o700)
+        original_remove = CI._safe_rmtree
+        for error in (OSError('injected deletion failure'), InterruptedError('cleanup cancelled')):
+            def fail_orphan(path):
+                if path == orphan:
+                    raise error
+                return original_remove(path)
+            with patch.object(CI, '_safe_rmtree', side_effect=fail_orphan):
+                with self.assertRaises(type(error)):
+                    self._local_cache_provider().prune()
+            self.assertTrue(orphan.is_dir())
+            self.assertEqual((entry / 'current.json').read_bytes(), pointer)
+        self._local_cache_provider().prune()
+        self.assertFalse(orphan.exists())
+
+        # An ancestor symlink is rejected, rather than traversed to an outside
+        # cache-like directory. No production owner guard is bypassed here.
+        (self.cache_root / 'scopes/linked-project').symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            self._local_cache_provider().prune()
+        self.assertTrue(marker.is_file())
+
     def test_end_to_end_delivery_prepare_submission_to_supervisor_reuse_and_extra_guards(self):
         import grp
         import work_external_delivery as delivery
@@ -1364,13 +1854,16 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         branch_tree = self._git('rev-parse', branch_commit + '^{tree}').decode().strip()
         self._git('push', '--quiet', str(remote), 'HEAD:refs/heads/feat/e2e-cache')
 
+        fixture_verifier = self.root / 'verifier.py'
+        fixture_verifier.write_bytes(Path(CI.__file__).read_bytes())
+        fixture_verifier.chmod(0o600)
         delivery_cfg = SimpleNamespace(
             state_root=self.root / 'delivery-state',
             spool_root=self.spool,
             results_root=self.results,
             projects={'homelab': {'repository': 'fixture/project', 'canonical_repo': str(canonical)}},
             github_config_dir=self.root / 'gh',
-            verifier=Path(CI.__file__),
+            verifier=fixture_verifier,
             jenkins_job='forge-exact-candidate',
         )
         base_commit = self.base_commit
@@ -1524,6 +2017,3 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-=======
-if __name__ == '__main__': unittest.main()
->>>>>>> 232c3f955328b6e788b9a0f32e04445fa5acaf49
