@@ -489,3 +489,70 @@ fn ambiguous_windows_paths_are_rejected_without_ambient_drive_state() {
     }
     assert_eq!(pwd(&client), fixture.path());
 }
+
+#[test]
+fn independent_clients_list_identically() {
+    let fixture = Fixture::new();
+    fs::write(fixture.join("z.txt"), b"1234").unwrap();
+    fs::write(fixture.join("a.txt"), b"hi").unwrap();
+    fs::create_dir(fixture.join("middle")).unwrap();
+    let factory = factory(fixture.path());
+    let first = factory.create().unwrap();
+    let second = factory.create().unwrap();
+    let first_list = list(&first, ".");
+    let second_list = list(&second, ".");
+    assert_eq!(first_list, second_list);
+    assert_eq!(
+        first_list
+            .entries
+            .iter()
+            .map(|e| e.name.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            OsString::from("a.txt"),
+            OsString::from("middle"),
+            OsString::from("z.txt")
+        ]
+    );
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    assert_eq!(
+        ConfigError::InitialDirectoryMustBeAbsolute.to_string(),
+        "initial disk directory must be an explicit absolute path"
+    );
+    assert_eq!(
+        ConfigError::Registration(RegistrationError::DuplicateGroup("g".into())).to_string(),
+        "factory group g is already registered"
+    );
+    assert_eq!(
+        DiskError::InvalidPath {
+            operation: DiskOperation::List,
+            path: PathBuf::new(),
+        }
+        .to_string(),
+        "List: invalid path \"\""
+    );
+    assert_eq!(
+        DiskError::NotDirectory {
+            operation: DiskOperation::Initialize,
+            path: PathBuf::from("/tmp/file"),
+        }
+        .to_string(),
+        "Initialize: not a directory \"/tmp/file\""
+    );
+    assert_eq!(
+        DiskError::Io {
+            operation: DiskOperation::Permissions,
+            path: PathBuf::from("/tmp/missing"),
+            source: io::Error::new(io::ErrorKind::NotFound, "missing"),
+        }
+        .to_string(),
+        "Permissions at \"/tmp/missing\": missing"
+    );
+    assert_eq!(
+        DiskError::StatePoisoned.to_string(),
+        "disk session state was poisoned by a panic"
+    );
+}

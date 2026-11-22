@@ -206,3 +206,46 @@ fn command_description_is_optional_separate_and_has_no_client_bound_or_execution
     );
     assert!(descriptions.iter().all(|d| d.arguments.is_empty()));
 }
+
+#[test]
+fn sequential_task_runs_record_exact_requests_in_order() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let task = NodeTask::new(FakeClient {
+        seen: seen.clone(),
+        response: Ok(info("injected")),
+    });
+    assert_eq!(task.run(NodeCommand::Info).unwrap(), info("injected"));
+    assert_eq!(task.run(NodeCommand::Info).unwrap(), info("injected"));
+    let seen_status = Rc::new(RefCell::new(Vec::new()));
+    let task = NodeTask::new(FakeClient {
+        seen: seen_status.clone(),
+        response: Ok(status("injected")),
+    });
+    assert_eq!(task.run(NodeCommand::Status).unwrap(), status("injected"));
+    assert_eq!(task.run(NodeCommand::Status).unwrap(), status("injected"));
+    assert_eq!(&*seen.borrow(), &[NodeRequest::Info, NodeRequest::Info]);
+    assert_eq!(
+        &*seen_status.borrow(),
+        &[NodeRequest::Status, NodeRequest::Status]
+    );
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    assert_eq!(
+        NodeError::Unavailable("collector not available".into()).to_string(),
+        "node observation unavailable: collector not available"
+    );
+    assert_eq!(
+        NodeError::UnexpectedResponse.to_string(),
+        "node client returned an unexpected response kind"
+    );
+    assert_eq!(
+        NodeConfigError::InvalidId.to_string(),
+        "node id must contain 1 to 128 ASCII letters, digits, dots, underscores or hyphens"
+    );
+    assert_eq!(
+        NodeConfigError::Registration(RegistrationError::DuplicateGroup("g".into())).to_string(),
+        "factory group g is already registered"
+    );
+}
