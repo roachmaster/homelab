@@ -245,3 +245,88 @@ fn empty_registry_can_freeze_for_an_application_with_no_groups() {
     assert_eq!(frozen.binding_count(), 0);
     let () = frozen.into_factories();
 }
+
+#[test]
+fn frozen_group_order_matches_registration_order_exactly_and_is_deterministic() {
+    fn build_group_metadata() -> Vec<(String, Vec<String>, Vec<String>)> {
+        let registry = Registry::new()
+            .register(PreparedGroup::new("a", &["a"], &[], ()).unwrap())
+            .unwrap()
+            .register(PreparedGroup::new("b", &["b"], &["a"], ()).unwrap())
+            .unwrap()
+            .register(PreparedGroup::new("c", &["c"], &["b"], ()).unwrap())
+            .unwrap();
+        registry
+            .groups()
+            .iter()
+            .map(|group| {
+                (
+                    group.id().to_string(),
+                    group.provides().to_vec(),
+                    group.requires().to_vec(),
+                )
+            })
+            .collect()
+    }
+    let expected = vec![
+        ("a".to_string(), vec!["a".to_string()], vec![]),
+        (
+            "b".to_string(),
+            vec!["b".to_string()],
+            vec!["a".to_string()],
+        ),
+        (
+            "c".to_string(),
+            vec!["c".to_string()],
+            vec!["b".to_string()],
+        ),
+    ];
+    let first = build_group_metadata();
+    let second = build_group_metadata();
+    assert_eq!(first, expected);
+    assert_eq!(first, second);
+    let registry = Registry::new()
+        .register(PreparedGroup::new("a", &["a"], &[], ()).unwrap())
+        .unwrap()
+        .register(PreparedGroup::new("b", &["b"], &["a"], ()).unwrap())
+        .unwrap()
+        .register(PreparedGroup::new("c", &["c"], &["b"], ()).unwrap())
+        .unwrap();
+    let frozen = registry.freeze().unwrap();
+    assert_eq!(
+        frozen
+            .groups()
+            .iter()
+            .map(|group| group.id())
+            .collect::<Vec<_>>(),
+        vec!["a", "b", "c"]
+    );
+}
+
+#[test]
+fn freeze_returns_the_first_validation_error_in_group_order() {
+    let missing_first = Registry::new()
+        .register(PreparedGroup::new("first", &["one"], &["missing"], ()).unwrap())
+        .unwrap()
+        .register(PreparedGroup::new("second", &["two"], &["two"], ()).unwrap())
+        .unwrap();
+    assert_eq!(
+        missing_first.freeze().unwrap_err().reason(),
+        &ValidationError::MissingRequirement {
+            group: "first".into(),
+            binding: "missing".into(),
+        }
+    );
+    let self_first = Registry::new()
+        .register(PreparedGroup::new("first", &["one"], &["one"], ()).unwrap())
+        .unwrap()
+        .register(PreparedGroup::new("second", &["two"], &["missing"], ()).unwrap())
+        .unwrap();
+    assert_eq!(
+        self_first.freeze().unwrap_err().reason(),
+        &ValidationError::SelfDependency {
+            group: "first".into(),
+            binding: "one".into(),
+        }
+    );
+}
