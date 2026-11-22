@@ -2976,7 +2976,7 @@ fn default_host_limits_are_exact_and_boundaries_are_enforced() {
     assert_eq!(limits.pairing_ttl, Duration::from_secs(300));
     assert_eq!(limits.session_ttl, Duration::from_secs(1800));
     let f = Files::new();
-    let mut bad = |mutate: fn(&mut HostLimits)| {
+    let bad = |mutate: fn(&mut HostLimits)| {
         let mut c = config(&f);
         mutate(&mut c.limits);
         assert!(matches!(
@@ -2994,7 +2994,7 @@ fn default_host_limits_are_exact_and_boundaries_are_enforced() {
     bad(|l| l.pairing_ttl = Duration::from_secs(601));
     bad(|l| l.session_ttl = Duration::from_secs(0));
     bad(|l| l.session_ttl = Duration::from_secs(3601));
-    let mut good = |mutate: fn(&mut HostLimits)| {
+    let good = |mutate: fn(&mut HostLimits)| {
         let mut c = config(&f);
         mutate(&mut c.limits);
         assert!(c.validate().is_ok());
