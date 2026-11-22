@@ -892,3 +892,155 @@ fn external_muse_directory_has_no_native_actions_or_fabricated_usage() {
     assert!(bindings.iter().any(|b| b == "work_submit"));
     assert!(bindings.iter().any(|b| b == "usage_overview"));
 }
+
+fn minimal_transport() -> Transport {
+    Transport {
+        initial_event: "mount".into(),
+        preserve_workspace_chat: false,
+        entry_actions: Default::default(),
+        bindings: vec![RequestBinding {
+            kind: "load".into(),
+            request_id: "request_id".into(),
+            headers: vec![HeaderBinding::literal(
+                "Forge-Destination",
+                "collection.read",
+            )],
+            csrf: false,
+            deadline: None,
+            timeout_ms: None,
+            error_events: vec![],
+            accept_events: vec!["loaded".into()],
+            policy: RequestPolicy::default(),
+        }],
+        timers: vec![],
+    }
+}
+
+#[test]
+fn header_bindings_carry_exactly_one_value_source() {
+    let literal = HeaderBinding::literal("Forge-Destination", "collection.read");
+    assert_eq!(literal.name, "Forge-Destination");
+    assert_eq!(literal.literal.as_deref(), Some("collection.read"));
+    assert_eq!(literal.field, None);
+    let field = HeaderBinding::field("Forge-Destination", "request.destination");
+    assert_eq!(field.name, "Forge-Destination");
+    assert_eq!(field.literal, None);
+    assert_eq!(field.field.as_deref(), Some("request.destination"));
+}
+
+#[test]
+fn transport_validation_names_each_failure_exactly() {
+    assert_eq!(minimal_transport().validate(), Ok(()));
+    let mut transport = minimal_transport();
+    transport.bindings.clear();
+    assert_eq!(transport.validate(), Err("invalid transport declarations"));
+    let mut transport = minimal_transport();
+    transport.bindings[0].kind = "abort".into();
+    assert_eq!(transport.validate(), Err("invalid request binding"));
+    let mut transport = minimal_transport();
+    transport.bindings[0].timeout_ms = Some(50);
+    assert_eq!(transport.validate(), Err("invalid request binding"));
+    let mut transport = minimal_transport();
+    transport.bindings[0].policy.delay_ms = Some(0);
+    assert_eq!(transport.validate(), Err("invalid request policy"));
+    let mut transport = minimal_transport();
+    transport.bindings[0].policy.expire_session_on_denial = true;
+    assert_eq!(transport.validate(), Err("invalid request policy"));
+    let mut transport = minimal_transport();
+    transport.bindings[0].headers[0].name = "Authorization".into();
+    assert_eq!(transport.validate(), Err("invalid header binding"));
+    let mut transport = minimal_transport();
+    transport.bindings[0].headers[0].name = "Forge-CSRF".into();
+    assert_eq!(transport.validate(), Err("invalid header binding"));
+    let mut transport = minimal_transport();
+    transport.bindings[0]
+        .headers
+        .push(HeaderBinding::literal("Forge-Destination", "other.read"));
+    assert_eq!(transport.validate(), Err("invalid header binding"));
+    let mut transport = minimal_transport();
+    transport.bindings[0].headers[0].literal = Some(String::new());
+    assert_eq!(
+        transport.validate(),
+        Err("invalid header value declaration")
+    );
+    let mut transport = minimal_transport();
+    transport
+        .timers
+        .push(forge_ide_web::generate::TimerBinding {
+            effect_kind: "watch".into(),
+            event_kind: "tick".into(),
+            argument_field: "kind".into(),
+            delay_ms: 1_000,
+        });
+    assert_eq!(transport.validate(), Err("invalid timer binding"));
+    let mut transport = minimal_transport();
+    transport
+        .timers
+        .push(forge_ide_web::generate::TimerBinding {
+            effect_kind: "watch".into(),
+            event_kind: "tick".into(),
+            argument_field: "at".into(),
+            delay_ms: 0,
+        });
+    assert_eq!(transport.validate(), Err("invalid timer binding"));
+    // A timer that reuses a binding kind collides with the request namespace.
+    let mut transport = minimal_transport();
+    transport
+        .timers
+        .push(forge_ide_web::generate::TimerBinding {
+            effect_kind: "load".into(),
+            event_kind: "tick".into(),
+            argument_field: "at".into(),
+            delay_ms: 1_000,
+        });
+    assert_eq!(transport.validate(), Err("invalid timer binding"));
+}
+
+#[test]
+fn document_and_theme_validation_name_each_failure_exactly() {
+    let mut document = Document {
+        title: String::new(),
+        subtitle: "Fixture".into(),
+        children: vec![],
+    };
+    assert_eq!(document.validate(), Err("invalid document label"));
+    document.title = "Fixture".into();
+    document.children.push(component!(text "same", "First"));
+    document.children.push(component!(text "same", "Second"));
+    assert_eq!(
+        document.validate(),
+        Err("invalid or duplicate component id")
+    );
+    assert_eq!(
+        Theme::parse(&"x".repeat(8193)).unwrap_err(),
+        "theme byte limit"
+    );
+    assert_eq!(
+        Theme::parse(&theme_with("background", "'red'")).unwrap_err(),
+        "theme colors require six hex digits"
+    );
+    assert_eq!(
+        Theme::parse(&theme_with("font_px", "900")).unwrap_err(),
+        "theme numeric limit"
+    );
+}
+
+#[test]
+fn asset_error_display_names_each_failure_exactly() {
+    use forge_ide_web::generate::AssetError;
+    use std::error::Error;
+    assert_eq!(
+        AssetError::Configuration("WASM magic/version/byte limit").to_string(),
+        "asset configuration: WASM magic/version/byte limit"
+    );
+    assert_eq!(
+        AssetError::Template(forge_template::TemplateError::Limit("output bytes")).to_string(),
+        "template output bytes limit exceeded"
+    );
+    assert!(AssetError::Configuration("x").source().is_none());
+    assert!(
+        AssetError::Template(forge_template::TemplateError::Limit("output bytes"))
+            .source()
+            .is_some()
+    );
+}
