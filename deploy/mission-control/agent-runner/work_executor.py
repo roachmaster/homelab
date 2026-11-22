@@ -1193,8 +1193,13 @@ class CommandRunnerProvider:
                 "check_id/diagnostic_code at most 128 bytes, path at most 1024, and reproduction/expected/actual at most "
                 "2048 each. Evidence_digest is empty or 64 lowercase hex characters. Summary is at most 2048 UTF-8 bytes; "
                 "the complete JSON verdict is at most 65536 bytes. Attested finding IDs may contain only "
-                "existing open IDs independently verified for a code approval. Escalate when uncertain or outside scope. "
-                "You cannot approve checks, choose another agent, alter the merge target or perform publication.")
+                "existing open IDs independently verified for a code approval, and approval MUST attest ALL target findings "
+                "whose status is open. Findings already marked verified need no additional attestation. "
+                "Use the bound passed CI evidence while independently checking each unresolved source finding, "
+                "including integration and CI-related findings. You cannot forge, change or waive check results. "
+                "If any open finding cannot be independently validated, return revise or escalate, never a partial approval. "
+                "For Plan approval, attested_finding_ids must remain empty. "
+                "You cannot choose another agent, alter the merge target or perform publication.")
         elif peer_context is not None:
             raise ExecutionError("needs_reconcile", "An unbound peer review target was supplied.")
         external_file = None

@@ -1,0 +1,279 @@
+"""Pure source boundaries for the unreviewed Jenkins M27 reference port.
+
+Historical migrations and unchanged boundary files retain Owner26/cache4dc bytes.
+Selected reviewer files instead come from the explicitly included UNAPPROVED
+2df4908 source context, not the admitted cache baseline. AST pins preserve the
+unchanged legacy guards while actual functional tests exercise intended Resume
+and coordinator changes. The task-organization context intentionally updates list admission, typed list
+contracts and browser fixtures; those have separate unapproved pins. These are
+archive-friendly source-identity checks, not approval, CI or admission authority.
+The final combined candidate is based on actual merged cache main9bf5062;
+source admission and consolidated CI remain Root-owned delivery gates.
+"""
+
+import ast
+import hashlib
+from pathlib import Path
+import re
+import shlex
+import unittest
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+MIGRATIONS = REPO_ROOT / "deploy/mission-control/sql/migrations"
+MANAGEMENT = REPO_ROOT / "deploy/mission-control/sql/management"
+RUNNER = Path(__file__).resolve().parent
+
+# SHA256 of the exact Git blob bytes, without newline or SQL normalization.
+MIGRATION_SHA256 = {
+    "0001_agent.sql": "62b639497347191b534ee2055bd4f09838ef98f69b0824c9bf2a55e5637b1331",
+    "0002_ide_workspace.sql": "61fca7c93cfc2a38ffdf39f1c4ef189233676cc1e93e07faee50c1db488b61a8",
+    "0003_ide_chat_history.sql": "91004ce176e3332dbb96c21d270564819994c2ccfe32d5ca7650bd509d7c0301",
+    "0004_ide_chat_default_expiration.sql": "b060f253ba04dff86f1a1a3e338a102c7ce69c0e4b69071eb2a6a48aa60c9ea7",
+    "0005_inference_dispatch.sql": "74285871ddfc316eafd5459d98c2364ae4172987461f1107dddea2948b84dcbb",
+    "0006_inference_model_selection.sql": "b228402869abd7614e784c920225a442ba59d9fe0e6b4382206f39d987471ddc",
+    "0007_ide_mail.sql": "58aeb69b6a0e760338378e5dc03c8606d55508265a32cad5e15bcd7cfe63f99a",
+    "0008_mail_archive.sql": "755679fcd42d9c727be602406875b1419c5e7002f6af181595d8c409481b403a",
+    "0009_coding_admission.sql": "4d9bf3aad61ecc281baf7a82b7e2e32b4d0414de3e138e8e8215b10d06c9f772",
+    "0010_coding_execution_and_usage.sql": "a1fef2e563b83df633181040875c5c02b211a0dec89523aa5fc7cb87b7d0c6ac",
+    "0011_coding_elevated_tool_policy.sql": "3bcd1a1cd440a57cd3d12b5d8116144079d5925c023debbdb880f3d0d8d9f0a2",
+    "0012_coding_progress.sql": "f04db86c316e5fce931050d1325db117652e05a5fbd6d8a405e902a31c2515ef",
+    "0013_coding_task_session_policy.sql": "2b6c8b3c25b5a5b91df0912db2d8dad37712a4395f9da290ea8fcb07a85a77ec",
+    "0014_coding_plan_workflow.sql": "dcc61c328b7f3aa242c1fa7bc26a2c673c146f26cb6d4ee0f6f8125dfe1dd561",
+    "0015_coding_feedback_loop.sql": "a9b35958de1614bd1bf04979152f674c85e6139372294df8b374ea68f60f06a4",
+    "0016_coding_autonomous_workflows.sql": "90452fddd77f81983fb7c6eb45e96c2bcc85cea53937d5ac0ded6cee2a001604",
+    "0017_coding_codex_warm_sessions.sql": "da3a0b0afef1cf1e823445fe7a13a07cf039efbc697f75f30a621d623c4463cb",
+    "0018_coding_grok_provider.sql": "bebb2849e5e62a1e75e5d69943d9e1828574ca7d8c737c5eb42d8cc3de0936e2",
+    "0019_coding_muse_provider.sql": "16012f62fb8769bc26f7305498976e37668809f0ddf52f6aa310313e5c464365",
+    "0020_external_agent_transport.sql": "c68528d81371e5541b8843eb5a13e97f2bb190eba116575056ef824643fdd62a",
+    "0021_coding_event_trace.sql": "27d0f242fde4e7f9ebb9f8960083de8fbc51d760728ca56510a6d6b50bcf08dc",
+    "0022_external_workflows.sql": "04bb27131d4a7dc7bfaa8828a33105407deb6cc9c26441a96b543c5462f92f52",
+    "0023_coding_agy_unattended.sql": "2282757e99d5c8b83656f7267b4aee5d269ad0130c30a89c3b89c9e716960fee",
+    "0024_native_jenkins_context.sql": "ee78572dbd036a7c6330090b63017cb84cfc94e33d6a26b6efe18eb686519a98",
+    "0025_native_delivery_repair.sql": "36b7ef798205514d6bcbdf2ca761de4aa8de476bee2be2b6ec3f97c720a165e7",
+    "0026_coding_owner_continuation.sql": "676b4518d1e83768b3e9eb8bf440e1f5d60d338fd55928c3fc3858a141a3d007",
+}
+
+UNCHANGED_BASELINE_SHA256 = {
+    "deploy/mission-control/sql/management/verify-owner-continuation.sql": "f5d7fcca9d4422e9e20a926149bcae0446b4ba598eab6f96400b199efc212c6e",
+    "deploy/mission-control/sql/management/verify-feedback.sql": "7a260c86159801473ed09abf9af0abd399e39bd3222eb4d847475325a94c0834",
+    "deploy/mission-control/sql/management/verify-native-delivery.sql": "d2e90311e17695fba72cc670b46038fb0e6528dddbc9921fb5140052474d8678",
+    "deploy/mission-control/agent-runner/work_worker_store.py": "0fcfc4ac3f09a2c8e86ff98348e6898ebd77008f7ec07cf95b61a3757cb86499",
+    "deploy/mission-control/agent-runner/work_publication_clients.py": "3d642c4d9112e00de6d203bc843613e0cbd3c6b32c21c1af235dbd810e01eb06",
+    "deploy/mission-control/agent-runner/work_review.py": "70bb230dfd182fa740bba8cce8eee753fdad712aabeed34b1820443032a67d4c",
+    "deploy/mission-control/agent-runner/work_native_jenkins.py": "ca8038ddb300fda22550dc028f52b5b026eff1898e7f9de6adb3d54848cc305b",
+    "deploy/mission-control/agent-runner/work_native_repair.py": "7151e1e043220c6de1bf17889093268a8c9020f32b2d8f1b5a69550c301ccbc4",
+    "deploy/mission-control/agent-runner/work_owner_reverification.py": "a2af7b2a293f9ebc6e6b8a1bd93546f522f496d0115754e58133a2d4f844746c",
+    "deploy/mission-control/agent-runner/work_config.py": "6d342e8e50485947a3d8f436c0b81839e0ea72b967b47bad0d7c4657b9c0d1fc",
+    "deploy/mission-control/agent-runner/work_policy.py": "38cbfda0443386cb10f78bc273c37496bb9469b37a7ebc55297e81aac77602ad",
+    "deploy/mission-control/agent-runner/work_publication_config.py": "ff4fe40ba682138fb52865e25e6f6fbd0aed4b110cb6a88d95a81aa36b5f9533",
+    "deploy/mission-control/agent-runner/work_external_delivery.py": "26fdc1ddec6c5e15e7368d46fff5e6f4f11ffd368e0da282a7a938ad07073f4c",
+    "src/rust/forge-ide-ui/tests/work_review.rs": "bbc570e60b2532c2a4d7730505e26cd0470e738a50a37fda0491bc4983440d3f",
+    "deploy/mission-control/agent-runner/test_work_owner_followup.py": "d791a3200da385177c3d2abd161be4bacfdac82eab2e98c3a26afd59a08bdce1",
+    "deploy/mission-control/agent-runner/work_external_workflow.py": "29b94ec191e55565ad4455d8fa2b706a4cc1489fddc2a631715d94b0eafc8fd7",
+    "deploy/mission-control/agent-runner/test_ci_supervision.py": "f6f7fe8242f2626a6ef2a34d4671e3aba41062830d7a274512a9e515c56c27c2",
+    "deploy/mission-control/agent-runner/test_work_branch_first.py": "0ba0f4ad5fbc1a73a6dc7b9d368c27ad68903b2c23169300db2c3f8145aa8c18",
+    "deploy/mission-control/agent-runner/test_work_external_delivery.py": "3f077e13d41b4a6eadcd99dd9f6f62a90d621c9a964ae223de9c672224f90732",
+    "deploy/mission-control/agent-runner/test_external_workflow_branch_scope.py": "1f876c2008fa9cfd5a284d7a3817af53c85ad226f98c383e2af780eeaaa27df1",
+    "deploy/mission-control/agent-runner/test_external_flow.py": "807ac5b0c27e21b1cb069fd84d29a2d6a5f5c07dca040297fab96c5c89364ff9",
+    "deploy/mission-control/agent-runner/test_work_native_jenkins.py": "4f954a6a79d9d40a8d2f5d50c5484afff085a4fafe183fbbd3817e94cef1df0c",
+    "deploy/mission-control/jenkins/verify-candidate.py": "04709f1e3aa948b5c35ba0423ce480186bba5e57207d97125e9ffd7602ddde68",
+    "deploy/mission-control/jenkins/clear-ci-cache.py": "b820fd1bd9e235e11a7e7cb511a8d57a141c4b67132558a930f8cca00fff9c23",
+    "deploy/mission-control/jenkins/setup-ci.py": "5701acfe6bc46d6f005c2996e190939fb6268317e7a2366396a4b6a7f585a726",
+    "docs/reports/forge-cargo-cache-qualification-20261121.md": "5a7c318495e114cc9c406ced1b32332799bafa08f96ccafc3921564f92adc54d",
+    "docs/reports/forge-cargo-cache-qualification-20261121.json": "68e92dfb355ca2ae8ec807daebf9ab7102a4755d1ee3da2c283c28a9f3c90d01",
+    "deploy/mission-control/jenkins/README.md": "0534bd65549acc683e74454c476b631fba8b476b92aa176d9427808b2e350dd4",
+    "docs/reports/forge-cargo-cache-publication-correctness-20261122.md": "31cf45a4a60f55fe209ff912204102e23f422cd446d7347c026616bb3ca29578",
+    "docs/reports/forge-cargo-cache-publication-correctness-20261122.json": "3b7c8ae00b26973dc1295d90b45fa36c408d9c01ee7bdbcdecaf73f82962bd9e"
+}
+
+# Exact included context bytes; these files intentionally differ from4dc.
+REVIEWER_CONTEXT_REVISION = "2df4908da25eb7a737678ce21cecc2ce0baf5428"
+INCLUDED_REVIEWER_CONTEXT_SHA256 = {
+    "work_owner_control.py": "16527f6a2217e766ed045bd7ecf66f35b4c647ff978064a135e1aeddcb30da10",
+    "work_workflow.py": "1db7750216dd902674be195978dc11e1cac90864dad63d6498ff46f3a7b42cda",
+    "work_reviewer_correction.py": "2b67452622e2cf924d0ce8970757823a7adaa9ef3d587e1828938e9d1807c80b",
+    "work_peer_review.py": "56078e57c08f5e5211722feadcae2d6223cc657bc37972d7e94b319990b26de5",
+    "work_executor.py": "c4a3627ebbc6634eabcf4638a19806abb77215c7d8f1ad7f5331f2ee98ee1df6",
+    "test_work_peer_review.py": "ee37627fd1781265d409a4c039041550453dee3efcb43c1aaded02826b613d1d",
+    "test_work_reviewer_correction.py": "fd406873395e011afe393d4d7f03e17251c5cc7d79a29ee34b585744f8b5dcd8"
+}
+
+# Python3.12 AST serialization; no Git or runtime imports are needed.
+UNCHANGED_LEGACY_GUARD_AST_SHA256 = {
+    "work_workflow.py::BoundDelegatedAuthority.validate": "3c5684800e9fd927d175c1b184368e3fbe9b47f88011fbf01704ac42125c9ac0",
+    "work_workflow.py::WorkflowStore._code_handoff": "28c134dec07214188396c681e59bf90bf81c8592bd645019790ba11977916b02",
+    "work_owner_control.py::owner_continuation_used": "9360ba6cabf3fd2100c0baad30f40a0e7ca28206dcefbe8edfaf4279d0fb6ec8",
+    "work_owner_control.py::_owner_source_history": "2e944f3a0bdd32d24c1130180be4293f876f7cc6588ef2cdb9eb60635288c1da",
+    "work_owner_control.py::_followup_replay": "91b40027cd2166441c903826b5c436cc025d348097d7d9eed2508b671bb2776f",
+    "work_owner_control.py::require_owner_capability": "4d69560a3daf28ac3903d962ba6e9f11ec317a8c1983b63fbf54018600471c68",
+    "work_owner_control.py::NativeOwnerControl.review_decide": "9931f291b49bc0801c928fec5897828243ade1e229bd890cf54a7d7f503641e4",
+    "work_store.py::WorkStore.plan_decide": "0ad758009a5ace197dc996ecd641baab370326fb693c2905b65476e38d3f5618",
+    "work_store.py::WorkStore.review_decide": "6e451bfd2b5d18865245dc049b725616f4448042a63c36eed9632097495dcebe",
+    "work_store.py::WorkStore._append_review_retry": "cd87596f0deed82998e5e1c38d535317c58eb629481a7a7285b5c794bb3a4355",
+    "work_store.py::WorkStore._publication_busy": "8e56623d967373002fa0b9fdc6634ca2741097296e965fa4b27cc09856e06ea4",
+    "work_store.py::WorkStore._require_transition_authority": "ef19c73adb7a69244d38a747189357b26cf74f7c3333f921c5985867be9c416c",
+    "work_workflow.py::BoundNativeRetryAuthority": "e24dd6666fbcce44177b849f6048b810a87f93f5ee99a4adea537fa0a8bcc604",
+    "work_workflow.py::BoundPreparationRetryAuthority": "e2c4dd1dda211ccdc02b743548c75db544423dd325c3d925a1e556acb2ec3c81",
+    "work_workflow.py::WorkflowStore.retry_native_timeout": "e803c96dedf426c8ac5edb343dd0b613102d96a60e95ce826d96561cc9ef8753",
+    "work_workflow.py::WorkflowStore.retry_peer_verdict": "3c194b82651b8a355daad066e579ecddd231bf520b63ef68450476ad6396ad87",
+    "work_workflow.py::WorkflowStore.retry_preparation": "a682c06026a0de95877b70d010bb605e04afc086934a1c1b4e63f656c58a8e57",
+    "work_workflow.py::WorkflowStore._code_review_source": "3679116c308d0af3517344bf053f58ed720c054a4e8c1ca6bc08e028932e0783",
+    "work_workflow.py::WorkflowStore._exhausted_code_budget": "6079ee6516a533ce869d6716a140d8dfbd3d64861e3ee0c12026c35aec296e81",
+    "work_peer_review.py::parse_review_verdict": "f6772a79b0e23e5115fc014e023103294e54cf4de02b5e08b2626446d6833eef"
+}
+
+# Explicit task-organization source qualification, based on combined351e.
+# These selected files intentionally differ from both4dc and reviewer2df.
+TASK_ORGANIZATION_CONTEXT_SHA256 = {
+    "src/rust/forge-ide-web-host/tests/consumer/work.rs": "93f109ca3156fa187331af2367355ddf7d2ff474817d515ea5213c7fbb5504f2",
+    "deploy/mission-control/agent-runner/work_api.py": "88d946828d34ba97d982c9e23b6ea36d2db387358f72d3f422c27246ef7325c0",
+    "deploy/mission-control/agent-runner/work_store.py": "07a36e7f9a90edf895dd260cfc1f27578c20c2af0e03ab4519c9ee2eccd8eb05",
+    "src/rust/forge-ide-ui/src/protocol/work.rs": "8cf09a3108b9e67cb8b639f43aaf9a903b7140494fec363e76edb9576b1aa8da",
+    "src/rust/forge-ide-web/tests/browser/agents-relay.mjs": "7516de55bd39f341a2b440dd76593ac89659f41a40a064b9a7f3d7908c37ac2b",
+    "src/rust/forge-ide-web/tests/browser/agents-relay.test.mjs": "6603adbcc3e73f4cfab45f984c663285b4630502e51a6004438828fb5d688312"
+}
+
+# Exact reviewed retirement context bytes and intentional UI composition deltas.
+# Composition pins qualify source; Root still requires genuine consolidated CI.
+RETIREMENT_CONTEXT_REVISION = "243742283dc1a182738c2d4ecf131618b1dc7b8e"
+INCLUDED_RETIREMENT_CONTEXT_SHA256 = {
+    "src/rust/forge-ide-ui/src/lib.rs": "b65ac3943ce794065da85f5ab932539adf35c79982a88f7b35aedb65283994a1",
+    "src/rust/forge-ide-ui/src/model/bookmark.rs": "429b2b860a19c1402c08e6eae7b2f63413b6fef4db9a602c7617c1f8a5efa496",
+    "src/rust/forge-ide-ui/src/model/edit.rs": "e92db9ce49cae250d60a87b7cb6b3956bcc219b1bfba7f44e996fc3179b8be99",
+    "src/rust/forge-ide-ui/src/model/projection.rs": "a45f8dcad634b1723d95df341cd4f569a999d8ae9c4c66145f88f0d3ef653597",
+    "src/rust/forge-ide-ui/src/model/source.rs": "ab667c5794ef6b64ef92161cc349583feb17f3e344253353f28075500fda533f",
+    "src/rust/forge-ide-ui/src/protocol/legacy.rs": "50c68db600746ee5839bc499d85c2787d46c2133279b85848e03fa38a6a9a740",
+    "src/rust/forge-ide-ui/src/view.rs": "8ccd4caf02eec07539a3c13199908a6378ea730de305d851aaa3cdb934e97517",
+    "src/rust/forge-ide-ui/tests/chat_retirement.rs": "de5d96a3423cc4e101ab086bfde48b239a132fdae495de3f3b9091028335d44c",
+    "src/rust/forge-ide-ui/tests/mail_archive.rs": "9f712228d7e3c6528fb821402c0c94e8e0c2485f7240be73ac87e1510fb18514",
+    "src/rust/forge-ide-ui/tests/model.rs": "f6f3266d5484a9004c23de8893630cbf5a919deeae637ff3663f7357c68231d0",
+    "src/rust/forge-ide-ui/tests/wasm_abi.mjs": "33f15dcfd90c02d2959a9e3fb226d5d9e66e4582d77521dd9dc91ba91f7c38fe",
+    "src/rust/forge-ide-ui/tests/worker_glue.mjs": "4ebf78598e8808f0d30ff69645be729ece0d6d94bf7f785f6ec28365f221e71c",
+    "src/rust/forge-ide-web-host/README.md": "5acf671a20c8085f620f5268f0c7560e2719038a1e73df87fa9545ef7b2b7c54",
+    "src/rust/forge-ide-web-host/src/assets.rs": "a30df3865db8c97960669f03fabfa9c51f8ca2912c028c98d172cf00553c1b79",
+    "src/rust/forge-ide-web-host/src/chat.rs": "58f1f68c45627ce3c99ed57dc62da0e8980b8dcaa5070b1df347f8ed96cf66a9",
+    "src/rust/forge-ide-web-host/src/http.rs": "0a86fd564fd4f1077de2f867d78727c776edc99b3e5e1c1465fb616da53b7e66",
+    "src/rust/forge-ide-web-host/src/lib.rs": "89c351cb11948317e775c8b6c232122e7252e69da80c20cf6af13ab4d18a8132",
+    "src/rust/forge-ide-web-host/src/service.rs": "94d9c8c17d4214464248b7ca5d4e815d73a570b9768332d76b9aec645e743622",
+    "src/rust/forge-ide-web-host/src/service/edit_write.rs": "ecceaf207765cc76061852cb7aa76208f8de1cfe3db38299a4f04bd18829450c",
+    "src/rust/forge-ide-web-host/src/session.rs": "492341fc9132ef2d0bed973f08c2cef8853f0c9dfb4b19b1630a71f2ab4da2cf",
+    "src/rust/forge-ide-web-host/src/workspace.rs": "f3ee8f4c5b59ed8d5702d96f880235e34c248324cd2541566fb346200dfaf606",
+    "src/rust/forge-ide-web-host/tests/consumer.rs": "dfa1af228cce9224f54b265b383fffefa18c4d4c725a07dbfb59b6f6d2c3ace7",
+    "src/rust/forge-ide-web/README.md": "9934b131016de8eaa76dfb0a5907beeacb5dd83567eac629cdabceb85b63aadc",
+    "src/rust/forge-ide-web/src/generate/javascript.rs": "e3efa60edc38d95b51aa30c2608059c997ccfceeb6656174788e58c079b08622",
+    "src/rust/forge-ide-web/src/generate/mod.rs": "f3a45afe2693baaad1756e9379ff84d8bede3d91ea78214d17263567ffd90c3d",
+    "src/rust/forge-ide-web/tests/generation.rs": "dd02f0b132fb0af5084174dabe2ee8dfa25d5f0d5f235f7f6a2857b1a6d9e89d",
+    "src/rust/forge-ide-web/tests/playtest-wire.mjs": "44c28f99689fc3147af455c5357f1876792c3405ea24ae65dad8d7062ea50937"
+}
+
+CONSOLIDATED_UI_CONTEXT_SHA256 = {
+    "src/rust/forge-ide-ui/src/model.rs": "bf9a80504a7902811bbe05aa1c218e36777f7a401a116f28709b38a524f79b33",
+    "src/rust/forge-ide-ui/src/model/agents.rs": "b8fd5f7624b00c51b124b767060b7b1301dabeed8e57a95403d1184823420a1a",
+    "src/rust/forge-ide-ui/src/model/agents/tests.rs": "8ef1a21ffb94b03463b7969dfd6d8f7c5d4c17a3e9bc01631e7e8fb925156f74",
+    "src/rust/forge-ide-ui/src/protocol.rs": "bdad229225ef916154a747f29516286e21875cd6855acdf728bd60ec03fc1f5f",
+    "src/rust/forge-ide-web/src/generate/application.rs": "b9d29c96611fcf87aa5022367428135657dd7886039a8b71c900fdb8af0acd85",
+    "src/rust/forge-ide-web/src/wasm.rs": "1f97a8974f37d3d82a444a8b614db38cd6a27f9a23e2674ed0c80e8fc74ab5ee",
+    "src/rust/forge-ide-web/tests/browser/journey.mjs": "54fb3215c4698477193b5456fd2af5e0d215225f9023a44ee0a1195a9512f402",
+    "src/rust/forge-ide-web/ui/styles.yaml": "b7fb1b60e30d2afff4e3eadd7c45ef474ffe2f66f0d95b27b7668ad57464188c"
+}
+
+RETIRED_BROWSER_SOURCE_FILES = ('src/rust/forge-ide-ui/src/model/chat.rs', 'src/rust/forge-ide-ui/src/model/chat/history.rs', 'src/rust/forge-ide-ui/src/model/chat/models.rs', 'src/rust/forge-ide-ui/src/model/chat/run.rs', 'src/rust/forge-ide-ui/src/model/mail.rs', 'src/rust/forge-ide-ui/src/presentation.rs', 'src/rust/forge-ide-ui/src/protocol/chat_run.rs', 'src/rust/forge-ide-ui/src/protocol/mail.rs', 'src/rust/forge-ide-web-host/src/edit.rs', 'src/rust/forge-ide-web-host/src/history.rs', 'src/rust/forge-ide-web-host/src/mail_dispatch.rs', 'src/rust/forge-ide-web-host/src/run_dispatch.rs')
+
+STRICT_VERIFIER_FILES = {
+    "verify.sql",
+    "verify-owner-continuation.sql",
+    "verify-agy-unattended.sql",
+    "verify-native-jenkins.sql",
+    "verify-native-delivery.sql",
+    "verify-jenkins-events.sql",
+    "verify-external-agent.sql",
+    "verify-muse-read-access.sql",
+    "verify-task-events.sql",
+    "verify-external-workflows.sql",
+    "verify-feedback.sql",
+    "verify-autonomy.sql",
+}
+
+
+class JenkinsM27SourceBoundaryTest(unittest.TestCase):
+    def test_applied_migrations_one_through_twenty_six_are_byte_identical(self):
+        historical_files = {
+            path.name for path in MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql")
+            if 1 <= int(path.name[:4]) <= 26
+        }
+        self.assertEqual(historical_files, set(MIGRATION_SHA256))
+        for name, expected in MIGRATION_SHA256.items():
+            with self.subTest(migration=name):
+                self.assertEqual(hashlib.sha256((MIGRATIONS / name).read_bytes()).hexdigest(), expected)
+
+    def test_unchanged_baseline_boundaries_remain_byte_identical(self):
+        for relative, expected in UNCHANGED_BASELINE_SHA256.items():
+            with self.subTest(source=relative):
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_explicit_reviewer_context_matches_included_unapproved_source(self):
+        for name, expected in INCLUDED_REVIEWER_CONTEXT_SHA256.items():
+            with self.subTest(context=REVIEWER_CONTEXT_REVISION, source=name):
+                self.assertEqual(hashlib.sha256((RUNNER / name).read_bytes()).hexdigest(), expected)
+
+    def test_task_organization_changes_match_explicit_unapproved_context(self):
+        for relative, expected in TASK_ORGANIZATION_CONTEXT_SHA256.items():
+            with self.subTest(context='unapproved task organization', source=relative):
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_retirement_and_ui_composition_match_their_explicit_source_contexts(self):
+        for context, pins in ((RETIREMENT_CONTEXT_REVISION, INCLUDED_RETIREMENT_CONTEXT_SHA256),
+                              ('consolidated task organization and retirement', CONSOLIDATED_UI_CONTEXT_SHA256)):
+            for relative, expected in pins.items():
+                with self.subTest(context=context, source=relative):
+                    self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+
+    def test_retired_browser_reducers_and_dispatchers_are_absent(self):
+        for relative in RETIRED_BROWSER_SOURCE_FILES:
+            with self.subTest(retired=relative):
+                self.assertFalse((REPO_ROOT / relative).exists())
+
+    def test_legacy_owner_and_publication_guards_remain_ast_identical(self):
+        for identity, expected in UNCHANGED_LEGACY_GUARD_AST_SHA256.items():
+            filename, qualified = identity.split('::')
+            node = ast.parse((RUNNER / filename).read_text())
+            for name in qualified.split('.'):
+                node = next(child for child in node.body if getattr(child, 'name', None) == name)
+            with self.subTest(guard=identity):
+                self.assertEqual(hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest(), expected)
+
+    def test_strict_verifier_closure_retains_owner_and_adds_jenkins(self):
+        pending = [MANAGEMENT / "verify.sql"]
+        visited = set()
+        while pending:
+            source = pending.pop().resolve()
+            if source in visited:
+                continue
+            self.assertTrue(source.is_relative_to(MANAGEMENT.resolve()), source)
+            self.assertTrue(source.is_file(), source)
+            visited.add(source)
+            for name in re.findall(r"^\\ir\s+(\S+)\s*$", source.read_text(), re.MULTILINE):
+                pending.append(source.parent / name)
+        self.assertEqual({source.name for source in visited}, STRICT_VERIFIER_FILES)
+
+    def test_normal_installer_preserves_owner_control_and_installs_event_service(self):
+        published = {
+            tuple(shlex.split(line, comments=True))
+            for line in (RUNNER / "setup-runner.sh").read_text().splitlines()
+            if line.lstrip().startswith("publish ")
+        }
+        required = (
+            "work_owner_control.py", "work_owner_reverification.py", "work_publication_clients.py", "work_review.py",
+            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py", "jenkins_events.py", "jenkins_config.py",
+            "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",
+            "jenkins_api.py", "jenkins_emitter.py", "jenkins_emit_tool.py",
+        )
+        for name in required:
+            with self.subTest(module=name):
+                self.assertTrue((RUNNER / name).is_file())
+                self.assertIn(("publish", "$directory/" + name, "$target/" + name), published)
+
+
+if __name__ == "__main__":
+    unittest.main()

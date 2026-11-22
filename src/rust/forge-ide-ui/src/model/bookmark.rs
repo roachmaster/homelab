@@ -5,18 +5,15 @@ impl UiModel {
     pub(super) fn workspace_snapshot(&self) -> Option<WorkspaceSnapshot> {
         self.catalog.as_ref()?;
         Some(WorkspaceSnapshot {
-            chat: self
-                .dormant_chat
-                .clone()
-                .unwrap_or_else(|| self.chats.snapshot()),
+            chat: self.dormant_chat.clone().unwrap_or_default(),
+            mail: None,
             workbench: self.workbench_bookmark(),
-            workbench_open: self.chats.workbench,
+            workbench_open: self.workbench,
         })
     }
 
     pub(super) fn has_workspace_work(&self) -> bool {
-        self.catalog.is_some() && (self.workbench_seen || self.chats.has_work())
-            || self.catalog.is_some() && self.agents.has_workspace_work()
+        self.catalog.is_some() && (self.workbench_seen || self.agents.has_workspace_work())
     }
 
     fn workbench_bookmark(&self) -> Option<WorkbenchBookmark> {
@@ -81,7 +78,7 @@ impl UiModel {
         now: u64,
         effects: &mut Vec<UiEffect>,
     ) {
-        self.chats.workbench = open;
+        self.workbench = open;
         self.workbench_seen = open;
         let Some(bookmark) = bookmark else { return };
         let Some(catalog) = &self.catalog else { return };

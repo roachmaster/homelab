@@ -12,6 +12,7 @@ This directory holds the SQL for the Forge agent database on Mission Control.
 | `management/verify-runner-privileges.sql` | Check required legacy permissions and exact effective permissions on the scoped Mail, GPU, and coding-admission runtime tables (used by `setup-postgres.sh --check` and disposable database tests). |
 | `management/grant-muse-read-access.sql` | Explicitly grant the existing Muse account its reviewed read-only capability; never creates or changes the account. |
 | `management/verify-muse-read-access.sql` | Read-only exact optional Muse reader contract, included by schema verification. |
+| `management/verify-jenkins-events.sql` | Strict M27 Jenkins event, delivery and observation catalog/privilege verification. |
 | `management/run-status.sql` | Summarize run and tool states without printing prompts or tool output. |
 | `tests/schema.sql` | Exercise the schema with a disposable transcript inside a rolled-back transaction. |
 
@@ -85,12 +86,18 @@ psql -X --dbname=forge_agent_test --file=deploy/mission-control/sql/tests/schema
 The externally managed `muse_events` login can read the coding lifecycle without
 owning or executing it. When that role exists, verification requires direct
 `CONNECT` on `forge_agent`, `USAGE` on its `forge_agent` schema and exactly
-non-grantable `SELECT` on these thirteen tables:
+non-grantable `SELECT` on these thirteen coding tables:
 
 - `coding_events`, `coding_plan_decisions`, `coding_result_chunks`
 - `coding_reconciliation_receipts`, `coding_publications`, `coding_hosted_checks`
 - `coding_feedback`, `coding_reviews`, `coding_tasks`, `coding_attempts`
 - `coding_workflows`, `coding_workflow_reviews`, `coding_workflow_actions`
+
+Schema27 additionally admits read-only `jenkins_events`,
+`jenkins_event_deliveries` and `jenkins_observations`, as already authorized by
+the existing owner/schema future-table SELECT default. Pre-27 verification
+retains the original thirteen-table allowlist. No role, credential, HBA,
+membership or default-ACL change is needed to apply M27.
 
 The check rejects extra table or column grants, writes, grant options, API or
 function execution, ownership, elevated role flags, memberships and default
@@ -133,3 +140,21 @@ handoffs. Capability probes expose only versioned metadata to the API and
 reconciler, with no new table, role, table-read grant or credential change.
 Run `management/verify-owner-continuation.sql` as part of the complete strict
 verifier closure before owner admission.
+
+## Jenkins event observations (M27)
+
+Migration27 selectively ports the never-applied legacy Jenkins schema without
+changing shipped migrations1--26. Events are immutable; consumer deliveries
+have frozen source identities and retry limits; projections accept only matching
+source events with increasing sequence numbers. Compound foreign keys bind
+event UUID, owner, project and sequence together. HTTPS and explicitly configured
+loopback HTTP are supported; arbitrary remote HTTP and URL userinfo are rejected.
+
+The runner receives SELECT/INSERT on events and SELECT/INSERT/UPDATE on delivery
+and observation tables. Native execution/reconciliation/GPU roles receive no
+access. These are untrusted observations: no table or trigger can approve a
+coding task, satisfy trusted hosted checks, advance verified source or authorize
+a merge. The M27 verifier pins columns, defaults, constraints, indexes, triggers,
+function source, owners and ACLs; it performs no repair. Applying this source is
+separate from production activation and still requires reviewed migration,
+backup/restore, independent review and genuine required gates.

@@ -57,6 +57,85 @@ single Mission Control operator.
 | `POST /v1/workspace` | Save or restore an authenticated Forge IDE workspace through PostgreSQL |
 | `POST /v1/dispatch` | Header-routed saved-chat, asynchronous IDE run, Mail, and opt-in coding-job admission operations |
 
+## Task list organization
+
+The portal requests `work_list` with `status_filter` set to `active`, `attention`,
+`history` or `all`. These read-only scopes group internal native/external review
+and repair steps under the workflow root before counting or pagination, classify
+using current workflow phase/enabled state, and order by effective latest activity
+and task UUID descending. Manual tasks use their actual raw status. The response
+includes scoped assignment counts and optional `updated_at`/`workflow_enabled`
+summary metadata. No rows are archived, deleted or marked complete by these views.
+
+Legacy `status_filter: null` and exact raw status filters retain their existing
+ungrouped/created-ascending behavior. Task details, event history and normal
+Cancel controls retain their independent guards. The generated portal defaults
+to Active, with Needs attention and History available in its task-view selector;
+raw task status remains available in the reader. Deploy the matching Python list
+contract and ABI13 host/WASM/generated assets together. This is source support,
+not an assertion that the live portal has been upgraded.
+
+## Independent reviewer approval completeness
+
+The combined source also includes the reviewer-only correction loop. Bootstrap
+selects `ReviewerCorrectionFactory` through `WorkflowStoreFactory` for both the
+coordinator and the normal Owner Resume control port. A live code approval must
+attest every target finding marked open; historical verdict parsing is unchanged.
+A structurally valid partial approval can queue a fresh attempt on the same
+read-only reviewer task, using the exact immutable target, at most three times
+per peer. Completed action receipts preserve each bad result and make retries
+idempotent. Explicit recovery of the matching legacy escalation additionally
+requires fresh stopped-reviewer reconciliation. Author work, source/CI receipts,
+Plan/code budgets and the Owner26 fence remain unchanged. Jenkins observations
+remain untrusted data and cannot authorize this correction or approve source.
+These are source capabilities; activation and actual-source approval remain
+separate delivery requirements.
+
+## Optional Jenkins event observations
+
+The recovered Jenkins event capability uses the same authenticated loopback
+`POST /v1/dispatch` front door. Its source and migration are review material;
+live activation is a separate operator step after independent review and CI.
+See [the event contract](../../../docs/architecture/jenkins-events.md).
+
+An explicit `FORGE_RUNNER_JENKINS_CONFIG` absolute JSON path selects the frozen
+project, instance, job and consumer catalog. With the setting absent, startup
+reads no Jenkins configuration file, opens no Jenkins database connection and
+creates no Jenkins consumer thread. A configured instance can use HTTPS or an
+explicit local HTTP origin such as `http://127.0.0.1:18084`; plaintext HTTP to
+other hosts is rejected. The build URL must match the configured scheme, host
+and effective port.
+Claims and lease updates enforce the current configured project, instance, job,
+origin and enabled consumer subscriptions. Projections check current owner and
+event grants. Narrowing that catalog leaves previously queued rows intact and
+excludes them from the new worker's scope.
+
+`build_jenkins_service` constructs the selected store and handler factories,
+then injects the ready service into `Server`. Enabled consumers run in API-only
+mode as well as the legacy host; API-only mode continues to leave Chat and
+inference workers inactive. `background_services` stops acquired workers in
+reverse order, including partial startup failures. Consumer shutdown releases
+its notification connection and joins owned work before releasing handlers.
+Supporting lease-heartbeat I/O has a bounded stop window; unconfirmed shutdown
+retains owned handlers and leaves the delivery leased for fenced recovery.
+Disabling every configured consumer leaves the event API available without a
+background consumer thread.
+
+| `Forge-Destination` | Operation |
+| --- | --- |
+| `ci.jenkins.event.emit` | Atomically save an idempotent event and its consumer deliveries |
+| `ci.jenkins.events.list` | Replay scoped event history after a sequence |
+| `ci.jenkins.event.get` | Read one event and safe delivery states |
+| `ci.jenkins.deliveries.list` | Inspect scoped pending, consumed or failed deliveries |
+
+Payloads are observational data. These routes cannot grant a review approval,
+satisfy exact-source Jenkins checks, create a build or authorize a main merge.
+The existing Rust Jenkins `IoClient`, trusted delivery workers and immutable
+verification receipts retain that authority. The preview-by-default
+`jenkins_emit_tool.py` bridge verifies an operator-selected HMAC when configured,
+translates a bounded webhook, and emits only through the authenticated front door.
+No public unauthenticated webhook endpoint is added.
+
 For a new async run, send JSON with `messages` and optional `model`,
 `max_tokens`, and `temperature`. Send the returned `conversation_id` and the new
 user turn on a follow-up. The service reads the saved conversation history for

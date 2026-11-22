@@ -2,14 +2,12 @@
 //! No filesystem, DOM, HTTP, TLS, asynchronous runtime or JSON value state.
 mod markdown;
 pub mod model;
-mod presentation;
 pub mod protocol;
 pub mod shape;
 mod validate;
 pub use markdown::render_markdown;
 pub mod view;
 pub use model::{name_label, Output, Phase, UiModel};
-pub use presentation::{PresentationPolicy, PORTAL_PRESENTATION};
 use std::{error::Error, fmt};
 pub use validate::{validate_catalog, validate_report};
 
