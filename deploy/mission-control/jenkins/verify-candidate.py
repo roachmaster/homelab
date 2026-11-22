@@ -43,8 +43,10 @@ EPHEMERAL_TARGET_DIRS = frozenset({'ui-assets', 'ui-qa', 'tmp'})
 # rebuilds of changed crates: unchanged crates reuse deps/ plus fingerprints,
 # and changed crates rebuild cleanly without them. Snapshotting incremental/
 # costs gigabytes per entry and grows on every warm cycle, because restored
-# sessions plus the new build's sessions accumulate.
-SNAPSHOT_EXCLUDED_DIR_NAMES = frozenset({'incremental'})
+# sessions plus the new build's sessions accumulate. rustdoc output (doc/) and
+# generated AST/dead-code reports (ast/) are pure build outputs that Cargo
+# never reads back for compilation reuse.
+SNAPSHOT_EXCLUDED_DIR_NAMES = frozenset({'incremental', 'doc', 'ast'})
 REPO_BUILD_CONFIG_PATHS = (
     '.cargo/config',
     '.cargo/config.toml',
@@ -752,7 +754,9 @@ def _copy_tree_from_build(src_root, dst_root, *, expected_uid, prefix_rel, exclu
     Uses O_NOFOLLOW + fstat on every directory and file component and rejects
     symlinks, FIFOs, sockets, devices, or files not owned by expected_uid.
     `excluded_top_dirs` skips top-level entries; `excluded_dir_names` skips
-    directories of that name at any depth.
+    directories of that name at any depth. Files are NOT fsynced here: staging
+    is disposable until os.replace publishes it, so publish() issues a single
+    os.sync() at the snapshot boundary instead of one fsync per file.
     """
     manifest_entries = []
     total_bytes = 0
@@ -823,7 +827,6 @@ def _copy_tree_from_build(src_root, dst_root, *, expected_uid, prefix_rel, exclu
                                 dst_stream.flush()
                                 os.fchmod(dst_stream.fileno(), mode)
                                 os.utime(dst_stream.fileno(), ns=(mtime_ns, mtime_ns))
-                                os.fsync(dst_stream.fileno())
                                 dst_info = os.fstat(dst_stream.fileno())
                     finally:
                         if dst_fd is not None:
@@ -1717,6 +1720,10 @@ class LocalCargoCacheProvider(CargoCachePort):
                 # entry being published to is protected so its prior
                 # known-good snapshot survives until the new one commits, and
                 # the live staging directory is never treated as orphaned.
+                # Capacity deliberately counts predecessor AND new snapshot:
+                # during publication both exist on disk at once (old snapshot
+                # plus staging), so the cap bounds peak disk, not just the
+                # steady state after the old snapshot is reconciled away.
                 pruned = self._prune_locked(
                     root,
                     protected_entry=entry_dir,
@@ -1761,6 +1768,12 @@ class LocalCargoCacheProvider(CargoCachePort):
                 snapshot_dir = entry_dir / snapshot_id
                 if snapshot_dir.exists() or snapshot_dir.is_symlink():
                     _safe_rmtree(snapshot_dir)
+                # One filesystem-wide sync makes the staged snapshot durable
+                # before it goes live; per-file fsync during the copy was
+                # paying 37,000+ syncs for a disposable staging directory.
+                # If a crash still tears the snapshot, restore detects it via
+                # files_sha256 and falls back to a clean build.
+                os.sync()
                 os.replace(staging, snapshot_dir)
                 staging = None
                 _fsync_dir(entry_dir)
@@ -2421,6 +2434,12 @@ def _execute_locked(action, config, *, cache_port):
             'HOME': str(scratch / 'home'),
             'LANG': 'C.UTF-8', 'CARGO_HOME': str(scratch / 'cargo-home'),
             'CARGO_TARGET_DIR': str(scratch / 'target'), 'CARGO_NET_OFFLINE': 'true',
+            # Incremental compilation writes multi-gigabyte query-cache trees
+            # that only accelerate rebuilds of changed crates; CI reuses deps/
+            # plus fingerprints instead. Line-tables-only debug info keeps
+            # file/line backtraces while dropping full DWARF from every
+            # test binary. Both rotate compat_key via the compiler env inputs.
+            'CARGO_INCREMENTAL': '0', 'CARGO_PROFILE_DEV_DEBUG': 'line-tables-only',
             'PYTHONDONTWRITEBYTECODE': '1', 'QA_OUTPUT_ROOT': str(scratch / 'qa'),
             'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
             'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_OPTIONAL_LOCKS': '0',
