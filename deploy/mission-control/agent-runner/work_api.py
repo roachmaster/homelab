@@ -193,7 +193,7 @@ class WorkPublicationRetry:
 class WorkService:
     """Authorized application service coordinating configured grants, catalog, and store."""
 
-    def __init__(self, config, catalog, store, *, external_workflow=None):
+    def __init__(self, config, catalog, store, *, external_workflow=None, native_control=None):
         if not isinstance(config, WorkConfig):
             raise TypeError("WorkService requires a frozen WorkConfig")
         if not isinstance(catalog, WorkCatalog):
@@ -207,6 +207,9 @@ class WorkService:
                 for name in ('cancel', 'forbid_manual_control')):
             raise TypeError('WorkService requires a ready external workflow control port')
         self._external_workflow = external_workflow
+        if native_control is not None and not callable(getattr(native_control, "resume", None)):
+            raise TypeError("WorkService requires a ready native owner control port")
+        self._native_control = native_control
         self.workflow_worker=None
 
     def _require_project(self, project_alias):
@@ -339,6 +342,10 @@ class WorkService:
     def resume(self, command):
         self._require_project(command.project_alias)
         self._external_control_guard(command)
+        if self._native_control is not None:
+            resumed = self._native_control.resume(command)
+            if resumed is not None:
+                return resumed
         if command.agent_profile not in self._config.profiles:
             raise Rejected(403, "denied")
 
@@ -383,6 +390,11 @@ class WorkService:
     def review_decide(self, command):
         self._require_project(command.project_alias)
         self._external_control_guard(command)
+        owner_decide = getattr(self._native_control, "review_decide", None)
+        if callable(owner_decide):
+            result = owner_decide(command)
+            if result is not None:
+                return result
         def resolve_recipe():
             if ("implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
                     or not self._config.profiles[command.agent_profile].execution_enabled
@@ -418,7 +430,7 @@ class WorkService:
 class WorkServiceFactory:
     """Effect-free startup factory producing a ready WorkService or None when unconfigured."""
 
-    def __init__(self, config, connect_factory=None, *, external_factory=None):
+    def __init__(self, config, connect_factory=None, *, external_factory=None, native_control_factory=None):
         if config is not None:
             if not isinstance(config, WorkConfig):
                 raise TypeError("WorkServiceFactory requires a frozen WorkConfig or None")
@@ -431,6 +443,9 @@ class WorkServiceFactory:
         if external_factory is not None and not callable(external_factory):
             raise TypeError("External work factory must be callable")
         self._external_factory = external_factory
+        if native_control_factory is not None and not callable(native_control_factory):
+            raise TypeError("Native control factory must be callable")
+        self._native_control_factory = native_control_factory
 
     def create(self):
         if self._config is None:
@@ -456,7 +471,12 @@ class WorkServiceFactory:
             if flow is None:raise ValueError('External workflow provider is unavailable')
             flow.bind_store(store)
         selected_flow=flow if self._config.external_workflows else None
-        service=WorkService(self._config,catalog,store,external_workflow=selected_flow)
+        if self._native_control_factory is None:
+            from work_owner_control import NativeOwnerControlFactory
+            native_control = NativeOwnerControlFactory(self._config, catalog, store).create()
+        else:
+            native_control = self._native_control_factory(self._config, catalog, store)
+        service=WorkService(self._config,catalog,store,external_workflow=selected_flow,native_control=native_control)
         from work_workflow import WorkflowCoordinatorFactory
         maintenance = {"external_maintenance": store.maintain_external} if external is not None else {}
         service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=selected_flow,**maintenance).create()

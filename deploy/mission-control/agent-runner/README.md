@@ -421,11 +421,19 @@ admitted verification action before independent code review. Publication and
 merge reobserve the same exact-source
 receipt instead of rerunning the suite. An immutable private mapping binds the
 native review manifest to the installed verifier's separate Jenkins manifest.
-With `native_delivery_mode: "branch-first-v1"`, the stopped source is first
-pushed to its owned branch; a committed scoped `branch_pushed` event precedes
-Jenkins admission. The separate native job checks main ancestry before expensive
-gates. A real build failure or a positively confirmed merge failure emits bounded
-repair feedback with an actual build reference. Integration conflicts are
+With `native_delivery_mode: "branch-first-v1"`, the publisher materializes the
+exact stopped source in its private clone, then performs an ordinary three-way
+merge of fetched current main before pushing its owned branch. The native
+workspace, admitted base and stop/reconciliation receipts stay unchanged. A v2
+prepared-source receipt separately pins the authored commit/tree, observed main,
+and integrated candidate/tree. Restart reuses that exact candidate even if main
+has advanced; historical v1/pushed receipts are never rewritten. A committed
+scoped `branch_pushed` event precedes Jenkins admission. The separate native job checks main ancestry before expensive
+gates. A pre-push integration conflict instead records a new unapproved source
+containing the genuine conflict markers and both parents, with typed source
+findings, no passed checks and no fabricated build reference. No branch, event or
+Jenkins job is submitted for that source. A real build failure or a positively
+confirmed merge failure emits bounded repair feedback with an actual build reference. Integration conflicts are
 preserved in a new unapproved source, then corrected and tested again. Independent
 review compares the complete change against actual main, including inherited
 unapproved code. Migration25 supplies these events, merge-failure transitions and
@@ -438,6 +446,17 @@ and cancellation state without granting reconciler table access. Journals preced
 POST; uncertain submissions are reconciled without duplicate jobs. Restart and
 cancel cleanup are scoped to owned actions and require actual stop proof. See
 [the native sequence and source contract](../../../docs/architecture/forge-jenkins.md#native-gemini-workflow).
+
+An owner can request one verification-only recovery through the existing
+`ide.work.review.decide` / `retry_infrastructure` command when an explicitly
+continued author result stopped at the preflight main-ancestry failure. The
+injected native owner-control port verifies the stopped artifact, original
+owner authority, real failed verification and spent recovery history. It appends
+a fresh local review of that same artifact against current main; it does not
+start another author, approve source or renew automatic repair allowance.
+The failed review and build remain intact. A durable, once-only owner action
+and normal control receipt make exact request replay safe; fresh full CI,
+independent review and guarded merge are still required.
 
 A later correction to a Completed task uses `ide.work.repair` with an explicit
 approved-project candidate. If that legacy parent has no bound review, trusted

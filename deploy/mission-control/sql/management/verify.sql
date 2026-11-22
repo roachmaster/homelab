@@ -4,6 +4,7 @@ BEGIN READ ONLY;
 SET LOCAL search_path = pg_catalog;
 
 -- Validate the M23 replacement before any historical-catalog normalization.
+\ir verify-owner-continuation.sql
 \ir verify-agy-unattended.sql
 \ir verify-native-jenkins.sql
 \ir verify-native-delivery.sql

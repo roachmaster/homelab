@@ -17,7 +17,7 @@ import threading
 import time
 
 from work_executor import WorkspaceLease, WorkspaceBusyError
-from work_publication_clients import DIGEST, SHA, PublicationError, uuid
+from work_publication_clients import DIGEST, SHA, PublicationError, SourceIntegrationConflict, uuid
 from work_publication_checks import VerificationFailure
 from work_repair_policy import RepairObservation, RepairPolicy, decide_repair, failure_fingerprint
 from work_verification import VerificationReport, diagnostic_text, gate_manifest_sha256, project_verification
@@ -347,7 +347,11 @@ class ReviewWorker:
                     stage = "prepare"
                     branch_first = getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1'
                     prepare = self.git.prepare_source if branch_first else self.git.prepare
-                    repository, head = prepare(check_job, snapshot)
+                    try:
+                        repository, head = prepare(check_job, snapshot)
+                    except SourceIntegrationConflict as conflict:
+                        self._finish_source_conflict(job,conflict,require_lease)
+                        return
                     integration_base = self.git._git(repository, "rev-parse", "FETCH_HEAD").decode().strip()
                     requires_new = _source_map(snapshot.files) != _tree_map(self.git, repository, head)
                     candidate_digest = WorkspaceLease(repository, self.config.worker.projects[job["project_alias"]],
@@ -457,6 +461,40 @@ class ReviewWorker:
         finally:
             done.set()
             heartbeat.join(timeout=12)
+
+    def _finish_source_conflict(self,job,conflict,require_lease):
+        """Persist honest pre-CI source feedback, with no push/build identity."""
+        require_lease();repository=conflict.repository;head=conflict.candidate_commit
+        self.git.verify(repository,head)
+        details={'version':1,'authored_commit':conflict.authored_commit,'current_main':conflict.integration_base,
+            'candidate_commit':head,'conflict_paths':list(conflict.conflict_paths)}
+        evidence=hashlib.sha256(json.dumps(details,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        finding={'finding_id':'source-integration-'+evidence[:24],'category':'source','check_id':'main-integration',
+            'path':conflict.conflict_paths[0],'diagnostic_code':'main_merge_conflict',
+            'summary':'Resolve the preserved private three-way conflict against current main; no branch was pushed and no Jenkins build ran.',
+            'reproduction':'Inspect git diff '+conflict.integration_base+' HEAD and both commit parents; retain nonconflicting current-main files.',
+            'expected':'Resolve source, then pass fresh fixed checks and independent code review.',
+            'actual':diagnostic_text(json.dumps(details,sort_keys=True)), 'evidence_digest':evidence,'status':'open'}
+        gate_source=gate_source_digest(self.git,repository,head)
+        gate=gate_manifest_sha256(self.config.checks,self.config.required_hosted_checks,gate_source)
+        digest=WorkspaceLease(repository,self.config.worker.projects[job['project_alias']],repository/'.git',job['task_id'],head).source_digest()
+        manifest={'version':1,'review_id':job['review_id'],'task_id':job['task_id'],'attempt_id':job['attempt_id'],
+            'base_revision':job['base_revision'],'workspace_digest':job['workspace_digest'],'candidate_commit':head,
+            'gate_manifest_sha256':gate,'gate_source_sha256':gate_source,'candidate_workspace_digest':digest,
+            'repair_requires_new_workspace':True,'integration_base':conflict.integration_base,'checks_passed':False,
+            'source_integration':details}
+        self.candidates.record(job,manifest)
+        observation=RepairObservation('source',repair_round=job.get('round',0),stagnant_rounds=job.get('stagnant_rounds',0),
+            infrastructure_retries=job.get('infrastructure_retries',0),verified_progress=False,checks_passed=False,cleanup_confirmed=True)
+        disposition=self.policy_decider(observation,repair_policy(job)).disposition
+        if disposition=='repair'and not job.get('auto_repair',False):disposition='handoff'
+        require_lease()
+        self._finish(job,{'disposition':disposition,'reason':'main_merge_conflict','candidate_commit':head,
+            'gate_manifest_sha256':gate,'findings':[finding],'verified_finding_ids':[],
+            'fingerprint':failure_fingerprint('main-integration','main_merge_conflict',finding['path'],finding['summary']),
+            'summary':finding['summary'],'verification':{'checks_passed':False,'candidate_workspace_digest':digest,
+                'repair_requires_new_workspace':True,'integration_base':conflict.integration_base,'cleanup_confirmed':True,
+                'toolchain':'Not run: source conflict before CI','checks':[],'source_integration':details}})
 
     def _process_source(self, job):
         """One owner-authorized legacy repair import, never approval or publish."""

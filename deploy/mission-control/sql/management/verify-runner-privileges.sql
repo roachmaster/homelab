@@ -74,6 +74,7 @@ BEGIN
         'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
       ]) AS privilege
     )
+    AND has_function_privilege(current_user, 'forge_agent.owner_continuation_capability()', 'EXECUTE')
     AND NOT has_schema_privilege(current_user, 'forge_agent_worker_api', 'USAGE, CREATE')
     AND NOT has_schema_privilege(current_user, 'forge_coding_worker_api', 'USAGE, CREATE')
     AND NOT has_schema_privilege(current_user, 'forge_coding_reconciler_api', 'USAGE, CREATE')

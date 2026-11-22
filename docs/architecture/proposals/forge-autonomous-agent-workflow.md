@@ -410,3 +410,40 @@ same owner-scoped transaction advisory lock before their SQL functions. This
 serializes the two initial review producers without new table grants or schema.
 Both coding-worker and publication-service facades must receive this update;
 the lock is not a substitute for the existing scoped SQL checks and task leases.
+
+## Explicit owner continuation after a code budget handoff
+
+An owner may use the existing authenticated `WorkResume` request once for an
+escalated workflow with a persisted, genuine independent code `revise` verdict
+and exhausted-budget receipt. This is an explicit exception; automatic scans do
+not call it. `WorkServiceFactory` injects the ready `NativeOwnerControl` port,
+which verifies the frozen recipes, Plan, reviewer artifact, source checks, role
+grants and native-worker readiness inside the existing project/task transaction.
+Admission requires the schema26 owner-continuation capability. Older database
+installations fail closed rather than queueing work without the canonical repair
+fences. Ordinary manual task Resume keeps its previous behavior.
+
+The caller supplies a fresh genuine stopped-workspace reconciliation for the
+**same native source digest** and a context note of at most 1536 UTF-8 bytes. A
+corrected Git ref in that note is context for the new author claim; it cannot
+replace old workspace files, attempt receipts or candidate evidence. The server
+loads all peer findings itself and merges their ledger normally. Canonical
+feedback for the same task remains `native_receipt`, while the old linked repair
+lineage remains unchanged. A linked child's incompatible workflow-feedback
+pointer is cleared only on the new task admission; immutable old attempts and
+the full peer target/verdict remain preserved.
+
+A fixed completed `owner-code-resume:<workflow-id>` action, standard Resume
+control receipt and resumed event commit together. Their immutable intent binds
+the owner/project/task/revision, reconciliation, Plan/source/reviewer hashes and
+spent counters. Exact retries return the stored result before current-state
+guards; a changed request conflicts. Admission does not alter repair, stagnation,
+Plan or infrastructure budgets, creates no additional task and sets
+`auto_repair=false`.
+
+This one owner turn grants no further automatic writer: deadline recovery,
+verifier repair, code `revise` and merge-failure repair hand off again even if
+verified progress resets the ordinary stagnation counter. The newly corrected
+candidate can still pass fresh fixed checks and independent review and proceed
+through the existing exact-head hosted checks and trusted merge. The owner turn
+is never an approval, successful build, stopped process or merge receipt.

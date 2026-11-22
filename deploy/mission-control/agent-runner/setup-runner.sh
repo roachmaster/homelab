@@ -56,6 +56,7 @@ publish "$directory/work_external_delivery_store.py" "$target/work_external_deli
 publish "$directory/work_external_delivery.py" "$target/work_external_delivery.py"
 publish "$directory/work_store.py" "$target/work_store.py"
 publish "$directory/work_api.py" "$target/work_api.py"
+publish "$directory/work_owner_control.py" "$target/work_owner_control.py"
 publish "$directory/usage_store.py" "$target/usage_store.py"
 publish "$directory/usage_api.py" "$target/usage_api.py"
 publish "$directory/usage_types.py" "$target/usage_types.py"

@@ -4,7 +4,9 @@ from dataclasses import replace
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 from uuid import UUID,uuid4
+import psycopg2
 from queue_store import Rejected
 from work_api import WorkServiceFactory,WorkGet,WorkList,WorkPlanDecide,WorkCancel,WorkAccept,WorkResume
 from work_config import WorkflowPolicy
@@ -195,6 +197,101 @@ class AutonomousWorkflowTest(unittest.TestCase):
     envelope=self.db.read_workflow_feedback(repair);target=parse_review_target(envelope['target_json'],envelope['target_sha256'])
     self.assertEqual(parse_review_verdict(envelope['verdict_json'],target)['decision'],'revise');self.assertEqual(target['source_attempt_id'],author.attempt_id)
     self.assertEqual(_lease(repair)['parent_task_id'],author.task_id if linked else None)
+ def exhausted_code_review(self):
+  # Exercise the real Plan, linked source repair and two subsequent check
+  # outcomes. No counter/status reset prepares the exhausted budget.
+  admitted,author,critic,checks=self.checked_implementation(linked=True)
+  self.publish(critic,self.verdict(critic,'revise'));self.coordinator.run_once()
+  repair=self.claim('agy-v2');self.assertEqual(repair.parent_task_id,author.task_id)
+  rec=self.publish(repair,'First repair still fails a fixed check.');self.db.queue_review(repair,rec)
+  job=self.db.review_claim('checks')
+  result={'disposition':'repair','candidate_commit':'d'*40,'gate_manifest_sha256':'e'*64,
+      'findings':[{'finding_id':'ci-2','category':'source','summary':'Fix the independent check.','check_id':'make-ci'}],
+      'verified_finding_ids':[],'fingerprint':'f'*64,'summary':'Repair the fixed check.','cleanup_confirmed':True,
+      'verification':{'checks_passed':False,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':False,'cleanup_confirmed':True}}
+  self.db.review_finish(job,result)
+  repair=self.claim('agy-v2');rec=self.publish(repair,'Second repair passes gates; source changes require independent attestation.')
+  self.db.queue_review(repair,rec);job=self.db.review_claim('checks')
+  result.update(disposition='awaiting_review',findings=[],fingerprint=None,summary='Fixed gates passed; source review required.',
+      verification={'checks_passed':True,'candidate_workspace_digest':'f'*64,'repair_requires_new_workspace':False,
+          'cleanup_confirmed':True,'integration_base':'a'*40,'gate_changes_require_review':True,
+          'checks':[{'check_id':'make-ci','status':'passed','head_sha':'d'*40}]})
+  self.db.review_finish(job,result);self.coordinator.run_once();critic=self.claim('codex-v2');self.assertIsNotNone(critic)
+  return admitted,repair,critic,job
+ def code_handoff_state(self,task_id,review_id):
+  with closing(self.cluster.connect('postgres')) as connection,connection.cursor() as cursor:
+   cursor.execute("SELECT to_jsonb(t),to_jsonb(q),(SELECT to_jsonb(b) FROM forge_agent.coding_review_budget b WHERE b.root_task_id=coalesce(t.repair_root_task_id,t.id)),(SELECT count(*) FROM forge_agent.coding_tasks WHERE mode='implement'),(SELECT count(*) FROM forge_agent.coding_feedback) FROM forge_agent.coding_tasks t JOIN forge_agent.coding_reviews q ON q.task_id=t.id WHERE t.id=%s AND q.review_id=%s",(task_id,review_id))
+   return cursor.fetchone()
+ def assert_code_handoff(self,action,critic,text,reason):
+  with closing(self.cluster.connect('postgres')) as connection,connection.cursor() as cursor:
+   cursor.execute('SELECT status,verdict_json,reviewer_attempt_id,reviewer_result_sha256,verdict_sha256 FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s',(action['workflow_review_id'],))
+   peer=cursor.fetchone();self.assertEqual(peer,('decided',text,UUID(critic.attempt_id),hashlib.sha256(text.encode()).hexdigest(),hashlib.sha256(text.encode()).hexdigest()))
+   cursor.execute('SELECT status,finish_token,finish_receipt,lease_token,lease_expires_at FROM forge_agent.coding_workflow_actions WHERE action_id=%s',(action['action_id'],))
+   row=cursor.fetchone();self.assertEqual(row[:2],('completed',action['lease_token']));self.assertEqual(row[2]['status'],'escalated');self.assertEqual(row[2]['reason'],reason);self.assertEqual(row[3:],(None,None))
+  self.assertEqual(self.get(critic.task_id)['status'],'completed');self.assertEqual(self.get(critic.task_id)['workflow']['phase'],'escalated')
+  self.assertIsNone(self.claim('agy-v2'));self.assertIsNone(self.db.publication_claim('publisher'))
+ def test_exhausted_code_revision_retains_exact_verdict_once_without_writer_or_counter_reset(self):
+  _,author,critic,checks=self.exhausted_code_review()
+  text=self.verdict(critic,'revise');self.publish(critic,text);action=self.coordinator.store.claim('budget-controller')
+  before=self.code_handoff_state(author.task_id,checks['review_id'])
+  self.assertEqual((before[2]['repair_rounds'],before[2]['stagnant_rounds']),(2,2))
+  frozen=self.get(author.task_id)['workflow'];self.coordinator.store.process(action)
+  self.assertEqual(self.code_handoff_state(author.task_id,checks['review_id']),before)
+  self.assert_code_handoff(action,critic,text,'repair_budget_exhausted')
+  after=self.get(author.task_id)['workflow'];self.assertEqual(after['policy_digest'],frozen['policy_digest']);self.assertEqual(after['plan_revisions'],frozen['plan_revisions'])
+  self.assertIn('frozen repair budget is exhausted',after['escalation_reason'])
+  # Replaying the exact processed action cannot rewrite the verdict, consume
+  # more budget or create another author/feedback record.
+  self.coordinator.store.process(action);self.assertFalse(self.coordinator.run_once())
+  self.assertEqual(self.code_handoff_state(author.task_id,checks['review_id']),before)
+  self.assert_code_handoff(action,critic,text,'repair_budget_exhausted')
+ def test_exhausted_repair_budget_still_allows_exact_independent_approval(self):
+  _,author,critic,checks=self.exhausted_code_review()
+  before=self.code_handoff_state(author.task_id,checks['review_id'])
+  envelope=self.db.read_review_target(critic);target=parse_review_target(envelope['target_json'],envelope['target_sha256'])
+  text=self.verdict(critic,attested_finding_ids=[f['finding_id'] for f in target['findings'] if f.get('status','open')=='open'])
+  self.publish(critic,text);self.coordinator.run_once()
+  self.assertEqual(self.get(author.task_id)['workflow']['phase'],'publishing')
+  self.assertEqual(self.code_handoff_state(author.task_id,checks['review_id'])[2],before[2]);self.assertIsNotNone(self.db.publication_claim('publisher'))
+ def test_raw_code_guard_failure_rolls_back_decision_and_retains_genuine_verdict(self):
+  _,author,critic,checks=self.checked_implementation();text=self.verdict(critic,'revise');self.publish(critic,text)
+  action=self.coordinator.store.claim('guard-controller');before=self.code_handoff_state(author.task_id,checks['review_id'])
+  original=self.coordinator.store.store.review_decide
+  def decide_then_reject(**request):
+   original(**request)
+   request['_authority'].cursor.execute("DO $$BEGIN RAISE EXCEPTION 'Scoped repair guard rejected' USING ERRCODE='P0009';END$$")
+  with patch.object(self.coordinator.store.store,'review_decide',side_effect=decide_then_reject):self.coordinator.store.process(action)
+  self.assertEqual(self.code_handoff_state(author.task_id,checks['review_id']),before)
+  self.assert_code_handoff(action,critic,text,'code_transition_not_reviewable')
+ def test_unrelated_database_failure_is_not_swallowed_as_code_handoff(self):
+  _,author,critic,checks=self.checked_implementation();text=self.verdict(critic,'revise');self.publish(critic,text)
+  action=self.coordinator.store.claim('database-controller');before=self.code_handoff_state(author.task_id,checks['review_id'])
+  original=self.coordinator.store.store.review_decide
+  def decide_then_database_failure(**request):
+   original(**request);request['_authority'].cursor.execute('SELECT 1/0')
+  with patch.object(self.coordinator.store.store,'review_decide',side_effect=decide_then_database_failure):
+   with self.assertRaises(psycopg2.errors.DivisionByZero):self.coordinator.store.process(action)
+  self.assertEqual(self.code_handoff_state(author.task_id,checks['review_id']),before)
+  self.assertEqual(self.get(critic.task_id)['status'],'awaiting_review');self.assertEqual(self.get(author.task_id)['workflow']['phase'],'code_review')
+  with closing(self.cluster.connect('postgres')) as connection,connection.cursor() as cursor:
+   cursor.execute('SELECT status,verdict_json FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s',(action['workflow_review_id'],));self.assertEqual(cursor.fetchone(),('reviewing',None))
+ def test_expired_decision_cannot_handoff_after_waiting_for_source_lock(self):
+  import threading,time
+  _,author,critic,checks=self.exhausted_code_review();text=self.verdict(critic,'revise');self.publish(critic,text)
+  action=self.coordinator.store.claim('expired-budget-controller')
+  original_phase=self.get(author.task_id)['workflow']['phase']
+  self.cluster.admin_exec("UPDATE forge_agent.coding_workflow_actions SET lease_expires_at=clock_timestamp()+interval '0.3 seconds' WHERE action_id='%s'"%action['action_id'],owner=False)
+  holder=self.cluster.connect('postgres');holder.autocommit=False
+  with holder.cursor() as cursor:cursor.execute('SELECT review_id FROM forge_agent.coding_reviews WHERE review_id=%s FOR UPDATE',(checks['review_id'],))
+  errors=[]
+  def process():
+   try:self.coordinator.store.process(action)
+   except Exception as error:errors.append(error)
+  thread=threading.Thread(target=process);thread.start();time.sleep(.6);self.assertTrue(thread.is_alive());holder.rollback();holder.close();thread.join(5)
+  self.assertFalse(thread.is_alive());self.assertFalse(errors);self.assertEqual(self.get(author.task_id)['workflow']['phase'],original_phase)
+  with closing(self.cluster.connect('postgres')) as connection,connection.cursor() as cursor:
+   cursor.execute('SELECT status,verdict_json FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s',(action['workflow_review_id'],));self.assertEqual(cursor.fetchone(),('reviewing',None))
+  self.assertTrue(self.coordinator.run_once());self.assertEqual(self.get(author.task_id)['workflow']['phase'],'escalated')
  def test_removed_project_delegation_escalates_without_auto_effect(self):
   _,admitted=self.submit();author=self.claim('agy-v2');self.publish(author,'Plan.')
   removed=WorkServiceFactory(make_v2_config(),lambda:self.cluster.connect('forge_agent')).create();self.assertIsNotNone(removed.workflow_worker)

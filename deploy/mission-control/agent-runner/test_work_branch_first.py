@@ -25,7 +25,7 @@ from work_review import ReviewedCandidateProvider, ReviewWorker
 
 
 @contextmanager
-def native_fixture(*, diverge=False):
+def native_fixture(*, diverge=False, historical_v1=False, main_only=False):
     with fixture() as values:
         root, config, source, workspaces, _accepted, bare, provider, *_ = values
         config = replace(config, native_delivery_mode='branch-first-v1')
@@ -33,14 +33,29 @@ def native_fixture(*, diverge=False):
             (workspace.path/'safe-link.py').unlink()
             source = {**source, 'workspace_digest': workspace.digest()}
         canonical_repo = config.worker.projects['homelab']
-        if diverge:
-            (canonical_repo/'app.py').write_text('concurrent main implementation\n')
+        if diverge or main_only:
+            if diverge:(canonical_repo/'app.py').write_text('concurrent main implementation\n')
             (canonical_repo/'main-only.py').write_text('preserve new main source\n')
+            (canonical_repo/'.cargo').mkdir()
+            (canonical_repo/'.cargo'/'config.toml').write_text('[build]\njobs = 2\n')
             git(canonical_repo,'add','.')
             git(canonical_repo,'commit','--quiet','-m','concurrent main source')
-            git(canonical_repo,'push','--quiet',str(bare),'main')
+            if not historical_v1:git(canonical_repo,'push','--quiet',str(bare),'main')
         main = git(bare,'rev-parse','refs/heads/main').decode().strip()
         job = review_job(source, workflow_id=str(uuid4()), correlation_id=str(uuid4()))
+        if historical_v1:
+            # Reproduce the immutable source receipt emitted by the previous
+            # branch-first publisher. It observed new main without merging it.
+            selected={**job,'publication_id':job['review_id']}
+            snapshot=WorkspaceSnapshotProvider(workspaces).create(job)
+            private,head=provider.prepare_source(selected,snapshot)
+            git(canonical_repo,'push','--quiet',str(bare),'main')
+            provider._git(private,'fetch','--quiet',str(bare),'refs/heads/main')
+            main=git(bare,'rev-parse','refs/heads/main').decode().strip()
+            path=config.state_root/job['review_id']/'prepared-source.json'
+            current=json.loads(path.read_text())
+            durable_json(path,{'version':1,'identity':current['identity'],
+                'candidate_commit':head,'expected_main':main})
         scope = {key:job[key] for key in ('project_alias','task_id','attempt_id','review_id','workflow_id','correlation_id')}
         scope['owner_id'] = config.worker.owner
         store = ReviewStore()
@@ -85,6 +100,111 @@ def native_fixture(*, diverge=False):
 
 
 class BranchFirstTest(unittest.TestCase):
+    def test_current_main_integrates_privately_before_push_event_and_jenkins(self):
+        with native_fixture(main_only=True) as (values,config,job,main,store,native,_repair,candidates,events,worker):
+            native_path=values[4]
+            before={path.name:path.read_bytes() for path in native_path.iterdir() if path.is_file()}
+            native_head=git(native_path,'rev-parse','HEAD')
+            worker.process(job)
+            outcome=store.outcomes[-1][1]
+            self.assertEqual(outcome['disposition'],'awaiting_review',outcome)
+            self.assertEqual(events,['push','jenkins'])
+            private=candidates.directory(job['review_id'])/'repository'
+            self.assertEqual((private/'main-only.py').read_text(),'preserve new main source\n')
+            self.assertTrue((private/'new.py').is_file())
+            self.assertEqual((private/'.cargo'/'config.toml').read_text(),'[build]\njobs = 2\n')
+            git(private,'merge-base','--is-ancestor',main,outcome['candidate_commit'])
+            manifest=candidates.read(job['review_id'])
+            self.assertTrue(manifest['repair_requires_new_workspace'])
+            self.assertEqual(manifest['integration_base'],main)
+            prepared=json.loads((private.parent/'prepared-source.json').read_text())
+            self.assertEqual(prepared['version'],2)
+            self.assertNotEqual(prepared['authored_tree'],prepared['candidate_tree'])
+            self.assertEqual(prepared['candidate_commit'],outcome['candidate_commit'])
+            self.assertEqual(prepared['candidate_tree'],git(private,'rev-parse','HEAD^{tree}').decode().strip())
+            self.assertEqual(git(native_path,'rev-parse','HEAD'),native_head)
+            self.assertEqual({path.name:path.read_bytes() for path in native_path.iterdir() if path.is_file()},before)
+            self.assertFalse((native_path/'main-only.py').exists())
+
+    def test_restart_after_integrated_push_keeps_exact_candidate_when_main_advances(self):
+        with native_fixture(main_only=True) as (values,config,job,main,store,native,_repair,candidates,events,worker):
+            ack=store.native_branch_published.return_value
+            store.native_branch_published.side_effect=[KeyboardInterrupt('unknown event ACK'),ack]
+            with self.assertRaises(KeyboardInterrupt):worker.process(job)
+            private=candidates.directory(job['review_id'])/'repository'
+            receipt=(private.parent/'prepared-source.json').read_bytes()
+            frozen=git(private,'rev-parse','HEAD').decode().strip()
+            canonical_repo=config.worker.projects['homelab']
+            (canonical_repo/'later-main.py').write_text('changed after first push\n')
+            git(canonical_repo,'add','.')
+            git(canonical_repo,'commit','--quiet','-m','later concurrent main')
+            git(canonical_repo,'push','--quiet',str(values[5]),'main')
+            worker.process(job)
+            outcome=store.outcomes[-1][1]
+            self.assertEqual(outcome['disposition'],'awaiting_review',outcome)
+            self.assertEqual(outcome['candidate_commit'],frozen)
+            self.assertEqual(outcome['verification']['integration_base'],main)
+            self.assertEqual(events,['push','jenkins'])
+            self.assertEqual((private.parent/'prepared-source.json').read_bytes(),receipt)
+            self.assertFalse((private/'later-main.py').exists())
+            self.assertEqual(git(values[5],'rev-parse','refs/heads/forge/task-'+job['review_id']).decode().strip(),frozen)
+            self.assertNotEqual(git(values[5],'rev-parse','refs/heads/main').decode().strip(),main)
+
+    def test_prepared_receipt_distinguishes_raw_snapshot_from_integrated_tree_and_rejects_tamper(self):
+        with native_fixture(main_only=True) as (values,config,job,_main,_store,native,_repair,candidates,_events,_worker):
+            snapshot=WorkspaceSnapshotProvider(values[3]).create(job)
+            selected={**job,'publication_id':job['review_id']}
+            private,head=native.git.prepare_source(selected,snapshot)
+            receipt=private.parent/'prepared-source.json'
+            value=json.loads(receipt.read_text())
+            # The merged tree legitimately differs from the model-authored tree.
+            self.assertNotEqual(value['authored_tree'],value['candidate_tree'])
+            self.assertEqual(native.git.prepare_source(selected,snapshot),(private,head))
+            for key,wrong in [('authored_commit',head),('candidate_tree','a'*40),('expected_main','b'*40),('version',True)]:
+                with self.subTest(field=key):
+                    durable_json(receipt,{**value,key:wrong})
+                    with self.assertRaises(PublicationError):native.git.prepare_source(selected,snapshot)
+            durable_json(receipt,value)
+            self.assertEqual(native.git.prepare_source(selected,snapshot),(private,head))
+
+    def test_actual_current_main_conflict_is_honest_source_feedback_before_any_push_or_build(self):
+        with native_fixture(diverge=True) as (values,_config,job,main,store,native,_repair,candidates,events,worker):
+            worker.process(job)
+            outcome=store.outcomes[-1][1]
+            self.assertEqual(outcome['disposition'],'repair',outcome)
+            self.assertEqual(outcome['reason'],'main_merge_conflict')
+            self.assertEqual(events,[])
+            self.assertEqual(native.delivery.submissions,0)
+            self.assertEqual(len(validate_findings(outcome['findings'])),1)
+            manifest=candidates.read(job['review_id'])
+            self.assertNotIn('native_ci',manifest)
+            self.assertNotIn('delivery_failure',manifest)
+            self.assertFalse(manifest['checks_passed'])
+            self.assertEqual(outcome['verification']['checks'],[])
+            self.assertEqual(manifest['source_integration']['conflict_paths'],['app.py'])
+            private=candidates.directory(job['review_id'])/'repository'
+            self.assertIn('<<<<<<<',(private/'app.py').read_text())
+            self.assertEqual((private/'main-only.py').read_text(),'preserve new main source\n')
+            self.assertEqual(git(private,'show','-s','--format=%P','HEAD').decode().split(),
+                [manifest['source_integration']['authored_commit'],main])
+            git(private,'merge-base','--is-ancestor',main,outcome['candidate_commit'])
+            self.assertEqual(git(values[5],'show-ref','--heads').decode().count('refs/heads/forge/task-'),0)
+            # Exact durable replay reuses the same unapproved source and finding.
+            worker.process(job)
+            self.assertEqual(store.outcomes[-1][1],outcome)
+            self.assertEqual(events,[])
+            self.assertEqual(native.delivery.submissions,0)
+
+    def test_pre_ci_conflict_respects_spent_owner_continuation_and_never_runs_ci(self):
+        with native_fixture(diverge=True) as (_values,_config,job,_main,store,native,_repair,_candidates,events,worker):
+            job={**job,'auto_repair':False,'round':2,'stagnant_rounds':2}
+            worker.process(job)
+            outcome=store.outcomes[-1][1]
+            self.assertEqual(outcome['disposition'],'handoff',outcome)
+            self.assertFalse(outcome['verification']['checks_passed'])
+            self.assertEqual(events,[])
+            self.assertEqual(native.delivery.submissions,0)
+
     def test_exact_source_is_pushed_before_jenkins_and_reuses_its_owned_branch(self):
         with native_fixture() as (values,config,job,main,store,native,_repair,candidates,events,worker):
             worker.process(job)
@@ -124,9 +244,9 @@ class BranchFirstTest(unittest.TestCase):
             binding = candidates.read(job['review_id'])['native_ci']
             self.assertEqual(binding['source_publication']['event_id'],acknowledged['event_id'])
 
-    def test_restart_between_seed_renames_finishes_same_unapproved_source(self):
+    def test_historical_v1_restart_between_seed_renames_preserves_same_source(self):
         from pathlib import Path
-        with native_fixture(diverge=True) as (_values,_config,job,_main,store,native,_repair,candidates,events,worker):
+        with native_fixture(diverge=True,historical_v1=True) as (_values,_config,job,_main,store,native,_repair,candidates,events,worker):
             original = Path.rename
             def interrupted(path,target):
                 if path.name=='repository' and path.parent.name=='delivery-repair':
@@ -142,8 +262,8 @@ class BranchFirstTest(unittest.TestCase):
             self.assertEqual(native.delivery.submissions,1)
             self.assertEqual(events.count('push'),1)
 
-    def test_genuine_ci_main_failure_preserves_tested_source_and_honest_conflict_seed(self):
-        with native_fixture(diverge=True) as (values,config,job,main,store,native,_repair,candidates,events,worker):
+    def test_historical_v1_ci_main_failure_preserves_tested_source_and_honest_seed(self):
+        with native_fixture(diverge=True,historical_v1=True) as (values,config,job,main,store,native,_repair,candidates,events,worker):
             worker.process(job)
             outcome = store.outcomes[-1][1]
             self.assertEqual(outcome['disposition'],'repair',outcome)
