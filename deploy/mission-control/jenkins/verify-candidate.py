@@ -454,9 +454,65 @@ class ClearOutcome:
     cache_entry_count: int
 
 
+@contextmanager
+def deferred_cancellation():
+    """Defer TERM/INT only during rollback or the final receipt commit.
+
+    The caller checks pending cancellation before the durable success marker.
+    Signals after that terminal boundary cannot invalidate an already committed
+    passed receipt. SIGKILL is handled by durable journal reconciliation.
+    """
+    pending = False
+    def remember(_number, _frame):
+        nonlocal pending
+        pending = True
+    old = {number: signal.signal(number, remember) for number in (signal.SIGTERM, signal.SIGINT)}
+    def check():
+        if pending:
+            raise InterruptedError('Jenkins requested verification cancellation')
+    try:
+        yield check
+    finally:
+        for number, handler in old.items():
+            signal.signal(number, handler)
+
+
+def mark_cache_rolled_back(result, *, inventory=None):
+    cache = result['cache']
+    if cache['publish_status'] == 'published':
+        cache['publish_status'] = 'rolled_back'
+        cache['published_bytes'] = 0
+        cache['published_files'] = 0
+        cache['cache_total_bytes'] = inventory[0] if inventory is not None else None
+        cache['cache_entry_count'] = inventory[1] if inventory is not None else None
+        for stage in result['stages']:
+            if stage['name'] == 'cache_publish':
+                stage.update(status='rolled_back', published_bytes=0, published_files=0, evicted_entries=0)
+
+
 class CargoCachePort(ABC):
     provider_name: str
     enabled: bool
+
+    @property
+    def terminal_result_committed(self):
+        return False
+
+    @contextmanager
+    def verification_transaction(self):
+        """Own optional publication until the supervisor has a durable result."""
+        yield
+
+    def recover_pending(self, *, action_id=None, result_path=None):
+        """Resolve durable provisional publications before result replay."""
+
+    def rollback_result(self, result):
+        mark_cache_rolled_back(result)
+
+    def finish_result(self, path, result, reader_group, *, cancelled):
+        if result['status'] == 'passed' and cancelled.exists():
+            raise InterruptedError('Verification cancelled before result commit')
+        write_result(path, result, reader_group)
 
     @abstractmethod
     def resolve_key(
@@ -936,10 +992,301 @@ class LocalCargoCacheProvider(CargoCachePort):
     def __init__(self, config: CargoCacheConfig, *, expected_owner: int = 0, expected_group: int | None = None):
         self.config = config
         self.expected_owner = expected_owner
+        self._publication = None
+        self._publication_lock_context = None
+        self._verification_active = False
+        self._maintenance_evicted = 0
+        self._rollback_inventory = None
+        self._unusable_reason = None
+        self._terminal_result_committed = False
         if expected_group is None:
             self.expected_group = expected_owner if expected_owner == 0 else os.getgid()
         else:
             self.expected_group = expected_group
+
+    @property
+    def terminal_result_committed(self):
+        return self._terminal_result_committed
+
+    @contextmanager
+    def verification_transaction(self):
+        if self._verification_active:
+            raise ValueError('CI cache transaction is already active')
+        self._verification_active = True
+        self._terminal_result_committed = False
+        try:
+            yield
+        finally:
+            try:
+                if (self._publication is not None
+                        and (self._publication / 'pending-publication.json').exists()):
+                    # A Python exception, cleanup failure or uncommitted return
+                    # must never leave the provisional pointer authoritative.
+                    with deferred_cancellation():
+                        self._resolve_publication_locked(self._publication, commit=False)
+                    self._publication = None
+            finally:
+                if self._publication_lock_context is not None:
+                    try:
+                        self._publication_lock_context.__exit__(None, None, None)
+                    except OSError:
+                        if not self._terminal_result_committed:
+                            raise
+                    finally:
+                        self._publication_lock_context = None
+                self._verification_active = False
+
+    @contextmanager
+    def _publication_lock(self):
+        if not self._verification_active or self._publication_lock_context is not None:
+            raise ValueError('Cache publication requires its supervisor transaction')
+        context = self._cache_lock()
+        root = context.__enter__()
+        try:
+            yield root
+        finally:
+            if self._publication is None:
+                context.__exit__(None, None, None)
+            else:
+                # Hold the exclusive lock through log close, UID/scratch
+                # cleanup and final root receipt publication. Other cache users
+                # cannot reconcile/clear the previous or provisional snapshot.
+                self._publication_lock_context = context
+
+    def _optional_metadata(self, path, maximum):
+        if not path.exists() and not path.is_symlink():
+            return None
+        return read_file(path, owner=self.expected_owner, maximum=maximum).hex()
+
+    def _restore_metadata(self, path, encoded):
+        if encoded is None:
+            if path.exists() or path.is_symlink():
+                path.unlink()
+                _fsync_dir(path.parent)
+            return
+        # Preserve the exact before-image, including formatting and newline.
+        raw = bytes.fromhex(encoded)
+        temporary = path.with_name(path.name + '.rollback')
+        if temporary.exists() or temporary.is_symlink():
+            read_file(temporary, owner=self.expected_owner, maximum=16384)
+            temporary.unlink()
+        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        _fsync_dir(path.parent)
+
+    def _read_publication_locked(self, entry_dir):
+        path = entry_dir / 'pending-publication.json'
+        body = json.loads(read_file(path, owner=self.expected_owner, maximum=131072))
+        expected = {'version', 'action_id', 'old_current', 'old_last_used', 'new_pointer', 'result', 'committed'}
+        if (not isinstance(body, dict) or set(body) != expected or body['version'] != 1
+                or type(body['committed']) is not bool
+                or not isinstance(body['action_id'], str)
+                or str(UUID(body['action_id'])) != body['action_id']):
+            raise ValueError('Invalid pending cache publication')
+        self._validate_pointer(body['new_pointer'])
+        if not body['new_pointer']['snapshot_id'].endswith('-' + body['action_id']):
+            raise ValueError('Pending cache action mismatch')
+        for name, maximum in (('old_current', 16384), ('old_last_used', 4096)):
+            value = body[name]
+            if value is not None:
+                if not isinstance(value, str) or len(value) > maximum * 2:
+                    raise ValueError('Invalid cache rollback before-image')
+                decoded = bytes.fromhex(value)
+                parsed = json.loads(decoded)
+                if name == 'old_current':
+                    self._validate_pointer(parsed)
+                elif (not isinstance(parsed, dict) or not _is_strict_int(parsed.get('last_used_at_ns'))):
+                    raise ValueError('Invalid cache rollback last-use metadata')
+        result = body['result']
+        if result is not None:
+            if (not isinstance(result, dict) or set(result) != {'path', 'sha256'}
+                    or not isinstance(result['path'], str)
+                    or not isinstance(result['sha256'], str)
+                    or not DIGEST.fullmatch(result['sha256'])):
+                raise ValueError('Invalid cache result binding')
+            result_path = Path(result['path'])
+            if (not result_path.is_absolute() or '..' in result_path.parts
+                    or result_path.name != body['action_id'] + '.json'):
+                raise ValueError('Invalid cache result path')
+        return body
+
+    def _bound_result_path(self, body):
+        result_path = Path(body['result']['path'])
+        for parent in result_path.parents:
+            if not stat.S_ISDIR(parent.lstat().st_mode):
+                raise ValueError('Unsafe cache result ancestor')
+        regular_directory(result_path.parent, owner=self.expected_owner)
+        return result_path
+
+    def _restore_beforeimages(self, entry_dir, body):
+        if body['old_current'] is not None:
+            previous_id = json.loads(bytes.fromhex(body['old_current']))['snapshot_id']
+            regular_directory(entry_dir / previous_id, owner=self.expected_owner)
+        self._restore_metadata(entry_dir / 'current.json', body['old_current'])
+        self._restore_metadata(entry_dir / 'last_used.json', body['old_last_used'])
+        self._rollback_inventory = None
+
+    def _matching_publication_result(self, body):
+        if body['result'] is None:
+            return False
+        try:
+            result = json.loads(read_file(self._bound_result_path(body), owner=self.expected_owner, maximum=1024 * 1024))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return False
+        return (isinstance(result, dict) and result.get('action_id') == body['action_id']
+                and result.get('status') == 'passed' and result.get('cleanup_confirmed') is True
+                and hashlib.sha256(canonical(result)).hexdigest() == body['result']['sha256'])
+
+    def rollback_result(self, result):
+        mark_cache_rolled_back(result, inventory=self._rollback_inventory)
+
+    def _pointed_inventory_locked(self):
+        total = 0
+        count = 0
+        for _project, _scope, _compat, entry in self._entry_directories_locked(self.config.root):
+            if not (entry / 'current.json').exists():
+                continue
+            total += self._read_pointer_locked(entry)['total_bytes']
+            count += 1
+        return total, count
+
+    def _resolve_publication_locked(self, entry_dir, *, commit=None):
+        body = self._read_publication_locked(entry_dir)
+        committed = False
+        if commit is not False and body['committed']:
+            # An unavailable receipt is uncertainty, not evidence that an
+            # already committed success should be downgraded. Leave its journal
+            # and snapshots intact for recovery; fresh callers can cold-build.
+            committed = self._matching_publication_result(body)
+        if commit is True and not committed:
+            raise ValueError('Cache publication lacks its durable successful result')
+        if not committed:
+            # Restore the known-good cache BEFORE any fallible receipt access.
+            # Persist the abort decision first. A crash during restoration or
+            # accounting must never reinterpret this transaction as committed.
+            body['committed'] = False
+            _atomic_write_json(entry_dir / 'pending-publication.json', body)
+            self._restore_beforeimages(entry_dir, body)
+            if body['result'] is not None:
+                result_path = self._bound_result_path(body)
+                temporary = result_path.with_suffix('.new')
+                if temporary.exists() or temporary.is_symlink():
+                    read_file(temporary, owner=self.expected_owner, maximum=1024 * 1024)
+                    temporary.unlink()
+                    _fsync_dir(temporary.parent)
+                if self._matching_publication_result(body):
+                    # A crash may have replaced the success receipt before the
+                    # transaction's durable marker. Preserve its genuine source
+                    # identities and cleanup proof, but make same-action replay
+                    # honestly report the unfinished publication as failed.
+                    info = result_path.lstat()
+                    result = json.loads(read_file(result_path, owner=self.expected_owner, maximum=1024 * 1024))
+                    result.update(status='failed', failure='cancelled_or_timed_out')
+                    self.rollback_result(result)
+                    write_result(result_path, result, info.st_gid)
+                elif result_path.exists() or result_path.is_symlink():
+                    observed = json.loads(read_file(result_path, owner=self.expected_owner, maximum=1024 * 1024))
+                    if not isinstance(observed, dict) or observed.get('status') != 'failed':
+                        raise ValueError('Pending cache publication has a conflicting result')
+            new_snapshot = entry_dir / body['new_pointer']['snapshot_id']
+            if new_snapshot.exists() or new_snapshot.is_symlink():
+                regular_directory(new_snapshot, owner=self.expected_owner)
+                _safe_rmtree(new_snapshot)
+        else:
+            current = self._read_pointer_locked(entry_dir)
+            if current != body['new_pointer']:
+                raise ValueError('Committed cache pointer does not match its result')
+            if body['old_current'] is not None:
+                previous = json.loads(bytes.fromhex(body['old_current']))['snapshot_id']
+                if previous != current['snapshot_id']:
+                    old_snapshot = entry_dir / previous
+                    if old_snapshot.exists() or old_snapshot.is_symlink():
+                        regular_directory(old_snapshot, owner=self.expected_owner)
+                        _safe_rmtree(old_snapshot)
+        (entry_dir / 'pending-publication.json').unlink()
+        _fsync_dir(entry_dir)
+        if not committed:
+            try:
+                self._rollback_inventory = self._pointed_inventory_locked()
+            except InterruptedError:
+                raise
+            except (OSError, ValueError):
+                self._rollback_inventory = None
+
+    def recover_pending(self, *, action_id=None, result_path=None):
+        if not self.config.root.exists():
+            return
+        try:
+            with self._cache_lock() as root, deferred_cancellation() as check_cancelled:
+                try:
+                    for _project, _scope, _compat, entry in self._entry_directories_locked(root):
+                        pending = entry / 'pending-publication.json'
+                        if pending.exists() or pending.is_symlink():
+                            self._resolve_publication_locked(entry)
+                finally:
+                    # Safe recovery may defer a signal; it must propagate
+                    # before replaying a result or launching another build.
+                    check_cancelled()
+        except InterruptedError:
+            raise
+        except (OSError, ValueError) as error:
+            if result_path is None or result_path.exists() or result_path.is_symlink():
+                # A saved same-action result is unsafe until reconciliation.
+                raise
+            # Unusable optional cache must not prevent an unrelated fresh
+            # source verification. Do not alter the unknown transaction or
+            # acknowledge its receipt; this scoped provider does no more I/O.
+            self._unusable_reason = type(error).__name__ + ': ' + str(error)[:160]
+
+    def finish_result(self, path, result, reader_group, *, cancelled):
+        if self._publication is None:
+            return super().finish_result(path, result, reader_group, cancelled=cancelled)
+        entry_dir = self._publication
+        if result['status'] != 'passed':
+            with deferred_cancellation():
+                self._resolve_publication_locked(entry_dir, commit=False)
+            self._publication = None
+            self.rollback_result(result)
+            return super().finish_result(path, result, reader_group, cancelled=cancelled)
+        body = self._read_publication_locked(entry_dir)
+        body['result'] = {'path': str(path), 'sha256': hashlib.sha256(canonical(result)).hexdigest()}
+        _atomic_write_json(entry_dir / 'pending-publication.json', body)
+        with deferred_cancellation() as check_signal:
+            def check_cancelled():
+                check_signal()
+                if cancelled.exists():
+                    raise InterruptedError('Verification cancelled before cache/result commit')
+            try:
+                check_cancelled()
+                _atomic_write_json(entry_dir / 'current.json', body['new_pointer'])
+                check_cancelled()
+                _atomic_write_json(entry_dir / 'last_used.json', {'last_used_at_ns': body['new_pointer']['published_at_ns']})
+                check_cancelled()
+                write_result(path, result, reader_group)
+                check_cancelled()
+                # This durable marker is the final success boundary. A crash
+                # before it restores the previous cache; a crash after it is
+                # completed only with the exact passed+cleanup-confirmed receipt.
+                body['committed'] = True
+                _atomic_write_json(entry_dir / 'pending-publication.json', body)
+                check_cancelled()
+            except BaseException:
+                self._resolve_publication_locked(entry_dir, commit=False)
+                self._publication = None
+                raise
+            self._terminal_result_committed = True
+            self._publication = None
+            # No fallible cleanup after the durable success boundary. Leave the
+            # committed journal for next-operation reconciliation if unlink or
+            # directory fsync is unavailable; success is already authoritative.
+            try:
+                self._resolve_publication_locked(entry_dir, commit=True)
+            except (OSError, ValueError):
+                pass
 
     def _ensure_root(self):
         root = self.config.root
@@ -1068,6 +1415,8 @@ class LocalCargoCacheProvider(CargoCachePort):
         def elapsed():
             return int((time.monotonic() - started) * 1000)
 
+        if self._unusable_reason is not None:
+            return CacheRestoreOutcome(status='corrupt_fallback', fallback_reason=self._unusable_reason)
         if not self.config.root.exists():
             return CacheRestoreOutcome(status='miss', fallback_reason='cache_root_missing', elapsed_ms=elapsed())
 
@@ -1075,7 +1424,18 @@ class LocalCargoCacheProvider(CargoCachePort):
             with self._cache_lock() as root:
                 self._cleanup_orphaned_staging(root)
                 self._reconcile_snapshots_locked(root)
+                own_entry = (root / 'scopes' / key.project_alias / key.scope_dir / key.compat_key
+                             if key.scope_dir is not None else None)
                 entry_dir, status_label, expected_scope, is_seed = self._select_candidate_entry(root, key)
+                if own_entry is not None:
+                    reserve_entry = 1 if not (own_entry / 'current.json').exists() else 0
+                    # Maintenance precedes the publication transaction baseline;
+                    # protect the actual selected seed so main fallback remains
+                    # usable even when a new branch needs a retention slot.
+                    maintenance = self._prune_locked(
+                        root, protected_entry=entry_dir or own_entry, reserve_entries=reserve_entry,
+                    )
+                    self._maintenance_evicted = maintenance.evicted_entries
                 if entry_dir is None:
                     reason = 'compat_key_mismatch' if status_label == 'incompatible' else 'no_matching_entry'
                     return CacheRestoreOutcome(status=status_label, fallback_reason=reason, elapsed_ms=elapsed())
@@ -1240,14 +1600,18 @@ class LocalCargoCacheProvider(CargoCachePort):
         def elapsed():
             return int((time.monotonic() - started) * 1000)
 
+        if self._unusable_reason is not None:
+            return CachePublishOutcome(status='skipped_error', reason=self._unusable_reason,
+                                       cache_total_bytes=None, cache_entry_count=None)
         if key.scope_dir is None or key.branch_scope == 'detached':
             return CachePublishOutcome(status='skipped_unscoped', elapsed_ms=elapsed(), reason='detached_scope')
 
         staging = None
         try:
-            with self._cache_lock() as root:
+            with self._publication_lock() as root:
                 self._cleanup_orphaned_staging(root)
                 self._reconcile_snapshots_locked(root)
+                baseline_bytes, baseline_count = self._inventory_locked(root)
                 published_at_ns = time.time_ns()
                 staging = root / ('.staging-' + action_id)
                 if staging.exists() or staging.is_symlink():
@@ -1329,6 +1693,21 @@ class LocalCargoCacheProvider(CargoCachePort):
                         reason='snapshot_exceeds_max_total_bytes',
                     )
 
+                entry_dir = self._ensure_entry_directory(root, key)
+                has_previous = (entry_dir / 'current.json').exists()
+                retained_bytes = baseline_bytes + total_bytes
+                retained_count = baseline_count + (0 if has_previous else 1)
+                if (retained_bytes > self.config.max_total_bytes
+                        or retained_count > self.config.max_entries):
+                    _safe_rmtree(staging)
+                    staging = None
+                    return CachePublishOutcome(
+                        status='skipped_capacity', elapsed_ms=elapsed(),
+                        cache_total_bytes=baseline_bytes, cache_entry_count=baseline_count,
+                        evicted_entries=self._maintenance_evicted,
+                        reason='retained_predecessor_and_new_snapshot_exceed_capacity',
+                    )
+
                 files_sha256 = hashlib.sha256(canonical(all_entries)).hexdigest()
                 meta = {
                     'schema_version': CACHE_SCHEMA_VERSION,
@@ -1354,37 +1733,27 @@ class LocalCargoCacheProvider(CargoCachePort):
                 os.replace(staging, snapshot_dir)
                 staging = None
                 _fsync_dir(entry_dir)
-                # Atomic current.json replacement is the publication commit.
-                # All artifacts and metadata are complete before this point.
-                # Cancellation before replacement preserves the old pointer;
-                # after replacement the new known-good snapshot may remain, but
-                # InterruptedError still makes the supervisor fail the action.
-                _atomic_write_json(
-                    entry_dir / 'current.json',
-                    {
-                        'snapshot_id': snapshot_id,
-                        'published_at_ns': published_at_ns,
-                        'total_bytes': total_bytes,
-                        'file_count': file_count,
-                    },
-                    mode=0o600,
-                )
-                _atomic_write_json(
-                    entry_dir / 'last_used.json',
-                    {'last_used_at_ns': published_at_ns},
-                    mode=0o600,
-                )
-                # Reconciliation under the same lock removes all superseded
-                # snapshots before retention computes bounded storage totals.
-                pruned = self._prune_locked(root, protected_entry=entry_dir)
+                old_current = self._optional_metadata(entry_dir / 'current.json', 16384)
+                old_last_used = self._optional_metadata(entry_dir / 'last_used.json', 4096)
+                pointer = {
+                    'snapshot_id': snapshot_id, 'published_at_ns': published_at_ns,
+                    'total_bytes': total_bytes, 'file_count': file_count,
+                }
+                journal = {
+                    'version': 1, 'action_id': action_id,
+                    'old_current': old_current, 'old_last_used': old_last_used,
+                    'new_pointer': pointer, 'result': None, 'committed': False,
+                }
+                _atomic_write_json(entry_dir / 'pending-publication.json', journal)
+                self._publication = entry_dir
                 return CachePublishOutcome(
                     status='published',
                     elapsed_ms=elapsed(),
                     published_bytes=total_bytes,
                     published_files=file_count,
-                    evicted_entries=pruned.evicted_entries,
-                    cache_total_bytes=pruned.cache_total_bytes,
-                    cache_entry_count=pruned.cache_entry_count,
+                    evicted_entries=self._maintenance_evicted,
+                    cache_total_bytes=retained_bytes,
+                    cache_entry_count=retained_count,
                     snapshot_id=snapshot_id,
                 )
         except InterruptedError:
@@ -1420,8 +1789,7 @@ class LocalCargoCacheProvider(CargoCachePort):
                     regular_directory(entry_dir, owner=self.expected_owner)
                     yield project_name, scope_name, compat_name, entry_dir
 
-    def _read_pointer_locked(self, entry_dir):
-        pointer = json.loads(read_file(entry_dir / 'current.json', owner=self.expected_owner, maximum=16384))
+    def _validate_pointer(self, pointer):
         if (not isinstance(pointer, dict)
                 or not isinstance(pointer.get('snapshot_id'), str)
                 or not re.fullmatch(r'[0-9]+-[0-9a-f-]{36}', pointer['snapshot_id'])
@@ -1430,6 +1798,10 @@ class LocalCargoCacheProvider(CargoCachePort):
                 or not _is_strict_int(pointer.get('total_bytes'))
                 or pointer['total_bytes'] < 0):
             raise ValueError('Invalid CI cache pointer')
+
+    def _read_pointer_locked(self, entry_dir):
+        pointer = json.loads(read_file(entry_dir / 'current.json', owner=self.expected_owner, maximum=16384))
+        self._validate_pointer(pointer)
         regular_directory(entry_dir / pointer['snapshot_id'], owner=self.expected_owner)
         return pointer
 
@@ -1445,6 +1817,9 @@ class LocalCargoCacheProvider(CargoCachePort):
         """
         scopes_dir = root / 'scopes'
         for _project, _scope, _compat, entry_dir in list(self._entry_directories_locked(root)):
+            pending = entry_dir / 'pending-publication.json'
+            if pending.exists() or pending.is_symlink():
+                self._resolve_publication_locked(entry_dir)
             try:
                 pointer = self._read_pointer_locked(entry_dir)
             except InterruptedError:
@@ -1508,7 +1883,7 @@ class LocalCargoCacheProvider(CargoCachePort):
             except OSError:
                 break
 
-    def _prune_locked(self, root, *, protected_entry=None, now_ns=None):
+    def _prune_locked(self, root, *, protected_entry=None, now_ns=None, reserve_entries=0):
         self._cleanup_orphaned_staging(root)
         scopes_dir = root / 'scopes'
         entries = self._collect_entries_locked(root)
@@ -1527,7 +1902,7 @@ class LocalCargoCacheProvider(CargoCachePort):
                 remaining.append(item)
 
         # 2. Enforce max_entries and max_total_bytes (evict non-main LRU before main).
-        while (len(remaining) > self.config.max_entries
+        while (len(remaining) + reserve_entries > self.config.max_entries
                or sum(item['total_bytes'] for item in remaining) > self.config.max_total_bytes):
             candidates = [item for item in remaining if item['path'] != protected_entry]
             if not candidates:
@@ -1921,6 +2296,13 @@ def execute(action, config, *, cache_port=None):
 
 
 def execute_locked(action, config, *, cache_port=None):
+    if cache_port is None:
+        cache_port = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache'))).create()
+    with cache_port.verification_transaction():
+        return _execute_locked(action, config, cache_port=cache_port)
+
+
+def _execute_locked(action, config, *, cache_port):
     require_main = config.get('require_main_ancestor', False)
     if type(require_main) is not bool:
         raise ValueError('Main ancestry selection must be an operator boolean')
@@ -1971,6 +2353,7 @@ def execute_locked(action, config, *, cache_port=None):
     lock_fd = os.open(results / (action + '.lock'), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock_fd, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        cache_port.recover_pending(action_id=action, result_path=result_path)
         if result_path.exists():
             previous = json.loads(read_file(result_path, owner=0, maximum=262144))
             if previous['request_sha256'] != identity:
@@ -2308,7 +2691,14 @@ def execute_locked(action, config, *, cache_port=None):
             'failure': failure, 'cleanup_confirmed': True,
             'log_sha256': hashlib.sha256(log_path.read_bytes()).hexdigest(),
             'elapsed_ms': int((time.time() - started) * 1000)}
-        write_result(result_path, result, submitter.pw_gid)
+        try:
+            cache_port.finish_result(result_path, result, submitter.pw_gid, cancelled=cancelled)
+        except (OSError, ValueError) as error:
+            result['status'] = 'failed'
+            result['failure'] = ('cancelled_or_timed_out' if isinstance(error, InterruptedError)
+                                 else 'verification_unavailable')
+            cache_port.rollback_result(result)
+            write_result(result_path, result, submitter.pw_gid)
         return result
 
 
@@ -2320,7 +2710,8 @@ def main():
     cache_factory = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache')))
     cache_port = cache_factory.create()
     def interrupted(_number, _frame):
-        raise InterruptedError('Jenkins requested verification cancellation')
+        if not cache_port.terminal_result_committed:
+            raise InterruptedError('Jenkins requested verification cancellation')
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     result = execute(sys.argv[1], config, cache_port=cache_port)

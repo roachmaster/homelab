@@ -281,6 +281,7 @@ after strict two-phase timestamp validation:
   scopes/<project>/<scope_dir>/<compat_key>/
     current.json                           # atomic pointer to immutable snapshot
     last_used.json                         # LRU tracking timestamp
+    pending-publication.json               # durable rollback/result binding while unfinished
     <published_at_ns>-<action_id>/
       meta.json                            # digest-bound metadata & source_inventory
       target/                              # cached CARGO_TARGET_DIR (excludes ui-assets, ui-qa, tmp)
@@ -290,20 +291,39 @@ after strict two-phase timestamp validation:
 - **Default retention bounds** (configured by `setup-ci.py`):
   `max_total_bytes = 20 GiB`, `max_entries = 8`, `max_age_seconds = 14 days`,
   `seed_from_main = true`, `timeout_seconds = 2700`.
-- **Eviction**: Expired entries (`> max_age_seconds`) are removed first, then LRU
-  entries until `entry_count <= max_entries` and `total_bytes <= max_total_bytes`,
-  evicting non-`main` scopes before `main`. The active publication is protected.
-- **Crash recovery**: Under the exclusive cache lock, restore, publication and
-  retention remove staging directories, entries without a valid current pointer,
-  and snapshots not referenced by that pointer before reporting storage totals.
-  Cache-scope directories must remain supervisor-owned and non-writable by
-  other users. Cleanup errors remain visible; symlinks are never traversed.
-- **Cancellation**: `InterruptedError` propagates through optional cache and
-  telemetry handlers into a failed cancellation receipt after confirmed cleanup.
-  Atomic replacement of `current.json` is the publication commit point: a
-  cancellation before replacement preserves the previous pointer; after
-  replacement the fully written new snapshot may remain. Neither case allows
-  the cancelled verification to report success.
+- **Eviction**: At restore acquisition, remove expired entries first, then
+  non-`main` LRU entries before `main`. Protect the selected snapshot, including
+  a main seed, and reserve an entry slot for a new writable scope. Explicit
+  `prune()` and operator clearing retain the same bounds. Detached restores do
+  not perform this entry maintenance.
+- **Publication transaction**: Stage a complete immutable snapshot under the
+  exclusive cache lock. Before replacing either metadata file, persist a
+  supervisor-owned journal with exact old pointer/LRU bytes, new snapshot and
+  final result identity. Keep the lock and predecessor through logging,
+  build-user quiescence and scratch cleanup. No entry eviction occurs in this
+  provisional window. If predecessor plus replacement cannot fit the byte or
+  entry bounds, skip optional publication (`skipped_capacity`) and retain the
+  previous cache. Reported publication storage includes the temporarily retained
+  predecessor; copying into staging also needs temporary disk space.
+- **Crash recovery**: Resolve journals before same-action result replay and
+  before snapshot GC. Only a durable committed marker plus the exact passed,
+  cleanup-confirmed root result authorizes the new pointer. Otherwise persist
+  an abort decision, restore previous metadata before receipt access, convert
+  an exact provisional success to a failed result, and remove the new snapshot.
+  Recovery is repeatable after a crash during rollback or predecessor deletion.
+  A malformed unrelated optional cache produces a clean build with
+  `corrupt_fallback`/`skipped_error`; uncertain saved-result replay fails closed.
+  Unknown storage totals are `null`, never a false empty cache. Root ownership,
+  bounded regular-file reads and non-symlink directories remain mandatory.
+- **Cancellation**: Recheck both signals and the spool cancellation marker at
+  finalization. Pointer replacement is provisional: interruption before durable
+  successful completion restores the previous usable cache, including when it
+  arrives after pointer or receipt replacement. Commit uses a narrow signal
+  guard and checks cancellation after the final marker write. After terminal
+  success, deferred predecessor GC may be retried without downgrading a genuine
+  passed result. Cleanup/result failures fail or remain unacknowledged; they
+  never authorize a provisional publication. `rolled_back` reports zero newly
+  published bytes and the restored inventory when it can be measured safely.
 - **Systemd**: `setup-ci.py` adds `/mnt/data/forge-homelab/ci-cache` to
   `ReadWritePaths` in `forge-jenkins-ci-agent.service` while keeping
   `ProtectSystem=strict`.
@@ -332,7 +352,7 @@ The next Jenkins build automatically falls back to a clean rebuild (`restore_sta
 - `cache`: `{enabled, provider, project_alias, branch_scope, compat_key, restore_status, restore_fallback_reason, restore_elapsed_ms, restored_bytes, restored_files, publish_status, publish_elapsed_ms, published_bytes, published_files, evicted_entries, cache_total_bytes, cache_entry_count}`
 - `stages`: ordered stage timings (`prepare_source`, `cache_restore`, `check_0`, `check_1`, `check_2`, `verify_source_clean`, `cache_publish`, `cleanup`), with `check_0` and `check_1` reporting Cargo-parsed `cargo_compiling_units`, `cargo_finished_count`, and `cargo_compile_ms` (explicitly marked `cargo_reported_cumulative_phase_ms`, distinct from wall-clock stage `elapsed_ms`), plus `ui_qa_stages` from `run.json` on `check_1`.
 
-### Measured operator qualification
+### Historical measured operator qualification
 
 Isolated cold, warm, post-clear clean rebuild, and deliberate-cancellation
 qualification runs on Mission Control (context commit
@@ -346,9 +366,14 @@ and [forge-cargo-cache-qualification-20261121.json](../../../docs/reports/forge-
 - **After scoped `forge-ci-cache-clear` (`restore_status: "miss"`, `publish_status: "published"`)**: total `34m 59s` (`make ci` `19m 40s`, `make ui-qa` `3m 26s`, backend gate `9m 31s`; `390` compiling units; `785` backend tests passed).
 - **Deliberate cancellation (`restore_status: "miss"`, `publish_status: "skipped_cancelled"`)**: failed cleanly with `cleanup_confirmed: true` without publishing a partial snapshot.
 
-These operator qualification runs are observed Mission Control measurements for
-the qualified cache implementation; they do not substitute for fresh exact-source
-Jenkins checks or independent review on any new candidate.
+These measurements apply to historical canonical helper
+`b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d`
+(qualification-rendered helper `ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a`).
+The original receipts and report hashes remain unchanged. They are not timing
+measurements for the later publication-transaction changes. A new helper needs
+its own correctness evidence, fresh exact-source Jenkins checks and independent
+review; retaining identical Cargo copy, key and timestamp code does not relabel
+these historical total timings as a new performance measurement.
 
 Official references: [Linux installation](https://www.jenkins.io/doc/book/installing/linux/),
 [systemd overrides](https://www.jenkins.io/doc/book/system-administration/systemd-services/),
