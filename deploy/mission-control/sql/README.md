@@ -123,3 +123,13 @@ or password authentication fallback is introduced.
 Read access does not enable external intake, task submission, approval,
 execution, reconciliation or merge. The [external intake design](../../../docs/architecture/muse-agent.md)
 remains dormant and separate from this capability.
+
+Schema26 adds the one-time owner-continuation fence. It preserves the spent
+repair ledger, immutable source/Plan/reviewer receipts and every prior migration.
+A completed source-bound normal resume receipt authorizes one preserved writer;
+canonical SQL repair and replay ingress cannot schedule another automatic writer
+after that marker. Real subsequent verification or merge failures remain durable
+handoffs. Capability probes expose only versioned metadata to the API and
+reconciler, with no new table, role, table-read grant or credential change.
+Run `management/verify-owner-continuation.sql` as part of the complete strict
+verifier closure before owner admission.

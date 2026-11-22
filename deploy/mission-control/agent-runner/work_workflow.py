@@ -14,6 +14,7 @@ import time
 import threading
 import re
 from uuid import UUID,uuid4
+import psycopg2
 from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import PinnedRecipe,sha256_canonical,prepare_title
@@ -215,6 +216,8 @@ class WorkflowStore:
                 if previous['status']!='completed' or not previous['finish_receipt']:raise Rejected(409,'reconcile_required')
                 return dict(previous['finish_receipt']['receipt'])
             if task['revision']!=expected_revision:raise Rejected(409,'revision_conflict')
+            from work_owner_control import owner_continuation_used
+            if owner_continuation_used(cursor, task['workflow_id']):raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE workflow_id=%s AND owner_id=%s AND project_alias=%s FOR UPDATE',
                            (task['workflow_id'],self.store.owner,project_alias))
             w=cursor.fetchone()
@@ -463,6 +466,8 @@ class WorkflowStore:
             if prior:
                 if prior['action']!='review_decide' or prior['intent_digest']!=intent:raise Rejected(409,'idempotency_conflict')
                 return dict(prior['receipt_json'])
+            from work_owner_control import owner_continuation_used
+            if owner_continuation_used(cursor, task['workflow_id']):raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE',
                            (self.store.owner,project_alias,task_id,review_id));q=cursor.fetchone()
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR UPDATE',
@@ -565,6 +570,8 @@ class WorkflowStore:
                 if prior['intent']!=intent:raise Rejected(409,'idempotency_conflict')
                 if prior['status']!='completed' or not prior['finish_receipt']:raise Rejected(409,'reconcile_required')
                 return dict(prior['finish_receipt']['receipt'])
+            from work_owner_control import owner_continuation_used
+            if owner_continuation_used(cursor, task['workflow_id']):raise Rejected(409,'not_reviewable')
             cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE',
                            (self.store.owner,project_alias,task_id,review_id));q=cursor.fetchone()
             cursor.execute('SELECT * FROM forge_agent.coding_workflows WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s FOR UPDATE',
@@ -775,7 +782,7 @@ class WorkflowStore:
                 self._escalate(cursor,w,'Peer review could not safely continue: '+(getattr(error,'code',None) or type(error).__name__))
                 cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))
                 return
-            cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_token=lease_token,finish_receipt=%s,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(Json(receipt),action['action_id']))
+            cursor.execute("UPDATE forge_agent.coding_workflow_actions SET status='completed',finish_token=%s,finish_receipt=%s,lease_token=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE action_id=%s",(action['lease_token'],Json(receipt),action['action_id']))
 
     def _admit_reviewer(self,cursor,w,review,task,validate_target):
         p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
@@ -814,6 +821,42 @@ class WorkflowStore:
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
         return receipt
 
+    def _code_review_source(self,cursor,review,task,authority):
+        authority.validate(cursor,task,'code')
+        cursor.execute("SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s FOR UPDATE",
+            (self.store.owner,task['project_alias'],task['id'],review['source_review_id']))
+        source=cursor.fetchone()
+        if (not source or source['status']!='awaiting_review' or source['attempt_id']!=task['latest_attempt_id']
+            or source['plan_decision_id']!=task['plan_decision_id'] or source['scope_plan_decision_id']!=task['scope_plan_decision_id']
+            or source['candidate_commit']!=review['candidate_commit'] or source['gate_manifest_sha256']!=review['gate_manifest_sha256']
+            or source['verification'].get('checks_passed') is not True or source['verification'].get('cleanup_confirmed') is not True):
+            raise Rejected(409,'result_mismatch')
+        return source
+
+    def _exhausted_code_budget(self,cursor,task,source):
+        # Read under the existing project/root/source locks. The API has no
+        # budget UPDATE grant; canonical repair admission retains its own row
+        # lock and final recheck. Success cannot reset the frozen ledger.
+        cursor.execute("SELECT repair_rounds,stagnant_rounds,policy FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s",
+            (self.store.owner,task['project_alias'],task['repair_root_task_id'] or task['id']))
+        budget=cursor.fetchone()
+        if budget is None:return None
+        evidence={'repair_rounds':budget['repair_rounds'],'max_rounds':budget['policy']['max_rounds'],
+            'stagnant_rounds':max(budget['stagnant_rounds'],source['stagnant_rounds']),
+            'max_stagnant_rounds':budget['policy']['max_stagnant_rounds']}
+        if evidence['repair_rounds']>=evidence['max_rounds'] or evidence['stagnant_rounds']>=evidence['max_stagnant_rounds']:
+            return evidence
+        return None
+
+    def _code_handoff(self,cursor,w,review,reason,budget=None):
+        note=('Independent code review requested revisions; the frozen repair budget is exhausted.'
+            if reason=='repair_budget_exhausted' else 'The source-bound code decision was rejected by a repair/publication guard; retained verdict requires reconciliation.')
+        self._escalate(cursor,w,note)
+        receipt={'status':'escalated','reason':reason,'workflow_id':str(w['workflow_id']),
+            'workflow_review_id':str(review['workflow_review_id']),'review_id':str(review['source_review_id'])}
+        if budget is not None:receipt['budget']=budget
+        return receipt
+
     def _apply_verdict(self,cursor,w,review,task,action,target,parse_verdict):
         p=w['snapshot'];self._grant(cursor,w,p['reviewer_profile'],'review')
         cursor.execute("SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE",(self.store.owner,w['project_alias'],review['reviewer_task_id']));critic=cursor.fetchone()
@@ -835,10 +878,33 @@ class WorkflowStore:
             receipt=self.store.plan_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],plan_attempt_id=review['source_attempt_id'],plan_sha256=review['source_result_sha256'],decision='resume' if decision=='approve' else 'revise',agent_profile=p['author_profile'],idempotency_key=key,note=note,resolve_recipe=lambda _:recipe_from_snapshot(p,'author_implement' if decision=='approve' else 'author_plan'),auto_repair=True,_authority=authority)
             cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,plan_revisions=plan_revisions+%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('implement' if decision=='approve' else 'plan_revision',0 if decision=='approve' else 1,w['workflow_id']))
         else:
-            if decision=='revise':self._grant(cursor,w,p['author_profile'],'implement')
-            receipt=self.store.review_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],review_id=review['source_review_id'],decision='approve' if decision=='approve' else 'repair',agent_profile=p['author_profile'],note=verdict['summary'],idempotency_key=key,findings=verdict['findings'],verified_finding_ids=verdict['attested_finding_ids'],resolve_recipe=lambda:recipe_from_snapshot(p,'author_implement'),_authority=authority)
-            cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('publishing' if decision=='approve' else 'repair',w['workflow_id']))
-        if decision in {'approve','revise'} and not (review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=p['max_plan_revisions']):
+            source=self._code_review_source(cursor,review,task,authority)
+            budget=self._exhausted_code_budget(cursor,task,source) if decision=='revise' else None
+            from work_owner_control import owner_continuation_used
+            owner_spent = decision == 'revise' and owner_continuation_used(cursor, w['workflow_id'])
+            if owner_spent:
+                authority.validate(cursor,task,'code')
+                receipt=self._code_handoff(cursor,w,review,'owner_continuation_exhausted',budget)
+            elif budget is not None:
+                authority.validate(cursor,task,'code')
+                receipt=self._code_handoff(cursor,w,review,'repair_budget_exhausted',budget)
+            else:
+                if decision=='revise':self._grant(cursor,w,p['author_profile'],'implement')
+                # A delegated transition shares this transaction. Catch only its
+                # typed SQL guard rejection here, before the outer transaction
+                # maps it and loses the genuine immutable peer verdict.
+                cursor.execute('SAVEPOINT peer_code_decision')
+                try:
+                    receipt=self.store.review_decide(project_alias=w['project_alias'],task_id=task['id'],expected_revision=task['revision'],review_id=review['source_review_id'],decision='approve' if decision=='approve' else 'repair',agent_profile=p['author_profile'],note=verdict['summary'],idempotency_key=key,findings=verdict['findings'],verified_finding_ids=verdict['attested_finding_ids'],resolve_recipe=lambda:recipe_from_snapshot(p,'author_implement'),_authority=authority)
+                except psycopg2.Error as error:
+                    if error.pgcode!='P0009':raise
+                    cursor.execute('ROLLBACK TO SAVEPOINT peer_code_decision')
+                    authority.validate(cursor,task,'code')
+                    receipt=self._code_handoff(cursor,w,review,'code_transition_not_reviewable')
+                cursor.execute('RELEASE SAVEPOINT peer_code_decision')
+                if receipt.get('status')!='escalated':
+                    cursor.execute("UPDATE forge_agent.coding_workflows SET phase=%s,updated_at=clock_timestamp() WHERE workflow_id=%s",('publishing' if decision=='approve' else 'repair',w['workflow_id']))
+        if receipt.get('status')!='escalated' and decision in {'approve','revise'} and not (review['target_kind']=='plan' and decision=='revise' and w['plan_revisions']>=p['max_plan_revisions']):
             next_task=UUID(receipt['repair_task_id']) if receipt.get('repair_task_id') else task['id']
             cursor.execute("UPDATE forge_agent.coding_tasks SET workflow_feedback_review_id=%s,workflow_feedback_sha256=%s WHERE owner_id=%s AND project_alias=%s AND id=%s",(review['workflow_review_id'],hashlib.sha256(result['content'].encode()).hexdigest(),self.store.owner,w['project_alias'],next_task))
         cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='decided',updated_at=clock_timestamp() WHERE workflow_review_id=%s",(review['workflow_review_id'],))

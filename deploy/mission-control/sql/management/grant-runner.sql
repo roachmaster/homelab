@@ -116,3 +116,12 @@ GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.native_merge_failure(uuid,
  forge_coding_reconciler_api.native_branch_published(uuid,uuid,jsonb) TO forge_coding_reconciler;
 GRANT EXECUTE ON FUNCTION forge_coding_worker_api.read_native_delivery_context(uuid,uuid) TO forge_coding_worker;
 \endif
+
+-- M26: role-local owner-continuation capability and scoped fence probe only.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=26) AS has_owner_continuation
+\gset
+\if :has_owner_continuation
+GRANT EXECUTE ON FUNCTION forge_agent.owner_continuation_capability() TO forge_agent;
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.owner_continuation_capability(),
+ forge_coding_reconciler_api.owner_continuation_fenced(jsonb) TO forge_coding_reconciler;
+\endif

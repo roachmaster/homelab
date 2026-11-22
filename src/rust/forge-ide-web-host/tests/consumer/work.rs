@@ -1215,6 +1215,83 @@ fn review_decision(decision: &str) -> Value {
     value["idempotency_key"] = json!("review-intent");
     value
 }
+
+fn verification_retry_receipt() -> Value {
+    reply(
+        "work_review_decided",
+        json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,
+            "status":"awaiting_review","review_id":"90b8e250-6824-4ef9-af75-078389e71960"}),
+    )
+}
+
+#[test]
+fn review_infrastructure_retry_relays_new_review_once_through_authenticated_gateway() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut request = review_decision("retry_infrastructure");
+    request["findings"] = json!([]);
+    request["verified_finding_ids"] = json!([]);
+    let receipt = verification_retry_receipt();
+    let worker = backend(upstream, vec![(202, receipt.clone())]);
+    assert_reply(
+        &host,
+        "ide.work.review.decide",
+        request.clone(),
+        &auth,
+        202,
+        receipt,
+    );
+    assert_eq!(worker.join().unwrap(), vec![request]);
+}
+
+#[test]
+fn review_infrastructure_retry_rejects_wrong_scope_revision_identity_and_repair_receipts() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let request = review_decision("retry_infrastructure");
+    let invalid: Vec<_> = [
+        ("project_alias", json!("foreign")),
+        ("task_id", json!(OTHER)),
+        ("base_revision", json!(3)),
+        ("revision", json!(4)),
+        ("revision", json!(6)),
+        ("review_id", json!(OTHER)),
+        ("review_id", json!("not-a-uuid")),
+        ("review_id", json!("90B8E250-6824-4EF9-AF75-078389E71960")),
+        ("review_id", Value::Null),
+        (
+            "repair_task_id",
+            json!("90b8e250-6824-4ef9-af75-078389e71960"),
+        ),
+        ("status", json!("running")),
+        ("status", json!("completed")),
+    ]
+    .into_iter()
+    .map(|(key, value)| {
+        let mut receipt = verification_retry_receipt();
+        receipt["event"][key] = value;
+        (202, receipt)
+    })
+    .collect();
+    let count = invalid.len();
+    let worker = backend(upstream, invalid);
+    for _ in 0..count {
+        assert_reply(
+            &host,
+            "ide.work.review.decide",
+            request.clone(),
+            &auth,
+            503,
+            failure("unavailable"),
+        );
+    }
+    assert_eq!(worker.join().unwrap(), vec![request; count]);
+}
+
 #[test]
 fn nonexecution_review_controls_survive_removed_profile_and_implementation_grant() {
     let files = Files::new();
@@ -1247,6 +1324,7 @@ fn nonexecution_review_controls_survive_removed_profile_and_implementation_grant
         "work_review_decided",
         json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,"status":"awaiting_review","review_id":OTHER}),
     );
+    let retried = verification_retry_receipt();
     let publication = reply(
         "work_publication_retry_queued",
         json!({"project_alias":PROJECT,"task_id":TASK,"base_revision":4,"revision":5,"status":"awaiting_review","publication_id":OTHER}),
@@ -1255,7 +1333,7 @@ fn nonexecution_review_controls_survive_removed_profile_and_implementation_grant
         upstream,
         vec![
             (200, receipt.clone()),
-            (200, receipt.clone()),
+            (200, retried.clone()),
             (200, receipt.clone()),
             (202, publication.clone()),
         ],
@@ -1269,7 +1347,11 @@ fn nonexecution_review_controls_survive_removed_profile_and_implementation_grant
             request,
             &auth,
             200,
-            receipt.clone(),
+            if decision == "retry_infrastructure" {
+                retried.clone()
+            } else {
+                receipt.clone()
+            },
         );
     }
     let mut retry = task_request("work_publication_retry");
