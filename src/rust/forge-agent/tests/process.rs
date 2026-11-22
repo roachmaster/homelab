@@ -312,3 +312,17 @@ fn shutdown_during_a_held_request_rejects_dispatch_after_stop_acknowledgement() 
     assert!(!response.contains("\"outcome\":\"success\""), "{response}");
     server.wait_success();
 }
+
+#[test]
+fn repeated_identical_node_info_calls_produce_identical_output() {
+    let fixture = Fixture::new();
+    let mut server = fixture.start(&fixture.server_config(), Some(2));
+    let client = fixture.client_config(server.address);
+    let first_output = fixture.client(&client, "node.info", None);
+    let first = success(&first_output).to_owned();
+    let second_output = fixture.client(&client, "node.info", None);
+    let second = success(&second_output).to_owned();
+    assert_eq!(first, second);
+    assert!(first.contains("test-node"));
+    server.wait_success();
+}

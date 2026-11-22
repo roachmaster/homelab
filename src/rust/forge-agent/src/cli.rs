@@ -209,6 +209,103 @@ mod tests {
         s.iter().map(OsString::from).collect()
     }
     #[test]
+    fn malformed_options_name_the_exact_usage_problem() {
+        for (s, message) in [
+            (vec!["inspect"], "--config is required"),
+            (
+                vec!["node.info", "--config", "a", "--node", "b", "--node", "c"],
+                "unknown or duplicate option",
+            ),
+            (
+                vec!["serve", "--config", "a", "--max-connections", "0"],
+                "max-connections must be 1..1000000",
+            ),
+            (
+                vec!["serve", "--config", "a", "--max-connections", "1000001"],
+                "max-connections must be 1..1000000",
+            ),
+            (
+                vec!["serve", "--config", "a", "--max-connections", "many"],
+                "max-connections must be 1..1000000",
+            ),
+            (vec!["no-such-command"], "unknown command"),
+            (vec!["serve", "--config"], "options require values"),
+            (vec!["node.info", "--config", "a"], "--node is required"),
+            (
+                vec!["inspect", "--config", "a", "--node", "b"],
+                "--project is required",
+            ),
+            (
+                vec![
+                    "node.info",
+                    "--config",
+                    "a",
+                    "--node",
+                    "b",
+                    "--project",
+                    "p",
+                ],
+                "invalid client option",
+            ),
+            (
+                vec!["serve", "--config", "a", "--node", "b"],
+                "invalid serve option",
+            ),
+        ] {
+            let Err(error) = parse(args(&s)) else {
+                panic!("expected usage error for {s:?}")
+            };
+            assert_eq!(error.to_string(), format!("usage: {message}"), "{s:?}");
+        }
+        assert!(parse(args(&[
+            "inspect",
+            "--config",
+            "a",
+            "--node",
+            "b",
+            "--project",
+            "../root",
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn app_error_display_names_each_failure_exactly() {
+        use crate::AppError;
+        use forge_remote::RemoteError;
+        use std::{error::Error, io};
+        assert_eq!(
+            AppError::Usage("unknown command").to_string(),
+            "usage: unknown command"
+        );
+        assert_eq!(
+            AppError::Configuration("serve requires server mode").to_string(),
+            "configuration: serve requires server mode"
+        );
+        assert_eq!(
+            AppError::Input(io::ErrorKind::NotFound).to_string(),
+            "cannot read bounded configuration/credential input: NotFound"
+        );
+        assert_eq!(
+            AppError::Remote(RemoteError::Forbidden).to_string(),
+            "operation forbidden"
+        );
+        assert_eq!(
+            AppError::Output(io::Error::other("closed")).to_string(),
+            "console output failed"
+        );
+        assert!(AppError::Usage("x").source().is_none());
+        assert!(AppError::Configuration("x").source().is_none());
+        assert!(AppError::Input(io::ErrorKind::NotFound).source().is_none());
+        assert!(AppError::Remote(RemoteError::Forbidden).source().is_some());
+        assert!(AppError::Output(io::Error::other("x")).source().is_some());
+        assert_eq!(
+            AppError::from(RemoteError::Unavailable).to_string(),
+            "node observation unavailable"
+        );
+    }
+
+    #[test]
     fn malformed_and_duplicate_options_are_rejected() {
         for s in [
             vec!["inspect"],

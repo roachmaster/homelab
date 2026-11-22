@@ -332,3 +332,87 @@ pub(crate) fn client(path: &Path, name: &str) -> Result<ClientPlan, AppError> {
         budget: limits,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn default_budget_is_exact_and_boundaries_are_enforced() {
+        let budget = Budget::default();
+        assert_eq!(budget.request_bytes, 4096);
+        assert_eq!(budget.response_bytes, 4 * 1024 * 1024);
+        assert_eq!(budget.timeout_ms, 5000);
+        assert_eq!(budget.poll_ms, 100);
+        let limits = budget.gateway().unwrap();
+        assert_eq!(limits.max_request_bytes, 4096);
+        assert_eq!(limits.max_response_bytes, 4 * 1024 * 1024);
+        assert_eq!(limits.connection_timeout, Duration::from_secs(5));
+        assert_eq!(limits.accept_poll, Duration::from_millis(100));
+        for budget in [
+            Budget {
+                request_bytes: 255,
+                ..Budget::default()
+            },
+            Budget {
+                request_bytes: 65_537,
+                ..Budget::default()
+            },
+            Budget {
+                response_bytes: 255,
+                ..Budget::default()
+            },
+            Budget {
+                response_bytes: 16 * 1024 * 1024 + 1,
+                ..Budget::default()
+            },
+            Budget {
+                timeout_ms: 0,
+                ..Budget::default()
+            },
+            Budget {
+                timeout_ms: 30_001,
+                ..Budget::default()
+            },
+            Budget {
+                poll_ms: 0,
+                ..Budget::default()
+            },
+            Budget {
+                poll_ms: 1001,
+                ..Budget::default()
+            },
+        ] {
+            assert!(matches!(budget.gateway(), Err(AppError::Assembly(_))));
+        }
+        for budget in [
+            Budget {
+                request_bytes: 256,
+                ..Budget::default()
+            },
+            Budget {
+                request_bytes: 65_536,
+                ..Budget::default()
+            },
+            Budget {
+                response_bytes: 256,
+                ..Budget::default()
+            },
+            Budget {
+                response_bytes: 16 * 1024 * 1024,
+                ..Budget::default()
+            },
+            Budget {
+                timeout_ms: 30_000,
+                ..Budget::default()
+            },
+            Budget {
+                poll_ms: 1000,
+                ..Budget::default()
+            },
+        ] {
+            assert!(budget.gateway().is_ok());
+        }
+    }
+}
