@@ -742,3 +742,107 @@ fn runtime_budget_rechecks_after_execution_policy_callback() {
         (JobState::Cancelled, 2, Some(CancelReason::RuntimeBudget))
     );
 }
+
+#[test]
+fn job_error_display_names_each_failure_exactly() {
+    let cases = [
+        (JobError::Invalid("total"), "invalid job total"),
+        (
+            JobError::Capacity(Capacity::Queued),
+            "job capacity exhausted: Queued",
+        ),
+        (
+            JobError::Capacity(Capacity::Active),
+            "job capacity exhausted: Active",
+        ),
+        (
+            JobError::Capacity(Capacity::Records),
+            "job capacity exhausted: Records",
+        ),
+        (
+            JobError::Capacity(Capacity::PerOwner),
+            "job capacity exhausted: PerOwner",
+        ),
+        (
+            JobError::IntentConflict,
+            "intent key already names different work",
+        ),
+        (
+            JobError::NotVisible,
+            "job is not known or not visible to this local owner",
+        ),
+        (
+            JobError::WrongIncarnation,
+            "job belongs to another application incarnation",
+        ),
+        (JobError::Denied, "local job policy denied this operation"),
+        (
+            JobError::PolicyUnavailable,
+            "local job policy is unavailable",
+        ),
+        (
+            JobError::PreparationFailed,
+            "job preparation failed before acceptance",
+        ),
+        (
+            JobError::Busy,
+            "job service is already processing an operation",
+        ),
+        (
+            JobError::Unavailable,
+            "job service invariant failed; recreate the local host",
+        ),
+        (
+            JobError::IdsExhausted,
+            "job identifier or revision space exhausted",
+        ),
+    ];
+    for (error, message) in cases {
+        assert_eq!(error.to_string(), message);
+    }
+    assert_eq!(
+        JobsConfigError("max_queued").to_string(),
+        "invalid jobs configuration: max_queued"
+    );
+}
+
+#[test]
+fn job_id_display_and_parse_round_trip() {
+    let (h, _) = ordinary();
+    let receipt = submit(&h, &who("a"), "k", 1).unwrap();
+    let rendered = receipt.id.to_string();
+    assert_eq!(rendered.parse::<JobId>().unwrap(), receipt.id);
+    assert_eq!(
+        rendered,
+        format!("{}:{}", receipt.id.incarnation(), receipt.id.sequence())
+    );
+    assert_eq!(receipt.id.incarnation(), "test-1");
+    assert_eq!(receipt.id.sequence(), 1);
+    assert_eq!("other:42".parse::<JobId>().unwrap().to_string(), "other:42");
+    assert!(!JobState::Queued.is_terminal());
+    assert!(!JobState::Running.is_terminal());
+    assert!(JobState::Succeeded.is_terminal());
+    assert!(JobState::Failed.is_terminal());
+    assert!(JobState::Cancelled.is_terminal());
+    assert!(JobState::Expired.is_terminal());
+}
+
+#[test]
+fn identical_services_produce_identical_snapshots() {
+    fn run_once() -> Vec<JobSnapshot> {
+        let (h, _) = ordinary();
+        let a = who("a");
+        let first = submit(&h, &a, "one", 5).unwrap();
+        let second = submit(&h, &a, "two", 3).unwrap();
+        step(&h, &a, &first.id);
+        step(&h, &a, &second.id);
+        list(&h, &a)
+    }
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(first.len(), 2);
+    assert_eq!(first[0].completed, 2);
+    assert_eq!(first[1].completed, 2);
+    assert!(first.iter().all(|s| s.state == JobState::Running));
+}

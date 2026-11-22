@@ -501,3 +501,85 @@ fn invalid_jobs_config_fails_before_selected_client_creation() {
     assert_eq!(counts.creates.get(), 0);
     assert_eq!(counts.calls.get(), 0);
 }
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    assert_eq!(
+        RunError::UnexpectedCommand.to_string(),
+        "unexpected command at admitted binding"
+    );
+    assert_eq!(
+        RunError::UnexpectedResponse.to_string(),
+        "client returned an unexpected response variant"
+    );
+    assert_eq!(
+        AppError::RequestIdsExhausted.to_string(),
+        "local request identifier space exhausted"
+    );
+    assert_eq!(
+        BootstrapError::MissingDescriptor("node.info").to_string(),
+        "missing command descriptor: node.info"
+    );
+    assert_eq!(
+        RunError::Node(NodeError::UnexpectedResponse).to_string(),
+        "node client returned an unexpected response kind"
+    );
+}
+
+#[test]
+fn identical_fake_applications_report_identical_node_info() {
+    fn info_once() -> NodeInfo {
+        let counts = Counts::new();
+        let app = fake_app(counts, false);
+        let Output::Node(NodeResponse::Info(info)) = app
+            .invoke(route("node.info"), Command::Node(NodeCommand::Info))
+            .unwrap()
+        else {
+            panic!("info")
+        };
+        info
+    }
+    let first = info_once();
+    let second = info_once();
+    assert_eq!(first, second);
+    assert_eq!(first.id, "local");
+    assert_eq!(first.target_os, "fake-os");
+    assert_eq!(first.target_arch, "fake-arch");
+}
+
+#[test]
+fn bootstrap_error_classifies_configuration_failures() {
+    let counts = Counts::new();
+    let bad = Application::bootstrap_with_node_registrar(LocalConfig::default(), |c| {
+        fake_group(c, counts, true, false)
+    })
+    .unwrap_err();
+    assert!(!bad.is_configuration());
+    assert!(Application::bootstrap(LocalConfig {
+        node_id: "bad id".into(),
+        ..LocalConfig::default()
+    })
+    .unwrap_err()
+    .is_configuration());
+}
+
+#[cfg(feature = "jobs")]
+#[test]
+fn jobs_configuration_failure_is_configuration() {
+    assert!(
+        Application::bootstrap_with_jobs(LocalConfig::default(), jobs::JobsConfig::local(""))
+            .unwrap_err()
+            .is_configuration()
+    );
+}
+
+#[cfg(feature = "disk")]
+#[test]
+fn disk_configuration_failure_is_configuration() {
+    assert!(Application::bootstrap(LocalConfig {
+        node_id: "local".into(),
+        disk_directory: Some(std::path::PathBuf::from("relative")),
+    })
+    .unwrap_err()
+    .is_configuration());
+}
