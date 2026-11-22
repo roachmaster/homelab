@@ -21,10 +21,11 @@ outputs. Jenkins and model credentials are outside that boundary.
 
 The configured wall deadline is 2,700 seconds after a measured cold smoke build
 took 29m 29s. Preserve that production value when preparing future configuration;
-the original installer default was 1,800 seconds. Compile targets are still per
-action until the separately assigned Cargo-cache feature is verified and merged.
-Do not describe the existing registry/toolchain/browser caches as a compiled
-artifact cache.
+`setup-ci.py` now defaults to 2,700 seconds (the original installer default was
+1,800 seconds). Persistent local compiled Cargo artifact caching is implemented
+below under `/mnt/data/forge-homelab/ci-cache` (activated on Mission Control
+when the updated `setup-ci.py` and verifiers are deployed). Do not describe the
+existing registry/toolchain/browser caches as a compiled artifact cache.
 
 External Muse delivery uses the typed Rust Jenkins client through the trusted
 delivery worker. Native Gemini uses the publisher's explicit `jenkins` provider
@@ -160,6 +161,219 @@ mutation denial and a typed absent-queue response. Later pipeline acceptance ran
 a real full-suite Jenkins smoke build; its source and results are recorded in
 `AGENT_WORK.md`. That smoke result is not a CI receipt for a current task. The
 native service's security settings and stopped Grok run remain as recorded above.
+
+## Persistent local Cargo build caching
+
+`verify-candidate.py` (installed to `/usr/local/libexec/forge-ci-check` for
+`forge-exact-candidate` and `/usr/local/libexec/forge-native-ci-check` for
+`forge-native-candidate`) manages persistent local Cargo build caching under
+`/mnt/data/forge-homelab/ci-cache` without changing any CI gate, adding external
+artifact servers, or granting candidate code additional privileges or network
+access.
+
+### Provider wiring and isolation boundaries
+
+- **Typed configuration (`CargoCacheConfig`)** is parsed and validated effect-free
+  at bootstrap from `/etc/forge-ci/pipeline.json` (and inherited into
+  `/etc/forge-ci/native-pipeline.json` by `setup-ci.py --native-only`). `root`
+  must be an absolute, non-symlink path strictly under `/mnt/data/forge-homelab`.
+- **Substitutable port (`CargoCachePort`)**: `CargoCacheFactory` freezes
+  `CargoCacheConfig` before any disk or process effect and selects either
+  `LocalCargoCacheProvider` (when `enabled: true`) or `NullCargoCacheProvider`
+  (zero-effect fallback when disabled or substituted in tests). The selected port
+  is injected into `execute(action, config, cache_port=...)`.
+- **Canonical execution slot**: Serialized under `results_root/executor.lock`,
+  each verification runs in `<work_root>/active/{source,scratch/{target,package-targets,cargo-home,home,qa}}`.
+  Stable `CARGO_MANIFEST_DIR`, `CARGO_TARGET_DIR`, `OUT_DIR`, and `CARGO_HOME`
+  paths let Cargo reuse compiled artifacts accurately. `<work_root>/active` is
+  wiped before every run and again in `finally` after `kill_build_user(account)`.
+- **Privilege isolation**: `/mnt/data/forge-homelab/ci-cache` is `0700 root:root`.
+  The unprivileged `forge_ci` build account never sees or accesses the cache root.
+  Publication runs only after `kill_build_user(account)` confirms zero surviving
+  `forge_ci` processes, all three fixed checks exit `0`, and `git status` is clean.
+  Copy-out from `forge_ci` scratch uses `O_NOFOLLOW` + `fstat` on every component
+  and rejects symlinks, FIFOs, sockets, device nodes, or non-`forge_ci` files
+  (`publish_status: "skipped_unsafe_artifact"`), preserving any prior known-good
+  snapshot.
+
+### Trusted source-branch scoping
+
+Branch cache identities are derived exclusively by trusted delivery components
+(`work_external_delivery.py:TrustedDeliveryPort.prepare_candidate`,
+`work_native_jenkins.py:NativeJenkinsVerification._prepare`, and
+`TrustedDeliveryPort._submission`), propagated immutably through submitter-owned
+`request.json` (without changing Jenkins job parameters in `ci-node.groovy` or
+`native-ci-job.groovy`), and verified fail-closed by `verify-candidate.py` before
+any cache or filesystem access:
+
+- **`main`**: Allowed **only** when `candidate_commit == expected_main` (exact
+  `main` verification). Writes to `scopes/<project>/main/<compat_key>`.
+- **`branch/<slug>`**: Resolved for external delivery from trusted remote
+  `refs/heads/*` via `git ls-remote --heads` (ignoring ephemeral
+  `refs/heads/forge/external-candidate-*` refs), or for native branch-first
+  delivery from the publisher's verified pushed branch receipt (`forge/task-*`).
+  An optional external author manifest `source_branch` is accepted only when
+  independently verified against the remote branch tip or verified ancestry
+  (`merge-base --is-ancestor`); spoofing another branch or claiming `main` fails
+  closed before submission. Slugs use `<sanitized-prefix>-<sha256(branch)[:16]>`
+  to prevent path traversal and collisions (`feat/a-b` vs `feat-a/b`). Writes only
+  to `scopes/<project>/branch--<slug>/<compat_key>`.
+- **`detached`**: Selected when zero or multiple remote heads match an explicit-free
+  candidate (or non-`main` legacy integrate-first runs without a published branch).
+  Strictly **non-writable** (`publish_status: "skipped_unscoped"`).
+- **Read-only `main` seeding**: When `seed_from_main: true`, a cold `branch/<slug>`
+  or `detached` run may copy `main`'s matching `<compat_key>` snapshot as a
+  read-only seed (`restore_status: "hit_main_seed"`) without ever modifying `main`.
+  If a branch's own snapshot exists and fails integrity or timestamp ordering,
+  it falls back directly to a clean build rather than silently switching snapshots.
+
+### Compatibility key (`compat_key`)
+
+`compat_key` is the SHA-256 of canonical JSON covering:
+
+- `cache_schema_version` (`1`), `project_alias`, `verification_profile`, and `CHECKS`
+- Toolchain fingerprint: `rustc -vV`, `cargo -V`, SHA-256 of `rustc`, `cargo`,
+  optional `clippy-driver`, and `lib/rustlib/{components,manifest-*}`
+- Host platform (`sys.platform`, `platform.machine()`)
+- Effective compiler/profile env (`RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+  `RUSTDOCFLAGS`, `CARGO_INCREMENTAL`, `CARGO_PROFILE_*`, `CARGO_BUILD_*`, `CC`, `CFLAGS`)
+- Git blob SHAs of repo Cargo/toolchain config files (`.cargo/config[.toml]`,
+  `src/rust/.cargo/config[.toml]`, `rust-toolchain[.toml]`)
+- `canonical_build_root` (`<work_root>/active`)
+
+`Cargo.lock` and crate source blobs are intentionally excluded so Cargo determines
+minimal accurate recompilation when crates or dependencies change.
+
+### Timestamp-ordering enforcement and clean fallback
+
+Because `git checkout --detach` stamps all checked-out files with current wall-clock
+time, the supervisor aligns unchanged source files to their cached `mtime_ns` only
+after strict two-phase timestamp validation:
+
+1. **Publish-time guard (`validate_publish_timestamps`)**: Captures
+   `published_at_ns = time.time_ns()` after `kill_build_user(account)` and records
+   `max_artifact_mtime_ns`, `max_fingerprint_mtime_ns`, and `source_inventory`
+   under the snapshot's `manifest_sha256`. Any non-positive or future-dated
+   (`> published_at_ns`) artifact, fingerprint, or source timestamp aborts
+   publication (`publish_status: "skipped_unsafe_timestamps"`), removes
+   `.staging-<action_id>`, and leaves any prior known-good snapshot intact.
+2. **Restore-time Phase 1 (`validate_restore_timestamp_ordering`)**: Before
+   mutating any file in `active/source`, captures `restore_now_ns` and
+   `min_fresh_checkout_mtime_ns`, restores verified regular files into
+   `active/scratch/{target,package-targets}` while verifying `files_sha256` and
+   exact destination `fstat().st_mtime_ns` equality with `meta.json` (mismatch ->
+   `corrupt_fallback`), and requires non-future timestamps strictly older than
+   `min_fresh_checkout_mtime_ns`. If strict ordering cannot be established (future
+   artifacts/fingerprints, host clock rollback, or equal-tick tie), the supervisor
+   wipes `active/scratch/{target,package-targets}`, leaves `active/source` untouched,
+   records `restore_status: "timestamp_ordering_fallback"`, and runs a clean build
+   whose valid publication self-heals the cache.
+3. **Restore-time Phase 2**: Only after Phase 1 passes, restores cached `mtime_ns`
+   on unchanged tracked files while changed/added files retain their verified
+   fresh checkout timestamps strictly newer than every cached artifact and
+   `.fingerprint` entry.
+
+### Storage layout, bounded retention and clearing
+
+```text
+/mnt/data/forge-homelab/ci-cache/          # 0700 root:root
+  cache.lock                               # exclusive flock
+  scopes/<project>/<scope_dir>/<compat_key>/
+    current.json                           # atomic pointer to immutable snapshot
+    last_used.json                         # LRU tracking timestamp
+    pending-publication.json               # durable rollback/result binding while unfinished
+    <published_at_ns>-<action_id>/
+      meta.json                            # digest-bound metadata & source_inventory
+      target/                              # cached CARGO_TARGET_DIR (excludes ui-assets, ui-qa, tmp)
+      package-targets/                     # cached standalone manifest targets
+```
+
+- **Default retention bounds** (configured by `setup-ci.py`):
+  `max_total_bytes = 20 GiB`, `max_entries = 8`, `max_age_seconds = 14 days`,
+  `seed_from_main = true`, `timeout_seconds = 2700`.
+- **Eviction**: At restore acquisition, remove expired entries first, then
+  non-`main` LRU entries before `main`. Protect the selected snapshot, including
+  a main seed, and reserve an entry slot for a new writable scope. Explicit
+  `prune()` and operator clearing retain the same bounds. Detached restores do
+  not perform this entry maintenance.
+- **Publication transaction**: Stage a complete immutable snapshot under the
+  exclusive cache lock. Before replacing either metadata file, persist a
+  supervisor-owned journal with exact old pointer/LRU bytes, new snapshot and
+  final result identity. Keep the lock and predecessor through logging,
+  build-user quiescence and scratch cleanup. No entry eviction occurs in this
+  provisional window. If predecessor plus replacement cannot fit the byte or
+  entry bounds, skip optional publication (`skipped_capacity`) and retain the
+  previous cache. Reported publication storage includes the temporarily retained
+  predecessor; copying into staging also needs temporary disk space.
+- **Crash recovery**: Resolve journals before same-action result replay and
+  before snapshot GC. Only a durable committed marker plus the exact passed,
+  cleanup-confirmed root result authorizes the new pointer. Otherwise persist
+  an abort decision, restore previous metadata before receipt access, convert
+  an exact provisional success to a failed result, and remove the new snapshot.
+  Recovery is repeatable after a crash during rollback or predecessor deletion.
+  A malformed unrelated optional cache produces a clean build with
+  `corrupt_fallback`/`skipped_error`; uncertain saved-result replay fails closed.
+  Unknown storage totals are `null`, never a false empty cache. Root ownership,
+  bounded regular-file reads and non-symlink directories remain mandatory.
+- **Cancellation**: Recheck both signals and the spool cancellation marker at
+  finalization. Pointer replacement is provisional: interruption before durable
+  successful completion restores the previous usable cache, including when it
+  arrives after pointer or receipt replacement. Commit uses a narrow signal
+  guard and checks cancellation after the final marker write. After terminal
+  success, deferred predecessor GC may be retried without downgrading a genuine
+  passed result. Cleanup/result failures fail or remain unacknowledged; they
+  never authorize a provisional publication. `rolled_back` reports zero newly
+  published bytes and the restored inventory when it can be measured safely.
+- **Systemd**: `setup-ci.py` adds `/mnt/data/forge-homelab/ci-cache` to
+  `ReadWritePaths` in `forge-jenkins-ci-agent.service` while keeping
+  `ProtectSystem=strict`.
+- **Operator cache clear**: `setup-ci.py` installs `clear-ci-cache.py` to
+  `/usr/local/sbin/forge-ci-cache-clear` (`0755 root:root`, deliberately excluded
+  from `/etc/sudoers.d/forge-ci-check` and `/etc/sudoers.d/forge-native-ci-check`).
+  Clear under `executor.lock` + `cache.lock`:
+
+```sh
+# Clear all cached scopes
+sudo /usr/local/sbin/forge-ci-cache-clear --all
+
+# Clear one project or one specific scope
+sudo /usr/local/sbin/forge-ci-cache-clear --project homelab
+sudo /usr/local/sbin/forge-ci-cache-clear --project homelab --scope main
+sudo /usr/local/sbin/forge-ci-cache-clear --project homelab --scope 'branch/<slug>'
+```
+
+The next Jenkins build automatically falls back to a clean rebuild (`restore_status: "miss"`).
+
+### Structured stage timing and cache telemetry
+
+`results_root/<action_id>.json` preserves the strict `checks` list schema and adds:
+
+- `branch_scope`: echoed validated scope (bound in `work_external_delivery.py:verify()`)
+- `cache`: `{enabled, provider, project_alias, branch_scope, compat_key, restore_status, restore_fallback_reason, restore_elapsed_ms, restored_bytes, restored_files, publish_status, publish_elapsed_ms, published_bytes, published_files, evicted_entries, cache_total_bytes, cache_entry_count}`
+- `stages`: ordered stage timings (`prepare_source`, `cache_restore`, `check_0`, `check_1`, `check_2`, `verify_source_clean`, `cache_publish`, `cleanup`), with `check_0` and `check_1` reporting Cargo-parsed `cargo_compiling_units`, `cargo_finished_count`, and `cargo_compile_ms` (explicitly marked `cargo_reported_cumulative_phase_ms`, distinct from wall-clock stage `elapsed_ms`), plus `ui_qa_stages` from `run.json` on `check_1`.
+
+### Historical measured operator qualification
+
+Isolated cold, warm, post-clear clean rebuild, and deliberate-cancellation
+qualification runs on Mission Control (context commit
+`d4ea0741d2bf95fee8cb147323b117bcc4d44a00`, qualification proof SHA-256
+`546015e03216d369dbddd72f49a8cc8bbb0ffb637d2cb51f4aa405628179435a`) are preserved
+in [forge-cargo-cache-qualification-20261121.md](../../../docs/reports/forge-cargo-cache-qualification-20261121.md)
+and [forge-cargo-cache-qualification-20261121.json](../../../docs/reports/forge-cargo-cache-qualification-20261121.json):
+
+- **Cold (`restore_status: "miss"`, `publish_status: "published"`)**: total `36m 28s` (`make ci` `20m 25s`, `make ui-qa` `3m 33s`, backend gate `9m 27s`; `390` compiling units; `785` backend tests passed).
+- **Warm (`restore_status: "hit_branch"`, `publish_status: "published"`)**: total `21m 25s` (**41.3% shorter**; `make ci` `5m 30s`, `make ui-qa` `2m 31s`, backend gate `9m 22s`; `8` compiling units; `785` backend tests passed; `cache_restore` `79.1s`).
+- **After scoped `forge-ci-cache-clear` (`restore_status: "miss"`, `publish_status: "published"`)**: total `34m 59s` (`make ci` `19m 40s`, `make ui-qa` `3m 26s`, backend gate `9m 31s`; `390` compiling units; `785` backend tests passed).
+- **Deliberate cancellation (`restore_status: "miss"`, `publish_status: "skipped_cancelled"`)**: failed cleanly with `cleanup_confirmed: true` without publishing a partial snapshot.
+
+These measurements apply to historical canonical helper
+`b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d`
+(qualification-rendered helper `ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a`).
+The original receipts and report hashes remain unchanged. They are not timing
+measurements for the later publication-transaction changes. A new helper needs
+its own correctness evidence, fresh exact-source Jenkins checks and independent
+review; retaining identical Cargo copy, key and timestamp code does not relabel
+these historical total timings as a new performance measurement.
 
 Official references: [Linux installation](https://www.jenkins.io/doc/book/installing/linux/),
 [systemd overrides](https://www.jenkins.io/doc/book/system-administration/systemd-services/),

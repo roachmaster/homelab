@@ -1,5 +1,4 @@
 """Independent delivery audit: real local Git, typed worker leases, Jenkins uncertainty."""
-from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -16,6 +15,8 @@ def identity_request():
     return {'action_id':str(uuid4()),'workflow_id':str(uuid4()),'correlation_id':str(uuid4()),
         'project_alias':'homelab','candidate_commit':'c'*40,'candidate_tree':'d'*40,
         'integration_base':'a'*40,'base_revision':'a'*40,'gate_manifest_sha256':'e'*64,
+        'branch_scope':'branch/'+delivery.canonical_branch_slug('feat/owned'),
+        'source_branch':'feat/owned',
         'prepare_action_id':str(uuid4()),'source_task_id':str(uuid4()),
         'source_assignment_id':str(uuid4()),'source_sha256':'f'*64}
 
@@ -56,13 +57,15 @@ class TrustedJenkinsTest(unittest.TestCase):
         self.temp=TemporaryDirectory(prefix='forge-delivery-audit-');self.addCleanup(self.temp.cleanup)
         self.config=configuration(self.temp.name);self.config.results_root.mkdir()
         self.jenkins=Mock();self.port=delivery.TrustedDeliveryPort(self.config,self.jenkins)
-        self.request=identity_request();self.record={k:self.request[k] for k in ('action_id','workflow_id','candidate_commit','candidate_tree','correlation_id')}
+        self.request=identity_request();self.record={k:self.request[k] for k in ('action_id','workflow_id','candidate_commit','candidate_tree','correlation_id','branch_scope')}
         self.record.update(expected_main='a'*40,gate_manifest_sha256='e'*64,verification_profile=delivery.PROFILE)
         self.port._submission=Mock(return_value=(Path(self.temp.name),self.record))
         self.require=Mock()
     def write_result(self,**changes):
         result={**self.record,'status':'passed','cleanup_confirmed':True,
             'checks':[{'index':index,'argv':list(argv),'returncode':0} for index,argv in enumerate(delivery.CHECKS)],
+            'cache':{'enabled':True,'restore_status':'hit_branch','publish_status':'published'},
+            'stages':[{'name':'check_0','status':'passed','elapsed_ms':120}],
             'request_sha256':hashlib.sha256(delivery.canonical(self.record)+b'\n').hexdigest()}
         result.update(changes);path=self.config.results_root/(self.request['action_id']+'.json')
         delivery.durable_json(path,result);return result
@@ -88,11 +91,16 @@ class TrustedJenkinsTest(unittest.TestCase):
             self.write_result();passed=self.port.verify(self.request,self.require)
             self.assertEqual(passed['status'],'passed');self.assertEqual(passed['receipt']['result'],'SUCCESS')
             self.assertEqual(passed['receipt']['candidate_tree'],self.request['candidate_tree'])
+            self.assertEqual(passed['receipt']['branch_scope'],self.request['branch_scope'])
+            self.assertEqual(passed['receipt']['cache']['restore_status'],'hit_branch')
+            self.assertEqual(passed['receipt']['stages'][0]['name'],'check_0')
             for changed in ({'checks':[]},{'checks':[{'index':0,'argv':list(delivery.CHECKS[0]),'returncode':0}]},
                             {'cleanup_confirmed':False},{'status':'failed'}):
                 with self.subTest(changed=changed):
                     self.write_result(**changed);self.assertEqual(self.port.verify(self.request,self.require)['status'],'failed')
             self.write_result(candidate_tree='b'*40)
+            with self.assertRaises(ValueError):self.port.verify(self.request,self.require)
+            self.write_result(branch_scope='branch/'+delivery.canonical_branch_slug('feat/other'))
             with self.assertRaises(ValueError):self.port.verify(self.request,self.require)
             self.write_result();self.jenkins.find.return_value=self.observed_build(result='FAILURE')
             self.assertEqual(self.port.verify(self.request,self.require)['status'],'failed')
@@ -122,6 +130,54 @@ class TrustedJenkinsTest(unittest.TestCase):
         self.assertEqual(self.port.cancel(self.cancel_request(),self.require)['status'],'pending')
 
 
+class SubmissionBranchScopeGuardTest(unittest.TestCase):
+    def test_submission_requires_valid_branch_scope_and_keeps_jenkins_parameters_unchanged(self):
+        with TemporaryDirectory(prefix='forge-submission-scope-') as root:
+            config=configuration(root)
+            config.spool_root.mkdir(parents=True)
+            port=delivery.TrustedDeliveryPort(config,Mock())
+            req=identity_request()
+            prep_dir=config.state_root/'actions'/req['prepare_action_id']
+            prep_dir.mkdir(parents=True)
+            bundle_path=prep_dir/'candidate.bundle'
+            bundle_path.write_bytes(b'owned-bundle')
+            bundle_path.chmod(0o600)
+            import grp
+            with patch.object(grp,'getgrnam',return_value=SimpleNamespace(gr_gid=os.getgid())):
+                # Valid branch_scope + consistent source_branch writes branch_scope into request.json.
+                sub_dir,record=port._submission(req)
+                self.assertEqual(record['branch_scope'],req['branch_scope'])
+                stored=json.loads((sub_dir/'request.json').read_text())
+                self.assertEqual(stored['branch_scope'],req['branch_scope'])
+                self.assertEqual(set(port._parameters(req)),set(delivery.PARAMETERS))
+
+                # Fail closed when both branch_scope and source_branch are missing.
+                missing={k:v for k,v in req.items() if k not in {'branch_scope','source_branch'}}
+                missing['action_id']=str(uuid4())
+                with self.assertRaises(ValueError):port._submission(missing)
+
+                # Fail closed on spoofed main, workflow-*, candidates/main, traversal, or mismatch.
+                for bad in ('main','candidates/main','workflow-123','../main','branch/Bad_Upper',''):
+                    bad_req={**req,'action_id':str(uuid4()),'branch_scope':bad}
+                    bad_req.pop('source_branch',None)
+                    with self.subTest(bad=bad):
+                        with self.assertRaises(ValueError):port._submission(bad_req)
+
+                mismatched={**req,'action_id':str(uuid4()),'source_branch':'feat/different'}
+                with self.assertRaises(ValueError):port._submission(mismatched)
+
+                # Detached scope with source_branch=None is valid and writes branch_scope='detached'.
+                detached_req={**req,'action_id':str(uuid4()),'branch_scope':'detached','source_branch':None}
+                _,det_record=port._submission(detached_req)
+                self.assertEqual(det_record['branch_scope'],'detached')
+
+                # Direct caller with source_branch only derives branch_scope.
+                direct_req={**req,'action_id':str(uuid4()),'source_branch':'feat/direct'}
+                direct_req.pop('branch_scope')
+                _,direct_record=port._submission(direct_req)
+                self.assertEqual(direct_record['branch_scope'],'branch/'+delivery.canonical_branch_slug('feat/direct'))
+
+
 class TypedDeliveryWorkerTest(unittest.TestCase):
     def test_typed_lease_is_passed_to_owner_scoped_dao_and_receipt_committed(self):
         request=identity_request();lease=ExternalDeliveryLease(request['action_id'],request['workflow_id'],'homelab','source',1,str(uuid4()),'2099-01-01T00:00:00Z',request)
@@ -148,16 +204,43 @@ class TypedDeliveryWorkerTest(unittest.TestCase):
 class LocalGitSanitizerTest(unittest.TestCase):
     def git(self,repository,*args,data=None):
         return subprocess.run(['/usr/bin/git','-C',str(repository),*args],input=data,check=True,capture_output=True).stdout
+
+    def _setup_repo_fixture(self,root):
+        config=configuration(root);base_repo=Path(root)/'author';base_repo.mkdir()
+        self.git(base_repo,'init','--quiet','--initial-branch=main')
+        self.git(base_repo,'config','user.name','Fixture');self.git(base_repo,'config','user.email','fixture@localhost')
+        (base_repo/'app.py').write_text('base\n');(base_repo/'Makefile').write_text('ci:\n\ttrue\n')
+        self.git(base_repo,'add','.');self.git(base_repo,'commit','--quiet','-m','Public base')
+        base=self.git(base_repo,'rev-parse','HEAD').decode().strip()
+        base_tree=self.git(base_repo,'rev-parse','HEAD^{tree}').decode().strip()
+        remote=Path(root)/'remote.git';self.git(base_repo,'clone','--quiet','--bare',str(base_repo),str(remote))
+        canonical=Path(config.projects['homelab']['canonical_repo']);self.git(base_repo,'clone','--quiet',str(remote),str(canonical))
+        self.git(canonical,'update-ref','refs/forge/verified-main',base)
+        config.verifier.write_text('# Pinned trusted helper\n');config.verifier.chmod(0o600)
+        class LocalPort(delivery.TrustedDeliveryPort):
+            def source_head(inner,project):return base
+            def git(inner,repository,*args,**kwargs):
+                args=tuple(str(remote) if x=='https://github.com/fixture/project.git' else x for x in args)
+                return super().git(repository,*args,**kwargs)
+        port=LocalPort(config,Mock())
+        return config,base_repo,remote,canonical,base,base_tree,port
+
+    def _prepare(self,port,base,raw,tree,*,source_branch=None,workflow_id=None):
+        req=identity_request()
+        req.pop('branch_scope',None);req.pop('source_branch',None)
+        if workflow_id is not None:req['workflow_id']=workflow_id
+        req.update(base_revision=base,candidate_commit=raw,candidate_tree=tree)
+        if source_branch is not None:req['source_branch']=source_branch
+        real_read=delivery.read_private
+        def owned(path,**kwargs):
+            if kwargs.get('owner')==0:kwargs['owner']=os.geteuid()
+            return real_read(path,**kwargs)
+        with patch.object(delivery,'read_private',side_effect=owned):
+            return port.prepare_candidate(req,Mock())
+
     def test_candidate_keeps_tree_but_drops_private_author_history_and_preserves_source_ref(self):
         with TemporaryDirectory(prefix='forge-clean-candidate-') as root:
-            config=configuration(root);base_repo=Path(root)/'author';base_repo.mkdir()
-            self.git(base_repo,'init','--quiet','--initial-branch=main');self.git(base_repo,'config','user.name','Fixture');self.git(base_repo,'config','user.email','fixture@localhost')
-            (base_repo/'app.py').write_text('base\n');(base_repo/'Makefile').write_text('ci:\n\ttrue\n')
-            self.git(base_repo,'add','.');self.git(base_repo,'commit','--quiet','-m','Public base')
-            base=self.git(base_repo,'rev-parse','HEAD').decode().strip()
-            remote=Path(root)/'remote.git';self.git(base_repo,'clone','--quiet','--bare',str(base_repo),str(remote))
-            canonical=Path(config.projects['homelab']['canonical_repo']);self.git(base_repo,'clone','--quiet',str(remote),str(canonical))
-            self.git(canonical,'update-ref','refs/forge/verified-main',base)
+            config,base_repo,remote,canonical,base,_base_tree,port=self._setup_repo_fixture(root)
             (base_repo/'private.txt').write_text('Private transient design artifact\n')
             self.git(base_repo,'add','.');self.git(base_repo,'commit','--quiet','-m','Private author notes and metadata')
             private_commit=self.git(base_repo,'rev-parse','HEAD').decode().strip()
@@ -166,13 +249,8 @@ class LocalGitSanitizerTest(unittest.TestCase):
             self.git(base_repo,'commit','--quiet','-m','Private author final metadata')
             raw=self.git(base_repo,'rev-parse','HEAD').decode().strip();tree=self.git(base_repo,'rev-parse','HEAD^{tree}').decode().strip()
             self.git(base_repo,'push','--quiet',str(remote),'HEAD:refs/heads/feature')
-            config.verifier.write_text('# Pinned trusted helper\n');config.verifier.chmod(0o600)
-            class LocalPort(delivery.TrustedDeliveryPort):
-                def source_head(inner,project):return base
-                def git(inner,repository,*args,**kwargs):
-                    args=tuple(str(remote) if x=='https://github.com/fixture/project.git' else x for x in args)
-                    return super().git(repository,*args,**kwargs)
-            port=LocalPort(config,Mock());request=identity_request();request.update(base_revision=base,candidate_commit=raw,candidate_tree=tree)
+            request=identity_request();request.pop('branch_scope',None);request.pop('source_branch',None)
+            request.update(base_revision=base,candidate_commit=raw,candidate_tree=tree)
             real_read=delivery.read_private
             def owned(path,**kwargs):
                 if kwargs.get('owner')==0:kwargs['owner']=os.geteuid()
@@ -181,6 +259,8 @@ class LocalGitSanitizerTest(unittest.TestCase):
                 result=port.prepare_candidate(request,Mock())
                 self.assertEqual(port.prepare_candidate(request,Mock()),result)
             clean=result['candidate_commit'];self.assertNotEqual(clean,raw)
+            self.assertEqual(result['source_branch'],'feature')
+            self.assertEqual(result['branch_scope'],'branch/'+delivery.canonical_branch_slug('feature'))
             self.assertEqual(self.git(canonical,'show','-s','--format=%P',clean).decode().strip(),base)
             self.assertEqual(self.git(canonical,'rev-parse',clean+'^{tree}').decode().strip(),tree)
             for forbidden in (raw,private_commit):
@@ -189,6 +269,79 @@ class LocalGitSanitizerTest(unittest.TestCase):
             diff=self.git(canonical,'diff',*delivery.DIFF_FLAGS,base,clean)
             self.assertEqual(hashlib.sha256(diff).hexdigest(),result['diff_sha256'])
             self.assertIn('Makefile',{x['path'] for x in result['protected_gate_changes']})
+
+    def test_remote_branch_scope_cross_workflow_reuse_isolation_spoofing_and_detached(self):
+        with TemporaryDirectory(prefix='forge-branch-scope-') as root:
+            _config,repo,remote,_canonical,base,base_tree,port=self._setup_repo_fixture(root)
+
+            # 1. Exact main verification across two distinct workflows -> both resolve 'main'.
+            m1=self._prepare(port,base,base,base_tree,workflow_id=str(uuid4()))
+            m2=self._prepare(port,base,base,base_tree,workflow_id=str(uuid4()))
+            self.assertEqual((m1['source_branch'],m1['branch_scope']),('main','main'))
+            self.assertEqual((m2['source_branch'],m2['branch_scope']),('main','main'))
+
+            # 2. Cross-workflow reuse on refs/heads/feat/cargo-cache without explicit source_branch.
+            self.git(repo,'checkout','--quiet','-b','feat/cargo-cache',base)
+            (repo/'app.py').write_text('cargo cache v1\n')
+            self.git(repo,'add','app.py');self.git(repo,'commit','--quiet','-m','c1')
+            c1=self.git(repo,'rev-parse','HEAD').decode().strip()
+            t1=self.git(repo,'rev-parse','HEAD^{tree}').decode().strip()
+            self.git(repo,'push','--quiet',str(remote),'HEAD:refs/heads/feat/cargo-cache')
+            # Ephemeral merge ref pointing to c1 must be ignored and never cause false ambiguity.
+            self.git(repo,'push','--quiet',str(remote),'HEAD:refs/heads/forge/external-candidate-'+str(uuid4()))
+
+            w1=self._prepare(port,base,c1,t1,workflow_id=str(uuid4()))
+            w2=self._prepare(port,base,c1,t1,workflow_id=str(uuid4()))
+            self.assertEqual(w1['source_branch'],'feat/cargo-cache')
+            self.assertEqual(w1['branch_scope'],w2['branch_scope'])
+            self.assertEqual(w1['branch_scope'],'branch/'+delivery.canonical_branch_slug('feat/cargo-cache'))
+
+            # 3. Distinct branches targeting main get isolated scopes (including slug collision pair).
+            self.git(repo,'checkout','--quiet','-b','feat/a-b',base)
+            (repo/'app.py').write_text('branch a-b\n')
+            self.git(repo,'add','app.py');self.git(repo,'commit','--quiet','-m','ab')
+            cab=self.git(repo,'rev-parse','HEAD').decode().strip()
+            tab=self.git(repo,'rev-parse','HEAD^{tree}').decode().strip()
+            self.git(repo,'push','--quiet',str(remote),'HEAD:refs/heads/feat/a-b')
+
+            self.git(repo,'checkout','--quiet','-b','feat-a/b',base)
+            (repo/'app.py').write_text('branch a/b\n')
+            self.git(repo,'add','app.py');self.git(repo,'commit','--quiet','-m','a_b')
+            ca_b=self.git(repo,'rev-parse','HEAD').decode().strip()
+            ta_b=self.git(repo,'rev-parse','HEAD^{tree}').decode().strip()
+            self.git(repo,'push','--quiet',str(remote),'HEAD:refs/heads/feat-a/b')
+
+            r_ab=self._prepare(port,base,cab,tab)
+            r_a_b=self._prepare(port,base,ca_b,ta_b)
+            self.assertNotEqual(r_ab['branch_scope'],r_a_b['branch_scope'])
+            self.assertNotEqual(r_ab['branch_scope'],w1['branch_scope'])
+
+            # 4. Spoofing guards: claiming another branch or main fails closed.
+            with self.assertRaises(ValueError):
+                self._prepare(port,base,cab,tab,source_branch='feat/cargo-cache')
+            with self.assertRaises(ValueError):
+                self._prepare(port,base,cab,tab,source_branch='main')
+            with self.assertRaises(ValueError):
+                self._prepare(port,base,cab,tab,source_branch='feat/nonexistent')
+
+            # 5. Ambiguous multi-branch commit without explicit source_branch -> detached; explicit disambiguates.
+            self.git(repo,'push','--quiet',str(remote),cab+':refs/heads/feat/alias-ab')
+            amb=self._prepare(port,base,cab,tab)
+            self.assertEqual((amb['source_branch'],amb['branch_scope']),(None,'detached'))
+            disamb=self._prepare(port,base,cab,tab,source_branch='feat/a-b')
+            self.assertEqual(disamb['branch_scope'],'branch/'+delivery.canonical_branch_slug('feat/a-b'))
+
+            # 6. Moved-forward branch tip: explicit source_branch succeeds when raw is ancestor of remote head.
+            self.git(repo,'checkout','--quiet','feat/cargo-cache')
+            (repo/'app.py').write_text('cargo cache v2\n')
+            self.git(repo,'add','app.py');self.git(repo,'commit','--quiet','-m','c2')
+            self.git(repo,'push','--quiet',str(remote),'HEAD:refs/heads/feat/cargo-cache')
+            moved=self._prepare(port,base,c1,t1,source_branch='feat/cargo-cache')
+            self.assertEqual(moved['branch_scope'],w1['branch_scope'])
+            # Without explicit source_branch, c1 now matches 0 remote heads -> detached.
+            detached_old=self._prepare(port,base,c1,t1)
+            self.assertEqual((detached_old['source_branch'],detached_old['branch_scope']),(None,'detached'))
+
 
 class GuardedMergeTest(unittest.TestCase):
     def fixture(self,root):
@@ -227,6 +380,7 @@ class GuardedMergeTest(unittest.TestCase):
             self.assertEqual(result['receipt']['observed_main'],'f'*40)
             port.git.assert_any_call(port.config.projects['homelab']['canonical_repo'],'merge-base','--is-ancestor','c'*40,'f'*40)
             port.api.assert_not_called()
+
 
 class ObservedSourceImportTest(unittest.TestCase):
     git=LocalGitSanitizerTest.git
@@ -269,3 +423,6 @@ class ObservedSourceImportTest(unittest.TestCase):
             self.assertEqual(len(fetches),1);self.assertIn('--no-tags',fetches[0]);self.assertIn('--no-write-fetch-head',fetches[0])
             self.assertEqual(port.source_head('homelab'),newer)
             self.assertEqual(len([args for args in commands if 'fetch' in args]),1)
+
+
+if __name__=='__main__': unittest.main()

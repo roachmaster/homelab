@@ -1,0 +1,385 @@
+{
+  "version": 1,
+  "kind": "cache_publication_correctness_addendum",
+  "date": "2026-11-22",
+  "status": "component_checks_passed_source_workflow_pending",
+  "meaning": "Separate publication-correctness evidence for helper047. This is not source approval, a Jenkins result, live activation proof, or a new performance measurement.",
+  "finding": {
+    "finding_id": "cache-cancelled-publication-replaces-good",
+    "review_id": "87c6e680-8fa8-4cc5-9319-8b810c8e8723",
+    "decision": "revise",
+    "scope": "Preserve previous known-good pointer, LRU metadata and snapshot through cancellation/failure after provisional pointer replacement."
+  },
+  "source": {
+    "base_candidate": "21a54876512724ef0ee4e98ce054a0d5f76f2d31",
+    "base_tree": "c6e16c47aebcf87d296f30f16ff0150ec6a7beca",
+    "code_context_commit": "51c35693525390f1e2f773755630a232bc31c896",
+    "implementation_commit": "4ac1d50fa990465cfcdd7d772c6034a04955354e",
+    "test_only_followup_commit": "51c35693525390f1e2f773755630a232bc31c896",
+    "approval": "unapproved_context",
+    "files": {
+      "deploy/mission-control/agent-runner/test_ci_supervision.py": "f6f7fe8242f2626a6ef2a34d4671e3aba41062830d7a274512a9e515c56c27c2",
+      "deploy/mission-control/jenkins/README.md": "0534bd65549acc683e74454c476b631fba8b476b92aa176d9427808b2e350dd4",
+      "deploy/mission-control/jenkins/verify-candidate.py": "04709f1e3aa948b5c35ba0423ce480186bba5e57207d97125e9ffd7602ddde68"
+    }
+  },
+  "implementation": {
+    "scope": "CargoCachePort selected by CargoCacheFactory; one verification-owned publication transaction.",
+    "changes": [
+      "Hold exclusive cache lock and exact prior pointer/LRU before-images through log close and supervisor cleanup.",
+      "Persist pending-publication journal before provisional pointer replacement; bind exact final result digest.",
+      "Check cancellation before and after final committed-marker write; abort is persisted before restoration/accounting.",
+      "Resolve pending journals before saved-result replay and snapshot GC; unfinished passed receipts become failed.",
+      "Keep committed success during deferred receipt-read/GC uncertainty; recovery is idempotent after predecessor removal.",
+      "Perform retention maintenance before the publication baseline; protect selected main seed and skip optional publication if predecessor plus replacement cannot fit.",
+      "Report restored inventory after complete rollback, or null when safe accounting is unavailable."
+    ]
+  },
+  "verification": {
+    "ordinary_uid_unit_regressions": {
+      "uid": 1000,
+      "total_distinct_methods": 43,
+      "one_combined_43_method_invocation": false,
+      "runs": [
+        {
+          "methods": 42,
+          "status": "passed",
+          "failures": 0,
+          "skips": 0,
+          "duration_seconds": 99.965,
+          "scope": "Complete test_ci_supervision module before additive test-only follow-up",
+          "helper_sha256": "04709f1e3aa948b5c35ba0423ce480186bba5e57207d97125e9ffd7602ddde68",
+          "test_file_sha256": "5925ccc0379c76617f114121c05f8df1e6a742441f5b5092f17d7d514477c79e",
+          "log_sha256": "4f8e14db4226019dd9d2973d169603816f6a82109524758f850edb23d310535e"
+        },
+        {
+          "methods": 1,
+          "subcases": 3,
+          "status": "passed",
+          "failures": 0,
+          "skips": 0,
+          "duration_seconds": 7.109,
+          "scope": "Additional committed-receipt-read, predecessor-delete and journal-unlink uncertainty regression",
+          "helper_sha256": "04709f1e3aa948b5c35ba0423ce480186bba5e57207d97125e9ffd7602ddde68",
+          "test_file_sha256": "f6f7fe8242f2626a6ef2a34d4671e3aba41062830d7a274512a9e515c56c27c2",
+          "log_sha256": "aa8344e20a4330fac875e65bbf0a47ae2877cc5b33edb0315e8e0d7c4d350f7c"
+        }
+      ],
+      "real_process_death": {
+        "mechanism": "ordinary-UID child os._exit; no Python finally handlers",
+        "boundaries": [
+          "after provisional pointer replacement",
+          "after passed receipt before committed marker",
+          "after committed marker",
+          "during abort after old pointer restoration",
+          "after predecessor deletion before journal removal"
+        ],
+        "root_process_death_test": false
+      },
+      "additional_coverage": [
+        "Signals during final-marker write and pending recovery",
+        "Spool cancellation arriving after checks",
+        "Receipt replacement/directory-fsync failures",
+        "Cleanup, log-close and log-hash failures",
+        "Unrelated unusable cache clean fallback and uncertain saved-result replay fail-closed",
+        "Pre-journal rename orphan collection, abandoned new scopes, physical pointed inventory and TTL",
+        "Projected capacity skip and prior/victim preservation"
+      ]
+    },
+    "root_filesystem_component": {
+      "owner_uid": 0,
+      "actual_run_id": "d79349c3-ec97-44b1-9c4d-44a6207d5277",
+      "raw_report_sha256": "1fd95651e80afb7514d3a2ececccf25bc1027fd2ab54f2dc5966d6a973707ee8",
+      "actor_sha256": "f8fd6e52e2c6572483650c5b4ff50ef5e9b7dbefb7357bc1390c8f065c38c0ce",
+      "helper_sha256": "04709f1e3aa948b5c35ba0423ce480186bba5e57207d97125e9ffd7602ddde68",
+      "status": "passed",
+      "cases_passed": 12,
+      "signal_capability": "injected_noop_not_qualified",
+      "real_process_death_exercised": false,
+      "recovery_kind": "captured synthetic owned filesystem state restored at the same paths after ordinary exception cleanup",
+      "not_a_ci_result": true,
+      "not_a_performance_measurement": true,
+      "cases": [
+        {
+          "case": "before_pointer",
+          "injection_reached": true,
+          "prior_and_victim_preserved": true,
+          "status": "passed",
+          "synthetic_receipt_status": "failed"
+        },
+        {
+          "case": "after_pointer",
+          "injection_reached": true,
+          "prior_and_victim_preserved": true,
+          "status": "passed",
+          "synthetic_receipt_status": "failed"
+        },
+        {
+          "case": "after_last_used",
+          "injection_reached": true,
+          "prior_and_victim_preserved": true,
+          "status": "passed",
+          "synthetic_receipt_status": "failed"
+        },
+        {
+          "case": "after_receipt",
+          "injection_reached": true,
+          "prior_and_victim_preserved": true,
+          "status": "passed",
+          "synthetic_receipt_status": "failed"
+        },
+        {
+          "case": "after_marker",
+          "injection_reached": true,
+          "prior_and_victim_preserved": true,
+          "status": "passed",
+          "synthetic_receipt_status": "failed"
+        },
+        {
+          "case": "pre_result_failure",
+          "injection_reached": true,
+          "prior_and_victim_preserved": true,
+          "status": "passed",
+          "synthetic_receipt_status": "failed"
+        },
+        {
+          "capture_sha256": "71bad4eb32e0bf8bdc4a5a71af514ef0572bcbf3a274309125f7da09dea535ec",
+          "case": "after_pointer",
+          "expected_result": "rolled_back",
+          "kind": "simulated_persistent_state_recovery",
+          "status": "passed"
+        },
+        {
+          "capture_sha256": "f0cb07645bb12c046f07cfdf0ba2b57682ec03c705892a44d91951b721fd1a28",
+          "case": "after_receipt",
+          "expected_result": "rolled_back",
+          "kind": "simulated_persistent_state_recovery",
+          "status": "passed"
+        },
+        {
+          "capture_sha256": "da8a41e80b14cecf4e08d27089d06c5398d33320fbe7aa1a5f7aa2ae32a5fd2d",
+          "case": "committed",
+          "expected_result": "committed",
+          "kind": "simulated_persistent_state_recovery",
+          "status": "passed"
+        },
+        {
+          "capture_sha256": "8a9cd314e2e0ad3bf366d0710b09c01f53ee3eca6e79ace128657a7b645f830d",
+          "case": "during_abort",
+          "expected_result": "rolled_back",
+          "kind": "simulated_persistent_state_recovery",
+          "status": "passed"
+        },
+        {
+          "capture_sha256": "c544076a8f16abacd5ac9577bbb440207c87bdf720c8973aa7b1c6d24511ae6d",
+          "case": "predecessor_removed",
+          "expected_result": "committed",
+          "kind": "simulated_persistent_state_recovery",
+          "status": "passed"
+        },
+        {
+          "case": "commit_restore_capacity_retention",
+          "expired_entries": 2,
+          "restored_bytes": 20,
+          "restored_files": 1,
+          "status": "passed"
+        }
+      ]
+    },
+    "ast_comparison": {
+      "added_nodes": [
+        "CargoCachePort.finish_result",
+        "CargoCachePort.recover_pending",
+        "CargoCachePort.rollback_result",
+        "CargoCachePort.terminal_result_committed",
+        "CargoCachePort.verification_transaction",
+        "LocalCargoCacheProvider._bound_result_path",
+        "LocalCargoCacheProvider._matching_publication_result",
+        "LocalCargoCacheProvider._optional_metadata",
+        "LocalCargoCacheProvider._pointed_inventory_locked",
+        "LocalCargoCacheProvider._publication_lock",
+        "LocalCargoCacheProvider._read_publication_locked",
+        "LocalCargoCacheProvider._resolve_publication_locked",
+        "LocalCargoCacheProvider._restore_beforeimages",
+        "LocalCargoCacheProvider._restore_metadata",
+        "LocalCargoCacheProvider._validate_pointer",
+        "LocalCargoCacheProvider.finish_result",
+        "LocalCargoCacheProvider.recover_pending",
+        "LocalCargoCacheProvider.rollback_result",
+        "LocalCargoCacheProvider.terminal_result_committed",
+        "LocalCargoCacheProvider.verification_transaction",
+        "_execute_locked",
+        "deferred_cancellation",
+        "mark_cache_rolled_back"
+      ],
+      "algorithm": "SHA-256 of UTF-8 ast.dump(node, include_attributes=False); location attributes excluded",
+      "baseline_commit": "21a54876512724ef0ee4e98ce054a0d5f76f2d31",
+      "baseline_helper_sha256": "b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d",
+      "changed_existing_nodes": [
+        "LocalCargoCacheProvider.__init__",
+        "LocalCargoCacheProvider._prune_locked",
+        "LocalCargoCacheProvider._read_pointer_locked",
+        "LocalCargoCacheProvider._reconcile_snapshots_locked",
+        "LocalCargoCacheProvider.publish",
+        "LocalCargoCacheProvider.restore",
+        "execute_locked",
+        "main"
+      ],
+      "fixed_checks_assignment": {
+        "baseline_ast_sha256": "b4bc47419c83dec917c770a0e1edd44d765ddcab96f4356917de5d86e6a00f96",
+        "equivalent": true,
+        "new_ast_sha256": "b4bc47419c83dec917c770a0e1edd44d765ddcab96f4356917de5d86e6a00f96",
+        "node": "CHECKS"
+      },
+      "new_commit": "51c35693525390f1e2f773755630a232bc31c896",
+      "new_helper_sha256": "04709f1e3aa948b5c35ba0423ce480186bba5e57207d97125e9ffd7602ddde68",
+      "python_version": "3.12.3",
+      "selected_function_count": 14,
+      "selected_functions": [
+        {
+          "baseline_ast_sha256": "f53bff0031f68957460c12daaa4970a53d8818492215b178a12b2871627e8607",
+          "equivalent": true,
+          "new_ast_sha256": "f53bff0031f68957460c12daaa4970a53d8818492215b178a12b2871627e8607",
+          "node": "derive_branch_scope"
+        },
+        {
+          "baseline_ast_sha256": "162ff307c4db6d3351de18bf0a95da563fa38d997d1ee0c4309924d3a2c1b502",
+          "equivalent": true,
+          "new_ast_sha256": "162ff307c4db6d3351de18bf0a95da563fa38d997d1ee0c4309924d3a2c1b502",
+          "node": "compute_compat_key"
+        },
+        {
+          "baseline_ast_sha256": "0409df0b4f02c2088b8478e2dd99c528ba09baf7efdaef0eab3c512b2d52d90a",
+          "equivalent": true,
+          "new_ast_sha256": "0409df0b4f02c2088b8478e2dd99c528ba09baf7efdaef0eab3c512b2d52d90a",
+          "node": "validate_publish_timestamps"
+        },
+        {
+          "baseline_ast_sha256": "b89123692ecb81e86902ecd655592abef40e22296dcdcc82145af048e05c4982",
+          "equivalent": true,
+          "new_ast_sha256": "b89123692ecb81e86902ecd655592abef40e22296dcdcc82145af048e05c4982",
+          "node": "validate_restore_timestamp_ordering"
+        },
+        {
+          "baseline_ast_sha256": "9e9c59fd2f89e1e393184205403915f93da369eab0d279eff953a2d5f382e57a",
+          "equivalent": true,
+          "new_ast_sha256": "9e9c59fd2f89e1e393184205403915f93da369eab0d279eff953a2d5f382e57a",
+          "node": "parse_cargo_duration_ms"
+        },
+        {
+          "baseline_ast_sha256": "540d554de5c63166fe493248e722f833bd4dc6f5ae84bbef449f15053b04994b",
+          "equivalent": true,
+          "new_ast_sha256": "540d554de5c63166fe493248e722f833bd4dc6f5ae84bbef449f15053b04994b",
+          "node": "parse_cargo_telemetry"
+        },
+        {
+          "baseline_ast_sha256": "2653440712f1c1c60186654e12121902e04030e0828ee03db73f485af8c5fb28",
+          "equivalent": true,
+          "new_ast_sha256": "2653440712f1c1c60186654e12121902e04030e0828ee03db73f485af8c5fb28",
+          "node": "_copy_tree_from_build"
+        },
+        {
+          "baseline_ast_sha256": "20ed6be58fdc15c144431bce882001e3e5395aa269de18d4e85a842f199068c3",
+          "equivalent": true,
+          "new_ast_sha256": "20ed6be58fdc15c144431bce882001e3e5395aa269de18d4e85a842f199068c3",
+          "node": "_copy_tree_to_build"
+        },
+        {
+          "baseline_ast_sha256": "47356f301b062b2ccd7d729df33bd3b9cc2b0380f04382eb37f2763f2fd4b47b",
+          "equivalent": true,
+          "new_ast_sha256": "47356f301b062b2ccd7d729df33bd3b9cc2b0380f04382eb37f2763f2fd4b47b",
+          "node": "run_child"
+        },
+        {
+          "baseline_ast_sha256": "75adf7d599c10534e9079fa5505aba24b7921379102d9d279934d73ded9f2568",
+          "equivalent": true,
+          "new_ast_sha256": "75adf7d599c10534e9079fa5505aba24b7921379102d9d279934d73ded9f2568",
+          "node": "main_ancestor_preflight"
+        },
+        {
+          "baseline_ast_sha256": "66752bea5df08368d33527bccae49ace33d3cd3ed759c1321852202012f46f2f",
+          "equivalent": true,
+          "new_ast_sha256": "66752bea5df08368d33527bccae49ace33d3cd3ed759c1321852202012f46f2f",
+          "node": "map_cargo_targets"
+        },
+        {
+          "baseline_ast_sha256": "9291c40ad1e1c8bfe2283e5aaba86e5aeed493848ed54c1f1d0f4350be80404a",
+          "equivalent": true,
+          "new_ast_sha256": "9291c40ad1e1c8bfe2283e5aaba86e5aeed493848ed54c1f1d0f4350be80404a",
+          "node": "_capture_source_inventory"
+        },
+        {
+          "baseline_ast_sha256": "64701ac78972c05fd11ec4688704ad566e201320c8010ba73d267d3d7d12b8d4",
+          "equivalent": true,
+          "new_ast_sha256": "64701ac78972c05fd11ec4688704ad566e201320c8010ba73d267d3d7d12b8d4",
+          "node": "_read_ui_qa_stages"
+        },
+        {
+          "baseline_ast_sha256": "823ceed8bef6377ce315c21cd186215601d2327cfe6de543e8da0950890efa2d",
+          "equivalent": true,
+          "new_ast_sha256": "823ceed8bef6377ce315c21cd186215601d2327cfe6de543e8da0950890efa2d",
+          "node": "LocalCargoCacheProvider.resolve_key"
+        }
+      ]
+    }
+  },
+  "historical_performance_baseline": {
+    "attribution": "These old measurements belong exclusively to historical b870; no new047 timing or speedup claim is made.",
+    "source_commit": "d4ea0741d2bf95fee8cb147323b117bcc4d44a00",
+    "source_tree": "8728c992c129c7e6ff899c814a2651867e40b71d",
+    "canonical_helper_sha256": "b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d",
+    "rendered_helper_sha256": "ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a",
+    "unchanged_reports": {
+      "docs/reports/forge-cargo-cache-qualification-20261121.json": "68e92dfb355ca2ae8ec807daebf9ab7102a4755d1ee3da2c283c28a9f3c90d01",
+      "docs/reports/forge-cargo-cache-qualification-20261121.md": "5a7c318495e114cc9c406ced1b32332799bafa08f96ccafc3921564f92adc54d"
+    },
+    "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms; observed completed Cargo elapsed phases, not CPU-only time",
+    "phases": [
+      {
+        "phase": "cold",
+        "action_id": "ff48079b-77d8-5dc1-8e26-c74475645197",
+        "status": "passed",
+        "total_elapsed_ms": 2188383,
+        "cargo_compile_ms": 882550,
+        "intentional_cancellation": false
+      },
+      {
+        "phase": "warm",
+        "action_id": "291d75a1-e961-50b0-b183-6b474fe88eef",
+        "status": "passed",
+        "total_elapsed_ms": 1285286,
+        "cargo_compile_ms": 98580,
+        "intentional_cancellation": false
+      },
+      {
+        "phase": "clear-rebuild",
+        "action_id": "1a451a27-30a0-5230-b511-83ff88addb44",
+        "status": "passed",
+        "total_elapsed_ms": 2098552,
+        "cargo_compile_ms": 829400,
+        "intentional_cancellation": false
+      },
+      {
+        "phase": "clear-cancel",
+        "action_id": "e0f6ba4b-72fc-53f6-bfef-8a8162445618",
+        "status": "failed",
+        "total_elapsed_ms": 27958,
+        "cargo_compile_ms": null,
+        "intentional_cancellation": true
+      }
+    ]
+  },
+  "remaining_gates": {
+    "new_exact_source_full_jenkins": "pending",
+    "independent_codex_review": "pending",
+    "normal_owner_workflow_authorization_and_guarded_merge": "pending",
+    "native_cache_runtime_activation": "pending"
+  },
+  "limitations": [
+    "The Root component run used synthetic artifacts and synthetic receipts in a new private fixture; it did not run supervisor/build-user/process/network/service/database operations.",
+    "Signal capability was intentionally replaced with a no-op in the Root filesystem actor; signal and actual process-death coverage is ordinary-UID unit evidence.",
+    "AST identity applies only to the named14 functions and fixed CHECKS assignment. Existing publication, restore orchestration, retention, metadata and supervisor lifecycle code changed.",
+    "No old total or phase timing is relabeled as a new-helper performance measurement.",
+    "No source approval, acceptance receipt, publication authority, budget reset or live cache activation is implied."
+  ]
+}

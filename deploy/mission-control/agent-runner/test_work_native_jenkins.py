@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from test_work_executor import raw_config
-from work_external_delivery import CHECKS, canonical, durable_json
+from work_external_delivery import CHECKS, PROFILE, canonical, durable_json, read_private
 from work_native_jenkins import NativeJenkinsVerification, VERSION
 from work_publication import PublicationWorker, PublicationWorkerFactory
 from work_publication_checks import VerificationFailure
@@ -121,6 +121,8 @@ class NativeJenkinsTest(unittest.TestCase):
 
     def test_one_real_candidate_action_is_reused_by_hosted_and_merge_observation(self):
         binding = self.local_pass()
+        self.assertEqual(binding['request']['branch_scope'], 'main')
+        self.assertEqual(binding['request']['source_branch'], 'main')
         self.assertEqual(self.driver.submissions, 1)
         self.assertEqual(self.git._git(self.repository,'rev-parse','HEAD').decode().strip(), self.head)
         for job in (self.hosted, {**self.hosted,'source_review_id':None,'review_id':self.scope['review_id']}):
@@ -375,6 +377,145 @@ class NativeJenkinsTest(unittest.TestCase):
         self.active = False
         for _ in range(5):self.provider.reconcile_once(limit=8)
         self.assertTrue((directory/'cancel-observation.json').exists())
+
+    def test_non_main_integrate_first_candidate_uses_non_writable_detached_branch_scope(self):
+        detached_job = {**self.job, 'integration_base': '0' * 40}
+        binding = self.provider._prepare(detached_job, self.repository)
+        self.assertEqual(binding['request']['branch_scope'], 'detached')
+        self.assertNotIn('source_branch', binding['request'])
+    def historical_terminal_proof(self, *, branch_scope=False):
+        binding = self.local_pass()
+        if branch_scope:
+            binding['request']['branch_scope'] = 'main'
+        else:
+            # New invocations always supply cache scope. Reconstruct only the
+            # frozen legacy request shape whose retired transport is tested.
+            binding['request'].pop('branch_scope', None)
+            binding['request'].pop('source_branch', None)
+        durable_json(self.provider._directory(binding['request']['action_id'])/'native-binding.json',binding)
+        request = binding['request']
+        record = {'version':1,'action_id':request['action_id'],'workflow_id':request['workflow_id'],
+            'project_alias':request['project_alias'],'candidate_commit':request['candidate_commit'],
+            'candidate_tree':request['candidate_tree'],'expected_main':request['integration_base'],
+            'gate_manifest_sha256':request['gate_manifest_sha256'],'verification_profile':PROFILE,
+            'correlation_id':request['correlation_id'],'bundle_sha256':'a'*64}
+        if branch_scope:record['branch_scope'] = request['branch_scope']
+        submission = self.driver.config.spool_root/request['action_id']/'request.json'
+        durable_json(submission,record)
+        result = {key:value for key,value in record.items() if key not in {'project_alias','bundle_sha256'}}
+        result.update(status='passed',cleanup_confirmed=True,log_sha256='c'*64,
+            request_sha256=hashlib.sha256(submission.read_bytes()).hexdigest(),
+            checks=[{'index':index,'argv':list(argv),'returncode':0} for index,argv in enumerate(CHECKS)])
+        root = self.driver.config.results_root/(request['action_id']+'.json')
+        durable_json(root,result)
+        directory = self.provider._directory(request['action_id'])
+        observed = json.loads((directory/'observation.json').read_text())
+        observed['receipt'].update(check_receipt_sha256=hashlib.sha256(root.read_bytes()).hexdigest(),log_sha256='c'*64)
+        durable_json(directory/'observation.json',observed)
+        self.store.native_ci_binding.side_effect = lambda _: {**self.scope,'active':False,'state':'completed'}
+        self.driver.config.jenkins_config.write_text('{"replacement_transport":true}')
+        return binding,directory,root
+
+    @contextmanager
+    def root_receipt_fixture(self, root):
+        # The unit fixture has no root writer. Assert the production reader
+        # demands uid0, then substitute only this owned fixture's file read.
+        def read(path,**kwargs):
+            if Path(path)==root:
+                self.assertEqual(kwargs.get('owner'),0)
+                kwargs['owner'] = os.geteuid()
+            return read_private(path,**kwargs)
+        with patch('work_native_jenkins.read_private',side_effect=read):yield
+
+    def test_retired_transport_terminal_root_proof_skips_without_weakening_read_or_writing_history(self):
+        binding,directory,root = self.historical_terminal_proof()
+        original = {p:p.read_bytes() for p in directory.iterdir() if p.is_file()}
+        with self.root_receipt_fixture(root):
+            self.assertTrue(self.provider._historical_terminal(directory))
+            with patch('work_native_jenkins.LOG.warning') as warning:self.provider.reconcile_once()
+            warning.assert_not_called()
+            with self.assertRaises(PublicationError):self.provider._read(binding['request']['action_id'])
+        self.assertEqual(self.driver.cancellations,0)
+        self.assertEqual({p:p.read_bytes() for p in original},original)
+
+    def test_retired_transport_supports_bound_new_branch_scope_and_failed_clean_root_result(self):
+        _binding,directory,root = self.historical_terminal_proof(branch_scope=True)
+        result = json.loads(root.read_text())
+        result.update(status='failed',failure='main_ancestor_required',checks=[])
+        durable_json(root,result)
+        observed = json.loads((directory/'observation.json').read_text())
+        observed['status'] = 'failed'
+        observed['receipt']['check_receipt_sha256'] = hashlib.sha256(root.read_bytes()).hexdigest()
+        durable_json(directory/'observation.json',observed)
+        with self.root_receipt_fixture(root):self.assertTrue(self.provider._historical_terminal(directory))
+
+    def test_retired_transport_active_scope_cannot_use_terminal_skip(self):
+        _binding,directory,root = self.historical_terminal_proof()
+        self.store.native_ci_binding.side_effect = lambda _: {**self.scope,'active':True,'state':'active'}
+        with self.root_receipt_fixture(root):
+            self.assertFalse(self.provider._historical_terminal(directory))
+            with self.assertLogs('forge-native-jenkins',level='WARNING'):self.provider.reconcile_once()
+        self.assertEqual(self.driver.cancellations,0)
+
+    def test_retired_cancelled_build_still_needs_bound_complete_root_cleanup(self):
+        binding,directory,root = self.historical_terminal_proof()
+        durable_json(directory/'observation.json',{'status':'pending','receipt':{}})
+        cancelled = {'status':'cancelled','receipt':{'target_action_id':binding['request']['action_id'],
+            'cleanup_confirmed':True,'check_receipt_sha256':hashlib.sha256(root.read_bytes()).hexdigest()}}
+        durable_json(directory/'cancel-observation.json',cancelled)
+        with self.root_receipt_fixture(root):
+            self.assertTrue(self.provider._historical_terminal(directory))
+            durable_json(directory/'cancel-observation.json',{**cancelled,'receipt':{
+                **cancelled['receipt'],'cleanup_confirmed':False,'process_started':False}})
+            self.assertFalse(self.provider._historical_terminal(directory))
+            durable_json(directory/'cancel-observation.json',{**cancelled,'receipt':{
+                **cancelled['receipt'],'target_action_id':str(uuid4())}})
+            self.assertFalse(self.provider._historical_terminal(directory))
+
+    def test_retired_transport_rejects_missing_forged_or_incomplete_root_cleanup(self):
+        _binding,directory,root = self.historical_terminal_proof()
+        raw = root.read_bytes()
+        baseline = json.loads(raw)
+        observation = json.loads((directory/'observation.json').read_text())
+        with self.root_receipt_fixture(root):
+            root.unlink()
+            self.assertFalse(self.provider._historical_terminal(directory))
+            for field,value in [('action_id',str(uuid4())),('workflow_id',str(uuid4())),
+                    ('candidate_commit','f'*40),('candidate_tree','f'*40),('expected_main','f'*40),
+                    ('gate_manifest_sha256','f'*64),('correlation_id',str(uuid4())),
+                    ('request_sha256','f'*64),('cleanup_confirmed',False),('status','running'),('checks',[])]:
+                result = {**baseline,field:value}
+                durable_json(root,result)
+                updated = {**observation,'receipt':{**observation['receipt'],
+                    'check_receipt_sha256':hashlib.sha256(root.read_bytes()).hexdigest()}}
+                durable_json(directory/'observation.json',updated)
+                with self.subTest(field=field):self.assertFalse(self.provider._historical_terminal(directory))
+            durable_json(root,baseline)
+            durable_json(directory/'observation.json',{**observation,'receipt':{
+                **observation['receipt'],'check_receipt_sha256':'f'*64}})
+            self.assertFalse(self.provider._historical_terminal(directory))
+            durable_json(directory/'observation.json',{**observation,'status':'pending'})
+            self.assertFalse(self.provider._historical_terminal(directory))
+            durable_json(root,['unknown-root-schema'])
+            durable_json(directory/'observation.json',{**observation,'receipt':{**observation['receipt'],
+                'check_receipt_sha256':hashlib.sha256(root.read_bytes()).hexdigest()}})
+            self.assertFalse(self.provider._historical_terminal(directory))
+
+    def test_retired_transport_cannot_skip_foreign_review_identity_or_untrusted_root_file(self):
+        binding,directory,root = self.historical_terminal_proof()
+        foreign = str(uuid4())
+        changed = {**binding,'scope':{**binding['scope'],'review_id':foreign},
+            'request':{**binding['request'],'review_id':foreign}}
+        durable_json(directory/'native-binding.json',changed)
+        self.store.native_ci_binding.side_effect = lambda _: {**self.scope,'review_id':foreign,'active':False,'state':'completed'}
+        with self.root_receipt_fixture(root):self.assertFalse(self.provider._historical_terminal(directory))
+        durable_json(directory/'native-binding.json',binding)
+        self.store.native_ci_binding.side_effect = lambda _: {**self.scope,'active':False,'state':'completed'}
+        def untrusted(path,**kwargs):
+            if Path(path)==root:raise ValueError('Root ownership is missing')
+            return read_private(path,**kwargs)
+        with patch('work_native_jenkins.read_private',side_effect=untrusted):
+            self.assertFalse(self.provider._historical_terminal(directory))
 
 
 class NativeFactoryTest(unittest.TestCase):

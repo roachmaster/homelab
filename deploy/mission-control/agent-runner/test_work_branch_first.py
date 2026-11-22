@@ -13,7 +13,7 @@ from test_work_publication import fixture, git
 from test_work_review import ReviewStore, review_job
 from test_work_native_jenkins import Driver
 from test_work_merge import merge_fixture, MergeStore
-from work_external_delivery import CHECKS, DeliveryConfig, canonical, durable_json
+from work_external_delivery import CHECKS, DeliveryConfig, canonical, derive_branch_scope, durable_json
 from work_feedback import validate_findings
 from work_candidate_source import ReviewCandidateSourceProvider
 from work_executor import WorkspaceProvider
@@ -219,6 +219,11 @@ class BranchFirstTest(unittest.TestCase):
                 'candidate_commit':outcome['candidate_commit']})
             self.assertEqual(branch_name(selected),'forge/task-'+job['review_id'])
             binding = manifest['native_ci']
+            expected_branch = 'forge/task-' + job['review_id']
+            self.assertEqual(binding['request']['source_branch'], expected_branch)
+            self.assertEqual(binding['request']['branch_scope'],
+                derive_branch_scope(candidate_commit=outcome['candidate_commit'],
+                    expected_main=main, source_branch=expected_branch))
             bundle = native._directory(binding['request']['prepare_action_id'])/'candidate.bundle'
             refs = git(repository,'bundle','list-heads',str(bundle)).decode().splitlines()
             self.assertEqual(len(refs),2)

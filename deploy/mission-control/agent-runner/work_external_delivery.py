@@ -29,6 +29,10 @@ LOG = logging.getLogger('forge-external-delivery')
 SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
 REPOSITORY = re.compile('[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+')
+BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
+BRANCH_SLUG_RE = re.compile(r'[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
+BRANCH_SCOPE_RE = re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
+EPHEMERAL_BRANCH_PREFIX = 'forge/external-candidate-'
 PROFILE = 'forge-sdlc-jenkins-v1'
 CHECKS = (('/usr/bin/make', 'ci'), ('/usr/bin/make', 'ui-qa'),
           ('/usr/bin/python3', '-B', '-m', 'unittest', 'discover', '-s',
@@ -68,6 +72,60 @@ def digest(value):
 
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+
+
+def validate_branch_name(value):
+    if (not isinstance(value, str) or not BRANCH_NAME_RE.fullmatch(value)
+            or '..' in value or '//' in value or '@{' in value
+            or value.endswith('/') or value.endswith('.')):
+        raise ValueError('Invalid Git branch name')
+    for part in value.split('/'):
+        if part in {'', '.', '..'} or part.startswith('.') or part.endswith('.lock'):
+            raise ValueError('Invalid Git branch name component')
+    return value
+
+
+def canonical_branch_slug(branch_name):
+    branch = validate_branch_name(branch_name)
+    digest16 = hashlib.sha256(branch.encode('utf-8')).hexdigest()[:16]
+    sanitized = re.sub(r'[^a-z0-9._-]+', '-', branch.lower())
+    sanitized = re.sub(r'-{2,}', '-', sanitized).strip('._-')
+    prefix = sanitized[:40].rstrip('._-')
+    if not prefix or not prefix[0].isalnum():
+        prefix = 'b'
+    slug = f'{prefix}-{digest16}'
+    if not BRANCH_SLUG_RE.fullmatch(slug):
+        raise ValueError('Canonical branch slug failed validation')
+    return slug
+
+
+def derive_branch_scope(*, candidate_commit, expected_main, source_branch):
+    sha(candidate_commit)
+    sha(expected_main)
+    if source_branch is None:
+        return 'main' if candidate_commit == expected_main else 'detached'
+    branch = validate_branch_name(source_branch)
+    if branch == 'main':
+        if candidate_commit != expected_main:
+            raise ValueError('Non-main candidate cannot claim main branch scope')
+        return 'main'
+    return 'branch/' + canonical_branch_slug(branch)
+
+
+def validate_branch_scope(scope, *, candidate_commit, expected_main):
+    sha(candidate_commit)
+    sha(expected_main)
+    if not isinstance(scope, str):
+        raise ValueError('Invalid delivery branch scope')
+    if scope == 'main':
+        if candidate_commit != expected_main:
+            raise ValueError('Main branch scope requires candidate_commit == expected_main')
+        return 'main'
+    if scope == 'detached':
+        return 'detached'
+    if '..' not in scope and BRANCH_SCOPE_RE.fullmatch(scope):
+        return scope
+    raise ValueError('Invalid delivery branch scope')
 
 
 def protected_delivery_gate(path):
@@ -306,11 +364,92 @@ class TrustedDeliveryPort:
             raise ValueError('Unsafe delivery state')
         return path
 
+    def _remote_branch_heads(self, repository, remote):
+        output = self.git(
+            repository,
+            '-c', 'credential.helper=!/usr/bin/gh auth git-credential',
+            'ls-remote', '--heads', '--', remote,
+        )
+        heads = {}
+        for line in output.decode('utf-8', errors='replace').splitlines():
+            if not line.strip() or '\t' not in line:
+                continue
+            head_sha, ref = line.split('\t', 1)
+            if not ref.startswith('refs/heads/') or not SHA.fullmatch(head_sha):
+                continue
+            name = ref[len('refs/heads/'):]
+            if name.startswith(EPHEMERAL_BRANCH_PREFIX):
+                continue
+            try:
+                validate_branch_name(name)
+            except ValueError:
+                continue
+            heads[name] = head_sha
+        return heads
+
+    def _resolve_branch_scope(
+        self,
+        repository,
+        remote,
+        *,
+        expected,
+        raw,
+        clean,
+        requested_branch,
+        require_lease,
+    ):
+        # Case A: exact main verification (raw == expected and clean == expected).
+        if raw == expected and clean == expected and requested_branch in (None, 'main'):
+            return 'main', 'main'
+
+        if requested_branch == 'main':
+            raise ValueError('Non-main candidate cannot claim main source branch')
+
+        require_lease()
+        remote_heads = self._remote_branch_heads(repository, remote)
+        require_lease()
+
+        # Case B1: explicit requested non-main branch verified against trusted remote tip/ancestry.
+        if requested_branch is not None:
+            if requested_branch not in remote_heads:
+                raise ValueError('Requested source branch does not exist on trusted remote')
+            head_sha = remote_heads[requested_branch]
+            if head_sha != raw:
+                if raw == expected:
+                    raise ValueError('Requested source branch does not point at candidate commit')
+                self.git(
+                    repository,
+                    '-c', 'credential.helper=!/usr/bin/gh auth git-credential',
+                    'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', '--', remote, head_sha,
+                )
+                require_lease()
+                try:
+                    self.git(repository, 'merge-base', '--is-ancestor', raw, head_sha)
+                except PublicationError:
+                    raise ValueError('Candidate commit is not on requested source branch') from None
+            return requested_branch, 'branch/' + canonical_branch_slug(requested_branch)
+
+        # Case B2: unambiguous remote head match without explicit manifest source_branch.
+        matching_heads = sorted(
+            name for name, head_sha in remote_heads.items()
+            if head_sha == raw and name != 'main'
+        )
+        if len(matching_heads) == 1:
+            resolved = matching_heads[0]
+            return resolved, 'branch/' + canonical_branch_slug(resolved)
+
+        # Case C: detached or ambiguous remote branch metadata -> strictly non-writable scope.
+        return None, 'detached'
+
     def prepare_candidate(self, request, require_lease):
         directory = self.directory(request)
         result_path = directory / 'prepared.json'
+        requested_branch = request.get('source_branch')
+        if requested_branch is not None:
+            requested_branch = validate_branch_name(requested_branch)
         intended = {k: request.get(k) for k in ('workflow_id', 'project_alias', 'source_task_id',
             'source_assignment_id', 'source_sha256', 'base_revision', 'candidate_commit', 'candidate_tree')}
+        intended['source_branch'] = requested_branch
         identity = hashlib.sha256(canonical(intended)).hexdigest()
         if result_path.exists():
             previous = json.loads(read_private(result_path, owner=os.geteuid()))
@@ -370,6 +509,15 @@ class TrustedDeliveryPort:
                    'GIT_COMMITTER_DATE': '@' + str(epoch) + ' +0000'}
             clean = self.git(repository, 'commit-tree', claimed_tree, '-p', expected,
                 data=('Verified Forge workflow ' + request['workflow_id'] + '\n').encode(), env=env).decode().strip()
+        resolved_source_branch, branch_scope = self._resolve_branch_scope(
+            repository,
+            remote,
+            expected=expected,
+            raw=raw,
+            clean=clean,
+            requested_branch=requested_branch,
+            require_lease=require_lease,
+        )
         require_lease()
         reference = 'refs/forge/external-candidates/' + request['action_id']
         self.git(repository, 'update-ref', reference, clean)
@@ -387,6 +535,7 @@ class TrustedDeliveryPort:
                 gate_changes.append({'path': name, 'finding_id': 'gate-' + hashlib.sha256(path).hexdigest()[:16]})
         result = {'candidate_commit': sha(clean), 'candidate_tree': claimed_tree,
             'integration_base': expected, 'author_candidate_commit': raw,
+            'source_branch': resolved_source_branch, 'branch_scope': branch_scope,
             'diff_sha256': hashlib.sha256(patch).hexdigest(), 'verification_profile': PROFILE,
             'gate_source_sha256': source_digest, 'gate_manifest_sha256': gate,
             'protected_gate_changes': gate_changes, 'no_change': clean == expected,
@@ -401,6 +550,33 @@ class TrustedDeliveryPort:
 
     def _submission(self, request):
         import grp
+        candidate_commit = sha(request['candidate_commit'])
+        expected_main = sha(request['integration_base'])
+        raw_scope = request.get('branch_scope')
+        raw_branch = request.get('source_branch')
+        if raw_scope is None and raw_branch is None:
+            raise ValueError('CI submission requires a trusted branch_scope or source_branch')
+        if raw_scope is not None:
+            branch_scope = validate_branch_scope(
+                raw_scope,
+                candidate_commit=candidate_commit,
+                expected_main=expected_main,
+            )
+            if raw_branch is not None:
+                expected_scope = derive_branch_scope(
+                    candidate_commit=candidate_commit,
+                    expected_main=expected_main,
+                    source_branch=raw_branch,
+                )
+                if branch_scope != expected_scope:
+                    raise ValueError('CI submission branch_scope does not match source_branch')
+        else:
+            branch_scope = derive_branch_scope(
+                candidate_commit=candidate_commit,
+                expected_main=expected_main,
+                source_branch=raw_branch,
+            )
+
         prepared = self.config.state_root / 'actions' / uid(request['prepare_action_id']) / 'candidate.bundle'
         bundle = read_private(prepared, owner=os.geteuid(), maximum=128 * 1024 * 1024)
         path = self.config.spool_root / uid(request['action_id'])
@@ -412,8 +588,8 @@ class TrustedDeliveryPort:
             raise ValueError('Unsafe CI submission')
         record = {'version': 1, 'action_id': uid(request['action_id']),
             'workflow_id': uid(request['workflow_id']), 'project_alias': request['project_alias'],
-            'candidate_commit': sha(request['candidate_commit']), 'candidate_tree': sha(request['candidate_tree']),
-            'expected_main': sha(request['integration_base']),
+            'candidate_commit': candidate_commit, 'candidate_tree': sha(request['candidate_tree']),
+            'expected_main': expected_main, 'branch_scope': branch_scope,
             'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
             'bundle_sha256': hashlib.sha256(bundle).hexdigest(), 'verification_profile': PROFILE,
             'correlation_id': uid(request['correlation_id'])}
@@ -468,16 +644,20 @@ class TrustedDeliveryPort:
         result_file = self.config.results_root / (request['action_id'] + '.json')
         if not result_file.exists():
             return {'status': 'failed', 'receipt': receipt, 'summary': 'The finished Jenkins build has no trusted verification receipt.'}
-        raw = read_private(result_file, owner=0)
+        raw = read_private(result_file, owner=0, maximum=262144)
         result = json.loads(raw)
         expected = {k: record[k] for k in ('action_id', 'workflow_id', 'candidate_commit', 'candidate_tree',
-                    'expected_main', 'gate_manifest_sha256', 'verification_profile', 'correlation_id')}
+                    'expected_main', 'branch_scope', 'gate_manifest_sha256', 'verification_profile', 'correlation_id')}
         if any(result.get(k) != v for k, v in expected.items()) or result.get('request_sha256') != hashlib.sha256(canonical(record) + b'\n').hexdigest():
             raise ValueError('Trusted CI receipt source mismatch')
         receipt.update({'check_receipt_sha256': hashlib.sha256(raw).hexdigest(),
             'cleanup_confirmed': result.get('cleanup_confirmed') is True,
             'checks': result.get('checks'), 'log_sha256': result.get('log_sha256'),
             'failure': result.get('failure')})
+        if isinstance(result.get('cache'), dict):
+            receipt['cache'] = result['cache']
+        if isinstance(result.get('stages'), list):
+            receipt['stages'] = result['stages']
         checks = result.get('checks')
         complete = (isinstance(checks, list) and len(checks) == len(CHECKS)
             and all(check == {'index': index, 'argv': list(argv), 'returncode': 0}
@@ -602,7 +782,7 @@ class TrustedDeliveryPort:
                     'summary': 'Jenkins process stop requested; awaiting the trusted cleanup receipt.'}
         result_path = self.config.results_root / (target['action_id'] + '.json')
         if result_path.exists():
-            raw = read_private(result_path, owner=0)
+            raw = read_private(result_path, owner=0, maximum=262144)
             result = json.loads(raw)
             if result.get('action_id') == target['action_id'] and result.get('cleanup_confirmed') is True:
                 return {'status': 'cancelled', 'receipt': {**receipt, 'cleanup_confirmed': True,

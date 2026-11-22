@@ -4,37 +4,81 @@
 Jenkins calls this one helper through its narrow sudo rule. No command, URL,
 credential or filesystem destination is accepted from build parameters.
 """
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-import argparse
 import ctypes
 import fcntl
-import hashlib
 import grp
+import hashlib
 import json
 import os
+import platform
 import pwd
 import re
-import signal
 import selectors
 import shutil
-import tempfile
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from uuid import UUID
 
 CONFIG = Path('/etc/forge-ci/pipeline.json')
 MAX_SOURCE_BYTES = 128 * 1024 * 1024
+MAX_META_BYTES = 16 * 1024 * 1024
+COPY_CHUNK_BYTES = 1024 * 1024
+CACHE_SCHEMA_VERSION = 1
+TRUSTED_CACHE_ROOT_PREFIX = Path('/mnt/data/forge-homelab')
+DEFAULT_CACHE_ROOT = Path('/mnt/data/forge-homelab/ci-cache')
+DEFAULT_MAX_TOTAL_BYTES = 20 * 1024 * 1024 * 1024
+DEFAULT_MAX_ENTRIES = 8
+DEFAULT_MAX_AGE_SECONDS = 14 * 86400
+EPHEMERAL_TARGET_DIRS = frozenset({'ui-assets', 'ui-qa', 'tmp'})
+REPO_BUILD_CONFIG_PATHS = (
+    '.cargo/config',
+    '.cargo/config.toml',
+    'src/rust/.cargo/config',
+    'src/rust/.cargo/config.toml',
+    'rust-toolchain',
+    'rust-toolchain.toml',
+)
+COMPILER_ENV_KEYS = (
+    'RUSTFLAGS',
+    'CARGO_ENCODED_RUSTFLAGS',
+    'RUSTDOCFLAGS',
+    'CARGO_INCREMENTAL',
+    'CC',
+    'CFLAGS',
+)
 CHECKS = (
     ('/usr/bin/make', 'ci'),
     ('/usr/bin/make', 'ui-qa'),
     ('/usr/bin/python3', '-B', '-m', 'unittest', 'discover', '-s',
      'deploy/mission-control/agent-runner', '-p', 'test_*.py', '-v'),
 )
+CHECK_LABELS = ('make ci', 'make ui-qa', 'unittest')
 SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
+BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
+BRANCH_SLUG_RE = re.compile(r'[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
+BRANCH_SCOPE_RE = re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
+CARGO_COMPILING_RE = re.compile(r'^\s*Compiling\s+\S+')
+CARGO_FINISHED_RE = re.compile(
+    r'^\s*Finished\s+.*?\s+in\s+((?:\d+h\s*)?(?:\d+m\s*)?\d+(?:\.\d+)?s)\s*$'
+)
+DURATION_PART_RE = re.compile(r'(?:(\d+)h\s*)?(?:(\d+)m\s*)?(\d+(?:\.\d+)?)s')
+
+
+class UnsafeArtifactError(ValueError):
+    """Raised when build-owned scratch contains an unsafe artifact entry."""
+
+
+class CorruptSnapshotError(ValueError):
+    """Raised when a cached snapshot fails integrity or structural checks."""
 
 
 class MainAncestorRequired(ValueError):
@@ -74,6 +118,505 @@ def protected_gate_path(path):
             'work_verification_init.py', 'work_policy.py', 'work_external_delivery.py'})
 
 
+# --- Pure branch-identity & compatibility helpers (no I/O or provisioning) ---
+
+
+def validate_branch_name(value):
+    if (not isinstance(value, str) or not BRANCH_NAME_RE.fullmatch(value)
+            or '..' in value or '//' in value or '@{' in value
+            or value.endswith('/') or value.endswith('.')):
+        raise ValueError('Invalid Git branch name')
+    for part in value.split('/'):
+        if part in {'', '.', '..'} or part.startswith('.') or part.endswith('.lock'):
+            raise ValueError('Invalid Git branch name component')
+    return value
+
+
+def canonical_branch_slug(branch_name):
+    branch = validate_branch_name(branch_name)
+    digest16 = hashlib.sha256(branch.encode('utf-8')).hexdigest()[:16]
+    sanitized = re.sub(r'[^a-z0-9._-]+', '-', branch.lower())
+    sanitized = re.sub(r'-{2,}', '-', sanitized).strip('._-')
+    prefix = sanitized[:40].rstrip('._-')
+    if not prefix or not prefix[0].isalnum():
+        prefix = 'b'
+    slug = f'{prefix}-{digest16}'
+    if not BRANCH_SLUG_RE.fullmatch(slug):
+        raise ValueError('Canonical branch slug failed validation')
+    return slug
+
+
+def derive_branch_scope(*, candidate_commit, expected_main, source_branch):
+    if (not isinstance(candidate_commit, str) or not SHA.fullmatch(candidate_commit)
+            or not isinstance(expected_main, str) or not SHA.fullmatch(expected_main)):
+        raise ValueError('Invalid commit identity for branch scope derivation')
+    if source_branch is None:
+        return 'main' if candidate_commit == expected_main else 'detached'
+    branch = validate_branch_name(source_branch)
+    if branch == 'main':
+        if candidate_commit != expected_main:
+            raise ValueError('Non-main candidate cannot claim main branch scope')
+        return 'main'
+    return 'branch/' + canonical_branch_slug(branch)
+
+
+def validate_branch_scope(scope, *, candidate_commit, expected_main):
+    if (not isinstance(candidate_commit, str) or not SHA.fullmatch(candidate_commit)
+            or not isinstance(expected_main, str) or not SHA.fullmatch(expected_main)):
+        raise ValueError('Invalid commit identity for branch scope validation')
+    if not isinstance(scope, str):
+        raise ValueError('Invalid CI branch scope')
+    if scope == 'main':
+        if candidate_commit != expected_main:
+            raise ValueError('Main branch scope requires candidate_commit == expected_main')
+        return 'main'
+    if scope == 'detached':
+        return 'detached'
+    if '..' not in scope and BRANCH_SCOPE_RE.fullmatch(scope):
+        return scope
+    raise ValueError('Invalid CI branch scope')
+
+
+def scope_directory_name(branch_scope):
+    if branch_scope == 'main':
+        return 'main'
+    if branch_scope == 'detached':
+        return None
+    if isinstance(branch_scope, str) and '..' not in branch_scope and BRANCH_SCOPE_RE.fullmatch(branch_scope):
+        return 'branch--' + branch_scope.split('/', 1)[1]
+    raise ValueError('Invalid CI branch scope for storage directory')
+
+
+def extract_compiler_and_feature_env(environment):
+    selected = {}
+    for key in sorted(environment):
+        if (key in COMPILER_ENV_KEYS
+                or key.startswith('CARGO_PROFILE_')
+                or key.startswith('CARGO_BUILD_')):
+            selected[key] = environment[key]
+    return selected
+
+
+def compute_compat_key(
+    *,
+    project_alias,
+    verification_profile,
+    checks,
+    toolchain_fingerprint,
+    host_platform,
+    compiler_and_feature_env,
+    repo_build_config,
+    canonical_build_root,
+):
+    payload = {
+        'cache_schema_version': CACHE_SCHEMA_VERSION,
+        'project_alias': project_alias,
+        'verification_profile': verification_profile,
+        'checks': [list(argv) for argv in checks],
+        'toolchain': toolchain_fingerprint,
+        'host_platform': host_platform,
+        'compiler_and_feature_env': dict(sorted(compiler_and_feature_env.items())),
+        'repo_build_config': dict(sorted(repo_build_config.items())),
+        'canonical_build_root': str(canonical_build_root),
+    }
+    return hashlib.sha256(canonical(payload)).hexdigest(), payload
+
+
+def _is_strict_int(value):
+    return type(value) is int
+
+
+def validate_publish_timestamps(
+    *,
+    published_at_ns,
+    max_artifact_mtime_ns,
+    max_fingerprint_mtime_ns,
+    source_inventory,
+):
+    if (not _is_strict_int(published_at_ns)
+            or not _is_strict_int(max_artifact_mtime_ns)
+            or not _is_strict_int(max_fingerprint_mtime_ns)
+            or not isinstance(source_inventory, dict)
+            or not source_inventory):
+        return False, 'invalid_timestamp_values'
+    if published_at_ns <= 0:
+        return False, 'non_positive_published_at'
+    if max_artifact_mtime_ns <= 0:
+        return False, 'non_positive_artifact_mtime'
+    if max_artifact_mtime_ns > published_at_ns:
+        return False, 'future_artifact_mtime'
+    if max_fingerprint_mtime_ns < 0 or max_fingerprint_mtime_ns > max_artifact_mtime_ns:
+        return False, 'invalid_fingerprint_mtime'
+    for entry in source_inventory.values():
+        if not isinstance(entry, dict) or not _is_strict_int(entry.get('mtime_ns')):
+            return False, 'invalid_source_inventory_mtime'
+        mtime_ns = entry['mtime_ns']
+        if mtime_ns <= 0:
+            return False, 'non_positive_source_mtime'
+        if mtime_ns > published_at_ns:
+            return False, 'future_source_mtime'
+    return True, None
+
+
+def validate_restore_timestamp_ordering(
+    *,
+    published_at_ns,
+    observed_max_artifact_mtime_ns,
+    observed_max_fingerprint_mtime_ns,
+    source_inventory,
+    restore_now_ns,
+    min_fresh_checkout_mtime_ns,
+    min_changed_source_mtime_ns=None,
+):
+    if (not _is_strict_int(published_at_ns)
+            or not _is_strict_int(observed_max_artifact_mtime_ns)
+            or not _is_strict_int(observed_max_fingerprint_mtime_ns)
+            or not _is_strict_int(restore_now_ns)
+            or not _is_strict_int(min_fresh_checkout_mtime_ns)
+            or not isinstance(source_inventory, dict)
+            or not source_inventory):
+        return False, 'invalid_timestamp_values'
+    if min_changed_source_mtime_ns is not None and not _is_strict_int(min_changed_source_mtime_ns):
+        return False, 'invalid_timestamp_values'
+    if published_at_ns <= 0 or restore_now_ns <= 0 or min_fresh_checkout_mtime_ns <= 0:
+        return False, 'non_positive_timestamp'
+    if published_at_ns > restore_now_ns:
+        return False, 'future_published_at'
+    if observed_max_artifact_mtime_ns <= 0 or observed_max_artifact_mtime_ns > published_at_ns:
+        return False, 'artifact_after_publish'
+    if (observed_max_fingerprint_mtime_ns < 0
+            or observed_max_fingerprint_mtime_ns > observed_max_artifact_mtime_ns):
+        return False, 'fingerprint_after_artifact'
+    max_cached_source_mtime_ns = 0
+    for entry in source_inventory.values():
+        if not isinstance(entry, dict) or not _is_strict_int(entry.get('mtime_ns')):
+            return False, 'invalid_source_inventory_mtime'
+        mtime_ns = entry['mtime_ns']
+        if mtime_ns <= 0:
+            return False, 'non_positive_cached_source_mtime'
+        if mtime_ns > published_at_ns:
+            return False, 'cached_source_after_publish'
+        if mtime_ns > max_cached_source_mtime_ns:
+            max_cached_source_mtime_ns = mtime_ns
+    if observed_max_artifact_mtime_ns >= min_fresh_checkout_mtime_ns:
+        return False, 'artifact_not_older_than_checkout'
+    if observed_max_fingerprint_mtime_ns >= min_fresh_checkout_mtime_ns:
+        return False, 'fingerprint_not_older_than_checkout'
+    if max_cached_source_mtime_ns >= min_fresh_checkout_mtime_ns:
+        return False, 'cached_source_not_older_than_checkout'
+    if published_at_ns >= min_fresh_checkout_mtime_ns:
+        return False, 'publish_not_older_than_checkout'
+    if min_changed_source_mtime_ns is not None and min_changed_source_mtime_ns < min_fresh_checkout_mtime_ns:
+        return False, 'changed_source_before_checkout'
+    return True, None
+
+
+def parse_cargo_duration_ms(text):
+    match = DURATION_PART_RE.fullmatch(text.strip())
+    if not match:
+        return 0
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = float(match.group(3))
+    return int(round((hours * 3600.0 + minutes * 60.0 + seconds) * 1000.0))
+
+
+def parse_cargo_telemetry(log_bytes):
+    compiling_units = 0
+    finished_count = 0
+    cargo_compile_ms = 0
+    for line in log_bytes.decode('utf-8', errors='replace').splitlines():
+        if CARGO_COMPILING_RE.match(line):
+            compiling_units += 1
+        else:
+            finished = CARGO_FINISHED_RE.match(line)
+            if finished:
+                finished_count += 1
+                cargo_compile_ms += parse_cargo_duration_ms(finished.group(1))
+    return {
+        'cargo_compiling_units': compiling_units,
+        'cargo_finished_count': finished_count,
+        'cargo_compile_ms': cargo_compile_ms,
+        'cargo_compile_ms_kind': 'cargo_reported_cumulative_phase_ms',
+    }
+
+
+# --- Typed cache configuration, ports & providers (Wire Forge Providers) ---
+
+
+@dataclass(frozen=True)
+class CargoCacheConfig:
+    enabled: bool = False
+    root: Path = DEFAULT_CACHE_ROOT
+    max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES
+    max_entries: int = DEFAULT_MAX_ENTRIES
+    max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS
+    seed_from_main: bool = True
+
+    @classmethod
+    def parse(cls, raw, *, trusted_prefix=None):
+        if raw is None:
+            return cls(enabled=False)
+        if not isinstance(raw, dict):
+            raise ValueError('Invalid cargo_cache configuration')
+        allowed = {'enabled', 'root', 'max_total_bytes', 'max_entries', 'max_age_seconds', 'seed_from_main'}
+        if not set(raw) <= allowed:
+            raise ValueError('Unexpected cargo_cache configuration keys')
+        enabled = raw.get('enabled', True)
+        if type(enabled) is not bool:
+            raise ValueError('cargo_cache.enabled must be boolean')
+        seed_from_main = raw.get('seed_from_main', True)
+        if type(seed_from_main) is not bool:
+            raise ValueError('cargo_cache.seed_from_main must be boolean')
+        raw_root = raw.get('root', str(DEFAULT_CACHE_ROOT))
+        if not isinstance(raw_root, str) or not raw_root:
+            raise ValueError('cargo_cache.root must be an absolute path string')
+        root = Path(raw_root)
+        prefix = TRUSTED_CACHE_ROOT_PREFIX if trusted_prefix is None else Path(trusted_prefix)
+        if (not root.is_absolute() or '..' in root.parts or root.is_symlink()
+                or prefix not in root.parents):
+            raise ValueError('cargo_cache.root must live under the trusted Forge data prefix')
+        max_total_bytes = raw.get('max_total_bytes', DEFAULT_MAX_TOTAL_BYTES)
+        max_entries = raw.get('max_entries', DEFAULT_MAX_ENTRIES)
+        max_age_seconds = raw.get('max_age_seconds', DEFAULT_MAX_AGE_SECONDS)
+        for value in (max_total_bytes, max_entries, max_age_seconds):
+            if type(value) is not int or value <= 0:
+                raise ValueError('cargo_cache retention bounds must be positive integers')
+        return cls(
+            enabled=enabled,
+            root=root,
+            max_total_bytes=max_total_bytes,
+            max_entries=max_entries,
+            max_age_seconds=max_age_seconds,
+            seed_from_main=seed_from_main,
+        )
+
+
+@dataclass(frozen=True)
+class CacheKey:
+    project_alias: str
+    branch_scope: str
+    scope_dir: str | None
+    compat_key: str
+    compat_inputs: dict
+
+
+@dataclass(frozen=True)
+class ActiveSlotLayout:
+    root: Path
+    source: Path
+    scratch: Path
+    target: Path
+    package_targets: Path
+    cargo_home: Path
+    home: Path
+    qa: Path
+    package_target_hashes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CacheRestoreOutcome:
+    status: str
+    fallback_reason: str | None = None
+    elapsed_ms: int = 0
+    restored_bytes: int = 0
+    restored_files: int = 0
+    source_scope: str | None = None
+    snapshot_id: str | None = None
+    details: dict | None = None
+
+
+@dataclass(frozen=True)
+class CachePublishOutcome:
+    status: str
+    elapsed_ms: int = 0
+    published_bytes: int = 0
+    published_files: int = 0
+    evicted_entries: int = 0
+    cache_total_bytes: int = 0
+    cache_entry_count: int = 0
+    snapshot_id: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class PruneOutcome:
+    evicted_entries: int
+    cache_total_bytes: int
+    cache_entry_count: int
+
+
+@dataclass(frozen=True)
+class ClearOutcome:
+    removed_entries: int
+    freed_bytes: int
+    cache_total_bytes: int
+    cache_entry_count: int
+
+
+@contextmanager
+def deferred_cancellation():
+    """Defer TERM/INT only during rollback or the final receipt commit.
+
+    The caller checks pending cancellation before the durable success marker.
+    Signals after that terminal boundary cannot invalidate an already committed
+    passed receipt. SIGKILL is handled by durable journal reconciliation.
+    """
+    pending = False
+    def remember(_number, _frame):
+        nonlocal pending
+        pending = True
+    old = {number: signal.signal(number, remember) for number in (signal.SIGTERM, signal.SIGINT)}
+    def check():
+        if pending:
+            raise InterruptedError('Jenkins requested verification cancellation')
+    try:
+        yield check
+    finally:
+        for number, handler in old.items():
+            signal.signal(number, handler)
+
+
+def mark_cache_rolled_back(result, *, inventory=None):
+    cache = result['cache']
+    if cache['publish_status'] == 'published':
+        cache['publish_status'] = 'rolled_back'
+        cache['published_bytes'] = 0
+        cache['published_files'] = 0
+        cache['cache_total_bytes'] = inventory[0] if inventory is not None else None
+        cache['cache_entry_count'] = inventory[1] if inventory is not None else None
+        for stage in result['stages']:
+            if stage['name'] == 'cache_publish':
+                stage.update(status='rolled_back', published_bytes=0, published_files=0, evicted_entries=0)
+
+
+class CargoCachePort(ABC):
+    provider_name: str
+    enabled: bool
+
+    @property
+    def terminal_result_committed(self):
+        return False
+
+    @contextmanager
+    def verification_transaction(self):
+        """Own optional publication until the supervisor has a durable result."""
+        yield
+
+    def recover_pending(self, *, action_id=None, result_path=None):
+        """Resolve durable provisional publications before result replay."""
+
+    def rollback_result(self, result):
+        mark_cache_rolled_back(result)
+
+    def finish_result(self, path, result, reader_group, *, cancelled):
+        if result['status'] == 'passed' and cancelled.exists():
+            raise InterruptedError('Verification cancelled before result commit')
+        write_result(path, result, reader_group)
+
+    @abstractmethod
+    def resolve_key(
+        self,
+        *,
+        project_alias,
+        branch_scope,
+        verification_profile,
+        checks,
+        toolchain_path,
+        environment,
+        repo_build_config,
+        canonical_build_root,
+    ) -> CacheKey:
+        raise NotImplementedError
+
+    @abstractmethod
+    def restore(self, key: CacheKey, layout: ActiveSlotLayout, tree_blobs: dict, account) -> CacheRestoreOutcome:
+        raise NotImplementedError
+
+    @abstractmethod
+    def publish(
+        self,
+        key: CacheKey,
+        layout: ActiveSlotLayout,
+        source_inventory: dict,
+        account,
+        *,
+        action_id: str,
+    ) -> CachePublishOutcome:
+        raise NotImplementedError
+
+    @abstractmethod
+    def prune(self) -> PruneOutcome:
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear(self, *, project=None, scope=None) -> ClearOutcome:
+        raise NotImplementedError
+
+
+class NullCargoCacheProvider(CargoCachePort):
+    """Zero-effect cache provider selected when caching is disabled or substituted."""
+
+    provider_name = 'null'
+    enabled = False
+
+    def __init__(self, config: CargoCacheConfig):
+        self.config = config
+
+    def resolve_key(
+        self,
+        *,
+        project_alias,
+        branch_scope,
+        verification_profile,
+        checks,
+        toolchain_path,
+        environment,
+        repo_build_config,
+        canonical_build_root,
+    ) -> CacheKey:
+        compat_key, compat_inputs = compute_compat_key(
+            project_alias=project_alias,
+            verification_profile=verification_profile,
+            checks=checks,
+            toolchain_fingerprint={'provider': 'null'},
+            host_platform={'platform': sys.platform, 'machine': platform.machine()},
+            compiler_and_feature_env=extract_compiler_and_feature_env(environment),
+            repo_build_config=repo_build_config,
+            canonical_build_root=canonical_build_root,
+        )
+        return CacheKey(
+            project_alias=project_alias,
+            branch_scope=branch_scope,
+            scope_dir=scope_directory_name(branch_scope),
+            compat_key=compat_key,
+            compat_inputs=compat_inputs,
+        )
+
+    def restore(self, key: CacheKey, layout: ActiveSlotLayout, tree_blobs: dict, account) -> CacheRestoreOutcome:
+        return CacheRestoreOutcome(status='disabled')
+
+    def publish(
+        self,
+        key: CacheKey,
+        layout: ActiveSlotLayout,
+        source_inventory: dict,
+        account,
+        *,
+        action_id: str,
+    ) -> CachePublishOutcome:
+        return CachePublishOutcome(status='disabled')
+
+    def prune(self) -> PruneOutcome:
+        return PruneOutcome(evicted_entries=0, cache_total_bytes=0, cache_entry_count=0)
+
+    def clear(self, *, project=None, scope=None) -> ClearOutcome:
+        return ClearOutcome(removed_entries=0, freed_bytes=0, cache_total_bytes=0, cache_entry_count=0)
+
+
+# --- Low-level supervisor & safe filesystem primitives ---
+
+
 def read_file(path, *, owner, maximum):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, 'rb') as stream:
@@ -90,6 +633,1368 @@ def regular_directory(path, *, owner):
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner or info.st_mode & 0o022:
         raise ValueError('Unsafe CI directory')
+
+
+def _fsync_dir(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write_json(path, value, *, mode=0o600):
+    temporary = path.with_name(path.name + '.' + str(os.getpid()) + '.new')
+    if temporary.exists() or temporary.is_symlink():
+        temporary.unlink()
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, mode)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(canonical(value) + b'\n')
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        _fsync_dir(path.parent)
+    finally:
+        if temporary.exists() or temporary.is_symlink():
+            temporary.unlink()
+
+
+def _safe_rmtree(path):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(info.st_mode) or not shutil.rmtree.avoids_symlink_attacks:
+        raise ValueError('Unsafe CI directory removal')
+    def _make_writable(func, target, _exc):
+        if isinstance(_exc[1], InterruptedError):
+            raise _exc[1]
+        target_path = Path(target)
+        parent = target_path.parent
+        try:
+            parent_info = parent.lstat()
+            if stat.S_ISDIR(parent_info.st_mode):
+                os.chmod(parent, parent_info.st_mode | 0o700)
+            entry_info = target_path.lstat()
+            if stat.S_ISDIR(entry_info.st_mode):
+                os.chmod(target_path, entry_info.st_mode | 0o700)
+        except InterruptedError:
+            raise
+        except OSError:
+            pass
+        func(target)
+    shutil.rmtree(path, onerror=_make_writable)
+
+
+def _hash_regular_file(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('Expected regular toolchain file')
+        hasher = hashlib.sha256()
+        with os.fdopen(fd, 'rb') as stream:
+            fd = None
+            while True:
+                chunk = stream.read(COPY_CHUNK_BYTES)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def observe_toolchain_fingerprint(toolchain_path):
+    toolchain = Path(toolchain_path)
+    safe_env = {'PATH': str(toolchain / 'bin') + ':/usr/bin:/bin', 'HOME': '/nonexistent', 'LANG': 'C.UTF-8'}
+    rustc_bin = toolchain / 'bin/rustc'
+    cargo_bin = toolchain / 'bin/cargo'
+    rustc_vv = bounded_output([str(rustc_bin), '-vV'], env=safe_env, maximum=65536).decode('utf-8', errors='replace').strip()
+    cargo_v = bounded_output([str(cargo_bin), '-V'], env=safe_env, maximum=65536).decode('utf-8', errors='replace').strip()
+    binaries = {
+        'rustc': _hash_regular_file(rustc_bin),
+        'cargo': _hash_regular_file(cargo_bin),
+    }
+    clippy_bin = toolchain / 'bin/clippy-driver'
+    if clippy_bin.exists() and not clippy_bin.is_symlink():
+        binaries['clippy-driver'] = _hash_regular_file(clippy_bin)
+    rustlib_manifests = {}
+    rustlib = toolchain / 'lib/rustlib'
+    if rustlib.is_dir() and not rustlib.is_symlink():
+        for entry in sorted(os.listdir(rustlib)):
+            if entry == 'components' or entry.startswith('manifest-'):
+                candidate = rustlib / entry
+                if not candidate.is_symlink() and candidate.is_file():
+                    rustlib_manifests[entry] = _hash_regular_file(candidate)
+    return {
+        'rustc_vv': rustc_vv,
+        'cargo_v': cargo_v,
+        'binaries': binaries,
+        'rustlib_manifests': rustlib_manifests,
+    }
+
+
+def _copy_tree_from_build(src_root, dst_root, *, expected_uid, prefix_rel, excluded_top_dirs=frozenset()):
+    """Safely copy regular files from build-owned scratch into root staging.
+
+    Uses O_NOFOLLOW + fstat on every directory and file component and rejects
+    symlinks, FIFOs, sockets, devices, or files not owned by expected_uid.
+    """
+    manifest_entries = []
+    total_bytes = 0
+    file_count = 0
+    max_artifact_mtime_ns = 0
+    max_fingerprint_mtime_ns = 0
+
+    def _walk(src_dir_fd, dst_dir, rel_parts, depth):
+        nonlocal total_bytes, file_count, max_artifact_mtime_ns, max_fingerprint_mtime_ns
+        names = sorted(os.listdir(src_dir_fd))
+        for name in names:
+            if name in {'', '.', '..'} or '/' in name or '\x00' in name:
+                raise UnsafeArtifactError('Unsafe artifact filename')
+            if depth == 0 and name in excluded_top_dirs:
+                continue
+            entry_fd = None
+            try:
+                try:
+                    entry_fd = os.open(
+                        name,
+                        os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                        dir_fd=src_dir_fd,
+                    )
+                except InterruptedError:
+                    raise
+                except OSError as error:
+                    raise UnsafeArtifactError('Rejected symlink or unreadable artifact entry') from error
+                info = os.fstat(entry_fd)
+                if info.st_uid != expected_uid:
+                    raise UnsafeArtifactError('Rejected artifact not owned by build user')
+                child_parts = rel_parts + (name,)
+                if stat.S_ISDIR(info.st_mode):
+                    # Verify directory fd explicitly with O_DIRECTORY | O_NOFOLLOW.
+                    sub_dir_fd = os.open(
+                        name,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=src_dir_fd,
+                    )
+                    os.close(entry_fd)
+                    entry_fd = None
+                    try:
+                        sub_dst = dst_dir / name
+                        sub_dst.mkdir(mode=0o700, exist_ok=True)
+                        _walk(sub_dir_fd, sub_dst, child_parts, depth + 1)
+                    finally:
+                        os.close(sub_dir_fd)
+                elif stat.S_ISREG(info.st_mode):
+                    dst_file = dst_dir / name
+                    mode = info.st_mode & 0o777
+                    mtime_ns = info.st_mtime_ns
+                    dst_fd = os.open(dst_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                    hasher = hashlib.sha256()
+                    copied = 0
+                    try:
+                        with os.fdopen(entry_fd, 'rb') as src_stream:
+                            entry_fd = None
+                            with os.fdopen(dst_fd, 'wb') as dst_stream:
+                                dst_fd = None
+                                while True:
+                                    chunk = src_stream.read(COPY_CHUNK_BYTES)
+                                    if not chunk:
+                                        break
+                                    dst_stream.write(chunk)
+                                    hasher.update(chunk)
+                                    copied += len(chunk)
+                                dst_stream.flush()
+                                os.fchmod(dst_stream.fileno(), mode)
+                                os.utime(dst_stream.fileno(), ns=(mtime_ns, mtime_ns))
+                                os.fsync(dst_stream.fileno())
+                                dst_info = os.fstat(dst_stream.fileno())
+                    finally:
+                        if dst_fd is not None:
+                            os.close(dst_fd)
+                    actual_mtime_ns = dst_info.st_mtime_ns
+                    rel_path = '/'.join((prefix_rel, *child_parts))
+                    manifest_entries.append([rel_path, copied, mode, actual_mtime_ns, hasher.hexdigest()])
+                    total_bytes += copied
+                    file_count += 1
+                    if actual_mtime_ns > max_artifact_mtime_ns:
+                        max_artifact_mtime_ns = actual_mtime_ns
+                    if '.fingerprint' in child_parts and actual_mtime_ns > max_fingerprint_mtime_ns:
+                        max_fingerprint_mtime_ns = actual_mtime_ns
+                else:
+                    raise UnsafeArtifactError('Rejected non-regular artifact entry')
+            finally:
+                if entry_fd is not None:
+                    os.close(entry_fd)
+
+    root_fd = os.open(src_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        root_info = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != expected_uid:
+            raise UnsafeArtifactError('Build artifact root is not owned by build user')
+        dst_root.mkdir(mode=0o700, exist_ok=True)
+        _walk(root_fd, dst_root, (), 0)
+    finally:
+        os.close(root_fd)
+    return manifest_entries, total_bytes, file_count, max_artifact_mtime_ns, max_fingerprint_mtime_ns
+
+
+def _copy_tree_to_build(src_root, dst_root, *, expected_owner, target_uid, target_gid, prefix_rel):
+    """Copy verified regular snapshot files into build-owned scratch preserving mtime_ns."""
+    manifest_entries = []
+    total_bytes = 0
+    file_count = 0
+    observed_max_artifact_mtime_ns = 0
+    observed_max_fingerprint_mtime_ns = 0
+
+    def _walk(src_dir_fd, dst_dir, rel_parts):
+        nonlocal total_bytes, file_count, observed_max_artifact_mtime_ns, observed_max_fingerprint_mtime_ns
+        for name in sorted(os.listdir(src_dir_fd)):
+            if name in {'', '.', '..'} or '/' in name or '\x00' in name:
+                raise CorruptSnapshotError('Invalid snapshot entry name')
+            entry_fd = None
+            try:
+                try:
+                    entry_fd = os.open(
+                        name,
+                        os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                        dir_fd=src_dir_fd,
+                    )
+                except InterruptedError:
+                    raise
+                except OSError as error:
+                    raise CorruptSnapshotError('Snapshot contains symlink or unreadable entry') from error
+                info = os.fstat(entry_fd)
+                if info.st_uid != expected_owner:
+                    raise CorruptSnapshotError('Snapshot entry owner mismatch')
+                child_parts = rel_parts + (name,)
+                if stat.S_ISDIR(info.st_mode):
+                    sub_dir_fd = os.open(
+                        name,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=src_dir_fd,
+                    )
+                    os.close(entry_fd)
+                    entry_fd = None
+                    try:
+                        sub_dst = dst_dir / name
+                        if sub_dst.is_symlink():
+                            raise CorruptSnapshotError('Destination symlink collision')
+                        sub_dst.mkdir(mode=0o700, exist_ok=True)
+                        os.chown(sub_dst, target_uid, target_gid)
+                        sub_dst.chmod(0o700)
+                        _walk(sub_dir_fd, sub_dst, child_parts)
+                    finally:
+                        os.close(sub_dir_fd)
+                elif stat.S_ISREG(info.st_mode):
+                    dst_file = dst_dir / name
+                    mode = info.st_mode & 0o777
+                    mtime_ns = info.st_mtime_ns
+                    dst_fd = os.open(dst_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+                    hasher = hashlib.sha256()
+                    copied = 0
+                    try:
+                        with os.fdopen(entry_fd, 'rb') as src_stream:
+                            entry_fd = None
+                            with os.fdopen(dst_fd, 'wb') as dst_stream:
+                                dst_fd = None
+                                while True:
+                                    chunk = src_stream.read(COPY_CHUNK_BYTES)
+                                    if not chunk:
+                                        break
+                                    dst_stream.write(chunk)
+                                    hasher.update(chunk)
+                                    copied += len(chunk)
+                                dst_stream.flush()
+                                os.fchown(dst_stream.fileno(), target_uid, target_gid)
+                                os.fchmod(dst_stream.fileno(), mode)
+                                os.utime(dst_stream.fileno(), ns=(mtime_ns, mtime_ns))
+                                dst_info = os.fstat(dst_stream.fileno())
+                    finally:
+                        if dst_fd is not None:
+                            os.close(dst_fd)
+                    actual_mtime_ns = dst_info.st_mtime_ns
+                    rel_path = '/'.join((prefix_rel, *child_parts))
+                    manifest_entries.append([rel_path, copied, mode, actual_mtime_ns, hasher.hexdigest()])
+                    total_bytes += copied
+                    file_count += 1
+                    if actual_mtime_ns > observed_max_artifact_mtime_ns:
+                        observed_max_artifact_mtime_ns = actual_mtime_ns
+                    if '.fingerprint' in child_parts and actual_mtime_ns > observed_max_fingerprint_mtime_ns:
+                        observed_max_fingerprint_mtime_ns = actual_mtime_ns
+                else:
+                    raise CorruptSnapshotError('Snapshot contains non-regular file')
+            finally:
+                if entry_fd is not None:
+                    os.close(entry_fd)
+
+    root_fd = os.open(src_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        root_info = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != expected_owner:
+            raise CorruptSnapshotError('Snapshot root directory invalid')
+        dst_root.mkdir(mode=0o700, exist_ok=True)
+        os.chown(dst_root, target_uid, target_gid)
+        dst_root.chmod(0o700)
+        _walk(root_fd, dst_root, ())
+    finally:
+        os.close(root_fd)
+    return (
+        manifest_entries,
+        total_bytes,
+        file_count,
+        observed_max_artifact_mtime_ns,
+        observed_max_fingerprint_mtime_ns,
+    )
+
+
+def _reset_scratch_targets(layout: ActiveSlotLayout, account):
+    for root in (layout.target, layout.package_targets):
+        if root.exists() or root.is_symlink():
+            _safe_rmtree(root)
+        root.mkdir(mode=0o700)
+        os.chown(root, account.pw_uid, account.pw_gid)
+        root.chmod(0o700)
+    for digest_name in layout.package_target_hashes:
+        owned = layout.package_targets / digest_name
+        owned.mkdir(mode=0o700, exist_ok=True)
+        os.chown(owned, account.pw_uid, account.pw_gid)
+        owned.chmod(0o700)
+
+
+def _snapshot_manifest_digest(meta_body):
+    fields = {
+        'schema_version': meta_body['schema_version'],
+        'project_alias': meta_body['project_alias'],
+        'branch_scope': meta_body['branch_scope'],
+        'compat_key': meta_body['compat_key'],
+        'published_at_ns': meta_body['published_at_ns'],
+        'max_artifact_mtime_ns': meta_body['max_artifact_mtime_ns'],
+        'max_fingerprint_mtime_ns': meta_body['max_fingerprint_mtime_ns'],
+        'source_inventory': meta_body['source_inventory'],
+        'file_count': meta_body['file_count'],
+        'total_bytes': meta_body['total_bytes'],
+        'files_sha256': meta_body['files_sha256'],
+    }
+    return hashlib.sha256(canonical(fields)).hexdigest()
+
+
+class LocalCargoCacheProvider(CargoCachePort):
+    """Supervisor-owned local persistent Cargo build cache under cache_root."""
+
+    provider_name = 'local'
+    enabled = True
+
+    def __init__(self, config: CargoCacheConfig, *, expected_owner: int = 0, expected_group: int | None = None):
+        self.config = config
+        self.expected_owner = expected_owner
+        self._publication = None
+        self._publication_lock_context = None
+        self._verification_active = False
+        self._maintenance_evicted = 0
+        self._rollback_inventory = None
+        self._unusable_reason = None
+        self._terminal_result_committed = False
+        if expected_group is None:
+            self.expected_group = expected_owner if expected_owner == 0 else os.getgid()
+        else:
+            self.expected_group = expected_group
+
+    @property
+    def terminal_result_committed(self):
+        return self._terminal_result_committed
+
+    @contextmanager
+    def verification_transaction(self):
+        if self._verification_active:
+            raise ValueError('CI cache transaction is already active')
+        self._verification_active = True
+        self._terminal_result_committed = False
+        try:
+            yield
+        finally:
+            try:
+                if (self._publication is not None
+                        and (self._publication / 'pending-publication.json').exists()):
+                    # A Python exception, cleanup failure or uncommitted return
+                    # must never leave the provisional pointer authoritative.
+                    with deferred_cancellation():
+                        self._resolve_publication_locked(self._publication, commit=False)
+                    self._publication = None
+            finally:
+                if self._publication_lock_context is not None:
+                    try:
+                        self._publication_lock_context.__exit__(None, None, None)
+                    except OSError:
+                        if not self._terminal_result_committed:
+                            raise
+                    finally:
+                        self._publication_lock_context = None
+                self._verification_active = False
+
+    @contextmanager
+    def _publication_lock(self):
+        if not self._verification_active or self._publication_lock_context is not None:
+            raise ValueError('Cache publication requires its supervisor transaction')
+        context = self._cache_lock()
+        root = context.__enter__()
+        try:
+            yield root
+        finally:
+            if self._publication is None:
+                context.__exit__(None, None, None)
+            else:
+                # Hold the exclusive lock through log close, UID/scratch
+                # cleanup and final root receipt publication. Other cache users
+                # cannot reconcile/clear the previous or provisional snapshot.
+                self._publication_lock_context = context
+
+    def _optional_metadata(self, path, maximum):
+        if not path.exists() and not path.is_symlink():
+            return None
+        return read_file(path, owner=self.expected_owner, maximum=maximum).hex()
+
+    def _restore_metadata(self, path, encoded):
+        if encoded is None:
+            if path.exists() or path.is_symlink():
+                path.unlink()
+                _fsync_dir(path.parent)
+            return
+        # Preserve the exact before-image, including formatting and newline.
+        raw = bytes.fromhex(encoded)
+        temporary = path.with_name(path.name + '.rollback')
+        if temporary.exists() or temporary.is_symlink():
+            read_file(temporary, owner=self.expected_owner, maximum=16384)
+            temporary.unlink()
+        fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        _fsync_dir(path.parent)
+
+    def _read_publication_locked(self, entry_dir):
+        path = entry_dir / 'pending-publication.json'
+        body = json.loads(read_file(path, owner=self.expected_owner, maximum=131072))
+        expected = {'version', 'action_id', 'old_current', 'old_last_used', 'new_pointer', 'result', 'committed'}
+        if (not isinstance(body, dict) or set(body) != expected or body['version'] != 1
+                or type(body['committed']) is not bool
+                or not isinstance(body['action_id'], str)
+                or str(UUID(body['action_id'])) != body['action_id']):
+            raise ValueError('Invalid pending cache publication')
+        self._validate_pointer(body['new_pointer'])
+        if not body['new_pointer']['snapshot_id'].endswith('-' + body['action_id']):
+            raise ValueError('Pending cache action mismatch')
+        for name, maximum in (('old_current', 16384), ('old_last_used', 4096)):
+            value = body[name]
+            if value is not None:
+                if not isinstance(value, str) or len(value) > maximum * 2:
+                    raise ValueError('Invalid cache rollback before-image')
+                decoded = bytes.fromhex(value)
+                parsed = json.loads(decoded)
+                if name == 'old_current':
+                    self._validate_pointer(parsed)
+                elif (not isinstance(parsed, dict) or not _is_strict_int(parsed.get('last_used_at_ns'))):
+                    raise ValueError('Invalid cache rollback last-use metadata')
+        result = body['result']
+        if result is not None:
+            if (not isinstance(result, dict) or set(result) != {'path', 'sha256'}
+                    or not isinstance(result['path'], str)
+                    or not isinstance(result['sha256'], str)
+                    or not DIGEST.fullmatch(result['sha256'])):
+                raise ValueError('Invalid cache result binding')
+            result_path = Path(result['path'])
+            if (not result_path.is_absolute() or '..' in result_path.parts
+                    or result_path.name != body['action_id'] + '.json'):
+                raise ValueError('Invalid cache result path')
+        return body
+
+    def _bound_result_path(self, body):
+        result_path = Path(body['result']['path'])
+        for parent in result_path.parents:
+            if not stat.S_ISDIR(parent.lstat().st_mode):
+                raise ValueError('Unsafe cache result ancestor')
+        regular_directory(result_path.parent, owner=self.expected_owner)
+        return result_path
+
+    def _restore_beforeimages(self, entry_dir, body):
+        if body['old_current'] is not None:
+            previous_id = json.loads(bytes.fromhex(body['old_current']))['snapshot_id']
+            regular_directory(entry_dir / previous_id, owner=self.expected_owner)
+        self._restore_metadata(entry_dir / 'current.json', body['old_current'])
+        self._restore_metadata(entry_dir / 'last_used.json', body['old_last_used'])
+        self._rollback_inventory = None
+
+    def _matching_publication_result(self, body):
+        if body['result'] is None:
+            return False
+        try:
+            result = json.loads(read_file(self._bound_result_path(body), owner=self.expected_owner, maximum=1024 * 1024))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return False
+        return (isinstance(result, dict) and result.get('action_id') == body['action_id']
+                and result.get('status') == 'passed' and result.get('cleanup_confirmed') is True
+                and hashlib.sha256(canonical(result)).hexdigest() == body['result']['sha256'])
+
+    def rollback_result(self, result):
+        mark_cache_rolled_back(result, inventory=self._rollback_inventory)
+
+    def _pointed_inventory_locked(self):
+        total = 0
+        count = 0
+        for _project, _scope, _compat, entry in self._entry_directories_locked(self.config.root):
+            if not (entry / 'current.json').exists():
+                continue
+            total += self._read_pointer_locked(entry)['total_bytes']
+            count += 1
+        return total, count
+
+    def _resolve_publication_locked(self, entry_dir, *, commit=None):
+        body = self._read_publication_locked(entry_dir)
+        committed = False
+        if commit is not False and body['committed']:
+            # An unavailable receipt is uncertainty, not evidence that an
+            # already committed success should be downgraded. Leave its journal
+            # and snapshots intact for recovery; fresh callers can cold-build.
+            committed = self._matching_publication_result(body)
+        if commit is True and not committed:
+            raise ValueError('Cache publication lacks its durable successful result')
+        if not committed:
+            # Restore the known-good cache BEFORE any fallible receipt access.
+            # Persist the abort decision first. A crash during restoration or
+            # accounting must never reinterpret this transaction as committed.
+            body['committed'] = False
+            _atomic_write_json(entry_dir / 'pending-publication.json', body)
+            self._restore_beforeimages(entry_dir, body)
+            if body['result'] is not None:
+                result_path = self._bound_result_path(body)
+                temporary = result_path.with_suffix('.new')
+                if temporary.exists() or temporary.is_symlink():
+                    read_file(temporary, owner=self.expected_owner, maximum=1024 * 1024)
+                    temporary.unlink()
+                    _fsync_dir(temporary.parent)
+                if self._matching_publication_result(body):
+                    # A crash may have replaced the success receipt before the
+                    # transaction's durable marker. Preserve its genuine source
+                    # identities and cleanup proof, but make same-action replay
+                    # honestly report the unfinished publication as failed.
+                    info = result_path.lstat()
+                    result = json.loads(read_file(result_path, owner=self.expected_owner, maximum=1024 * 1024))
+                    result.update(status='failed', failure='cancelled_or_timed_out')
+                    self.rollback_result(result)
+                    write_result(result_path, result, info.st_gid)
+                elif result_path.exists() or result_path.is_symlink():
+                    observed = json.loads(read_file(result_path, owner=self.expected_owner, maximum=1024 * 1024))
+                    if not isinstance(observed, dict) or observed.get('status') != 'failed':
+                        raise ValueError('Pending cache publication has a conflicting result')
+            new_snapshot = entry_dir / body['new_pointer']['snapshot_id']
+            if new_snapshot.exists() or new_snapshot.is_symlink():
+                regular_directory(new_snapshot, owner=self.expected_owner)
+                _safe_rmtree(new_snapshot)
+        else:
+            current = self._read_pointer_locked(entry_dir)
+            if current != body['new_pointer']:
+                raise ValueError('Committed cache pointer does not match its result')
+            if body['old_current'] is not None:
+                previous = json.loads(bytes.fromhex(body['old_current']))['snapshot_id']
+                if previous != current['snapshot_id']:
+                    old_snapshot = entry_dir / previous
+                    if old_snapshot.exists() or old_snapshot.is_symlink():
+                        regular_directory(old_snapshot, owner=self.expected_owner)
+                        _safe_rmtree(old_snapshot)
+        (entry_dir / 'pending-publication.json').unlink()
+        _fsync_dir(entry_dir)
+        if not committed:
+            try:
+                self._rollback_inventory = self._pointed_inventory_locked()
+            except InterruptedError:
+                raise
+            except (OSError, ValueError):
+                self._rollback_inventory = None
+
+    def recover_pending(self, *, action_id=None, result_path=None):
+        if not self.config.root.exists():
+            return
+        try:
+            with self._cache_lock() as root, deferred_cancellation() as check_cancelled:
+                try:
+                    for _project, _scope, _compat, entry in self._entry_directories_locked(root):
+                        pending = entry / 'pending-publication.json'
+                        if pending.exists() or pending.is_symlink():
+                            self._resolve_publication_locked(entry)
+                finally:
+                    # Safe recovery may defer a signal; it must propagate
+                    # before replaying a result or launching another build.
+                    check_cancelled()
+        except InterruptedError:
+            raise
+        except (OSError, ValueError) as error:
+            if result_path is None or result_path.exists() or result_path.is_symlink():
+                # A saved same-action result is unsafe until reconciliation.
+                raise
+            # Unusable optional cache must not prevent an unrelated fresh
+            # source verification. Do not alter the unknown transaction or
+            # acknowledge its receipt; this scoped provider does no more I/O.
+            self._unusable_reason = type(error).__name__ + ': ' + str(error)[:160]
+
+    def finish_result(self, path, result, reader_group, *, cancelled):
+        if self._publication is None:
+            return super().finish_result(path, result, reader_group, cancelled=cancelled)
+        entry_dir = self._publication
+        if result['status'] != 'passed':
+            with deferred_cancellation():
+                self._resolve_publication_locked(entry_dir, commit=False)
+            self._publication = None
+            self.rollback_result(result)
+            return super().finish_result(path, result, reader_group, cancelled=cancelled)
+        body = self._read_publication_locked(entry_dir)
+        body['result'] = {'path': str(path), 'sha256': hashlib.sha256(canonical(result)).hexdigest()}
+        _atomic_write_json(entry_dir / 'pending-publication.json', body)
+        with deferred_cancellation() as check_signal:
+            def check_cancelled():
+                check_signal()
+                if cancelled.exists():
+                    raise InterruptedError('Verification cancelled before cache/result commit')
+            try:
+                check_cancelled()
+                _atomic_write_json(entry_dir / 'current.json', body['new_pointer'])
+                check_cancelled()
+                _atomic_write_json(entry_dir / 'last_used.json', {'last_used_at_ns': body['new_pointer']['published_at_ns']})
+                check_cancelled()
+                write_result(path, result, reader_group)
+                check_cancelled()
+                # This durable marker is the final success boundary. A crash
+                # before it restores the previous cache; a crash after it is
+                # completed only with the exact passed+cleanup-confirmed receipt.
+                body['committed'] = True
+                _atomic_write_json(entry_dir / 'pending-publication.json', body)
+                check_cancelled()
+            except BaseException:
+                self._resolve_publication_locked(entry_dir, commit=False)
+                self._publication = None
+                raise
+            self._terminal_result_committed = True
+            self._publication = None
+            # No fallible cleanup after the durable success boundary. Leave the
+            # committed journal for next-operation reconciliation if unlink or
+            # directory fsync is unavailable; success is already authoritative.
+            try:
+                self._resolve_publication_locked(entry_dir, commit=True)
+            except (OSError, ValueError):
+                pass
+
+    def _ensure_root(self):
+        root = self.config.root
+        if root.is_symlink():
+            raise ValueError('Unsafe CI cache root symlink')
+        if not root.exists():
+            root.mkdir(mode=0o700, parents=False, exist_ok=False)
+            os.chown(root, self.expected_owner, self.expected_group)
+            root.chmod(0o700)
+        info = root.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != self.expected_owner
+                or info.st_mode & 0o077):
+            raise ValueError('Unsafe CI cache root permissions or ownership')
+        return root
+
+    @contextmanager
+    def _cache_lock(self):
+        root = self._ensure_root()
+        fd = os.open(root / 'cache.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            yield root
+
+    def _cleanup_orphaned_staging(self, root):
+        for name in os.listdir(root):
+            if name.startswith('.staging-'):
+                candidate = root / name
+                info = candidate.lstat()
+                if info.st_uid != self.expected_owner:
+                    raise ValueError('Unsafe CI cache staging ownership')
+                if stat.S_ISDIR(info.st_mode):
+                    regular_directory(candidate, owner=self.expected_owner)
+                    _safe_rmtree(candidate)
+                else:
+                    candidate.unlink()
+
+    def _ensure_entry_directory(self, root, key):
+        entry_dir = root
+        for name in ('scopes', key.project_alias, key.scope_dir, key.compat_key):
+            entry_dir = entry_dir / name
+            entry_dir.mkdir(mode=0o700, exist_ok=True)
+            regular_directory(entry_dir, owner=self.expected_owner)
+        return entry_dir
+
+    def _scope_has_other_compat_key(self, scope_path, compat_key):
+        if not scope_path.exists() or scope_path.is_symlink() or not scope_path.is_dir():
+            return False
+        for entry in os.listdir(scope_path):
+            if entry == compat_key or not DIGEST.fullmatch(entry):
+                continue
+            current_file = scope_path / entry / 'current.json'
+            if current_file.exists() and not current_file.is_symlink():
+                return True
+        return False
+
+    def _select_candidate_entry(self, root, key: CacheKey):
+        scopes_project = root / 'scopes' / key.project_alias
+        if key.branch_scope == 'main':
+            scope_path = scopes_project / 'main'
+            entry = scope_path / key.compat_key
+            if (entry / 'current.json').exists():
+                return entry, 'hit_main', 'main', False
+            if self._scope_has_other_compat_key(scope_path, key.compat_key):
+                return None, 'incompatible', None, False
+            return None, 'miss', None, False
+
+        if key.branch_scope.startswith('branch/'):
+            scope_path = scopes_project / key.scope_dir
+            own_entry = scope_path / key.compat_key
+            if (own_entry / 'current.json').exists():
+                return own_entry, 'hit_branch', key.branch_scope, False
+            if self.config.seed_from_main:
+                main_scope = scopes_project / 'main'
+                main_entry = main_scope / key.compat_key
+                if (main_entry / 'current.json').exists():
+                    return main_entry, 'hit_main_seed', 'main', True
+            if self._scope_has_other_compat_key(scope_path, key.compat_key):
+                return None, 'incompatible', None, False
+            if self.config.seed_from_main and self._scope_has_other_compat_key(scopes_project / 'main', key.compat_key):
+                return None, 'incompatible', None, False
+            return None, 'miss', None, False
+
+        # detached scope: strictly read-only main seed only
+        if self.config.seed_from_main:
+            main_scope = scopes_project / 'main'
+            main_entry = main_scope / key.compat_key
+            if (main_entry / 'current.json').exists():
+                return main_entry, 'hit_main_seed', 'main', True
+            if self._scope_has_other_compat_key(main_scope, key.compat_key):
+                return None, 'incompatible', None, False
+        return None, 'miss', None, False
+
+    def resolve_key(
+        self,
+        *,
+        project_alias,
+        branch_scope,
+        verification_profile,
+        checks,
+        toolchain_path,
+        environment,
+        repo_build_config,
+        canonical_build_root,
+    ) -> CacheKey:
+        toolchain_fingerprint = observe_toolchain_fingerprint(toolchain_path)
+        compat_key, compat_inputs = compute_compat_key(
+            project_alias=project_alias,
+            verification_profile=verification_profile,
+            checks=checks,
+            toolchain_fingerprint=toolchain_fingerprint,
+            host_platform={'platform': sys.platform, 'machine': platform.machine()},
+            compiler_and_feature_env=extract_compiler_and_feature_env(environment),
+            repo_build_config=repo_build_config,
+            canonical_build_root=canonical_build_root,
+        )
+        return CacheKey(
+            project_alias=project_alias,
+            branch_scope=branch_scope,
+            scope_dir=scope_directory_name(branch_scope),
+            compat_key=compat_key,
+            compat_inputs=compat_inputs,
+        )
+
+    def restore(self, key: CacheKey, layout: ActiveSlotLayout, tree_blobs: dict, account) -> CacheRestoreOutcome:
+        started = time.monotonic()
+        def elapsed():
+            return int((time.monotonic() - started) * 1000)
+
+        if self._unusable_reason is not None:
+            return CacheRestoreOutcome(status='corrupt_fallback', fallback_reason=self._unusable_reason)
+        if not self.config.root.exists():
+            return CacheRestoreOutcome(status='miss', fallback_reason='cache_root_missing', elapsed_ms=elapsed())
+
+        try:
+            with self._cache_lock() as root:
+                self._cleanup_orphaned_staging(root)
+                self._reconcile_snapshots_locked(root)
+                own_entry = (root / 'scopes' / key.project_alias / key.scope_dir / key.compat_key
+                             if key.scope_dir is not None else None)
+                entry_dir, status_label, expected_scope, is_seed = self._select_candidate_entry(root, key)
+                if own_entry is not None:
+                    reserve_entry = 1 if not (own_entry / 'current.json').exists() else 0
+                    # Maintenance precedes the publication transaction baseline;
+                    # protect the actual selected seed so main fallback remains
+                    # usable even when a new branch needs a retention slot.
+                    maintenance = self._prune_locked(
+                        root, protected_entry=entry_dir or own_entry, reserve_entries=reserve_entry,
+                    )
+                    self._maintenance_evicted = maintenance.evicted_entries
+                if entry_dir is None:
+                    reason = 'compat_key_mismatch' if status_label == 'incompatible' else 'no_matching_entry'
+                    return CacheRestoreOutcome(status=status_label, fallback_reason=reason, elapsed_ms=elapsed())
+
+                # Observe fresh checkout timestamps BEFORE touching active/source mtimes.
+                restore_now_ns = time.time_ns()
+                fresh_mtimes = {}
+                min_fresh_checkout_mtime_ns = None
+                for rel_path in sorted(tree_blobs):
+                    info = (layout.source / rel_path).lstat()
+                    if not stat.S_ISREG(info.st_mode):
+                        raise CorruptSnapshotError('Checked-out source path is not a regular file')
+                    fresh_mtimes[rel_path] = info.st_mtime_ns
+                    if min_fresh_checkout_mtime_ns is None or info.st_mtime_ns < min_fresh_checkout_mtime_ns:
+                        min_fresh_checkout_mtime_ns = info.st_mtime_ns
+                if min_fresh_checkout_mtime_ns is None:
+                    return CacheRestoreOutcome(status='miss', fallback_reason='empty_source_tree', elapsed_ms=elapsed())
+
+                try:
+                    pointer = json.loads(read_file(entry_dir / 'current.json', owner=self.expected_owner, maximum=16384))
+                    snapshot_id = pointer.get('snapshot_id')
+                    if not isinstance(snapshot_id, str) or not re.fullmatch(r'[0-9]+-[0-9a-f-]{36}', snapshot_id):
+                        raise CorruptSnapshotError('Invalid snapshot pointer')
+                    snapshot_dir = entry_dir / snapshot_id
+                    if not snapshot_dir.exists() or snapshot_dir.is_symlink() or not snapshot_dir.is_dir():
+                        raise CorruptSnapshotError('Snapshot directory missing')
+                    meta = json.loads(read_file(snapshot_dir / 'meta.json', owner=self.expected_owner, maximum=MAX_META_BYTES))
+                    if (not isinstance(meta, dict)
+                            or meta.get('schema_version') != CACHE_SCHEMA_VERSION
+                            or meta.get('project_alias') != key.project_alias
+                            or meta.get('compat_key') != key.compat_key
+                            or meta.get('branch_scope') != expected_scope
+                            or not isinstance(meta.get('source_inventory'), dict)):
+                        raise CorruptSnapshotError('Snapshot metadata mismatch')
+                    if _snapshot_manifest_digest(meta) != meta.get('manifest_sha256'):
+                        raise CorruptSnapshotError('Snapshot manifest digest mismatch')
+
+                    # Phase 1: Copy verified regular files into scratch & observe actual destination mtimes.
+                    t_entries, t_bytes, t_files, t_max_art, t_max_fp = _copy_tree_to_build(
+                        snapshot_dir / 'target',
+                        layout.target,
+                        expected_owner=self.expected_owner,
+                        target_uid=account.pw_uid,
+                        target_gid=account.pw_gid,
+                        prefix_rel='target',
+                    )
+                    p_entries, p_bytes, p_files, p_max_art, p_max_fp = _copy_tree_to_build(
+                        snapshot_dir / 'package-targets',
+                        layout.package_targets,
+                        expected_owner=self.expected_owner,
+                        target_uid=account.pw_uid,
+                        target_gid=account.pw_gid,
+                        prefix_rel='package-targets',
+                    )
+                    all_entries = sorted(t_entries + p_entries, key=lambda row: row[0])
+                    restored_bytes = t_bytes + p_bytes
+                    restored_files = t_files + p_files
+                    observed_max_art = max(t_max_art, p_max_art)
+                    observed_max_fp = max(t_max_fp, p_max_fp)
+                    files_sha256 = hashlib.sha256(canonical(all_entries)).hexdigest()
+                    if (files_sha256 != meta.get('files_sha256')
+                            or restored_files != meta.get('file_count')
+                            or restored_bytes != meta.get('total_bytes')
+                            or observed_max_art != meta.get('max_artifact_mtime_ns')
+                            or observed_max_fp != meta.get('max_fingerprint_mtime_ns')):
+                        raise CorruptSnapshotError('Restored files or mtimes diverged from snapshot metadata')
+                except InterruptedError:
+                    raise
+                except (OSError, ValueError, KeyError, TypeError, CorruptSnapshotError) as error:
+                    _reset_scratch_targets(layout, account)
+                    return CacheRestoreOutcome(
+                        status='corrupt_fallback',
+                        fallback_reason=type(error).__name__ + ': ' + str(error)[:160],
+                        elapsed_ms=elapsed(),
+                        source_scope=expected_scope,
+                    )
+
+                # Classify unchanged vs changed/added tracked files before mutating active/source.
+                source_inventory = meta['source_inventory']
+                unchanged_mtimes = []
+                min_changed_source_mtime_ns = None
+                for rel_path, (mode, blob) in tree_blobs.items():
+                    cached = source_inventory.get(rel_path)
+                    if (isinstance(cached, dict)
+                            and cached.get('blob') == blob
+                            and cached.get('mode') == mode
+                            and _is_strict_int(cached.get('mtime_ns'))):
+                        unchanged_mtimes.append((rel_path, cached['mtime_ns']))
+                    else:
+                        fresh_ns = fresh_mtimes[rel_path]
+                        if min_changed_source_mtime_ns is None or fresh_ns < min_changed_source_mtime_ns:
+                            min_changed_source_mtime_ns = fresh_ns
+
+                ordering_ok, ordering_reason = validate_restore_timestamp_ordering(
+                    published_at_ns=meta['published_at_ns'],
+                    observed_max_artifact_mtime_ns=observed_max_art,
+                    observed_max_fingerprint_mtime_ns=observed_max_fp,
+                    source_inventory=source_inventory,
+                    restore_now_ns=restore_now_ns,
+                    min_fresh_checkout_mtime_ns=min_fresh_checkout_mtime_ns,
+                    min_changed_source_mtime_ns=min_changed_source_mtime_ns,
+                )
+                if not ordering_ok:
+                    _reset_scratch_targets(layout, account)
+                    return CacheRestoreOutcome(
+                        status='timestamp_ordering_fallback',
+                        fallback_reason=ordering_reason,
+                        elapsed_ms=elapsed(),
+                        source_scope=expected_scope,
+                        snapshot_id=snapshot_id,
+                        details={
+                            'published_at_ns': meta['published_at_ns'],
+                            'observed_max_artifact_mtime_ns': observed_max_art,
+                            'observed_max_fingerprint_mtime_ns': observed_max_fp,
+                            'min_fresh_checkout_mtime_ns': min_fresh_checkout_mtime_ns,
+                            'min_changed_source_mtime_ns': min_changed_source_mtime_ns,
+                            'restore_now_ns': restore_now_ns,
+                        },
+                    )
+
+                # Phase 2: Timestamp ordering verified; align unchanged source file mtimes.
+                for rel_path, cached_ns in unchanged_mtimes:
+                    os.utime(layout.source / rel_path, ns=(cached_ns, cached_ns))
+
+                # Update LRU timestamp on the scope's own entry (keep main strictly read-only when seeding).
+                if not is_seed:
+                    try:
+                        _atomic_write_json(entry_dir / 'last_used.json', {'last_used_at_ns': restore_now_ns})
+                    except InterruptedError:
+                        raise
+                    except OSError:
+                        pass
+
+                return CacheRestoreOutcome(
+                    status=status_label,
+                    elapsed_ms=elapsed(),
+                    restored_bytes=restored_bytes,
+                    restored_files=restored_files,
+                    source_scope=expected_scope,
+                    snapshot_id=snapshot_id,
+                )
+        except InterruptedError:
+            raise
+        except (OSError, ValueError) as error:
+            _reset_scratch_targets(layout, account)
+            return CacheRestoreOutcome(
+                status='corrupt_fallback',
+                fallback_reason=type(error).__name__ + ': ' + str(error)[:160],
+                elapsed_ms=elapsed(),
+            )
+
+    def publish(
+        self,
+        key: CacheKey,
+        layout: ActiveSlotLayout,
+        source_inventory: dict,
+        account,
+        *,
+        action_id: str,
+    ) -> CachePublishOutcome:
+        started = time.monotonic()
+        def elapsed():
+            return int((time.monotonic() - started) * 1000)
+
+        if self._unusable_reason is not None:
+            return CachePublishOutcome(status='skipped_error', reason=self._unusable_reason,
+                                       cache_total_bytes=None, cache_entry_count=None)
+        if key.scope_dir is None or key.branch_scope == 'detached':
+            return CachePublishOutcome(status='skipped_unscoped', elapsed_ms=elapsed(), reason='detached_scope')
+
+        staging = None
+        try:
+            with self._publication_lock() as root:
+                self._cleanup_orphaned_staging(root)
+                self._reconcile_snapshots_locked(root)
+                baseline_bytes, baseline_count = self._inventory_locked(root)
+                published_at_ns = time.time_ns()
+                staging = root / ('.staging-' + action_id)
+                if staging.exists() or staging.is_symlink():
+                    _safe_rmtree(staging)
+                staging.mkdir(mode=0o700)
+                os.chown(staging, self.expected_owner, self.expected_group)
+
+                try:
+                    t_entries, t_bytes, t_files, t_max_art, t_max_fp = _copy_tree_from_build(
+                        layout.target,
+                        staging / 'target',
+                        expected_uid=account.pw_uid,
+                        prefix_rel='target',
+                        excluded_top_dirs=EPHEMERAL_TARGET_DIRS,
+                    )
+                    p_entries, p_bytes, p_files, p_max_art, p_max_fp = _copy_tree_from_build(
+                        layout.package_targets,
+                        staging / 'package-targets',
+                        expected_uid=account.pw_uid,
+                        prefix_rel='package-targets',
+                    )
+                except UnsafeArtifactError as error:
+                    _safe_rmtree(staging)
+                    staging = None
+                    summary = self._inventory_locked(root)
+                    return CachePublishOutcome(
+                        status='skipped_unsafe_artifact',
+                        elapsed_ms=elapsed(),
+                        cache_total_bytes=summary[0],
+                        cache_entry_count=summary[1],
+                        reason=str(error)[:160],
+                    )
+
+                all_entries = sorted(t_entries + p_entries, key=lambda row: row[0])
+                total_bytes = t_bytes + p_bytes
+                file_count = t_files + p_files
+                max_art = max(t_max_art, p_max_art)
+                max_fp = max(t_max_fp, p_max_fp)
+
+                if file_count == 0:
+                    _safe_rmtree(staging)
+                    staging = None
+                    summary = self._inventory_locked(root)
+                    return CachePublishOutcome(
+                        status='skipped_empty',
+                        elapsed_ms=elapsed(),
+                        cache_total_bytes=summary[0],
+                        cache_entry_count=summary[1],
+                        reason='no_cargo_artifacts_produced',
+                    )
+
+                ts_ok, ts_reason = validate_publish_timestamps(
+                    published_at_ns=published_at_ns,
+                    max_artifact_mtime_ns=max_art,
+                    max_fingerprint_mtime_ns=max_fp,
+                    source_inventory=source_inventory,
+                )
+                if not ts_ok:
+                    _safe_rmtree(staging)
+                    staging = None
+                    summary = self._inventory_locked(root)
+                    return CachePublishOutcome(
+                        status='skipped_unsafe_timestamps',
+                        elapsed_ms=elapsed(),
+                        cache_total_bytes=summary[0],
+                        cache_entry_count=summary[1],
+                        reason=ts_reason,
+                    )
+
+                if total_bytes > self.config.max_total_bytes:
+                    _safe_rmtree(staging)
+                    staging = None
+                    summary = self._inventory_locked(root)
+                    return CachePublishOutcome(
+                        status='skipped_oversized',
+                        elapsed_ms=elapsed(),
+                        cache_total_bytes=summary[0],
+                        cache_entry_count=summary[1],
+                        reason='snapshot_exceeds_max_total_bytes',
+                    )
+
+                entry_dir = self._ensure_entry_directory(root, key)
+                has_previous = (entry_dir / 'current.json').exists()
+                retained_bytes = baseline_bytes + total_bytes
+                retained_count = baseline_count + (0 if has_previous else 1)
+                if (retained_bytes > self.config.max_total_bytes
+                        or retained_count > self.config.max_entries):
+                    _safe_rmtree(staging)
+                    staging = None
+                    return CachePublishOutcome(
+                        status='skipped_capacity', elapsed_ms=elapsed(),
+                        cache_total_bytes=baseline_bytes, cache_entry_count=baseline_count,
+                        evicted_entries=self._maintenance_evicted,
+                        reason='retained_predecessor_and_new_snapshot_exceed_capacity',
+                    )
+
+                files_sha256 = hashlib.sha256(canonical(all_entries)).hexdigest()
+                meta = {
+                    'schema_version': CACHE_SCHEMA_VERSION,
+                    'project_alias': key.project_alias,
+                    'branch_scope': key.branch_scope,
+                    'compat_key': key.compat_key,
+                    'published_at_ns': published_at_ns,
+                    'max_artifact_mtime_ns': max_art,
+                    'max_fingerprint_mtime_ns': max_fp,
+                    'source_inventory': source_inventory,
+                    'file_count': file_count,
+                    'total_bytes': total_bytes,
+                    'files_sha256': files_sha256,
+                }
+                meta['manifest_sha256'] = _snapshot_manifest_digest(meta)
+                _atomic_write_json(staging / 'meta.json', meta, mode=0o600)
+
+                entry_dir = self._ensure_entry_directory(root, key)
+                snapshot_id = f'{published_at_ns}-{action_id}'
+                snapshot_dir = entry_dir / snapshot_id
+                if snapshot_dir.exists() or snapshot_dir.is_symlink():
+                    _safe_rmtree(snapshot_dir)
+                os.replace(staging, snapshot_dir)
+                staging = None
+                _fsync_dir(entry_dir)
+                old_current = self._optional_metadata(entry_dir / 'current.json', 16384)
+                old_last_used = self._optional_metadata(entry_dir / 'last_used.json', 4096)
+                pointer = {
+                    'snapshot_id': snapshot_id, 'published_at_ns': published_at_ns,
+                    'total_bytes': total_bytes, 'file_count': file_count,
+                }
+                journal = {
+                    'version': 1, 'action_id': action_id,
+                    'old_current': old_current, 'old_last_used': old_last_used,
+                    'new_pointer': pointer, 'result': None, 'committed': False,
+                }
+                _atomic_write_json(entry_dir / 'pending-publication.json', journal)
+                self._publication = entry_dir
+                return CachePublishOutcome(
+                    status='published',
+                    elapsed_ms=elapsed(),
+                    published_bytes=total_bytes,
+                    published_files=file_count,
+                    evicted_entries=self._maintenance_evicted,
+                    cache_total_bytes=retained_bytes,
+                    cache_entry_count=retained_count,
+                    snapshot_id=snapshot_id,
+                )
+        except InterruptedError:
+            raise
+        except (OSError, ValueError) as error:
+            if staging is not None and (staging.exists() or staging.is_symlink()):
+                try:
+                    _safe_rmtree(staging)
+                except InterruptedError:
+                    raise
+                except OSError:
+                    pass
+            return CachePublishOutcome(
+                status='skipped_error',
+                elapsed_ms=elapsed(),
+                reason=type(error).__name__ + ': ' + str(error)[:160],
+            )
+
+    def _entry_directories_locked(self, root):
+        """Walk only supervisor-owned directories, never a symlink ancestor."""
+        scopes_dir = root / 'scopes'
+        if not scopes_dir.exists() and not scopes_dir.is_symlink():
+            return
+        regular_directory(scopes_dir, owner=self.expected_owner)
+        for project_name in sorted(os.listdir(scopes_dir)):
+            project_dir = scopes_dir / project_name
+            regular_directory(project_dir, owner=self.expected_owner)
+            for scope_name in sorted(os.listdir(project_dir)):
+                scope_dir = project_dir / scope_name
+                regular_directory(scope_dir, owner=self.expected_owner)
+                for compat_name in sorted(os.listdir(scope_dir)):
+                    entry_dir = scope_dir / compat_name
+                    regular_directory(entry_dir, owner=self.expected_owner)
+                    yield project_name, scope_name, compat_name, entry_dir
+
+    def _validate_pointer(self, pointer):
+        if (not isinstance(pointer, dict)
+                or not isinstance(pointer.get('snapshot_id'), str)
+                or not re.fullmatch(r'[0-9]+-[0-9a-f-]{36}', pointer['snapshot_id'])
+                or not _is_strict_int(pointer.get('published_at_ns'))
+                or pointer['published_at_ns'] < 0
+                or not _is_strict_int(pointer.get('total_bytes'))
+                or pointer['total_bytes'] < 0):
+            raise ValueError('Invalid CI cache pointer')
+
+    def _read_pointer_locked(self, entry_dir):
+        pointer = json.loads(read_file(entry_dir / 'current.json', owner=self.expected_owner, maximum=16384))
+        self._validate_pointer(pointer)
+        regular_directory(entry_dir / pointer['snapshot_id'], owner=self.expected_owner)
+        return pointer
+
+    def _reconcile_snapshots_locked(self, root):
+        """Collect incomplete publications before reporting retention totals.
+
+        The global cache lock excludes a live publisher. An entry with no valid
+        pointer is an abandoned pre-commit publication. Within a committed
+        entry, only its pointed snapshot is live; crash leftovers and previous
+        snapshots are garbage. Removal failures propagate instead of allowing
+        unaccounted bytes to disappear from inventory. rmtree is fd-based and
+        never follows a link; every traversed ancestor is checked above.
+        """
+        scopes_dir = root / 'scopes'
+        for _project, _scope, _compat, entry_dir in list(self._entry_directories_locked(root)):
+            pending = entry_dir / 'pending-publication.json'
+            if pending.exists() or pending.is_symlink():
+                self._resolve_publication_locked(entry_dir)
+            try:
+                pointer = self._read_pointer_locked(entry_dir)
+            except InterruptedError:
+                raise
+            except (OSError, ValueError, KeyError, TypeError):
+                _safe_rmtree(entry_dir)
+                self._remove_empty_parents(entry_dir, scopes_dir)
+                continue
+            for name in os.listdir(entry_dir):
+                if name in {'current.json', 'last_used.json', pointer['snapshot_id']}:
+                    continue
+                orphan = entry_dir / name
+                info = orphan.lstat()
+                if info.st_uid != self.expected_owner:
+                    raise ValueError('Unsafe CI cache orphan ownership')
+                if stat.S_ISDIR(info.st_mode):
+                    regular_directory(orphan, owner=self.expected_owner)
+                    _safe_rmtree(orphan)
+                else:
+                    # Unlink a link itself; never open its target.
+                    orphan.unlink()
+
+    def _collect_entries_locked(self, root):
+        self._reconcile_snapshots_locked(root)
+        entries = []
+        for project_name, scope_name, compat_name, entry_dir in self._entry_directories_locked(root):
+            pointer = self._read_pointer_locked(entry_dir)
+            published_at_ns = pointer['published_at_ns']
+            last_used_ns = published_at_ns
+            last_used_path = entry_dir / 'last_used.json'
+            if last_used_path.exists() or last_used_path.is_symlink():
+                lu = json.loads(read_file(last_used_path, owner=self.expected_owner, maximum=4096))
+                if not isinstance(lu, dict) or not _is_strict_int(lu.get('last_used_at_ns')):
+                    raise ValueError('Invalid CI cache last-use metadata')
+                last_used_ns = max(last_used_ns, lu['last_used_at_ns'])
+            entries.append({
+                'project': project_name,
+                'scope_dir': scope_name,
+                'compat_key': compat_name,
+                'path': entry_dir,
+                'is_main': scope_name == 'main',
+                'published_at_ns': published_at_ns,
+                'last_used_at_ns': last_used_ns,
+                'total_bytes': pointer['total_bytes'],
+            })
+        return entries
+
+    def _inventory_locked(self, root):
+        entries = self._collect_entries_locked(root)
+        return sum(e['total_bytes'] for e in entries), len(entries)
+
+    def _remove_empty_parents(self, entry_dir, scopes_dir):
+        for parent in (entry_dir.parent, entry_dir.parent.parent):
+            if parent == scopes_dir or scopes_dir not in parent.parents:
+                break
+            try:
+                if parent.exists() and not parent.is_symlink() and not os.listdir(parent):
+                    parent.rmdir()
+            except InterruptedError:
+                raise
+            except OSError:
+                break
+
+    def _prune_locked(self, root, *, protected_entry=None, now_ns=None, reserve_entries=0):
+        self._cleanup_orphaned_staging(root)
+        scopes_dir = root / 'scopes'
+        entries = self._collect_entries_locked(root)
+        now = time.time_ns() if now_ns is None else now_ns
+        max_age_ns = self.config.max_age_seconds * 1_000_000_000
+        evicted = 0
+        remaining = []
+
+        # 1. Evict entries older than max_age_seconds.
+        for item in entries:
+            if item['path'] != protected_entry and (now - item['last_used_at_ns']) > max_age_ns:
+                _safe_rmtree(item['path'])
+                self._remove_empty_parents(item['path'], scopes_dir)
+                evicted += 1
+            else:
+                remaining.append(item)
+
+        # 2. Enforce max_entries and max_total_bytes (evict non-main LRU before main).
+        while (len(remaining) + reserve_entries > self.config.max_entries
+               or sum(item['total_bytes'] for item in remaining) > self.config.max_total_bytes):
+            candidates = [item for item in remaining if item['path'] != protected_entry]
+            if not candidates:
+                # An active publication is protected even under a tighter
+                # operator retention policy. Never delete its current snapshot.
+                break
+            candidates.sort(key=lambda item: (
+                1 if item['is_main'] else 0,
+                item['last_used_at_ns'],
+                item['published_at_ns'],
+                item['scope_dir'],
+                item['compat_key'],
+            ))
+            victim = candidates[0]
+            _safe_rmtree(victim['path'])
+            self._remove_empty_parents(victim['path'], scopes_dir)
+            remaining.remove(victim)
+            evicted += 1
+
+        total_bytes = sum(item['total_bytes'] for item in remaining)
+        return PruneOutcome(
+            evicted_entries=evicted,
+            cache_total_bytes=total_bytes,
+            cache_entry_count=len(remaining),
+        )
+
+    def prune(self, *, now_ns=None) -> PruneOutcome:
+        if not self.config.root.exists():
+            return PruneOutcome(evicted_entries=0, cache_total_bytes=0, cache_entry_count=0)
+        with self._cache_lock() as root:
+            return self._prune_locked(root, now_ns=now_ns)
+
+    def clear(self, *, project=None, scope=None) -> ClearOutcome:
+        if scope is not None and project is None:
+            raise ValueError('Clearing a specific scope requires --project')
+        target_scope_dir = None
+        if scope is not None:
+            if scope == 'main':
+                target_scope_dir = 'main'
+            elif '..' not in scope and BRANCH_SCOPE_RE.fullmatch(scope):
+                target_scope_dir = 'branch--' + scope.split('/', 1)[1]
+            else:
+                raise ValueError('Invalid scope for cache clear')
+        if not self.config.root.exists():
+            return ClearOutcome(removed_entries=0, freed_bytes=0, cache_total_bytes=0, cache_entry_count=0)
+        with self._cache_lock() as root:
+            self._cleanup_orphaned_staging(root)
+            scopes_dir = root / 'scopes'
+            entries = self._collect_entries_locked(root)
+            removed = 0
+            freed = 0
+            for item in entries:
+                if project is not None and item['project'] != project:
+                    continue
+                if target_scope_dir is not None and item['scope_dir'] != target_scope_dir:
+                    continue
+                _safe_rmtree(item['path'])
+                self._remove_empty_parents(item['path'], scopes_dir)
+                removed += 1
+                freed += item['total_bytes']
+            if project is None and scope is None and scopes_dir.exists() and not scopes_dir.is_symlink():
+                _safe_rmtree(scopes_dir)
+            total_bytes, count = self._inventory_locked(root)
+            return ClearOutcome(
+                removed_entries=removed,
+                freed_bytes=freed,
+                cache_total_bytes=total_bytes,
+                cache_entry_count=count,
+            )
+
+
+class CargoCacheFactory:
+    """Effect-free bootstrap factory that freezes CargoCacheConfig before creation."""
+
+    def __init__(self, config: CargoCacheConfig, *, expected_owner: int = 0, expected_group: int | None = None):
+        if not isinstance(config, CargoCacheConfig):
+            raise TypeError('Expected frozen CargoCacheConfig')
+        self.config = config
+        self.expected_owner = expected_owner
+        self.expected_group = expected_group
+
+    def create(self) -> CargoCachePort:
+        if self.config.enabled:
+            return LocalCargoCacheProvider(
+                self.config,
+                expected_owner=self.expected_owner,
+                expected_group=self.expected_group,
+            )
+        return NullCargoCacheProvider(self.config)
+
+
+# --- Process isolation & execution helpers ---
 
 
 def private_network():
@@ -157,7 +2062,6 @@ def run_child(argv, *, cwd, env, account, log, timeout, cancelled):
             process.wait(timeout=10)
 
 
-
 def bounded_output(argv, *, env, maximum=32 * 1024 * 1024):
     process = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
@@ -203,11 +2107,7 @@ def write_result(path, result, reader_group):
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
-    fd = os.open(path.parent, os.O_DIRECTORY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    _fsync_dir(path.parent)
 
 
 def import_verified_bundle(bundle, source, env):
@@ -246,12 +2146,16 @@ def map_cargo_targets(source, scratch, manifest_parents, account):
             raise ValueError('Candidate includes a Cargo output path')
         mappings.append((relative, target))
     output = scratch / 'package-targets'
-    output.mkdir(mode=0o700)
+    if output.is_symlink():
+        raise ValueError('Unsafe package-targets symlink')
+    output.mkdir(mode=0o700, exist_ok=True)
     os.chown(output, account.pw_uid, account.pw_gid)
+    output.chmod(0o700)
     for relative, target in mappings:
         owned = output / hashlib.sha256(relative.encode('utf-8')).hexdigest()
-        owned.mkdir(mode=0o700)
+        owned.mkdir(mode=0o700, exist_ok=True)
         os.chown(owned, account.pw_uid, account.pw_gid)
+        owned.chmod(0o700)
         target.symlink_to(owned, target_is_directory=True)
     return [target for _relative, target in mappings]
 
@@ -310,19 +2214,100 @@ def open_log(path, reader_group):
         raise
 
 
-def execute(action, config):
+def _read_ui_qa_stages(qa_root, *, expected_uid):
+    """Safely extract ui-qa stage durations from build-owned QA_OUTPUT_ROOT after quiescence."""
+    try:
+        root_fd = os.open(qa_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except InterruptedError:
+        raise
+    except OSError:
+        return None
+    try:
+        root_info = os.fstat(root_fd)
+        if not stat.S_ISDIR(root_info.st_mode) or root_info.st_uid != expected_uid:
+            return None
+        candidates = sorted(n for n in os.listdir(root_fd) if n.startswith('forge-ui-qa-'))
+        if not candidates:
+            return None
+        run_dir_fd = os.open(candidates[-1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+        try:
+            dir_info = os.fstat(run_dir_fd)
+            if not stat.S_ISDIR(dir_info.st_mode) or dir_info.st_uid != expected_uid:
+                return None
+            file_fd = os.open('run.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=run_dir_fd)
+            with os.fdopen(file_fd, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != expected_uid or info.st_size > 65536:
+                    return None
+                raw = stream.read(65537)
+                if len(raw) > 65536:
+                    return None
+        finally:
+            os.close(run_dir_fd)
+        parsed = json.loads(raw)
+        stages = parsed.get('stages')
+        if not isinstance(stages, list):
+            return None
+        summary = {}
+        for item in stages:
+            if (isinstance(item, dict)
+                    and isinstance(item.get('id'), str)
+                    and isinstance(item.get('status'), str)
+                    and _is_strict_int(item.get('duration_ms'))):
+                summary[item['id']] = {
+                    'status': item['status'],
+                    'duration_ms': item['duration_ms'],
+                }
+        return summary or None
+    except InterruptedError:
+        raise
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    finally:
+        os.close(root_fd)
+
+
+def _capture_source_inventory(source, tree_blobs):
+    inventory = {}
+    for rel_path, (mode, blob) in sorted(tree_blobs.items()):
+        info = (source / rel_path).lstat()
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('Tracked source file is no longer regular')
+        inventory[rel_path] = {
+            'blob': blob,
+            'mode': mode,
+            'mtime_ns': info.st_mtime_ns,
+        }
+    return inventory
+
+
+def execute(action, config, *, cache_port=None):
+    require_main = config.get('require_main_ancestor', False)
+    if type(require_main) is not bool:
+        raise ValueError('Main ancestry selection must be an operator boolean')
+    if cache_port is None:
+        cache_port = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache'))).create()
     results = Path(config['results_root'])
     regular_directory(results, owner=0)
     fd = os.open(results / 'executor.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return execute_locked(action, config)
+        return execute_locked(action, config, cache_port=cache_port)
 
 
-def execute_locked(action, config):
+def execute_locked(action, config, *, cache_port=None):
+    if cache_port is None:
+        cache_port = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache'))).create()
+    with cache_port.verification_transaction():
+        return _execute_locked(action, config, cache_port=cache_port)
+
+
+def _execute_locked(action, config, *, cache_port):
     require_main = config.get('require_main_ancestor', False)
     if type(require_main) is not bool:
         raise ValueError('Main ancestry selection must be an operator boolean')
+    if cache_port is None:
+        cache_port = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache'))).create()
     account = pwd.getpwnam(config['build_user'])
     submitter = pwd.getpwnam(config['submitter_user'])
     if (account.pw_uid == 0 or account.pw_uid == submitter.pw_uid or account.pw_name != 'forge_ci'
@@ -340,7 +2325,7 @@ def execute_locked(action, config):
     request = json.loads(raw)
     required = {'version', 'action_id', 'workflow_id', 'project_alias', 'candidate_commit',
                 'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'bundle_sha256',
-                'verification_profile', 'correlation_id'}
+                'verification_profile', 'correlation_id', 'branch_scope'}
     if set(request) != required or request['version'] != 1 or request['action_id'] != action:
         raise ValueError('Invalid CI request')
     for key in ('workflow_id', 'correlation_id'):
@@ -354,6 +2339,12 @@ def execute_locked(action, config):
             raise ValueError('Invalid CI digest')
     if request['verification_profile'] != config['verification_profile'] or request['project_alias'] not in config['projects']:
         raise ValueError('CI scope denied')
+    # Fail-closed branch scope validation before any cache or build slot filesystem access.
+    branch_scope = validate_branch_scope(
+        request['branch_scope'],
+        candidate_commit=request['candidate_commit'],
+        expected_main=request['expected_main'],
+    )
     bundle = read_file(directory / 'candidate.bundle', owner=submitter.pw_uid, maximum=MAX_SOURCE_BYTES)
     if hashlib.sha256(bundle).hexdigest() != request['bundle_sha256']:
         raise ValueError('CI bundle changed')
@@ -362,21 +2353,29 @@ def execute_locked(action, config):
     lock_fd = os.open(results / (action + '.lock'), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(lock_fd, 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        cache_port.recover_pending(action_id=action, result_path=result_path)
         if result_path.exists():
-            previous = json.loads(read_file(result_path, owner=0, maximum=65536))
+            previous = json.loads(read_file(result_path, owner=0, maximum=262144))
             if previous['request_sha256'] != identity:
                 raise ValueError('CI replay intent changed')
             return previous
         kill_build_user(account)
-        job = work / action
-        create_job_directory(job)
-        verified_bundle = job / 'verified.bundle'
-        fd = os.open(verified_bundle, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o444)
-        with os.fdopen(fd, 'wb') as stream:
+
+        # Canonical stable execution slot under <work_root>/active for effective Cargo reuse.
+        active = work / 'active'
+        if active.is_symlink():
+            raise ValueError('Unsafe CI active slot symlink')
+        if active.exists():
+            _safe_rmtree(active)
+        create_job_directory(active)
+
+        verified_bundle = active / 'verified.bundle'
+        bfd = os.open(verified_bundle, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o444)
+        with os.fdopen(bfd, 'wb') as stream:
             stream.write(bundle)
             stream.flush()
             os.fsync(stream.fileno())
-        scratch = job / 'scratch'
+        scratch = active / 'scratch'
         scratch.mkdir(mode=0o700)
         os.chown(scratch, account.pw_uid, account.pw_gid)
         for name in ('home', 'target', 'cargo-home', 'qa'):
@@ -384,7 +2383,7 @@ def execute_locked(action, config):
             p.mkdir(mode=0o700)
             os.chown(p, account.pw_uid, account.pw_gid)
         (scratch / 'cargo-home/registry').symlink_to(config['cargo_registry'], target_is_directory=True)
-        source = job / 'source'
+        source = active / 'source'
         environment = {'PATH': config['toolchain'] + '/bin:/usr/bin:/bin',
             'HOME': str(scratch / 'home'),
             'LANG': 'C.UTF-8', 'CARGO_HOME': str(scratch / 'cargo-home'),
@@ -399,10 +2398,19 @@ def execute_locked(action, config):
         log_path = results / (action + '.log')
         fd = open_log(log_path, submitter.pw_gid)
         checks = []
+        stages = []
+        check_log_spans = {}
         started = time.time()
         failure = None
         short_tmp = None
+        cache_key = None
+        restore_outcome = CacheRestoreOutcome(status='disabled' if not cache_port.enabled else 'not_run')
+        publish_outcome = CachePublishOutcome(status='disabled' if not cache_port.enabled else 'not_run')
+        tree_blobs = {}
+        layout = None
+        post_check_quiesced = False
         try:
+            prep_started = time.monotonic()
             short_tmp = create_short_tmp(account)
             (scratch / 'tmp').symlink_to(short_tmp, target_is_directory=True)
             environment['TMPDIR'] = str(short_tmp)
@@ -418,6 +2426,7 @@ def execute_locked(action, config):
             rows = bounded_output(['/usr/bin/git', '-C', str(source), 'ls-tree', '-r', '-l', '-z', '--full-tree', request['candidate_commit']], env=safe_env)
             protected = {}
             manifest_parents = []
+            repo_build_config = {}
             count = 0
             total = 0
             for record in rows.split(b'\0'):
@@ -433,8 +2442,11 @@ def execute_locked(action, config):
                         or any(ord(c) < 32 for c in path) or path.startswith('/')
                         or any(part in {'', '.', '..'} for part in path.split('/'))):
                     raise ValueError('CI source contains links or exceeds checkout bounds')
+                tree_blobs[path] = (mode, blob)
                 if Path(path).name == 'Cargo.toml':
                     manifest_parents.append(str(Path(path).parent))
+                if path in REPO_BUILD_CONFIG_PATHS:
+                    repo_build_config[path] = [mode, blob]
                 if protected_gate_path(path):
                     protected[path] = [mode, blob]
             helper_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
@@ -466,7 +2478,8 @@ def execute_locked(action, config):
                 raise ValueError('Candidate includes build output')
             target_link.symlink_to(scratch / 'target', target_is_directory=True)
             generated = [node_modules, target_link]
-            generated.extend(map_cargo_targets(source, scratch, manifest_parents, account))
+            mapped_targets = map_cargo_targets(source, scratch, manifest_parents, account)
+            generated.extend(mapped_targets)
             exclude_generated_outputs(source, generated)
             for current, directories, files in os.walk(source, followlinks=False):
                 os.chmod(current, 0o755)
@@ -474,8 +2487,57 @@ def execute_locked(action, config):
                     path = Path(current) / name
                     if not path.is_symlink():
                         path.chmod(0o755 if path.stat().st_mode & 0o111 else 0o644)
+            package_target_hashes = tuple(
+                sorted(p.readlink().name for p in mapped_targets if p.is_symlink())
+            )
+            layout = ActiveSlotLayout(
+                root=active,
+                source=source,
+                scratch=scratch,
+                target=scratch / 'target',
+                package_targets=scratch / 'package-targets',
+                cargo_home=scratch / 'cargo-home',
+                home=scratch / 'home',
+                qa=scratch / 'qa',
+                package_target_hashes=package_target_hashes,
+            )
+            stages.append({
+                'name': 'prepare_source',
+                'status': 'passed',
+                'elapsed_ms': int((time.monotonic() - prep_started) * 1000),
+            })
+
+            cache_key = cache_port.resolve_key(
+                project_alias=request['project_alias'],
+                branch_scope=branch_scope,
+                verification_profile=config['verification_profile'],
+                checks=CHECKS,
+                toolchain_path=config['toolchain'],
+                environment=environment,
+                repo_build_config=repo_build_config,
+                canonical_build_root=active,
+            )
+            restore_outcome = cache_port.restore(cache_key, layout, tree_blobs, account)
+            restore_stage = {
+                'name': 'cache_restore',
+                'status': restore_outcome.status,
+                'elapsed_ms': restore_outcome.elapsed_ms,
+                'restored_bytes': restore_outcome.restored_bytes,
+                'restored_files': restore_outcome.restored_files,
+            }
+            if restore_outcome.fallback_reason is not None:
+                restore_stage['fallback_reason'] = restore_outcome.fallback_reason
+            stages.append(restore_stage)
+
             with os.fdopen(fd, 'wb') as log:
                 fd = None
+                log.write((
+                    f'FORGE_CACHE_RESTORE status={restore_outcome.status} '
+                    f'scope={branch_scope} compat_key={cache_key.compat_key} '
+                    f'elapsed_ms={restore_outcome.elapsed_ms} '
+                    f'files={restore_outcome.restored_files} bytes={restore_outcome.restored_bytes}\n'
+                ).encode('utf-8'))
+                log.flush()
                 for index, argv in enumerate(CHECKS):
                     remaining = config['timeout_seconds'] - (time.time() - started)
                     if remaining <= 0:
@@ -483,35 +2545,160 @@ def execute_locked(action, config):
                         break
                     log.write(('FORGE_FIXED_CHECK_START ' + str(index) + '\n').encode())
                     log.flush()
+                    span_start = log.tell()
+                    check_started = time.monotonic()
                     code = run_child(argv, cwd=source, env=environment, account=account,
                                      log=log, timeout=remaining, cancelled=cancelled)
+                    check_elapsed_ms = int((time.monotonic() - check_started) * 1000)
+                    log.flush()
+                    span_end = log.tell()
+                    check_log_spans[index] = (span_start, span_end)
+                    log.write((
+                        f'FORGE_FIXED_CHECK_END {index} rc={code} elapsed_ms={check_elapsed_ms}\n'
+                    ).encode('utf-8'))
+                    log.flush()
                     checks.append({'index': index, 'argv': list(argv), 'returncode': code})
+                    stages.append({
+                        'name': f'check_{index}',
+                        'label': CHECK_LABELS[index] if index < len(CHECK_LABELS) else f'check_{index}',
+                        'status': 'passed' if code == 0 else 'failed',
+                        'returncode': code,
+                        'elapsed_ms': check_elapsed_ms,
+                    })
                     if code:
                         failure = 'cancelled_or_timed_out' if code == 124 else 'checks_failed'
                         break
-            after = subprocess.check_output(['/usr/bin/git', '-C', str(source), 'status', '--porcelain', '--untracked-files=no'], env=safe_env, text=True)
-            if after.strip():
-                failure = 'source_changed_during_checks'
+
+                clean_started = time.monotonic()
+                after = subprocess.check_output(['/usr/bin/git', '-C', str(source), 'status', '--porcelain', '--untracked-files=no'], env=safe_env, text=True)
+                if after.strip():
+                    failure = 'source_changed_during_checks'
+                    clean_status = 'failed'
+                else:
+                    clean_status = 'passed'
+                stages.append({
+                    'name': 'verify_source_clean',
+                    'status': clean_status,
+                    'elapsed_ms': int((time.monotonic() - clean_started) * 1000),
+                })
+
+                # Quiesce all build-user processes BEFORE reading scratch outputs or publishing cache.
+                kill_build_user(account)
+                post_check_quiesced = True
+
+                # Enrich check_0 and check_1 stages with Cargo compilation & ui-qa telemetry.
+                if check_log_spans:
+                    raw_log_now = log_path.read_bytes()
+                    for stage in stages:
+                        if stage['name'] in {'check_0', 'check_1'}:
+                            idx = int(stage['name'].split('_', 1)[1])
+                            if idx in check_log_spans:
+                                s0, s1 = check_log_spans[idx]
+                                stage.update(parse_cargo_telemetry(raw_log_now[s0:s1]))
+                            if idx == 1:
+                                ui_qa_stages = _read_ui_qa_stages(layout.qa, expected_uid=account.pw_uid)
+                                if ui_qa_stages is not None:
+                                    stage['ui_qa_stages'] = ui_qa_stages
+
+                # Publish cache only on clean passing checks of a writable branch scope.
+                if not cache_port.enabled:
+                    publish_outcome = CachePublishOutcome(status='disabled')
+                elif failure == 'cancelled_or_timed_out':
+                    publish_outcome = CachePublishOutcome(status='skipped_cancelled', reason='cancelled_or_timed_out')
+                elif failure == 'source_changed_during_checks':
+                    publish_outcome = CachePublishOutcome(status='skipped_dirty', reason='source_changed_during_checks')
+                elif failure is not None or len(checks) != len(CHECKS):
+                    publish_outcome = CachePublishOutcome(status='skipped_failed', reason=failure or 'incomplete_checks')
+                elif branch_scope == 'detached':
+                    publish_outcome = CachePublishOutcome(status='skipped_unscoped', reason='detached_scope')
+                else:
+                    source_inventory = _capture_source_inventory(source, tree_blobs)
+                    publish_outcome = cache_port.publish(
+                        cache_key,
+                        layout,
+                        source_inventory,
+                        account,
+                        action_id=action,
+                    )
+                stages.append({
+                    'name': 'cache_publish',
+                    'status': publish_outcome.status,
+                    'elapsed_ms': publish_outcome.elapsed_ms,
+                    'published_bytes': publish_outcome.published_bytes,
+                    'published_files': publish_outcome.published_files,
+                    'evicted_entries': publish_outcome.evicted_entries,
+                })
+                log.write((
+                    f'FORGE_CACHE_PUBLISH status={publish_outcome.status} '
+                    f'scope={branch_scope} elapsed_ms={publish_outcome.elapsed_ms} '
+                    f'files={publish_outcome.published_files} bytes={publish_outcome.published_bytes} '
+                    f'evicted={publish_outcome.evicted_entries}\n'
+                ).encode('utf-8'))
+                log.flush()
         except MainAncestorRequired:
             failure = 'main_ancestor_required'
+            if cache_port.enabled and publish_outcome.status == 'not_run':
+                publish_outcome = CachePublishOutcome(status='skipped_failed', reason='main_ancestor_required')
         except InterruptedError:
             failure = 'cancelled_or_timed_out'
+            if cache_port.enabled and publish_outcome.status == 'not_run':
+                publish_outcome = CachePublishOutcome(status='skipped_cancelled', reason='interrupted')
         except (OSError, ValueError, subprocess.SubprocessError):
             failure = 'verification_unavailable'
+            if cache_port.enabled and publish_outcome.status == 'not_run':
+                publish_outcome = CachePublishOutcome(status='skipped_failed', reason='verification_unavailable')
         finally:
+            cleanup_started = time.monotonic()
             if fd is not None:
                 os.close(fd)
-            kill_build_user(account)
+            if not post_check_quiesced:
+                kill_build_user(account)
             if short_tmp is not None:
                 cleanup_short_tmp(short_tmp)
+            if active.exists() and not active.is_symlink():
+                _safe_rmtree(active)
+            stages.append({
+                'name': 'cleanup',
+                'status': 'passed',
+                'elapsed_ms': int((time.monotonic() - cleanup_started) * 1000),
+            })
+
+        cache_summary = {
+            'enabled': cache_port.enabled,
+            'provider': cache_port.provider_name,
+            'project_alias': request['project_alias'],
+            'branch_scope': branch_scope,
+            'compat_key': cache_key.compat_key if cache_key is not None else None,
+            'restore_status': restore_outcome.status,
+            'restore_fallback_reason': restore_outcome.fallback_reason,
+            'restore_elapsed_ms': restore_outcome.elapsed_ms,
+            'restored_bytes': restore_outcome.restored_bytes,
+            'restored_files': restore_outcome.restored_files,
+            'publish_status': publish_outcome.status,
+            'publish_elapsed_ms': publish_outcome.elapsed_ms,
+            'published_bytes': publish_outcome.published_bytes,
+            'published_files': publish_outcome.published_files,
+            'evicted_entries': publish_outcome.evicted_entries,
+            'cache_total_bytes': publish_outcome.cache_total_bytes,
+            'cache_entry_count': publish_outcome.cache_entry_count,
+        }
         result = {**{key: request[key] for key in ('action_id', 'workflow_id', 'candidate_commit',
-            'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'verification_profile', 'correlation_id')},
+            'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'verification_profile',
+            'correlation_id', 'branch_scope')},
             'version': 1, 'request_sha256': identity, 'checks': checks,
+            'cache': cache_summary, 'stages': stages,
             'status': 'passed' if failure is None and len(checks) == len(CHECKS) else 'failed',
             'failure': failure, 'cleanup_confirmed': True,
             'log_sha256': hashlib.sha256(log_path.read_bytes()).hexdigest(),
             'elapsed_ms': int((time.time() - started) * 1000)}
-        write_result(result_path, result, submitter.pw_gid)
+        try:
+            cache_port.finish_result(result_path, result, submitter.pw_gid, cancelled=cancelled)
+        except (OSError, ValueError) as error:
+            result['status'] = 'failed'
+            result['failure'] = ('cancelled_or_timed_out' if isinstance(error, InterruptedError)
+                                 else 'verification_unavailable')
+            cache_port.rollback_result(result)
+            write_result(result_path, result, submitter.pw_gid)
         return result
 
 
@@ -519,12 +2706,24 @@ def main():
     if os.geteuid() != 0 or len(sys.argv) != 2 or str(UUID(sys.argv[1])) != sys.argv[1]:
         raise ValueError('Expected root-owned CI helper and canonical action UUID')
     config = json.loads(read_file(CONFIG, owner=0, maximum=65536))
+    # Stage and freeze the cache factory before any disk or process effect.
+    cache_factory = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache')))
+    cache_port = cache_factory.create()
     def interrupted(_number, _frame):
-        raise InterruptedError('Jenkins requested verification cancellation')
+        if not cache_port.terminal_result_committed:
+            raise InterruptedError('Jenkins requested verification cancellation')
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
-    result = execute(sys.argv[1], config)
-    print(json.dumps({k: result[k] for k in ('action_id', 'status', 'log_sha256', 'elapsed_ms')}))
+    result = execute(sys.argv[1], config, cache_port=cache_port)
+    print(json.dumps({
+        'action_id': result['action_id'],
+        'status': result['status'],
+        'branch_scope': result['branch_scope'],
+        'log_sha256': result['log_sha256'],
+        'elapsed_ms': result['elapsed_ms'],
+        'cache_restore_status': result['cache']['restore_status'],
+        'cache_publish_status': result['cache']['publish_status'],
+    }))
     return 0 if result['status'] == 'passed' else 1
 
 
