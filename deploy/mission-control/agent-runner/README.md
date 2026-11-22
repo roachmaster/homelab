@@ -421,11 +421,19 @@ admitted verification action before independent code review. Publication and
 merge reobserve the same exact-source
 receipt instead of rerunning the suite. An immutable private mapping binds the
 native review manifest to the installed verifier's separate Jenkins manifest.
-With `native_delivery_mode: "branch-first-v1"`, the stopped source is first
-pushed to its owned branch; a committed scoped `branch_pushed` event precedes
-Jenkins admission. The separate native job checks main ancestry before expensive
-gates. A real build failure or a positively confirmed merge failure emits bounded
-repair feedback with an actual build reference. Integration conflicts are
+With `native_delivery_mode: "branch-first-v1"`, the publisher materializes the
+exact stopped source in its private clone, then performs an ordinary three-way
+merge of fetched current main before pushing its owned branch. The native
+workspace, admitted base and stop/reconciliation receipts stay unchanged. A v2
+prepared-source receipt separately pins the authored commit/tree, observed main,
+and integrated candidate/tree. Restart reuses that exact candidate even if main
+has advanced; historical v1/pushed receipts are never rewritten. A committed
+scoped `branch_pushed` event precedes Jenkins admission. The separate native job checks main ancestry before expensive
+gates. A pre-push integration conflict instead records a new unapproved source
+containing the genuine conflict markers and both parents, with typed source
+findings, no passed checks and no fabricated build reference. No branch, event or
+Jenkins job is submitted for that source. A real build failure or a positively
+confirmed merge failure emits bounded repair feedback with an actual build reference. Integration conflicts are
 preserved in a new unapproved source, then corrected and tested again. Independent
 review compares the complete change against actual main, including inherited
 unapproved code. Migration25 supplies these events, merge-failure transitions and
