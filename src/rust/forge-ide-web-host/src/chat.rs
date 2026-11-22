@@ -1,13 +1,10 @@
 use crate::{service::Rejection, workspace, HostError};
-use forge_ide_ui::protocol::{
-    valid_chat_text, ChatAttachmentDto, ChatMessage, ChatOutcome, ChatRole, FailureKind,
-    PreparedChat, MAX_CHAT_REPLY_BYTES,
-};
+use forge_ide_ui::protocol::FailureKind;
 use forge_provider::Factory;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{body::Bytes, client::conn::http1, Request, StatusCode};
 use hyper_util::rt::TokioIo;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{fs::File, io::Read, net::SocketAddr, path::PathBuf, time::Instant};
 
 #[derive(Clone, Debug, Deserialize)]
@@ -19,11 +16,13 @@ pub struct ChatConfig {
     /// The local runner supports authenticated PostgreSQL workspace checkpoints.
     #[serde(default)]
     pub workspace_persistence: bool,
-    /// The local runner accepts chat turns through its durable job queue.
+    /// Legacy config compatibility flag; portal Chat async dispatch is retired.
     #[serde(default)]
     pub async_dispatch: bool,
+    /// Legacy config compatibility flag; portal Mail dispatch is retired.
     #[serde(default)]
     pub mail_enabled: bool,
+    /// Legacy config compatibility flag; portal Mail archive dispatch is retired.
     #[serde(default)]
     pub mail_archive_enabled: bool,
 }
@@ -46,9 +45,6 @@ pub(crate) struct ChatRelay {
     endpoint: SocketAddr,
     token: String,
     pub workspace_persistence: bool,
-    pub async_dispatch: bool,
-    pub mail_enabled: bool,
-    pub mail_archive_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -60,43 +56,6 @@ impl Factory<ChatRelay> for ChatRelayFactory {
     fn create(&self) -> Result<ChatRelay, HostError> {
         ChatRelay::new(&self.0)
     }
-}
-
-#[derive(Serialize)]
-struct CompletionRequest<'a> {
-    messages: &'a [ChatMessage],
-    max_tokens: u32,
-    stream: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    chat_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expected_revision: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    attachment: Option<&'a VerifiedAttachment>,
-}
-
-#[derive(Serialize)]
-pub(crate) struct VerifiedAttachment {
-    pub reference: ChatAttachmentDto,
-    pub excerpt: String,
-}
-
-#[derive(Deserialize)]
-struct Completion {
-    choices: Vec<Choice>,
-    chat_id: Option<String>,
-    revision: Option<u64>,
-}
-
-#[derive(Deserialize)]
-struct Choice {
-    message: Answer,
-}
-
-#[derive(Deserialize)]
-struct Answer {
-    role: ChatRole,
-    content: Option<String>,
 }
 
 impl ChatRelay {
@@ -125,74 +84,7 @@ impl ChatRelay {
             endpoint: config.endpoint,
             token: token.into(),
             workspace_persistence: config.workspace_persistence,
-            async_dispatch: config.async_dispatch,
-            mail_enabled: config.mail_enabled,
-            mail_archive_enabled: config.mail_archive_enabled,
         })
-    }
-
-    pub fn complete(
-        &self,
-        chat: &PreparedChat,
-        attachment: Option<&VerifiedAttachment>,
-        deadline: Instant,
-    ) -> Result<ChatOutcome, FailureKind> {
-        let chat_id = chat.chat_id.as_deref();
-        if chat_id.is_some() && !self.workspace_persistence {
-            return Err(FailureKind::Unavailable);
-        }
-        let body = serde_json::to_vec(&CompletionRequest {
-            messages: &chat.messages,
-            max_tokens: 384,
-            stream: false,
-            chat_id,
-            expected_revision: chat.expected_revision,
-            attachment,
-        })
-        .map_err(|_| FailureKind::InvalidResponse)?;
-        let mut request = self.request("/v1/chat/completions");
-        if chat_id.is_some() {
-            request = request.header("Idempotency-Key", &chat.request_id);
-        }
-        let (status, body) = self.post(request, body, 128 * 1024, false, deadline)?;
-        match status {
-            StatusCode::OK => {}
-            StatusCode::NOT_FOUND if chat_id.is_some() => {
-                return Ok(ChatOutcome::SavedChatUnavailable);
-            }
-            StatusCode::CONFLICT if chat_id.is_some() => {
-                return Ok(ChatOutcome::SavedChatConflict);
-            }
-            StatusCode::REQUEST_TIMEOUT | StatusCode::GATEWAY_TIMEOUT => {
-                return Err(FailureKind::Timeout);
-            }
-            _ => return Err(FailureKind::Unavailable),
-        }
-        let completion: Completion =
-            serde_json::from_slice(&body).map_err(|_| FailureKind::InvalidResponse)?;
-        let content = completion
-            .choices
-            .into_iter()
-            .next()
-            .filter(|choice| choice.message.role == ChatRole::Assistant)
-            .and_then(|choice| choice.message.content)
-            .filter(|content| valid_chat_text(content, MAX_CHAT_REPLY_BYTES))
-            .ok_or(FailureKind::InvalidResponse)?;
-        match (chat_id, completion.chat_id, completion.revision) {
-            (None, None, None) => Ok(ChatOutcome::Answer { content }),
-            (Some(requested), Some(chat_id), Some(revision))
-                if requested == chat_id
-                    && revision > chat.expected_revision.unwrap_or(0)
-                    && revision <= 9_007_199_254_740_991 =>
-            {
-                Ok(ChatOutcome::SavedAnswer {
-                    content,
-                    chat_id,
-                    revision,
-                })
-            }
-            _ => Err(FailureKind::InvalidResponse),
-        }
     }
 
     pub(crate) fn workspace(

@@ -412,6 +412,107 @@ pub enum WorkStatus {
     BlockedPermission,
     NeedsReconcile,
 }
+
+/// Server-side task organization, separate from immutable raw task statuses.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkListScope {
+    #[default]
+    Active,
+    Attention,
+    History,
+    All,
+}
+impl WorkListScope {
+    pub fn value(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Attention => "attention",
+            Self::History => "history",
+            Self::All => "all",
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Active => "Active",
+            Self::Attention => "Needs attention",
+            Self::History => "History",
+            Self::All => "All assignments",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "active" => Some(Self::Active),
+            "attention" => Some(Self::Attention),
+            "history" => Some(Self::History),
+            "all" => Some(Self::All),
+            _ => None,
+        }
+    }
+    pub fn accepts(self, task: &WorkTaskSummary) -> bool {
+        let group = if let Some(phase) = task.workflow_phase {
+            match phase {
+                WorkWorkflowPhase::Completed | WorkWorkflowPhase::Cancelled => Self::History,
+                WorkWorkflowPhase::Escalated => Self::Attention,
+                _ if task.workflow_enabled == Some(false) => Self::Attention,
+                _ => Self::Active,
+            }
+        } else if task.workflow_required == Some(true) {
+            Self::Attention
+        } else {
+            match task.status {
+                WorkStatus::Queued | WorkStatus::Running | WorkStatus::CancelRequested => {
+                    Self::Active
+                }
+                WorkStatus::Completed | WorkStatus::Cancelled => Self::History,
+                _ => Self::Attention,
+            }
+        };
+        self == Self::All || self == group
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WorkListFilter {
+    Scope(WorkListScope),
+    Status(WorkStatus),
+}
+impl WorkListFilter {
+    fn accepts(self, task: &WorkTaskSummary) -> bool {
+        match self {
+            Self::Scope(scope) => scope.accepts(task),
+            Self::Status(status) => status == task.status,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkScopeCounts {
+    pub active: u64,
+    pub attention: u64,
+    pub history: u64,
+    pub all: u64,
+}
+impl WorkScopeCounts {
+    pub fn is_valid(&self) -> bool {
+        self.all <= MAX_WORK_INTEGER
+            && self
+                .active
+                .checked_add(self.attention)
+                .and_then(|n| n.checked_add(self.history))
+                == Some(self.all)
+    }
+    pub fn count(&self, scope: WorkListScope) -> u64 {
+        match scope {
+            WorkListScope::Active => self.active,
+            WorkListScope::Attention => self.attention,
+            WorkListScope::History => self.history,
+            WorkListScope::All => self.all,
+        }
+    }
+}
 impl WorkStatus {
     pub fn label(self) -> &'static str {
         match self {
@@ -566,12 +667,16 @@ pub struct WorkTaskSummary {
     pub revision: u64,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     /// Explicit false identifies manual history; missing metadata stays unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_required: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_phase: Option<WorkWorkflowPhase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow_enabled: Option<bool>,
 }
 impl WorkTaskSummary {
     pub fn is_valid(&self) -> bool {
@@ -583,7 +688,9 @@ impl WorkTaskSummary {
             && valid_work_hex(&self.recipe_digest, 64)
             && valid_work_revision(self.revision)
             && valid_work_timestamp(&self.created_at)
+            && self.updated_at.as_deref().is_none_or(valid_work_timestamp)
             && !(self.workflow_required == Some(false) && self.workflow_phase.is_some())
+            && !(self.workflow_enabled.is_some() && self.workflow_phase.is_none())
             && self
                 .title
                 .as_deref()
@@ -698,9 +805,11 @@ impl WorkTaskDetail {
             status: self.status,
             revision: self.revision,
             created_at: self.created_at.clone(),
+            updated_at: None,
             title: self.title.clone(),
             workflow_required: Some(self.workflow_required || self.workflow.is_some()),
             workflow_phase: self.workflow.as_ref().map(|w| w.phase),
+            workflow_enabled: None,
         }
     }
     pub fn is_valid(&self) -> bool {
@@ -864,7 +973,7 @@ pub enum WorkRequest {
         request_id: String,
         project_alias: String,
         #[serde(default)]
-        status_filter: Option<WorkStatus>,
+        status_filter: Option<WorkListFilter>,
         #[serde(default = "list_limit")]
         limit: usize,
         #[serde(default)]
@@ -1327,6 +1436,8 @@ pub enum WorkResponse {
         tasks: Vec<WorkTaskSummary>,
         #[serde(deserialize_with = "required_nullable")]
         next_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope_counts: Option<WorkScopeCounts>,
     },
     WorkEvents {
         request_id: String,
@@ -1502,6 +1613,7 @@ impl WorkResponse {
                     project_alias,
                     tasks,
                     next_cursor,
+                    scope_counts,
                     ..
                 },
                 WorkRequest::WorkList {
@@ -1517,7 +1629,12 @@ impl WorkResponse {
                     && tasks.iter().all(|t| {
                         t.is_valid()
                             && project(&t.project_alias)
-                            && status_filter.is_none_or(|s| s == t.status)
+                            && status_filter.is_none_or(|s| s.accepts(t))
+                            && (!matches!(status_filter, Some(WorkListFilter::Scope(_)))
+                                || t.updated_at.is_some())
+                            && (!matches!(status_filter, Some(WorkListFilter::Scope(_)))
+                                || t.workflow_phase.is_none()
+                                || t.workflow_enabled.is_some())
                             && cursor.as_deref() != Some(&t.task_id)
                     })
                     && tasks
@@ -1527,10 +1644,25 @@ impl WorkResponse {
                         .len()
                         == tasks.len()
                     && tasks.windows(2).all(|p| {
-                        work_timestamp_key(&p[0].created_at)
-                            .zip(work_timestamp_key(&p[1].created_at))
-                            .is_some_and(|(a, b)| (a, &p[0].task_id) < (b, &p[1].task_id))
+                        if matches!(status_filter, Some(WorkListFilter::Scope(_))) {
+                            work_timestamp_key(p[0].updated_at.as_deref().unwrap_or(""))
+                                .zip(work_timestamp_key(p[1].updated_at.as_deref().unwrap_or("")))
+                                .is_some_and(|(a, b)| (a, &p[0].task_id) > (b, &p[1].task_id))
+                        } else {
+                            work_timestamp_key(&p[0].created_at)
+                                .zip(work_timestamp_key(&p[1].created_at))
+                                .is_some_and(|(a, b)| (a, &p[0].task_id) < (b, &p[1].task_id))
+                        }
                     })
+                    && scope_counts.as_ref().is_none_or(WorkScopeCounts::is_valid)
+                    && (!matches!(status_filter, Some(WorkListFilter::Scope(_)))
+                        || scope_counts.is_some())
+                    && match (status_filter, scope_counts) {
+                        (Some(WorkListFilter::Scope(scope)), Some(counts)) => {
+                            counts.count(*scope) >= tasks.len() as u64
+                        }
+                        _ => true,
+                    }
                     && next_cursor.as_ref().is_none_or(|c| {
                         valid_chat_id(c) && tasks.last().is_some_and(|t| &t.task_id == c)
                     })

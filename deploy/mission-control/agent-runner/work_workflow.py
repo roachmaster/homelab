@@ -126,6 +126,7 @@ class BoundPreparationRetryAuthority:
 class WorkflowStore:
     def __init__(self,config,catalog,store):
         self.config=config;self.catalog=catalog;self.store=store
+        self.reviewer_correction = None
 
     @contextmanager
     def _transaction(self):
@@ -689,6 +690,9 @@ class WorkflowStore:
                 cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s) AS ready",(self.store.owner,w['project_alias'],t['id'],t['latest_attempt_id']))
                 if not cursor.fetchone()['ready']:continue
                 if t['workflow_review_id'] is not None:
+                    cursor.execute("SELECT target_kind,status FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s",(t['workflow_review_id'],))
+                    peer=cursor.fetchone()
+                    if peer and peer['status']=='reviewing':self._phase(cursor,w,'code_review' if peer['target_kind']=='code' else 'plan_review')
                     cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,workflow_review_id,kind,source_key) SELECT workflow_id,owner_id,project_alias,workflow_review_id,'decide',%s FROM forge_agent.coding_workflow_reviews WHERE workflow_review_id=%s AND status='reviewing' ON CONFLICT DO NOTHING",(str(t['latest_attempt_id'])+':'+t['result_sha256'],t['workflow_review_id']))
                     continue
                 if t['mode']=='plan':self._queue_review(cursor,w,t,None)
@@ -751,7 +755,7 @@ class WorkflowStore:
         return a
 
     def process(self,job):
-        from work_peer_review import validate_review_target,parse_review_target,parse_review_verdict
+        from work_peer_review import validate_review_target,parse_review_target,validate_live_review_verdict
         with self._transaction() as cursor:
             self._project_lock(cursor,job["project_alias"])
             # Task -> peer review -> action is shared with owner/cancel paths.
@@ -775,7 +779,7 @@ class WorkflowStore:
                     receipt=self._admit_reviewer(cursor,w,review,task,validate_review_target)
                 else:
                     target=parse_review_target(review['target_json'],review['target_sha256'])
-                    receipt=self._apply_verdict(cursor,w,review,task,action,target,parse_review_verdict)
+                    receipt=self._apply_verdict(cursor,w,review,task,action,target,validate_live_review_verdict)
             except (Rejected,ValueError,KeyError) as error:
                 cursor.execute('ROLLBACK TO SAVEPOINT workflow_action')
                 if isinstance(error,Rejected) and (error.code=='reconcile_required' or error.status>=500):return
@@ -863,7 +867,12 @@ class WorkflowStore:
         expected=recipe_from_snapshot(p,'reviewer_review')
         if not critic or critic['mode']!='review' or critic['agent_profile']!=p['reviewer_profile'] or critic['recipe_digest']!=expected.digest or critic['workflow_review_id']!=review['workflow_review_id'] or critic['status']!='awaiting_review':raise Rejected(409,'result_mismatch')
         result=self._artifact(cursor,critic['id'],critic['latest_attempt_id'])
-        verdict=parse_verdict(result['content'],target)
+        from work_peer_review import IncompleteApprovalError
+        try:
+            verdict=parse_verdict(result['content'],target)
+        except IncompleteApprovalError as error:
+            if self.reviewer_correction is None:raise Rejected(503,'unavailable')
+            return self.reviewer_correction.correct(cursor,w,review,task,critic,result,error,action=action)
         cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET reviewer_attempt_id=%s,reviewer_result_sha256=%s,verdict_json=%s,verdict_sha256=%s WHERE workflow_review_id=%s",(critic['latest_attempt_id'],result['result_sha256'],result['content'],hashlib.sha256(result['content'].encode()).hexdigest(),review['workflow_review_id']))
         review.update(reviewer_attempt_id=critic['latest_attempt_id'],reviewer_result_sha256=result['result_sha256'])
         authority=BoundDelegatedAuthority(self.store,cursor,w,action,review,verdict)
@@ -958,4 +967,19 @@ class WorkflowCoordinatorFactory:
     def __init__(self,config,catalog,store,*,external_maintenance=None,external_workflow=None):
         self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance;self.external_workflow=external_workflow
     def create(self):
-        return WorkflowCoordinator(WorkflowStore(self.config,self.catalog,self.store),external_maintenance=self.external_maintenance,external_workflow=self.external_workflow)
+        return WorkflowCoordinator(WorkflowStoreFactory(self.config,self.catalog,self.store).create(),external_maintenance=self.external_maintenance,external_workflow=self.external_workflow)
+
+
+class WorkflowStoreFactory:
+    """Composition selects and injects the reviewer correction application port."""
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None):
+        self.config,self.catalog,self.store=config,catalog,store
+        self.reviewer_correction_factory=reviewer_correction_factory
+    def create(self):
+        from work_reviewer_correction import ReviewerCorrectionFactory
+        flow=WorkflowStore(self.config,self.catalog,self.store)
+        factory=self.reviewer_correction_factory or ReviewerCorrectionFactory
+        flow.reviewer_correction=factory(flow).create()
+        if not all(callable(getattr(flow.reviewer_correction, name, None)) for name in ('correct','resume')):
+            raise TypeError('Reviewer correction requires a ready correction/control port')
+        return flow

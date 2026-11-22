@@ -15,6 +15,7 @@ from work_store import (
     RESULT_MAX_LIMIT_BYTES,
     RESULT_MIN_LIMIT_BYTES,
     VALID_STATUSES,
+    VALID_LIST_FILTERS,
     WorkStore,
 )
 
@@ -34,7 +35,7 @@ IDEMPOTENCY_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 UUID36_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 SHA1_HEX_RE = re.compile(r"[0-9a-f]{40}")
 RESULT_CURSOR_RE = re.compile(r"[0-9a-f]{64}\.(0|[1-9][0-9]{0,7})")
-VALID_STATUS_FILTERS = VALID_STATUSES
+VALID_STATUS_FILTERS = VALID_LIST_FILTERS
 CONFLICT_CODES = frozenset({
     "idempotency_conflict",
     "revision_conflict",

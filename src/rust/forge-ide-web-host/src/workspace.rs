@@ -75,18 +75,20 @@ impl WorkspaceRequest {
                 history,
                 models,
                 preserve_chat,
-            } => {
-                valid_tab(tab)
-                    && (!*models || *history)
-                    && (!*preserve_chat || !*history && !*models)
-            }
+            } => valid_tab(tab) && *preserve_chat && !*history && !*models,
             Self::Save {
                 tab,
                 lease,
                 revision,
                 snapshot,
-                ..
-            } => valid_tab(tab) && valid_lease(lease) && *revision > 0 && snapshot.is_valid(),
+                preserve_chat,
+            } => {
+                valid_tab(tab)
+                    && valid_lease(lease)
+                    && *revision > 0
+                    && *preserve_chat
+                    && snapshot.is_valid()
+            }
         }
     }
 
@@ -254,6 +256,15 @@ mod tests {
         )
         .unwrap();
         assert!(request.is_valid());
+        for value in [
+            serde_json::json!({"operation":"restore","tab":tab}),
+            serde_json::json!({"operation":"restore","tab":tab,"preserve_chat":false}),
+            serde_json::json!({"operation":"restore","tab":tab,"history":true,"models":true}),
+        ] {
+            assert!(!serde_json::from_value::<WorkspaceRequest>(value)
+                .unwrap()
+                .is_valid());
+        }
         for hydration in ["history", "models"] {
             let mut value = serde_json::to_value(&request).unwrap();
             value[hydration] = true.into();

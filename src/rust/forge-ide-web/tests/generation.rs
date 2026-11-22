@@ -183,13 +183,12 @@ fn guarded_edit_controls_share_the_generated_workbench_with_markdown_formats() {
     assert!(!content.contains("data-source-wrap"));
     assert!(source.contains("id=\"source-format\""));
     assert!(source.contains("id=\"source-pagination\""));
-    let (_, review) = source.split_once("id=\"workbench-edit-diff\"").unwrap();
-    assert!(review.contains("data-diff-view"));
+    assert!(!source.contains("id=\"workbench-edit-diff\""));
     assert!(html.contains("<footer class=\"fg-pane-footer\" id=\"workbench-write-footer\" hidden>"));
     assert!(!html.contains("id=\"send-chat-with-file\""));
     let css = std::str::from_utf8(&assets.files["style.css"]).unwrap();
     assert!(css.contains(".fg-source[data-wrap=true] .fg-source-line{"));
-    assert!(css.contains(".fg-diff-line[data-change=removed]{"));
+    assert!(!css.contains(".fg-diff-line"));
 
     let transport = ide_transport();
     let (kind, destination, result) = ("edit_write", "ide.edit_write", "edit_write_result");
@@ -210,15 +209,8 @@ fn guarded_edit_controls_share_the_generated_workbench_with_markdown_formats() {
 
 #[test]
 fn application_can_change_worker_policy_without_changing_its_adapter() {
-    let mut original_config = config();
-    original_config.transport = forge_ide_web::generate::application::ide_transport_with_policy(
-        forge_ide_ui::PresentationPolicy { chat: true },
-    );
-    let original = build(original_config);
+    let original = build(config());
     let mut updated = config();
-    updated.transport = forge_ide_web::generate::application::ide_transport_with_policy(
-        forge_ide_ui::PresentationPolicy { chat: true },
-    );
     updated
         .transport
         .timers
@@ -230,7 +222,7 @@ fn application_can_change_worker_policy_without_changing_its_adapter() {
         .transport
         .bindings
         .iter_mut()
-        .find(|binding| binding.kind == "chat_run_events")
+        .find(|binding| binding.kind == "work_list")
         .unwrap();
     polls.policy.delay_ms = Some(2_000);
     polls.policy.wait_for_slot_ms = Some(6_000);
@@ -256,7 +248,7 @@ fn application_can_change_worker_policy_without_changing_its_adapter() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|binding| binding["kind"] == "chat_run_events")
+        .find(|binding| binding["kind"] == "work_list")
         .unwrap();
     assert_eq!(polls["policy"]["delay_ms"], 2_000);
     assert_eq!(polls["policy"]["wait_for_slot_ms"], 6_000);
@@ -431,9 +423,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==12"));
+    assert!(worker.contains("wasm.abi_version()!==13"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 12);
+    assert_eq!(manifest["abi_version"], 13);
 }
 
 #[test]
@@ -709,7 +701,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
     assert!(main.contains("navigation_checkpoint_saved"));
     assert!(worker.contains("!await localCheckpoint.pending"));
     assert!(worker.contains("restore_agents_navigation"));
-    assert!(worker.contains("wasm.abi_version()!==12"));
+    assert!(worker.contains("wasm.abi_version()!==13"));
 }
 
 #[test]

@@ -32,16 +32,12 @@ impl Session {
             protocol_version: 1,
             session_epoch: random_token()?,
             timeout_ms: config.limits.request_timeout.as_millis() as u64,
-            chat_history: config
-                .chat
-                .as_ref()
-                .is_some_and(|chat| chat.workspace_persistence),
-            async_chat: config.chat.as_ref().is_some_and(|chat| chat.async_dispatch),
-            mail_enabled: config.chat.as_ref().is_some_and(|chat| chat.mail_enabled),
-            mail_archive_enabled: config
-                .chat
-                .as_ref()
-                .is_some_and(|chat| chat.mail_archive_enabled),
+            // Legacy ChatConfig still selects the Workbench workspace store.
+            // Its retained settings cannot reactivate retired browser routes.
+            chat_history: false,
+            async_chat: false,
+            mail_enabled: false,
+            mail_archive_enabled: false,
             nodes: config
                 .nodes
                 .iter()

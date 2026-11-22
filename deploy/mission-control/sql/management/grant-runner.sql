@@ -125,3 +125,11 @@ GRANT EXECUTE ON FUNCTION forge_agent.owner_continuation_capability() TO forge_a
 GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.owner_continuation_capability(),
  forge_coding_reconciler_api.owner_continuation_fenced(jsonb) TO forge_coding_reconciler;
 \endif
+
+-- M27: untrusted event/consumer state only; no coding-worker authority.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=27) AS has_jenkins_events
+\gset
+\if :has_jenkins_events
+GRANT SELECT,INSERT ON forge_agent.jenkins_events TO forge_agent;
+GRANT SELECT,INSERT,UPDATE ON forge_agent.jenkins_event_deliveries,forge_agent.jenkins_observations TO forge_agent;
+\endif

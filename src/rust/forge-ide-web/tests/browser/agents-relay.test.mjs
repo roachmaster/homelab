@@ -41,6 +41,29 @@ async function implementationFixture(t) {
   return { relay, post, before, request };
 }
 
+test('organized lists filter before pagination and expose truthful scope counts', async t => {
+  const { relay, post } = await relayFixture(t);
+  const queued = await post('work_submit', { base_revision: 'a'.repeat(40), mode: 'review',
+    agent_profile: 'agy-primary', prompt: 'Current background work', acceptance_criteria: '', idempotency_key: 'scope-current' });
+  const completed = relay.addPlan('completed', 'Historical source result');
+  const attention = relay.addPlan('awaiting_review', 'Latest owner decision');
+  const active = await post('work_list', { status_filter: 'active', limit: 1 });
+  assert.equal(active.body.event.tasks[0].task_id, queued.body.event.task_id);
+  assert.deepEqual(active.body.event.scope_counts, { active: 1, attention: 2, history: 1, all: 4 });
+  assert.equal(active.body.event.next_cursor, null);
+  const first = await post('work_list', { status_filter: 'attention', limit: 1 });
+  assert.equal(first.body.event.tasks[0].task_id, attention);
+  assert.equal(first.body.event.tasks[0].status, 'awaiting_review');
+  assert.equal(first.body.event.next_cursor, attention);
+  const next = await post('work_list', { status_filter: 'attention', limit: 1, cursor: first.body.event.next_cursor });
+  assert.equal(next.body.event.tasks[0].task_id, '11111111-1111-4111-8111-111111111111');
+  const history = await post('work_list', { status_filter: 'history' });
+  assert.equal(history.body.event.tasks[0].task_id, completed);
+  const legacy = await post('work_list', { status_filter: 'completed' });
+  assert.equal(legacy.body.event.tasks[0].task_id, completed);
+  assert.equal(legacy.body.event.scope_counts, undefined);
+});
+
 test('verification retry returns a new review and exposes it without creating another author', async t => {
   const { relay, post, before, request } = await implementationFixture(t);
   const tasks = relay.taskCount;

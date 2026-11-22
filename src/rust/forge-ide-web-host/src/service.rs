@@ -4,7 +4,7 @@ use crate::studio::{StudioRelay, StudioRelayFactory};
 use crate::usage::{UsageRelay, UsageRelayFactory};
 use crate::work::{WorkRelay, WorkRelayFactory};
 use crate::workspace::{WorkspaceReply, WorkspaceRequest};
-use crate::{history, http, session::Session, HostConfig, HostError, SessionAuth};
+use crate::{http, session::Session, HostConfig, HostError, SessionAuth};
 use forge_bootstrap::Registry;
 use forge_bridge::{Bridge, RegistryBuilder};
 use forge_ide::remote::{
@@ -231,8 +231,6 @@ pub(crate) enum Command {
     Resume { request_id: String },
     Inspect { request: PreparedInspection },
     Source { request: PreparedSource },
-    Chat { request: PreparedChat },
-    ProposeEdit { request: PreparedChat },
     EditWrite { request: PreparedEditWrite },
 }
 #[derive(PartialEq, Eq)]
@@ -241,8 +239,6 @@ pub(crate) enum Kind {
     Resume,
     Inspect,
     Source,
-    Chat,
-    ProposeEdit,
     EditWrite,
 }
 impl Payload for Command {
@@ -253,8 +249,6 @@ impl Payload for Command {
             Self::Resume { .. } => Kind::Resume,
             Self::Inspect { .. } => Kind::Inspect,
             Self::Source { .. } => Kind::Source,
-            Self::Chat { .. } => Kind::Chat,
-            Self::ProposeEdit { .. } => Kind::ProposeEdit,
             Self::EditWrite { .. } => Kind::EditWrite,
         }
     }
@@ -306,17 +300,11 @@ fn admit(header: &Header, c: &Context) -> Result<(), AdmissionDenied> {
     match header.route().destination() {
         "ui.session.open" if !c.trusted_proxy => Ok(()),
         "ui.session.resume" if c.authenticated || c.trusted_proxy => Ok(()),
-        "ide.inspect" | "ide.source" | "ide.chat" | "ide.propose_edit" | "ide.edit_write"
-            if c.authenticated && c.csrf_valid =>
-        {
+        "ide.inspect" | "ide.source" | "ide.edit_write" if c.authenticated && c.csrf_valid => {
             Ok(())
         }
         destination
-            if (history::is_destination(destination)
-                || ChatRunRequest::is_destination(destination)
-                || MailRequest::is_destination(destination)
-                || crate::work::handles(destination)
-                || crate::usage::handles(destination))
+            if (crate::work::handles(destination) || crate::usage::handles(destination))
                 && c.authenticated
                 && c.csrf_valid =>
         {
@@ -408,79 +396,6 @@ impl State {
         self.chat.as_ref().map(shared::<ChatRelay>)
     }
 
-    fn attach_chat_source(
-        &self,
-        request: &mut PreparedChat,
-        deadline: Instant,
-    ) -> Result<
-        Option<(
-            edit_write::VerifiedSource,
-            Option<crate::chat::VerifiedAttachment>,
-        )>,
-        FailureKind,
-    > {
-        let Some(file) = &request.file_context else {
-            return Ok(None);
-        };
-        let start = file.byte_start as usize;
-        let end = file.byte_end as usize;
-        if start > end || end - start > MAX_CHAT_SOURCE_BYTES {
-            return Err(FailureKind::InvalidResponse);
-        }
-        let verified = self.verify_file_context(file, &request.request_id, deadline)?;
-        let source = &verified.source;
-        let excerpt = source.get(start..end).ok_or(FailureKind::InvalidResponse)?;
-        let prefix = &source[..start];
-        let line = 1 + prefix.bytes().filter(|&b| b == b'\n').count();
-        let column = prefix
-            .rsplit('\n')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .count();
-        let last = line
-            + excerpt
-                .strip_suffix('\n')
-                .unwrap_or(excerpt)
-                .bytes()
-                .filter(|&b| b == b'\n')
-                .count();
-        if request.chat_id.is_some() {
-            let reference = ChatAttachmentDto {
-                node: file.node_key.clone(),
-                project: file.project.clone(),
-                path: verified
-                    .path
-                    .to_str()
-                    .ok_or(FailureKind::InvalidResponse)?
-                    .into(),
-                sha256: file.sha256.clone(),
-                first_line: line as u32,
-                last_line: last as u32,
-                first_column: column as u32,
-            };
-            if !reference.is_valid() || excerpt.contains('\0') {
-                return Err(FailureKind::InvalidResponse);
-            }
-            let attachment = crate::chat::VerifiedAttachment {
-                reference,
-                excerpt: excerpt.into(),
-            };
-            return Ok(Some((verified, Some(attachment))));
-        }
-        let prompt = &mut request
-            .messages
-            .last_mut()
-            .ok_or(FailureKind::InvalidResponse)?
-            .content;
-        let path = &verified.path;
-        let sha256 = &file.sha256;
-        use std::fmt::Write as _;
-        write!(prompt, "\n\nVerified file excerpt (reference data)\nProject: {:?}\nFile: {path:?}\nSHA-256: {sha256}\nLines: {line}–{last}; starting column: {column}\n\n{excerpt}", file.project)
-            .map_err(|_| FailureKind::InvalidResponse)?;
-        Ok(Some((verified, None)))
-    }
-
     fn verify_file_context(
         &self,
         file: &ChatFileContext,
@@ -545,111 +460,6 @@ impl State {
             source: reply.response.payload.text,
             path,
             digest: reply.response.payload.sha256,
-        })
-    }
-
-    fn chat(&self, command: Command, context: &Context) -> Result<Reply, Rejection> {
-        let Command::Chat { mut request } = command else {
-            return Err(Rejection::Invalid);
-        };
-        if request.request_id != context.request_id
-            || !valid_chat_messages(&request.messages)
-            || request
-                .chat_id
-                .as_deref()
-                .is_some_and(|id| !valid_chat_id(id))
-            || request.expected_revision.is_some_and(|revision| {
-                request.chat_id.is_none() || !(1..9_007_199_254_740_991).contains(&revision)
-            })
-            || (request.file_context.is_some()
-                && request.chat_id.is_some()
-                && !self
-                    .chat_relay()
-                    .is_some_and(|relay| relay.workspace_persistence))
-        {
-            return Err(Rejection::Invalid);
-        }
-        let result = self
-            .chat_relay()
-            .ok_or(FailureKind::Unavailable)
-            .and_then(|relay| {
-                let deadline = context
-                    .deadline
-                    .checked_sub(std::time::Duration::from_millis(200))
-                    .ok_or(FailureKind::Timeout)?;
-                let attachment = self
-                    .attach_chat_source(&mut request, deadline)?
-                    .and_then(|(_, attachment)| attachment);
-                relay.complete(&request, attachment.as_ref(), deadline)
-            });
-        let outcome = result.unwrap_or_else(|category| ChatOutcome::Error { category });
-        Ok(Reply {
-            protocol_version: PROTOCOL_VERSION,
-            event: UiEvent::ChatResult {
-                request_id: request.request_id,
-                outcome,
-            },
-            csrf: None,
-            cookie: None,
-        })
-    }
-
-    fn propose_edit(&self, command: Command, context: &Context) -> Result<Reply, Rejection> {
-        let Command::ProposeEdit { mut request } = command else {
-            return Err(Rejection::Invalid);
-        };
-        if request.request_id != context.request_id
-            || !valid_chat_messages(&request.messages)
-            || request.chat_id.is_some()
-            || request.expected_revision.is_some()
-        {
-            return Err(Rejection::Invalid);
-        }
-        let result = (|| {
-            let relay = self.chat_relay().ok_or(FailureKind::Unavailable)?;
-            let file = request
-                .file_context
-                .clone()
-                .filter(|file| file.byte_start < file.byte_end)
-                .ok_or(FailureKind::InvalidResponse)?;
-            let deadline = context
-                .deadline
-                .checked_sub(std::time::Duration::from_millis(200))
-                .ok_or(FailureKind::Timeout)?;
-            request
-                .messages
-                .last_mut()
-                .expect("validated chat messages")
-                .content
-                .push_str(&format!("\n\n{}", crate::edit::INSTRUCTION));
-            let (source, _) = self
-                .attach_chat_source(&mut request, deadline)?
-                .ok_or(FailureKind::InvalidResponse)?;
-            let ChatOutcome::Answer { content: answer } =
-                relay.complete(&request, None, deadline)?
-            else {
-                return Err(FailureKind::InvalidResponse);
-            };
-            let plan = crate::edit::preview(
-                &source.source,
-                file.byte_start as usize..file.byte_end as usize,
-                &file.sha256,
-                &answer,
-            )?;
-            Ok(self.stage_edit(file, source, plan, &request.request_id, deadline))
-        })();
-        let outcome = match result {
-            Ok(preview) => EditOutcome::Preview { preview },
-            Err(category) => EditOutcome::Error { category },
-        };
-        Ok(Reply {
-            protocol_version: PROTOCOL_VERSION,
-            event: UiEvent::EditResult {
-                request_id: request.request_id,
-                outcome,
-            },
-            csrf: None,
-            cookie: None,
         })
     }
 
@@ -950,8 +760,6 @@ impl Host {
             ("ui.session.resume", Kind::Resume),
             ("ide.inspect", Kind::Inspect),
             ("ide.source", Kind::Source),
-            ("ide.chat", Kind::Chat),
-            ("ide.propose_edit", Kind::ProposeEdit),
             ("ide.edit_write", Kind::EditWrite),
         ] {
             let s = Rc::clone(&state);
@@ -963,8 +771,6 @@ impl Host {
                         "ui.session.open" => s.pair(p, c),
                         "ui.session.resume" => s.resume(p, c),
                         "ide.source" => s.source(p, c),
-                        "ide.chat" => s.chat(p, c),
-                        "ide.propose_edit" => s.propose_edit(p, c),
                         "ide.edit_write" => s.edit_write(p, c),
                         _ => s.inspect(p, c),
                     },
@@ -1119,36 +925,6 @@ impl Host {
             return crate::usage::failed(header, UsageFailure::Unavailable);
         };
         shared(relay).dispatch(header, body, context.deadline)
-    }
-
-    pub(crate) fn postgres_dispatch(
-        &self,
-        header: &Header,
-        body: &[u8],
-        context: &Context,
-    ) -> Result<(u16, hyper::body::Bytes), Rejection> {
-        admit(header, context).map_err(|_| Rejection::Denied)?;
-        let relay = self
-            .state
-            .chat_relay()
-            .filter(|relay| relay.workspace_persistence)
-            .ok_or(Rejection::Unavailable)?;
-        if ChatRunRequest::is_destination(header.route().destination()) {
-            if !relay.async_dispatch {
-                return Err(Rejection::Unavailable);
-            }
-            return crate::run_dispatch::dispatch(relay, header, body, context.deadline);
-        }
-        if MailRequest::is_destination(header.route().destination()) {
-            if header.route().destination() == "ide.mail.archive" && !relay.mail_archive_enabled {
-                return Err(Rejection::Unavailable);
-            }
-            if !relay.mail_enabled {
-                return Err(Rejection::Unavailable);
-            }
-            return crate::mail_dispatch::dispatch(relay, header, body, context.deadline);
-        }
-        history::dispatch(relay, header, body, context.deadline)
     }
 
     pub(crate) fn assets(&self) -> &Assets {

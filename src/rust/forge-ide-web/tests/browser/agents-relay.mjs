@@ -63,6 +63,15 @@ function progress(t) {
   t.public_summary = publicMilestone;
   t.progress_emitted = true;
 }
+function taskScope(t) {
+  const phase=t.workflow?.phase;
+  if(['completed','cancelled'].includes(phase))return 'history';
+  if(phase==='escalated')return 'attention';
+  if(phase)return 'active';
+  if(t.workflow_required)return 'attention';
+  if(['queued','running','cancel_requested'].includes(t.status))return 'active';
+  return ['completed','cancelled'].includes(t.status)?'history':'attention';
+}
 function summary(t) {
   return {
     ...Object.fromEntries(['task_id', 'correlation_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]])),
@@ -74,6 +83,8 @@ function detail(t) {
   const processing = ['running', 'cancel_requested'].includes(t.status);
   const fields = summary(t);
   delete fields.workflow_phase;
+  delete fields.workflow_enabled;
+  delete fields.updated_at;
   if(t.external_result)return {...fields,prompt:t.prompt,acceptance_criteria:t.acceptance_criteria,
     attempt:null,result:null,reconciliation_receipt_id:null,workflow_required:t.workflow_required===true,workflow:t.workflow??null,
     external_result:t.external_result};
@@ -143,11 +154,16 @@ export async function startAgentsRelay() {
         refreshes++; send(202, 'usage_refresh_queued', { project_alias: project, refresh_id: randomUUID(), profiles: [input.agent_profile], coalesced: false }); return;
       }
       if (input.kind === 'work_list') {
-        const ordered = [...tasks.values()].filter(t=>!t.internal).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.task_id.localeCompare(b.task_id));
-        const after = input.cursor ? ordered.findIndex(t => t.task_id === input.cursor) + 1 : 0;
-        const available = ordered.slice(after).filter(t => !input.status_filter || t.status === input.status_filter);
-        const page = available.slice(0, input.limit ?? 20);
-        send(200, 'work_listed', { project_alias: project, tasks: page.map(summary), next_cursor: available.length > page.length ? page.at(-1).task_id : null }); return;
+        const roots=[...tasks.values()].filter(t=>!t.internal);
+        const scoped=['active','attention','history','all'].includes(input.status_filter);
+        const counts={active:0,attention:0,history:0,all:roots.length};
+        for(const item of roots)counts[taskScope(item)]++;
+        const ordered=roots.filter(t=>scoped?(input.status_filter==='all'||taskScope(t)===input.status_filter):(!input.status_filter||t.status===input.status_filter))
+          .sort((a,b)=>scoped?(b.updated_at??b.created_at).localeCompare(a.updated_at??a.created_at)||b.task_id.localeCompare(a.task_id):a.created_at.localeCompare(b.created_at)||a.task_id.localeCompare(b.task_id));
+        const anchor=input.cursor?ordered.findIndex(t=>t.task_id===input.cursor):-1;
+        if(input.cursor&&anchor<0){failed(400,'invalid_request');return;}
+        const available=ordered.slice(anchor+1),page=available.slice(0,input.limit??20);
+        send(200,'work_listed',{project_alias:project,tasks:page.map(t=>({...summary(t),...(scoped?{updated_at:t.updated_at??t.created_at,...(t.workflow?{workflow_enabled:!['completed','cancelled','escalated'].includes(t.workflow.phase)}:{})}:{})})),next_cursor:available.length>page.length?page.at(-1).task_id:null,...(scoped?{scope_counts:counts}:{})});return;
       }
       if (input.kind === 'work_submit') {
         const external=input.agent_profile==='muse-db-primary';

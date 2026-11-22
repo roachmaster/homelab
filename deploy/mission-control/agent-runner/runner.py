@@ -1,6 +1,7 @@
 """Authenticated loopback ingress and durable Forge run completion."""
 
 from dataclasses import dataclass, replace
+from contextlib import ExitStack, contextmanager
 from enum import Enum, auto
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +24,8 @@ import chat_history_store as history_store
 import chat_run_api as run_api
 from file_context import parse_attachment
 import mail_api
+import jenkins_api
+import jenkins_config
 from model_adapter import MAX_BODY, ModelAdapter
 import queue_store as store
 from queue_store import Message, Rejected, Submit
@@ -494,6 +497,8 @@ class Handler(BaseHTTPRequestHandler):
         raise Rejected(404, "route_not_found")
 
     def versioned_api(self):
+        if jenkins_api.handles(self.headers):
+            return jenkins_api
         if work_api.handles(self.headers):
             return work_api
         u_api = usage_api if usage_api is not None else _UnavailableUsageApi
@@ -512,13 +517,19 @@ class Handler(BaseHTTPRequestHandler):
                 raise Rejected(400, "invalid_request")
             route = api.destination(self.headers)
             limit = (
-                work_api.MAX_REQUEST_BYTES if api is work_api
+                jenkins_api.MAX_REQUEST_BYTES if api is jenkins_api
+                else work_api.MAX_REQUEST_BYTES if api is work_api
                 else getattr(u_api, "MAX_REQUEST_BYTES", history_api.MAX_REQUEST_BYTES) if api is u_api
                 else mail_api.MAX_REQUEST_BYTES if api is mail_api
                 else history_api.MAX_REQUEST_BYTES
             )
             body = self.read_json_body(limit, "invalid_request")
             command = api.decode(route, correlation, body)
+            if api is jenkins_api:
+                jenkins_service = getattr(self.server, "jenkins_service", None)
+                if jenkins_service is None:
+                    raise Rejected(503, "unavailable")
+                return api.dispatch(route, correlation, command, jenkins_service)
             if api is work_api:
                 work_service = getattr(self.server, "work_service", None)
                 if work_service is None:
@@ -596,7 +607,7 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     def __init__(self, token, ready, inference, *, distributed=False, pinned_model=DEFAULT_MODEL,
                  configured_models=None, tool_repositories=None, work_service=None,
-                 usage_service=None, port=PORT):
+                 usage_service=None, jenkins_service=None, port=PORT):
         self.authorization = f"Bearer {token}".encode()
         self.ready = ready
         self.inference = inference
@@ -606,6 +617,7 @@ class Server(ThreadingHTTPServer):
         self.tool_repositories = {} if tool_repositories is None else tool_repositories
         self.work_service = work_service
         self.usage_service = usage_service
+        self.jenkins_service = jenkins_service
         self.slots = threading.BoundedSemaphore(24)
         super().__init__(("127.0.0.1", port), Handler)
 
@@ -665,6 +677,29 @@ def configured_listener(environ):
     return port, api_only == "1"
 
 
+def build_jenkins_service(environ=None, connect_factory=store.connect, *,
+                          handler_factories=None):
+    """Freeze optional config before selecting and creating the ready service."""
+    env = os.environ if environ is None else environ
+    selected = jenkins_config.load_jenkins_config(env.get(jenkins_config.CONFIG_ENV_VAR))
+    return jenkins_api.JenkinsServiceFactory(selected, connect_factory,
+        handler_factories=handler_factories).create()
+
+
+@contextmanager
+def background_services(work_service, jenkins_service):
+    """Own selected background lifetimes independently of Chat/inference mode."""
+    with ExitStack() as cleanup:
+        for worker in (getattr(work_service, "workflow_worker", None),
+                       getattr(jenkins_service, "consumer_worker", None)):
+            if worker is not None:
+                # Register first: a partially acquired worker must also stop
+                # if its start fails or a later service cannot become ready.
+                cleanup.callback(worker.close)
+                worker.start()
+        yield
+
+
 def main():
     port, api_only = configured_listener(os.environ)
     logging.basicConfig(level=logging.INFO)
@@ -675,6 +710,7 @@ def main():
     models = configured_models(model, os.environ.get("FORGE_RUNNER_MODELS"))
     repositories = agent_tools.repository_catalog(os.environ.get("FORGE_RUNNER_TOOL_REPOSITORIES"))
     work_service, usage_service = build_work_and_usage_services(os.environ, store.connect)
+    jenkins_service = build_jenkins_service(os.environ, store.connect)
     credentials = Path(os.environ["CREDENTIALS_DIRECTORY"])
     inbound = (credentials / "runner.token").read_text().strip()
     if not re.fullmatch(r"[a-fA-F0-9]{32,128}", inbound):
@@ -688,7 +724,8 @@ def main():
     ready = threading.Event()
     with Server(inbound, ready, inference, distributed=mode == "dispatch", pinned_model=model,
                 configured_models=models, tool_repositories=repositories,
-                work_service=work_service, usage_service=usage_service, port=port) as server:
+                work_service=work_service, usage_service=usage_service,
+                jenkins_service=jenkins_service, port=port) as server:
         if api_only:
             ready.set()
         elif mode == "dispatch":
@@ -701,12 +738,8 @@ def main():
         if not api_only:
             threading.Thread(target=expire_chat_history, daemon=True).start()
         LOG.info("Listening on loopback port %d (api_only=%s)", port, api_only)
-        workflow=getattr(work_service,"workflow_worker",None)
-        try:
-            if workflow is not None:workflow.start()
+        with background_services(work_service, jenkins_service):
             server.serve_forever()
-        finally:
-            if workflow is not None:workflow.close()
 
 
 if __name__ == "__main__":

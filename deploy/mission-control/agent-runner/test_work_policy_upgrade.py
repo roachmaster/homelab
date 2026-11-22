@@ -7,6 +7,7 @@ import re
 import shutil
 from tempfile import TemporaryDirectory
 import unittest
+import psycopg2
 from uuid import UUID, uuid4
 
 from test_work_execution_and_usage import BASE_REV, make_stop_proof, make_submit, make_v2_config
@@ -96,6 +97,7 @@ def historical_registry(root, maximum):
     registry.write_text(script)
     grant=root/"management/grant-runner.sql"
     value=grant.read_text()
+    if maximum<27:value=value.split("-- M27:")[0]
     if maximum<26:value=value.split("-- M26:")[0]
     if maximum<25:value=value.split("-- M25:")[0]
     if maximum<24:value=value.split("-- M24:")[0]
@@ -324,7 +326,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 self.assertIsNotNone(snapshots[0][2], "An immutable explicit acceptance receipt exists before upgrade")
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 27)
                 self.assertEqual(self.rows(cluster, snapshot_query, (UUID(lease.task_id),)), snapshots)
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None, "V2 result", proof), publication)
                 self.assertEqual(self.service(cluster).accept(command), acceptance)
@@ -463,7 +465,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 27)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -523,7 +525,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 27)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -583,7 +585,7 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
                 )
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
-                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 26)
+                self.assertEqual(self.rows(cluster, "SELECT max(version) FROM forge_agent.schema_migrations")[0][0], 27)
                 self.assertEqual(
                     self.rows(cluster, "SELECT to_jsonb(t)-'correlation_id', to_jsonb(a) FROM forge_agent.coding_tasks t "
                               "JOIN forge_agent.coding_attempts a ON a.task_id=t.id WHERE t.id=%s",
@@ -928,6 +930,154 @@ class WorkPolicyUpgradeTest(unittest.TestCase):
             finally:
                 self.cluster.admin_exec(function)
         self.cluster.apply_and_verify()
+
+
+@unittest.skipUnless(PG16_AVAILABLE, "Requires non-root disposable PostgreSQL16")
+class JenkinsSchema27ContractTest(unittest.TestCase):
+    """Storage contracts only: no external Jenkins, credentials or live database."""
+    @classmethod
+    def setUpClass(cls):
+        cls.cluster = DisposablePostgresCluster().start()
+        cls.addClassCleanup(cls.cluster.stop)
+
+    def setUp(self):
+        self.cluster.reset_jenkins_tables()
+
+    def execute(self, sql, parameters=(), *, user="postgres", cluster=None):
+        with closing((cluster or self.cluster).connect(user)) as c:
+            with c, c.cursor() as q:
+                q.execute(sql, parameters) if parameters else q.execute(sql)
+                return q.fetchall() if q.description is not None else None
+
+    def event(self, sequence=1, *, build=1, url="https://jenkins.invalid/job/owned/1/"):
+        return self.execute("""INSERT INTO forge_agent.jenkins_events(owner_id,project_alias,sequence,jenkins_instance,
+            job_name,delivery_id,event_kind,build_number,summary,occurred_at,payload_sha256,build_url)
+            VALUES('fixture','homelab',%s,'local','owned',%s,'build_started',%s,%s,'2026-11-21T05:00:00Z',%s,%s)
+            RETURNING event_id""", (sequence, "fixture-"+str(sequence), build, "Owned fixture event "+str(sequence), "a"*64, url), user="forge_agent")[0][0]
+
+    def observation(self, event_id):
+        self.execute("""INSERT INTO forge_agent.jenkins_observations(owner_id,project_alias,jenkins_instance,job_name,
+            observation_key,build_number,queue_id,last_event_id,last_event_sequence,last_event_kind,commit_sha,branch,
+            build_result,stage_name,stage_status,duration_ms,build_url,summary,occurred_at)
+            SELECT owner_id,project_alias,jenkins_instance,job_name,'build:'||build_number::text,build_number,queue_id,
+            event_id,sequence,event_kind,commit_sha,branch,build_result,stage_name,stage_status,duration_ms,build_url,summary,occurred_at
+            FROM forge_agent.jenkins_events WHERE event_id=%s""", (event_id,), user="forge_agent")
+
+    def test_fresh_reapply_roles_and_untrusted_event_storage_have_no_coding_effect(self):
+        self.cluster.apply_and_verify()
+        self.event()
+        self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations"), [(27,)])
+        self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_hosted_checks"), [(0,)])
+        self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_workflow_actions"), [(0,)])
+        for role in ("forge_gpu_worker", "forge_coding_worker", "forge_coding_reconciler"):
+            for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
+                with self.subTest(role=role, table=table), self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+                    self.execute("SELECT * FROM forge_agent."+table, user=role)
+        for statement in ("UPDATE forge_agent.jenkins_events SET summary='forged'",
+                          "DELETE FROM forge_agent.jenkins_events", "DELETE FROM forge_agent.jenkins_event_deliveries",
+                          "DELETE FROM forge_agent.jenkins_observations"):
+            with self.subTest(statement=statement), self.assertRaises(psycopg2.errors.InsufficientPrivilege):
+                self.execute(statement, user="forge_agent")
+
+    def test_loopback_http_urls_are_supported_without_remote_http_or_userinfo(self):
+        allowed = ("http://localhost:8080/job/owned/1/", "http://127.0.0.1:8080/job/owned/1/",
+                   "http://[::1]:8080/job/owned/1/", "http://LOCALHOST:8080/job/owned/1/")
+        for sequence, url in enumerate(allowed, 1): self.event(sequence, url=url)
+        for url in ("http://remote.invalid/job/owned/1/", "http://127.0.0.1.evil.invalid/job/owned/1/",
+                    "http://user@localhost:8080/job/owned/1/", "https://user:password@jenkins.invalid/job/owned/1/"):
+            with self.subTest(url=url), self.assertRaises(psycopg2.errors.CheckViolation): self.event(5, url=url)
+
+    def test_source_identity_fks_and_frozen_delivery_budget_reject_cross_event_rows(self):
+        first, second = self.event(1), self.event(2, build=2)
+        sql = """INSERT INTO forge_agent.jenkins_event_deliveries(event_id,owner_id,project_alias,event_sequence,consumer_name,max_attempts)
+            VALUES(%s,'fixture','homelab',%s,'observation',3) RETURNING delivery_row_id"""
+        with self.assertRaises(psycopg2.errors.ForeignKeyViolation): self.execute(sql, (first, 2), user="forge_agent")
+        delivery = self.execute(sql, (first, 1), user="forge_agent")[0][0]
+        with self.assertRaises(psycopg2.Error) as caught:
+            self.execute("UPDATE forge_agent.jenkins_event_deliveries SET max_attempts=4 WHERE delivery_row_id=%s", (delivery,))
+        self.assertEqual(caught.exception.pgcode, "P0009")
+        self.execute("""UPDATE forge_agent.jenkins_event_deliveries SET status='consumed',attempt_count=1,
+            receipt_digest=%s,consumed_at=clock_timestamp() WHERE delivery_row_id=%s""", ("b"*64, delivery))
+        for statement in ("DELETE FROM forge_agent.jenkins_event_deliveries WHERE delivery_row_id=%s",
+                          "UPDATE forge_agent.jenkins_event_deliveries SET last_error='changed' WHERE delivery_row_id=%s"):
+            with self.subTest(statement=statement), self.assertRaises(psycopg2.Error) as caught:
+                self.execute(statement, (delivery,))
+            self.assertEqual(caught.exception.pgcode, "P0009")
+        self.assertNotEqual(first, second)
+
+    def test_projection_is_monotonic_and_matches_immutable_source_without_changing_coding(self):
+        first, second = self.event(1), self.event(2)
+        self.observation(first)
+        update = """UPDATE forge_agent.jenkins_observations o SET last_event_id=e.event_id,last_event_sequence=e.sequence,
+            last_event_kind=e.event_kind,summary=e.summary,occurred_at=e.occurred_at
+            FROM forge_agent.jenkins_events e WHERE e.event_id=%s"""
+        self.execute(update, (second,), user="forge_agent")
+        with self.assertRaises(psycopg2.Error) as caught: self.execute(update, (first,), user="forge_agent")
+        self.assertEqual(caught.exception.pgcode, "P0009")
+        self.assertEqual(self.execute("SELECT last_event_id,last_event_sequence FROM forge_agent.jenkins_observations"), [(second, 2)])
+        with self.assertRaises(psycopg2.Error) as caught:
+            self.execute("""UPDATE forge_agent.jenkins_observations SET last_event_sequence=3,last_event_id=%s,job_name='other'""", (second,))
+        self.assertEqual(caught.exception.pgcode, "P0009")
+        self.assertEqual(self.execute("SELECT count(*) FROM forge_agent.coding_events"), [(0,)])
+
+    def test_strict_verifier_rejects_constraint_index_trigger_function_acl_and_column_drift(self):
+        changes = (
+            "UPDATE forge_agent.schema_migrations SET name='unexpected-jenkins' WHERE version=27",
+            "ALTER TABLE forge_agent.jenkins_events DROP CONSTRAINT jenkins_events_summary_check",
+            "ALTER TABLE forge_agent.jenkins_events DISABLE TRIGGER jenkins_events_immutable",
+            "DROP INDEX forge_agent.jenkins_events_by_commit",
+            "GRANT SELECT ON forge_agent.jenkins_events TO PUBLIC",
+            "GRANT UPDATE(summary) ON forge_agent.jenkins_events TO forge_agent",
+            "ALTER FUNCTION forge_agent.jenkins_events_immutable() OWNER TO forge_agent",
+            "CREATE OR REPLACE FUNCTION forge_agent.jenkins_events_immutable() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END;'",
+        )
+        for statement in changes:
+            with self.subTest(statement=statement), closing(self.cluster.connect("postgres")) as c:
+                with c.cursor() as q:
+                    q.execute(statement)
+                    with self.assertRaises(psycopg2.Error):
+                        q.execute((SQL_DIR/"management/verify-jenkins-events.sql").read_text())
+                c.rollback()
+        self.cluster.apply_and_verify()
+
+    def test_26_upgrade_preserves_owner_functions_rows_roles_credentials_defaults_hba_and_existing_muse_reads(self):
+        with TemporaryDirectory(prefix="forge-jenkins27-upgrade-", dir="/tmp") as temporary:
+            registry = Path(temporary)/"sql"
+            historical_registry(registry, 26)
+            cluster = PreUpgradeCluster(registry).start()
+            try:
+                # The broad historical helper deliberately strips several
+                # legacy read grants for old schemas. Reapply the version-gated
+                # runtime registry before snapshotting an actual complete M26
+                # surface; its M27 block is still inactive here.
+                cluster._run("psql", "-h", cluster.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
+                    "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", SQL_DIR/"management/grant-runner.sql")
+                self.execute("CREATE ROLE muse_events LOGIN NOINHERIT", cluster=cluster)
+                result = cluster._run("psql", "-h", cluster.root, "-U", "postgres", "-X", "-v", "ON_ERROR_STOP=1",
+                    "-d", "forge_agent", "-c", "SET ROLE forge_agent_owner", "-f", SQL_DIR/"management/grant-muse-read-access.sql")
+                service = WorkServiceFactory(make_v2_config(), lambda:cluster.connect("forge_agent")).create()
+                admitted = service.submit(make_submit(idempotency_key="before-jenkins27"))
+                previous_tables = [row[0] for row in self.execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND relname<>'schema_migrations' ORDER BY relname", cluster=cluster)]
+                def snapshot():
+                    return (
+                        self.execute("SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=26 ORDER BY version", cluster=cluster),
+                        {table:self.execute("SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),'[]'::jsonb) FROM forge_agent."+table+" t", cluster=cluster) for table in previous_tables},
+                        self.execute("SELECT nspname,nspowner,nspacl FROM pg_namespace WHERE nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') ORDER BY nspname", cluster=cluster),
+                        self.execute("SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r", cluster=cluster),
+                        self.execute("SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid", cluster=cluster),
+                        self.execute("SELECT relname,relowner,relacl FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname NOT LIKE 'jenkins_%' ORDER BY relname", cluster=cluster),
+                        self.execute("SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_functiondef(p.oid),p.proowner,p.proacl FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('forge_agent','forge_coding_worker_api','forge_coding_reconciler_api') AND p.proname NOT LIKE 'jenkins_%' ORDER BY n.nspname,p.proname,pg_get_function_identity_arguments(p.oid)", cluster=cluster),
+                        hashlib.sha256((cluster.data/"pg_hba.conf").read_bytes()).hexdigest(),
+                    )
+                before = snapshot()
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                DisposablePostgresCluster.apply_and_verify(cluster)
+                self.assertEqual(snapshot(), before)
+                for table in ("jenkins_events", "jenkins_event_deliveries", "jenkins_observations"):
+                    self.assertEqual(self.execute("SELECT has_table_privilege('muse_events',%s,'SELECT'),has_table_privilege('muse_events',%s,'INSERT,UPDATE,DELETE')",
+                        ("forge_agent."+table,"forge_agent."+table),cluster=cluster), [(True, False)])
+                self.assertEqual(self.execute("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(27,)])
+            finally: cluster.stop()
 
 
 if __name__ == "__main__":
