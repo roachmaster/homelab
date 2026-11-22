@@ -4,7 +4,8 @@
 use crate::{
     entity::{Descriptor, EntityId, Kind, Patrol, Position},
     physics::{Character, Collider, TileGrid, Vector, TILE},
-    AnimationTiming, EXIT, GUARD, HEIGHT, KEY, MAP, PLAYER, WIDTH,
+    room::{EXIT, GUARD, HEIGHT, KEY, MAP, PLAYER, WIDTH},
+    AnimationTiming,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::physics::{MotionInput, MotionPhase};
+use crate::room::INPUT_CHANNEL;
 
 const TICK: u32 = 16_667;
 const TO_KEY: &[u8] = b"RRDDLLDDRRDDLL";

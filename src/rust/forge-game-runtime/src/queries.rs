@@ -2,7 +2,8 @@
 
 use crate::entity::{Entity, Kind, Position};
 use crate::physics::{cast_room_ray, Collider, RoomRayHit, Vector, TILE};
-use crate::{Room, RoomCollision, Status};
+use crate::room::RoomCollision;
+use crate::{Room, Status};
 
 const HIT_LIMIT: usize = 8;
 
