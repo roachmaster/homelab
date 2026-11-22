@@ -1,0 +1,572 @@
+{
+  "clear_invocation_sha256": {
+    "clear-cancel": "adb1334898780b1b7f837d8df32c344a9e6123a7da5eaafdb7acef14153a9c79",
+    "clear-rebuild": "173870678c2e79a272fc75204c2c17263f2a989345da681c06d3948c64d8d43f"
+  },
+  "context": {
+    "commit": "d4ea0741d2bf95fee8cb147323b117bcc4d44a00",
+    "evidence_ref": "refs/heads/ops/forge-cache-qualification-evidence-20261121",
+    "ref": "refs/heads/ops/forge-cache-qualification-20261121",
+    "report_json": "docs/reports/forge-cargo-cache-qualification-20261121.json",
+    "report_markdown": "docs/reports/forge-cargo-cache-qualification-20261121.md"
+  },
+  "kind": "forge-cache-operator-qualification",
+  "meaning": {
+    "budgets_modified": false,
+    "native_task_ci": false,
+    "operator_qualification_only": true,
+    "resume_performed": false,
+    "source_approval": false,
+    "source_workspace_modified": false
+  },
+  "measurement_export_revision": 2,
+  "observed_at": "2026-11-22T00:01:11.727828Z",
+  "qualification": {
+    "branch_scope": "branch/ops-forge-cache-qualification-20261121-f3353690a4314999",
+    "candidate_commit": "d4ea0741d2bf95fee8cb147323b117bcc4d44a00",
+    "candidate_tree": "8728c992c129c7e6ff899c814a2651867e40b71d",
+    "canonical_helper_sha256": "b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d",
+    "expected_main": "a08b71862178e4026ca407e2258bb60ca7eac39b",
+    "gate_manifest_sha256": "98a1ab7b513812888599ec2bc387b3d5f4abd7ab8b331c215cf133da047bf686",
+    "job": "forge-cache-qualification",
+    "phases": [
+      {
+        "action_id": "ff48079b-77d8-5dc1-8e26-c74475645197",
+        "all_fixed_gates_passed": true,
+        "cache_metrics": {
+          "publish_elapsed_ms": 175736,
+          "published_bytes": 13913213571,
+          "published_files": 37007,
+          "restore_elapsed_ms": 0,
+          "restored_bytes": 0,
+          "restored_files": 0
+        },
+        "cache_publish": "published",
+        "cache_restore": "miss",
+        "candidate_commit": "d4ea0741d2bf95fee8cb147323b117bcc4d44a00",
+        "candidate_tree": "8728c992c129c7e6ff899c814a2651867e40b71d",
+        "canonical_helper_sha256": "b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d",
+        "cargo_compile_ms": 882550,
+        "cargo_compile_ms_estimated": false,
+        "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+        "cargo_telemetry_status": "measured_completed_cargo_phases",
+        "cleanup_confirmed": true,
+        "compatibility_key": "1ee62d47410e917a157b46abe890a2246fd7ee4e57c9565413099c06cf11a200",
+        "correlation_id": "1288520e-6af1-542f-b767-8cb55c530d49",
+        "expected_main": "a08b71862178e4026ca407e2258bb60ca7eac39b",
+        "fresh_compiling_units": 390,
+        "intentional_cancellation": false,
+        "log_sha256": "94934b0ccacaf841a7227eb27b25ae3386ebb6d6c7f11f3425b86fb9edaa7f18",
+        "phase": "cold",
+        "raw_log_cargo_telemetry_verified": true,
+        "receipt_sha256": "af69160850ed7bf1280f6af5ef6b377878788be68bf8652eff6ee7f837968165",
+        "rendered_helper_sha256": "ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a",
+        "request_sha256": "1cdde02eb33c80a4af6c1fd90fa9bf3ed475e1027493ed1fb09bf338a51e9062",
+        "stages": [
+          {
+            "elapsed_ms": 982,
+            "estimated": false,
+            "name": "prepare_source",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 0,
+            "estimated": false,
+            "name": "cache_restore",
+            "status": "miss",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "cargo_compile_ms": 818580,
+            "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+            "cargo_compiling_units": 369,
+            "cargo_finished_count": 32,
+            "elapsed_ms": 1224790,
+            "estimated": false,
+            "label": "make ci",
+            "name": "check_0",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "cargo_compile_ms": 63970,
+            "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+            "cargo_compiling_units": 21,
+            "cargo_finished_count": 4,
+            "elapsed_ms": 213498,
+            "estimated": false,
+            "label": "make ui-qa",
+            "name": "check_1",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt",
+            "ui_qa_stages": {
+              "agent-and-fixture": {
+                "duration_ms": 63850,
+                "estimated": false,
+                "status": "passed"
+              },
+              "browser-journeys": {
+                "duration_ms": 144619,
+                "estimated": false,
+                "status": "passed"
+              },
+              "generated-assets": {
+                "duration_ms": 4247,
+                "estimated": false,
+                "status": "passed"
+              },
+              "prerequisites": {
+                "duration_ms": 0,
+                "estimated": false,
+                "status": "passed"
+              }
+            }
+          },
+          {
+            "elapsed_ms": 566857,
+            "estimated": false,
+            "label": "unittest",
+            "name": "check_2",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 119,
+            "estimated": false,
+            "name": "verify_source_clean",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 175736,
+            "estimated": false,
+            "name": "cache_publish",
+            "status": "published",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 5988,
+            "estimated": false,
+            "name": "cleanup",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          }
+        ],
+        "status": "passed",
+        "total_elapsed_ms": 2188383,
+        "total_elapsed_ms_estimated": false,
+        "unavailable_measurements": [
+          {
+            "metric": "compiler_cpu_ms",
+            "reason": "No compiler CPU profiler was recorded; Cargo reported elapsed phases are not CPU time."
+          }
+        ],
+        "workflow_id": "f2a60bf7-e824-48bd-b9cb-d18656ac1ca2"
+      },
+      {
+        "action_id": "291d75a1-e961-50b0-b183-6b474fe88eef",
+        "all_fixed_gates_passed": true,
+        "cache_metrics": {
+          "publish_elapsed_ms": 155926,
+          "published_bytes": 14479439114,
+          "published_files": 39026,
+          "restore_elapsed_ms": 79083,
+          "restored_bytes": 13913213571,
+          "restored_files": 37007
+        },
+        "cache_publish": "published",
+        "cache_restore": "hit_branch",
+        "candidate_commit": "d4ea0741d2bf95fee8cb147323b117bcc4d44a00",
+        "candidate_tree": "8728c992c129c7e6ff899c814a2651867e40b71d",
+        "canonical_helper_sha256": "b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d",
+        "cargo_compile_ms": 98580,
+        "cargo_compile_ms_estimated": false,
+        "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+        "cargo_telemetry_status": "measured_completed_cargo_phases",
+        "cleanup_confirmed": true,
+        "compatibility_key": "1ee62d47410e917a157b46abe890a2246fd7ee4e57c9565413099c06cf11a200",
+        "correlation_id": "09f537a8-0469-5620-bfaf-98483d949635",
+        "expected_main": "a08b71862178e4026ca407e2258bb60ca7eac39b",
+        "fresh_compiling_units": 8,
+        "intentional_cancellation": false,
+        "log_sha256": "6c607367c63b8c7a30bcb9089b63f7fddd5205c045ba72671b2c2aac5f20e79c",
+        "phase": "warm",
+        "raw_log_cargo_telemetry_verified": true,
+        "receipt_sha256": "21fe7be56a88c561962a2038a7b18100286a08969391cf45519460a322cb3f37",
+        "rendered_helper_sha256": "ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a",
+        "request_sha256": "f915cfad5c33928d4b8c3f2944aec7c5a47e23e2e9bc111859a3a3069d9c05b1",
+        "stages": [
+          {
+            "elapsed_ms": 1087,
+            "estimated": false,
+            "name": "prepare_source",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 79083,
+            "estimated": false,
+            "name": "cache_restore",
+            "status": "hit_branch",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "cargo_compile_ms": 95330,
+            "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+            "cargo_compiling_units": 7,
+            "cargo_finished_count": 32,
+            "elapsed_ms": 329565,
+            "estimated": false,
+            "label": "make ci",
+            "name": "check_0",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "cargo_compile_ms": 3250,
+            "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+            "cargo_compiling_units": 1,
+            "cargo_finished_count": 4,
+            "elapsed_ms": 151097,
+            "estimated": false,
+            "label": "make ui-qa",
+            "name": "check_1",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt",
+            "ui_qa_stages": {
+              "agent-and-fixture": {
+                "duration_ms": 3110,
+                "estimated": false,
+                "status": "passed"
+              },
+              "browser-journeys": {
+                "duration_ms": 142690,
+                "estimated": false,
+                "status": "passed"
+              },
+              "generated-assets": {
+                "duration_ms": 4441,
+                "estimated": false,
+                "status": "passed"
+              },
+              "prerequisites": {
+                "duration_ms": 1,
+                "estimated": false,
+                "status": "passed"
+              }
+            }
+          },
+          {
+            "elapsed_ms": 562397,
+            "estimated": false,
+            "label": "unittest",
+            "name": "check_2",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 109,
+            "estimated": false,
+            "name": "verify_source_clean",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 155926,
+            "estimated": false,
+            "name": "cache_publish",
+            "status": "published",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 5560,
+            "estimated": false,
+            "name": "cleanup",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          }
+        ],
+        "status": "passed",
+        "total_elapsed_ms": 1285286,
+        "total_elapsed_ms_estimated": false,
+        "unavailable_measurements": [
+          {
+            "metric": "compiler_cpu_ms",
+            "reason": "No compiler CPU profiler was recorded; Cargo reported elapsed phases are not CPU time."
+          }
+        ],
+        "workflow_id": "f2a60bf7-e824-48bd-b9cb-d18656ac1ca2"
+      },
+      {
+        "action_id": "1a451a27-30a0-5230-b511-83ff88addb44",
+        "all_fixed_gates_passed": true,
+        "cache_metrics": {
+          "publish_elapsed_ms": 134905,
+          "published_bytes": 13913211354,
+          "published_files": 37007,
+          "restore_elapsed_ms": 0,
+          "restored_bytes": 0,
+          "restored_files": 0
+        },
+        "cache_publish": "published",
+        "cache_restore": "miss",
+        "candidate_commit": "d4ea0741d2bf95fee8cb147323b117bcc4d44a00",
+        "candidate_tree": "8728c992c129c7e6ff899c814a2651867e40b71d",
+        "canonical_helper_sha256": "b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d",
+        "cargo_compile_ms": 829400,
+        "cargo_compile_ms_estimated": false,
+        "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+        "cargo_telemetry_status": "measured_completed_cargo_phases",
+        "cleanup_confirmed": true,
+        "compatibility_key": "1ee62d47410e917a157b46abe890a2246fd7ee4e57c9565413099c06cf11a200",
+        "correlation_id": "24a19ad7-8095-54f4-86bb-06173c880467",
+        "expected_main": "a08b71862178e4026ca407e2258bb60ca7eac39b",
+        "fresh_compiling_units": 390,
+        "intentional_cancellation": false,
+        "log_sha256": "00ef2b7e83eddbc987a6a7165b8e8259cecb3ec69cbe176e0294ce0e7460cd8a",
+        "phase": "clear-rebuild",
+        "raw_log_cargo_telemetry_verified": true,
+        "receipt_sha256": "d56f192c1c21428a4405ced5812a11320df0fbc9a7f61c4a84a3d7d52a2d4866",
+        "rendered_helper_sha256": "ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a",
+        "request_sha256": "9707819cb542c44f2af56afe8de72e3fc2dc26b2ea5cec1bb9a5d8949eb9d47c",
+        "stages": [
+          {
+            "elapsed_ms": 1073,
+            "estimated": false,
+            "name": "prepare_source",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 0,
+            "estimated": false,
+            "name": "cache_restore",
+            "status": "miss",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "cargo_compile_ms": 768820,
+            "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+            "cargo_compiling_units": 369,
+            "cargo_finished_count": 32,
+            "elapsed_ms": 1179907,
+            "estimated": false,
+            "label": "make ci",
+            "name": "check_0",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "cargo_compile_ms": 60580,
+            "cargo_compile_ms_kind": "cargo_reported_cumulative_phase_ms",
+            "cargo_compiling_units": 21,
+            "cargo_finished_count": 4,
+            "elapsed_ms": 205662,
+            "estimated": false,
+            "label": "make ui-qa",
+            "name": "check_1",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt",
+            "ui_qa_stages": {
+              "agent-and-fixture": {
+                "duration_ms": 60466,
+                "estimated": false,
+                "status": "passed"
+              },
+              "browser-journeys": {
+                "duration_ms": 140119,
+                "estimated": false,
+                "status": "passed"
+              },
+              "generated-assets": {
+                "duration_ms": 4234,
+                "estimated": false,
+                "status": "passed"
+              },
+              "prerequisites": {
+                "duration_ms": 0,
+                "estimated": false,
+                "status": "passed"
+              }
+            }
+          },
+          {
+            "elapsed_ms": 571206,
+            "estimated": false,
+            "label": "unittest",
+            "name": "check_2",
+            "returncode": 0,
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 115,
+            "estimated": false,
+            "name": "verify_source_clean",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 134905,
+            "estimated": false,
+            "name": "cache_publish",
+            "status": "published",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 5124,
+            "estimated": false,
+            "name": "cleanup",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          }
+        ],
+        "status": "passed",
+        "total_elapsed_ms": 2098552,
+        "total_elapsed_ms_estimated": false,
+        "unavailable_measurements": [
+          {
+            "metric": "compiler_cpu_ms",
+            "reason": "No compiler CPU profiler was recorded; Cargo reported elapsed phases are not CPU time."
+          }
+        ],
+        "workflow_id": "f2a60bf7-e824-48bd-b9cb-d18656ac1ca2"
+      },
+      {
+        "action_id": "e0f6ba4b-72fc-53f6-bfef-8a8162445618",
+        "all_fixed_gates_passed": false,
+        "cache_metrics": {
+          "publish_elapsed_ms": 0,
+          "published_bytes": 0,
+          "published_files": 0,
+          "restore_elapsed_ms": 0,
+          "restored_bytes": 0,
+          "restored_files": 0
+        },
+        "cache_publish": "skipped_cancelled",
+        "cache_restore": "miss",
+        "candidate_commit": "d4ea0741d2bf95fee8cb147323b117bcc4d44a00",
+        "candidate_tree": "8728c992c129c7e6ff899c814a2651867e40b71d",
+        "canonical_helper_sha256": "b870302a19504426efac6e46fda38a744138ec852951ae8d96a7d8b1b7b1607d",
+        "cargo_compile_ms": null,
+        "cargo_compile_ms_estimated": false,
+        "cargo_compile_ms_kind": null,
+        "cargo_telemetry_status": "unavailable_interrupted_before_check_completion",
+        "cleanup_confirmed": true,
+        "compatibility_key": "1ee62d47410e917a157b46abe890a2246fd7ee4e57c9565413099c06cf11a200",
+        "correlation_id": "01d89cdc-4cf3-54ac-9621-e261f9216e57",
+        "expected_main": "a08b71862178e4026ca407e2258bb60ca7eac39b",
+        "fresh_compiling_units": null,
+        "intentional_cancellation": true,
+        "log_sha256": "5afcb8b94bff57145dcf70f48f916c018de7619c35ddb79f8a6adbfefedf95d0",
+        "phase": "clear-cancel",
+        "raw_log_cargo_telemetry_verified": false,
+        "receipt_sha256": "fa2c23bae814be13b7a8244a783bc6d7034028fe4368fd3813fb5f8597080be7",
+        "rendered_helper_sha256": "ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a",
+        "request_sha256": "269e2f08d3b5c9ecec69f502e237c6fcd0642f5c1339f5b321dfcfa3df7c3344",
+        "stages": [
+          {
+            "elapsed_ms": 935,
+            "estimated": false,
+            "name": "prepare_source",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 0,
+            "estimated": false,
+            "name": "cache_restore",
+            "status": "miss",
+            "timing_source": "protected_root_receipt"
+          },
+          {
+            "elapsed_ms": 411,
+            "estimated": false,
+            "name": "cleanup",
+            "status": "passed",
+            "timing_source": "protected_root_receipt"
+          }
+        ],
+        "status": "failed",
+        "total_elapsed_ms": 27958,
+        "total_elapsed_ms_estimated": false,
+        "unavailable_measurements": [
+          {
+            "metric": "cargo_compile_ms",
+            "reason": "Check0 was interrupted before a completed root stage or Cargo-phase receipt."
+          },
+          {
+            "metric": "check_0/check_1/check_2 elapsed_ms",
+            "reason": "No fixed check completed; later gates and publication did not run."
+          }
+        ],
+        "workflow_id": "f2a60bf7-e824-48bd-b9cb-d18656ac1ca2"
+      }
+    ],
+    "rendered_helper_sha256": "ef7f917874e626fbcf97ff4c8826acc8c844d996bc45a3e72986f6168c47496a"
+  },
+  "qualification_proof_sha256": "546015e03216d369dbddd72f49a8cc8bbb0ffb637d2cb51f4aa405628179435a",
+  "source_snapshot": {
+    "binding": {
+      "author_profile": "agy-primary",
+      "genuine_peer_findings": 3,
+      "handoff_action_id": "0fedb57c-b8b5-46b6-a897-fd3cd551db9a",
+      "handoff_reason": "repair_budget_exhausted",
+      "max_repair_rounds": 3,
+      "max_stagnant_rounds": 2,
+      "old_repair_source_review_id": "16e83ff1-14b6-43c3-8f22-1dc66644d053",
+      "peer_decision": "revise",
+      "peer_review_id": "b5a80a97-f607-4c76-931f-4b322a529b58",
+      "peer_target_sha256": "88cca04130c129073560422cd17b092adb551573f5d14097629d58042ec09ac4",
+      "plan_decision_id": "892733a6-4d87-40e3-b2a0-4e9e86c9d07b",
+      "plan_revisions": 3,
+      "plan_sha256": "da4dea086d4b68be28e98fe52d31f5ab54372648cb84dd80cc75d8dfe2d1a725",
+      "project_alias": "homelab",
+      "repair_rounds": 2,
+      "reviewer_attempt_id": "bee6531a-ab48-4c36-98da-d28751dd3044",
+      "reviewer_profile": "codex-primary",
+      "reviewer_result_sha256": "10277704ec1d911b9fee4b4bda75fba946f020bc0271d7feba0755988232f2c8",
+      "source_candidate_commit": "a19a46a10282e7a6f3ad065f34efeaecc4967680",
+      "source_gate_manifest_sha256": "999fae637c2c13f2483dc3c8ce7a81714cfd4f0970f04893aa68fc68f4d9572a",
+      "source_result_sha256": "d0ff057a8f216c1893bc259bfe035ad8d5503ba4d0505dac0db8df23564ce3b8",
+      "stagnant_rounds": 2,
+      "task_status": "awaiting_review",
+      "workflow_enabled": false,
+      "workflow_phase": "escalated"
+    },
+    "inspected_at": "2026-11-22T00:01:11.727828Z",
+    "source": {
+      "attempt_id": "171a9198-f942-425e-abc2-d075794ae5fa",
+      "expected_revision": 6,
+      "peer_decided_at": "2026-11-21T21:50:15.310037Z",
+      "peer_verdict_sha256": "10277704ec1d911b9fee4b4bda75fba946f020bc0271d7feba0755988232f2c8",
+      "recipe_digest": "ca585e98200ffe086f3ea808ddcab03cfe4fa99e887e49626cad9d0fede23755",
+      "review_id": "8222a349-998d-438b-8938-5650e2808a84",
+      "task_id": "0b3828b5-b79b-46dd-9d1a-76444a52454b",
+      "workflow_id": "6339494b-4293-4230-b49f-57cca66bd64a",
+      "workspace_digest": "5715f72c610ac2151caa0166485580eb4df47ca388e4efb4058186b9ab1727e4"
+    }
+  },
+  "timing_provenance": {
+    "addendum_manifest_sha256": "db1242e6974161f8361b2b6166ac85170f11a56a0869c0854d0f3d5cf029e189",
+    "addressed_finding_id": "jenkins-cache-qualification-missing",
+    "approved_plan_sha256": "da4dea086d4b68be28e98fe52d31f5ab54372648cb84dd80cc75d8dfe2d1a725",
+    "cargo_definition": "Sum of Cargo Finished ... in ... elapsed durations inside completed check0/check1 spans, using the qualified b870 parser grammar; not compiler CPU time or an additional wall-clock stage.",
+    "estimated_values": false,
+    "method": "Existing protected Root stage receipts, independently cross-checked against their SHA256-bound fixed-check raw log spans.",
+    "new_measurements_or_ci_runs": false,
+    "original_manifest_sha256": "ea8bdba77bac2170699017102366ddc38aeff2a95c0df10fce8294b598c3dbe2",
+    "original_report_sha256": "1b604e0bfe8c95e0c75625de85a802874b880aee1ecdcecf16fed6f907d4e1d6",
+    "reviewer_result_sha256": "f63c6f6e2d7eabbf0c399478030d96e0b023a6dd89e6782fa11641560191945a"
+  },
+  "version": 1
+}
