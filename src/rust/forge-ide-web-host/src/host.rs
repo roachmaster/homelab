@@ -1,6 +1,6 @@
 use crate::config::HostConfig;
 use crate::service::HostFactory;
-use forge_bootstrap::PreparedGroup;
+use forge_core::bootstrap::PreparedGroup;
 use std::{error::Error, fmt, io};
 
 #[derive(Debug)]

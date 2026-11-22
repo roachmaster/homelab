@@ -7,9 +7,9 @@ mod io;
 mod task;
 
 use self::io::{register_native_io, ConsoleRequest, ReadSource, SourceError};
-use forge_bootstrap::Registry;
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton};
+use forge_core::bootstrap::Registry;
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use std::{error::Error, ffi::OsString, fmt};
 
 #[derive(Debug)]
@@ -18,11 +18,11 @@ enum CliError {
     Source(SourceError),
     Template(crate::TemplateError),
     Assembly(crate::assembly::AssemblyError),
-    Registration(forge_bootstrap::RegistrationError),
-    Validation(forge_bootstrap::ValidationError),
-    Header(forge_ingress_contract::HeaderError),
-    Descriptor(forge_command::DescriptorError),
-    Duplicate(forge_bridge::DuplicateRoute),
+    Registration(forge_core::bootstrap::RegistrationError),
+    Validation(forge_core::bootstrap::ValidationError),
+    Header(forge_core::ingress::HeaderError),
+    Descriptor(forge_core::command::DescriptorError),
+    Duplicate(forge_core::bridge::DuplicateRoute),
     Invariant(&'static str),
 }
 impl fmt::Display for CliError {
@@ -128,7 +128,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forge_ingress_contract::{Envelope, Header, RouteKey};
+    use forge_core::ingress::{Envelope, Header, RouteKey};
     use std::{cell::RefCell, rc::Rc};
     #[derive(Clone)]
     struct SourceProbe(Rc<RefCell<Vec<ReadSource>>>);

@@ -1,4 +1,7 @@
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use forge_ide::{
     assembly::{register_ast_graph, AstGraphConfig},
     ast_graph::{
@@ -7,9 +10,6 @@ use forge_ide::{
     filesystem::{EntryKind, FsEntry, FsError, FsRequest, FsResponse},
     syntax::DeclarationKind,
 };
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
 use std::{
     collections::BTreeMap,
     ffi::OsString,

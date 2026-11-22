@@ -1,5 +1,5 @@
 use forge_bootstrap_demo::{bootstrap, sum_route, AppConfig, Command, DemoContext};
-use forge_ingress_contract::{Envelope, Header};
+use forge_core::ingress::{Envelope, Header};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(feature = "messages"))]

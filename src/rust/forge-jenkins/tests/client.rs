@@ -1,10 +1,10 @@
-use forge_bootstrap::Registry;
-use forge_io_client::IoClient;
+use forge_core::bootstrap::Registry;
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use forge_jenkins::{
     register, Client, Config, Credentials, Error, HttpRequest, HttpResponse, Method, Request,
     Response, TransportError,
 };
-use forge_provider::Factory;
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, VecDeque},
@@ -598,7 +598,7 @@ fn stop_build_requires_mutation_policy_and_never_claims_execution_stopped_or_ret
 
 #[test]
 fn error_display_names_each_failure_exactly_without_secrets() {
-    use forge_bootstrap::RegistrationError;
+    use forge_core::bootstrap::RegistrationError;
     let cases = [
         (Error::Configuration, "invalid Jenkins configuration"),
         (Error::InvalidRequest, "invalid Jenkins request"),

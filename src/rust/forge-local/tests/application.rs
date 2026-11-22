@@ -1,8 +1,8 @@
-use forge_bootstrap::PreparedGroup;
-use forge_ingress_contract::{Envelope, Header, Payload, RouteKey};
-use forge_io_client::IoClient;
+use forge_core::bootstrap::PreparedGroup;
+use forge_core::ingress::{Envelope, Header, Payload, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use forge_local::*;
-use forge_provider::Factory;
 use std::{cell::Cell, error::Error, rc::Rc, time::Duration};
 
 fn route(name: &str) -> RouteKey {
@@ -149,7 +149,7 @@ fn selected_routes_are_sorted_and_discovery_is_a_checked_command() {
         .unwrap_err();
     assert!(matches!(
         bad,
-        AppError::Dispatch(forge_bridge::DispatchError::PayloadMismatch(_))
+        AppError::Dispatch(forge_core::bridge::DispatchError::PayloadMismatch(_))
     ));
 }
 #[test]
@@ -161,14 +161,14 @@ fn header_route_and_nested_variants_gate_before_injected_client_calls() {
         assert!(matches!(
             app.invoke(r, Command::Node(NodeCommand::Info)),
             Err(AppError::Dispatch(
-                forge_bridge::DispatchError::UnknownRoute(_)
+                forge_core::bridge::DispatchError::UnknownRoute(_)
             ))
         ));
     }
     assert!(matches!(
         app.invoke(route("node.info"), Command::Node(NodeCommand::Status)),
         Err(AppError::Dispatch(
-            forge_bridge::DispatchError::PayloadMismatch(_)
+            forge_core::bridge::DispatchError::PayloadMismatch(_)
         ))
     ));
     assert_eq!(counts.calls.get(), 0);
@@ -228,7 +228,7 @@ fn factory_and_client_errors_are_visible_without_retry() {
         .invoke(route("node.status"), Command::Node(NodeCommand::Status))
         .unwrap_err();
     assert!(
-        matches!(&bad,AppError::Dispatch(forge_bridge::DispatchError::Handler(RunError::Node(NodeError::Unavailable(reason)))) if reason=="collector failed")
+        matches!(&bad,AppError::Dispatch(forge_core::bridge::DispatchError::Handler(RunError::Node(NodeError::Unavailable(reason)))) if reason=="collector failed")
     );
     assert!(bad.source().unwrap().source().is_some());
     assert_eq!(counts.calls.get(), 1);
@@ -272,7 +272,7 @@ fn omitted_disk_is_not_advertised_or_routable() {
     assert!(matches!(
         app.invoke(route("disk.pwd"), Command::Commands),
         Err(AppError::Dispatch(
-            forge_bridge::DispatchError::UnknownRoute(_)
+            forge_core::bridge::DispatchError::UnknownRoute(_)
         ))
     ));
 }

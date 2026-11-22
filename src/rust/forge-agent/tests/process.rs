@@ -2,13 +2,13 @@
 //! These tests establish no physical-machine or production deployment claim.
 mod support;
 
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::Factory;
+use forge_core::task::Task;
 use forge_ide::{
     assembly::{register_ide, IdeConfig},
     task::InspectRequest,
 };
-use forge_provider::Factory;
-use forge_task::Task;
 use serde_json::json;
 use std::{
     fs,

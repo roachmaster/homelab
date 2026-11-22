@@ -307,8 +307,8 @@ fn response_default() -> usize {
     8 * 1024 * 1024
 }
 pub(crate) fn bounded_read(path: &Path, max: usize) -> Result<Vec<u8>, HostError> {
+    use forge_core::io_client::IoClient;
     use forge_ide::filesystem::{FsRequest, FsResponse, NativeFiles};
-    use forge_io_client::IoClient;
     let parent = path
         .parent()
         .ok_or(HostError::Configuration("startup file parent"))?;

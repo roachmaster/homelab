@@ -7,8 +7,8 @@ mod html;
 mod javascript;
 mod theme;
 pub use component::{ButtonEmphasis, Component, Document, PanePosition, PortalDocument, TextStyle};
-use forge_bootstrap::{PreparedGroup, Registry};
-use forge_provider::{Factory, InstanceProvider, Singleton};
+use forge_core::bootstrap::{PreparedGroup, Registry};
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_template::{
     assembly::{register_renderer, RenderConfig},
     Field, Limits, MethodRegistry, Schema, Value,

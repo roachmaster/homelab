@@ -9,8 +9,8 @@ use crate::{
     assembly::{RenderConfig, Renderer},
     Field, Limits, Schema, Value,
 };
-use forge_io_client::IoClient;
-use forge_task::Task;
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use std::{collections::BTreeMap, rc::Rc};
 
 pub(super) trait RendererFactory {
@@ -86,8 +86,8 @@ where
 mod tests {
     use super::*;
     use crate::{assembly::register_renderer, MethodRegistry};
-    use forge_bootstrap::Registry;
-    use forge_provider::Factory;
+    use forge_core::bootstrap::Registry;
+    use forge_core::provider::Factory;
     use std::cell::RefCell;
     struct SourceProbe {
         order: Rc<RefCell<Vec<&'static str>>>,

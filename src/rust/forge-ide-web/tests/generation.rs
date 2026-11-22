@@ -1,5 +1,6 @@
 #![cfg(feature = "build-assets")]
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_ide_web::{
     component,
     generate::{
@@ -8,7 +9,6 @@ use forge_ide_web::{
         RequestPolicy, Theme, Transport,
     },
 };
-use forge_provider::{Factory, InstanceProvider, Singleton};
 use sha2::{Digest, Sha256};
 fn config() -> AssetConfig {
     AssetConfig {

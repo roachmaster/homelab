@@ -128,7 +128,7 @@ make test PACKAGE=forge-template NO_DEFAULT_FEATURES=1
 make ci
 ```
 
-Default library consumers retain only `forge-bootstrap` and `forge-provider`.
+Default library consumers retain only `forge-core`.
 The `cli` feature additionally selects Task, command description, I/O-client,
 bridge and ingress contracts; it does not pull in `forge-local`, `forge-terminal`
 or kernel clients. The binary has `required-features = ["cli"]`. Existing separate

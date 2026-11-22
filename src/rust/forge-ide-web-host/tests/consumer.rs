@@ -1,5 +1,6 @@
 //! External consumer: public imports, no inclusion of private example source.
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::ingress::{Header, Response, RouteKey};
 use forge_ide::{
     model::{Entry, Name, ProjectReport, TreeNode},
     remote::{InspectReply, RemoteInspectInput},
@@ -8,7 +9,6 @@ use forge_ide_web_host::{
     register_host, Host, HostConfig, HostError, HostLimits, InspectionPort, NodeConfig,
     ServeOutcome, SessionAuth,
 };
-use forge_ingress_contract::{Header, Response, RouteKey};
 use forge_remote::{RemoteError, Target};
 use forge_remote_https::{ClientConfig, Credentials, Limits};
 use serde_json::{json, Value};
@@ -1974,8 +1974,8 @@ fn slow_trusted_port_cannot_return_late_http_success() {
 
 #[test]
 fn actual_host_factory_roundtrips_mtls_and_agent_policy_denies_alias() {
+    use forge_core::provider::Factory;
     use forge_ide::remote::{InspectCommand, ReportLimits};
-    use forge_provider::Factory;
     use forge_remote_https::{
         gateway::{
             register_gateway_server, GatewayLimits, GatewayServerConfig,

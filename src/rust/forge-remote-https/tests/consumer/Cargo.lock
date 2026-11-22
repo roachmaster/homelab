@@ -230,15 +230,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
-name = "forge-bootstrap"
+name = "forge-core"
 version = "0.1.0"
-
-[[package]]
-name = "forge-bridge"
-version = "0.1.0"
-dependencies = [
- "forge-ingress-contract",
-]
 
 [[package]]
 name = "forge-ide"
@@ -246,12 +239,8 @@ version = "0.1.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
- "forge-bootstrap",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-provider",
+ "forge-core",
  "forge-remote",
- "forge-task",
  "proc-macro2",
  "quote",
  "sha2",
@@ -259,36 +248,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-ingress-contract"
-version = "0.1.0"
-
-[[package]]
-name = "forge-io-client"
-version = "0.1.0"
-
-[[package]]
-name = "forge-provider"
-version = "0.1.0"
-
-[[package]]
 name = "forge-remote"
 version = "0.1.0"
 dependencies = [
- "forge-bridge",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-task",
+ "forge-core",
 ]
 
 [[package]]
 name = "forge-remote-https"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
+ "forge-core",
  "forge-ide",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-provider",
  "forge-remote",
  "http-body-util",
  "hyper",
@@ -299,10 +270,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
 ]
-
-[[package]]
-name = "forge-task"
-version = "0.1.0"
 
 [[package]]
 name = "fs-set-times"
@@ -608,11 +575,8 @@ dependencies = [
 name = "remote-https-public-consumer"
 version = "0.0.0"
 dependencies = [
- "forge-bootstrap",
+ "forge-core",
  "forge-ide",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-provider",
  "forge-remote",
  "forge-remote-https",
  "rcgen",

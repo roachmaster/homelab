@@ -286,28 +286,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
-name = "forge-access"
-version = "0.1.0"
-dependencies = [
- "forge-ingress-contract",
-]
-
-[[package]]
 name = "forge-agent"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
- "forge-bootstrap",
- "forge-bridge",
- "forge-command",
+ "forge-core",
  "forge-ide",
- "forge-ingress-contract",
- "forge-io-client",
  "forge-kernel",
- "forge-provider",
  "forge-remote",
  "forge-remote-https",
- "forge-task",
  "nix",
  "rcgen",
  "rustls",
@@ -316,56 +303,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-bootstrap"
-version = "0.1.0"
-
-[[package]]
 name = "forge-bootstrap-demo"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
- "forge-bridge",
+ "forge-core",
  "forge-demo-memory-client",
  "forge-demo-messages",
- "forge-ingress-contract",
- "forge-io-client",
  "forge-kernel",
- "forge-provider",
- "forge-task",
 ]
 
 [[package]]
-name = "forge-bridge"
-version = "0.1.0"
-dependencies = [
- "forge-ingress-contract",
- "forge-io-client",
- "forge-provider",
- "forge-task",
-]
-
-[[package]]
-name = "forge-command"
+name = "forge-core"
 version = "0.1.0"
 
 [[package]]
 name = "forge-demo-memory-client"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
+ "forge-core",
  "forge-demo-messages",
- "forge-io-client",
- "forge-provider",
 ]
 
 [[package]]
 name = "forge-demo-messages"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
- "forge-io-client",
- "forge-provider",
- "forge-task",
+ "forge-core",
 ]
 
 [[package]]
@@ -378,14 +341,8 @@ version = "0.1.0"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
- "forge-bootstrap",
- "forge-bridge",
- "forge-command",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-provider",
+ "forge-core",
  "forge-remote",
- "forge-task",
  "nix",
  "proc-macro2",
  "quote",
@@ -408,10 +365,9 @@ dependencies = [
 name = "forge-ide-web"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
+ "forge-core",
  "forge-game-runtime",
  "forge-ide-ui",
- "forge-provider",
  "forge-template",
  "serde",
  "serde_json",
@@ -424,16 +380,11 @@ name = "forge-ide-web-host"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
- "forge-bootstrap",
- "forge-bridge",
+ "forge-core",
  "forge-ide",
  "forge-ide-ui",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-provider",
  "forge-remote",
  "forge-remote-https",
- "forge-task",
  "getrandom 0.4.3",
  "http-body-util",
  "httparse",
@@ -448,21 +399,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-ingress-contract"
-version = "0.1.0"
-
-[[package]]
-name = "forge-io-client"
-version = "0.1.0"
-
-[[package]]
 name = "forge-jenkins"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "forge-bootstrap",
- "forge-io-client",
- "forge-provider",
+ "forge-core",
  "serde",
  "serde_json",
  "ureq",
@@ -474,11 +415,7 @@ name = "forge-jobs"
 version = "0.1.0"
 dependencies = [
  "cap-std",
- "forge-access",
- "forge-bootstrap",
- "forge-bridge",
- "forge-ingress-contract",
- "forge-provider",
+ "forge-core",
  "serde",
  "serde_json",
 ]
@@ -487,11 +424,7 @@ dependencies = [
 name = "forge-kernel"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
- "forge-command",
- "forge-io-client",
- "forge-provider",
- "forge-task",
+ "forge-core",
 ]
 
 [[package]]
@@ -499,10 +432,7 @@ name = "forge-llama"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
- "forge-bootstrap",
- "forge-bridge",
- "forge-ingress-contract",
- "forge-provider",
+ "forge-core",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -517,43 +447,26 @@ dependencies = [
 name = "forge-local"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
- "forge-bridge",
- "forge-command",
- "forge-ingress-contract",
- "forge-io-client",
+ "forge-core",
  "forge-jenkins",
  "forge-kernel",
- "forge-provider",
- "forge-task",
 ]
-
-[[package]]
-name = "forge-provider"
-version = "0.1.0"
 
 [[package]]
 name = "forge-remote"
 version = "0.1.0"
 dependencies = [
- "forge-bridge",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-task",
+ "forge-core",
 ]
 
 [[package]]
 name = "forge-remote-https"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
+ "forge-core",
  "forge-ide",
- "forge-ingress-contract",
- "forge-io-client",
  "forge-kernel",
- "forge-provider",
  "forge-remote",
- "forge-task",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -566,24 +479,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-task"
-version = "0.1.0"
-dependencies = [
- "forge-io-client",
- "forge-provider",
-]
-
-[[package]]
 name = "forge-template"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
- "forge-bridge",
- "forge-command",
- "forge-ingress-contract",
- "forge-io-client",
- "forge-provider",
- "forge-task",
+ "forge-core",
 ]
 
 [[package]]
@@ -591,14 +490,10 @@ name = "forge-terminal"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
- "forge-access",
- "forge-bootstrap",
- "forge-ingress-contract",
- "forge-io-client",
+ "forge-core",
  "forge-jenkins",
  "forge-jobs",
  "forge-local",
- "forge-provider",
  "nix",
  "serde",
  "serde_json",

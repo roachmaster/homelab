@@ -14,7 +14,7 @@
 //! permission elevation, process cwd change or mutation operation is supplied.
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
 use cap_std::fs::{Dir, OpenOptions};
-use forge_io_client::IoClient;
+use forge_core::io_client::IoClient;
 use std::{
     error::Error,
     ffi::OsString,

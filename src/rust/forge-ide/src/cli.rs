@@ -7,13 +7,15 @@ use crate::{
     task::{InspectError, InspectRequest, InspectTask},
     yaml,
 };
-use forge_bootstrap::Registry;
-use forge_bridge::{Bridge, RegistryBuilder};
-use forge_command::{ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence};
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
+use forge_core::bootstrap::Registry;
+use forge_core::bridge::{Bridge, RegistryBuilder};
+use forge_core::command::{
+    ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence,
+};
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use std::{
     ffi::OsString,
     io::{self, Write},
@@ -133,7 +135,7 @@ fn bridge<C: IoClient<Request = FsRequest, Response = FsResponse, Error = FsErro
     task: Option<InspectTask<C>>,
     ast_task: Option<AstGraphTask<C>>,
 ) -> Result<AppBridge, String> {
-    forge_command::validate_descriptors(Catalog.descriptors()).map_err(|e| e.to_string())?;
+    forge_core::command::validate_descriptors(Catalog.descriptors()).map_err(|e| e.to_string())?;
     let mut routes = RegistryBuilder::new();
     if let Some(task) = task {
         let provider = Singleton::new(task);

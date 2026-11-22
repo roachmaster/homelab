@@ -4,8 +4,8 @@ use cap_std::{
     ambient_authority,
     fs::{Dir, OpenOptions},
 };
-use forge_bootstrap::PreparedGroup;
-use forge_provider::Factory;
+use forge_core::bootstrap::PreparedGroup;
+use forge_core::provider::Factory;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::TryLockError,

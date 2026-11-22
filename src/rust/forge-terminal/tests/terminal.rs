@@ -1,4 +1,4 @@
-use forge_io_client::IoClient;
+use forge_core::io_client::IoClient;
 use forge_terminal::{
     console::{ConsoleRequest, ConsoleResponse, InputLine, StreamConsole, MAX_LINE_BYTES},
     parser::{parse_options, quote_os, session_arguments, Mode},

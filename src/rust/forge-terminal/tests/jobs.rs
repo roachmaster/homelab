@@ -1,5 +1,5 @@
 #![cfg(feature = "jobs")]
-use forge_io_client::IoClient;
+use forge_core::io_client::IoClient;
 use forge_terminal::{
     console::{ConsoleRequest, ConsoleResponse, InputLine, StreamConsole},
     run,

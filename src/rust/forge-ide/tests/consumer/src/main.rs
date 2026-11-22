@@ -3,14 +3,14 @@ fn main() {
 }
 #[cfg(all(test, feature = "inspection"))]
 mod tests {
-    use forge_bootstrap::Registry;
+    use forge_core::bootstrap::Registry;
     use forge_ide::{
         assembly::{register_ast_graph, register_ide, AstGraphConfig, IdeConfig},
         ast_graph::AstGraphRequest,
         task::InspectRequest,
     };
-    use forge_provider::{Factory, InstanceProvider, Singleton, Transient};
-    use forge_task::Task;
+    use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
+    use forge_core::task::Task;
     use std::{
         path::PathBuf,
         sync::atomic::{AtomicUsize, Ordering},
@@ -124,7 +124,7 @@ mod tests {
 
 #[cfg(all(test, feature = "remote-inspection"))]
 mod remote_tests {
-    use forge_bootstrap::Registry;
+    use forge_core::bootstrap::Registry;
     use forge_ide::{
         assembly::{register_projects, IdeConfig, ProjectAlias},
         remote::{
@@ -133,11 +133,11 @@ mod remote_tests {
         },
         task::InspectRequest,
     };
-    use forge_ingress_contract::Response;
-    use forge_io_client::IoClient;
-    use forge_provider::{Factory, InstanceProvider, Singleton};
+    use forge_core::ingress::Response;
+    use forge_core::io_client::IoClient;
+    use forge_core::provider::{Factory, InstanceProvider, Singleton};
     use forge_remote::Target;
-    use forge_task::Task;
+    use forge_core::task::Task;
 
     struct InProcess(forge_ide::model::ProjectReport);
     impl IoClient for InProcess {

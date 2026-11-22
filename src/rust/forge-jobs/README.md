@@ -1,6 +1,6 @@
 # Forge durable jobs
 
-`authenticated_bridge` accepts a context issued by `forge-access` after a
+`authenticated_bridge` accepts a context issued by `forge_core::access` after a
 configured verifier authenticates the caller. Configure exact route grants
 with `RoutePolicy`. The store derives the owner from the verified subject and
 checks ownership on status and cancellation.

@@ -1,9 +1,9 @@
-use forge_bootstrap::{PreparedGroup, RegistrationError, Registry, ValidationError};
-use forge_bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
-use forge_ingress_contract::{
+use forge_core::bootstrap::{PreparedGroup, RegistrationError, Registry, ValidationError};
+use forge_core::bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
+use forge_core::ingress::{
     AdmissionDenied, AdmissionPolicy, Envelope, Header, Payload, Response, RouteKey,
 };
-use forge_task::Task;
+use forge_core::task::Task;
 use std::{error::Error, fmt};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

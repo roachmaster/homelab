@@ -8,14 +8,14 @@ use forge_bootstrap_demo::{
     },
     DemoContext,
 };
-use forge_bridge::DispatchError;
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
-use forge_io_client::IoClient;
+use forge_core::bridge::DispatchError;
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use forge_kernel::disk::{
     ConfigError, DirectoryListing, DiskConfig, DiskError, DiskOperation, DiskRequest, DiskResponse,
     EntryKind,
 };
-use forge_task::Task;
 use std::{
     cell::RefCell,
     error::Error,

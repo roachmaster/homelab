@@ -5,23 +5,23 @@ use crate::usage::{UsageRelay, UsageRelayFactory};
 use crate::work::{WorkRelay, WorkRelayFactory};
 use crate::workspace::{WorkspaceReply, WorkspaceRequest};
 use crate::{http, session::Session, HostConfig, HostError, SessionAuth};
-use forge_bootstrap::Registry;
-use forge_bridge::{Bridge, RegistryBuilder};
+use forge_core::bootstrap::Registry;
+use forge_core::bridge::{Bridge, RegistryBuilder};
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use forge_ide::remote::{
     InspectCall, InspectReply, ProjectAlias, RemoteInspectInput, RemoteInspectTask, ReportLimits,
 };
 use forge_ide::remote_source::{RemoteSourceInput, RemoteSourceTask, SourceReply, SourceSelection};
 use forge_ide_ui::protocol::*;
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton};
 use forge_remote::{now_unix_ms, RemoteError};
 use forge_remote_https::ide::{register_ide_client, IdeClientConfig};
 use forge_remote_https::managed_write::{
     register_managed_write_client, ManagedCall, ManagedReply, ManagedWriteClient,
 };
 use forge_remote_https::source::register_source_client;
-use forge_task::Task;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
@@ -873,8 +873,8 @@ impl Host {
             .dispatch(Envelope::new(header, payload), context)
             .map(|r| r.payload)
             .map_err(|e| match e {
-                forge_bridge::DispatchError::Admission(_) => Rejection::Denied,
-                forge_bridge::DispatchError::Handler(e) => e,
+                forge_core::bridge::DispatchError::Admission(_) => Rejection::Denied,
+                forge_core::bridge::DispatchError::Handler(e) => e,
                 _ => Rejection::Invalid,
             })
     }

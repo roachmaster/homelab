@@ -1,9 +1,9 @@
 use crate::driver::Driver;
 use crate::model_runtime::NativeModelProvider;
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_bridge::{DuplicateRoute, RegistryBuilder};
-use forge_ingress_contract::{Payload, RouteKey};
-use forge_provider::Factory;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::bridge::{DuplicateRoute, RegistryBuilder};
+use forge_core::ingress::{Payload, RouteKey};
+use forge_core::provider::Factory;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,

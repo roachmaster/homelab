@@ -1,7 +1,7 @@
-use forge_ingress_contract::{Envelope, Header, Response, ResponseHeader, RouteKey};
-use forge_io_client::IoClient;
+use forge_core::ingress::{Envelope, Header, Response, ResponseHeader, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use forge_remote::*;
-use forge_task::Task;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,

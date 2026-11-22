@@ -1,5 +1,5 @@
 //! DTOs are private to this boundary. JSON never enters Forge task/bridge types.
-use forge_ingress_contract::{Envelope, Header, Response, ResponseHeader, RouteKey};
+use forge_core::ingress::{Envelope, Header, Response, ResponseHeader, RouteKey};
 use forge_remote::{NodeCall, NodeCommand, NodeInfo, NodeReply, RemoteError, Target};
 use hyper::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};

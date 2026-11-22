@@ -7,7 +7,10 @@ use crate::{
     gateway::{GatewayCodec, RequestMetadata},
     wire, AssemblyError, ClientConfig, HttpsClient,
 };
-use forge_bootstrap::PreparedGroup;
+use forge_core::bootstrap::PreparedGroup;
+use forge_core::ingress::{Envelope, Response, ResponseHeader};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use forge_ide::{
     assembly::ProjectAlias,
     remote::{
@@ -15,9 +18,6 @@ use forge_ide::{
         CONTRACT_VERSION, IDE_INSPECT,
     },
 };
-use forge_ingress_contract::{Envelope, Response, ResponseHeader};
-use forge_io_client::IoClient;
-use forge_provider::Factory;
 use forge_remote::{RemoteError, Target};
 use serde::{Deserialize, Serialize};
 

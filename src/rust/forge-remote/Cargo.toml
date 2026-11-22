@@ -5,10 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-forge-ingress-contract.workspace = true
-forge-bridge.workspace = true
-forge-io-client.workspace = true
-forge-task.workspace = true
+forge-core.workspace = true
 
 [lints]
 workspace = true

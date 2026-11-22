@@ -11,13 +11,13 @@ use crate::{
     assembly::{register_renderer, RenderConfig, Renderer},
     MethodRegistry,
 };
-use forge_bootstrap::{PreparedGroup, Registry};
-use forge_bridge::{Bridge, RegistryBuilder};
-use forge_command::validate_descriptors;
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, RouteKey};
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
+use forge_core::bootstrap::{PreparedGroup, Registry};
+use forge_core::bridge::{Bridge, RegistryBuilder};
+use forge_core::command::validate_descriptors;
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use std::{convert::Infallible, rc::Rc};
 
 /// Explicit command-scoped construction, not an opaque callback or mutable
@@ -150,7 +150,7 @@ impl Application {
             .dispatch(Envelope::new(header, invocation.command), &true)
             .map(|response| response.payload)
             .map_err(|error| match error {
-                forge_bridge::DispatchError::Handler(error) => error,
+                forge_core::bridge::DispatchError::Handler(error) => error,
                 _ => CliError::Invariant("CLI route/admission invariant failed"),
             })
     }

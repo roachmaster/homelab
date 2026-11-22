@@ -34,7 +34,7 @@ The library exports `ClientConfig::MutualTls`, `ServerConfig::LoopbackMutualTls`
    target identity, peer mapping and budgets. No implicit system roots, environment
    reads or credential-file lookup occur in this library.
 2. A registrar validates configuration shape and stages one complete factory group
-   in `forge-bootstrap`. No TLS parsing, runtime creation or socket binding yet.
+   in `forge_core::bootstrap`. No TLS parsing, runtime creation or socket binding yet.
 3. Consuming registration rejects conflicts without overwriting the original;
    freeze validates declared assembly metadata before construction.
 4. `Factory::create` validates TLS material and creates one private current-thread

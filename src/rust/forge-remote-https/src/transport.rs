@@ -5,7 +5,7 @@ use crate::{
     },
     wire,
 };
-use forge_io_client::IoClient;
+use forge_core::io_client::IoClient;
 use forge_remote::{now_unix_ms, Authorize, Destination, NodeCall, NodeReply, RemoteError, Target};
 use http_body_util::{BodyExt, Full};
 use hyper::{

@@ -4,9 +4,9 @@ use crate::{
     register, Client, ClientFactory, Config, Credentials, Error, HttpRequest, HttpResponse, Limits,
     Method, TransportError,
 };
-use forge_bootstrap::PreparedGroup;
-use forge_io_client::IoClient;
-use forge_provider::Factory;
+use forge_core::bootstrap::PreparedGroup;
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use std::{collections::BTreeMap, io::Read};
 
 pub type HttpClient = Client<HttpTransport>;

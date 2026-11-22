@@ -1,11 +1,11 @@
 #![cfg(feature = "ide")]
+use forge_core::ingress::{Envelope, Header, Response, ResponseHeader, RouteKey};
 use forge_ide::{
     assembly::ProjectAlias,
     model::{Entry, FileContent, Name, ProjectReport, TreeNode},
     remote::{InspectCall, InspectCommand, InspectReply, ReportLimits},
     syntax,
 };
-use forge_ingress_contract::{Envelope, Header, Response, ResponseHeader, RouteKey};
 use forge_remote::{RemoteError, Target};
 use forge_remote_https::{
     gateway::{GatewayCodec, RequestMetadata},

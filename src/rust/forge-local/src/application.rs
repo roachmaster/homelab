@@ -1,20 +1,22 @@
 #[cfg(feature = "disk")]
 use crate::disk::DiskCommand;
-use forge_bootstrap::{PreparedGroup, RegistrationError, Registry, ValidationError};
-use forge_bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
-use forge_command::{validate_descriptors, CommandDescriptor, DescribeCommand, DescriptorError};
-use forge_ingress_contract::{
+use forge_core::bootstrap::{PreparedGroup, RegistrationError, Registry, ValidationError};
+use forge_core::bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
+use forge_core::command::{
+    validate_descriptors, CommandDescriptor, DescribeCommand, DescriptorError,
+};
+use forge_core::ingress::{
     AdmissionDenied, AdmissionPolicy, Envelope, Header, HeaderError, Payload, Response, RouteKey,
 };
-use forge_io_client::IoClient;
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 #[cfg(feature = "disk")]
 use forge_kernel::disk::{DiskError, DiskResponse};
 use forge_kernel::node::{
     self, NodeCommand, NodeConfig, NodeConfigError, NodeError, NodeFactories, NodeRequest,
     NodeResponse, NodeTask,
 };
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
 use std::{cell::Cell, error::Error, fmt, rc::Rc};
 
 pub struct LocalConfig {
@@ -742,7 +744,7 @@ fn bind_jobs(bindings: &mut Bindings, jobs: crate::jobs::JobsHandle) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forge_command::{ArgumentDescriptor, DataType, Presence};
+    use forge_core::command::{ArgumentDescriptor, DataType, Presence};
     #[test]
     fn failed_binding_does_not_add_or_replace_discovery_metadata() {
         let mut b = Bindings::new();

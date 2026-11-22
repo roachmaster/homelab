@@ -3,12 +3,12 @@
 #[path = "../examples/registered_render.rs"]
 mod registered_render;
 
-use forge_bootstrap::{RegistrationError, Registry};
-use forge_bridge::DispatchError;
-use forge_command::{DataType, DescribeCommand, Presence};
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, RouteKey};
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
+use forge_core::bootstrap::{RegistrationError, Registry};
+use forge_core::bridge::DispatchError;
+use forge_core::command::{DataType, DescribeCommand, Presence};
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, RouteKey};
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use forge_template::{
     assembly::{register_renderer, AssemblyError, RenderConfig, RenderFactory, Renderer},
     Limits, MethodRegistry, TemplateError, Value,

@@ -9,19 +9,15 @@ default-run = "forge"
 default = ["disk", "jobs"]
 disk = ["forge-local/disk"]
 jobs = ["forge-local/jobs"]
-durable-jobs = ["dep:forge-access", "dep:forge-ingress-contract", "dep:forge-jobs", "dep:ctrlc", "dep:nix"]
+durable-jobs = ["dep:forge-jobs", "dep:ctrlc", "dep:nix"]
 jenkins = ["forge-local/jenkins", "dep:forge-jenkins", "forge-jenkins/http", "dep:serde", "dep:serde_json", "dep:nix"]
 
 [dependencies]
 forge-local = { workspace = true, default-features = false }
-forge-io-client.workspace = true
-forge-bootstrap.workspace = true
-forge-provider.workspace = true
+forge-core.workspace = true
 forge-jenkins = { path = "../forge-jenkins", default-features = false, optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-forge-access = { path = "../forge-access", optional = true }
-forge-ingress-contract = { workspace = true, optional = true }
 forge-jobs = { path = "../forge-jobs", optional = true }
 
 [target.'cfg(unix)'.dependencies]

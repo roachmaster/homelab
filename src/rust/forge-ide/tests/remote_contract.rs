@@ -1,4 +1,7 @@
 #![cfg(feature = "remote")]
+use forge_core::ingress::Response;
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use forge_ide::{
     assembly::ProjectAlias,
     model::{Entry, FileContent, Name, ProjectReport, TreeNode},
@@ -8,10 +11,7 @@ use forge_ide::{
     },
     syntax,
 };
-use forge_ingress_contract::Response;
-use forge_io_client::IoClient;
 use forge_remote::Target;
-use forge_task::Task;
 use std::{cell::RefCell, rc::Rc};
 
 fn report(source: &str) -> ProjectReport {
@@ -76,8 +76,7 @@ impl IoClient for Fake {
         }
         let mut header = call.request.header.clone();
         if self.wrong_id {
-            header =
-                forge_ingress_contract::Header::new(header.route().clone(), "another").unwrap();
+            header = forge_core::ingress::Header::new(header.route().clone(), "another").unwrap();
         }
         Ok(InspectReply {
             responder: if self.wrong_target {

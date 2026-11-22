@@ -5,14 +5,14 @@ use super::{
     Application, BootstrapError, Command, CommandKind, Outcome, PureConfig, RunError, SumTask,
 };
 use crate::demo::{bind_sum, publish, stage_pure, Routes};
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::ingress::RouteKey;
+use forge_core::provider::{Factory, Singleton, Transient};
+use forge_core::task::Task;
 use forge_demo_memory_client::{
     self as memory, MemoryClientHandle, MemoryConfig, MemoryFactoryError, MemoryProbe,
 };
 use forge_demo_messages::{self as capability, MessagesConfig, TaskBuildError, TaskProbe};
-use forge_ingress_contract::RouteKey;
-use forge_provider::{Factory, Singleton, Transient};
-use forge_task::Task;
 use std::{error::Error, fmt, rc::Rc};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

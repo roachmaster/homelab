@@ -20,11 +20,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-bootstrap"
-version = "0.1.0"
-
-[[package]]
-name = "forge-io-client"
+name = "forge-core"
 version = "0.1.0"
 
 [[package]]
@@ -32,17 +28,11 @@ name = "forge-jenkins"
 version = "0.1.0"
 dependencies = [
  "base64",
- "forge-bootstrap",
- "forge-io-client",
- "forge-provider",
+ "forge-core",
  "serde",
  "serde_json",
  "url",
 ]
-
-[[package]]
-name = "forge-provider"
-version = "0.1.0"
 
 [[package]]
 name = "form_urlencoded"
@@ -167,10 +157,8 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 name = "jenkins-independent-consumer"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
- "forge-io-client",
+ "forge-core",
  "forge-jenkins",
- "forge-provider",
 ]
 
 [[package]]

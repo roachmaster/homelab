@@ -7,8 +7,8 @@ it is **not a bootable operating-system kernel**, `no_std` runtime or Raspberry 
 image. It uses hosted Rust `std::fs`, `std::path` and metadata APIs—not Bash,
 shell commands, subprocesses or command-output parsing. No unrelated system-client placeholder modules are added.
 
-This optional implementation crate depends on `forge-bootstrap`,
-`forge-provider` and `forge-io-client`; enabling `node` also selects `forge-task`.
+This optional implementation crate depends on `forge-core` (its `bootstrap`,
+`provider`, and `io_client` modules); enabling `node` also uses the `task` module.
 None of the six core packages imports it. Tasks remain capability-owned; clients
 execute prepared requests rather than assembling automation workflows. The
 `disk` feature remains enabled by default for compatibility. A node-only consumer
@@ -157,7 +157,7 @@ clock creation only after freeze, independent client/provider lifetimes, actual
 compile-target/monotonic observations, exact task-prepared requests, fake-client
 substitution, response-kind rejection and error propagation without retry.
 
-The node feature also opts into the dependency-free `forge-command` description
+The node feature also opts into the dependency-free `forge_core::command` description
 contract. `NodeTask` implements `DescribeCommand` separately from `Task`, exposing
 `node.info` and `node.status` as distinct no-argument operations. Metadata reads do
 not require a working I/O client; execution still uses the original typed client

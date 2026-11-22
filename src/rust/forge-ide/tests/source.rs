@@ -1,12 +1,12 @@
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::Factory;
+use forge_core::task::Task;
 use forge_ide::{
     assembly::{register_ide, IdeConfig},
     model::{Entry, FileContent},
     source::{digest, SourceError, SourceRequest, MAX_SOURCE_BYTES},
     task::InspectRequest,
 };
-use forge_provider::Factory;
-use forge_task::Task;
 use std::{
     fs,
     path::PathBuf,

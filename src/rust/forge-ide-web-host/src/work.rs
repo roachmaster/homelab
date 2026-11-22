@@ -4,11 +4,11 @@ use crate::{
     service::Rejection,
     ChatConfig, HostError,
 };
+use forge_core::ingress::Header;
+use forge_core::provider::Factory;
 use forge_ide_ui::protocol::WorkPlanDecision;
 use forge_ide_ui::protocol::{valid_work_name, WorkReply, WorkRequest};
 pub use forge_ide_ui::protocol::{WorkFailure as Failure, WorkMode};
-use forge_ingress_contract::Header;
-use forge_provider::Factory;
 use hyper::body::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, net::SocketAddr, path::PathBuf, time::Instant};

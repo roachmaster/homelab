@@ -1,6 +1,5 @@
 #![cfg(feature = "messages")]
 
-use forge_bootstrap::{Registry, ValidationError};
 use forge_bootstrap_demo::{
     messages::{
         bootstrap_messages, greeting_route, ClientLifetime, ClientSelection,
@@ -8,7 +7,9 @@ use forge_bootstrap_demo::{
     },
     sum_route, BootstrapError, Command, DemoContext, Outcome, PureConfig, RunError,
 };
-use forge_bridge::DispatchError;
+use forge_core::bootstrap::{Registry, ValidationError};
+use forge_core::bridge::DispatchError;
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, RouteKey};
 use forge_demo_memory_client::{
     self as memory, ClientConstruction, MemoryAccessError, MemoryConfig, MemoryFactoryError,
     MemoryMode, MemoryProbe,
@@ -17,7 +18,6 @@ use forge_demo_messages::{
     self as capability, Delivery, DeliveryError, GreetingError, GreetingInput, MessagesConfig,
     PreparedMessage, TaskBuildError, TaskConstruction, TaskProbe,
 };
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, RouteKey};
 use std::{cell::RefCell, rc::Rc};
 
 fn greeting() -> Command {
@@ -37,7 +37,7 @@ fn request(route: RouteKey, payload: Command) -> Envelope<Command> {
 }
 fn send(
     app: &forge_bootstrap_demo::Application,
-) -> Result<forge_ingress_contract::Response<Outcome>, DispatchError<RunError>> {
+) -> Result<forge_core::ingress::Response<Outcome>, DispatchError<RunError>> {
     app.dispatch(
         request(greeting_route(), greeting()),
         &DemoContext { allow: true },

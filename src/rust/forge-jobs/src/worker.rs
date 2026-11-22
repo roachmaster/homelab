@@ -1,6 +1,6 @@
 use crate::{JobError, JobStore};
-use forge_bootstrap::PreparedGroup;
-use forge_provider::Factory;
+use forge_core::bootstrap::PreparedGroup;
+use forge_core::provider::Factory;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},

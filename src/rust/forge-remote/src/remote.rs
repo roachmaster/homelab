@@ -1,9 +1,9 @@
-use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
-use forge_ingress_contract::{
+use forge_core::bridge::{Bridge, DispatchError, RegistryBuilder};
+use forge_core::ingress::{
     AdmissionDenied, AdmissionPolicy, Envelope, Header, Payload, Response, RouteKey,
 };
-use forge_io_client::IoClient;
-use forge_task::Task;
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use std::{
     error::Error,
     fmt,

@@ -1,7 +1,7 @@
 //! Bounded, revision-checked source reads using the same rooted I/O capability.
 use crate::filesystem::{FsError, FsRequest, FsResponse};
-use forge_io_client::IoClient;
-use forge_task::Task;
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use sha2::{Digest, Sha256};
 use std::{
     ffi::OsString,

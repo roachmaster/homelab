@@ -67,7 +67,11 @@ fn external_consumer_imports_ide_and_omits_parser_when_unselected() {
     assert!(selected_names.contains("forge-ide"));
     assert!(selected_names.contains("syn"));
     assert!(!selected_names.contains("serde_yaml_ng"));
-    assert!(!selected_names.contains("forge-bridge"));
+    // The bridge is a forge-core module now, so the tree can no longer show
+    // its absence: forge-core travels with forge-ide. The inspection profile
+    // still does not use the bridge module — that use is gated by
+    // forge-ide's `cli` feature, which inspection does not enable.
+    assert!(selected_names.contains("forge-core"));
     let mut remote = base.to_vec();
     remote.extend(["--features", "remote-inspection"]);
     let remote_output = cargo(&remote);

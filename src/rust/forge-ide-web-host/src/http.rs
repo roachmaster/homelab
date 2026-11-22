@@ -3,7 +3,7 @@ use crate::{
     service::{Command, Rejection},
     workspace, Host, HostError,
 };
-use forge_ingress_contract::{Header, RouteKey};
+use forge_core::ingress::{Header, RouteKey};
 use std::{
     collections::BTreeMap,
     io::{Read, Write},

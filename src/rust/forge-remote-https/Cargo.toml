@@ -12,10 +12,7 @@ managed-writes = ["ide", "forge-ide/write-contract"]
 [dependencies]
 forge-ide = { path = "../forge-ide", default-features = false, features = ["remote"], optional = true }
 forge-remote = { path = "../forge-remote" }
-forge-bootstrap.workspace = true
-forge-provider.workspace = true
-forge-io-client.workspace = true
-forge-ingress-contract.workspace = true
+forge-core.workspace = true
 hyper = { version = "1.7", features = ["http1", "client", "server"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
@@ -28,7 +25,7 @@ serde_json = "1"
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
 forge-kernel = { path = "../forge-kernel", default-features = false, features = ["node"] }
-forge-task.workspace = true
+forge-core.workspace = true
 
 [lints]
 workspace = true

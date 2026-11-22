@@ -1,6 +1,6 @@
 use crate::transport::{HttpsClient, HttpsServer};
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_provider::Factory;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::provider::Factory;
 use forge_remote::{valid_token, Target};
 use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName},

@@ -1,8 +1,8 @@
 use crate::observation::{self, QueueListing, RecentBuildListing};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_io_client::IoClient;
-use forge_provider::Factory;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},

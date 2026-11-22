@@ -20,17 +20,11 @@ keeping implemented slices distinct from broader sketches.
 
 | Package | Responsibility | Normal dependencies |
 | --- | --- | --- |
-| [forge-ingress-contract](forge-ingress-contract/README.md) | Validated route/header, generic typed request/response, payload classification and admission contracts | Standard library only |
-| [forge-bridge](forge-bridge/README.md) | Local route builder, frozen membership, header-selected admission/variant-checked dispatch | `forge-ingress-contract` |
-| [forge-provider](forge-provider/README.md) | Typed factories, borrow-aware provider/lease contract, host-owned singleton and transient acquisition | Standard library only |
-| [forge-io-client](forge-io-client/README.md) | Executes an already prepared typed request at a narrow I/O boundary | Standard library only |
-| [forge-command](forge-command/README.md) | Optional command description: name, help, semantic argument types/presence and validation; no execution requirement | Standard library only |
-| [forge-task](forge-task/README.md) | Typed pure computation or orchestration through injected client contracts | Standard library only |
-| [forge-bootstrap](forge-bootstrap/README.md) | Atomic typed factory-group registration, declared-order validation, consuming freeze and tuple extraction | Standard library only |
+| [forge-core](forge-core/README.md) | The contract layer in one crate: typed factories and provider/lease acquisition, narrow I/O boundary, static command descriptions, validated route/header and admission contracts, typed tasks, atomic factory-group registration and freeze, header-selected dispatch, verified access | Standard library only |
 
-The bridge's **dev-only** provider/client/task dependencies compose examples and
-contract tests. Task's client/provider dependencies are also dev-only; pure task
-consumers have no normal I/O dependency, and client adapters need no task model.
+The bridge's provider/client/task uses and the task's client/provider uses
+are intra-crate module references now; pure task consumers still have no
+normal I/O dependency, and client adapters need no task model.
 Production routing imports none of these abstractions. Factories, providers and leases stay in
 one cohesive crate; they are not a class-per-package hierarchy. Capability enums
 and ports live in consumers, not this framework. There is no JSON/value-map
@@ -38,12 +32,12 @@ payload fallback, transport library in core, global enum, global registry or ser
 
 ## Optional native system clients
 
-[`forge-kernel`](forge-kernel/README.md) groups hosted low-level clients; `disk` is the first module. Its real native filesystem operations are list, pwd, client-local cd and permission inspection. It imports bootstrap/provider/I/O-client contracts; core never imports it. No shell wrapper, process cwd mutation, file mutation API, bootable OS or Raspberry Pi image is included. The opt-in `node` module adds configured identity, compile-target facts and client-instance uptime; it does not claim machine health. `disk` remains enabled by default for existing consumers. New local consumers select kernel features explicitly.
+[`forge-kernel`](forge-kernel/README.md) groups hosted low-level clients; `disk` is the first module. Its real native filesystem operations are list, pwd, client-local cd and permission inspection. It imports forge-core contracts; core never imports it. No shell wrapper, process cwd mutation, file mutation API, bootable OS or Raspberry Pi image is included. The opt-in `node` module adds configured identity, compile-target facts and client-instance uptime; it does not claim machine health. `disk` remains enabled by default for existing consumers. New local consumers select kernel features explicitly.
 
 ## Runnable local system
 
-- [`forge-local`](forge-local/README.md) owns explicit node/disk/optional-jobs composition, per-application providers, typed command/result sums and registered command descriptors. It imports the six execution contracts, independent command-description contract and selected kernel modules; no core imports it.
-- [`forge-terminal`](forge-terminal/README.md) supplies the ordinary `forge` binary using the local application and injected console I/O, with bootstrap/provider ownership. Its optional `durable-jobs` feature adds a separate Unix `forge-jobs` executable and the selected access/store/signal dependencies; those are not mandatory terminal or core dependencies.
+- [`forge-local`](forge-local/README.md) owns explicit node/disk/optional-jobs composition, per-application providers, typed command/result sums and registered command descriptors. It imports the forge-core contracts and selected kernel modules; no core imports it.
+- [`forge-terminal`](forge-terminal/README.md) supplies the ordinary `forge` binary using the local application and injected console I/O, with core-contract ownership. Its optional `durable-jobs` feature adds a separate Unix `forge-jobs` executable and the selected jobs/store/signal dependencies; those are not mandatory terminal or core dependencies.
 
 ```bash
 cargo run -p forge-terminal -- --help
@@ -56,9 +50,9 @@ The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them 
 
 ## Optional verified access and durable jobs
 
-[`forge-access`](forge-access/src/lib.rs) supplies a configured `Verifier`, an
+[`forge_core::access`](forge-core/src/access.rs) supplies a configured `Verifier`, an
 `AuthenticatedBoundary` issuing private subject/deadline `Context` values, and
-`RoutePolicy` exact-route grants. It imports only the ingress contract. It does
+`RoutePolicy` exact-route grants. It imports only the `ingress` module. It does
 not implement identity federation, delegated actors or a credential service.
 
 [`forge-jobs`](forge-jobs/README.md) is a separate bounded durable sum-job
@@ -174,7 +168,7 @@ Use a single package for reliable feature omission: workspace builds unify the
 features required by every selected consumer.
 
 ```bash
-make test PACKAGE=forge-provider
+make test PACKAGE=forge-core
 make test ALL_FEATURES=1
 make test PACKAGE=forge-kernel NO_DEFAULT_FEATURES=1 FEATURES=node
 make run ARGS='--node-id desk node.info'
@@ -268,8 +262,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --offl
 cargo run -p forge-bootstrap-demo --no-default-features --offline --locked
 cargo run -p forge-bootstrap-demo --features messages --offline --locked
 cargo run -p forge-bootstrap-demo --example disk_access --no-default-features --features disk --offline --locked
-cargo run -p forge-bridge --example in_process --offline --locked
-cargo run -p forge-bridge --example task_clients --offline --locked
+cargo run -p forge-core --example in_process --offline --locked
+cargo run -p forge-core --example task_clients --offline --locked
 python3 scripts/check_dependencies.py
 ```
 
@@ -300,7 +294,7 @@ No minimum-supported-Rust-version guarantee or production certification is claim
 
 ## Command description is not task execution
 
-[`DescribeCommand`](forge-command/README.md) is an independent, object-safe trait
+[`DescribeCommand`](forge-core/README.md) is an independent, object-safe trait
 returning static per-operation descriptors. It is **not a `Task` supertrait**;
 existing pure tasks remain valid without metadata. A selected task may implement
 both traits, while non-Task operations (the local discovery handler) reuse the
@@ -358,7 +352,7 @@ implementation is pure or that a future client respects its semantics.
   acquisition. Borrowed leases cannot outlive their owner. Owned transient values
   may still share captured backing state. Ordinary destruction is synchronous.
 
-`forge-bootstrap` validates assembly binding metadata, not a route-descriptor
+`forge_core::bootstrap` validates assembly binding metadata, not a route-descriptor
 catalog. The local application now registers its presentation descriptors together with checked bindings and tests that every advertised command is invokable; this is an application-specific guarantee, not a generic core catalog. Existing bridge registration still rejects route duplicates; the demo
 tests its known route set. Metadata cannot prove arbitrary factory code follows
 its declarations. Registrar purity and construction/drop order are tested behavior,

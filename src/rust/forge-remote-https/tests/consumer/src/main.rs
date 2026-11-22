@@ -4,10 +4,10 @@ fn main() {
 
 #[cfg(all(test, feature = "https"))]
 mod tests {
-    use forge_bootstrap::Registry;
-    use forge_ingress_contract::{Envelope, Header, RouteKey};
-    use forge_io_client::IoClient;
-    use forge_provider::{Factory, InstanceProvider, Singleton};
+    use forge_core::bootstrap::Registry;
+    use forge_core::ingress::{Envelope, Header, RouteKey};
+    use forge_core::io_client::IoClient;
+    use forge_core::provider::{Factory, InstanceProvider, Singleton};
     use forge_remote::{NodeCall, NodeCommand, RemoteError, Target};
     use forge_remote_https::{register_client, ClientConfig, Credentials, Limits};
 
@@ -52,14 +52,14 @@ mod tests {
 
 #[cfg(all(test, feature = "ide"))]
 mod ide_tests {
-    use forge_bootstrap::Registry;
+    use forge_core::bootstrap::Registry;
     use forge_ide::{
         assembly::ProjectAlias,
         remote::{InspectCall, InspectCommand, ReportLimits},
     };
-    use forge_ingress_contract::{Envelope, Header, RouteKey};
-    use forge_io_client::IoClient;
-    use forge_provider::{Factory, InstanceProvider, Singleton};
+    use forge_core::ingress::{Envelope, Header, RouteKey};
+    use forge_core::io_client::IoClient;
+    use forge_core::provider::{Factory, InstanceProvider, Singleton};
     use forge_remote::{RemoteError, Target};
     use forge_remote_https::{
         gateway::{

@@ -1,5 +1,5 @@
 use super::*;
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,

@@ -1,8 +1,8 @@
 #![cfg(feature = "http")]
-use forge_bootstrap::Registry;
-use forge_io_client::IoClient;
+use forge_core::bootstrap::Registry;
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use forge_jenkins::{register_http, Config, Credentials, Error, Request, Response};
-use forge_provider::Factory;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},

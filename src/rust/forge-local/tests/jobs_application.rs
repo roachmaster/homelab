@@ -1,5 +1,5 @@
 #![cfg(feature = "jobs")]
-use forge_ingress_contract::{Envelope, Header};
+use forge_core::ingress::{Envelope, Header};
 use forge_local::{
     jobs::{
         CancelAck, IntentKey, JobCommand, JobError, JobId, JobOutput, JobState, JobsConfig,
@@ -171,9 +171,9 @@ fn intent_replay_and_conflict_do_not_replace_the_original_record() {
                 total: 6
             })
         ),
-        Err(AppError::Dispatch(forge_bridge::DispatchError::Handler(
-            RunError::Jobs(JobError::IntentConflict)
-        )))
+        Err(AppError::Dispatch(
+            forge_core::bridge::DispatchError::Handler(RunError::Jobs(JobError::IntentConflict))
+        ))
     ));
     let JobOutput::Listed(records) = call(&app, "jobs.list", JobCommand::List) else {
         panic!("list")
@@ -212,9 +212,9 @@ fn local_owner_is_context_not_payload_and_each_operation_checks_it() {
     ] {
         assert!(matches!(
             app.invoke_as_local(&bob, route(name), Command::Jobs(command)),
-            Err(AppError::Dispatch(forge_bridge::DispatchError::Handler(
-                RunError::Jobs(JobError::NotVisible)
-            )))
+            Err(AppError::Dispatch(
+                forge_core::bridge::DispatchError::Handler(RunError::Jobs(JobError::NotVisible))
+            ))
         ));
     }
     let Output::Jobs(JobOutput::Listed(records)) = app
@@ -241,8 +241,8 @@ fn different_host_incarnation_rejects_old_reference() {
             route("jobs.inspect"),
             Command::Jobs(JobCommand::Inspect { id })
         ),
-        Err(AppError::Dispatch(forge_bridge::DispatchError::Handler(
-            RunError::Jobs(JobError::WrongIncarnation)
-        )))
+        Err(AppError::Dispatch(
+            forge_core::bridge::DispatchError::Handler(RunError::Jobs(JobError::WrongIncarnation))
+        ))
     ));
 }

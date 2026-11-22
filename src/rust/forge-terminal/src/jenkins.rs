@@ -3,11 +3,11 @@
 //! prepared operation acquires the configured native client; successful
 //! construction is reused for this application, with no automatic request retry.
 use crate::parser::safe_text;
-use forge_bootstrap::{PreparedGroup, Registry};
-use forge_io_client::IoClient;
+use forge_core::bootstrap::{PreparedGroup, Registry};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use forge_jenkins::{Config, Credentials, Error, HttpClient, Request, Response};
 use forge_local::{jenkins::JenkinsCommand, Command, CommandKind};
-use forge_provider::Factory;
 use serde::Deserialize;
 use std::{
     cell::OnceCell,

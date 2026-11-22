@@ -1,5 +1,5 @@
+use forge_core::io_client::IoClient;
 use forge_ide::filesystem::{EntryKind, FsError, FsRequest, FsResponse, NativeFiles};
-use forge_io_client::IoClient;
 use std::{
     error::Error,
     ffi::OsString,

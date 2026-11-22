@@ -1,10 +1,10 @@
 //! Explicit build-boundary I/O; no runtime host or application domain decisions.
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_ide_web::generate::{
     application::{ide_document, ide_transport, IDE_THEME},
     register_assets, AssetConfig,
 };
-use forge_provider::{Factory, InstanceProvider, Singleton};
 use std::{
     error::Error,
     fs::{self, File},

@@ -42,7 +42,7 @@ make ci
 
 Import `forge_template::assembly::{register_renderer, RenderConfig, RenderFactory,
 Renderer, AssemblyError}` from the **library**, not from an example. The public
-module depends only on `forge-bootstrap` and `forge-provider`. Parser, schema,
+module depends only on `forge-core`. Parser, schema,
 expression and rendering modules do not import those contracts. The default package profile has
 **two normal dependencies**, not a zero-dependency profile; the optional `cli`
 feature selects additional narrow contracts only for the standalone binary. A

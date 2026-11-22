@@ -1,7 +1,7 @@
 //! Native boundary operations only: no schema or business payload assembly.
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_io_client::IoClient;
-use forge_provider::Factory;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use std::{
     convert::Infallible,
     error::Error,

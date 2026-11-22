@@ -1,8 +1,8 @@
-use forge_bootstrap::{RegistrationError, Registry};
-use forge_io_client::IoClient;
+use forge_core::bootstrap::{RegistrationError, Registry};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
+use forge_core::task::Task;
 use forge_kernel::node::*;
-use forge_provider::{Factory, InstanceProvider, Singleton, Transient};
-use forge_task::Task;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 fn factory(id: &str) -> NodeClientFactory {
@@ -195,7 +195,7 @@ fn task_rejects_a_substituted_clients_wrong_response_kind() {
 
 #[test]
 fn command_description_is_optional_separate_and_has_no_client_bound_or_execution() {
-    use forge_command::{validate_descriptors, DescribeCommand};
+    use forge_core::command::{validate_descriptors, DescribeCommand};
     // () is not a node client: reading metadata cannot require executing one.
     let task = forge_kernel::node::NodeTask::new(());
     let descriptions = task.descriptors();

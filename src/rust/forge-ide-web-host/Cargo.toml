@@ -5,12 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-forge-bootstrap.workspace = true
-forge-provider.workspace = true
-forge-task.workspace = true
-forge-io-client.workspace = true
-forge-ingress-contract.workspace = true
-forge-bridge.workspace = true
+forge-core.workspace = true
 forge-ide = { path = "../forge-ide", features = ["remote"] }
 forge-ide-ui = { path = "../forge-ide-ui" }
 forge-remote = { path = "../forge-remote" }

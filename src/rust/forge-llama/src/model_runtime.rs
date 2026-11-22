@@ -1,7 +1,7 @@
 //! Native process construction and scoped GPU acquisition for a configured driver.
 
 use crate::{backend_address, Config, Error, MAIL_MODEL_ID};
-use forge_provider::{Factory, InstanceProvider, Transient};
+use forge_core::provider::{Factory, InstanceProvider, Transient};
 use std::{
     fs::{File, OpenOptions, TryLockError},
     io::{self, Read},

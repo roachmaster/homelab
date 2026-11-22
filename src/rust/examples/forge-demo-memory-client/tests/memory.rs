@@ -1,11 +1,11 @@
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, Singleton, Transient};
 use forge_demo_memory_client::{
     register, ClientConstruction, ConfigError, MemoryAccessError, MemoryClientFactory,
     MemoryClientHandle, MemoryConfig, MemoryFactoryError, MemoryMode, MemoryProbe,
 };
 use forge_demo_messages::{Delivery, DeliveryError, PreparedMessage};
-use forge_io_client::IoClient;
-use forge_provider::{Factory, Singleton, Transient};
 use std::rc::Rc;
 
 fn factory(config: MemoryConfig, probe: MemoryProbe) -> MemoryClientFactory {
@@ -232,7 +232,7 @@ fn probe_log_records_create_execute_and_drop_in_order() {
 
 #[test]
 fn error_display_names_each_failure_exactly() {
-    use forge_bootstrap::RegistrationError;
+    use forge_core::bootstrap::RegistrationError;
     use forge_demo_memory_client::{ConfigError, MemoryAccessError, MemoryFactoryError};
     assert_eq!(
         ConfigError::ZeroSequence.to_string(),

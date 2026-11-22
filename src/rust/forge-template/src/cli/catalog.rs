@@ -2,7 +2,9 @@
 //! an adapter convention, not a field inserted into rendering business input.
 
 use super::input::{HelpTarget, MAX_ARGUMENTS, MAX_ARGUMENT_BYTES, MAX_BINDINGS};
-use forge_command::{ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence};
+use forge_core::command::{
+    ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence,
+};
 use std::fmt::Write;
 
 pub(super) const RENDER_ROUTE: &str = "template.render";
@@ -185,7 +187,7 @@ pub(super) fn help(target: Option<HelpTarget>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forge_command::validate_descriptors;
+    use forge_core::command::validate_descriptors;
 
     #[test]
     fn descriptors_are_valid_and_are_the_exact_binding_catalog() {

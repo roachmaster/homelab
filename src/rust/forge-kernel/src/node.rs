@@ -4,11 +4,11 @@
 //! Rust compile-target constants, not hardware probes. Uptime starts when this
 //! client is constructed, not when the OS boots or the whole application becomes
 //! ready. A responding client is not a production health/readiness assessment.
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_command::{CommandDescriptor, DescribeCommand};
-use forge_io_client::IoClient;
-use forge_provider::Factory;
-use forge_task::Task;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::command::{CommandDescriptor, DescribeCommand};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
+use forge_core::task::Task;
 use std::{
     error::Error,
     fmt,
@@ -228,7 +228,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use forge_bootstrap::Registry;
+    use forge_core::bootstrap::Registry;
 
     #[test]
     fn uptime_origin_is_created_after_freeze_and_fresh_on_each_creation() {

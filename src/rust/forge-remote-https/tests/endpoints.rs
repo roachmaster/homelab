@@ -1,8 +1,8 @@
 mod support;
-use forge_bootstrap::Registry;
-use forge_ingress_contract::{Envelope, Header, RouteKey};
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton};
+use forge_core::bootstrap::Registry;
+use forge_core::ingress::{Envelope, Header, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_remote::{
     now_unix_ms, Destination, NodeCall, NodeCommand, NodeInfo, ReadNodeInfo, RemoteError, Target,
 };

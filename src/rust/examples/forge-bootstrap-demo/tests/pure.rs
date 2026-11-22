@@ -2,9 +2,9 @@ use forge_bootstrap_demo::{
     bootstrap, sum_route, AppConfig, Command, CommandKind, DemoContext, Outcome, PureConfig,
     RunError, SumOverflow, SumTask,
 };
-use forge_bridge::DispatchError;
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
-use forge_task::Task;
+use forge_core::bridge::DispatchError;
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
+use forge_core::task::Task;
 
 fn sum(left: i64, right: i64) -> Envelope<Command> {
     Envelope::new(
@@ -89,6 +89,9 @@ fn unselected_optional_route_is_absent_even_when_package_feature_is_enabled() {
 #[test]
 fn repeated_applications_produce_identical_sums() {
     fn run_once() -> i64 {
+        // The update fills `messages` when that feature is enabled; without
+        // it the struct has only `pure` and clippy would call it needless.
+        #[allow(clippy::needless_update)]
         let app = bootstrap(AppConfig {
             pure: PureConfig { bias: 2 },
             ..AppConfig::default()
@@ -109,9 +112,9 @@ fn repeated_applications_produce_identical_sums() {
 
 #[test]
 fn error_display_names_each_failure_exactly() {
-    use forge_bootstrap::{RegistrationError, ValidationError};
     use forge_bootstrap_demo::BootstrapError;
-    use forge_bridge::DuplicateRoute;
+    use forge_core::bootstrap::{RegistrationError, ValidationError};
+    use forge_core::bridge::DuplicateRoute;
     use std::error::Error;
     assert_eq!(SumOverflow.to_string(), "sum overflow");
     assert_eq!(RunError::Sum(SumOverflow).to_string(), "sum overflow");

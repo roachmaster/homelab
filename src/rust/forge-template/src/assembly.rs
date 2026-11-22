@@ -5,8 +5,8 @@
 //! its bootstrap registry, it explicitly creates a renderer or retains the
 //! factory in a transient provider. This module does not select routes or scopes.
 use crate::{schema, Limits, MethodRegistry, Schema, Template, TemplateError, Value};
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_provider::Factory;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::provider::Factory;
 use std::{error::Error, fmt, sync::Arc};
 
 /// Explicit startup source, schema and budgets. Neither variant reads files or

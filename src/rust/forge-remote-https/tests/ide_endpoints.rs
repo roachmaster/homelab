@@ -1,14 +1,14 @@
 #![cfg(feature = "ide")]
 mod support;
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::ingress::{Envelope, Header, Response, ResponseHeader, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_ide::{
     assembly::ProjectAlias,
     model::{Entry, Name, ProjectReport, TreeNode},
     remote::{InspectCall, InspectCommand, InspectReply, ReportLimits},
 };
-use forge_ingress_contract::{Envelope, Header, Response, ResponseHeader, RouteKey};
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton};
 use forge_remote::{now_unix_ms, RemoteError};
 use forge_remote_https::{
     gateway::{register_gateway_server, GatewayLimits, GatewayServerConfig, ServeOutcome},

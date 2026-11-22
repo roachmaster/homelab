@@ -1,9 +1,9 @@
 //! Disposable two-process browser fixture. Creates temporary test credentials,
 //! starts the real agent, and hosts only an owned temporary inspection project.
 //! No system trust stores, external hosts or operational identities are changed.
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::Factory;
 use forge_ide_web_host::{load_config, register_host, ServeOutcome};
-use forge_provider::Factory;
 use rcgen::{
     BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose,
@@ -348,8 +348,8 @@ impl forge_ide_web_host::InspectionPort for FaultPort {
         &self,
         r: forge_ide::remote::RemoteInspectInput,
     ) -> Result<forge_ide::remote::InspectReply, forge_remote::RemoteError> {
+        use forge_core::ingress::{Header, Response, RouteKey};
         use forge_ide::model::{Entry, FileContent, Name, ProjectReport, TreeNode};
-        use forge_ingress_contract::{Header, Response, RouteKey};
         match r.project.as_str() {
             "slow" => std::thread::sleep(Duration::from_millis(700)),
             "timeout" => std::thread::sleep(Duration::from_millis(5500)),
@@ -393,13 +393,13 @@ impl forge_ide_web_host::InspectionPort for FaultPort {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use forge_core::task::Task;
     use forge_ide::assembly::{register_ide, IdeConfig, ProjectAlias};
     use forge_ide::remote::RemoteInspectInput;
     use forge_ide::task::InspectRequest;
     use forge_ide_ui::protocol::NativeName;
     use forge_ide_web_host::{project_report, InspectionPort};
     use forge_remote::{RemoteError, Target};
-    use forge_task::Task;
 
     #[test]
     fn live_fixture_sources_exercise_full_report_filtering_and_empty_unavailable_distinctions() {

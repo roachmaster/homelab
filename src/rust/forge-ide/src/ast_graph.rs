@@ -13,8 +13,8 @@ use crate::{
     },
     task::InspectError,
 };
-use forge_io_client::IoClient;
-use forge_task::Task;
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use proc_macro2::{TokenStream, TokenTree};
 use quote::ToTokens;
 use std::{

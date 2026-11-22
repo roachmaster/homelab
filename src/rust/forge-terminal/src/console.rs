@@ -1,7 +1,7 @@
 //! Synchronous terminal I/O boundary. Requests contain already prepared text.
-use forge_bootstrap::PreparedGroup;
-use forge_io_client::IoClient;
-use forge_provider::Factory;
+use forge_core::bootstrap::PreparedGroup;
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use std::{
     cell::RefCell,
     convert::Infallible,
@@ -60,7 +60,8 @@ impl Factory<StdioConsole> for StdioFactory {
     }
 }
 
-pub fn register_stdio() -> Result<PreparedGroup<StdioFactory>, forge_bootstrap::RegistrationError> {
+pub fn register_stdio(
+) -> Result<PreparedGroup<StdioFactory>, forge_core::bootstrap::RegistrationError> {
     PreparedGroup::new("terminal.stdio", &["terminal.console"], &[], StdioFactory)
 }
 impl<R, W, E> StreamConsole<R, W, E> {

@@ -1,10 +1,10 @@
-use forge_bootstrap::Registry;
-use forge_io_client::IoClient;
+use forge_core::bootstrap::Registry;
+use forge_core::io_client::IoClient;
 use forge_jenkins::{
     register, Config, Credentials, Error, HttpRequest, HttpResponse, Request, Response,
     TransportError,
 };
-use forge_provider::{Factory, InstanceProvider, Singleton, Transient};
+use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
 use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 
 #[derive(Clone)]

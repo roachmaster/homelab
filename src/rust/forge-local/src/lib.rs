@@ -4,7 +4,7 @@
 //! discovery, passes through the existing header-selected bridge. This synchronous
 //! host runs under its process's OS credentials: its local admission policy is not
 //! authentication, per-user authorization, a filesystem sandbox or remote access.
-pub use forge_command::{
+pub use forge_core::command::{
     ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, DescriptorError, Presence,
 };
 
@@ -22,7 +22,7 @@ pub use application::{
 };
 #[cfg(feature = "disk")]
 pub use disk::DiskCommand;
-pub use forge_ingress_contract::RouteKey;
+pub use forge_core::ingress::RouteKey;
 #[cfg(feature = "disk")]
 pub use forge_kernel::disk::{
     DirectoryEntry, DirectoryListing, DiskError, DiskResponse, EntryKind, PermissionInfo,

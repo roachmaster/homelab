@@ -6,21 +6,15 @@ publish.workspace = true
 
 [features]
 default = []
-remote = ["dep:forge-remote", "dep:forge-ingress-contract"]
+remote = ["dep:forge-remote"]
 yaml = ["dep:serde", "dep:serde_yaml_ng"]
 write-contract = ["dep:serde"]
 managed-writes = ["write-contract", "dep:nix", "dep:serde_json"]
-cli = ["yaml", "dep:serde_json", "dep:forge-bridge", "dep:forge-ingress-contract", "dep:forge-command"]
+cli = ["yaml", "dep:serde_json"]
 
 [dependencies]
 forge-remote = { path = "../forge-remote", optional = true }
-forge-bootstrap.workspace = true
-forge-provider.workspace = true
-forge-task.workspace = true
-forge-io-client.workspace = true
-forge-bridge = { workspace = true, optional = true }
-forge-ingress-contract = { workspace = true, optional = true }
-forge-command = { workspace = true, optional = true }
+forge-core.workspace = true
 sha2 = "=0.10.9"
 cap-std = "=4.0.3"
 cap-fs-ext = "=4.0.3"

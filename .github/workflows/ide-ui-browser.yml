@@ -3,7 +3,7 @@ name: IDE browser acceptance
 on:
   push:
     branches: [main, validation/forge-ide-ui]
-    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-game-runtime/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-bootstrap/**', 'src/rust/forge-provider/**', 'src/rust/forge-bridge/**', 'src/rust/forge-ingress-contract/**', 'src/rust/forge-task/**', 'src/rust/forge-io-client/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', 'src/rust/scripts/ui_qa.py', 'src/rust/scripts/tests/test_ui_qa.py', '.github/workflows/ide-ui-browser.yml']
+    paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-game-runtime/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-core/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', 'src/rust/scripts/ui_qa.py', 'src/rust/scripts/tests/test_ui_qa.py', '.github/workflows/ide-ui-browser.yml']
   # Backend/docs-only agent PRs also require the real-browser check.
   pull_request: {}
   workflow_dispatch:

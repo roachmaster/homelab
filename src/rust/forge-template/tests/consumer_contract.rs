@@ -68,11 +68,6 @@ fn external_consumer_imports_public_assembly_and_can_omit_the_capability() {
     selected.extend(["--features", "rendering"]);
     assert_eq!(
         names(&cargo(&selected)),
-        BTreeSet::from([
-            "template-public-consumer",
-            "forge-template",
-            "forge-bootstrap",
-            "forge-provider"
-        ])
+        BTreeSet::from(["template-public-consumer", "forge-template", "forge-core"])
     );
 }

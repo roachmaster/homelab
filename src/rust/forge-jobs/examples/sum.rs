@@ -1,12 +1,12 @@
 //! An in-process driver for one private local store.
 
-use forge_bootstrap::Registry;
-use forge_ingress_contract::{AdmissionDenied, AdmissionPolicy, Envelope, Header, RouteKey};
+use forge_core::bootstrap::Registry;
+use forge_core::ingress::{AdmissionDenied, AdmissionPolicy, Envelope, Header, RouteKey};
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_jobs::{
     bridge, register_store, register_worker, Command, JobId, Owner, State, StoreConfig, Work,
     WorkerConfig,
 };
-use forge_provider::{Factory, InstanceProvider, Singleton};
 use std::{
     env,
     error::Error,

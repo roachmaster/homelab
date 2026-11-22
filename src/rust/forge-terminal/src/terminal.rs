@@ -3,7 +3,7 @@ use crate::help::HELP_OPTION;
 #[cfg(feature = "disk")]
 use crate::parser::quote_os;
 use crate::parser::{decode, decode_session, parse_options, safe_text, session_arguments, Mode};
-use forge_io_client::IoClient;
+use forge_core::io_client::IoClient;
 #[cfg(feature = "disk")]
 use forge_local::DiskResponse;
 use forge_local::{Application, CommandInfo, NodeResponse, NodeState, Output};
@@ -349,7 +349,7 @@ fn mode_text(mode: Option<u32>) -> String {
 mod help_tests {
     use super::*;
     use crate::console::StreamConsole;
-    use forge_bootstrap::PreparedGroup;
+    use forge_core::bootstrap::PreparedGroup;
     use forge_local::{LocalConfig, NodeConfigError, NodeError, NodeFactories, NodeRequest};
     use std::{cell::Cell, io::Cursor, rc::Rc};
 

@@ -1,10 +1,10 @@
-use forge_bootstrap::Registry;
-use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header};
+use forge_core::bootstrap::Registry;
+use forge_core::bridge::{Bridge, DispatchError, RegistryBuilder};
+use forge_core::ingress::{AdmissionDenied, Envelope, Header};
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_llama::{
     register_llama, register_routes, Config, Error, LlamaFactory, Operation, Reply, Request,
 };
-use forge_provider::{Factory, InstanceProvider, Singleton};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
     body::{Bytes, Incoming},

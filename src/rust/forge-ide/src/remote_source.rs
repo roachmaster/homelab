@@ -4,10 +4,10 @@ use crate::{
     model::Name,
     source::{SourceDocument, MAX_SOURCE_BYTES},
 };
-use forge_ingress_contract::{Envelope, Header, Payload, Response, RouteKey};
-use forge_io_client::IoClient;
+use forge_core::ingress::{Envelope, Header, Payload, Response, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use forge_remote::{RemoteError, Target};
-use forge_task::Task;
 pub const IDE_SOURCE: &str = "ide.source";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceSelection {

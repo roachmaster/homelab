@@ -11,15 +11,15 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(unix)]
 mod native {
-    use forge_access::{AuthenticatedBoundary, Grant, IdentityFacts, RoutePolicy, Verifier};
-    use forge_bootstrap::{PreparedGroup, Registry};
-    use forge_ingress_contract::{Envelope, Header, RouteKey};
-    use forge_io_client::IoClient;
+    use forge_core::access::{AuthenticatedBoundary, Grant, IdentityFacts, RoutePolicy, Verifier};
+    use forge_core::bootstrap::{PreparedGroup, Registry};
+    use forge_core::ingress::{Envelope, Header, RouteKey};
+    use forge_core::io_client::IoClient;
+    use forge_core::provider::{Factory, InstanceProvider, Singleton};
     use forge_jobs::{
         authenticated_bridge, register_private_store, register_worker, Command, JobId, Reply,
         StoreConfig, Work, Worker, WorkerConfig,
     };
-    use forge_provider::{Factory, InstanceProvider, Singleton};
     use forge_terminal::console::{register_stdio, ConsoleRequest, StdioConsole};
     use std::{
         env,

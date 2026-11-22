@@ -1,10 +1,12 @@
 //! Application-owned Jenkins actions, request preparation and admitted bindings.
 use super::{BootstrapError, Command, CommandKind, Output, RunError};
 use crate::application::{descriptor_for, Bindings};
-use forge_command::{ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence};
-use forge_io_client::IoClient;
+use forge_core::command::{
+    ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence,
+};
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use forge_jenkins::{Error, Request, Response};
-use forge_task::Task;
 use std::{collections::BTreeMap, rc::Rc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

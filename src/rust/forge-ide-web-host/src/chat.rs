@@ -1,6 +1,6 @@
 use crate::{service::Rejection, workspace, HostError};
+use forge_core::provider::Factory;
 use forge_ide_ui::protocol::FailureKind;
-use forge_provider::Factory;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{body::Bytes, client::conn::http1, Request, StatusCode};
 use hyper_util::rt::TokioIo;

@@ -1,5 +1,5 @@
-use forge_bridge::{Bridge, RegistryBuilder};
-use forge_ingress_contract::{AdmissionPolicy, Payload, RouteKey};
+use forge_core::bridge::{Bridge, RegistryBuilder};
+use forge_core::ingress::{AdmissionPolicy, Payload, RouteKey};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, sync::Arc};
 
@@ -174,8 +174,15 @@ pub fn bridge<S: JobStore, A: AdmissionPolicy<Owner>>(
 
 pub fn authenticated_bridge<S: JobStore>(
     store: Arc<S>,
-    admission: forge_access::RoutePolicy,
-) -> Bridge<'static, Command, forge_access::Context, Reply, JobError, forge_access::RoutePolicy> {
+    admission: forge_core::access::RoutePolicy,
+) -> Bridge<
+    'static,
+    Command,
+    forge_core::access::Context,
+    Reply,
+    JobError,
+    forge_core::access::RoutePolicy,
+> {
     bind(store, admission, |context| Owner::new(context.subject()))
 }
 

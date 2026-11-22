@@ -3,15 +3,15 @@
 //! descriptors and admitted bindings belong to this example application.
 //! The composition tests reuse these application-specific bindings.
 
-use forge_bootstrap::Registry;
-use forge_bridge::{Bridge, RegistryBuilder};
-use forge_command::{
+use forge_core::bootstrap::Registry;
+use forge_core::bridge::{Bridge, RegistryBuilder};
+use forge_core::command::{
     validate_descriptors, ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand,
     Presence,
 };
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, Payload, RouteKey};
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use forge_template::{
     assembly::{register_renderer, RenderConfig, Renderer},
     Field, Limits, MethodRegistry, Schema, TemplateError, Value,

@@ -2,15 +2,17 @@
 
 **Status: working todo list for the crate consolidation and CI revision,
 2026-11-22. Traced against main `c738faa`. Crate formalization complete
-22/22 (section 7); consolidation decisions below are still open.**
+22/22 (section 7); the `forge-core` merge is done (section 8); the
+`forge-llama`, demo-crate, `forge-kernel`, and CI-matrix decisions below
+are still open.**
 
 ## Todo
 
-- [ ] Decide the `forge-core` merge (eight contract crates into one) and the name
+- [x] Decide the `forge-core` merge (eight contract crates into one) and the name — done, section 8
 - [ ] Decide `forge-llama`: remove from the workspace, wire into the host, or keep deliberately
 - [ ] Decide the demo crates: keep in the workspace for every CI combination, or gate them to a single job / separate example workspace
 - [ ] Decide `forge-kernel`: into `forge-core` as feature-gated modules, or separate
-- [ ] Decide the layering enforcement: a layering test, or keep the eight crate boundaries
+- [x] Decide the layering enforcement: a layering test, or keep the eight crate boundaries — layering test, `forge-core/tests/layering.rs`
 - [ ] Rationalize the CI feature matrix (step two, after the layout decision)
 
 Built to answer: which crates are cohesive enough to merge into a higher-order
@@ -311,3 +313,72 @@ whether that sharing is declared or accidental. That is the concrete reason
 the layering test matters: without it, a merge re-creates the root-private
 pattern at a larger scale, with eight modules' privates silently visible to
 each other through the crate root.
+
+## 8. The `forge-core` merge (2026-11-22)
+
+Done on this branch, in one commit. The eight contract crates are gone;
+`src/rust/forge-core/` holds one public module per contract (`provider`,
+`io_client`, `command`, `ingress`, `task`, `bootstrap`, `bridge`,
+`access`), each moved from its crate with its crate doc as the module doc.
+All 16 consumer crates now depend on `forge-core` alone; the old crates'
+tests (82 tests + 6 doctests) and the two `forge-bridge` examples moved
+with them, imports rewritten mechanically (`forge_task::` ->
+`forge_core::task::`, and so on). No behavior changed, no public API
+changed beyond the crate path.
+
+Measured after the merge (same analyzer as section 1): **19 crates, 40
+internal edges, max depth 4** (was 26 / 111 / 6) — exactly the section 3.1
+prediction. `forge-core` is 4,135 lines over 22 files, 16 dependents, zero
+external dependencies, zero features. Total workspace LOC is 96,213, up
+from 91,503 — the growth is the test revamp and formalization work since
+`c738faa`, not the merge.
+
+Three things the merge turned up that section 3.1 did not foresee:
+
+### 8.1 The modules are public, not private behind re-exports
+
+Section 3.1 recommended private modules with re-exports. That does not
+work: `forge-bootstrap` and `forge-bridge` both export a public `Registry`
+(the factory-group registry and the frozen route registry), so a flat
+re-export at the `forge-core` root would collide. The modules are public
+and consumers qualify (`forge_core::bootstrap::Registry` vs
+`forge_core::bridge::Registry`). The layering test is correspondingly more
+important: it is the only thing stopping a module from reaching into a
+higher one.
+
+### 8.2 Per-crate optional dependencies are gone
+
+Four consumers used the old crates as optional dependencies under
+features: `forge-ide` (bridge/command/ingress under `cli`/`remote`),
+`forge-template` (task/command/bridge/ingress/io-client under `cli`),
+`forge-bootstrap-demo` (provider/io-client under `disk`/`messages`), and
+`forge-terminal` (access/ingress under `durable-jobs`). One crate cannot
+be both a required dependency (for the modules a consumer always needs)
+and an optional one (for the modules it needs only under a feature), so
+those consumers now depend on `forge-core` unconditionally and the
+features gate only the *use* of the modules in code (`cfg(feature = ...)`),
+not their compilation. The cost is compiling ~3,000 lines of zero-dependency
+code in builds that previously excluded some of it — negligible. The
+`check_dependencies.py` optionality assertions for those four consumers
+were rewritten to match (the assertions on heavier optional dependencies —
+serde, serde_yaml_ng, nix, forge-remote, forge-template — are unchanged).
+`forge-ide-web` is the exception: its only core dependencies were
+bootstrap/provider under `build-assets`, so its `forge-core` dependency
+stays optional. `forge-template`'s `cli` feature is now an empty marker
+feature, and the guard asserts it stays that way.
+
+### 8.3 The architecture guard was rewritten for the new shape
+
+`scripts/check_dependencies.py` hardcodes the workspace: its `ALLOWED`
+map, the pure/messages/disk consumer profiles, the negative fixtures, and
+the `cargo tree` assertions all named the eight crates. All of it now
+names `forge-core` (fixtures: a `forge-core` -> `forge-kernel` edge, a
+parser in `forge-core`, a `forge-core` -> `rustls` leak, a non-empty
+template `cli` feature). The guard passes: 22 negative fixtures rejected,
+all profile checks green. The `forge-core` layering test
+(`tests/layering.rs`) is the module-level counterpart: it scans the eight
+module sources for `crate::<module>` references and fails on any edge
+outside the allowed set (task -> io_client/provider, bridge -> ingress /
+io_client / provider / task, access -> ingress), and it fails if a module
+is added without a layering rule. Both guards are part of the merge
+commit, not follow-ups.

@@ -11,7 +11,7 @@ application owns its ingress command/result sums.
 `MessagesConfig` is typed startup configuration, not a runtime command. The
 `register(config, probe)` function validates it and returns one
 `PreparedGroup<MessageFactories>` without creating a task or client. Its declared
-client requirement must precede it in a frozen `forge-bootstrap::Registry`.
+client requirement must precede it in a frozen `forge_core::bootstrap::Registry`.
 After freeze, application composition extracts `GreetingRecipe`, supplies an
 owned ready client handle via `bind(client)`, and invokes the resulting existing
 zero-argument `Factory::create` contract. `TaskConstruction::Fail` and `TaskProbe`

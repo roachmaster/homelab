@@ -7,9 +7,9 @@
 //! The configured directory is a starting location, **not a security root**.
 //! Absolute paths, `..` and symlink traversal are allowed with host-process
 //! permissions. Canonicalization is not a sandbox or race-free access check.
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_io_client::IoClient;
-use forge_provider::Factory;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use std::{
     error::Error,
     ffi::OsString,

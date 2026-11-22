@@ -1,7 +1,7 @@
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_io_client::IoClient;
-use forge_provider::Factory;
-use forge_task::Task;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
+use forge_core::task::Task;
 use std::{cell::RefCell, error::Error, fmt, rc::Rc};
 
 pub const CLIENT_BINDING: &str = "demo.messages.client";

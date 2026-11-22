@@ -7,7 +7,7 @@ use forge_bootstrap_demo::{
     },
     DemoContext,
 };
-use forge_ingress_contract::{Envelope, Header, RouteKey};
+use forge_core::ingress::{Envelope, Header, RouteKey};
 use forge_kernel::disk::DiskConfig;
 use std::{
     error::Error,

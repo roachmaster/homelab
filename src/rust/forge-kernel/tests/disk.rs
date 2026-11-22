@@ -1,7 +1,7 @@
-use forge_bootstrap::{RegistrationError, Registry};
-use forge_io_client::IoClient;
+use forge_core::bootstrap::{RegistrationError, Registry};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
 use forge_kernel::disk::*;
-use forge_provider::{Factory, InstanceProvider, Singleton, Transient};
 use std::{
     error::Error,
     ffi::OsString,

@@ -1,11 +1,11 @@
-use forge_bootstrap::Registry;
-use forge_bridge::DispatchError;
-use forge_ingress_contract::{AdmissionDenied, AdmissionPolicy, Envelope, Header, RouteKey};
+use forge_core::bootstrap::Registry;
+use forge_core::bridge::DispatchError;
+use forge_core::ingress::{AdmissionDenied, AdmissionPolicy, Envelope, Header, RouteKey};
+use forge_core::provider::Factory;
 use forge_jobs::{
     bridge, register_store, Command, FileStore, JobError, JobStore, Owner, Reply, State,
     StoreConfig, Work, Worker, WorkerConfig,
 };
-use forge_provider::Factory;
 use std::{
     fs,
     path::PathBuf,
@@ -337,7 +337,7 @@ fn failed_publication_preserves_previous_receipt() {
         receipt.id.0 + 1
     );
 }
-use forge_access::{AuthenticatedBoundary, Grant, IdentityFacts, RoutePolicy, Verifier};
+use forge_core::access::{AuthenticatedBoundary, Grant, IdentityFacts, RoutePolicy, Verifier};
 
 #[test]
 fn identical_submission_sequences_produce_identical_receipts_and_statuses() {

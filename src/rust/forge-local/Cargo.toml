@@ -11,13 +11,7 @@ jobs = []
 jenkins = ["dep:forge-jenkins"]
 
 [dependencies]
-forge-command.workspace = true
-forge-bootstrap.workspace = true
-forge-bridge.workspace = true
-forge-ingress-contract.workspace = true
-forge-provider.workspace = true
-forge-io-client.workspace = true
-forge-task.workspace = true
+forge-core.workspace = true
 forge-jenkins = { path = "../forge-jenkins", default-features = false, optional = true }
 forge-kernel = { path = "../forge-kernel", default-features = false, features = ["node"] }
 

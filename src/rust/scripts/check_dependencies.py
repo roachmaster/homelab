@@ -7,43 +7,29 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
-    "forge-jenkins": {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-io-client")},
-    "forge-llama": {(name, "normal") for name in ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider")},
+    "forge-jenkins": {("forge-core", "normal")},
+    "forge-llama": {("forge-core", "normal")},
     "forge-ide-ui": set(),
-    "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-bootstrap","forge-provider","forge-template","forge-game-runtime")},
-    "forge-ide-web-host": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")} | {("forge-ide-ui", "build")},
+    "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-core","forge-template","forge-game-runtime")},
+    "forge-ide-web-host": {(name,"normal") for name in ("forge-core","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")} | {("forge-ide-ui", "build")},
     "forge-game-runtime": set(),
-    "forge-jobs": {(name, "normal") for name in ("forge-access", "forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider")},
-    "forge-access": {("forge-ingress-contract", "normal")},
-    "forge-agent": {(name,"normal") for name in ("forge-bootstrap","forge-provider","forge-task","forge-io-client","forge-ingress-contract","forge-bridge","forge-command","forge-kernel","forge-ide","forge-remote","forge-remote-https")},
-    "forge-remote": {(name, "normal") for name in ("forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task")},
-    "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-bootstrap", "forge-provider", "forge-io-client", "forge-ingress-contract", "forge-ide")} | {(name, "dev") for name in ("forge-kernel", "forge-task")},
-    "forge-ide": {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-io-client", "forge-bridge", "forge-command", "forge-ingress-contract", "forge-remote")},
-    "forge-template": {(name, "dev") for name in ("forge-task", "forge-command", "forge-bridge", "forge-ingress-contract")} |
-                      {(name, "normal") for name in ("forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client")},
-    "forge-command": set(),
-    "forge-ingress-contract": set(),
-    "forge-provider": set(),
-    "forge-io-client": set(),
-    "forge-task": {("forge-io-client", "dev"), ("forge-provider", "dev")},
-    "forge-bridge": {("forge-ingress-contract", "normal"), ("forge-provider", "dev"),
-                     ("forge-io-client", "dev"), ("forge-task", "dev")},
-    "forge-bootstrap": set(),
-    "forge-kernel": {(name, "normal") for name in
-                     ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task", "forge-command")},
+    "forge-jobs": {("forge-core", "normal")},
+    "forge-core": set(),
+    "forge-agent": {(name,"normal") for name in ("forge-core","forge-kernel","forge-ide","forge-remote","forge-remote-https")},
+    "forge-remote": {("forge-core", "normal")},
+    "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-core", "forge-ide")} | {("forge-kernel", "dev"), ("forge-core", "dev")},
+    "forge-ide": {(name, "normal") for name in ("forge-core", "forge-remote")},
+    "forge-template": {("forge-core", "dev"), ("forge-core", "normal")},
+    "forge-kernel": {("forge-core", "normal")},
     "forge-local": {("forge-jenkins", "normal")} | {(name, "normal") for name in
-                    ("forge-bootstrap", "forge-bridge", "forge-ingress-contract", "forge-provider",
-                     "forge-io-client", "forge-task", "forge-kernel", "forge-command")},
+                    ("forge-core", "forge-kernel")},
     "forge-terminal": {("forge-jenkins", "normal")} | {(name, "normal") for name in
-                       ("forge-local", "forge-io-client", "forge-bootstrap", "forge-provider",
-                        "forge-access", "forge-ingress-contract", "forge-jobs")},
-    "forge-demo-messages": {(name, "normal") for name in
-                            ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-task")},
+                       ("forge-local", "forge-core", "forge-jobs")},
+    "forge-demo-messages": {("forge-core", "normal")},
     "forge-demo-memory-client": {(name, "normal") for name in
-                                 ("forge-bootstrap", "forge-provider", "forge-io-client", "forge-demo-messages")},
+                                 ("forge-core", "forge-demo-messages")},
     "forge-bootstrap-demo": {(name, "normal") for name in
-                             ("forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract",
-                              "forge-provider", "forge-io-client", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
+                             ("forge-core", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
 EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
@@ -64,10 +50,10 @@ EXTERNAL = {
 }
 
 DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
-PURE_PROFILE = {"forge-bootstrap-demo", "forge-bootstrap", "forge-bridge", "forge-task", "forge-ingress-contract"}
-OPTIONAL = {"forge-demo-messages", "forge-demo-memory-client", "forge-provider", "forge-kernel", "forge-io-client"}
-MESSAGES_PROFILE = PURE_PROFILE | {"forge-demo-messages", "forge-demo-memory-client", "forge-provider", "forge-io-client"}
-DISK_PROFILE = PURE_PROFILE | {"forge-kernel", "forge-provider", "forge-io-client"}
+PURE_PROFILE = {"forge-bootstrap-demo", "forge-core"}
+OPTIONAL = {"forge-demo-messages", "forge-demo-memory-client", "forge-kernel"}
+MESSAGES_PROFILE = PURE_PROFILE | {"forge-demo-messages", "forge-demo-memory-client"}
+DISK_PROFILE = PURE_PROFILE | {"forge-kernel"}
 WASM_PLAYTEST_PROFILE = {
     "forge-game-runtime", "sha2", "cfg-if", "digest", "block-buffer", "generic-array",
     "typenum", "crypto-common",
@@ -125,7 +111,7 @@ def validate_packages(packages):
     for dep in web["dependencies"]:
         if dep["name"] == "sha2" and dep["target"] == 'cfg(target_arch = "wasm32")':
             continue  # Playtest runtime verifies cooked bytes on this target.
-        if dep["name"] in {"forge-bootstrap","forge-provider","forge-template","serde_yaml_ng","sha2"} and not dep["optional"]:
+        if dep["name"] in {"forge-core","forge-template","serde_yaml_ng","sha2"} and not dep["optional"]:
             raise SystemExit("Asset build dependency leaked into WASM default")
         if dep["name"] == "forge-game-runtime" and dep["target"] != 'cfg(target_arch = "wasm32")':
             raise SystemExit("Game runtime must remain a WASM-only dependency of forge-ide-web")
@@ -133,7 +119,10 @@ def validate_packages(packages):
     if ide["features"].get("default", []) != []:
         raise SystemExit("IDE YAML/CLI/remote must remain opt-in")
     for dep in ide["dependencies"]:
-        if dep["name"] in {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract", "forge-remote", "nix", "serde_json"} and not dep["optional"]:
+        # Bridge/command/ingress were optional deps here before the merge;
+        # they are forge-core modules now, always compiled, and their use is
+        # gated by the cli/remote features in code instead.
+        if dep["name"] in {"serde", "serde_yaml_ng", "forge-remote", "nix", "serde_json"} and not dep["optional"]:
             raise SystemExit("IDE integration dependencies must remain optional")
     https = packages["forge-remote-https"]
     if https["features"].get("default", []) != []:
@@ -146,8 +135,10 @@ def validate_packages(packages):
     template = packages["forge-template"]
     if template["features"].get("default", []) != []:
         raise SystemExit("Template CLI must not be enabled by default")
+    if template["features"].get("cli", []) != []:
+        raise SystemExit("Template CLI must enable no dependency; its contracts are forge-core modules")
     for dep in template["dependencies"]:
-        if (dep["kind"] or "normal") == "normal" and dep["name"] not in {"forge-bootstrap", "forge-provider"} and not dep["optional"]:
+        if (dep["kind"] or "normal") == "normal" and dep["name"] not in {"forge-core"} and not dep["optional"]:
             raise SystemExit("Template CLI contracts must remain optional")
     binaries = [t for t in template["targets"] if "bin" in t["kind"]]
     if len(binaries) != 1 or binaries[0].get("required-features") != ["cli"]:
@@ -178,7 +169,7 @@ def validate_packages(packages):
 def negative_fixtures(packages):
     fixtures = []
     bad = copy.deepcopy(packages)
-    bad["forge-task"]["dependencies"].append({"name": "forge-kernel", "kind": None,
+    bad["forge-core"]["dependencies"].append({"name": "forge-kernel", "kind": None,
         "path": str(ROOT / "forge-kernel"), "optional": False})
     fixtures.append(("core-to-implementation edge", bad))
     bad = copy.deepcopy(packages)
@@ -201,8 +192,8 @@ def negative_fixtures(packages):
     bad["forge-template"]["features"]["default"] = ["cli"]
     fixtures.append(("template CLI enabled by default", bad))
     bad = copy.deepcopy(packages)
-    next(d for d in bad["forge-template"]["dependencies"] if d["name"] == "forge-io-client" and d["kind"] is None)["optional"] = False
-    fixtures.append(("mandatory CLI dependency", bad))
+    bad["forge-template"]["features"]["cli"] = ["dep:serde_json"]
+    fixtures.append(("CLI feature enabling a dependency", bad))
     bad = copy.deepcopy(packages)
     bad["forge-ide"]["features"]["default"] = ["cli"]
     fixtures.append(("IDE CLI enabled by default", bad))
@@ -210,9 +201,9 @@ def negative_fixtures(packages):
     next(d for d in bad["forge-ide"]["dependencies"] if d["name"] == "serde_yaml_ng")["optional"] = False
     fixtures.append(("mandatory YAML dependency", bad))
     bad = copy.deepcopy(packages)
-    bad["forge-task"]["dependencies"].append({"name": "syn", "kind": None, "source": "registry+https://github.com/rust-lang/crates.io-index", "optional": False})
+    bad["forge-core"]["dependencies"].append({"name": "syn", "kind": None, "source": "registry+https://github.com/rust-lang/crates.io-index", "optional": False})
     fixtures.append(("parser in core", bad))
-    for source, target in [("forge-remote", "serde_json"), ("forge-ingress-contract", "rustls"), ("forge-local", "hyper")]:
+    for source, target in [("forge-remote", "serde_json"), ("forge-core", "rustls"), ("forge-local", "hyper")]:
         bad = copy.deepcopy(packages)
         bad[source]["dependencies"].append({"name": target, "kind": None, "source": "registry+https://github.com/rust-lang/crates.io-index", "optional": False})
         fixtures.append((f"network/codec leakage into {source}", bad))
@@ -250,19 +241,19 @@ def main():
     packages = {p["name"]: p for p in metadata["packages"]}
     validate_packages(packages)
     negative_fixtures(packages)
-    if consumer_tree(package="forge-template") != {"forge-template", "forge-bootstrap", "forge-provider"}:
-        raise SystemExit("Renderer public assembly must depend only on bootstrap/provider contracts")
-    if consumer_tree("--features", "cli", package="forge-template") != {"forge-template", "forge-bootstrap", "forge-provider", "forge-task", "forge-command", "forge-bridge", "forge-ingress-contract", "forge-io-client"}:
-        raise SystemExit("Template CLI must include only its selected narrow contracts")
+    if consumer_tree(package="forge-template") != {"forge-template", "forge-core"}:
+        raise SystemExit("Renderer public assembly must depend only on the forge-core contracts")
+    if consumer_tree("--features", "cli", package="forge-template") != {"forge-template", "forge-core"}:
+        raise SystemExit("Template CLI must add no crate beyond the core contracts")
     ide_default = consumer_tree(package="forge-ide")
     ide_cli = consumer_tree("--features", "cli", package="forge-ide")
-    if {"serde", "serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract"} & ide_default:
+    if {"serde", "serde_yaml_ng"} & ide_default:
         raise SystemExit("IDE default library includes presentation")
     if not {"syn", "cap-std", "cap-fs-ext"} <= ide_default:
         raise SystemExit("IDE lacks real parser/rooted native boundary")
-    if not {"serde_yaml_ng", "forge-bridge", "forge-command", "forge-ingress-contract"} <= ide_cli:
-        raise SystemExit("IDE CLI lacks required boundary contracts")
-    if {name for name in ide_default if name.startswith("forge-")} != {"forge-ide", "forge-task", "forge-io-client", "forge-bootstrap", "forge-provider"}:
+    if not {"serde_yaml_ng"} <= ide_cli:
+        raise SystemExit("IDE CLI lacks required YAML contract")
+    if {name for name in ide_default if name.startswith("forge-")} != {"forge-ide", "forge-core"}:
         raise SystemExit("IDE default has unexpected Forge dependencies")
     pure = consumer_tree()
     messages = consumer_tree("--features", "messages")
@@ -276,13 +267,13 @@ def main():
         if actual != expected:
             raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
     remote = consumer_tree(package="forge-remote")
-    if remote != {"forge-remote", "forge-ingress-contract", "forge-bridge", "forge-io-client", "forge-task"}:
+    if remote != {"forge-remote", "forge-core"}:
         raise SystemExit("Remote conversation port includes a transport/codec or implementation")
     https = consumer_tree(package="forge-remote-https")
     if not {"rustls", "hyper", "tokio", "serde_json"} <= https or "rcgen" in https or {"forge-kernel", "forge-ide", "forge-agent"} & https:
         raise SystemExit("HTTPS normal profile must own TLS/HTTP only; demo identity issuance/kernel stay dev-only")
     ide_remote = consumer_tree("--features", "remote", package="forge-ide")
-    if not {"forge-remote", "forge-ingress-contract"} <= ide_remote or {"serde_json", "rustls", "hyper", "forge-agent", "serde_yaml_ng"} & ide_remote:
+    if not {"forge-remote"} <= ide_remote or {"serde_json", "rustls", "hyper", "forge-agent", "serde_yaml_ng"} & ide_remote:
         raise SystemExit("IDE remote contract must remain transport and presentation free")
     if not {"forge-ide", "forge-remote-https", "ctrlc"} <= consumer_tree(package="forge-agent"):
         raise SystemExit("Agent must explicitly select its capabilities")
@@ -293,17 +284,17 @@ def main():
         raise SystemExit("Only the playtest runtime and digest verifier may expand the default WASM profile")
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-jenkins", "forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs", "forge-access"})
+    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-jenkins", "forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs"})
     for args in [(), ("--features", "disk"), ("--features", "jobs")]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
     if packages["forge-terminal"]["features"].get("durable-jobs") != [
-        "dep:forge-access", "dep:forge-ingress-contract", "dep:forge-jobs", "dep:ctrlc", "dep:nix"
+        "dep:forge-jobs", "dep:ctrlc", "dep:nix"
     ]:
         raise SystemExit("Durable jobs must remain a separate explicit terminal feature")
     for selection in [("--features", "durable-jobs"), ("--all-features",)]:
         tree = consumer_tree(*selection, package="forge-terminal")
-        expected_forge = local_expected | {"forge-jobs", "forge-access"}
+        expected_forge = local_expected | {"forge-jobs"}
         if selection == ("--all-features",):
             expected_forge |= {"forge-jenkins"}
         if {name for name in tree if name.startswith("forge-")} != expected_forge:
@@ -334,8 +325,8 @@ def main():
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
     print("PASS: remote typed port is transport-free; HTTPS is absent from existing local/IDE/template consumers")
     print("PASS: optional IDE parser/rooted native client isolated; YAML/CLI absent from library default")
-    print("PASS: six execution core + independent command description + optional kernel + local application/terminal + three demos; local allowed DAG")
-    print("PASS: renderer default exposes only bootstrap/provider assembly; opt-in CLI has narrow contracts; terminal/demo omit it")
+    print("PASS: one contract core + optional kernel + local application/terminal + three demos; local allowed DAG")
+    print("PASS: renderer default exposes only forge-core assembly; opt-in CLI adds no crate; terminal/demo omit it")
     print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk; no demo implementations")
     print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
 

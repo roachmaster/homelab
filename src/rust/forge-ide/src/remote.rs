@@ -8,10 +8,10 @@ use crate::{
     model::{Entry, FileContent, Name, ProjectReport},
     syntax::{Counts, Declaration, DeclarationKind, SourceSpan, SyntaxError},
 };
-use forge_ingress_contract::{Envelope, Header, Payload, Response, RouteKey};
-use forge_io_client::IoClient;
+use forge_core::ingress::{Envelope, Header, Payload, Response, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use forge_remote::Target;
-use forge_task::Task;
 use std::collections::BTreeSet;
 
 pub use crate::assembly::ProjectAlias;

@@ -1,11 +1,11 @@
-use forge_bootstrap::{PreparedGroup, Registry, ValidationError};
+use forge_core::bootstrap::{PreparedGroup, Registry, ValidationError};
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
+use forge_core::task::Task;
 use forge_demo_messages::{
     register, ConfigError, Delivery, GreetingError, GreetingInput, MessageFactories,
     MessagesConfig, PreparedMessage, TaskConstruction, TaskProbe, CLIENT_BINDING, GROUP_ID,
 };
-use forge_io_client::IoClient;
-use forge_provider::Factory;
-use forge_task::Task;
 use std::{cell::RefCell, fmt, rc::Rc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

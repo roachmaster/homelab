@@ -5,9 +5,9 @@ use crate::{
     work::{transport, valid_names, Envelope},
     HostError,
 };
+use forge_core::ingress::Header;
+use forge_core::provider::Factory;
 use forge_ide_ui::protocol::{UsageFailure, UsageReply, UsageRequest};
-use forge_ingress_contract::Header;
-use forge_provider::Factory;
 use hyper::body::Bytes;
 use serde::Deserialize;
 use std::{net::SocketAddr, path::PathBuf, time::Instant};

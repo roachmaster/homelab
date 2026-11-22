@@ -1,5 +1,5 @@
-use forge_bootstrap::Registry;
-use forge_provider::{Factory, InstanceProvider, Singleton};
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_terminal::console::register_stdio;
 use std::{error::Error, process::ExitCode};
 

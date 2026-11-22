@@ -1,6 +1,6 @@
 mod support;
-use forge_bootstrap::Registry;
-use forge_provider::{Factory, InstanceProvider, Transient};
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Transient};
 use forge_remote_https::{
     register_client, register_server, AssemblyError, ClientConfig, ServerConfig,
 };
@@ -92,8 +92,8 @@ fn credentials_debug_redacts_key_and_nested_runtime_creation_is_rejected() {
 
 #[test]
 fn calling_from_async_host_is_rejected_and_idle_drop_does_not_panic() {
-    use forge_ingress_contract::{Envelope, Header, RouteKey};
-    use forge_io_client::IoClient;
+    use forge_core::ingress::{Envelope, Header, RouteKey};
+    use forge_core::io_client::IoClient;
     use forge_remote::{NodeCall, NodeCommand, RemoteError};
     let certs = Certificates::new();
     let ((), factory) = Registry::new()
@@ -129,7 +129,7 @@ fn calling_from_async_host_is_rejected_and_idle_drop_does_not_panic() {
 
 #[test]
 fn assembly_error_display_names_each_failure_exactly() {
-    use forge_bootstrap::RegistrationError;
+    use forge_core::bootstrap::RegistrationError;
     use std::{error::Error, io};
     assert_eq!(
         AssemblyError::Configuration.to_string(),

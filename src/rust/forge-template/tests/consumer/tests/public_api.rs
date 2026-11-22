@@ -1,7 +1,7 @@
 #![cfg(feature = "rendering")]
 // Deliberately import only the dependency's public API. No example/private source inclusion.
-use forge_bootstrap::{RegistrationError, Registry};
-use forge_provider::{Factory, InstanceProvider, Singleton, Transient};
+use forge_core::bootstrap::{RegistrationError, Registry};
+use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
 use forge_template::{
     assembly::{register_renderer, AssemblyError, RenderConfig},
     Field, Limits, MethodRegistry, Schema, TemplateError, Value,

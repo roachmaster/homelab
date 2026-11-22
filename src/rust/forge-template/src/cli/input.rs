@@ -5,7 +5,7 @@ use super::{
     catalog::{HELP_ROUTE, METHODS_ROUTE, RENDER_ROUTE},
     CliError,
 };
-use forge_ingress_contract::Payload;
+use forge_core::ingress::Payload;
 use std::{ffi::OsString, path::PathBuf};
 
 pub(super) const MAX_ARGUMENTS: usize = 256;

@@ -9,12 +9,12 @@ request/value-map fallback.
 ```bash
 # Repository root; fetch the locked dependencies once, then use offline targets.
 cargo fetch --manifest-path src/rust/Cargo.toml --locked
-make ide ARGS='inspect src/rust/forge-task'
+make ide ARGS='inspect src/rust/forge-core'
 make ide ARGS='--help'
 
 # Equivalent Cargo command:
 cargo run --manifest-path src/rust/Cargo.toml --offline --locked \
-  -p forge-ide --features cli --bin forge-ide -- inspect src/rust/forge-task
+  -p forge-ide --features cli --bin forge-ide -- inspect src/rust/forge-core
 ```
 
 `inspect ROOT` accepts exactly one native path argument; quote spaces at your shell

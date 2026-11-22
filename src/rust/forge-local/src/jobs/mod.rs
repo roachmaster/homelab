@@ -15,9 +15,11 @@ mod engine;
 mod program;
 pub use contract::*;
 pub use engine::JobsHandle;
-use forge_bootstrap::PreparedGroup;
-use forge_command::{ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence};
-use forge_provider::Factory;
+use forge_core::bootstrap::PreparedGroup;
+use forge_core::command::{
+    ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence,
+};
+use forge_core::provider::Factory;
 pub use program::*;
 use std::{cell::Cell, rc::Rc};
 

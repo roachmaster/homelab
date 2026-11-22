@@ -1,7 +1,11 @@
 //! Application-owned sum and policy. Transport supplies verified context; no
 //! arbitrary subject constructor is exposed by this application.
 use crate::config::Grants;
-use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
+use forge_core::bridge::{Bridge, DispatchError, RegistryBuilder};
+use forge_core::ingress::{
+    AdmissionDenied, AdmissionPolicy, Envelope, Header, Payload, Response, RouteKey,
+};
+use forge_core::io_client::IoClient;
 use forge_ide::managed_edit::{
     ManagedCommand, ManagedResponse, ManagedWriteRequest, IDE_MANAGED_WRITE,
 };
@@ -12,10 +16,6 @@ use forge_ide::{
     model::ProjectReport,
     remote::{InspectCall, InspectCommand, InspectReply, ReportLimits, IDE_INSPECT},
 };
-use forge_ingress_contract::{
-    AdmissionDenied, AdmissionPolicy, Envelope, Header, Payload, Response, RouteKey,
-};
-use forge_io_client::IoClient;
 use forge_remote::{
     now_unix_ms, NodeCall, NodeInfo, NodeInfoSource, NodeReply, ReadNodeInfo, RemoteError, Target,
     NODE_INFO,

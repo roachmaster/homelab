@@ -1,10 +1,10 @@
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use forge_ide::{
     filesystem::{EntryKind, FsEntry, FsError, FsRequest, FsResponse},
     model::{Entry, FileContent},
     task::{InspectError, InspectRequest, InspectTask, Limits},
 };
-use forge_io_client::IoClient;
-use forge_task::Task;
 use std::{cell::RefCell, collections::BTreeMap, path::PathBuf, rc::Rc};
 struct Fake {
     files: BTreeMap<String, Vec<u8>>,

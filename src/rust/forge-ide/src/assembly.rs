@@ -5,8 +5,8 @@ use crate::{
     filesystem::{FsError, NativeFiles},
     task::{InspectError, InspectTask, Limits},
 };
-use forge_bootstrap::{PreparedGroup, RegistrationError};
-use forge_provider::Factory;
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::provider::Factory;
 use std::{error::Error, ffi::OsString, fmt, path::PathBuf};
 
 #[cfg(all(unix, feature = "managed-writes"))]

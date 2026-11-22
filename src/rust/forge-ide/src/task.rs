@@ -4,8 +4,8 @@ use crate::{
     model::{Entry, FileContent, Name, ProjectReport, TreeNode},
     syntax,
 };
-use forge_io_client::IoClient;
-use forge_task::Task;
+use forge_core::io_client::IoClient;
+use forge_core::task::Task;
 use std::{
     error::Error,
     ffi::OsString,

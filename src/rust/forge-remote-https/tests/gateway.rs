@@ -1,6 +1,6 @@
 mod support;
-use forge_bootstrap::Registry;
-use forge_provider::{Factory, InstanceProvider, Transient};
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Transient};
 use forge_remote::RemoteError;
 use forge_remote_https::{
     gateway::{
@@ -129,8 +129,8 @@ fn gateway_async_call_is_rejected_and_idle_drop_is_safe() {
 
 #[test]
 fn existing_node_client_uses_generic_gateway_without_changing_wire_or_api() {
-    use forge_ingress_contract::{Envelope, Header, Response, ResponseHeader, RouteKey};
-    use forge_io_client::IoClient;
+    use forge_core::ingress::{Envelope, Header, Response, ResponseHeader, RouteKey};
+    use forge_core::io_client::IoClient;
     use forge_remote::{now_unix_ms, NodeCall, NodeCommand, NodeInfo, NodeReply};
     use forge_remote_https::register_client;
     let c = Certificates::new();

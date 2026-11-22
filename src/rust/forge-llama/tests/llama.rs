@@ -1,11 +1,11 @@
-use forge_bootstrap::Registry;
-use forge_bridge::{Bridge, DispatchError, RegistryBuilder};
-use forge_ingress_contract::{AdmissionDenied, Envelope, Header, RouteKey};
+use forge_core::bootstrap::Registry;
+use forge_core::bridge::{Bridge, DispatchError, RegistryBuilder};
+use forge_core::ingress::{AdmissionDenied, Envelope, Header, RouteKey};
+use forge_core::provider::Factory;
 use forge_llama::{
     register_llama, register_routes, Config, Error, MailExpertPaging, Message, Operation,
     Registration, Reply, Request, Role,
 };
-use forge_provider::Factory;
 use std::{
     cell::RefCell,
     collections::BTreeMap,
@@ -112,7 +112,7 @@ fn operations_map_to_exact_route_names() {
 
 #[test]
 fn requests_report_their_operation_kind() {
-    use forge_ingress_contract::Payload;
+    use forge_core::ingress::Payload;
     let chat = forge_llama::Chat {
         model: None,
         messages: vec![Message {

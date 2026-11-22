@@ -1,6 +1,6 @@
 #![cfg(feature = "jenkins")]
-use forge_ingress_contract::RouteKey;
-use forge_io_client::IoClient;
+use forge_core::ingress::RouteKey;
+use forge_core::io_client::IoClient;
 use forge_jenkins::{ControllerInfo, Error, QueueReceipt, Request, Response};
 use forge_local::{jenkins::JenkinsCommand, Application, Command, LocalConfig, Output};
 use std::{

@@ -1,6 +1,6 @@
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::Factory;
 use forge_ide_web_host::{load_config, register_host, ServeOutcome};
-use forge_provider::Factory;
 use std::{
     io::Write,
     path::Path,

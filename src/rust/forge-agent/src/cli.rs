@@ -1,9 +1,11 @@
 //! Thin bounded argument/output adapters. Config and response JSON never become
 //! untyped application payloads. Help invokes no factory, network or project read.
 use crate::{host, AppError};
-use forge_command::{ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence};
+use forge_core::command::{
+    ArgumentDescriptor, CommandDescriptor, DataType, DescribeCommand, Presence,
+};
+use forge_core::io_client::IoClient;
 use forge_ide::assembly::ProjectAlias;
-use forge_io_client::IoClient;
 use std::{
     cell::RefCell,
     collections::BTreeMap,
@@ -186,7 +188,7 @@ pub fn run(
     args: impl IntoIterator<Item = OsString>,
     stop: Arc<AtomicBool>,
 ) -> Result<(), AppError> {
-    forge_command::validate_descriptors(Catalog.descriptors()).map_err(crate::assembly)?;
+    forge_core::command::validate_descriptors(Catalog.descriptors()).map_err(crate::assembly)?;
     let invocation = parse(args)?;
     let out = Output(RefCell::new(io::stdout()));
     let err = Output(RefCell::new(io::stderr()));

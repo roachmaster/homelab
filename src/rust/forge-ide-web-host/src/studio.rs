@@ -4,8 +4,8 @@ use crate::{
     service::Rejection,
     ChatConfig, HostError, NodeConfig,
 };
-use forge_ingress_contract::Header;
-use forge_provider::Factory;
+use forge_core::ingress::Header;
+use forge_core::provider::Factory;
 use hyper::body::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf, time::Instant};

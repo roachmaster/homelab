@@ -7,14 +7,10 @@ publish.workspace = true
 [features]
 default = ["disk"]
 disk = []
-node = ["dep:forge-task", "dep:forge-command"]
+node = []
 
 [dependencies]
-forge-command = { workspace = true, optional = true }
-forge-bootstrap.workspace = true
-forge-io-client.workspace = true
-forge-provider.workspace = true
-forge-task = { workspace = true, optional = true }
+forge-core.workspace = true
 
 [[test]]
 name = "disk"

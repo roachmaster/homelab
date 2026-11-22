@@ -7,7 +7,9 @@ description = "Bounded, typed, schema-checked Mustache-like rendering"
 
 [features]
 default = []
-cli = ["dep:forge-task", "dep:forge-command", "dep:forge-bridge", "dep:forge-ingress-contract", "dep:forge-io-client"]
+# Marker feature: it gates the CLI module and the binary. Its contracts are
+# forge-core modules now, always compiled, so it enables no dependency.
+cli = []
 
 [[bin]]
 name = "forge-template"
@@ -18,16 +20,7 @@ required-features = ["cli"]
 workspace = true
 
 [dependencies]
-forge-bootstrap.workspace = true
-forge-provider.workspace = true
-forge-task = { workspace = true, optional = true }
-forge-command = { workspace = true, optional = true }
-forge-bridge = { workspace = true, optional = true }
-forge-ingress-contract = { workspace = true, optional = true }
-forge-io-client = { workspace = true, optional = true }
+forge-core.workspace = true
 
 [dev-dependencies]
-forge-task.workspace = true
-forge-command.workspace = true
-forge-bridge.workspace = true
-forge-ingress-contract.workspace = true
+forge-core.workspace = true

@@ -1,7 +1,7 @@
-use forge_bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::bootstrap::{PreparedGroup, RegistrationError};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
 use forge_demo_messages::{Delivery, DeliveryError, PreparedMessage, CLIENT_BINDING};
-use forge_io_client::IoClient;
-use forge_provider::{Factory, InstanceProvider, Singleton, Transient};
 use std::{
     cell::{Cell, RefCell},
     error::Error,

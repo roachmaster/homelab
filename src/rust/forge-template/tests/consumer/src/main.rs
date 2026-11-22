@@ -1,7 +1,7 @@
 #[cfg(feature = "rendering")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use forge_bootstrap::Registry;
-    use forge_provider::{Factory, InstanceProvider, Singleton};
+    use forge_core::bootstrap::Registry;
+    use forge_core::provider::{Factory, InstanceProvider, Singleton};
     use forge_template::{
         assembly::{register_renderer, RenderConfig},
         Limits, MethodRegistry, Schema, Value,

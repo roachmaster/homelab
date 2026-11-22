@@ -3,26 +3,20 @@
 version = 4
 
 [[package]]
-name = "forge-bootstrap"
-version = "0.1.0"
-
-[[package]]
-name = "forge-provider"
+name = "forge-core"
 version = "0.1.0"
 
 [[package]]
 name = "forge-template"
 version = "0.1.0"
 dependencies = [
- "forge-bootstrap",
- "forge-provider",
+ "forge-core",
 ]
 
 [[package]]
 name = "template-public-consumer"
 version = "0.0.0"
 dependencies = [
- "forge-bootstrap",
- "forge-provider",
+ "forge-core",
  "forge-template",
 ]

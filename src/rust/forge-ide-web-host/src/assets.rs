@@ -1,7 +1,7 @@
 use crate::HostError;
+use forge_core::io_client::IoClient;
+use forge_core::provider::Factory;
 use forge_ide::filesystem::{FsError, FsRequest, FsResponse, NativeFiles};
-use forge_io_client::IoClient;
-use forge_provider::Factory;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{

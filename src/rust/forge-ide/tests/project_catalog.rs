@@ -1,8 +1,8 @@
-use forge_bootstrap::Registry;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use forge_ide::assembly::{register_projects, IdeConfig, ProjectAlias};
 use forge_ide::task::InspectRequest;
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
 use std::{
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},

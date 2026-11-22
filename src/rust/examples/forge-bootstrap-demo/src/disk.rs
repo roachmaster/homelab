@@ -4,15 +4,15 @@
 
 use crate::demo::DemoAdmission;
 use crate::DemoContext;
-use forge_bootstrap::{RegistrationError, Registry, ValidationError};
-use forge_bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
-use forge_ingress_contract::{Envelope, Payload, Response, RouteKey};
-use forge_io_client::IoClient;
+use forge_core::bootstrap::{RegistrationError, Registry, ValidationError};
+use forge_core::bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
+use forge_core::ingress::{Envelope, Payload, Response, RouteKey};
+use forge_core::io_client::IoClient;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 use forge_kernel::disk::{
     self as native, DirectoryListing, DiskClient, DiskConfig, DiskError, DiskRequest, DiskResponse,
 };
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
 use std::{error::Error, fmt, path::PathBuf, rc::Rc};
 
 /// The host's selected operations. The header, not this variant, chooses a route.
