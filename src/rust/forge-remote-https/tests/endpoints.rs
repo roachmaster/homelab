@@ -752,3 +752,29 @@ fn combined_optional_metadata_and_missing_headers_fail_before_body_limits() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     server.join().unwrap().unwrap();
 }
+
+#[test]
+fn repeated_identical_calls_produce_identical_replies() {
+    let certs = Certificates::new();
+    let run_once = || {
+        let (address, calls, server) = start_server(certs.server_config(limits()), true, false);
+        let reply = client(certs.client_config(address, limits()))
+            .execute(call())
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        server.join().unwrap().unwrap();
+        reply
+    };
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first.responder, second.responder);
+    assert_eq!(
+        first.response.header.request_id(),
+        second.response.header.request_id()
+    );
+    assert_eq!(
+        first.response.header.correlation_id(),
+        second.response.header.correlation_id()
+    );
+    assert_eq!(first.response.payload, second.response.payload);
+}
