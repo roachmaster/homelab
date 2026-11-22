@@ -226,6 +226,15 @@ any cache or filesystem access:
   read-only seed (`restore_status: "hit_main_seed"`) without ever modifying `main`.
   If a branch's own snapshot exists and fails integrity or timestamp ordering,
   it falls back directly to a clean build rather than silently switching snapshots.
+- **Sibling-scope seeding**: When `seed_from_siblings: true`, a cold
+  `branch/<slug>` run with no entry of its own first tries the most recently
+  published compatible entry from another branch scope
+  (`restore_status: "hit_sibling_seed"`), falling back to the `main` seed.
+  Retries on a new branch scope usually share the retry's source state, so a
+  sibling snapshot matches more fingerprints than `main`'s older one. Like the
+  `main` seed, the sibling entry is read-only during the restore and the
+  compat-key match is still required — an incompatible entry is never reused.
+  Detached runs do not seed from siblings.
 
 ### Compatibility key (`compat_key`)
 
@@ -284,13 +293,13 @@ after strict two-phase timestamp validation:
     pending-publication.json               # durable rollback/result binding while unfinished
     <published_at_ns>-<action_id>/
       meta.json                            # digest-bound metadata & source_inventory
-      target/                              # cached CARGO_TARGET_DIR (excludes ui-assets, ui-qa, tmp)
+      target/                              # cached CARGO_TARGET_DIR (excludes ui-assets, ui-qa, tmp; incremental/ at any depth)
       package-targets/                     # cached standalone manifest targets
 ```
 
 - **Default retention bounds** (configured by `setup-ci.py`):
   `max_total_bytes = 20 GiB`, `max_entries = 8`, `max_age_seconds = 14 days`,
-  `seed_from_main = true`, `timeout_seconds = 2700`.
+  `seed_from_main = true`, `seed_from_siblings = true`, `timeout_seconds = 2700`.
 - **Eviction**: At restore acquisition, remove expired entries first, then
   non-`main` LRU entries before `main`. Protect the selected snapshot, including
   a main seed, and reserve an entry slot for a new writable scope. Explicit

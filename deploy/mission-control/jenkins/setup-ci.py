@@ -160,6 +160,7 @@ def render_pipeline_config(*, operator, spool, state_root, toolchain, registry, 
             'max_entries': DEFAULT_CARGO_CACHE_MAX_ENTRIES,
             'max_age_seconds': DEFAULT_CARGO_CACHE_MAX_AGE_SECONDS,
             'seed_from_main': True,
+            'seed_from_siblings': True,
         },
     }
 

@@ -361,6 +361,7 @@ class CargoCacheConfig:
     max_entries: int = DEFAULT_MAX_ENTRIES
     max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS
     seed_from_main: bool = True
+    seed_from_siblings: bool = True
 
     @classmethod
     def parse(cls, raw, *, trusted_prefix=None):
@@ -368,7 +369,8 @@ class CargoCacheConfig:
             return cls(enabled=False)
         if not isinstance(raw, dict):
             raise ValueError('Invalid cargo_cache configuration')
-        allowed = {'enabled', 'root', 'max_total_bytes', 'max_entries', 'max_age_seconds', 'seed_from_main'}
+        allowed = {'enabled', 'root', 'max_total_bytes', 'max_entries', 'max_age_seconds', 'seed_from_main',
+                   'seed_from_siblings'}
         if not set(raw) <= allowed:
             raise ValueError('Unexpected cargo_cache configuration keys')
         enabled = raw.get('enabled', True)
@@ -377,6 +379,9 @@ class CargoCacheConfig:
         seed_from_main = raw.get('seed_from_main', True)
         if type(seed_from_main) is not bool:
             raise ValueError('cargo_cache.seed_from_main must be boolean')
+        seed_from_siblings = raw.get('seed_from_siblings', True)
+        if type(seed_from_siblings) is not bool:
+            raise ValueError('cargo_cache.seed_from_siblings must be boolean')
         raw_root = raw.get('root', str(DEFAULT_CACHE_ROOT))
         if not isinstance(raw_root, str) or not raw_root:
             raise ValueError('cargo_cache.root must be an absolute path string')
@@ -398,6 +403,7 @@ class CargoCacheConfig:
             max_entries=max_entries,
             max_age_seconds=max_age_seconds,
             seed_from_main=seed_from_main,
+            seed_from_siblings=seed_from_siblings,
         )
 
 
@@ -1359,6 +1365,57 @@ class LocalCargoCacheProvider(CargoCachePort):
                 return True
         return False
 
+    def _select_sibling_seed(self, scopes_project, key: CacheKey):
+        # A retry on a new branch scope reuses the most recent compatible
+        # entry from another branch scope: retries usually share the same
+        # source state, so a sibling snapshot matches more fingerprints than
+        # main's older one, and main seeding stays the fallback. Scope
+        # directories may nest (branch names contain slashes), so the scan
+        # walks the tree and treats every directory holding a matching
+        # compat-key entry as a candidate scope, skipping the requester's own
+        # scope and main. Compat-key directories are never descended into:
+        # no scope directory lives beneath one. The expected scope comes from
+        # the snapshot's own meta.json, because restore requires
+        # meta.branch_scope to match it exactly; entries whose pointer or
+        # metadata cannot be read are skipped, never fatal.
+        if key.scope_dir is None:
+            return None
+        if not scopes_project.exists() or scopes_project.is_symlink() or not scopes_project.is_dir():
+            return None
+        own_scope_path = scopes_project / key.scope_dir
+        main_scope_path = scopes_project / 'main'
+        candidates = []
+        for dirpath, dirnames, _filenames in os.walk(scopes_project):
+            here = Path(dirpath)
+            dirnames[:] = [name for name in dirnames
+                           if not DIGEST.fullmatch(name) and not (here / name).is_symlink()]
+            if here == own_scope_path or here == main_scope_path:
+                continue
+            entry = here / key.compat_key
+            pointer_file = entry / 'current.json'
+            if not pointer_file.exists() or pointer_file.is_symlink():
+                continue
+            try:
+                pointer = json.loads(read_file(pointer_file, owner=self.expected_owner, maximum=16384))
+                published_at_ns = pointer['published_at_ns']
+                snapshot_id = pointer['snapshot_id']
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if not _is_strict_int(published_at_ns) or not isinstance(snapshot_id, str):
+                continue
+            candidates.append((published_at_ns, entry, snapshot_id))
+        candidates.sort(key=lambda row: row[0], reverse=True)
+        for _published_at_ns, entry, snapshot_id in candidates:
+            try:
+                meta = json.loads(read_file(entry / snapshot_id / 'meta.json',
+                                            owner=self.expected_owner, maximum=MAX_META_BYTES))
+                sibling_scope = meta['branch_scope']
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            if isinstance(sibling_scope, str) and sibling_scope:
+                return entry, sibling_scope
+        return None
+
     def _select_candidate_entry(self, root, key: CacheKey):
         scopes_project = root / 'scopes' / key.project_alias
         if key.branch_scope == 'main':
@@ -1375,6 +1432,11 @@ class LocalCargoCacheProvider(CargoCachePort):
             own_entry = scope_path / key.compat_key
             if (own_entry / 'current.json').exists():
                 return own_entry, 'hit_branch', key.branch_scope, False
+            if self.config.seed_from_siblings:
+                sibling = self._select_sibling_seed(scopes_project, key)
+                if sibling is not None:
+                    sibling_entry, sibling_scope = sibling
+                    return sibling_entry, 'hit_sibling_seed', sibling_scope, True
             if self.config.seed_from_main:
                 main_scope = scopes_project / 'main'
                 main_entry = main_scope / key.compat_key
@@ -1448,9 +1510,15 @@ class LocalCargoCacheProvider(CargoCachePort):
                     reserve_entry = 1 if not (own_entry / 'current.json').exists() else 0
                     # Maintenance precedes the publication transaction baseline;
                     # protect the actual selected seed so main fallback remains
-                    # usable even when a new branch needs a retention slot.
+                    # usable even when a new branch needs a retention slot. A
+                    # sibling seed is NOT protected: under retention pressure
+                    # the sibling yields to main, and the restore falls back
+                    # to a clean build (the entry is gone when the copy runs)
+                    # rather than evicting main to keep the seed.
+                    protect_seed = entry_dir is not None and (not is_seed or expected_scope == 'main')
                     maintenance = self._prune_locked(
-                        root, protected_entry=entry_dir or own_entry, reserve_entries=reserve_entry,
+                        root, protected_entry=entry_dir if protect_seed else own_entry,
+                        reserve_entries=reserve_entry,
                     )
                     self._maintenance_evicted = maintenance.evicted_entries
                 if entry_dir is None:
