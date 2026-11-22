@@ -127,12 +127,8 @@ class NativeOwnerControl:
         if (not isinstance(command.task_id, UUID) or not isinstance(command.review_id, UUID)
                 or type(command.expected_revision) is not int or not 1 <= command.expected_revision < 2**53
                 or not isinstance(command.idempotency_key, str) or not re.fullmatch('[A-Za-z0-9_.-]{1,128}', command.idempotency_key)
-                or not isinstance(command.note, str) or not command.note.strip() or len(command.note.encode()) > 2048
-                or command.findings or command.verified_finding_ids):
+                or not isinstance(command.note, str) or len(command.note.encode()) > 2048):
             raise Rejected(400, 'invalid_request')
-        request = {**vars(command), 'task_id': str(command.task_id), 'review_id': str(command.review_id),
-                   'findings': [], 'verified_finding_ids': []}
-        intent_digest = sha256_canonical({k: v for k, v in request.items() if k != 'idempotency_key'} | {'action': 'review_decide'})
         with flow._transaction() as cursor:
             flow._project_lock(cursor, command.project_alias)
             cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE',
@@ -142,6 +138,16 @@ class NativeOwnerControl:
                 raise Rejected(404, 'not_found')
             if not task['workflow_required'] or not task['workflow_id']:
                 return None
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
+                           (task['workflow_id'], owner_source_key(task['workflow_id'])))
+            owner = cursor.fetchone()
+            if owner is None:
+                return None
+            if not command.note.strip() or command.findings or command.verified_finding_ids:
+                raise Rejected(400, 'invalid_request')
+            request = {**vars(command), 'task_id': str(command.task_id), 'review_id': str(command.review_id),
+                       'findings': [], 'verified_finding_ids': []}
+            intent_digest = sha256_canonical({k: v for k, v in request.items() if k != 'idempotency_key'} | {'action': 'review_decide'})
             key = verification_source_key(task['workflow_id'])
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
                            (task['workflow_id'], key))
@@ -165,11 +171,6 @@ class NativeOwnerControl:
                            (store.owner, command.project_alias, command.task_id, command.idempotency_key))
             if cursor.fetchone():
                 raise Rejected(409, 'idempotency_conflict')
-            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
-                           (task['workflow_id'], owner_source_key(task['workflow_id'])))
-            owner = cursor.fetchone()
-            if owner is None:
-                return None
             owner_intent, owner_finish = owner['intent'] or {}, owner['finish_receipt'] or {}
             if not isinstance(owner_intent, dict) or not isinstance(owner_finish, dict):
                 raise Rejected(409, 'not_reviewable')

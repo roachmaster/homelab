@@ -105,6 +105,18 @@ class OwnerVerificationRetryTest(unittest.TestCase):
             self.assertEqual(intent['authority'], 'explicit_owner_verification_only')
             self.assertIs(intent['automatic_allowance_renewed'], False)
 
+    def test_empty_note_keeps_ordinary_and_pre_owner_workflow_fallthrough(self):
+        from test_work_execution_and_usage import make_submit
+        plain_config = replace(self.config, project_workflows={})
+        plain = WorkServiceFactory(plain_config, lambda: self.cluster.connect('forge_agent')).create()
+        admitted = plain.submit(make_submit(agent_profile='agy-v2', idempotency_key='plain-empty-note'))
+        command = WorkReviewDecide('homelab', UUID(admitted['task_id']), admitted['revision'], uuid4(),
+            'retry_infrastructure', 'agy-v2', '', 'plain-verifier-retry')
+        self.assertIsNone(plain._native_control.review_decide(command))
+        _, admitted = self.submit('workflow-empty-note')
+        self.assertIsNone(self.service._native_control.review_decide(replace(command,
+            task_id=UUID(admitted['task_id']), expected_revision=admitted['revision'])))
+
     def test_exact_replay_survives_changed_policy_and_once_action_rejects_another_key(self):
         source, old, request = self.failure()
         with ThreadPoolExecutor(max_workers=2) as executor:
