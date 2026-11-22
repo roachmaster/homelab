@@ -375,3 +375,150 @@ fn session_stops_after_console_diagnostic_or_response_failure() {
         assert_eq!(console.reads.get(), 1);
     }
 }
+
+#[test]
+fn repeated_node_info_runs_produce_identical_output() {
+    let first = execute(&["--no-disk", "--node-id", "node-test", "node.info"], b"");
+    let second = execute(&["--no-disk", "--node-id", "node-test", "node.info"], b"");
+    assert_eq!(first, second);
+    assert_eq!(first.0, 0);
+    assert!(first.2.is_empty());
+    assert!(first.1.starts_with("node_id=node-test\n"));
+}
+
+#[test]
+fn startup_option_errors_name_the_exact_problem() {
+    for (args, message) in [
+        (vec!["--node-id"], "--node-id needs a value"),
+        (
+            vec!["--node-id", "x", "--node-id", "y"],
+            "--node-id was supplied twice",
+        ),
+        (
+            vec!["--no-jobs", "--no-jobs"],
+            "--no-jobs was supplied twice",
+        ),
+        (
+            vec!["--session", "node.info"],
+            "--help/-h/--session must end the startup options",
+        ),
+        (vec!["--bad"], "unknown startup option; use --help"),
+        (vec!["--cwd"], "--cwd needs a path"),
+        (vec!["--cwd", "a", "--cwd", "b"], "--cwd was supplied twice"),
+        (
+            vec!["--no-disk", "--no-disk"],
+            "--no-disk was supplied twice",
+        ),
+        (
+            vec!["--cwd", "x", "--no-disk"],
+            "--no-disk conflicts with --cwd",
+        ),
+        (
+            vec!["--no-disk", "--cwd", "x"],
+            "--cwd conflicts with --no-disk",
+        ),
+    ] {
+        assert_eq!(parse_options(arguments(&args)).unwrap_err(), message);
+    }
+}
+
+#[test]
+fn session_arguments_split_only_on_the_first_whitespace_run() {
+    assert_eq!(session_arguments(""), Vec::<OsString>::new());
+    assert_eq!(session_arguments("   \t  "), Vec::<OsString>::new());
+    assert_eq!(session_arguments("exit"), arguments(&["exit"]));
+    assert_eq!(
+        session_arguments("disk.cd\tpath with\ttabs"),
+        arguments(&["disk.cd", "path with\ttabs"])
+    );
+    assert_eq!(
+        session_arguments("  node.info  "),
+        arguments(&["node.info"])
+    );
+}
+
+#[test]
+fn safe_text_escapes_control_characters_and_non_ascii() {
+    use forge_terminal::parser::safe_text;
+    assert_eq!(safe_text("plain"), "plain");
+    assert_eq!(safe_text("é雪"), "\\u{e9}\\u{96ea}");
+    assert_eq!(safe_text("a\x1b[31m\n\t"), "a\\u{1b}[31m\\n\\t");
+}
+
+#[test]
+fn format_output_renders_node_observations_exactly() {
+    use forge_local::{NodeInfo, NodeResponse, NodeState, NodeStatus, Output};
+    use forge_terminal::format_output;
+    use std::time::Duration;
+    assert_eq!(
+        format_output(Output::Node(NodeResponse::Info(NodeInfo {
+            id: "node-test".into(),
+            target_os: "linux",
+            target_arch: "x86_64",
+        }))),
+        "node_id=node-test\ntarget_os=linux\ntarget_arch=x86_64\n"
+    );
+    assert_eq!(
+        format_output(Output::Node(NodeResponse::Status(NodeStatus {
+            id: "node-test".into(),
+            state: NodeState::Responding,
+            instance_uptime: Duration::from_millis(1500),
+        }))),
+        "node_id=node-test\nobservation=responding\ninstance_uptime_ms=1500\nscope=this node client answered; not OS uptime or overall health\n"
+    );
+    assert_eq!(
+        format_output(Output::Commands(vec![])),
+        "Registered commands:\n"
+    );
+    // Control characters in a node id are escaped, never emitted raw.
+    assert!(!format_output(Output::Node(NodeResponse::Info(NodeInfo {
+        id: "a\x1b[31m".into(),
+        target_os: "linux",
+        target_arch: "x86_64",
+    })))
+    .contains('\u{1b}'));
+}
+
+#[cfg(feature = "disk")]
+#[test]
+fn format_output_renders_disk_observations_exactly() {
+    use forge_local::{
+        DirectoryEntry, DirectoryListing, DiskResponse, EntryKind, Output, PermissionInfo,
+        PermissionInspection,
+    };
+    use forge_terminal::format_output;
+    use std::path::PathBuf;
+    assert_eq!(
+        format_output(Output::Disk(DiskResponse::WorkingDirectory(PathBuf::from(
+            "/tmp/work"
+        )))),
+        "cwd=\"/tmp/work\"\n"
+    );
+    assert_eq!(
+        format_output(Output::Disk(DiskResponse::Listed(DirectoryListing {
+            directory: PathBuf::from("/tmp/work"),
+            entries: vec![DirectoryEntry {
+                name: "alpha.txt".into(),
+                kind: EntryKind::File,
+                size_bytes: 5,
+                path: PathBuf::from("/tmp/work/alpha.txt"),
+                permissions: PermissionInfo {
+                    readonly: false,
+                    unix_mode: Some(0o644),
+                },
+            }],
+        }))),
+        "directory=\"/tmp/work\"\nFile\t5\treadonly=false\tmode=0644\t\"alpha.txt\"\n"
+    );
+    assert_eq!(
+        format_output(Output::Disk(DiskResponse::Permissions(PermissionInspection {
+            path: PathBuf::from("/tmp/work/alpha.txt"),
+            kind: EntryKind::File,
+            permissions: PermissionInfo {
+                readonly: true,
+                unix_mode: None,
+            },
+        }))),
+        "path=\"/tmp/work/alpha.txt\"\nkind=File\nreadonly=true\nunix_mode=unavailable\nmetadata_only=true; not effective access authorization\n"
+    );
+}
