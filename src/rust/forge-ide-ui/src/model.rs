@@ -5,13 +5,7 @@ use std::collections::BTreeSet;
 const PAGE_ROWS: usize = 256;
 mod agents;
 mod bookmark;
-mod chat;
 mod edit;
-// Retained standalone Mail contracts remain testable; the live UI owns no
-// Mail request dispatcher, timers, lock state or projection.
-#[cfg(test)]
-#[allow(dead_code)]
-mod mail;
 mod projection;
 mod source;
 pub use projection::name_label;
@@ -40,8 +34,6 @@ pub struct Output {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mail_navigation: Option<MailNavigationSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mail_navigation_locked: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub agents_navigation: Option<AgentsNavigationSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agents_navigation_locked: Option<bool>,
@@ -51,12 +43,9 @@ pub struct Output {
 /// idempotency store. The host independently authorizes every request.
 #[derive(Debug)]
 pub struct UiModel {
-    presentation: crate::PresentationPolicy,
     dormant_chat: Option<ChatSnapshot>,
     catalog: Option<Catalog>,
-    chats: chat::Chats,
-    pending_edit: Option<edit::PendingEdit>,
-    edit_review: Option<edit::EditReview>,
+    workbench: bool,
     editor: Option<edit::Editor>,
     write: edit::WriteState,
     legacy_mail_navigation: Option<MailNavigationSnapshot>,
@@ -96,12 +85,9 @@ pub struct UiModel {
 impl Default for UiModel {
     fn default() -> Self {
         Self {
-            presentation: crate::PORTAL_PRESENTATION,
             dormant_chat: None,
             catalog: None,
-            chats: chat::Chats::default(),
-            pending_edit: None,
-            edit_review: None,
+            workbench: false,
             editor: None,
             write: edit::WriteState::default(),
             legacy_mail_navigation: None,
@@ -141,14 +127,6 @@ impl Default for UiModel {
     }
 }
 impl UiModel {
-    /// Native composition may retain an explicitly enabled legacy client. The
-    /// portal and its WASM use the shared policy; cache data cannot override it.
-    pub fn with_presentation_policy(presentation: crate::PresentationPolicy) -> Self {
-        Self {
-            presentation,
-            ..Self::default()
-        }
-    }
     pub fn phase(&self) -> Phase {
         self.phase
     }
@@ -185,7 +163,6 @@ impl UiModel {
             workspace: self.workspace_snapshot(),
             has_workspace_work: self.has_workspace_work(),
             mail_navigation: self.legacy_mail_navigation.clone(),
-            mail_navigation_locked: None,
             agents_navigation: self.agents.snapshot(),
             agents_navigation_locked: self.agents.locked().then_some(true),
         }
@@ -224,25 +201,16 @@ impl UiModel {
             return Err(UiError::InvalidClock);
         }
         self.agents.now_ms = input.now_ms;
-        // Old entry links/actions navigate to the replacement capability. Do
-        // this before normal editor/lifecycle guards; no Mail intent is replayed.
-        if matches!(input.event, UiEvent::OpenMail {})
-            || !self.presentation.chat && matches!(input.event, UiEvent::OpenChat {})
-        {
+        // Legacy entry links/actions resolve to Agents before normal
+        // editor/lifecycle guards; no Chat or Mail intent is replayed.
+        if matches!(input.event, UiEvent::OpenMail {} | UiEvent::OpenChat {}) {
             input.event = UiEvent::OpenAgents {};
-        }
-        if !self.presentation.chat && retired_chat_event(&input.event) {
-            return Ok(self.output(None));
         }
         let mut effects = Vec::new();
         if self.editor_blocks(&input.event) {
             return Ok(self.output(None));
         }
-        if matches!(
-            &input.event,
-            UiEvent::OpenChat {} | UiEvent::OpenWorkbench {}
-        ) && self.agents.locked()
-        {
+        if matches!(&input.event, UiEvent::OpenWorkbench {}) && self.agents.locked() {
             return Ok(self.output(None));
         }
         if matches!(input.event, UiEvent::OpenAgents {})
@@ -266,6 +234,7 @@ impl UiModel {
                 | UiEvent::SelectAgentProject { .. }
                 | UiEvent::SelectAgentProfile { .. }
                 | UiEvent::SelectAgentMode { .. }
+                | UiEvent::SelectAgentTaskScope { .. }
                 | UiEvent::SetAgentPrompt { .. }
                 | UiEvent::SetAgentCriteria { .. }
                 | UiEvent::SetAgentReviewNote { .. }
@@ -300,15 +269,13 @@ impl UiModel {
             let aux = self.next_id(input.now_ms)?;
             match input.event {
                 UiEvent::OpenAgents {} => {
-                    self.chats.workbench = false;
-                    self.chats.close_history();
+                    self.workbench = false;
                     self.agents
                         .open(&self.project, work, usage, id, aux, &mut effects);
                 }
                 UiEvent::RestoreAgentsNavigation { snapshot } => {
                     if snapshot.active && snapshot.is_valid() {
-                        self.chats.workbench = false;
-                        self.chats.close_history();
+                        self.workbench = false;
                     }
                     self.agents
                         .restore(snapshot, work, usage, id, aux, &mut effects);
@@ -322,59 +289,21 @@ impl UiModel {
             return Ok(output);
         }
         match input.event {
-            UiEvent::OpenChat {}
-            | UiEvent::OpenWorkbench {}
-            | UiEvent::NewChat {}
-            | UiEvent::SelectChat { .. }
-            | UiEvent::SelectChatModel { .. }
-            | UiEvent::SetChatDraft { .. }
-            | UiEvent::SendChat {}
-            | UiEvent::SendWorkbenchChat { .. }
-            | UiEvent::SendChatWithFile { .. }
-            | UiEvent::ProposeEdit { .. }
-            | UiEvent::DiscardEdit {}
+            UiEvent::OpenWorkbench {}
             | UiEvent::OpenDocument { .. }
             | UiEvent::SetDocument { .. }
             | UiEvent::SaveDocument { .. }
             | UiEvent::CloseDocument { .. }
-            | UiEvent::ApplyEdit { .. }
             | UiEvent::UndoEdit { .. }
             | UiEvent::CheckEditWrite {}
-            | UiEvent::SendPersistentChat { .. }
-            | UiEvent::CancelChatRun {}
-            | UiEvent::RetryChatSubmit {}
-            | UiEvent::ShowChatHistory {}
-            | UiEvent::SetChatHistoryQuery { .. }
-            | UiEvent::MoreChatHistory {}
-            | UiEvent::NewerChatHistory {}
-            | UiEvent::OpenSavedChat { .. }
-            | UiEvent::ManageSavedChat {}
-            | UiEvent::ShowChatExpiry {}
-            | UiEvent::SetChatExpiry { .. }
-            | UiEvent::ConfirmChatExpiry {}
-            | UiEvent::KeepChatLongTerm {}
-            | UiEvent::ShowChatDelete {}
-            | UiEvent::ConfirmChatDelete {}
-            | UiEvent::CloseChatDialog {}
                 if self.catalog.is_none() =>
             {
                 return Err(UiError::NotConnected)
             }
-            UiEvent::OpenChat {} => {
-                self.agents.close();
-                self.chats.workbench = false;
-                if self.chats.async_chat {
-                    let request_id = self.next_id(input.now_ms)?;
-                    if let Some(request) = self.chats.request_models(request_id) {
-                        effects.push(UiEffect::ChatRun(request));
-                    }
-                }
-            }
             UiEvent::OpenWorkbench {} => {
                 self.agents.close();
-                self.chats.workbench = true;
+                self.workbench = true;
                 self.workbench_seen = true;
-                self.chats.close_history();
             }
             UiEvent::RestoreMailNavigation { mut snapshot } => {
                 if snapshot.is_valid() && self.legacy_mail_navigation.is_none() {
@@ -384,97 +313,7 @@ impl UiModel {
                     self.legacy_mail_navigation = Some(snapshot);
                 }
             }
-            UiEvent::OpenMail {}
-            | UiEvent::MailInbox {}
-            | UiEvent::MailArchive {}
-            | UiEvent::MailNewMessage {}
-            | UiEvent::MailFollowUp {}
-            | UiEvent::MailDiscardDraft {}
-            | UiEvent::MailBack {}
-            | UiEvent::MailRefresh {}
-            | UiEvent::MailPrevious {}
-            | UiEvent::MailNext {}
-            | UiEvent::MailOpenThread { .. }
-            | UiEvent::SetMailSubject { .. }
-            | UiEvent::SetMailDraft { .. }
-            | UiEvent::SendMail { .. }
-            | UiEvent::RetryMail { .. }
-            | UiEvent::MailArchiveThread { .. }
-            | UiEvent::PollMail { .. }
-            | UiEvent::Mail(_) => {} // Retired events decode but have no effects.
-            UiEvent::NewChat {} => self.chats.new_conversation()?,
-            UiEvent::SelectChat { value } => {
-                let request_id = self
-                    .chats
-                    .history
-                    .enabled
-                    .then(|| self.next_id(input.now_ms))
-                    .transpose()?;
-                if let Some(request) = self.chats.select(&value, request_id)? {
-                    effects.push(UiEffect::ChatHistory(request));
-                }
-            }
-            UiEvent::SelectChatModel { value } => self.chats.select_model(value)?,
-            UiEvent::SetChatDraft {
-                conversation,
-                value,
-            } => self.chats.draft(conversation, value)?,
-            UiEvent::SendChat {} => {
-                if self.chats.async_chat {
-                    return Err(UiError::InvalidAction);
-                }
-                let request_id = self.next_id(input.now_ms)?;
-                if let Some(request) = self.chats.send(request_id)? {
-                    effects.push(UiEffect::Chat { request });
-                }
-            }
-            UiEvent::SendChatWithFile {
-                report,
-                entry,
-                byte_start,
-                conversation,
-                chat_id,
-            } => {
-                self.send_chat_with_file(
-                    (report, entry, byte_start, conversation),
-                    chat_id,
-                    input.now_ms,
-                    &mut effects,
-                )?;
-            }
-            UiEvent::SendWorkbenchChat {
-                report,
-                entry,
-                byte_start,
-                conversation,
-                chat_id,
-            } => {
-                self.send_workbench(
-                    input.now_ms,
-                    (report, entry, byte_start, conversation),
-                    false,
-                    chat_id,
-                    &mut effects,
-                )?;
-            }
-            UiEvent::ProposeEdit {
-                report,
-                entry,
-                byte_start,
-                conversation,
-            } => {
-                self.send_workbench(
-                    input.now_ms,
-                    (report, entry, byte_start, conversation),
-                    true,
-                    None,
-                    &mut effects,
-                )?;
-            }
-            UiEvent::DiscardEdit {} if self.chats.workbench && !self.write_pending() => {
-                self.edit_review = None
-            }
-            UiEvent::DiscardEdit {} => {}
+            UiEvent::OpenChat {} | UiEvent::OpenMail {} => {}
             UiEvent::OpenDocument { report, entry } => {
                 self.open_document(report, entry, input.now_ms)?;
             }
@@ -483,13 +322,6 @@ impl UiModel {
                 self.save_document(&editor_id, input.now_ms, &mut effects)?;
             }
             UiEvent::CloseDocument { editor_id } => self.close_document(&editor_id),
-            UiEvent::EditResult {
-                request_id,
-                outcome,
-            } => self.complete_edit(&request_id, outcome),
-            UiEvent::ApplyEdit { proposal_id } => {
-                self.apply_edit(proposal_id, input.now_ms, &mut effects)?
-            }
             UiEvent::UndoEdit { applied_operation } => {
                 self.undo_edit(applied_operation, input.now_ms, &mut effects)?
             }
@@ -501,86 +333,6 @@ impl UiModel {
             } => {
                 self.complete_write(&request_id, &operation, outcome, input.now_ms, &mut effects);
             }
-            UiEvent::SendPersistentChat { chat_id } => {
-                let request_id = self.next_id(input.now_ms)?;
-                if self.chats.async_chat {
-                    if let Some(request) = self.chats.submit_run(request_id, chat_id)? {
-                        effects.push(UiEffect::ChatRun(request));
-                    }
-                } else if let Some(request) = self.chats.send_with_id(request_id, Some(chat_id))? {
-                    effects.push(UiEffect::Chat { request });
-                }
-            }
-            UiEvent::CancelChatRun {} | UiEvent::RetryChatSubmit {} => {
-                let request_id = self.next_id(input.now_ms)?;
-                let request = if matches!(input.event, UiEvent::CancelChatRun {}) {
-                    self.chats.cancel_run(request_id)
-                } else {
-                    self.chats.retry_run(request_id)
-                };
-                if let Some(request) = request {
-                    effects.push(UiEffect::ChatRun(request));
-                }
-            }
-            UiEvent::ShowChatHistory {}
-            | UiEvent::MoreChatHistory {}
-            | UiEvent::NewerChatHistory {}
-            | UiEvent::OpenSavedChat { .. }
-            | UiEvent::ManageSavedChat {}
-            | UiEvent::ConfirmChatExpiry {}
-            | UiEvent::KeepChatLongTerm {}
-            | UiEvent::ConfirmChatDelete {} => {
-                let request_id = self.next_id(input.now_ms)?;
-                let request = match input.event {
-                    UiEvent::ShowChatHistory {} => self.chats.toggle_history(request_id),
-                    UiEvent::MoreChatHistory {} => self.chats.page_history(request_id, false),
-                    UiEvent::NewerChatHistory {} => self.chats.page_history(request_id, true),
-                    UiEvent::OpenSavedChat { chat_id } => {
-                        self.chats.open_saved(request_id, chat_id)
-                    }
-                    UiEvent::ManageSavedChat {} => self.chats.manage_saved(request_id),
-                    UiEvent::ConfirmChatExpiry {} => self.chats.set_retention(request_id, false),
-                    UiEvent::KeepChatLongTerm {} => self.chats.set_retention(request_id, true),
-                    UiEvent::ConfirmChatDelete {} => self.chats.delete_saved(request_id),
-                    _ => unreachable!("matched chat history request"),
-                }?;
-                if let Some(request) = request {
-                    effects.push(UiEffect::ChatHistory(request));
-                }
-            }
-            UiEvent::ShowChatExpiry {} => self.chats.show_history_dialog(false)?,
-            UiEvent::ShowChatDelete {} => self.chats.show_history_dialog(true)?,
-            UiEvent::SetChatExpiry { value } => self.chats.set_expiry_date(value)?,
-            UiEvent::SetChatHistoryQuery { value } => self.chats.search_history(value)?,
-            UiEvent::CloseChatDialog {} => self.chats.close_history_dialog(),
-            UiEvent::ChatHistory(response) => self.chats.accept_history(response),
-            UiEvent::ChatRun(response) => {
-                if !self.chats.accept_models(&response)
-                    && self.chats.expects_run_request(response.request_id())
-                {
-                    let completed = matches!(
-                        &response,
-                        ChatRunResponse::ChatRunEvents {
-                            status: ChatRunStatus::Completed,
-                            ..
-                        }
-                    );
-                    let next_id = self.next_id(input.now_ms)?;
-                    if let Some(request) = self.chats.accept_run(response, next_id) {
-                        effects.push(UiEffect::ChatRun(request));
-                    } else if completed {
-                        let request_id = self.next_id(input.now_ms)?;
-                        if let Some(request) = self.chats.request_models(request_id) {
-                            effects.push(UiEffect::ChatRun(request));
-                        }
-                    }
-                }
-            }
-            UiEvent::ChatResult {
-                request_id,
-                outcome,
-            } if !self.is_pending_edit(&request_id) => self.chats.complete(&request_id, outcome),
-            UiEvent::ChatResult { .. } => {}
             UiEvent::NetworkFailed {
                 request_id,
                 category,
@@ -588,20 +340,6 @@ impl UiModel {
                 let watch = self.next_id(input.now_ms)?;
                 self.agents.network_failed(&request_id, watch, &mut effects);
                 self.write_failed(&request_id);
-                if self.is_pending_edit(&request_id) {
-                    self.complete_edit(&request_id, EditOutcome::Error { category });
-                } else {
-                    self.chats
-                        .complete(&request_id, ChatOutcome::Error { category });
-                }
-                if self.chats.expects_run_request(&request_id) {
-                    let next_id = self.next_id(input.now_ms)?;
-                    if let Some(request) = self.chats.run_network_failed(&request_id, next_id) {
-                        effects.push(UiEffect::ChatRun(request));
-                    }
-                }
-                self.chats.history_network_failed(&request_id, category);
-                self.chats.models_network_failed(&request_id);
                 if self.pairing.as_ref() == Some(&request_id) {
                     self.pairing = None;
                     self.phase = Phase::Unpaired;
@@ -686,10 +424,8 @@ impl UiModel {
                     .is_some_and(|previous| previous.session_epoch != catalog.session_epoch)
                 {
                     self.invalidate(&mut effects)?;
-                    self.chats = chat::Chats::default();
+                    self.workbench = false;
                     self.dormant_chat = None;
-                    self.pending_edit = None;
-                    self.edit_review = None;
                     self.write = edit::WriteState::default();
                     self.legacy_mail_navigation = None;
                     self.agents = agents::Agents::default();
@@ -717,12 +453,7 @@ impl UiModel {
                 }
                 let mut catalog = catalog;
                 let recent_write = catalog.recent_write.take();
-                self.chats.history.enabled = catalog.chat_history;
-                self.chats.async_chat = catalog.async_chat;
                 self.catalog = Some(catalog);
-                if self.presentation.chat {
-                    self.chats.open();
-                }
                 if let Some(recent) = recent_write {
                     self.restore_write(recent);
                 }
@@ -742,38 +473,20 @@ impl UiModel {
                 if sole.len() == 1 {
                     self.begin_inspection(input.now_ms, &mut effects)?;
                 }
-                if self.presentation.chat && self.chats.async_chat {
-                    let request_id = self.next_id(input.now_ms)?;
-                    if let Some(request) = self.chats.request_models(request_id) {
-                        effects.push(UiEffect::ChatRun(request));
-                    }
-                }
-                if !self.presentation.chat {
-                    let catalog = self.catalog.as_ref().expect("paired catalog");
-                    let (work, usage) = (catalog.work_enabled, catalog.usage_enabled);
-                    let id = self.next_id(input.now_ms)?;
-                    let aux = self.next_id(input.now_ms)?;
-                    self.agents
-                        .open(&self.project, work, usage, id, aux, &mut effects);
-                }
+                let catalog = self.catalog.as_ref().expect("paired catalog");
+                let (work, usage) = (catalog.work_enabled, catalog.usage_enabled);
+                let id = self.next_id(input.now_ms)?;
+                let aux = self.next_id(input.now_ms)?;
+                self.agents
+                    .open(&self.project, work, usage, id, aux, &mut effects);
             }
             UiEvent::RestoreWorkspace { snapshot } => {
                 if self.catalog.is_none() || self.workspace_restored || !snapshot.is_valid() {
                     return Ok(self.output(None));
                 }
-                if self.presentation.chat {
-                    self.chats.restore_snapshot(snapshot.chat)?;
-                } else {
-                    self.dormant_chat = Some(snapshot.chat);
-                    if snapshot.workbench_open {
-                        self.agents.close();
-                    }
-                }
-                if self.presentation.chat && self.chats.async_chat {
-                    let request_id = self.next_id(input.now_ms)?;
-                    if let Some(request) = self.chats.resume_run(request_id) {
-                        effects.push(UiEffect::ChatRun(request));
-                    }
+                self.dormant_chat = Some(snapshot.chat);
+                if snapshot.workbench_open {
+                    self.agents.close();
                 }
                 self.workspace_restored = true;
                 self.restore_workbench(
@@ -796,6 +509,7 @@ impl UiModel {
             | UiEvent::SelectAgentProject { .. }
             | UiEvent::SelectAgentProfile { .. }
             | UiEvent::SelectAgentMode { .. }
+            | UiEvent::SelectAgentTaskScope { .. }
             | UiEvent::SetAgentPrompt { .. }
             | UiEvent::SetAgentCriteria { .. }
             | UiEvent::SetAgentReviewNote { .. }
@@ -1178,7 +892,6 @@ impl UiModel {
             workspace: self.workspace_snapshot(),
             has_workspace_work: self.has_workspace_work(),
             mail_navigation: self.legacy_mail_navigation.clone(),
-            mail_navigation_locked: None,
             agents_navigation: self.agents.snapshot(),
             agents_navigation_locked: self.agents.locked().then_some(true),
         })
@@ -1308,40 +1021,4 @@ fn failure_label(kind: FailureKind) -> &'static str {
         FailureKind::Limit => "Limit exceeded",
         FailureKind::Cancelled => "Stopped locally",
     }
-}
-
-fn retired_chat_event(event: &UiEvent) -> bool {
-    matches!(
-        event,
-        UiEvent::NewChat {}
-            | UiEvent::SelectChat { .. }
-            | UiEvent::SelectChatModel { .. }
-            | UiEvent::SetChatDraft { .. }
-            | UiEvent::SendChat {}
-            | UiEvent::SendWorkbenchChat { .. }
-            | UiEvent::SendChatWithFile { .. }
-            | UiEvent::ProposeEdit { .. }
-            | UiEvent::DiscardEdit {}
-            | UiEvent::ApplyEdit { .. }
-            | UiEvent::EditResult { .. }
-            | UiEvent::SendPersistentChat { .. }
-            | UiEvent::CancelChatRun {}
-            | UiEvent::RetryChatSubmit {}
-            | UiEvent::ShowChatHistory {}
-            | UiEvent::SetChatHistoryQuery { .. }
-            | UiEvent::MoreChatHistory {}
-            | UiEvent::NewerChatHistory {}
-            | UiEvent::OpenSavedChat { .. }
-            | UiEvent::ManageSavedChat {}
-            | UiEvent::ShowChatExpiry {}
-            | UiEvent::SetChatExpiry { .. }
-            | UiEvent::ConfirmChatExpiry {}
-            | UiEvent::KeepChatLongTerm {}
-            | UiEvent::ShowChatDelete {}
-            | UiEvent::ConfirmChatDelete {}
-            | UiEvent::CloseChatDialog {}
-            | UiEvent::ChatHistory(_)
-            | UiEvent::ChatRun(_)
-            | UiEvent::ChatResult { .. }
-    )
 }

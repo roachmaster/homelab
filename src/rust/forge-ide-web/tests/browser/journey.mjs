@@ -1247,7 +1247,7 @@ async function assertNativeViews(page, active) {
 
 async function unconfiguredAgentsNavigationJourney(page, desktop, traffic, origin) {
   process.stderr.write('QA_CHECK unconfigured_agents_navigation\n');
-  await check.poll(traffic.catalogMailEnabled).toBe(true);
+  await check.poll(traffic.catalogMailEnabled).toBe(false);
   assert.deepEqual(traffic.businessCalls(), { mail: 0, work: 0, usage: 0, chat: 0, proposal: 0 });
   const pages = page.context().pages();
   for (const width of [320, 375, 390]) {
@@ -2870,11 +2870,21 @@ async function agentsJourney() {
     context = await browser.newContext({ viewport: { width: 390, height: 844 } });
     const traffic = await observe(context);
     const { page, errors, respondToLeaveWarning } = await connect(context, fixture);
+    async function chooseTaskScope(value) {
+      await check(page.locator('#agents-task-scope')).toBeEnabled();
+      await page.locator('#agents-task-scope').selectOption(value);
+      await check(page.locator('#agents-task-scope')).toBeEnabled();
+      await check(page.locator('#agents-task-scope')).toHaveValue(value);
+    }
     await check.poll(traffic.catalogMailEnabled).toBe(false);
     await assertApplicationViews(page, 'Workbench');
     await page.locator('#open-agents').focus();
     await page.keyboard.press('Enter');
     await check(page.locator('#agents')).toBeVisible();
+    await check(page.locator('#agents-task-scope')).toHaveValue('active');
+    await check(page.locator('#agents-tasks')).toContainText('No active assignments');
+    await chooseTaskScope('attention');
+    await check(page.locator('#agents-task-scope option[value="attention"]')).toHaveText('Needs attention (1)');
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
     await assertApplicationViews(page, 'Agents');
     await page.locator('#open-workbench').click();
@@ -2892,6 +2902,7 @@ async function agentsJourney() {
     await assertRetiredChat(page, traffic);
     await assertApplicationViews(page, 'Agents');
     await check(page.locator('#ide-navigation > :is(button,a)')).toHaveCount(4);
+    await chooseTaskScope('attention');
     await check(page.locator('#agents-tasks')).toContainText('Fixture existing report');
     const cards = page.locator('#agents-providers article.fg-metric-card');
     const geminiCard = page.locator('#agents-providers article[data-card-id="agy-primary"]');
@@ -3088,6 +3099,7 @@ async function agentsJourney() {
     await check(page.locator('#agents')).toBeVisible();
     await page.locator('#agents-back').click();
     await check(page.locator('#agents-overview')).toBeVisible();
+    await chooseTaskScope('history');
     await page.locator('#agents-tasks .fg-row-select').filter({ hasText: acceptedTitle }).click();
     await check(page.locator('#agents-reader')).toBeVisible();
     await check(page.locator('#agents-task-status')).toContainText('Accepted');
@@ -3156,6 +3168,7 @@ async function agentsJourney() {
     await summary.focus();
     await page.keyboard.press('Enter');
     await check(details).toHaveJSProperty('open', false);
+    await chooseTaskScope('history');
     const accepted = page.locator('#agents-tasks .fg-tree-row').filter({ hasText: 'Keep this local Agents draft.' });
     await check(accepted.locator('.fg-row-summary .fg-badge')).toHaveText('Accepted');
     await check(accepted.locator('.fg-row-summary .fg-badge')).toHaveAttribute('data-tone', 'success');
@@ -3190,6 +3203,7 @@ async function agentsJourney() {
     await page.setViewportSize({ width: 390, height: 844 });
     async function openFinishedPlan(status, title) {
       const taskId = relay.addPlan(status, title);
+      await chooseTaskScope(status==='completed'?'history':'attention');
       await page.locator('#agents-refresh').click();
       const row = page.locator(`#agents-tasks [data-row-id="${taskId}"] .fg-row-select`);
       await check(row).toBeVisible(); await row.click();
@@ -3351,6 +3365,7 @@ async function agentsJourney() {
       await check(page.locator('#agents-plan-actions')).toBeHidden();
       if(['merging','completed'].includes(phase))await check(page.locator('#agents-cancel')).toBeHidden();
       await page.locator('#agents-back').click();
+      if(phase==='completed')await chooseTaskScope('history');
       await check(workflowRow).toContainText(phaseLabel);
       await check(workflowRow).not.toContainText('Ready for review');
       await workflowRow.locator('.fg-row-select').click();
@@ -3371,6 +3386,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-workflow-escalation')).toContainText('Revision budget exhausted');
     await check(page.locator('#agents-accept')).toBeHidden();await check(page.locator('#agents-plan-actions')).toBeHidden();
     await page.locator('#agents-back').click();
+    await chooseTaskScope('attention');
     const escalationRow=page.locator(`#agents-tasks [data-row-id="${escalationTaskId}"]`);
     await check(escalationRow).toContainText('Needs attention');
     await escalationRow.locator('.fg-row-select').click();
@@ -3402,6 +3418,7 @@ async function agentsJourney() {
     await check(page.locator('#agents-muse-db-state')).toHaveText('Runner available');
     // The full envelope history is separate from the bounded current-attempt milestones.
     const historyTaskId=relay.addHistory();
+    await chooseTaskScope('attention');
     await page.locator('#agents-refresh').click();
     await page.locator(`#agents-tasks [data-row-id="${historyTaskId}"] .fg-row-select`).click();
     await check(page.locator('#agents-task-correlation')).toContainText('Correlation ·');

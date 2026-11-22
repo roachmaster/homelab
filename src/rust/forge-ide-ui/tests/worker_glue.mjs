@@ -34,7 +34,7 @@ async function harness(respond, initialMode = 'normal') {
         const compiled = await WebAssembly.instantiate(...args);
         const actual = compiled.instance.exports;
         return { instance: { exports: { ...actual,
-          abi_version: () => mode === 'legacy' ? 1 : mode === 'previous' ? 11 : actual.abi_version(),
+          abi_version: () => mode === 'legacy' ? 1 : mode === 'previous' ? 12 : actual.abi_version(),
           dispatch_input: () => mode === 'zero' ? 0 : actual.dispatch_input(),
           output_len: () => mode === 'malformed' ? 1 : actual.output_len(),
         } } };
@@ -133,7 +133,7 @@ for (const mode of ['legacy', 'previous']) {
     assert.equal(h.messages.length, messages);
   } finally { h.close(); }
 }
-console.log('Generated worker rejects legacy ABI 1 and previous ABI 11 before session or inspection effects.');
+console.log('Generated worker rejects legacy ABI 1 and previous ABI 12 before session or inspection effects.');
 
 {
   const h = await harness(request => request.kind === 'resume' ? json(paired(request)) : json(inspected(request)));

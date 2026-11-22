@@ -629,7 +629,7 @@ fn active_agents_remove_retained_tab_selection_and_only_lock_during_uncertain_mu
     let mut agents = ready();
     let retained = || ViewModel {
         buttons: vec![ButtonBinding {
-            id: "open-chat",
+            id: "open-workbench",
             action: None,
             disabled: true,
             pressed: None,
@@ -1316,6 +1316,7 @@ fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_r
 
 mod history;
 mod review;
+mod scopes;
 mod workflow;
 
 #[test]

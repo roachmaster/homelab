@@ -86,4 +86,24 @@ BEGIN
 END;
 $verify$;
 
+-- M27 is optional for a pre-upgrade backup check; exact privileges after admission.
+DO $jenkins_runtime$
+DECLARE spec record;privilege_name text;
+BEGIN
+ IF to_regclass('forge_agent.jenkins_events') IS NULL THEN RETURN;END IF;
+ FOR spec IN SELECT * FROM(VALUES
+  ('jenkins_events',ARRAY['SELECT','INSERT']),
+  ('jenkins_event_deliveries',ARRAY['SELECT','INSERT','UPDATE']),
+  ('jenkins_observations',ARRAY['SELECT','INSERT','UPDATE'])
+ )x(name,allowed) LOOP
+  FOREACH privilege_name IN ARRAY ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'] LOOP
+   IF has_table_privilege(current_user,'forge_agent.'||spec.name,privilege_name) IS DISTINCT FROM(privilege_name=ANY(spec.allowed))
+    OR(privilege_name IN('SELECT','INSERT','UPDATE','REFERENCES') AND NOT privilege_name=ANY(spec.allowed)
+     AND has_any_column_privilege(current_user,'forge_agent.'||spec.name,privilege_name)) THEN
+    RAISE EXCEPTION 'Unexpected Jenkins runtime privilege: %',spec.name;END IF;
+  END LOOP;
+ END LOOP;
+END;
+$jenkins_runtime$;
+
 COMMIT;

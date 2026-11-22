@@ -9,7 +9,6 @@ let actionByElement=new WeakMap();
 let focusKeyByElement=new WeakMap();
 let inputDrafts=new WeakMap();
 let sourceViews=new WeakMap();
-let diffViews=new WeakMap();
 let transcriptViews=new WeakMap();
 let presentationSequence=0;
 let pendingActionOrigin=null;
@@ -195,7 +194,6 @@ function clearProtected(){
   for(const n of document.querySelectorAll('input,textarea')){n.value='';if(n.type==='checkbox')n.checked=false;n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
   for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,.fg-timeline,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
-  for(const n of document.querySelectorAll('[data-diff-view]')){n.replaceChildren();n.scrollTop=0;}
   for(const n of document.querySelectorAll('[data-source-wrap],[data-compact-toolbar]')){
     if(n.hasAttribute('data-source-wrap')){
       const source=element(n.getAttribute('aria-controls'));
@@ -209,7 +207,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('.fg-disclosure'))n.open=false;
   for(const n of [...dialogs.values(),...sheets.values()])if(n.open)n.close();
   for(const n of [...panelToggles.values(),...document.querySelectorAll('[data-sheet-open]')])n.setAttribute('aria-expanded','false');
-  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();diffViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
+  actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
   metricViews=new WeakMap();
   workspaceWork=false;
@@ -425,26 +423,6 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       select.setAttribute('aria-level',String(row.depth+1));select.setAttribute('aria-selected',String(row.selected));
       if(row.expanded===null)select.removeAttribute('aria-expanded');else select.setAttribute('aria-expanded',String(row.expanded));
       select.children[0].textContent=row.glyph||'';select.children[1].textContent=row.label;select.children[2].textContent=row.secondary;
-      const correspondence=row.correspondence;
-      let metadata=select.querySelector(':scope > .fg-correspondence-meta');
-      let preview=select.querySelector(':scope > .fg-correspondence-preview');
-      if(correspondence){
-        item.dataset.correspondence='true';select.dataset.correspondence='true';select.dataset.ready=String(correspondence.ready===true);
-        if(!metadata){
-          metadata=document.createElement('span');metadata.className='fg-correspondence-meta';
-          const dot=document.createElement('span');dot.className='fg-correspondence-dot';dot.setAttribute('aria-hidden','true');
-          const sender=document.createElement('span');sender.className='fg-correspondence-sender';
-          const time=document.createElement('span');time.className='fg-correspondence-time';
-          metadata.append(dot,sender,time);select.append(metadata);
-        }
-        metadata.children[0].title=correspondence.status;
-        metadata.children[1].textContent=correspondence.sender;metadata.children[2].textContent=correspondence.timestamp;
-        if(!preview){preview=document.createElement('span');preview.className='fg-correspondence-preview';select.append(preview);}
-        preview.textContent=correspondence.preview;
-      }else{
-        delete item.dataset.correspondence;delete select.dataset.correspondence;delete select.dataset.ready;
-        metadata?.remove();preview?.remove();
-      }
       let summary=select.querySelector(':scope > .fg-row-summary');
       if(row.summary){
         item.dataset.summary='true';
@@ -452,7 +430,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
         paintBadge(summary.children[0],row.summary.badge);summary.children[1].textContent=row.summary.tag;paintTime(summary.children[2],row.summary.time);
       }else{delete item.dataset.summary;summary?.remove();}
       const description=n.classList?.contains('fg-stacked-tree')?row.secondary:row.kind_label;
-      const accessible=correspondence?[row.label,correspondence.sender,correspondence.status,correspondence.timestamp].filter(Boolean).join(', '):description?row.label+', '+description:row.label;
+      const accessible=description?row.label+', '+description:row.label;
       select.setAttribute('aria-label',row.summary?[row.label,row.summary.badge.label,row.summary.tag,row.summary.time.label].join(', '):accessible);select.title=row.label;
       // Preserve stable rows and their scroll anchor; moving every existing node
       // would transiently reorder the list even when its accepted order is unchanged.
@@ -492,33 +470,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
       node.dataset.role=role;
       const label=role==='user'?n.dataset.transcriptUser:b.assistant_label??n.dataset.transcriptAssistant;
       const heading=node.children[0];
-      const header=message.header;
-      let recipient=node.querySelector(':scope > .fg-message-recipient');
-      if(header){
-        node.dataset.correspondence='true';heading.className='fg-correspondence-header';
-        if(!heading.querySelector('.fg-correspondence-avatar')){
-          const avatar=document.createElement('span');avatar.className='fg-correspondence-avatar';avatar.setAttribute('aria-hidden','true');
-          const sender=document.createElement('span');sender.className='fg-correspondence-sender';
-          const time=document.createElement('span');time.className='fg-correspondence-time';
-          heading.replaceChildren(avatar,sender,time);
-        }
-        heading.children[0].textContent=header.monogram;heading.children[1].textContent=header.sender;
-        heading.children[2].textContent=header.timestamp??'';heading.children[2].hidden=!header.timestamp;
-        if(!recipient){
-          recipient=document.createElement('details');recipient.className='fg-message-recipient';
-          const summary=document.createElement('summary');
-          const addresses=document.createElement('dl');
-          const from=document.createElement('dt');from.textContent='From';
-          const sender=document.createElement('dd');
-          const to=document.createElement('dt');to.textContent='To';
-          const destination=document.createElement('dd');
-          addresses.append(from,sender,to,destination);recipient.append(summary,addresses);node.append(recipient);
-        }
-        recipient.children[0].textContent='To '+header.recipient;
-        recipient.children[1].children[1].textContent=header.sender;recipient.children[1].children[3].textContent=header.recipient;
-      }else{
-        delete node.dataset.correspondence;heading.className='';heading.textContent=label??'';recipient?.remove();
-      }
+      heading.textContent=label??'';
       const previous=node.children[1];
       const existingNotice=node.querySelector(':scope > .fg-message-notice');
       if(typeof message.notice==='string'){
@@ -549,21 +501,6 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   for(const b of view.tables||[]){
     const n=element(b.id);if(!n)continue;
     const parts=[];for(const row of b.rows){const property=document.createElement('div');property.className='fg-property';const t=document.createElement('dt');t.textContent=row.label;const d=document.createElement('dd');d.textContent=row.value;property.append(t,d);parts.push(property);}n.replaceChildren(...parts);
-  }
-  for(const b of view.diffs||[]){
-    const n=element(b.id);
-    if(!n?.hasAttribute('data-diff-view'))continue;
-    if(!Array.isArray(b.lines)||b.lines.length>24)throw new Error('Invalid diff');
-    const signature=JSON.stringify(b.lines);
-    if(diffViews.get(n)===signature)continue;
-    const rows=b.lines.map(line=>{
-      const row=document.createElement('div');row.className='fg-diff-line';
-      row.dataset.change=line.old_line===null?'added':line.new_line===null?'removed':'context';
-      const fields=[line.old_line??'',line.new_line??'',row.dataset.change==='added'?'+':row.dataset.change==='removed'?'−':'',line.text];
-      for(const value of fields){const cell=document.createElement('span');cell.textContent=String(value);row.append(cell);}
-      return row;
-    });
-    n.replaceChildren(...rows);diffViews.set(n,signature);
   }
   // Source windows are selected and bounded by WASM. The renderer only creates
   // numbered safe-text lines and projects the accepted declaration span.
@@ -917,7 +854,7 @@ let workspaceJSON=null;
 let latestCheckpoint=null;
 let latestWorkspace=null;
 let mailNavigation=null;
-let mailNavigationLocked=false;
+let agentsNavigationLocked=false;
 let agentsNavigation=null;
 let localCheckpointSequence=0;
 const localCheckpointAcks=new Map();
@@ -954,18 +891,13 @@ async function workspaceRequest(body,keepalive,signal){
     body,keepalive,signal,credentials:'same-origin',redirect:'error',cache:'no-store'
   });
 }
-async function restoreWorkspace(chatHistory,chatModels){
+async function restoreWorkspace(){
   if(!workspaceTab||!csrf)return {snapshot:null,unavailable:false};
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),2500);
   try{
-    const request={operation:'restore',tab:workspaceTab,...(CONFIG.preserve_workspace_chat?{preserve_chat:true}:{...(chatHistory?{history:true}:{}),...(chatModels?{models:true}:{})})};
-    let response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
-    if(request.models&&response.status===400){
-      await response.body?.cancel();
-      delete request.models;
-      response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
-    }
+    const request={operation:'restore',tab:workspaceTab,...(CONFIG.preserve_workspace_chat?{preserve_chat:true}:{})};
+    const response=await workspaceRequest(JSON.stringify(request),false,controller.signal);
     if(!response.ok){await response.body?.cancel();return {snapshot:null,unavailable:response.status>=500};}
     const saved=safeJson(decoder.decode(await bounded(response,WORKSPACE_MAX)));
     if(!/^[0-9a-f]{64}$/.test(saved.lease))return {snapshot:null,unavailable:false};
@@ -1023,11 +955,11 @@ async function flushNavigation(id){
   const saved=Boolean(workspaceLease&&snapshot&&workspaceJSON===json&&
     JSON.stringify(latestWorkspace)===json&&(!checkpoint||checkpoint.saved));
   let cache=null;
-  if(saved&&workspaceEpoch&&!mailNavigationLocked){
+  if(saved&&workspaceEpoch&&!agentsNavigationLocked){
     cache=navigationCacheJSON(snapshot);
   }
   const requiresCache=Boolean(mailNavigation?.active||agentsNavigation);
-  postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!mailNavigationLocked&&(!requiresCache||cache!==null),requires_cache:requiresCache,cache});
+  postMessage({kind:'workspace_navigation_flushed',id,saved:saved&&!agentsNavigationLocked&&(!requiresCache||cache!==null),requires_cache:requiresCache,cache});
 }
 function localNavigationCheckpoint(snapshot){
   if(!agentsNavigation||!workspaceEpoch||!workspaceTab)return null;
@@ -1061,20 +993,6 @@ function navigationSnapshot(snapshot){
   return {chat:{selected:chat.selected,model_id:chat.model_id,conversations},
     workbench:snapshot.workbench,workbench_open:snapshot.workbench_open};
 }
-async function checkpointMatches(effect,binding){
-  if(!workspaceLease||!workspaceJSON)return false;
-  const intent=valueAt(safeJson(workspaceJSON),binding.snapshot_path);
-  if(!intent||typeof intent!=='object')return false;
-  if(!binding.fields.every(key=>valueAt(intent,key)===valueAt(effect,key)))return false;
-  const checkpoint=latestCheckpoint;
-  if(!checkpoint)return true; // Restored from a durable checkpoint.
-  await checkpoint.pending;
-  if(!checkpoint.saved&&checkpoint===latestCheckpoint){
-    checkpoint.pending=saveCheckpoint(checkpoint);
-    await checkpoint.pending;
-  }
-  return checkpoint.saved;
-}
 function dispatch(event,presentation_sequence=null,suppressView=false){
   if(closed||!wasm)return;
   const input=encoder.encode(JSON.stringify({now_ms:Date.now(),event}));if(input.length>MAX)throw new Error('Input limit');
@@ -1088,7 +1006,7 @@ function dispatch(event,presentation_sequence=null,suppressView=false){
   if(!suppressView){
     mailNavigation=result.mail_navigation??null;
     agentsNavigation=result.agents_navigation??null;
-    mailNavigationLocked=result.mail_navigation_locked===true||result.agents_navigation_locked===true;
+    agentsNavigationLocked=result.agents_navigation_locked===true;
     postMessage({kind:'view',view:result.view,presentation_sequence,has_workspace_work:result.has_workspace_work});
     checkpointWorkspace(result.workspace);
     localCheckpoint=localNavigationCheckpoint(result.workspace);
@@ -1124,15 +1042,11 @@ async function run(effect,localCheckpoint=null){
   }
   const binding=CONFIG.bindings.find(b=>b.kind===effect.kind);if(!binding)throw new Error('Undeclared transport effect');
   const id=String(field(effect,binding.request_id));
-  const {delay_ms,wait_for_slot_ms,checkpoint,expire_session_on_denial,expire_session_on_unauthenticated,local_checkpoint_path}=binding.policy;
+  const {delay_ms,wait_for_slot_ms,expire_session_on_denial,expire_session_on_unauthenticated,local_checkpoint_path}=binding.policy;
   if(local_checkpoint_path&&(!localCheckpoint||JSON.stringify(valueAt(localCheckpoint.snapshot,local_checkpoint_path))!==JSON.stringify(effect)||!await localCheckpoint.pending)){
     failed(id,'unavailable');return;
   }
   if(delay_ms)await new Promise(resolve=>setTimeout(resolve,delay_ms));
-  if(checkpoint&&!await checkpointMatches(effect,checkpoint)){
-    failed(id,'unavailable');
-    return;
-  }
   if(wait_for_slot_ms){
     // Wait for an initial slot. This does not replay a dispatched request.
     const slotDeadline=Date.now()+wait_for_slot_ms;
@@ -1170,7 +1084,7 @@ async function run(effect,localCheckpoint=null){
       if(typeof decoded.csrf!=='string'||!/^[-a-zA-Z0-9_]{16,128}$/.test(decoded.csrf))throw new Error('Invalid session metadata');
       csrf=decoded.csrf;
       workspaceEpoch=decoded.event.catalog?.session_epoch??null;
-      const restore=await restoreWorkspace(decoded.event.catalog?.chat_history===true,decoded.event.catalog?.async_chat===true);
+      const restore=await restoreWorkspace();
       const cache=navigationCache;
       navigationCache=null;
       const matchesCache=cache?.version===1&&cache.tab===workspaceTab&&workspaceEpoch&&cache.epoch===workspaceEpoch;
@@ -1199,7 +1113,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==12 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==13 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));
