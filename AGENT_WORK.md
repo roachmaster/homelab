@@ -1,4 +1,11 @@
-## Current: Clean up stalled pipeline work — 2026-11-21
+## Current: Recover native publication ancestry — 2026-11-22
+
+- The continued cache author finished normally with the corrected cache helper and measured qualification report. Native Jenkins build4 then rejected its old-base candidate at `main_ancestor_required` before running checks. The finished native workspace and all failed evidence are preserved; the idle publisher was stopped pending the controller fix.
+- Trusted branch-first preparation now snapshots authored source in its private clone and three-way merges actual current main before branch push, the durable event and Jenkins. Version2 receipts freeze both authored and integrated identities; historical receipts replay unchanged. Conflicts produce unapproved source findings before any push or build.
+- One explicit owner verification-only command can append a fresh local review of the same stopped author result after this failure. It preserves the failed review, original owner fence, Plan and spent repair history; it starts no model writer and renews no automatic allowance. Fresh CI, independent review and guarded merge remain required.
+- Publication changes passed68 focused tests and independent review. Owner recovery passed7 actual PostgreSQL cases,56 affected cases and an additional native acquisition assertion. The integrated owner/publication/review/native-Jenkins/API suite passed70 tests in58.476s with zero skips. Verification and the real delivery outcome are recorded outside the source tree under the existing cleanup evidence directories. Source-only API/publisher activation is pending; schema26, runtime configuration and Rust/ABI12 assets remain unchanged.
+
+## Earlier: Clean up stalled pipeline work — 2026-11-21
 
 - **authorization:** User requests cleaning up and fixing the stalled conflict workflows. Preserve saved source, immutable Plans/verdicts, budget counters and actual source authority. Never manufacture acceptance or reset an exhausted automatic budget.
 - **coordinator fix:** A genuine Code Review Revise at the frozen2/2 stagnation limit caused SQL P0009 to escape the inner savepoint, rolling back the verdict and retrying forever. The deployed API hotfix now records the exact verdict/reviewer result and explicit exhausted-budget handoff atomically. Scoped64 real PostgreSQL/feedback/replay/preparation tests and independent review passed. Schema25, credentials, policy snapshots and all other services were preserved at activation.
