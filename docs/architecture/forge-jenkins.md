@@ -83,7 +83,10 @@ sequenceDiagram
     P->>G: Implement
     G->>P: Stop and reconcile source
     P->>V: Lease verification
-    V->>GH: Push exact source to its owned branch
+    V->>GH: Read current main
+    V->>V: Three-way integrate in private clone; pin authored/main/candidate
+    Note over V,P: A conflict yields unapproved source feedback, with no push or build
+    V->>GH: Push exact integrated source to its owned branch
     GH-->>V: Confirm remote head
     V->>P: Commit idempotent branch_pushed event
     P-->>V: Event receipt under current lease
@@ -111,6 +114,16 @@ sequenceDiagram
         end
     end
 ```
+
+Source integration never updates the native worker workspace or substitutes its
+base/digest/stop proof. A version2 private receipt distinguishes the exact authored
+tree from the integrated candidate and freezes observed main. Replay verifies both
+trees and parent ancestry, reuses that same candidate, and leaves historical v1 or
+already pushed/build-bound receipts intact. A conflict commits only the real
+unresolved merge as unapproved repair evidence, preserving nonconflicting main
+files. Its source findings report no checks and no native Jenkins identity; normal
+repair policy and owner-continuation fences still apply. Later main races retain
+the existing independently verified build/merge feedback path.
 
 Jenkins runs all fixed commands once per admitted verification action. Later
 publication/merge stages reobserve the same action. Changed source or an
