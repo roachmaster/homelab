@@ -338,3 +338,149 @@ fn failed_publication_preserves_previous_receipt() {
     );
 }
 use forge_access::{AuthenticatedBoundary, Grant, IdentityFacts, RoutePolicy, Verifier};
+
+#[test]
+fn identical_submission_sequences_produce_identical_receipts_and_statuses() {
+    fn run_once() -> (Vec<forge_jobs::Receipt>, Vec<forge_jobs::Status>) {
+        let directory = Directory::new();
+        let store = FileStore::open(directory.config()).unwrap();
+        let owner = Owner::new("alice").unwrap();
+        let first = store.submit(&owner, "one", WORK).unwrap();
+        let second = store
+            .submit(&owner, "two", Work::Sum { through: 5 })
+            .unwrap();
+        let statuses = vec![
+            store.status(&owner, first.id).unwrap(),
+            store.status(&owner, second.id).unwrap(),
+        ];
+        (vec![first, second], statuses)
+    }
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(first.0[0].id.0, 1);
+    assert_eq!(first.0[1].id.0, 2);
+    assert!(first
+        .1
+        .iter()
+        .all(|status| status.state == State::Queued && status.attempt == 0));
+}
+
+#[test]
+fn work_and_owner_boundaries_are_exact() {
+    let directory = Directory::new();
+    let store = FileStore::open(directory.config()).unwrap();
+    let owner = Owner::new("alice").unwrap();
+    for invalid in [Work::Sum { through: 0 }, Work::Sum { through: 1_000_001 }] {
+        assert_eq!(
+            store.submit(&owner, "invalid", invalid),
+            Err(JobError::InvalidRequest)
+        );
+    }
+    assert_eq!(
+        store
+            .submit(&owner, "one", Work::Sum { through: 1 })
+            .unwrap()
+            .id
+            .0,
+        1
+    );
+    assert!(store
+        .submit(&owner, "max", Work::Sum { through: 1_000_000 })
+        .is_ok());
+    assert_eq!(Owner::new(""), Err(JobError::InvalidRequest));
+    assert_eq!(Owner::new("a".repeat(65)), Err(JobError::InvalidRequest));
+    assert!(Owner::new("a".repeat(64)).is_ok());
+    assert_eq!(Owner::new("has space"), Err(JobError::InvalidRequest));
+}
+
+#[test]
+fn store_configuration_boundaries_are_exact() {
+    let directory = Directory::new();
+    for max_jobs in [0, 4097] {
+        assert_eq!(
+            register_store(StoreConfig {
+                directory: directory.0.clone(),
+                max_jobs,
+            })
+            .unwrap_err(),
+            JobError::InvalidConfiguration
+        );
+    }
+    assert_eq!(
+        register_store(StoreConfig {
+            directory: PathBuf::new(),
+            max_jobs: 32,
+        })
+        .unwrap_err(),
+        JobError::InvalidConfiguration
+    );
+    assert!(register_store(StoreConfig {
+        directory: directory.0.clone(),
+        max_jobs: 4096,
+    })
+    .is_ok());
+}
+
+#[test]
+fn worker_configuration_boundaries_are_exact() {
+    use forge_jobs::register_worker;
+    let valid = WorkerConfig {
+        poll_interval: Duration::from_millis(10),
+        lease: Duration::from_secs(2),
+        retries: 1,
+    };
+    assert!(register_worker(valid).is_ok());
+    for invalid in [
+        WorkerConfig {
+            poll_interval: Duration::ZERO,
+            ..valid
+        },
+        WorkerConfig {
+            poll_interval: Duration::from_secs(6),
+            ..valid
+        },
+        WorkerConfig {
+            lease: Duration::from_millis(999),
+            ..valid
+        },
+        WorkerConfig {
+            lease: Duration::from_millis(300_001),
+            ..valid
+        },
+        WorkerConfig {
+            retries: 11,
+            ..valid
+        },
+    ] {
+        assert_eq!(
+            register_worker(invalid).unwrap_err(),
+            JobError::InvalidConfiguration
+        );
+    }
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    let cases = [
+        (JobError::InvalidRequest, "invalid job request"),
+        (JobError::InvalidConfiguration, "invalid job configuration"),
+        (
+            JobError::Conflict,
+            "intent key already identifies different work",
+        ),
+        (JobError::NotFound, "job is not visible"),
+        (JobError::Capacity, "job store capacity exhausted"),
+        (JobError::StaleAttempt, "job attempt is no longer current"),
+        (JobError::StoreBusy, "durable job store is busy"),
+        (
+            JobError::PrivateDirectoryRequired,
+            "job directory must be private and owned by the current Unix account",
+        ),
+        (JobError::StoreUnavailable, "durable job store unavailable"),
+        (JobError::WorkerPanicked, "job worker panicked"),
+    ];
+    for (error, message) in cases {
+        assert_eq!(error.to_string(), message);
+    }
+}
