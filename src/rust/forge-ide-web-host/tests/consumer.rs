@@ -2936,3 +2936,155 @@ fn coding_agent_and_usage_design_readers_serve_only_fixed_pages_and_diagrams() {
         );
     }
 }
+
+#[test]
+fn host_error_display_names_each_failure_exactly() {
+    use std::io;
+    assert_eq!(
+        HostError::Configuration("invalid limits").to_string(),
+        "invalid UI host configuration: invalid limits"
+    );
+    assert_eq!(
+        HostError::Io(io::ErrorKind::NotFound).to_string(),
+        "UI host I/O failed: NotFound"
+    );
+    assert_eq!(
+        HostError::Assembly.to_string(),
+        "UI host dependency construction failed"
+    );
+    assert_eq!(HostError::Limit.to_string(), "UI host limit exceeded");
+    assert_eq!(
+        HostError::InvalidReport.to_string(),
+        "invalid report projection"
+    );
+    assert_eq!(
+        HostError::Entropy.to_string(),
+        "operating-system randomness unavailable"
+    );
+    assert_eq!(
+        HostError::from(io::Error::new(io::ErrorKind::PermissionDenied, "denied")).to_string(),
+        "UI host I/O failed: PermissionDenied"
+    );
+}
+
+#[test]
+fn default_host_limits_are_exact_and_boundaries_are_enforced() {
+    let limits = HostLimits::default();
+    assert_eq!(limits.request_bytes, 16_384);
+    assert_eq!(limits.response_bytes, 8 * 1024 * 1024);
+    assert_eq!(limits.request_timeout, Duration::from_secs(5));
+    assert_eq!(limits.pairing_ttl, Duration::from_secs(300));
+    assert_eq!(limits.session_ttl, Duration::from_secs(1800));
+    let f = Files::new();
+    let mut bad = |mutate: fn(&mut HostLimits)| {
+        let mut c = config(&f);
+        mutate(&mut c.limits);
+        assert!(matches!(
+            c.validate(),
+            Err(HostError::Configuration("invalid limits"))
+        ));
+    };
+    bad(|l| l.request_bytes = 255);
+    bad(|l| l.request_bytes = 65_537);
+    bad(|l| l.response_bytes = 1023);
+    bad(|l| l.response_bytes = 8 * 1024 * 1024 + 1);
+    bad(|l| l.request_timeout = Duration::from_millis(99));
+    bad(|l| l.request_timeout = Duration::from_secs(31));
+    bad(|l| l.pairing_ttl = Duration::from_secs(0));
+    bad(|l| l.pairing_ttl = Duration::from_secs(601));
+    bad(|l| l.session_ttl = Duration::from_secs(0));
+    bad(|l| l.session_ttl = Duration::from_secs(3601));
+    let mut good = |mutate: fn(&mut HostLimits)| {
+        let mut c = config(&f);
+        mutate(&mut c.limits);
+        assert!(c.validate().is_ok());
+    };
+    good(|l| l.request_bytes = 256);
+    good(|l| l.request_bytes = 65_536);
+    good(|l| l.response_bytes = 1024);
+    good(|l| l.response_bytes = 8 * 1024 * 1024);
+    good(|l| l.request_timeout = Duration::from_millis(100));
+    good(|l| l.request_timeout = Duration::from_secs(30));
+    good(|l| l.pairing_ttl = Duration::from_secs(600));
+    good(|l| l.session_ttl = Duration::from_secs(3600));
+}
+
+#[test]
+fn host_config_validation_names_each_failure_exactly() {
+    let f = Files::new();
+    let mut c = config(&f);
+    c.bind = "192.0.2.1:0".parse().unwrap();
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: loopback bind and absolute asset directory required"
+    );
+    let mut c = config(&f);
+    c.assets = PathBuf::from("relative/assets");
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: loopback bind and absolute asset directory required"
+    );
+    let mut c = config(&f);
+    c.nodes.clear();
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: invalid limits"
+    );
+    let mut c = config(&f);
+    c.nodes.push(c.nodes[0].clone());
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: node key, label or projects"
+    );
+    let mut c = config(&f);
+    c.nodes[0].projects = vec!["../escape".into()];
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: project alias"
+    );
+    let mut c = config(&f);
+    c.nodes[0].projects = vec!["workspace".into(), "workspace".into()];
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: project alias"
+    );
+    let mut c = config(&f);
+    c.session_auth = SessionAuth::TrustedProxy;
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: trusted proxy sessions require an explicit HTTPS public origin"
+    );
+    let mut c = config(&f);
+    c.public_origin = Some("http://portal.example".into());
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: canonical HTTPS public origin required"
+    );
+    let mut c = config(&f);
+    c.alternate_cooked_assets = Some(PathBuf::from("relative/cooked"));
+    assert_eq!(
+        c.validate().unwrap_err().to_string(),
+        "invalid UI host configuration: absolute alternate cooked asset directory required"
+    );
+}
+
+#[test]
+fn repeated_static_asset_requests_produce_identical_responses() {
+    let f = Files::new();
+    let (first, _) = host(&f);
+    let (second, _) = host(&f);
+    let get = |h: &Host| {
+        exchange(
+            h,
+            format!(
+                "GET /main.js HTTP/1.1\r\nHost: {}\r\n\r\n",
+                h.local_addr().unwrap()
+            ),
+        )
+    };
+    let first_response = get(&first);
+    let second_response = get(&second);
+    assert!(first_response.starts_with("HTTP/1.1 200"));
+    assert_eq!(first_response, second_response);
+    assert!(first_response.ends_with("test-only asset"));
+}
