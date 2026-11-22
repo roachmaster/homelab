@@ -160,6 +160,13 @@ class JenkinsStore:
             (f"{self._config.owner}\n{project_alias}", ADVISORY_LOCK_SALT),
         )
 
+    def _owner_capacity_lock(self, cursor):
+        # Project aliases are nonempty, so the empty slot is a distinct owner scope.
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s::text, %s::bigint))",
+            (f"{self._config.owner}\n", ADVISORY_LOCK_SALT),
+        )
+
     def _require_admitted(self, event: JenkinsEventEmit):
         if event.project_alias not in self._config.allowed_projects:
             raise Rejected(403, "denied")
@@ -229,6 +236,8 @@ class JenkinsStore:
         subscribers = self._config.subscribed_consumers(event.project_alias, event.event_kind)
 
         with self._transaction() as cursor:
+            # Capacity is owner-wide. Always take this before the project sequence lock.
+            self._owner_capacity_lock(cursor)
             self._project_lock(cursor, event.project_alias)
 
             cursor.execute(

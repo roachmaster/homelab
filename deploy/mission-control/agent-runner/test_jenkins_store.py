@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import threading
+import time
 import unittest
 from uuid import UUID, uuid4
 
@@ -197,6 +198,106 @@ class JenkinsStorePostgresTest(unittest.TestCase):
             store.emit(conflicting)
         self.assertEqual(ctx.exception.status, 409)
         self.assertEqual(ctx.exception.code, "idempotency_conflict")
+
+    def _emit_while_another_owner_transaction_is_uncommitted(self, *, other_owner):
+        first_ready = threading.Event()
+        release_first = threading.Event()
+        second_connected = threading.Event()
+        pids = {}
+
+        class HeldCommit:
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __enter__(self):
+                self.connection.__enter__()
+                return self
+
+            def __exit__(self, *error):
+                if error[0] is None:
+                    first_ready.set()  # COUNT and fanout ran, but no rows are committed.
+                    if not release_first.wait(3):
+                        self.connection.rollback()
+                        raise AssertionError("Held test transaction was not released")
+                return self.connection.__exit__(*error)
+
+            def cursor(self, **kwargs):
+                return self.connection.cursor(**kwargs)
+
+            def close(self):
+                self.connection.close()
+
+        def first_connect():
+            connection = self.cluster.connect()
+            pids['first'] = connection.get_backend_pid()
+            return HeldCommit(connection)
+
+        def second_connect():
+            connection = self.cluster.connect()
+            pids['second'] = connection.get_backend_pid()
+            second_connected.set()
+            return connection
+
+        cfg = {"max_pending_deliveries": 1,
+               "consumers": [{"name": "observation", "handler": "observation"}]}
+        first = JenkinsStore(make_config(**cfg), first_connect)
+        second = JenkinsStore(make_config(owner=other_owner, **cfg), second_connect)
+        events = (sample_event(delivery_id='owner-cap-first'), sample_event(
+            project_alias='docs', job_name='docs/build', delivery_id='owner-cap-second',
+            build_url=f'{ORIGIN}/job/docs/job/build/1/'))
+        blocked = False
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            left = pool.submit(first.emit, events[0])
+            try:
+                self.assertTrue(first_ready.wait(2))
+                right = pool.submit(second.emit, events[1])
+                self.assertTrue(second_connected.wait(2))
+                # Inspect the actual server lock wait, not a guessed thread delay.
+                with closing(self.cluster.connect('postgres')) as observer, observer.cursor() as cursor:
+                    deadline = time.monotonic() + 2
+                    while not right.done() and time.monotonic() < deadline:
+                        cursor.execute('SELECT pg_blocking_pids(%s)', (pids['second'],))
+                        if pids['first'] in cursor.fetchone()[0]:
+                            blocked = True
+                            break
+                        time.sleep(0.01)
+            finally:
+                release_first.set()
+            admitted = left.result(timeout=3)
+            try:
+                outcome = right.result(timeout=3)
+            except Rejected as error:
+                outcome = (error.status, error.code)
+        with closing(self.cluster.connect()) as connection, connection.cursor() as cursor:
+            cursor.execute('SELECT count(*) FROM forge_agent.jenkins_events')
+            event_count = cursor.fetchone()[0]
+            cursor.execute('SELECT count(*) FROM forge_agent.jenkins_event_deliveries')
+            delivery_count = cursor.fetchone()[0]
+        return first, events[0], admitted, outcome, blocked, event_count, delivery_count
+
+    def test_owner_capacity_serializes_two_projects_before_count_and_fanout(self):
+        store, event, receipt, outcome, blocked, event_count, delivery_count = (
+            self._emit_while_another_owner_transaction_is_uncommitted(other_owner='mission-control'))
+        self.assertTrue(blocked, f'Second project bypassed uncommitted owner capacity: '
+                        f'outcome={outcome!r}, events={event_count}, deliveries={delivery_count}')
+        self.assertEqual(outcome, (503, 'queue_full'))
+        self.assertEqual((event_count, delivery_count), (1, 1))
+        # The full owner queue still replays an admitted key and rejects changed intent.
+        replay = store.emit(event)
+        self.assertTrue(replay['deduplicated'])
+        self.assertEqual(replay['event_id'], receipt['event_id'])
+        self.assertEqual(replay['sequence'], 1)
+        with self.assertRaises(Rejected) as changed:
+            store.emit(sample_event(delivery_id=event.delivery_id, summary='Changed owner intent'))
+        self.assertEqual((changed.exception.status, changed.exception.code), (409, 'idempotency_conflict'))
+
+    def test_owner_capacity_does_not_serialize_different_owners(self):
+        _, _, receipt, outcome, blocked, event_count, delivery_count = (
+            self._emit_while_another_owner_transaction_is_uncommitted(other_owner='another-owner'))
+        self.assertFalse(blocked)
+        self.assertIsInstance(outcome, dict)
+        self.assertEqual((receipt['sequence'], outcome['sequence']), (1, 1))
+        self.assertEqual((event_count, delivery_count), (2, 2))
 
     def test_queue_full_and_pagination_filters_and_no_lease_token_leak(self):
         store = self.make_store(max_pending_deliveries=2)

@@ -1,26 +1,19 @@
 # Jenkins Events in Forge's Event-Driven System
 
-This document describes the selectively recovered Mission Control Jenkins event
-capability. The saved implementation is being ported onto current main for a new
-independent Plan/code review and genuine Jenkins verification. This source report
-does not claim live activation. Original task, source and approval receipts remain
-unchanged.
+This document describes the implemented, optional Mission Control Jenkins event
+modules and their runtime contract. Typed configuration selects the store,
+emitter and consumer providers through the runner's factories; webhook data
+cannot select its own dependencies or grant authority.
 
-This **PRELIMINARY, UNAPPROVED** context imports only the feature delta from
-`9e975ffd4acf49630120f38ce9e099c2b5fce77e` against candidate21 onto corrected
-cache context `4dc2214ced0ff3f37c5423f64056bd24297d388a`, tree
-`db1036f53d3d33ec55f57afdb2cdf5c937d7c8d9`. Main remains held at `c5d8647`.
-It preserves frozen helper047 and its new correctness addendum, historical b870
-timing reports, Owner4f source-followup/private authority, nativeca8 accounting
-and terminal compatibility, M1–26, and the Rust7b ACK/browser tree with ABI12.
+The capability is disabled by default. Enabling it requires the normal reviewed
+deployment of matching source, schema migration 0027, narrowly granted database
+access and trusted operator configuration. Source support alone does not prove
+that the service or its consumers are active.
 
-The corrected cache context is not main or approved source. After genuine cache
-Jenkins checks, independent review and guarded merge, refresh this M27 delta onto
-the actual merged-main parent/ref with exact source/tree preservation proof
-before any new Plan/admission. Existing green M27/Owner results are attributable
-to unchanged protected code and their original context; the updated source
-boundary checks are run separately. Neither reused tests nor this prepared
-reference creates source approval, runtime readiness or deployment authority.
+Each workflow's persisted records identify its actual source, CI, independent
+review and deployment status. This design does not replace those receipts or
+authorize a merge or activation. Historical qualification reports remain
+attributed to their recorded revisions and are not relabeled by later changes.
 
 ## 1. Scope and Trust Boundaries
 
