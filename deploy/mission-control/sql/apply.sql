@@ -259,4 +259,11 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=26)
 \ir migrations/0026_coding_owner_continuation.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(26,'coding_owner_continuation');
 \endif
+
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=27) AS apply_0027
+\gset
+\if :apply_0027
+\ir migrations/0027_jenkins_events.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(27,'jenkins_events');
+\endif
 COMMIT;

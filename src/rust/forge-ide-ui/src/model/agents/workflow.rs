@@ -4,6 +4,9 @@ use super::*;
 impl Agents {
     pub(super) fn task_summary_badge(&self, task: &WorkTaskSummary) -> BadgeView {
         if let Some(phase) = task.workflow_phase {
+            if task.workflow_enabled == Some(false) && phase.is_processing() {
+                return badge("Needs attention", BadgeTone::Warning);
+            }
             if task.mode == WorkMode::Review && task.status == WorkStatus::Completed {
                 return badge("Review complete", BadgeTone::Success);
             }

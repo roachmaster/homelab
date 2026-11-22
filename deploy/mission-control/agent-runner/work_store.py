@@ -53,6 +53,8 @@ VALID_STATUSES = frozenset({
     "blocked_permission",
     "needs_reconcile",
 })
+TASK_SCOPES = frozenset({"active", "attention", "history", "all"})
+VALID_LIST_FILTERS = VALID_STATUSES | TASK_SCOPES
 
 
 def _public_progress(payload):
@@ -619,12 +621,14 @@ class WorkStore:
 
     def list_tasks(self, *, project_alias, status_filter=None, limit=20, cursor_task_id=None):
         self._require_project(project_alias)
-        if status_filter is not None and status_filter not in VALID_STATUSES:
+        if status_filter is not None and (not isinstance(status_filter, str) or status_filter not in VALID_LIST_FILTERS):
             raise Rejected(400, "invalid_request")
         if type(limit) is not int or not 1 <= limit <= 50:
             raise Rejected(400, "invalid_request")
         if cursor_task_id is not None and not isinstance(cursor_task_id, UUID):
             raise Rejected(400, "invalid_request")
+        if status_filter in TASK_SCOPES:
+            return self._list_task_scope(project_alias, status_filter, limit, cursor_task_id)
 
         mode = {"repeatable_read": True} if self._external_workflow_for(project_alias) is not None else {"read_only": True}
         external_filter = "AND NOT forge_external_workflow_api.is_internal(t.owner_id,t.project_alias,t.id)" if self._external_workflow_for(project_alias) is not None else ""
@@ -684,6 +688,102 @@ class WorkStore:
             "tasks": summaries,
             "next_cursor": next_cursor,
         }
+
+    def _list_task_scope(self, project_alias, scope, limit, cursor_task_id):
+        """Classify complete workflow roots before counting and keyset paging.
+
+        Raw statuses remain evidence. A running workflow can have a stopped
+        author while an internal reviewer or repair task performs the next step.
+        The independent external provider retains its existing scope guard.
+        """
+        external = self._external_workflow_for(project_alias)
+        external_join = ""
+        external_filter = ""
+        phase, enabled = "w.phase", "w.enabled"
+        activity = ""
+        if external is not None:
+            external_join = """
+                LEFT JOIN forge_external_workflow.tasks x
+                  ON (x.owner_id,x.project_alias,x.task_id)=(t.owner_id,t.project_alias,t.id)
+                LEFT JOIN forge_external_workflow.workflows ew
+                  ON (ew.owner_id,ew.project_alias,ew.workflow_id)=(x.owner_id,x.project_alias,x.workflow_id)
+            """
+            external_filter = "AND NOT forge_external_workflow_api.is_internal(t.owner_id,t.project_alias,t.id)"
+            phase, enabled = "coalesce(w.phase,ew.phase)", "coalesce(w.enabled,ew.enabled)"
+            activity = """, coalesce(ew.updated_at,t.updated_at), coalesce((
+                SELECT max(member.updated_at) FROM forge_external_workflow.tasks member_link
+                JOIN forge_agent.coding_tasks member
+                  ON (member.owner_id,member.project_alias,member.id)=
+                     (member_link.owner_id,member_link.project_alias,member_link.task_id)
+                WHERE (member_link.owner_id,member_link.project_alias,member_link.workflow_id)=
+                      (ew.owner_id,ew.project_alias,ew.workflow_id)
+            ),t.updated_at)"""
+        classified = f"""
+            WITH classified AS (
+                SELECT t.id,t.correlation_id,t.project_alias,t.base_revision,t.mode,t.agent_profile,
+                       t.recipe_digest,t.status,t.revision,t.created_at,t.title,
+                       (t.workflow_required OR {phase} IS NOT NULL) AS workflow_required,
+                       {phase} AS workflow_phase, {enabled} AS workflow_enabled,
+                       greatest(t.updated_at,coalesce(w.updated_at,t.updated_at),coalesce((
+                           SELECT max(member.updated_at) FROM forge_agent.coding_tasks member
+                           WHERE (member.owner_id,member.project_alias,member.workflow_id)=
+                                 (w.owner_id,w.project_alias,w.workflow_id)
+                       ),t.updated_at){activity}) AS list_updated_at,
+                       CASE WHEN {phase} IN ('completed','cancelled') THEN 'history'
+                            WHEN {phase} IS NOT NULL THEN
+                                CASE WHEN {phase}='escalated' OR NOT {enabled} THEN 'attention' ELSE 'active' END
+                            WHEN t.workflow_required THEN 'attention'
+                            WHEN t.status IN ('completed','cancelled') THEN 'history'
+                            WHEN t.status IN ('queued','running','cancel_requested') THEN 'active'
+                            ELSE 'attention' END AS task_scope
+                FROM forge_agent.coding_tasks t
+                LEFT JOIN forge_agent.coding_workflows w
+                  ON (w.owner_id,w.project_alias,w.workflow_id)=(t.owner_id,t.project_alias,t.workflow_id)
+                {external_join}
+                WHERE t.owner_id=%s AND t.project_alias=%s
+                  AND (w.workflow_id IS NULL OR t.id=w.root_task_id)
+                  {external_filter}
+            )
+        """
+        mode = {"repeatable_read": True} if external is not None else {"read_only": True}
+        with self._transaction(**mode) as cursor:
+            cursor.execute(classified + """
+                SELECT count(*) FILTER(WHERE task_scope='active') AS active,
+                       count(*) FILTER(WHERE task_scope='attention') AS attention,
+                       count(*) FILTER(WHERE task_scope='history') AS history,count(*) AS "all"
+                FROM classified
+            """, (self._owner, project_alias))
+            counts = dict(cursor.fetchone())
+            anchor = None
+            if cursor_task_id is not None:
+                cursor.execute(classified + "SELECT id,list_updated_at FROM classified WHERE id=%s",
+                               (self._owner, project_alias, cursor_task_id))
+                anchor = cursor.fetchone()
+                if anchor is None:
+                    raise Rejected(400, "invalid_request")
+            cursor.execute(classified + """
+                SELECT * FROM classified WHERE (%s='all' OR task_scope=%s)
+                  AND (%s::timestamptz IS NULL OR (list_updated_at,id)<(%s::timestamptz,%s::uuid))
+                ORDER BY list_updated_at DESC,id DESC LIMIT %s
+            """, (self._owner, project_alias, scope, scope,
+                  anchor["list_updated_at"] if anchor else None,
+                  anchor["list_updated_at"] if anchor else None, cursor_task_id, limit + 1))
+            rows = cursor.fetchall()
+            page = rows[:limit]
+            summaries = []
+            for row in page:
+                item = _summary(row)
+                item["updated_at"] = _timestamp(row["list_updated_at"])
+                if row["workflow_enabled"] is not None:
+                    item["workflow_enabled"] = row["workflow_enabled"]
+                if external is not None:
+                    projection = external.project(cursor, project_alias, row["id"])
+                    if projection is not None:
+                        item.update(workflow_required=True, workflow_phase=projection["phase"])
+                summaries.append(item)
+        return {"project_alias": project_alias, "tasks": summaries,
+                "next_cursor": str(page[-1]["id"]) if len(rows) > limit else None,
+                "scope_counts": counts}
 
     def events(self, *, project_alias, task_id, after_sequence=0, limit=50):
         self._require_project(project_alias)
@@ -1133,7 +1233,7 @@ class WorkStore:
                 (lock_scope, ADVISORY_LOCK_SALT),
             )
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id,workflow_review_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -1156,7 +1256,7 @@ class WorkStore:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
-            self._require_transition_authority(cursor,task,_authority,"native_timeout")
+            self._require_transition_authority(cursor,task,_authority,"reviewer_correction" if task["mode"]=="review" else "native_timeout")
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
@@ -1279,7 +1379,8 @@ class WorkStore:
             with self._transaction() as cursor:yield cursor
         else:
             from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority)) or authority.store is not self:
+            from work_reviewer_correction import BoundReviewerCorrectionAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 

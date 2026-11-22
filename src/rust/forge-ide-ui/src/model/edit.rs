@@ -1,25 +1,5 @@
-//! A preview binds to one accepted file window and conversation.
+//! Direct Workbench document editing and managed write recovery.
 use super::*;
-
-#[derive(Debug)]
-pub(super) struct EditContext {
-    file: ChatFileContext,
-    navigation: u64,
-    conversation: usize,
-}
-
-#[derive(Debug)]
-pub(super) struct PendingEdit {
-    request_id: String,
-    context: EditContext,
-}
-
-#[derive(Debug)]
-pub(super) struct EditReview {
-    context: EditContext,
-    pub preview: EditPreview,
-    message: usize,
-}
 
 #[derive(Debug)]
 pub(super) struct Editor {
@@ -62,7 +42,7 @@ impl Editor {
 impl UiModel {
     pub(super) fn workbench_file(&self) -> Option<ChatFileContext> {
         let source = self.source.as_ref()?;
-        let (byte_start, byte_end, ..) = source.chat_window();
+        let (byte_start, byte_end) = source.edit_window();
         Some(ChatFileContext {
             report: self.accepted_report.clone()?,
             node_key: self.node.clone(),
@@ -74,25 +54,11 @@ impl UiModel {
         })
     }
 
-    fn edit_context_matches(&self, context: &EditContext) -> bool {
-        context.navigation == self.navigation_revision
-            && context.conversation == self.chats.selected()
-            && self.workbench_file().as_ref() == Some(&context.file)
-    }
-
-    pub(super) fn current_edit(&self) -> Option<&EditReview> {
-        self.edit_review
-            .as_ref()
-            .filter(|review| self.edit_context_matches(&review.context))
-    }
-
     pub(super) fn document_action(&self) -> Option<RowAction> {
         let text = &self.source.as_ref()?.document.text;
-        if !self.chats.workbench
+        if !self.workbench
             || self.editor.is_some()
             || self.write_pending()
-            || self.pending_edit.is_some()
-            || self.current_edit().is_some()
             || text.is_empty()
             || text.len() > MAX_EDITOR_BYTES
         {
@@ -142,7 +108,7 @@ impl UiModel {
     }
 
     pub(super) fn set_document(&mut self, id: &str, text: String) {
-        if !self.chats.workbench
+        if !self.workbench
             || self.write_pending()
             || text.len() > MAX_EDITOR_BYTES
             || text.contains(['\r', '\0'])
@@ -157,7 +123,7 @@ impl UiModel {
     }
 
     pub(super) fn close_document(&mut self, id: &str) {
-        if self.chats.workbench
+        if self.workbench
             && !self.write_pending()
             && self.editor.as_ref().is_some_and(|editor| editor.id == id)
         {
@@ -171,7 +137,7 @@ impl UiModel {
         now: u64,
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
-        if !self.chats.workbench || self.write_pending() {
+        if !self.workbench || self.write_pending() {
             return Ok(());
         }
         let Some(editor) = self.editor.as_ref().filter(|editor| {
@@ -187,7 +153,7 @@ impl UiModel {
             file: editor.file.clone(),
             text: editor.text.clone(),
         };
-        self.begin_write(file, self.chats.selected(), None, intent, now, effects)
+        self.begin_write(file, intent, now, effects)
     }
 
     pub(super) fn editor_blocks(&mut self, event: &UiEvent) -> bool {
@@ -284,118 +250,6 @@ impl UiModel {
             tone: Tone::Neutral,
         });
     }
-
-    pub(super) fn send_workbench(
-        &mut self,
-        now: u64,
-        context: (RequestToken, u32, u32, usize),
-        proposal: bool,
-        chat_id: Option<String>,
-        effects: &mut Vec<UiEffect>,
-    ) -> Result<(), UiError> {
-        let (report, entry, byte_start, conversation) = context;
-        if !self.chats.workbench
-            || self.chats.selected() != conversation
-            || self.editor.is_some()
-            || self.current_edit().is_some()
-            || self.write_pending()
-        {
-            return Ok(());
-        }
-        let Some(file) = self.workbench_file().filter(|file| {
-            file.report == report && file.entry == entry && file.byte_start == byte_start
-        }) else {
-            return Ok(());
-        };
-        if proposal && file.byte_start == file.byte_end {
-            return Ok(());
-        }
-        let request_id = self.next_id(now)?;
-        let request = if proposal {
-            self.chats
-                .send_with_context(request_id.clone(), file.clone())?
-        } else {
-            self.chats
-                .send_saved_with_context(request_id.clone(), file.clone(), chat_id)?
-        };
-        if let Some(request) = request {
-            if proposal {
-                self.pending_edit = Some(PendingEdit {
-                    request_id,
-                    context: EditContext {
-                        file,
-                        navigation: self.navigation_revision,
-                        conversation,
-                    },
-                });
-                effects.push(UiEffect::ProposeEdit { request });
-            } else {
-                effects.push(UiEffect::Chat { request });
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) fn is_pending_edit(&self, request_id: &str) -> bool {
-        self.pending_edit
-            .as_ref()
-            .is_some_and(|p| p.request_id == request_id)
-    }
-
-    pub(super) fn complete_edit(&mut self, request_id: &str, outcome: EditOutcome) {
-        if !self.is_pending_edit(request_id) {
-            return;
-        }
-        let pending = self.pending_edit.take().expect("matching edit request");
-        let mut review = None;
-        let conversation = pending.context.conversation;
-        let outcome = match outcome {
-            EditOutcome::Preview { preview }
-                if preview.base_sha256 == pending.context.file.sha256
-                    && !preview.lines.is_empty()
-                    && preview.lines.len() <= MAX_EDIT_PREVIEW_ROWS
-                    && preview
-                        .lines
-                        .iter()
-                        .map(|row| row.text.len())
-                        .sum::<usize>()
-                        <= MAX_CHAT_SOURCE_BYTES * 2
-                    && preview.lines.iter().all(|row| {
-                        (row.old_line.is_some() || row.new_line.is_some())
-                            && row.old_line != Some(0)
-                            && row.new_line != Some(0)
-                            && !row.text.contains(['\0', '\n', '\r'])
-                    }) =>
-            {
-                let ready = self.edit_context_matches(&pending.context);
-                if ready {
-                    review = Some((pending.context, preview));
-                }
-                ChatOutcome::Answer {
-                    content: if ready {
-                        "Edit preview ready in Workbench.".into()
-                    } else {
-                        "The edit preview belonged to an earlier file or conversation selection."
-                            .into()
-                    },
-                }
-            }
-            EditOutcome::Error { category } => ChatOutcome::Error { category },
-            _ => ChatOutcome::Error {
-                category: FailureKind::InvalidResponse,
-            },
-        };
-        self.chats.complete(request_id, outcome);
-        if let (Some((context, preview)), Some(message)) =
-            (review, self.chats.last_message(conversation))
-        {
-            self.edit_review = Some(EditReview {
-                context,
-                preview,
-                message,
-            });
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -409,8 +263,6 @@ struct WriteFile {
 struct AppliedEdit {
     operation: String,
     file: WriteFile,
-    conversation: usize,
-    message: Option<usize>,
     undo_until: u64,
 }
 #[derive(Debug)]
@@ -418,8 +270,6 @@ struct Mutation {
     operation: String,
     request_id: Option<String>,
     file: WriteFile,
-    conversation: usize,
-    message: Option<usize>,
     undo: bool,
     document: bool,
 }
@@ -430,7 +280,6 @@ pub(super) struct WriteState {
     reopen: Option<WriteFile>,
     status: String,
     status_file: Option<WriteFile>,
-    followup: Option<(WriteFile, usize, String)>,
 }
 
 impl UiModel {
@@ -444,42 +293,13 @@ impl UiModel {
         })
     }
 
-    pub(super) fn apply_edit(
-        &mut self,
-        id: String,
-        now: u64,
-        effects: &mut Vec<UiEffect>,
-    ) -> Result<(), UiError> {
-        if !self.chats.workbench || self.write.pending.is_some() || self.editor.is_some() {
-            return Ok(());
-        }
-        let Some(review) = self
-            .current_edit()
-            .filter(|review| review.preview.proposal_id.as_deref() == Some(&id))
-        else {
-            return Ok(());
-        };
-        let Some(file) = self.write_file() else {
-            return Ok(());
-        };
-        let (conversation, message) = (review.context.conversation, Some(review.message));
-        self.begin_write(
-            file,
-            conversation,
-            message,
-            EditWriteIntent::Apply { proposal_id: id },
-            now,
-            effects,
-        )
-    }
-
     pub(super) fn undo_edit(
         &mut self,
         operation: String,
         now: u64,
         effects: &mut Vec<UiEffect>,
     ) -> Result<(), UiError> {
-        if !self.chats.workbench || self.write.pending.is_some() || self.editor.is_some() {
+        if !self.workbench || self.write.pending.is_some() || self.editor.is_some() {
             return Ok(());
         }
         let Some(applied) = self.write.applied.clone().filter(|applied| {
@@ -491,8 +311,6 @@ impl UiModel {
         };
         self.begin_write(
             applied.file,
-            applied.conversation,
-            applied.message,
             EditWriteIntent::Undo {
                 applied_operation: operation,
             },
@@ -504,8 +322,6 @@ impl UiModel {
     fn begin_write(
         &mut self,
         file: WriteFile,
-        conversation: usize,
-        message: Option<usize>,
         intent: EditWriteIntent,
         now: u64,
         effects: &mut Vec<UiEffect>,
@@ -524,8 +340,6 @@ impl UiModel {
             operation: id.clone(),
             request_id: Some(id.clone()),
             file,
-            conversation,
-            message,
             undo: matches!(intent, EditWriteIntent::Undo { .. }),
             document: matches!(intent, EditWriteIntent::SaveDocument { .. }),
         });
@@ -629,20 +443,9 @@ impl UiModel {
                     if pending.document { "Saved" } else { "Applied" },
                     &digest[..8]
                 );
-                if let Some(message) = pending.message {
-                    self.chats.mark_proposal(
-                        pending.conversation,
-                        message,
-                        self.write.status.clone(),
-                    );
-                    self.write.followup =
-                        Some((pending.file.clone(), pending.conversation, digest));
-                }
                 self.write.applied = undo_until_unix_ms.map(|undo_until| AppliedEdit {
                     operation: pending.operation,
                     file: pending.file.clone(),
-                    conversation: pending.conversation,
-                    message: pending.message,
                     undo_until,
                 });
                 if same_file {
@@ -654,15 +457,6 @@ impl UiModel {
             }
             (EditWriteOutcome::Reverted { .. }, Some(digest)) => {
                 self.write.status = format!("Reverted · rev {}", &digest[..8]);
-                if let Some(message) = pending.message {
-                    self.chats.mark_proposal(
-                        pending.conversation,
-                        message,
-                        self.write.status.clone(),
-                    );
-                    self.write.followup =
-                        Some((pending.file.clone(), pending.conversation, digest));
-                }
                 self.write.applied = None;
                 if same_file {
                     self.refresh_written_file(pending.file, now, effects);
@@ -670,10 +464,7 @@ impl UiModel {
             }
             (EditWriteOutcome::Conflict, _) => {
                 self.write.status =
-                    "The file changed. Refresh the project before proposing another edit.".into();
-                if let Some(review) = self.edit_review.as_mut() {
-                    review.preview.proposal_id = None;
-                }
+                    "The file changed. Refresh the project before saving another edit.".into();
                 if pending.document {
                     if let Some(editor) = &mut self.editor {
                         editor.conflict = true;
@@ -682,9 +473,6 @@ impl UiModel {
             }
             _ => {
                 self.write.status = "The native workspace declined the write.".into();
-                if let Some(review) = self.edit_review.as_mut() {
-                    review.preview.proposal_id = None;
-                }
                 if pending.document {
                     if let Some(editor) = &mut self.editor {
                         editor.rejected = true;
@@ -761,7 +549,6 @@ impl UiModel {
             names: recent.path.into_iter().map(NativeName::Utf8).collect(),
         };
         self.write.status_file = Some(file.clone());
-        let conversation = self.chats.selected();
         match recent.outcome {
             Some(EditWriteOutcome::Applied {
                 sha256,
@@ -771,8 +558,6 @@ impl UiModel {
                 self.write.applied = undo_until_unix_ms.map(|undo_until| AppliedEdit {
                     operation: recent.operation,
                     file,
-                    conversation,
-                    message: None,
                     undo_until,
                 });
             }
@@ -786,8 +571,6 @@ impl UiModel {
                     operation: recent.operation,
                     request_id: None,
                     file,
-                    conversation,
-                    message: None,
                     undo: false,
                     document: false,
                 });
@@ -795,7 +578,7 @@ impl UiModel {
         }
     }
 
-    pub(super) fn project_write(&self, view: &mut ViewModel, proposal_id: Option<&str>) {
+    pub(super) fn project_write(&self, view: &mut ViewModel) {
         let pending = self.write.pending.as_ref();
         let file = self.write_file();
         let undo = self
@@ -803,72 +586,18 @@ impl UiModel {
             .applied
             .as_ref()
             .filter(|applied| file.as_ref() == Some(&applied.file));
-        let can_apply = proposal_id.is_some() && pending.is_none();
         let check = pending.is_some_and(|pending| pending.request_id.is_none());
-        view.visibility.push(VisibilityBinding {
-            id: "workbench-write-footer",
-            visible: !self.presentation.chat
-                && self.chats.workbench
-                && (pending.is_some()
-                    || undo.is_some()
-                    || self
-                        .write
-                        .status_file
-                        .as_ref()
-                        .is_some_and(|target| file.as_ref() == Some(target))),
-        });
-        if pending.is_some() && self.chats.workbench {
-            if let Some(dock) = view
-                .visibility
-                .iter_mut()
-                .find(|binding| binding.id == "workbench-chat")
-            {
-                if !dock.visible {
-                    dock.visible = true;
-                    if let Some(compose) = view
-                        .visibility
-                        .iter_mut()
-                        .find(|binding| binding.id == "workbench-chat-compose")
-                    {
-                        compose.visible = false;
-                    }
-                }
-            }
-        }
-        if pending.is_some() {
-            for button in &mut view.buttons {
-                if matches!(
-                    button.id,
-                    "send-workbench-chat" | "propose-workbench-edit" | "discard-workbench-edit"
-                ) {
-                    button.disabled = true;
-                }
-            }
-        }
-        let followup = self
-            .presentation
-            .chat
-            .then(|| self.fresh_chat_file())
-            .flatten();
-        view.visibility.push(VisibilityBinding {
-            id: "send-chat-with-file",
-            visible: followup.is_some(),
-        });
-        view.buttons.push(ButtonBinding {
-            pressed: None,
-            id: "send-chat-with-file",
-            disabled: followup.is_none() || !self.chats.can_send_draft(),
-            action: followup.map(|file| RowAction::SendChatWithFile {
-                report: file.report,
-                entry: file.entry,
-                byte_start: file.byte_start,
-                conversation: self.chats.selected(),
-            }),
-        });
         view.visibility.extend([
             VisibilityBinding {
-                id: "apply-workbench-edit",
-                visible: proposal_id.is_some(),
+                id: "workbench-write-footer",
+                visible: self.workbench
+                    && (pending.is_some()
+                        || undo.is_some()
+                        || self
+                            .write
+                            .status_file
+                            .as_ref()
+                            .is_some_and(|target| file.as_ref() == Some(target))),
             },
             VisibilityBinding {
                 id: "undo-workbench-edit",
@@ -880,14 +609,6 @@ impl UiModel {
             },
         ]);
         view.buttons.extend([
-            ButtonBinding {
-                pressed: None,
-                id: "apply-workbench-edit",
-                disabled: !can_apply,
-                action: proposal_id.map(|id| RowAction::ApplyEdit {
-                    proposal_id: id.into(),
-                }),
-            },
             ButtonBinding {
                 pressed: None,
                 id: "undo-workbench-edit",
@@ -933,45 +654,6 @@ impl UiModel {
 
     pub(super) fn write_pending(&self) -> bool {
         self.write.pending.is_some()
-    }
-
-    fn fresh_chat_file(&self) -> Option<ChatFileContext> {
-        let (file, conversation, digest) = self.write.followup.as_ref()?;
-        if self.chats.workbench
-            || self.write_pending()
-            || self.chats.selected() != *conversation
-            || self.write_file().as_ref() != Some(file)
-        {
-            return None;
-        }
-        self.workbench_file()
-            .filter(|context| context.sha256 == *digest)
-    }
-
-    pub(super) fn send_chat_with_file(
-        &mut self,
-        context: (RequestToken, u32, u32, usize),
-        chat_id: Option<String>,
-        now: u64,
-        effects: &mut Vec<UiEffect>,
-    ) -> Result<(), UiError> {
-        let (report, entry, byte_start, conversation) = context;
-        let Some(file) = self.fresh_chat_file().filter(|file| {
-            file.report == report
-                && file.entry == entry
-                && file.byte_start == byte_start
-                && self.chats.selected() == conversation
-        }) else {
-            return Ok(());
-        };
-        let request_id = self.next_id(now)?;
-        if let Some(request) = self
-            .chats
-            .send_saved_with_context(request_id, file, chat_id)?
-        {
-            effects.push(UiEffect::Chat { request });
-        }
-        Ok(())
     }
 }
 

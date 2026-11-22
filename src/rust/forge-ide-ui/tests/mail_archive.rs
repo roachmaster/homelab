@@ -1,5 +1,7 @@
-//! Retired Mail UI/cache admission. Standalone Mail and private backend tests remain.
+//! Retired Mail UI/cache admission. Legacy Mail drafts stay inert while
+//! removed Mail protocol events are rejected at the codec boundary.
 use forge_ide_ui::{protocol::*, view::ViewModel, Output, UiModel};
+use serde_json::json;
 const THREAD: &str = "8452b258-df30-4985-bfa1-cd98245b2a06";
 fn event(m: &mut UiModel, e: UiEvent) -> Output {
     m.dispatch(Input {
@@ -11,26 +13,29 @@ fn event(m: &mut UiModel, e: UiEvent) -> Output {
 fn visible(v: &ViewModel, id: &str) -> bool {
     v.visibility.iter().any(|b| b.id == id && b.visible)
 }
-fn ready(work: bool, usage: bool) -> UiModel {
-    let mut m = UiModel::with_presentation_policy(forge_ide_ui::PresentationPolicy { chat: true });
+fn ready_with_output(work: bool, usage: bool) -> (UiModel, Output) {
+    let mut m = UiModel::default();
     let UiEffect::Resume { request_id } = event(&mut m, UiEvent::Resume {}).effects.remove(0)
     else {
         panic!("resume")
     };
-    let catalog = serde_json::from_value(serde_json::json!({
+    let catalog = serde_json::from_value(json!({
         "protocol_version":1,"session_epoch":"retirement-test","timeout_ms":1000,
         "mail_enabled":true,"mail_archive_enabled":true,"work_enabled":work,"usage_enabled":usage,
         "nodes":[{"key":"lab","label":"Lab","node":"node-a","incarnation":"boot-a",
             "projects":[{"alias":"workspace","label":"Workspace"},{"alias":"other","label":"Other"}]}]
     })).unwrap();
-    event(
+    let paired = event(
         &mut m,
         UiEvent::Paired {
             request_id,
             catalog,
         },
     );
-    m
+    (m, paired)
+}
+fn ready(work: bool, usage: bool) -> UiModel {
+    ready_with_output(work, usage).0
 }
 fn legacy() -> MailNavigationSnapshot {
     MailNavigationSnapshot {
@@ -69,68 +74,35 @@ fn agent(retry: bool) -> AgentsNavigationSnapshot {
         }),
     }
 }
-fn retired(id: &str) -> Vec<UiEvent> {
+fn removed_mail_wire_events(id: &str) -> Vec<serde_json::Value> {
     vec![
-        UiEvent::MailInbox {},
-        UiEvent::MailArchive {},
-        UiEvent::MailNewMessage {},
-        UiEvent::MailFollowUp {},
-        UiEvent::MailDiscardDraft {},
-        UiEvent::MailBack {},
-        UiEvent::MailRefresh {},
-        UiEvent::MailPrevious {},
-        UiEvent::MailNext {},
-        UiEvent::MailOpenThread {
-            thread_id: THREAD.into(),
-        },
-        UiEvent::SetMailSubject {
-            value: "Must not replace subject".into(),
-        },
-        UiEvent::SetMailDraft {
-            value: "Must not replace draft".into(),
-        },
-        UiEvent::SendMail {
-            idempotency_key: "old-send".into(),
-        },
-        UiEvent::RetryMail {
-            idempotency_key: "old-retry".into(),
-        },
-        UiEvent::MailArchiveThread {
-            thread_id: THREAD.into(),
-            expected_revision: 1,
-        },
-        UiEvent::PollMail {
-            watch: "old-mail-watch".into(),
-        },
-        UiEvent::Mail(MailResponse::MailListed {
-            request_id: id.into(),
-            items: vec![],
-            next_cursor: None,
-        }),
-        UiEvent::Mail(MailResponse::MailSent {
-            request_id: id.into(),
-            thread_id: THREAD.into(),
-            run_id: THREAD.into(),
-            status: MailStatus::Queued,
-        }),
-        UiEvent::Mail(MailResponse::MailArchived {
-            request_id: id.into(),
-            thread_id: THREAD.into(),
-            base_revision: 1,
-            result_revision: 2,
-        }),
-        UiEvent::Mail(MailResponse::MailFailed {
-            request_id: id.into(),
-            code: MailFailure::ThreadBusy,
-        }),
+        json!({"kind": "mail_inbox"}),
+        json!({"kind": "mail_archive"}),
+        json!({"kind": "mail_new_message"}),
+        json!({"kind": "mail_follow_up"}),
+        json!({"kind": "mail_discard_draft"}),
+        json!({"kind": "mail_back"}),
+        json!({"kind": "mail_refresh"}),
+        json!({"kind": "mail_previous"}),
+        json!({"kind": "mail_next"}),
+        json!({"kind": "mail_open_thread", "thread_id": THREAD}),
+        json!({"kind": "set_mail_subject", "value": "Must not replace subject"}),
+        json!({"kind": "set_mail_draft", "value": "Must not replace draft"}),
+        json!({"kind": "send_mail", "idempotency_key": "old-send"}),
+        json!({"kind": "retry_mail", "idempotency_key": "old-retry"}),
+        json!({"kind": "mail_archive_thread", "thread_id": THREAD, "expected_revision": 1}),
+        json!({"kind": "poll_mail", "watch": "old-mail-watch"}),
+        json!({"kind": "mail_listed", "request_id": id, "items": [], "next_cursor": null}),
+        json!({"kind": "mail_sent", "request_id": id, "thread_id": THREAD, "run_id": THREAD, "status": "queued"}),
+        json!({"kind": "mail_archived", "request_id": id, "thread_id": THREAD, "base_revision": 1, "result_revision": 2}),
+        json!({"kind": "mail_failed", "request_id": id, "code": "thread_busy"}),
     ]
 }
 #[test]
 fn agents_tab_replaces_mail_with_independent_optional_capabilities_and_selected_state() {
     for work in [false, true] {
         for usage in [false, true] {
-            let mut m = ready(work, usage);
-            let o = event(&mut m, UiEvent::OpenAgents {});
+            let (mut m, o) = ready_with_output(work, usage);
             assert!(visible(&o.view, "open-agents") && visible(&o.view, "agents"));
             assert!(!visible(&o.view, "mail"));
             let tab = o
@@ -149,19 +121,16 @@ fn agents_tab_replaces_mail_with_independent_optional_capabilities_and_selected_
                 o.effects.iter().any(|e| matches!(e, UiEffect::Usage(_))),
                 usage
             );
-            assert!(!o
-                .effects
-                .iter()
-                .any(|e| matches!(e, UiEffect::Mail(_) | UiEffect::MailWatch { .. })));
             if !work && !usage {
                 assert!(o.effects.is_empty());
                 assert!(visible(&o.view, "agents-unsupported"));
             }
             assert!(!o.view.visibility.iter().any(|b| b.id == "open-mail"));
             assert!(!o.view.transcripts.iter().any(|b| b.id == "mail-transcript"));
-            let chat = event(&mut m, UiEvent::OpenChat {});
+            let workbench = event(&mut m, UiEvent::OpenWorkbench {});
             assert_eq!(
-                chat.view
+                workbench
+                    .view
                     .buttons
                     .iter()
                     .find(|b| b.id == "open-agents")
@@ -174,17 +143,19 @@ fn agents_tab_replaces_mail_with_independent_optional_capabilities_and_selected_
 }
 #[test]
 fn legacy_open_mail_alias_navigates_to_agents_without_mail_io() {
-    let mut m = ready(true, false);
-    let o = event(&mut m, UiEvent::OpenMail {});
-    assert!(visible(&o.view, "agents"));
-    assert!(o
+    let (mut m, paired) = ready_with_output(true, false);
+    assert!(paired
         .effects
         .iter()
         .any(|e| matches!(e, UiEffect::Work(WorkRequest::WorkCatalog { .. }))));
-    assert!(!o.effects.iter().any(|e| matches!(e, UiEffect::Mail(_))));
+    let workbench = event(&mut m, UiEvent::OpenWorkbench {});
+    assert!(visible(&workbench.view, "workbench"));
+    let o = event(&mut m, UiEvent::OpenMail {});
+    assert!(visible(&o.view, "agents"));
+    assert!(!visible(&o.view, "workbench"));
 }
 #[test]
-fn inert_legacy_draft_survives_all_retired_actions_without_io_locks_or_leave_warning() {
+fn inert_legacy_draft_survives_and_removed_mail_events_fail_strict_decode() {
     let mut m = ready(false, false);
     let o = event(
         &mut m,
@@ -195,16 +166,18 @@ fn inert_legacy_draft_survives_all_retired_actions_without_io_locks_or_leave_war
     assert!(!snapshot.active);
     assert_eq!(snapshot.subject, "Keep this old draft");
     assert_eq!(snapshot.draft, "Saved legacy text\nNo send authority.");
-    assert_eq!(o.mail_navigation_locked, None);
     assert!(!o.has_workspace_work);
-    for action in retired("stale-request") {
-        let o = event(&mut m, action);
-        assert!(o.effects.is_empty());
-        assert_eq!(o.mail_navigation.as_ref(), Some(&snapshot));
-        assert_eq!(o.mail_navigation_locked, None);
-        assert!(!o.has_workspace_work);
-        assert!(!visible(&o.view, "mail"));
+    for raw in removed_mail_wire_events("stale-request") {
+        assert!(
+            serde_json::from_value::<UiEvent>(raw.clone()).is_err(),
+            "removed Mail event must not deserialize: {raw}"
+        );
     }
+    let after = m.output(None);
+    assert!(after.effects.is_empty());
+    assert_eq!(after.mail_navigation.as_ref(), Some(&snapshot));
+    assert!(!after.has_workspace_work);
+    assert!(!visible(&after.view, "mail"));
 }
 #[test]
 fn invalid_legacy_snapshot_is_ignored_and_valid_thread_hints_never_open_a_reader() {
@@ -232,9 +205,8 @@ fn invalid_legacy_snapshot_is_ignored_and_valid_thread_hints_never_open_a_reader
     assert!(!o.has_workspace_work);
 }
 #[test]
-fn retired_mail_replies_cannot_steal_a_pending_agents_request_or_replay_mutations() {
-    let mut m = ready(true, false);
-    let o = event(&mut m, UiEvent::OpenAgents {});
+fn removed_mail_replies_cannot_decode_or_interfere_with_pending_agents_request() {
+    let (mut m, o) = ready_with_output(true, false);
     let id = o
         .effects
         .iter()
@@ -243,10 +215,8 @@ fn retired_mail_replies_cannot_steal_a_pending_agents_request_or_replay_mutation
             _ => None,
         })
         .unwrap();
-    for action in retired(&id) {
-        let o = event(&mut m, action);
-        assert!(o.effects.is_empty());
-        assert!(visible(&o.view, "agents"));
+    for raw in removed_mail_wire_events(&id) {
+        assert!(serde_json::from_value::<UiEvent>(raw).is_err());
     }
     let o = event(
         &mut m,

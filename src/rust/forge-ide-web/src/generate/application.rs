@@ -1,24 +1,16 @@
 //! The IDE's authored UI: typed components plus a separate YAML theme.
 //! No application HTML, CSS, JS, raw-code field or string template lives here.
-use super::{
-    CheckpointBinding, Document, HeaderBinding, RequestBinding, RequestPolicy, TimerBinding,
-    Transport,
-};
+use super::{Document, HeaderBinding, RequestBinding, RequestPolicy, TimerBinding, Transport};
 use crate::component;
-use forge_ide_ui::PORTAL_PRESENTATION;
 mod external_agents;
 
 pub fn ide_document() -> Document {
-    let mut document = Document {
+    Document {
         title: "Forge IDE".into(),
         subtitle: "Agents and source workbench".into(),
         children: vec![
             component!(brand_link "forge-home", "Forge IDE", Home),
             component!(header_actions "ide-header-actions"; [
-                component!(region "chat-header-actions"; [
-                    component!(toggle_panel "chat-history-toggle", "Previous chats", "show_chat_history", "chat-history-panel"),
-                    component!(primary_icon "new-chat", "New chat", "new_chat", '+'),
-                ]),
                 component!(region "workbench-header-actions"; [
                     component!(sheet_trigger "workbench-context", "Project options", "project-options"),
                     component!(sheet_icon "workspace-options-toggle", "View options", "workspace-options", '⋯'),
@@ -32,73 +24,10 @@ pub fn ide_document() -> Document {
                 ]),
             ]),
             component!(navigation "ide-navigation", "Forge IDE views"; [
-                component!(button "open-chat", "Chat", "open_chat"),
                 component!(button "open-agents", "Agents", "open_agents"),
                 component!(button "open-workbench", "Workbench", "open_workbench"),
                 component!(navigation_link "open-home", "Home", Home),
                 component!(navigation_link "open-design", "Design", Design),
-            ]),
-            component!(screen "chat", "Chat", true; [
-                component!(reading_column [
-                    component!(dialog "chat-history-panel", "Conversations", "show_chat_history", "chat-conversation"; [
-                        component!(primary_icon "chat-history-close", "Close conversations", "show_chat_history", '×'),
-                        component!(select "chat-conversation", "Conversation", "select_chat"),
-                        component!(status "chat-history-status", ""),
-                        component!(region "chat-history-content"; [
-                            component!(filter "chat-history-query", "Search saved chats on this page", "set_chat_history_query"),
-                            component!(tree "chat-history-list", "Saved chats"),
-                            component!(row [
-                                component!(button "chat-history-newer", "Newer chats", "newer_chat_history"),
-                                component!(button "chat-history-older", "Older chats", "more_chat_history"),
-                            ]),
-                        ]),
-                        component!(toggle_panel "chat-manage-toggle", "Manage current chat", "manage_saved_chat", "chat-manage-panel"),
-                        component!(panel "chat-manage-panel", "Chat retention"; [
-                            component!(caption "chat-retention-label", ""),
-                            component!(region "chat-retention-actions"; [
-                                component!(row [
-                                    component!(button "chat-show-expiry", "Set expiration", "show_chat_expiry"),
-                                    component!(button "chat-long-term", "Keep long term", "keep_chat_long_term"),
-                                    component!(button "chat-show-delete", "Delete chat", "show_chat_delete"),
-                                ]),
-                            ]),
-                        ]),
-                    ]),
-                    component!(dialog "chat-expiry-dialog", "Set expiration", "close_chat_dialog", "chat-expiry-date"; [
-                        component!(text "chat-expiry-help", "The chat will be kept through the selected date in UTC."),
-                        component!(date_input "chat-expiry-date", "Keep through", "set_chat_expiry"),
-                        component!(status "chat-expiry-status", ""),
-                        component!(row [
-                            component!(button "chat-expiry-cancel", "Cancel", "close_chat_dialog"),
-                            component!(checked_button "chat-expiry-save", "Save expiration", "confirm_chat_expiry", "chat-expiry-date"),
-                        ]),
-                    ]),
-                    component!(dialog "chat-delete-dialog", "Delete chat", "close_chat_dialog", "chat-delete-cancel"; [
-                        component!(text "chat-delete-description", ""),
-                        component!(status "chat-delete-status", ""),
-                        component!(row [
-                            component!(button "chat-delete-cancel", "Cancel", "close_chat_dialog"),
-                            component!(button "chat-delete-confirm", "Delete chat", "confirm_chat_delete"),
-                        ]),
-                    ]),
-                    component!(transcript "chat-transcript", "Chat messages", "You", "Forge",
-                        "Send a message to start this conversation."),
-                    component!(status "chat-status", ""),
-                    component!(region "chat-composer"; [
-                        component!(textarea "chat-draft", "Message", "set_chat_draft", "Message Forge…"),
-                        component!(uuid_icon "send-chat", "Send", "send_persistent_chat", "chat-draft", "chat_id", '↑'),
-                        component!(disclosure "chat-options", "Chat options"; [
-                            component!(region "chat-model-choice"; [
-                                component!(select "chat-model", "Model", "select_chat_model"),
-                            ]),
-                            component!(row [
-                                component!(uuid_button "send-chat-with-file", "Send with file", "send_chat_with_file", "chat-draft", "chat_id"),
-                                component!(button "chat-run-cancel", "Cancel run", "cancel_chat_run"),
-                                component!(button "chat-run-retry", "Retry send", "retry_chat_submit"),
-                            ]),
-                        ]),
-                    ]),
-                ]),
             ]),
             component!(screen "agents", "Agents", true; [
                 component!(reading_column [
@@ -111,7 +40,12 @@ pub fn ide_document() -> Document {
                     ]),
                     component!(status "agents-status", ""),
                     component!(region "agents-project-bar"; [
-                        component!(select "agents-project", "Project", "select_agent_project"),
+                        component!(row [
+                            component!(select "agents-project", "Project", "select_agent_project"),
+                            component!(region "agents-task-scope-field"; [
+                                component!(select "agents-task-scope", "Tasks", "select_agent_task_scope"),
+                            ]),
+                        ]),
                     ]),
                     component!(region "agents-unsupported"; [
                         component!(text "agents-unsupported-message", "Agents are not configured on this host."),
@@ -341,7 +275,6 @@ pub fn ide_document() -> Document {
                                     component!(button "close-document", "Discard draft", "close_document"),
                                 ]),
                             ]),
-                            component!(diff "workbench-edit-diff", "Proposed diff"),
                         ]),
                         component!(panel "declaration-details-panel", "Selected declaration"; [
                             component!(details "declaration-details"),
@@ -360,19 +293,7 @@ pub fn ide_document() -> Document {
                                 component!(facts "source-shape-details"),
                             ]),
                         ]),
-                        component!(pane_footer "workbench-chat"; [
-                            component!(caption "workbench-chat-context", ""),
-                            component!(status "workbench-chat-status", ""),
-                            component!(region "workbench-chat-compose"; [
-                                component!(textarea "workbench-chat-draft", "Ask Forge about this file", "set_chat_draft", "Ask Forge…"),
-                                component!(uuid_button "send-workbench-chat", "Send", "send_workbench_chat", "workbench-chat-draft", "chat_id"),
-                                component!(checked_button "propose-workbench-edit", "Propose edit", "propose_edit", "workbench-chat-draft"),
-                            ]),
-                            component!(region "workbench-edit-review"; [
-                                component!(status "workbench-edit-status", ""),
-                                component!(button "discard-workbench-edit", "Discard", "discard_edit"),
-                                component!(primary "apply-workbench-edit", "Apply", "apply_edit"),
-                            ]),
+                        component!(pane_footer "workbench-write-footer"; [
                             component!(region "workbench-write"; [
                                 component!(status "workbench-write-status", ""),
                                 component!(button "undo-workbench-edit", "Undo edit", "undo_edit"),
@@ -402,60 +323,10 @@ pub fn ide_document() -> Document {
                 ]),
             ]),
         ],
-    };
-    if !PORTAL_PRESENTATION.chat {
-        retire_chat_components(&mut document.children);
     }
-    document
 }
 
-fn retire_chat_components(children: &mut Vec<super::Component>) {
-    use super::Component;
-    children.retain(|component| {
-        !matches!(component,
-        Component::Screen { id, .. } if id == "chat")
-            && !matches!(component, Component::Region { id, .. } if id == "chat-header-actions")
-            && !matches!(component, Component::Button { id, .. } if id == "open-chat")
-    });
-    for component in children {
-        if let Component::PaneFooter { id, children } = component {
-            if id == "workbench-chat" {
-                *id = "workbench-write-footer".into();
-                children.retain(|child| matches!(child, Component::Region { id, .. } if id == "workbench-write"));
-            }
-        }
-        let descendants = match component {
-            Component::HeaderActions { children, .. }
-            | Component::Navigation { children, .. }
-            | Component::CompactToolbar { children, .. }
-            | Component::Screen { children, .. }
-            | Component::Panel { children, .. }
-            | Component::Dialog { children, .. }
-            | Component::Sheet { children, .. }
-            | Component::Disclosure { children, .. }
-            | Component::PaneLayout { children, .. }
-            | Component::Region { children, .. }
-            | Component::Pane { children, .. }
-            | Component::PaneFooter { children, .. }
-            | Component::SourceFormats { children, .. }
-            | Component::Row(children)
-            | Component::LayoutControls(children)
-            | Component::ReadingColumn(children)
-            | Component::ReaderLayout(children)
-            | Component::Toolbar(children)
-            | Component::Workspace(children) => Some(children),
-            _ => None,
-        };
-        if let Some(descendants) = descendants {
-            retire_chat_components(descendants);
-        }
-    }
-}
 pub fn ide_transport() -> Transport {
-    ide_transport_with_policy(PORTAL_PRESENTATION)
-}
-
-pub fn ide_transport_with_policy(presentation: forge_ide_ui::PresentationPolicy) -> Transport {
     let common = vec![
         HeaderBinding::literal("Forge-Envelope-Version", "1"),
         HeaderBinding::literal("Forge-Contract-Version", "1"),
@@ -472,12 +343,6 @@ pub fn ide_transport_with_policy(presentation: forge_ide_ui::PresentationPolicy)
         "ui.session.resume",
     ));
     resume.push(HeaderBinding::field("Forge-Request-Id", "request_id"));
-    let mut chat = common.clone();
-    chat.push(HeaderBinding::literal("Forge-Destination", "ide.chat"));
-    chat.push(HeaderBinding::field(
-        "Forge-Request-Id",
-        "request.request_id",
-    ));
     let mut inspect = common.clone();
     inspect.extend([
         HeaderBinding::field("Forge-Destination", "request.destination"),
@@ -486,6 +351,15 @@ pub fn ide_transport_with_policy(presentation: forge_ide_ui::PresentationPolicy)
         HeaderBinding::field("Forge-Target-Incarnation", "request.target_incarnation"),
         HeaderBinding::field("Forge-Expires-Unix-Ms", "request.expires_unix_ms"),
     ]);
+    let mut edit_write = common.clone();
+    edit_write.push(HeaderBinding::literal(
+        "Forge-Destination",
+        "ide.edit_write",
+    ));
+    edit_write.push(HeaderBinding::field(
+        "Forge-Request-Id",
+        "request.request_id",
+    ));
     let mut bindings = vec![
         RequestBinding {
             kind: "pair".into(),
@@ -522,20 +396,6 @@ pub fn ide_transport_with_policy(presentation: forge_ide_ui::PresentationPolicy)
             policy: RequestPolicy::default(),
         },
         RequestBinding {
-            kind: "chat".into(),
-            request_id: "request.request_id".into(),
-            headers: chat,
-            csrf: true,
-            timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
-            deadline: None,
-            error_events: vec![],
-            accept_events: vec!["chat_result".into()],
-            policy: RequestPolicy {
-                expire_session_on_denial: true,
-                ..RequestPolicy::default()
-            },
-        },
-        RequestBinding {
             kind: "source".into(),
             request_id: "request.token.request_id".into(),
             headers: inspect,
@@ -546,115 +406,21 @@ pub fn ide_transport_with_policy(presentation: forge_ide_ui::PresentationPolicy)
             accept_events: vec!["source_result".into()],
             policy: RequestPolicy::default(),
         },
-    ];
-    for (kind, destination, success_event) in [
-        ("propose_edit", "ide.propose_edit", "edit_result"),
-        ("edit_write", "ide.edit_write", "edit_write_result"),
-    ] {
-        let mut headers = common.clone();
-        headers.push(HeaderBinding::literal("Forge-Destination", destination));
-        headers.push(HeaderBinding::field(
-            "Forge-Request-Id",
-            "request.request_id",
-        ));
-        bindings.push(RequestBinding {
-            kind: kind.into(),
+        RequestBinding {
+            kind: "edit_write".into(),
             request_id: "request.request_id".into(),
-            headers,
+            headers: edit_write,
             csrf: true,
-            timeout_ms: Some(forge_ide_ui::protocol::MAX_CHAT_TIMEOUT_MS as u32),
+            timeout_ms: Some(26_000),
             deadline: None,
             error_events: vec![],
-            accept_events: vec![success_event.into()],
+            accept_events: vec!["edit_write_result".into()],
             policy: RequestPolicy {
                 expire_session_on_denial: true,
                 ..RequestPolicy::default()
             },
-        });
-    }
-    for (kind, destination, success_event, error_event) in [
-        (
-            "chat_history_list",
-            "ide.chat.history.list",
-            "chat_history_listed",
-            "chat_history_failed",
-        ),
-        (
-            "chat_history_open",
-            "ide.chat.history.open",
-            "chat_history_opened",
-            "chat_history_failed",
-        ),
-        (
-            "chat_history_retention_set",
-            "ide.chat.history.retention.set",
-            "chat_history_retention_set",
-            "chat_history_failed",
-        ),
-        (
-            "chat_history_delete",
-            "ide.chat.history.delete",
-            "chat_history_deleted",
-            "chat_history_failed",
-        ),
-        (
-            "chat_run_submit",
-            "ide.chat.run.submit",
-            "chat_run_accepted",
-            "chat_run_failed",
-        ),
-        (
-            "chat_run_events",
-            "ide.chat.run.events",
-            "chat_run_events",
-            "chat_run_failed",
-        ),
-        (
-            "chat_run_cancel",
-            "ide.chat.run.cancel",
-            "chat_run_cancelled",
-            "chat_run_failed",
-        ),
-        (
-            "chat_run_models",
-            "ide.chat.run.models",
-            "chat_run_models_listed",
-            "chat_run_failed",
-        ),
-    ] {
-        let mut headers = common.clone();
-        headers.push(HeaderBinding::literal("Forge-Destination", destination));
-        headers.push(HeaderBinding::field("Forge-Request-Id", "request_id"));
-        let mut policy = RequestPolicy {
-            wait_for_slot_ms: Some(5_000),
-            expire_session_on_denial: true,
-            ..RequestPolicy::default()
-        };
-        match kind {
-            "chat_run_events" => policy.delay_ms = Some(1_200),
-            "chat_run_submit" => {
-                policy.checkpoint = Some(CheckpointBinding {
-                    snapshot_path: "chat.pending_run".into(),
-                    fields: ["chat_id", "idempotency_key", "model_id"]
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect(),
-                });
-            }
-            _ => {}
-        }
-        bindings.push(RequestBinding {
-            kind: kind.into(),
-            request_id: "request_id".into(),
-            headers,
-            csrf: true,
-            timeout_ms: None,
-            deadline: None,
-            accept_events: vec![success_event.into()],
-            error_events: vec![error_event.into()],
-            policy,
-        });
-    }
+        },
+    ];
     for (kind, destination, success_event, error_event, mutating) in [
         (
             "work_catalog",
@@ -789,24 +555,11 @@ pub fn ide_transport_with_policy(presentation: forge_ide_ui::PresentationPolicy)
             },
         });
     }
-    if !presentation.chat {
-        bindings.retain(|b| {
-            b.kind != "chat" && !b.kind.starts_with("chat_") && b.kind != "propose_edit"
-        });
-    }
     Transport {
         initial_event: "resume".into(),
-        preserve_workspace_chat: !presentation.chat,
+        preserve_workspace_chat: true,
         entry_actions: [
-            (
-                "chat".into(),
-                if presentation.chat {
-                    "open_chat"
-                } else {
-                    "open_agents"
-                }
-                .into(),
-            ),
+            ("chat".into(), "open_agents".into()),
             ("mail".into(), "open_agents".into()),
             ("workbench".into(), "open_workbench".into()),
             ("agents".into(), "open_agents".into()),

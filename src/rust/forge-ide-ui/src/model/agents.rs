@@ -49,6 +49,8 @@ pub(super) struct Agents {
     auto_repair: bool,
     verified_finding_ids: BTreeSet<String>,
     tasks: Vec<WorkTaskSummary>,
+    task_scope: WorkListScope,
+    scope_counts: Option<WorkScopeCounts>,
     list_cursor: Option<String>,
     list_history: Vec<Option<String>>,
     list_next: Option<String>,
@@ -255,7 +257,7 @@ impl Agents {
             WorkRequest::WorkList {
                 request_id: id,
                 project_alias: self.project.clone(),
-                status_filter: None,
+                status_filter: Some(WorkListFilter::Scope(self.task_scope)),
                 limit: 20,
                 cursor,
             },
@@ -491,6 +493,11 @@ impl Agents {
                 self.warning = true;
             }
             UiEvent::AgentsNewTask {} if work && self.assignment_catalog_ready() => {
+                self.task_scope = WorkListScope::Active;
+                self.list_cursor = None;
+                self.list_next = None;
+                self.list_history.clear();
+                self.scope_counts = None;
                 self.auto_repair = false;
                 self.pending = None;
                 self.choose_mode();
@@ -547,6 +554,20 @@ impl Agents {
             }
             UiEvent::AgentsNext {} if work => self.list(id, Direction::Next, effects),
             UiEvent::AgentsPrevious {} if work => self.list(id, Direction::Previous, effects),
+            UiEvent::SelectAgentTaskScope { value } if work && self.pane == Pane::List => {
+                if self.pending.is_none() {
+                    if let Some(scope) =
+                        WorkListScope::parse(&value).filter(|scope| *scope != self.task_scope)
+                    {
+                        self.task_scope = scope;
+                        self.tasks.clear();
+                        self.list_cursor = None;
+                        self.list_next = None;
+                        self.list_history.clear();
+                        self.list(id, Direction::Current, effects);
+                    }
+                }
+            }
             UiEvent::AgentHistoryFirst {
                 task_id,
                 correlation_id,
@@ -596,6 +617,7 @@ impl Agents {
                     self.list_cursor = None;
                     self.list_next = None;
                     self.list_history.clear();
+                    self.scope_counts = None;
                     self.clear_result();
                     if work {
                         self.list(id, Direction::Current, effects);
@@ -1439,7 +1461,10 @@ impl Agents {
                 }
             }
             WorkResponse::WorkListed {
-                tasks, next_cursor, ..
+                tasks,
+                next_cursor,
+                scope_counts,
+                ..
             } => {
                 if let WorkRequest::WorkList { cursor, .. } = request {
                     match self.direction {
@@ -1458,12 +1483,8 @@ impl Agents {
                 }
                 self.tasks = tasks;
                 self.list_next = next_cursor;
-                self.status = if self.tasks.is_empty() {
-                    "No tasks yet. Create one to begin."
-                } else {
-                    "Tasks are saved in PostgreSQL."
-                }
-                .into();
+                self.scope_counts = scope_counts;
+                self.status.clear();
                 self.schedule(id, effects);
             }
             WorkResponse::WorkEvents {
@@ -1730,7 +1751,6 @@ impl Agents {
         view.lists.clear();
         view.tables.clear();
         view.sources.clear();
-        view.diffs.clear();
         view.badges.clear();
         view.metric_cards.clear();
         view.transcripts.clear();
@@ -1755,18 +1775,13 @@ impl Agents {
             for binding in &mut view.visibility {
                 if matches!(
                     binding.id,
-                    "chat"
-                        | "mail"
-                        | "workbench"
-                        | "chat-header-actions"
-                        | "workbench-header-actions"
-                        | "status"
+                    "workbench" | "workbench-header-actions" | "status"
                 ) {
                     binding.visible = false;
                 }
             }
             for button in &mut view.buttons {
-                if matches!(button.id, "open-chat" | "open-mail" | "open-workbench") {
+                if button.id == "open-workbench" {
                     button.disabled = locked;
                     button.pressed = Some(false);
                 }
@@ -1936,6 +1951,10 @@ impl Agents {
             visible("agents-list-pagination", active && !compose && !reader),
             visible("agents-usage", active && usage && !compose && !reader),
             visible("agents-task-list", active && work && !compose && !reader),
+            visible(
+                "agents-task-scope-field",
+                active && work && !compose && !reader,
+            ),
             visible("agents-unsupported", active && !work && !usage),
         ]);
         let review = self.task.as_ref().and_then(|task| task.review.as_ref());
@@ -2064,7 +2083,6 @@ impl Agents {
                         ),
                         rendered_html: None,
                         notice: None,
-                        header: None,
                     })
                     .collect()
             }),
@@ -2214,7 +2232,6 @@ impl Agents {
                     rendered_html: render_markdown(&content),
                     content,
                     notice: None,
-                    header: None,
                 }]
             }),
         });
@@ -2433,6 +2450,26 @@ impl Agents {
         ]);
         view.choices.extend([
             SelectBinding {
+                id: "agents-task-scope",
+                value: self.task_scope.value().into(),
+                disabled: !enabled || pending,
+                options: [
+                    WorkListScope::Active,
+                    WorkListScope::Attention,
+                    WorkListScope::History,
+                    WorkListScope::All,
+                ]
+                .into_iter()
+                .map(|scope| OptionView {
+                    value: scope.value().into(),
+                    label: self.scope_counts.as_ref().map_or_else(
+                        || scope.label().into(),
+                        |counts| format!("{} ({})", scope.label(), counts.count(scope)),
+                    ),
+                })
+                .collect(),
+            },
+            SelectBinding {
                 id: "agents-project",
                 value: self.project.clone(),
                 disabled: !enabled || pending,
@@ -2481,7 +2518,14 @@ impl Agents {
             empty_message: if pending {
                 "Loading tasks…"
             } else {
-                "No tasks yet. Create your first assignment."
+                match self.task_scope {
+                    WorkListScope::Active => {
+                        "No active assignments. Check Needs attention or History for earlier work."
+                    }
+                    WorkListScope::Attention => "Nothing needs attention.",
+                    WorkListScope::History => "No completed or cancelled assignments.",
+                    WorkListScope::All => "No assignments yet. Create your first assignment.",
+                }
             }
             .into(),
             rows: self
@@ -2510,11 +2554,13 @@ impl Agents {
                         task_id: t.task_id.clone(),
                     },
                     toggle: None,
-                    correspondence: None,
                     summary: Some(RowSummary {
                         badge: self.task_summary_badge(t),
                         tag: t.agent_profile.clone(),
-                        time: timestamp(&t.created_at, self.now_ms),
+                        time: timestamp(
+                            t.updated_at.as_deref().unwrap_or(&t.created_at),
+                            self.now_ms,
+                        ),
                     }),
                 })
                 .collect(),
@@ -2575,7 +2621,6 @@ impl Agents {
                 content: p.summary.clone(),
                 rendered_html: render_markdown(&p.summary),
                 notice: Some(short_time(&event.created_at)),
-                header: None,
             }
         };
         view.transcripts.push(TranscriptBinding {
@@ -2594,7 +2639,6 @@ impl Agents {
                         .into(),
                         rendered_html: None,
                         notice: None,
-                        header: None,
                     }]
                 },
                 |e| vec![message(e)],
@@ -2625,7 +2669,6 @@ impl Agents {
                     content: self.result.clone(),
                     rendered_html: render_markdown(&self.result),
                     notice: None,
-                    header: None,
                 }]
             } else {
                 vec![]
@@ -2652,7 +2695,6 @@ impl Agents {
                     content: r.content.clone(),
                     rendered_html: render_markdown(&r.content),
                     notice: None,
-                    header: None,
                 }]
             }),
         });

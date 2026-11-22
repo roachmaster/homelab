@@ -209,7 +209,7 @@ class AgYUnattendedDatabaseContractTest(unittest.TestCase):
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(self.rows(snapshot_query, cluster=cluster), before)
-                self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(26,)])
+                self.assertEqual(self.rows("SELECT max(version) FROM forge_agent.schema_migrations", cluster=cluster), [(27,)])
                 self.assertEqual(db.publish(lease, "awaiting_review", manifest, None,
                                            "Owned policy upgrade fixture", proof), receipt)
                 self.assertEqual(service.submit(make_submit(idempotency_key="pre-m23")), submitted)

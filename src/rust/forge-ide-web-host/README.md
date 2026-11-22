@@ -250,52 +250,38 @@ Bodies are tagged `pair {request_id, code}`, `resume {request_id}`, or
 transport plumbing, not the Rust domain model or DOM. HTTP failures use a bounded
 `{error:...}` response; application errors can be typed events with HTTP 200.
 
-## Retained Chat relay
+## Workbench checkpoints and retired Chat/Mail compatibility
 
-Chat is temporarily inactive in the portal. These native backend APIs remain
-configured and preserved; removing the portal view does not delete conversations
-or retention data. The active UI uses `preserve_chat: true` workspace restore/save
-to retain dormant snapshots without Chat hydration, model discovery or run replay.
+Chat and Mail reducers, browser dispatch codecs, host routes and generated UI
+have been removed. Their PostgreSQL history is retained by the existing backend.
+Legacy Chat/Mail links lead to Agents, and supported dormant tab snapshots keep
+their drafts, identities and pending-run hints without activating those features.
+Unknown historical top-level workspace `mail` values are ignored; the supported
+separate Mail navigation snapshot remains inert and preserves its draft.
 
-The optional host configuration enables chat against the private Forge llama.cpp
-adapter. The endpoint must be loopback, such as a local SSH forward to Forge GPU.
-The token file is readable only by the native host and stays outside the asset
-directory. The model must already be running on the adapter.
+The legacy `chat` configuration key now selects only the optional loopback
+Workbench workspace store. Its token remains native and outside served assets:
 
 ```json
 "chat": {
-  "endpoint": "127.0.0.1:18080",
-  "token_file": "/etc/homelab-forge/web/llama.token"
+  "endpoint": "127.0.0.1:18083",
+  "token_file": "/etc/homelab-forge/web/agent-runner.token",
+  "workspace_persistence": true
 }
 ```
 
-Chat uses `POST /forge/v1/dispatch` with destination `ide.chat`, the normal
-session cookie and CSRF header. The host forwards the bounded message history to
-the adapter's `POST /v1/chat/completions` and returns the assistant's text.
-When the adapter or model is unavailable, the browser keeps the prompt as a draft.
+The session catalog always disables `chat_history`, `async_chat`, `mail_enabled`
+and `mail_archive_enabled`, including when old configuration flags remain true.
+Authenticated retired Chat/Mail commands fail before any upstream request.
 
 The same-origin workspace endpoint at `/forge/v1/dispatch/workspace` requires the
 active session cookie and CSRF token. With `chat.workspace_persistence` enabled,
 the host forwards checkpoint requests to the configured local runner's
-`/v1/workspace` endpoint. The runner stores them in PostgreSQL. A new tab can
-restore the operator's saved Chat history, while the original tab keeps its
-drafts and Workbench bookmark. The host revalidates that bookmark against an
-admitted catalog and a fresh inspection. An older page lease cannot replace a
-newer checkpoint.
-
-With PostgreSQL enabled, **Previous chats** lists and opens committed chats
-across browser tabs. Its **Manage** menu uses the same authenticated
-`POST /forge/v1/dispatch` endpoint with the `ide.chat.history.*` destinations.
-The host forwards those requests to the existing runner's private
-`POST /v1/dispatch`. The runner commits each linked chat turn. It assigns
-a keep-through date 30 days after the first saved turn in UTC and keeps
-that date across follow-ups. It checks the current revision when changing
-expiration, keeping a chat indefinitely, or deleting it. The runner expires
-chats at midnight after their keep-through date.
-
-With `chat.async_dispatch` enabled, **Model** in Chat lists the versions
-configured by the runner. The selected `model_id` is pinned to each queued
-run. Forge loads the selected model when its job is ready.
+`/v1/workspace` endpoint. Restore and Save require explicit `preserve_chat: true`;
+history hydration, model discovery and omitted/false preservation are rejected
+before relay. The runner retains dormant Chat data while the Workbench bookmark
+changes. The host revalidates that bookmark against an admitted catalog and a
+fresh inspection. An older page lease cannot replace a newer checkpoint.
 
 Without the runner setting, the host keeps up to 12 bounded tab checkpoints in
 session memory. Session rotation and host restart clear those checkpoints.
@@ -413,23 +399,16 @@ before UI assertions; changing a supported browser selection is not a passing te
 
 ### Workbench asset compatibility
 
-The host accepts asset manifest ABI 5. Rebuild and replace the complete generated
-bundle for the report-keyed workbench; old ABI 4 or unknown asset versions fail
+The host accepts asset manifest ABI 13. Rebuild and replace the complete generated
+bundle for the retired browser codecs; ABI 12 or unknown asset versions fail
 before listening. Hashes bind the five files as a bundle, not publisher identity.
 The native session/inspection HTTP protocol remains 1. See the
 [local UI migration](../forge-ide-web/WORKBENCH.md#compatibility-and-verification).
 
-Manual Mail archiving is disabled by default. Enable `chat.mail_archive_enabled`
-only with normal Mail support and the matching runner/schema implementation.
-The native gateway rejects archive requests while the flag is false; the browser
-receives the capability only when it is enabled.
-
-Rollout requires a quiesced migration 0008, updated runner, native host, and atomic
-ABI 5 bundle before explicit opt-in. Host restart rotates session credentials and
-epochs; older strict Catalog readers must reload. Older Mail readers cannot decode
-the persisted `manual` archive reason. After manual data exists, rollback requires
-a compatible reader; do not erase or relabel archives to restore an older binary.
-This repository change does not modify the running portal’s configuration.
+The portal does not expose manual Mail archiving or any other Mail mutation.
+Old configuration flags cannot enable these retired routes. Existing backend
+archives and schema history remain intact. This retirement needs no database
+deletion, schema rewrite or running-configuration change.
 
 ## Selected source reads
 
