@@ -1,9 +1,9 @@
 # Dependency injection: factories, providers, and owned lifetimes
 
 **Status: implemented explicit assembly with a broader lifecycle design.** Reviewed
-against the repository on 18 November 2026. [`forge-provider`](../../src/rust/forge-provider/README.md)
+against the repository on 18 November 2026. [`forge-core`](../../src/rust/forge-core/README.md)
 implements synchronous factory/provider/lease primitives and singleton/transient
-scopes; [`forge-bootstrap`](bootstrap-registrars.md) implements typed staging,
+scopes; [`forge_core::bootstrap`](bootstrap-registrars.md) implements typed staging,
 dependency-order validation and consuming freeze. The agent, portal host, model
 runtime and durable-jobs executable use those boundaries in their normal entry
 paths. This is explicit application composition, not a universal reflective DI

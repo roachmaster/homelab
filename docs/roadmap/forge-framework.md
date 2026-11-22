@@ -101,7 +101,7 @@ terminal help uses admitted discovery without executing the business task/client
 The reusable help option stays in presentation metadata, not typed task inputs.
 Explicit codecs and tests establish agreement; this is not reflection, a universal
 schema/parser or automatic execution. Pure tasks remain metadata-free. See the
-[description contract](../../src/rust/forge-command/README.md).
+[description contract](../../src/rust/forge-core/README.md).
 
 ## Bounded local jobs checkpoint — implemented
 

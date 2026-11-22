@@ -1,7 +1,7 @@
 # Jenkins client and Forge CLI
 
 Implemented source: the optional [`forge-jenkins`](../../src/rust/forge-jenkins/README.md)
-Rust capability implements `forge_io_client::IoClient`. Its public `Config`,
+Rust capability implements `forge_core::io_client::IoClient`. Its public `Config`,
 `Credentials`, `ClientFactory`, `register` and opt-in `register_http` compose with
 Forge's existing bootstrap and provider contracts. No dependency selection or
 global registry lookup occurs in a request handler. The library default omits

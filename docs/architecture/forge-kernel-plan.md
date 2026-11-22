@@ -10,7 +10,7 @@ distributed scheduler or shell platform.
 [volatile stepped counter](../../src/rust/forge-local/JOBS.md) are implemented.
 A separate [durable sum-job capability](../../src/rust/forge-jobs/README.md) owns a
 locked file store, restart-persistent receipts and leased worker attempts.
-[`forge-access`](../../src/rust/forge-access/src/lib.rs) supplies verified
+[`forge_core::access`](../../src/rust/forge-core/src/access.rs) supplies verified
 subject/deadline contexts and exact-route grants. The configured HTTPS agent
 provides node/project/source operations and explicitly granted managed writes.
 Automatic peer discovery, generic remote jobs, broad delegation and a bootable
@@ -59,11 +59,11 @@ does not replace those controls. [Linux cgroup v2 documentation](https://docs.ke
 
 | Existing code | Reuse | Missing capability, not an implicit promise |
 | --- | --- | --- |
-| [Ingress contract](../../src/rust/forge-ingress-contract/src/lib.rs) | Typed `Envelope<P>`/response; route/version, request ID and correlation | No node identity, deadline, cancellation or idempotency enforcement |
-| [Bridge](../../src/rust/forge-bridge/src/lib.rs) | Header-selected registration → admission → variant check → handler | Synchronous closures lack `Send`/`Sync`; handlers receive payload/context, not the header |
-| [Bootstrap](../../src/rust/forge-bootstrap/src/lib.rs) | Atomic typed groups, dependency-order validation, consuming freeze | No automatic graph execution, route catalog or managed host lifecycle |
-| [Provider](../../src/rust/forge-provider/src/lib.rs) | Explicit factories, singleton/transient ownership and leases | No pools, request scopes, async construction or service locator |
-| [Task](../../src/rust/forge-task/src/lib.rs) and [IoClient](../../src/rust/forge-io-client/src/lib.rs) | Task prepares/computes/orchestrates; client executes typed prepared requests | `run`/`execute` may block; neither supplies a scheduler or cancellation |
+| [Ingress contract](../../src/rust/forge-core/src/ingress.rs) | Typed `Envelope<P>`/response; route/version, request ID and correlation | No node identity, deadline, cancellation or idempotency enforcement |
+| [Bridge](../../src/rust/forge-core/src/bridge.rs) | Header-selected registration → admission → variant check → handler | Synchronous closures lack `Send`/`Sync`; handlers receive payload/context, not the header |
+| [Bootstrap](../../src/rust/forge-core/src/bootstrap.rs) | Atomic typed groups, dependency-order validation, consuming freeze | No automatic graph execution, route catalog or managed host lifecycle |
+| [Provider](../../src/rust/forge-core/src/provider.rs) | Explicit factories, singleton/transient ownership and leases | No pools, request scopes, async construction or service locator |
+| [Task](../../src/rust/forge-core/src/task.rs) and [IoClient](../../src/rust/forge-core/src/io_client.rs) | Task prepares/computes/orchestrates; client executes typed prepared requests | `run`/`execute` may block; neither supplies a scheduler or cancellation |
 | [Kernel disk module](../../src/rust/forge-kernel/src/disk.rs) | Native list/pwd/cd/permissions; config/factory/registrar | No sandbox, file mutation, bounded listing, remote codec or per-user session manager |
 
 Current executed checks, including the new local application/terminal tests, are recorded in the [Rust workspace guide](../../src/rust/README.md). The earlier research-only pass did not execute source tests.

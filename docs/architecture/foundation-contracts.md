@@ -6,7 +6,7 @@ design; several narrower capabilities now exist with different public names:
 
 | Sketch area | Actual implementation to use |
 | --- | --- |
-| Verified access | [`forge_access::Verifier`, `AuthenticatedBoundary`, `Context`, `Grant`, `RoutePolicy`](../../src/rust/forge-access/src/lib.rs): verified subject, bounded call deadline and exact-route grants; no generic delegation/federation contract |
+| Verified access | [`forge_core::access::{Verifier, AuthenticatedBoundary, Context, Grant, RoutePolicy}`](../../src/rust/forge-core/src/access.rs): verified subject, bounded call deadline and exact-route grants; no generic delegation/federation contract |
 | Explicitly stepped jobs | [`forge-local` counter](../../src/rust/forge-local/JOBS.md): volatile, owner-scoped and manually progressed |
 | Durable jobs | [`forge-jobs`](../../src/rust/forge-jobs/README.md): bounded sum work, committed file-store receipts, leased worker attempts and restart recovery; not the generic `JobProgram` API below |
 | Remote conversation | [`forge-remote`](../../src/rust/forge-remote/src/lib.rs), [HTTPS boundary](remote-node-info.md) and [configured agent composition](../../src/rust/forge-agent/src/host.rs): typed node/project/source calls and explicitly granted managed writes, not arbitrary remote jobs |
@@ -22,7 +22,7 @@ better boundary. These sketches do not claim that the entire foundation has been
 ## A. Access: verified context, then resource decisions
 
 ```rust
-// Proposed forge-access contract; E is fixed for a selected verifier.
+// Proposed access contract (implemented as forge_core::access); E is fixed for a selected verifier.
 trait IdentityVerifier {
     type Evidence;
     fn verify(
@@ -164,7 +164,7 @@ memory bound. `inspect` returns bounded summary/progress, not an unbounded event
 `dyn JobService<Input = CounterInput, ResultView = CounterResult>` and
 `dyn JobStepper<Output = CounterResult, Failure = CounterFailure>` are intended
 object-safe seams; a concrete generic engine is equally valid. There is no `Send`
-or `Sync` promise. The actual [provider GAT](../../src/rust/forge-provider/src/lib.rs)
+or `Sync` promise. The actual [provider GAT](../../src/rust/forge-core/src/provider.rs)
 is a different contract and is not made dyn-compatible by these sketches.
 [Rust's dyn-compatibility rules](https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility)
 explain why generic methods/associated type families cannot simply be hidden behind

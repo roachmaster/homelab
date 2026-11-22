@@ -1,7 +1,7 @@
 # Bootstrap and cohesive factory registrars
 
 **Status: typed bootstrap is implemented and used by concrete hosts.** Reviewed
-against the repository on 18 November 2026. [`forge-bootstrap`](../../src/rust/forge-bootstrap/README.md)
+against the repository on 18 November 2026. [`forge-core`](../../src/rust/forge-core/README.md)
 provides atomic typed group registration, consuming validation/freeze and explicit
 assembly. Native disk, the HTTPS agent, generated browser host, model runtime and
 durable jobs now consume the pattern; they are not all future demos. Automatic
@@ -26,7 +26,7 @@ Startup configuration selects implementation behavior and lifecycle. Runtime cap
 
 ## Minimal Rust-feasible registration
 
-The implemented **`forge-bootstrap` crate** is std-only with no normal dependencies. `PreparedGroup<F>` stores one package-owned factory/recipe struct plus validated group metadata. `Registry<G>` owns the index and all typed groups together. Successful registration appends to a nested tuple `(G, F)`; rejected registration returns the original registry and incoming group unchanged through `Rejected::into_parts()`.
+The implemented **`forge_core::bootstrap` module** is std-only with no normal dependencies. `PreparedGroup<F>` stores one package-owned factory/recipe struct plus validated group metadata. `Registry<G>` owns the index and all typed groups together. Successful registration appends to a nested tuple `(G, F)`; rejected registration returns the original registry and incoming group unchanged through `Rejected::into_parts()`.
 
 This **consuming, typed builder replaces the earlier separately borrowed slot/metadata proposal**. Owning both together prevents mismatched slot/index ownership without a second container protocol. The tuple type changes when a group is added; the consuming application explicitly chooses the registration calls. No `Any`/downcasts, JSON, global business enum, heterogeneous factory map or dyn-GAT provider is used. The core does not impose a universal registrar trait: packages export ordinary typed registrar functions.
 
@@ -47,7 +47,7 @@ let (((), clients), tasks) = registry.freeze()?.into_factories();
 // create the task and register its typed bridge closure before publication.
 ```
 
-This fragment names real APIs but is not a standalone program; error mapping and lifetime selection are in the linked source. The default demo consumer contains only pure arithmetic and has **no normal dependency on either message package, `forge-io-client` or `forge-provider`**. Its opt-in Cargo `messages` feature adds the selected packages; tests/normal-dependency trees prove actual inclusion/omission, not just a runtime `if`.
+This fragment names real APIs but is not a standalone program; error mapping and lifetime selection are in the linked source. The default demo consumer contains only pure arithmetic and has **no normal dependency on either message package**. Its opt-in Cargo `messages` feature adds the selected packages; the `io_client`/`provider` modules it uses are part of `forge-core`, always compiled but only used when the feature is enabled. Tests/normal-dependency trees prove actual inclusion/omission, not just a runtime `if`.
 
 No client/task is created during staging or freeze. The complete group's collisions are checked before metadata or typed values move into the next builder. Preparation errors occur before registration; registration errors retain the prior plan; construction errors return no application. The sample composes only owned in-memory resources and makes no remote/durable/authentication guarantee.
 

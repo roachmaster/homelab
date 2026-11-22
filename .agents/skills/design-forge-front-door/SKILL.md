@@ -38,7 +38,7 @@ Read the [HTTP projection and limits](../../../src/rust/forge-remote-https/READM
 and verify [wire conversion](../../../src/rust/forge-remote-https/src/wire.rs),
 [HTTP entry](../../../src/rust/forge-remote-https/src/transport.rs),
 [destination policy](../../../src/rust/forge-remote/src/lib.rs) and
-[bridge dispatch](../../../src/rust/forge-bridge/src/lib.rs) for the requested change.
+[bridge dispatch](../../../src/rust/forge-core/src/bridge.rs) for the requested change.
 
 - **Current:** `POST /forge/v1/dispatch` invokes `node.info@1`; the configured
   [agent](../../../src/rust/forge-agent/README.md) also binds `ide.inspect@1` for

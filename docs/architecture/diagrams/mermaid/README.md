@@ -24,7 +24,7 @@ while discovery implements description without Task and the older list-current
 Task need not expose metadata. Static per-operation descriptors own names/help
 and semantic argument types/presence; they are not reflection over Rust input
 fields. The terminal owns its help-option syntax and renders only the admitted
-catalog. See [command descriptions](../../../../src/rust/forge-command/README.md).
+catalog. See [command descriptions](../../../../src/rust/forge-core/README.md).
 
 ## M02 — Implemented bootstrap
 

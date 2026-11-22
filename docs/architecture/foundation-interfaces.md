@@ -3,7 +3,7 @@
 **Current checkpoint — 18 November 2026:** the repository now includes the
 [volatile stepped counter](../../src/rust/forge-local/JOBS.md), a separate
 [durable sum-job store and worker](../../src/rust/forge-jobs/README.md),
-[verified access contexts and route grants](../../src/rust/forge-access/src/lib.rs),
+[verified access contexts and route grants](../../src/rust/forge-core/src/access.rs),
 and the [typed HTTPS boundary](remote-node-info.md) used by the configured agent.
 The agent also supplies source reads and explicitly granted managed-project writes.
 See the [source-backed implementation inventory](forge-framework-blueprint.md#current-implementation).
@@ -42,7 +42,8 @@ remote milestone.
 ## 2. Coherent internal modules, not a class-per-crate tree
 
 The original design below proposes logical units and import responsibilities.
-`forge-jobs`, `forge-access` and `forge-remote` are now real workspace members;
+`forge-jobs` and `forge-remote` are now real workspace members, and verified
+access is the `access` module of `forge-core`;
 their current interfaces and dependencies are the linked source inventory above.
 The broader table remains a proposed decomposition, not the actual Cargo DAG.
 No empty crates are needed to complete that drawing. Contract-only packages need
@@ -50,7 +51,7 @@ no ceremonial registrar.
 
 | Unit and candidate home | Internal modules / visibility | Imports and forbidden knowledge |
 | --- | --- | --- |
-| Access, `forge-access` candidate | Public `identity` facts/context and `policy` queries; private context issuance; `audit` bounded event contract | May use ingress `RouteKey` for action identity. No jobs, remote transport, database, kernel or credential SDK import |
+| Access, `forge_core::access` | Public `identity` facts/context and `policy` queries; private context issuance; `audit` bounded event contract | May use ingress `RouteKey` for action identity. No jobs, remote transport, database, kernel or credential SDK import |
 | Jobs, `forge-local::jobs` initially; `forge-jobs` candidate | Public `contract`, `program`, `service`; private `engine`, `admission`, `retention`, `intent`; `assembly` owns config/recipe/registrar if packaged | Access's narrow identity/policy types, optional command descriptions; bootstrap/provider in assembly. No terminal, network, concrete disk client, global business enum or mandatory Task dependency |
 | Remote boundary, `forge-remote` candidate | `address`, `call`, `outcome`; small `peer` resolution contract | Existing ingress and I/O-client contracts. Target-node identity is distinct from operation routing. No jobs policy, concrete protocol or credential provider |
 | Selected network/credential implementation, name chosen later | Private framing/codec/connection/verification modules; public typed config and cohesive registrar | Imports the contracts it implements plus its chosen libraries. Never imported by the existing core or by jobs |

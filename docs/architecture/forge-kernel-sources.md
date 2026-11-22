@@ -24,10 +24,10 @@ Baseline inspected: public homelab
 Relative links below refer to the working repository; the pinned baseline defines
 what was reviewed for this plan.
 
-- [Ingress source](../../src/rust/forge-ingress-contract/src/lib.rs): exact header fields, typed envelope, host-supplied admission context.
-- [Bridge source](../../src/rust/forge-bridge/src/lib.rs): ordered checks, synchronous non-`Send`/`Sync` handler erasure, payload/context handler signature.
-- [Task source](../../src/rust/forge-task/src/lib.rs) and [I/O client source](../../src/rust/forge-io-client/src/lib.rs): synchronous contracts, no built-in job runner or cancellation.
-- [Bootstrap source](../../src/rust/forge-bootstrap/src/lib.rs) and [provider source](../../src/rust/forge-provider/src/lib.rs): typed consuming registration/freeze, explicit construction and acquisition.
+- [Ingress source](../../src/rust/forge-core/src/ingress.rs): exact header fields, typed envelope, host-supplied admission context.
+- [Bridge source](../../src/rust/forge-core/src/bridge.rs): ordered checks, synchronous non-`Send`/`Sync` handler erasure, payload/context handler signature.
+- [Task source](../../src/rust/forge-core/src/task.rs) and [I/O client source](../../src/rust/forge-core/src/io_client.rs): synchronous contracts, no built-in job runner or cancellation.
+- [Bootstrap source](../../src/rust/forge-core/src/bootstrap.rs) and [provider source](../../src/rust/forge-core/src/provider.rs): typed consuming registration/freeze, explicit construction and acquisition.
 - [Disk source](../../src/rust/forge-kernel/src/disk.rs) and [contract](../../src/rust/forge-kernel/README.md): native path/session semantics, no sandbox, unbounded materialized listing, no network codec or file mutation API.
 - [Recorded verification](../../src/rust/README.md): previous implementation checks. Reading those records is not a fresh test execution.
 
