@@ -1702,15 +1702,22 @@ impl WorkResponse {
                     && task(task_id)
                     && base_revision == expected_revision
                     && step(*base_revision, *revision)
-                    && review_id == expected_review
                     && repair_task_id
                         .as_deref()
                         .is_none_or(|id| valid_chat_id(id) && id != task_id)
                     && (repair_task_id.is_none() || *decision == WorkReviewDecision::Repair)
-                    && if *decision == WorkReviewDecision::Cancel {
-                        *status == WorkStatus::Cancelled
-                    } else {
-                        *status != WorkStatus::Completed
+                    && match decision {
+                        // A verification retry appends a review, while other
+                        // decisions retain the admitted target identity.
+                        WorkReviewDecision::RetryInfrastructure => {
+                            valid_chat_id(review_id)
+                                && review_id != expected_review
+                                && *status == WorkStatus::AwaitingReview
+                        }
+                        WorkReviewDecision::Cancel => {
+                            review_id == expected_review && *status == WorkStatus::Cancelled
+                        }
+                        _ => review_id == expected_review && *status != WorkStatus::Completed,
                     }
             }
             (
