@@ -193,12 +193,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('select[data-action]')){n.replaceChildren();n.value='';n.removeAttribute('title');delete n.dataset.options;n.disabled=true;}
   for(const n of document.querySelectorAll('input,textarea')){n.value='';if(n.type==='checkbox')n.checked=false;n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
-<<<<<<< HEAD
-  for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
-=======
   for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,.fg-timeline,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
-  for(const n of document.querySelectorAll('[data-diff-view]')){n.replaceChildren();n.scrollTop=0;}
->>>>>>> a1ee6f64ee377a6c3640b86d70de5ece8373aacc
   for(const n of document.querySelectorAll('[data-source-wrap],[data-compact-toolbar]')){
     if(n.hasAttribute('data-source-wrap')){
       const source=element(n.getAttribute('aria-controls'));
@@ -1118,11 +1113,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-<<<<<<< HEAD
-  if(wasm.abi_version()!==10 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
-=======
-  if(wasm.abi_version()!==12 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
->>>>>>> a1ee6f64ee377a6c3640b86d70de5ece8373aacc
+  if(wasm.abi_version()!==13 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));

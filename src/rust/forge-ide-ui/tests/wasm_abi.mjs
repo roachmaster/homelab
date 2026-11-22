@@ -6,11 +6,7 @@ assert.ok(path, 'supply the built forge_ide_web.wasm path');
 const { instance } = await WebAssembly.instantiate(await readFile(path), {});
 const w = instance.exports;
 for (const name of ['memory', 'abi_version', 'reserve_input', 'dispatch_input', 'output_ptr', 'output_len', 'release_output']) assert.ok(w[name], name);
-<<<<<<< HEAD
-assert.equal(w.abi_version(), 10);
-=======
-assert.equal(w.abi_version(), 12);
->>>>>>> a1ee6f64ee377a6c3640b86d70de5ece8373aacc
+assert.equal(w.abi_version(), 13);
 assert.equal(w.reserve_input(0), 0);
 assert.equal(w.reserve_input(8 * 1024 * 1024 + 1), 0);
 const encoder = new TextEncoder();

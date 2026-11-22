@@ -2640,7 +2640,6 @@ impl Agents {
                     content: r.content.clone(),
                     rendered_html: render_markdown(&r.content),
                     notice: None,
-                    header: None,
                 }]
             }),
         });
