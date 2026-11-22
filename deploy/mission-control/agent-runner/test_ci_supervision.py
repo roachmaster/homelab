@@ -90,16 +90,20 @@ class SupervisionBoundaryTest(unittest.TestCase):
                     CI._safe_rmtree(source)
             self.assertTrue((source / 'artifact').is_file())
 
-    def test_cache_copy_skips_incremental_directories_at_any_depth(self):
+    def test_cache_copy_skips_excluded_directories_at_any_depth(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / 'target'
             (source / 'debug' / 'deps').mkdir(parents=True)
             (source / 'debug' / 'incremental' / 'lib-core-abc' / 's-session').mkdir(parents=True)
             (source / 'release' / 'incremental').mkdir(parents=True)
+            (source / 'doc').mkdir(parents=True)
+            (source / 'ast').mkdir(parents=True)
             (source / 'debug' / 'deps' / 'liblib_core.rlib').write_bytes(b'rlib-bytes')
             (source / 'debug' / 'incremental' / 'lib-core-abc' / 's-session' / 'dep-graph.bin').write_bytes(b'incremental-bytes')
             (source / 'release' / 'incremental' / 'stale.bin').write_bytes(b'stale-bytes')
+            (source / 'doc' / 'index.html').write_bytes(b'doc-bytes')
+            (source / 'ast' / 'ast-graph.yaml').write_bytes(b'ast-bytes')
             entries, total_bytes, file_count, _max_art, _max_fp = CI._copy_tree_from_build(
                 source, root / 'staging', expected_uid=os.getuid(), prefix_rel='target',
                 excluded_dir_names=CI.SNAPSHOT_EXCLUDED_DIR_NAMES,
@@ -109,6 +113,21 @@ class SupervisionBoundaryTest(unittest.TestCase):
             self.assertEqual([row[0] for row in entries], ['target/debug/deps/liblib_core.rlib'])
             self.assertFalse((root / 'staging' / 'debug' / 'incremental').exists())
             self.assertFalse((root / 'staging' / 'release' / 'incremental').exists())
+            self.assertFalse((root / 'staging' / 'doc').exists())
+            self.assertFalse((root / 'staging' / 'ast').exists())
+
+    def test_cache_copy_does_not_fsync_individual_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'target'
+            (source / 'debug').mkdir(parents=True)
+            (source / 'debug' / 'artifact').write_bytes(b'artifact-bytes')
+            with patch.object(CI.os, 'fsync', side_effect=AssertionError('per-file fsync called')):
+                _entries, total_bytes, file_count, _max_art, _max_fp = CI._copy_tree_from_build(
+                    source, root / 'staging', expected_uid=os.getuid(), prefix_rel='target',
+                )
+            self.assertEqual(file_count, 1)
+            self.assertEqual(total_bytes, len(b'artifact-bytes'))
 
     def test_bounded_observation_enforces_limit_and_exit_status(self):
         env = {'PATH': '/usr/bin:/bin'}
@@ -1061,6 +1080,35 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         pointers = list(self.cache_root.rglob('current.json'))
         self.assertEqual(len(pointers), 1)
         self.assertIn(CI.scope_directory_name(branch_b), str(pointers[0]))
+
+    def test_checks_run_with_incremental_disabled_and_line_tables_debug(self):
+        seen_envs = []
+        def capture_env(argv, *, cwd, env, account, log, timeout, cancelled):
+            seen_envs.append(dict(env))
+            proc = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                  stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+            return proc.returncode
+        r1, log1, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40,
+            branch_scope='branch/' + CI.canonical_branch_slug('feat/cache-env'),
+            workflow_id=str(uuid4()), run_child_override=capture_env,
+        )
+        self.assertEqual(r1['status'], 'passed', log1)
+        self.assertEqual(len(seen_envs), len(CI.CHECKS))
+        for env in seen_envs:
+            self.assertEqual(env['CARGO_INCREMENTAL'], '0')
+            self.assertEqual(env['CARGO_PROFILE_DEV_DEBUG'], 'line-tables-only')
+
+    def test_publish_syncs_once_at_snapshot_boundary(self):
+        with patch.object(CI.os, 'sync') as mock_sync:
+            r1, log1, _ = self._run_supervisor(
+                commit=self.base_commit, expected_main='0' * 40,
+                branch_scope='branch/' + CI.canonical_branch_slug('feat/cache-sync'),
+                workflow_id=str(uuid4()),
+            )
+        self.assertEqual(r1['status'], 'passed', log1)
+        self.assertEqual(r1['cache']['publish_status'], 'published')
+        self.assertEqual(mock_sync.call_count, 1)
 
     def test_future_dated_snapshot_falls_back_cleanly_on_source_edit_and_self_heals(self):
         branch_scope = 'branch/' + CI.canonical_branch_slug('feat/future-guard')
