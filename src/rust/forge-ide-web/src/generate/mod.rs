@@ -63,18 +63,10 @@ pub struct RequestBinding {
 pub struct RequestPolicy {
     pub delay_ms: Option<u32>,
     pub wait_for_slot_ms: Option<u32>,
-    pub checkpoint: Option<CheckpointBinding>,
     pub expire_session_on_denial: bool,
     pub expire_session_on_unauthenticated: bool,
     /// Exact prepared intent under the Rust-owned local navigation snapshot.
     pub local_checkpoint_path: Option<String>,
-}
-
-/// Match a request against the corresponding intent in the saved workspace.
-#[derive(Clone, Debug, Serialize)]
-pub struct CheckpointBinding {
-    pub snapshot_path: String,
-    pub fields: Vec<String>,
 }
 
 /// Turn a typed effect into a delayed model event. A new effect of the same
@@ -147,18 +139,6 @@ impl Transport {
                     .is_some_and(|p| !path(p))
             {
                 return Err("invalid request policy");
-            }
-            if let Some(checkpoint) = &b.policy.checkpoint {
-                let fields: BTreeSet<_> = checkpoint.fields.iter().collect();
-                if !b.csrf
-                    || !path(&checkpoint.snapshot_path)
-                    || fields.is_empty()
-                    || fields.len() > 8
-                    || fields.len() != checkpoint.fields.len()
-                    || !fields.iter().all(|field| component::key(field))
-                {
-                    return Err("invalid checkpoint binding");
-                }
             }
             let mut headers = BTreeSet::new();
             for h in &b.headers {
@@ -350,7 +330,7 @@ impl Factory<AssetBundle> for AssetFactory {
         ]);
         let manifest = Manifest {
             format_version: 1,
-            abi_version: 9,
+            abi_version: 10,
             files: files
                 .iter()
                 .map(|(path, bytes)| ManifestFile {

@@ -1,7 +1,5 @@
 //! Typed presentation bindings for generated reusable DOM primitives.
-use crate::protocol::{
-    ChatRole, DiffLine, RequestToken, SourceSpan, WorkPlanDecision, WorkReviewDecision,
-};
+use crate::protocol::{ChatRole, RequestToken, SourceSpan, WorkPlanDecision, WorkReviewDecision};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -18,14 +16,8 @@ pub struct ViewModel {
     pub panes: Vec<PaneBinding>,
     pub sources: Vec<SourceBinding>,
     pub transcripts: Vec<TranscriptBinding>,
-    pub diffs: Vec<DiffBinding>,
     pub badges: Vec<BadgeBinding>,
     pub metric_cards: Vec<MetricCardsBinding>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DiffBinding {
-    pub id: &'static str,
-    pub lines: Vec<DiffLine>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TranscriptBinding {
@@ -45,17 +37,6 @@ pub struct TranscriptMessage {
     pub rendered_html: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
-    /// Optional correspondence presentation prepared by the application model.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub header: Option<MessageHeader>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct MessageHeader {
-    pub sender: String,
-    pub recipient: String,
-    pub timestamp: Option<String>,
-    pub monogram: String,
 }
 
 /// Exact, bounded UTF-8 window of the accepted read-only source document.
@@ -191,16 +172,9 @@ pub enum FilterAction {
         report: RequestToken,
         entry_names: bool,
     },
-    SetChatDraft {
-        conversation: usize,
-    },
     SetDocument {
         editor_id: String,
     },
-    SetChatExpiry {},
-    SetChatHistoryQuery {},
-    SetMailSubject {},
-    SetMailDraft {},
     SetAgentPrompt {},
     SetAgentCriteria {},
     SetAgentReviewNote {},
@@ -261,9 +235,6 @@ pub struct RowView {
     pub expanded: Option<bool>,
     pub action: RowAction,
     pub toggle: Option<RowAction>,
-    /// Optional inbox anatomy, with all status and date policy owned by Rust.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub correspondence: Option<CorrespondenceRow>,
     /// Model-formatted summary; the host performs no date or state inference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<RowSummary>,
@@ -353,14 +324,6 @@ pub struct MetricProperty {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct CorrespondenceRow {
-    pub sender: String,
-    pub timestamp: String,
-    pub preview: String,
-    pub status: String,
-    pub ready: bool,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RowAction {
     DecideAgentReview {
@@ -411,39 +374,8 @@ pub enum RowAction {
     CloseDocument {
         editor_id: String,
     },
-    SendChatWithFile {
-        report: RequestToken,
-        entry: u32,
-        byte_start: u32,
-        conversation: usize,
-    },
-    ApplyEdit {
-        proposal_id: String,
-    },
     UndoEdit {
         applied_operation: String,
-    },
-    SendWorkbenchChat {
-        report: RequestToken,
-        entry: u32,
-        byte_start: u32,
-        conversation: usize,
-    },
-    ProposeEdit {
-        report: RequestToken,
-        entry: u32,
-        byte_start: u32,
-        conversation: usize,
-    },
-    MailArchiveThread {
-        thread_id: String,
-        expected_revision: u64,
-    },
-    MailOpenThread {
-        thread_id: String,
-    },
-    OpenSavedChat {
-        chat_id: String,
     },
     SelectSearchResult {
         report: RequestToken,

@@ -43,9 +43,8 @@ fn event(m: &mut UiModel, e: UiEvent) -> Output {
     })
     .unwrap()
 }
-// Explicit retained legacy client contract; the portal uses the disabled default policy.
-fn connected_chat() -> UiModel {
-    let mut m = UiModel::with_presentation_policy(PresentationPolicy { chat: true });
+fn connected_portal() -> UiModel {
+    let mut m = UiModel::default();
     let o = event(&mut m, UiEvent::Resume {});
     let UiEffect::Resume { request_id } = &o.effects[0] else {
         panic!("resume")
@@ -60,7 +59,7 @@ fn connected_chat() -> UiModel {
     m
 }
 fn connected() -> UiModel {
-    let mut model = connected_chat();
+    let mut model = connected_portal();
     event(&mut model, UiEvent::OpenWorkbench {});
     model
 }
@@ -463,7 +462,7 @@ fn workspace_restores_source_and_declaration_only_from_fresh_report() {
     assert_eq!(bookmark.path, [NativeName::UnixBytes(vec![b'f', 0xff])]);
     assert_eq!(bookmark.declaration[1].name, "run");
 
-    let mut reopened = connected_chat();
+    let mut reopened = connected_portal();
     let clean = reopened.output(None);
     assert!(!clean.has_workspace_work);
     let mut invalid = saved.clone();
@@ -533,7 +532,7 @@ fn workspace_restores_source_and_declaration_only_from_fresh_report() {
 
 #[test]
 fn workspace_recovery_reuses_autoload_and_drops_missing_selection() {
-    let mut reopened = UiModel::with_presentation_policy(PresentationPolicy { chat: true });
+    let mut reopened = UiModel::default();
     let resume = event(&mut reopened, UiEvent::Resume {});
     let UiEffect::Resume { request_id } = &resume.effects[0] else {
         panic!("resume")
@@ -2338,8 +2337,7 @@ fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_five_list
         n.projects.clear();
         c.nodes.push(n);
     }
-    // Retain the maximal legacy five-list contract separately from the retired portal.
-    let mut m = UiModel::with_presentation_policy(PresentationPolicy { chat: true });
+    let mut m = UiModel::default();
     let start = event(&mut m, UiEvent::Resume {});
     let UiEffect::Resume { request_id } = &start.effects[0] else {
         panic!()
@@ -2351,6 +2349,7 @@ fn deepest_full_safe_path_and_escaped_catalog_still_leave_room_for_all_five_list
             catalog: c,
         },
     );
+    event(&mut m, UiEvent::OpenWorkbench {});
     let mut r = report();
     let root = r.entries[0].clone();
     let file = r.entries[1].clone();
@@ -2776,110 +2775,111 @@ fn workbench_header_context_tracks_admitted_selection() {
 }
 
 #[test]
-fn chat_is_the_landing_view_and_in_flight_replies_follow_their_conversation() {
-    let mut model = connected_chat();
-    let visible = |view: &forge_ide_ui::view::ViewModel, id: &str| {
-        view.visibility
-            .iter()
-            .any(|binding| binding.id == id && binding.visible)
-    };
-    assert!(visible(&model.view(), "chat"));
-    assert!(!visible(&model.view(), "workbench"));
+fn direct_workbench_editor_save_check_and_undo_keep_managed_write_lifecycle_intact() {
+    let mut model = connected();
+    let request = inspect(&mut model);
+    event(&mut model, result(&request, report()));
+    let selected = event(
+        &mut model,
+        UiEvent::SelectEntry {
+            report: request.token.clone(),
+            value: 1,
+        },
+    );
+    let source = source_request(&selected);
     event(
         &mut model,
-        UiEvent::SetChatDraft {
-            conversation: 0,
-            value: "First prompt".into(),
-        },
+        source_result(&source, "fn original() {}\n".into()),
     );
-    let sent = event(&mut model, UiEvent::SendChat {});
-    let UiEffect::Chat { request } = &sent.effects[0] else {
-        panic!("chat effect")
-    };
-    assert_eq!(request.messages.len(), 1);
-    let request_id = request.request_id.clone();
-    event(&mut model, UiEvent::NewChat {});
-    event(
+    let opened = event(
         &mut model,
-        UiEvent::SetChatDraft {
-            conversation: 1,
-            value: "Other draft".into(),
+        UiEvent::OpenDocument {
+            report: request.token.clone(),
+            entry: 1,
         },
     );
-    let received = event(
-        &mut model,
-        UiEvent::ChatResult {
-            request_id,
-            outcome: ChatOutcome::Answer {
-                content: "First answer".into(),
-            },
-        },
-    );
-    assert_eq!(received.view.transcripts[0].conversation, 1);
-    assert!(received.view.transcripts[0].messages.is_empty());
-    assert!(received
+    let editor_id = match &opened
         .view
         .inputs
         .iter()
-        .any(|b| b.id == "chat-draft" && b.value == "Other draft"));
-
-    event(&mut model, UiEvent::OpenWorkbench {});
-    assert!(visible(&model.view(), "workbench"));
-    event(&mut model, UiEvent::OpenChat {});
-    assert!(visible(&model.view(), "chat"));
-    let first = event(&mut model, UiEvent::SelectChat { value: "0".into() });
-    assert_eq!(
-        first.view.transcripts[0].messages[1].content,
-        "First answer"
-    );
+        .find(|b| b.id == "document-text")
+        .unwrap()
+        .action
+    {
+        Some(FilterAction::SetDocument { editor_id }) => editor_id.clone(),
+        _ => panic!("owned editor action"),
+    };
     event(
         &mut model,
-        UiEvent::SetChatDraft {
-            conversation: 0,
-            value: "Follow-up".into(),
+        UiEvent::SetDocument {
+            editor_id: editor_id.clone(),
+            value: "fn updated() {}\n".into(),
         },
     );
-    let second = event(&mut model, UiEvent::SendChat {});
-    let UiEffect::Chat { request } = &second.effects[0] else {
-        panic!("chat effect")
+    let saving = event(&mut model, UiEvent::SaveDocument { editor_id });
+    let [UiEffect::EditWrite { request: write }] = saving.effects.as_slice() else {
+        panic!("expected managed write effect");
     };
-    assert_eq!(
-        request
-            .messages
-            .iter()
-            .map(|m| m.content.as_str())
-            .collect::<Vec<_>>(),
-        ["First prompt", "First answer", "Follow-up"]
-    );
-    let request_id = request.request_id.clone();
-    let failure = event(
+    assert!(matches!(write.intent, EditWriteIntent::SaveDocument { .. }));
+    assert!(visible(&saving.view, "workbench-write-footer"));
+    let unknown = event(
         &mut model,
         UiEvent::NetworkFailed {
-            request_id: request_id.clone(),
+            request_id: write.request_id.clone(),
             category: FailureKind::Timeout,
         },
     );
-    assert_eq!(failure.view.transcripts[0].messages.len(), 2);
-    assert!(failure
-        .view
-        .inputs
-        .iter()
-        .any(|b| b.id == "chat-draft" && b.value == "Follow-up"));
-    let late = event(
+    assert!(visible(&unknown.view, "check-workbench-write"));
+    let checking = event(&mut model, UiEvent::CheckEditWrite {});
+    let [UiEffect::EditWrite { request: check }] = checking.effects.as_slice() else {
+        panic!("expected status check effect");
+    };
+    assert_eq!(check.operation, write.operation);
+    assert_eq!(check.intent, EditWriteIntent::Status {});
+    let saved_digest = "b".repeat(64);
+    let applied = event(
         &mut model,
-        UiEvent::ChatResult {
-            request_id,
-            outcome: ChatOutcome::Answer {
-                content: "Late answer".into(),
+        UiEvent::EditWriteResult {
+            request_id: check.request_id.clone(),
+            operation: write.operation.clone(),
+            outcome: EditWriteOutcome::Applied {
+                sha256: saved_digest,
+                undo_until_unix_ms: Some(5_000),
             },
         },
     );
-    assert_eq!(late.view.transcripts[0].messages.len(), 2);
+    assert!(!applied.view.document_dirty);
+    let [UiEffect::Inspect { request: refresh }] = applied.effects.as_slice() else {
+        panic!("expected post-save inspection refresh");
+    };
+    let refreshed = event(&mut model, result(refresh, report()));
+    assert!(visible(&refreshed.view, "workbench-write-footer"));
+    assert!(visible(&refreshed.view, "undo-workbench-edit"));
+    let refreshed_source = source_request(&refreshed);
+    event(
+        &mut model,
+        source_result(&refreshed_source, "fn updated() {}\n".into()),
+    );
+    let undoing = event(
+        &mut model,
+        UiEvent::UndoEdit {
+            applied_operation: write.operation.clone(),
+        },
+    );
+    let [UiEffect::EditWrite { request: undo }] = undoing.effects.as_slice() else {
+        panic!("expected undo managed write effect");
+    };
+    assert_eq!(
+        undo.intent,
+        EditWriteIntent::Undo {
+            applied_operation: write.operation.clone()
+        }
+    );
 }
 
 #[test]
 fn legacy_mail_open_navigates_to_agents_without_mail_requests() {
-    let mut model = connected_chat();
+    let mut model = connected_portal();
     let output = event(&mut model, UiEvent::OpenMail {});
     assert!(
         output.effects.is_empty(),

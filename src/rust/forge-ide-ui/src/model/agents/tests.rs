@@ -524,7 +524,7 @@ fn active_agents_remove_retained_tab_selection_and_only_lock_during_uncertain_mu
     let mut agents = ready();
     let retained = || ViewModel {
         buttons: vec![ButtonBinding {
-            id: "open-chat",
+            id: "open-workbench",
             action: None,
             disabled: true,
             pressed: None,

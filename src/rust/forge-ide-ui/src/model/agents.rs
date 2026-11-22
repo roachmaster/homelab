@@ -1624,7 +1624,6 @@ impl Agents {
         view.lists.clear();
         view.tables.clear();
         view.sources.clear();
-        view.diffs.clear();
         view.badges.clear();
         view.metric_cards.clear();
         view.transcripts.clear();
@@ -1636,18 +1635,13 @@ impl Agents {
             for binding in &mut view.visibility {
                 if matches!(
                     binding.id,
-                    "chat"
-                        | "mail"
-                        | "workbench"
-                        | "chat-header-actions"
-                        | "workbench-header-actions"
-                        | "status"
+                    "workbench" | "workbench-header-actions" | "status"
                 ) {
                     binding.visible = false;
                 }
             }
             for button in &mut view.buttons {
-                if matches!(button.id, "open-chat" | "open-mail" | "open-workbench") {
+                if button.id == "open-workbench" {
                     button.disabled = locked;
                     button.pressed = Some(false);
                 }
@@ -1936,7 +1930,6 @@ impl Agents {
                         ),
                         rendered_html: None,
                         notice: None,
-                        header: None,
                     })
                     .collect()
             }),
@@ -2086,7 +2079,6 @@ impl Agents {
                     rendered_html: render_markdown(&content),
                     content,
                     notice: None,
-                    header: None,
                 }]
             }),
         });
@@ -2373,7 +2365,6 @@ impl Agents {
                         task_id: t.task_id.clone(),
                     },
                     toggle: None,
-                    correspondence: None,
                     summary: Some(RowSummary {
                         badge: self.task_summary_badge(t),
                         tag: t.agent_profile.clone(),
@@ -2438,7 +2429,6 @@ impl Agents {
                 content: p.summary.clone(),
                 rendered_html: render_markdown(&p.summary),
                 notice: Some(short_time(&event.created_at)),
-                header: None,
             }
         };
         view.transcripts.push(TranscriptBinding {
@@ -2457,7 +2447,6 @@ impl Agents {
                         .into(),
                         rendered_html: None,
                         notice: None,
-                        header: None,
                     }]
                 },
                 |e| vec![message(e)],
@@ -2488,7 +2477,6 @@ impl Agents {
                     content: self.result.clone(),
                     rendered_html: render_markdown(&self.result),
                     notice: None,
-                    header: None,
                 }]
             } else {
                 vec![]

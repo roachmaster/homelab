@@ -1,10 +1,8 @@
 //! Portable browser conversation. Serialization belongs to the WASM/host codecs.
 //! IDs address a bounded view, never a native path or executable name.
 use serde::{Deserialize, Serialize};
-mod chat_run;
-pub use chat_run::*;
-mod mail;
-pub use mail::*;
+mod legacy;
+pub use legacy::*;
 mod work;
 pub use work::*;
 mod usage;
@@ -64,7 +62,10 @@ pub struct ResumableWrite {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkspaceSnapshot {
+    #[serde(default)]
     pub chat: ChatSnapshot,
+    #[serde(default, skip_serializing)]
+    pub mail: Option<LegacyIgnored>,
     pub workbench: Option<WorkbenchBookmark>,
     pub workbench_open: bool,
 }
@@ -199,87 +200,11 @@ pub struct PreparedSource {
     pub expires_unix_ms: u64,
     pub entry: u32,
 }
-pub const MAX_CHAT_PROMPT_BYTES: usize = 2048;
-pub const MAX_CHAT_REPLY_BYTES: usize = 4096;
-pub const MAX_CHAT_TIMEOUT_MS: u64 = 26_000;
-pub const MAX_CHAT_SOURCE_BYTES: usize = 4096;
-pub(crate) const MAX_CONVERSATIONS: usize = 16;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatRole {
     User,
     Assistant,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatMessage {
-    pub role: ChatRole,
-    pub content: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatSnapshot {
-    pub selected: usize,
-    pub conversations: Vec<ChatConversationSnapshot>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pending_run: Option<PendingChatRunSnapshot>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatConversationSnapshot {
-    pub messages: Vec<ChatMessage>,
-    pub draft: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chat_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub revision: Option<u64>,
-}
-
-pub fn valid_chat_snapshot(snapshot: &ChatSnapshot) -> bool {
-    let conversations = &snapshot.conversations;
-    conversations.len() <= MAX_CONVERSATIONS
-        && snapshot.selected < conversations.len().max(1)
-        && snapshot.model_id.as_deref().is_none_or(valid_model_id)
-        && conversations.iter().all(|conversation| {
-            conversation.draft.len() <= MAX_CHAT_PROMPT_BYTES
-                && conversation.chat_id.as_deref().is_none_or(valid_chat_id)
-                && conversation.revision.is_none_or(|revision| {
-                    conversation.chat_id.is_some()
-                        && revision > 0
-                        && revision <= 9_007_199_254_740_991
-                })
-                && valid_committed_chat_messages(&conversation.messages)
-        })
-        && snapshot.pending_run.as_ref().is_none_or(|pending| {
-            pending.is_valid()
-                && conversations
-                    .iter()
-                    .filter(|chat| {
-                        chat.chat_id.as_ref() == Some(&pending.chat_id)
-                            && valid_chat_text(chat.draft.trim(), MAX_CHAT_PROMPT_BYTES)
-                    })
-                    .count()
-                    == 1
-        })
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PreparedChat {
-    pub request_id: String,
-    pub messages: Vec<ChatMessage>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chat_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file_context: Option<ChatFileContext>,
 }
 
 /// A reference into an accepted source revision. The host resolves the bytes.
@@ -295,32 +220,7 @@ pub struct ChatFileContext {
     pub byte_end: u32,
 }
 
-pub const MAX_EDIT_PREVIEW_ROWS: usize = 24;
 pub const MAX_EDITOR_BYTES: usize = 4096;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EditPreview {
-    pub base_sha256: String,
-    pub lines: Vec<DiffLine>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub proposal_id: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DiffLine {
-    pub old_line: Option<u32>,
-    pub new_line: Option<u32>,
-    pub text: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum EditOutcome {
-    Preview { preview: EditPreview },
-    Error { category: FailureKind },
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -354,197 +254,6 @@ pub enum EditWriteOutcome {
     Unknown,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ChatOutcome {
-    Answer {
-        content: String,
-    },
-    SavedAnswer {
-        content: String,
-        chat_id: String,
-        revision: u64,
-    },
-    SavedChatUnavailable,
-    SavedChatConflict,
-    Error {
-        category: FailureKind,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RetentionPolicyInput {
-    LongTerm,
-    Expires {
-        expires_on: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        time_zone: Option<String>,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RetentionPolicyDto {
-    LongTerm,
-    Expires {
-        expires_on: String,
-        time_zone: String,
-        expires_at: String,
-    },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatSummaryDto {
-    pub chat_id: String,
-    pub title: String,
-    pub updated_at: String,
-    pub revision: u64,
-    pub retention: RetentionPolicyDto,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatMessageDto {
-    pub position: usize,
-    pub role: ChatRole,
-    pub content: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attachment: Option<ChatAttachmentDto>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatAttachmentDto {
-    pub node: String,
-    pub project: String,
-    pub path: String,
-    pub sha256: String,
-    pub first_line: u32,
-    pub last_line: u32,
-    pub first_column: u32,
-}
-
-impl ChatAttachmentDto {
-    pub fn is_valid(&self) -> bool {
-        [&self.node, &self.project, &self.path].iter().all(|value| {
-            !value.is_empty() && value.len() <= 4096 && !value.chars().any(char::is_control)
-        }) && self.sha256.len() == 64
-            && self
-                .sha256
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-            && (1..=1_048_577).contains(&self.first_line)
-            && (self.first_line..=1_048_577).contains(&self.last_line)
-            && self.first_column <= 1_048_576
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChatHistoryDto {
-    pub summary: ChatSummaryDto,
-    pub messages: Vec<ChatMessageDto>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ChatHistoryRequest {
-    ChatHistoryList {
-        request_id: String,
-        limit: usize,
-        cursor: Option<String>,
-    },
-    ChatHistoryOpen {
-        request_id: String,
-        chat_id: String,
-    },
-    ChatHistoryRetentionSet {
-        request_id: String,
-        chat_id: String,
-        expected_revision: u64,
-        policy: RetentionPolicyInput,
-    },
-    ChatHistoryDelete {
-        request_id: String,
-        chat_id: String,
-        expected_revision: u64,
-    },
-}
-
-impl ChatHistoryRequest {
-    pub fn request_id(&self) -> &str {
-        match self {
-            Self::ChatHistoryList { request_id, .. }
-            | Self::ChatHistoryOpen { request_id, .. }
-            | Self::ChatHistoryRetentionSet { request_id, .. }
-            | Self::ChatHistoryDelete { request_id, .. } => request_id,
-        }
-    }
-
-    pub fn destination(&self) -> &'static str {
-        match self {
-            Self::ChatHistoryList { .. } => "ide.chat.history.list",
-            Self::ChatHistoryOpen { .. } => "ide.chat.history.open",
-            Self::ChatHistoryRetentionSet { .. } => "ide.chat.history.retention.set",
-            Self::ChatHistoryDelete { .. } => "ide.chat.history.delete",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatHistoryFailureCode {
-    RevisionConflict,
-    NotFound,
-    InvalidRequest,
-    InvalidPolicy,
-    Denied,
-    Unavailable,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ChatHistoryResponse {
-    ChatHistoryListed {
-        request_id: String,
-        items: Vec<ChatSummaryDto>,
-        next_cursor: Option<String>,
-    },
-    ChatHistoryOpened {
-        request_id: String,
-        chat: ChatHistoryDto,
-    },
-    ChatHistoryRetentionSet {
-        request_id: String,
-        chat_id: String,
-        revision: u64,
-        retention: RetentionPolicyDto,
-    },
-    ChatHistoryDeleted {
-        request_id: String,
-        chat_id: String,
-        revision: u64,
-    },
-    ChatHistoryFailed {
-        request_id: String,
-        code: ChatHistoryFailureCode,
-    },
-}
-
-impl ChatHistoryResponse {
-    pub fn request_id(&self) -> &str {
-        match self {
-            Self::ChatHistoryListed { request_id, .. }
-            | Self::ChatHistoryOpened { request_id, .. }
-            | Self::ChatHistoryRetentionSet { request_id, .. }
-            | Self::ChatHistoryDeleted { request_id, .. }
-            | Self::ChatHistoryFailed { request_id, .. } => request_id,
-        }
-    }
-}
-
 pub fn valid_chat_id(id: &str) -> bool {
     id.len() == 36
         && id.bytes().enumerate().all(|(i, b)| match i {
@@ -559,35 +268,6 @@ pub fn valid_chat_text(text: &str, max: usize) -> bool {
         && text
             .chars()
             .all(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t'))
-}
-
-pub fn valid_committed_chat_messages(messages: &[ChatMessage]) -> bool {
-    messages.split_last().is_none_or(|(reply, history)| {
-        // The last reply can grow the accepted request beyond its send budget.
-        valid_chat_messages(history)
-            && reply.role == ChatRole::Assistant
-            && valid_chat_text(&reply.content, MAX_CHAT_REPLY_BYTES)
-    })
-}
-
-pub fn valid_chat_messages(messages: &[ChatMessage]) -> bool {
-    !messages.is_empty()
-        && messages.len() % 2 == 1
-        && messages.len() <= 25
-        && messages
-            .iter()
-            .map(|message| message.content.len())
-            .sum::<usize>()
-            <= 7168
-        && messages.iter().enumerate().all(|(i, message)| {
-            if i % 2 == 0 {
-                message.role == ChatRole::User
-                    && valid_chat_text(&message.content, MAX_CHAT_PROMPT_BYTES)
-            } else {
-                message.role == ChatRole::Assistant
-                    && valid_chat_text(&message.content, MAX_CHAT_REPLY_BYTES)
-            }
-        })
 }
 
 /// Per-tab recovery hints, never permission or proof of a committed task.
@@ -662,17 +342,8 @@ pub enum UiEffect {
     Abort {
         token: RequestToken,
     },
-    Chat {
-        request: PreparedChat,
-    },
-    ProposeEdit {
-        request: PreparedChat,
-    },
     EditWrite {
         request: PreparedEditWrite,
-    },
-    MailWatch {
-        watch: String,
     },
     AgentsClock {
         watch: String,
@@ -680,12 +351,6 @@ pub enum UiEffect {
     AgentsWatch {
         watch: String,
     },
-    #[serde(untagged)]
-    ChatHistory(ChatHistoryRequest),
-    #[serde(untagged)]
-    ChatRun(ChatRunRequest),
-    #[serde(untagged)]
-    Mail(MailRequest),
     #[serde(untagged)]
     Work(WorkRequest),
     #[serde(untagged)]
@@ -807,75 +472,9 @@ pub enum UiEvent {
     RestoreAgentsNavigation {
         snapshot: AgentsNavigationSnapshot,
     },
-    MailInbox {},
-    MailArchive {},
-    MailNewMessage {},
-    MailFollowUp {},
-    MailDiscardDraft {},
-    MailBack {},
-    MailRefresh {},
-    MailPrevious {},
-    MailNext {},
-    MailOpenThread {
-        thread_id: String,
-    },
     RestoreMailNavigation {
         snapshot: MailNavigationSnapshot,
     },
-    SetMailSubject {
-        value: String,
-    },
-    SetMailDraft {
-        value: String,
-    },
-    SendMail {
-        idempotency_key: String,
-    },
-    RetryMail {
-        idempotency_key: String,
-    },
-    MailArchiveThread {
-        thread_id: String,
-        expected_revision: u64,
-    },
-    PollMail {
-        watch: String,
-    },
-    NewChat {},
-    SelectChat {
-        value: String,
-    },
-    SelectChatModel {
-        value: String,
-    },
-    SetChatDraft {
-        conversation: usize,
-        value: String,
-    },
-    SendChat {},
-    SendWorkbenchChat {
-        report: RequestToken,
-        entry: u32,
-        byte_start: u32,
-        conversation: usize,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        chat_id: Option<String>,
-    },
-    SendChatWithFile {
-        report: RequestToken,
-        entry: u32,
-        byte_start: u32,
-        conversation: usize,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        chat_id: Option<String>,
-    },
-    ProposeEdit {
-        report: RequestToken,
-        entry: u32,
-        byte_start: u32,
-        conversation: usize,
-    },
-    DiscardEdit {},
     OpenDocument {
         report: RequestToken,
         entry: u32,
@@ -890,13 +489,6 @@ pub enum UiEvent {
     CloseDocument {
         editor_id: String,
     },
-    EditResult {
-        request_id: String,
-        outcome: EditOutcome,
-    },
-    ApplyEdit {
-        proposal_id: String,
-    },
     UndoEdit {
         applied_operation: String,
     },
@@ -905,34 +497,6 @@ pub enum UiEvent {
         request_id: String,
         operation: String,
         outcome: EditWriteOutcome,
-    },
-    SendPersistentChat {
-        chat_id: String,
-    },
-    CancelChatRun {},
-    RetryChatSubmit {},
-    ShowChatHistory {},
-    SetChatHistoryQuery {
-        value: String,
-    },
-    MoreChatHistory {},
-    NewerChatHistory {},
-    OpenSavedChat {
-        chat_id: String,
-    },
-    ManageSavedChat {},
-    ShowChatExpiry {},
-    SetChatExpiry {
-        value: String,
-    },
-    ConfirmChatExpiry {},
-    KeepChatLongTerm {},
-    ShowChatDelete {},
-    ConfirmChatDelete {},
-    CloseChatDialog {},
-    ChatResult {
-        request_id: String,
-        outcome: ChatOutcome,
     },
     NetworkFailed {
         request_id: String,
@@ -1051,12 +615,6 @@ pub enum UiEvent {
     SourceResult {
         result: SourceResultEvent,
     },
-    #[serde(untagged)]
-    ChatHistory(ChatHistoryResponse),
-    #[serde(untagged)]
-    ChatRun(ChatRunResponse),
-    #[serde(untagged)]
-    Mail(MailResponse),
     #[serde(untagged)]
     Work(WorkResponse),
     #[serde(untagged)]

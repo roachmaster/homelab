@@ -157,7 +157,6 @@ impl UiModel {
             }
             let directory = e.kind == EntryKind::Directory;
             rows.push(RowView {
-                correspondence: None,
                 summary: None,
                 id: format!("entry-{}", e.id),
                 parent: e.parent.map(|p| format!("entry-{p}")),
@@ -229,7 +228,6 @@ impl UiModel {
                 path
             };
             RowView {
-                correspondence: None,
                 summary: None,
                 id: format!(
                     "search-{entry}-{}",
@@ -280,7 +278,6 @@ impl UiModel {
                 continue;
             }
             rows.push(RowView {
-                correspondence: None,
                 summary: None,
                 id: format!("declaration-{}-{}", e.id, d.id),
                 parent: d.parent.map(|p| format!("declaration-{}-{p}", e.id)),
@@ -323,7 +320,6 @@ impl UiModel {
                 .iter()
                 .enumerate()
                 .map(move |(index, text)| RowView {
-                    correspondence: None,
                     summary: None,
                     id: format!("problem-{}-{index}", e.id),
                     parent: None,
@@ -564,7 +560,7 @@ impl UiModel {
                     .collect()
             })
             .unwrap_or_default();
-        let workbench_node = selected_node.filter(|_| self.chats.workbench);
+        let workbench_node = selected_node.filter(|_| self.workbench);
         let workbench_context = workbench_node
             .map(|node| {
                 node.projects
@@ -751,10 +747,7 @@ impl UiModel {
                 markdown: None,
             });
         let source_range = self.source.as_ref().map(|s| s.range()).unwrap_or_default();
-        let review = self.current_edit();
-        let source_status = if review.is_some() {
-            "Proposed diff · Awaiting review".into()
-        } else if source_loading {
+        let source_status = if source_loading {
             "Loading source…".into()
         } else {
             self.source_message.clone()
@@ -1065,10 +1058,7 @@ impl UiModel {
             visibility: vec![
                 visible("workbench-context", workbench_node.is_some()),
                 visible("ide-header-actions", connected),
-                visible(
-                    "workbench-header-actions",
-                    connected && self.chats.workbench,
-                ),
+                visible("workbench-header-actions", connected && self.workbench),
                 visible("selection-title", file_open),
                 visible("file-empty", !file_open),
                 visible(
@@ -1094,7 +1084,7 @@ impl UiModel {
                 visible(
                     "status",
                     !connected
-                        || self.chats.workbench
+                        || self.workbench
                             && (can_cancel
                                 || can_reload
                                 || no_project
@@ -1105,7 +1095,7 @@ impl UiModel {
                     "pair-panel",
                     !connected && self.pairing_required && self.pairing.is_none(),
                 ),
-                visible("workbench", connected && self.chats.workbench),
+                visible("workbench", connected && self.workbench),
                 visible("workspace", connected),
                 visible(
                     "declaration-details-panel",
@@ -1113,98 +1103,20 @@ impl UiModel {
                 ),
                 visible("file-metadata-panel", entry.is_some()),
                 visible("file-declarations-panel", file_open),
+                visible("ide-navigation", connected),
+                visible("workbench-source-content", self.editor.is_none()),
             ],
             transcripts: vec![],
-            diffs: vec![],
             badges: vec![],
             metric_cards: vec![],
         };
-        if self.presentation.chat {
-            self.chats.project(&mut view, connected);
-        } else {
-            view.visibility.push(visible("ide-navigation", connected));
-            view.buttons.push(ButtonBinding {
-                id: "open-workbench",
-                disabled: !connected || self.chats.workbench,
-                pressed: Some(connected && self.chats.workbench),
-                action: None,
-            });
-        }
-        let (workbench_chat, propose, attachment) = match (key, entry, &self.source) {
-            (Some(report), Some(entry), Some(source))
-                if self.presentation.chat
-                    && connected
-                    && self.chats.workbench
-                    && self.editor.is_none() =>
-            {
-                let (byte_start, _, first, last, clipped) = source.chat_window();
-                let location = if source.document.text.is_empty() {
-                    "Empty file".into()
-                } else if first == last {
-                    format!("Line {first}")
-                } else {
-                    format!("Lines {first}–{last}")
-                };
-                (
-                    Some(RowAction::SendWorkbenchChat {
-                        report: report.clone(),
-                        entry: entry.id,
-                        byte_start,
-                        conversation: self.chats.selected(),
-                    }),
-                    (!source.document.text.is_empty()).then_some(RowAction::ProposeEdit {
-                        report: report.clone(),
-                        entry: entry.id,
-                        byte_start,
-                        conversation: self.chats.selected(),
-                    }),
-                    format!(
-                        "{location} · rev {}{}",
-                        &source.document.sha256[..8],
-                        if clipped { " · excerpt" } else { "" }
-                    ),
-                )
-            }
-            _ => (None, None, String::new()),
-        };
-        view.visibility.extend([
-            visible("workbench-edit-diff", review.is_some()),
-            visible(
-                "workbench-source-content",
-                review.is_none() && self.editor.is_none(),
-            ),
-        ]);
-        view.diffs.push(DiffBinding {
-            id: "workbench-edit-diff",
-            lines: review
-                .map(|review| review.preview.lines.clone())
-                .unwrap_or_default(),
+        view.buttons.push(ButtonBinding {
+            id: "open-workbench",
+            disabled: !connected || self.workbench,
+            pressed: Some(connected && self.workbench),
+            action: None,
         });
-        if review.is_some() {
-            let label = if review
-                .and_then(|review| review.preview.proposal_id.as_ref())
-                .is_some()
-            {
-                "Proposed diff"
-            } else {
-                "Proposed diff · Read-only preview"
-            };
-            view.texts.push(text("workbench-edit-status", label));
-        }
-        if self.presentation.chat {
-            self.chats.project_workbench(
-                &mut view,
-                workbench_chat,
-                propose,
-                attachment,
-                review.is_some(),
-                self.pending_edit.is_some(),
-            );
-        }
-        self.project_write(
-            &mut view,
-            review.and_then(|review| review.preview.proposal_id.as_deref()),
-        );
+        self.project_write(&mut view);
         self.project_editor(&mut view);
         self.agents.project(
             &mut view,
@@ -1231,7 +1143,6 @@ fn shape_row(
     selected: Option<u32>,
 ) -> RowView {
     RowView {
-        correspondence: None,
         summary: None,
         id,
         parent,
@@ -1503,7 +1414,6 @@ mod tests {
         };
         let name = name_label(&NativeName::Utf8("\u{1f}".repeat(MAX_TEXT_BYTES)));
         let row = RowView {
-            correspondence: None,
             summary: None,
             id: "declaration-4294967295-4294967295".into(),
             parent: Some("declaration-4294967295-4294967295".into()),

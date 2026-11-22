@@ -51,7 +51,8 @@ impl Files {
         }
         fs::write(
             p.join("manifest.json"),
-            serde_json::to_vec(&json!({"format_version":1,"abi_version":9,"files":files})).unwrap(),
+            serde_json::to_vec(&json!({"format_version":1,"abi_version":10,"files":files}))
+                .unwrap(),
         )
         .unwrap();
         Self(p)
@@ -1757,7 +1758,7 @@ fn stale_browser_documents_redirect_to_the_portal() {
 
 #[test]
 fn legacy_or_unknown_asset_abi_is_rejected_before_host_admission() {
-    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 10] {
+    for abi in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11] {
         let f = Files::new();
         let path = f.0.join("manifest.json");
         let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -2117,320 +2118,329 @@ fn binary_help_does_not_load_config_or_bind() {
 
 #[cfg(unix)]
 #[test]
-fn chat_requires_session_and_csrf_and_projects_only_the_reply() {
-    use std::io::{BufRead, BufReader};
+fn retired_chat_and_mail_destinations_are_rejected_before_upstream_io() {
     use std::net::TcpListener;
     use std::os::unix::fs::PermissionsExt;
 
     let files = Files::new();
     let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
-    let token_dir = files.0.join("native");
-    fs::create_dir(&token_dir).unwrap();
-    let token_path = token_dir.join("token");
-    let token = "0123456789abcdef".repeat(4);
-    fs::write(&token_path, &token).unwrap();
-    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-    let mut settings = config(&files);
-    settings.chat = Some(forge_ide_web_host::ChatConfig {
-        endpoint: upstream.local_addr().unwrap(),
-        token_file: token_path,
-        workspace_persistence: false,
-        async_dispatch: false,
-        mail_enabled: false,
-        mail_archive_enabled: false,
-    });
-    let ((), factory) = Registry::new()
-        .register(register_host("context-chat", settings).unwrap())
-        .unwrap()
-        .freeze()
-        .unwrap()
-        .into_factories();
-    let reads = Rc::new(Cell::new(0));
-    let corrupt = Rc::new(Cell::new(false));
-    let host = factory
-        .create_with_ports(BTreeMap::from([(
-            "lab".into(),
-            Box::new(SourcePort {
-                reads: reads.clone(),
-                corrupt: corrupt.clone(),
-            }) as Box<dyn InspectionPort>,
-        )]))
-        .unwrap();
-    let body = json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"one"},{"role":"assistant","content":"two"},{"role":"user","content":"three"}]}});
-    let (cookie, csrf, epoch) = paired(&host);
-    assert!(exchange(&host, post(&host, "ide.chat", body.clone(), "")).starts_with("HTTP/1.1 401"));
-    assert!(exchange(
-        &host,
-        post(
-            &host,
-            "ide.chat",
-            body.clone(),
-            &format!("Cookie: {cookie}\r\n")
-        )
-    )
-    .starts_with("HTTP/1.1 401"));
-    let headers = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
-    let mut invalid = body.clone();
-    invalid["request"]["request_id"] = "mismatch".into();
-    assert!(exchange(&host, post(&host, "ide.chat", invalid, &headers)).starts_with("HTTP/1.1 400"));
-    let mut invalid = body.clone();
-    invalid["request"]["messages"][0]["role"] = "assistant".into();
-    assert!(exchange(&host, post(&host, "ide.chat", invalid, &headers)).starts_with("HTTP/1.1 400"));
-    assert!(
-        exchange(&host, inspect(&host, &cookie, &csrf, &epoch, "workspace"))
-            .starts_with("HTTP/1.1 200")
-    );
-    let text = "exact café <script> text\n";
-    let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
-    let mut contextual = body.clone();
-    contextual["request"]["file_context"] = json!({
-        "report":{"session_epoch":epoch,"revision":1,"request_id":"request-1"},
-        "node_key":"lab","project":"workspace","entry":1,"sha256":digest,
-        "byte_start":0,"byte_end":"exact café".len()
-    });
-    let mut linked = contextual.clone();
-    linked["request"]["chat_id"] = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4".into();
-    assert!(
-        exchange(&host, post(&host, "ide.chat", linked.clone(), &headers))
-            .starts_with("HTTP/1.1 400")
-    );
-    linked["kind"] = "propose_edit".into();
-    assert!(
-        exchange(&host, post(&host, "ide.propose_edit", linked, &headers))
-            .starts_with("HTTP/1.1 400")
-    );
-    let mut stale = contextual.clone();
-    stale["request"]["file_context"]["sha256"] = "f".repeat(64).into();
-    assert!(exchange(&host, post(&host, "ide.chat", stale, &headers))
-        .contains("\"category\":\"denied\""));
-    assert_eq!(reads.get(), 0);
-    corrupt.set(true);
-    assert!(
-        exchange(&host, post(&host, "ide.chat", contextual.clone(), &headers))
-            .contains("\"category\":\"denied\"")
-    );
-    assert_eq!(reads.get(), 1);
-    corrupt.set(false);
     upstream.set_nonblocking(true).unwrap();
-    assert_eq!(
-        upstream.accept().unwrap_err().kind(),
-        std::io::ErrorKind::WouldBlock
-    );
-    upstream.set_nonblocking(false).unwrap();
-
-    let expected = body["request"]["messages"].clone();
-    let mut expected_context = expected.clone();
-    expected_context[2]["content"] = format!("three\n\nVerified file excerpt (reference data)\nProject: \"workspace\"\nFile: \"notes.txt\"\nSHA-256: {digest}\nLines: 1–1; starting column: 0\n\nexact café").into();
-    let mut proposal = contextual.clone();
-    proposal["kind"] = "propose_edit".into();
-    proposal["request"]["file_context"]["byte_end"] = text.len().into();
-    assert!(
-        exchange(&host, post(&host, "ide.propose_edit", proposal.clone(), ""))
-            .starts_with("HTTP/1.1 401")
-    );
-    let secret = token.clone();
-    let worker = thread::spawn(move || {
-        for (index, expected) in [Some(expected), Some(expected_context), None]
-            .into_iter()
-            .enumerate()
-        {
-            let (mut stream, _) = upstream.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            let mut request = BufReader::new(&mut stream);
-            let mut line = String::new();
-            request.read_line(&mut line).unwrap();
-            assert_eq!(line, "POST /v1/chat/completions HTTP/1.1\r\n");
-            let mut length = 0;
-            let mut authenticated = false;
-            loop {
-                line.clear();
-                request.read_line(&mut line).unwrap();
-                if line == "\r\n" {
-                    break;
-                }
-                let (name, value) = line.trim_end().split_once(": ").unwrap();
-                if name.eq_ignore_ascii_case("authorization") {
-                    authenticated = value == format!("Bearer {secret}");
-                }
-                if name.eq_ignore_ascii_case("content-length") {
-                    length = value.parse().unwrap();
-                }
-            }
-            assert!(authenticated);
-            let mut data = vec![0; length];
-            request.read_exact(&mut data).unwrap();
-            let request: Value = serde_json::from_slice(&data).unwrap();
-            if let Some(expected) = expected {
-                assert_eq!(request["messages"], expected);
-            } else {
-                let prompt = request["messages"][2]["content"].as_str().unwrap();
-                assert!(prompt.contains("first_line and last_line"));
-                assert!(prompt.ends_with(text));
-            }
-            assert_eq!(request["stream"], false);
-            let answer = if index == 2 {
-                r#"{"first_line":1,"last_line":1,"replacement":"safe replacement"}"#
-            } else {
-                "local response"
-            };
-            let response = json!({"choices":[{"message":{"role":"assistant","content":answer,"reasoning_content":"private scratchpad"}}]}).to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-                response.len(),
-                response
-            )
-            .unwrap();
-        }
-    });
-    let response = exchange(&host, post(&host, "ide.chat", body, &headers));
-    let contextual_response = exchange(&host, post(&host, "ide.chat", contextual, &headers));
-    let proposed = exchange(&host, post(&host, "ide.propose_edit", proposal, &headers));
-    worker.join().unwrap();
-    assert_eq!(contextual_response, response);
-    assert_eq!(reads.get(), 3);
-    let proposed: Value = serde_json::from_str(proposed.split_once("\r\n\r\n").unwrap().1).unwrap();
-    assert_eq!(
-        proposed["event"]["outcome"],
-        json!({
-            "kind":"preview","preview":{"base_sha256":digest,"lines":[
-                {"old_line":1,"new_line":null,"text":"exact café <script> text"},
-                {"old_line":null,"new_line":1,"text":"safe replacement"}
-            ]}
-        })
-    );
-    assert!(response.starts_with("HTTP/1.1 200"));
-    assert!(!response.contains(&token));
-    assert!(!response.contains("private scratchpad"));
-    let reply: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
-    assert_eq!(
-        reply["event"],
-        json!({"kind":"chat_result","request_id":"request-1","outcome":{"kind":"answer","content":"local response"}})
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn chat_history_routes_an_admitted_request_and_checks_the_runner_reply() {
-    use std::io::{BufRead, BufReader};
-    use std::net::TcpListener;
-    use std::os::unix::fs::PermissionsExt;
-
-    let files = Files::new();
-    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
-    let token = "0123456789abcdef".repeat(4);
     let token_path = files.0.join("runner.token");
-    fs::write(&token_path, &token).unwrap();
+    fs::write(&token_path, "0123456789abcdef".repeat(4)).unwrap();
     fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
     let mut settings = config(&files);
     settings.chat = Some(forge_ide_web_host::ChatConfig {
         endpoint: upstream.local_addr().unwrap(),
         token_file: token_path,
         workspace_persistence: true,
-        async_dispatch: false,
-        mail_enabled: false,
-        mail_archive_enabled: false,
+        async_dispatch: true,
+        mail_enabled: true,
+        mail_archive_enabled: true,
     });
-    let (host, _) = host_with_config(settings);
+    let (host, calls) = host_with_config(settings);
     let (cookie, csrf, _) = paired(&host);
     let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
-    let chat_id = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
-    let destination = "ide.chat.history.delete";
-    let delete = json!({"kind":"chat_history_delete","request_id":"request-1",
-                        "chat_id":chat_id,"expected_revision":7});
-    let request = post(&host, destination, delete.clone(), &auth);
-    for (request, expected) in [
-        (post(&host, destination, delete.clone(), ""), 401),
+    let uuid = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
+    for (destination, body) in [
         (
-            post(&host, "ide.chat.history.list", delete.clone(), &auth),
-            400,
-        ),
-        (request.replace("\"request-1\"", "\"mismatch!\""), 400),
-        (
-            request.replace("Content-Type:", "Forge-Target-Node: lab\r\nContent-Type:"),
-            400,
+            "ide.chat",
+            json!({"kind":"chat","request":{"request_id":"request-1","messages":[{"role":"user","content":"hi"}]}}),
         ),
         (
-            request.replace(host.origin(), "https://example.invalid"),
-            400,
+            "ide.propose_edit",
+            json!({"kind":"propose_edit","request":{"request_id":"request-1","messages":[{"role":"user","content":"hi"}]}}),
+        ),
+        (
+            "ide.chat.history.list",
+            json!({"kind":"chat_history_list","request_id":"request-1","limit":10,"cursor":null}),
+        ),
+        (
+            "ide.chat.history.delete",
+            json!({"kind":"chat_history_delete","request_id":"request-1","chat_id":uuid,"expected_revision":1}),
+        ),
+        (
+            "ide.chat.run.submit",
+            json!({"kind":"chat_run_submit","request_id":"request-1","chat_id":uuid,"content":"hi","idempotency_key":uuid}),
+        ),
+        (
+            "ide.chat.run.models",
+            json!({"kind":"chat_run_models","request_id":"request-1"}),
+        ),
+        (
+            "ide.mail.list",
+            json!({"kind":"mail_list","request_id":"request-1"}),
+        ),
+        (
+            "ide.mail.send",
+            json!({"kind":"mail_send","request_id":"request-1","thread_id":uuid,"subject":"Hi","content":"Hello","idempotency_key":uuid}),
+        ),
+        (
+            "ide.mail.archive",
+            json!({"kind":"mail_archive_thread","request_id":"request-1","thread_id":uuid,"expected_revision":1}),
         ),
     ] {
-        assert!(exchange(&host, request).starts_with(&format!("HTTP/1.1 {expected} ")));
+        let response = exchange(&host, post(&host, destination, body, &auth));
+        assert!(
+            response.starts_with("HTTP/1.1 400") || response.starts_with("HTTP/1.1 401"),
+            "{destination} must be rejected: {response}"
+        );
+        assert_eq!(
+            upstream.accept().unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "{destination} must not contact upstream"
+        );
     }
-    upstream.set_nonblocking(true).unwrap();
-    assert_eq!(
-        upstream.accept().unwrap_err().kind(),
-        std::io::ErrorKind::WouldBlock
-    );
-    upstream.set_nonblocking(false).unwrap();
+    assert_eq!(calls.get(), 0);
+}
 
-    let conflict = json!({"protocol_version":1,"event":{"kind":"chat_history_failed",
-                         "request_id":"request-1","code":"revision_conflict"}});
-    let wrong_chat = json!({"protocol_version":1,"event":{"kind":"chat_history_deleted",
-                           "request_id":"request-1","chat_id":"0".repeat(36),"revision":8}});
-    let success = json!({"protocol_version":1,"event":{"kind":"chat_history_deleted",
-                        "request_id":"request-1","chat_id":chat_id,"revision":8}});
-    let answers = [
-        ("409 Conflict", conflict.clone()),
-        ("200 OK", wrong_chat),
-        ("200 OK", success.clone()),
-    ];
-    let worker = thread::spawn(move || {
-        for (status, reply) in answers {
-            let (mut stream, _) = upstream.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            let mut request = BufReader::new(&mut stream);
-            let mut line = String::new();
-            request.read_line(&mut line).unwrap();
-            assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
-            let mut headers = BTreeMap::new();
-            loop {
-                line.clear();
-                assert_ne!(request.read_line(&mut line).unwrap(), 0);
-                if line == "\r\n" {
-                    break;
+#[test]
+fn legacy_mail_and_agents_entry_paths_redirect_to_agents_fragment() {
+    let files = Files::new();
+    let (host, _) = host(&files);
+    let address = host.local_addr().unwrap();
+    for path in ["/mail", "/mail/", "/agents", "/agents/"] {
+        for method in ["GET", "HEAD"] {
+            let response = exchange(
+                &host,
+                format!("{method} {path} HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+            );
+            assert!(
+                response.starts_with("HTTP/1.1 302 Found"),
+                "{method} {path}: {response}"
+            );
+            assert!(
+                response.contains("Location: /#agents\r\n"),
+                "{method} {path}: {response}"
+            );
+        }
+        let post_resp = exchange(
+            &host,
+            format!("POST {path} HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        );
+        assert!(
+            post_resp.starts_with("HTTP/1.1 405 Method Not Allowed"),
+            "POST {path}: {post_resp}"
+        );
+    }
+}
+
+#[test]
+fn workspace_endpoint_round_trips_legacy_chat_and_strips_top_level_mail() {
+    let files = Files::new();
+    let (host, _) = host(&files);
+    let (cookie, csrf, _) = paired(&host);
+    let address = host.local_addr().unwrap();
+    let origin = host.origin().to_owned();
+    let ws_post = |body: Value| {
+        let raw = body.to_string();
+        exchange(
+            &host,
+            format!(
+                "POST /forge/v1/dispatch/workspace HTTP/1.1\r\nHost: {address}\r\nOrigin: {origin}\r\nContent-Type: application/json\r\nCookie: {cookie}\r\nForge-CSRF: {csrf}\r\nContent-Length: {}\r\n\r\n{raw}",
+                raw.len()
+            ),
+        )
+    };
+    let tab = "a".repeat(32);
+    let restored = ws_post(json!({"operation":"restore","tab":tab,"preserve_chat":true}));
+    assert!(restored.starts_with("HTTP/1.1 200 OK"), "{restored}");
+    let body: Value = serde_json::from_str(restored.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let lease = body["lease"].as_str().unwrap().to_owned();
+    assert!(body["snapshot"].is_null());
+
+    let legacy_snapshot = json!({
+        "chat": {
+            "selected": 0,
+            "conversations": [{
+                "messages": [
+                    {"role":"user","content":"Retained question"},
+                    {"role":"assistant","content":"Retained answer"}
+                ],
+                "draft": "Keep me"
+            }]
+        },
+        "mail": {"active": true, "draft": "legacy mail payload"},
+        "workbench": null,
+        "workbench_open": true
+    });
+    let saved = ws_post(json!({
+        "operation": "save",
+        "tab": tab,
+        "lease": lease,
+        "revision": 1,
+        "snapshot": legacy_snapshot,
+        "preserve_chat": true
+    }));
+    assert!(saved.starts_with("HTTP/1.1 200 OK"), "{saved}");
+
+    let restored_again = ws_post(json!({"operation":"restore","tab":tab,"preserve_chat":true}));
+    assert!(
+        restored_again.starts_with("HTTP/1.1 200 OK"),
+        "{restored_again}"
+    );
+    let restored_body: Value =
+        serde_json::from_str(restored_again.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let snapshot = &restored_body["snapshot"];
+    assert_eq!(snapshot["chat"]["conversations"][0]["draft"], "Keep me");
+    assert_eq!(snapshot["workbench_open"], true);
+    assert!(snapshot.get("mail").is_none());
+}
+
+#[test]
+fn direct_workbench_edit_write_routes_save_and_undo_and_rejects_apply() {
+    use forge_ide::managed_edit::{
+        ManagedCommand, ManagedResponse, ManagedRevision, WriteIntent, WriteOutcome, WriteReceipt,
+    };
+
+    struct WritePort {
+        reads: Rc<Cell<usize>>,
+        writes: Rc<Cell<usize>>,
+    }
+    impl InspectionPort for WritePort {
+        fn inspect(&self, r: RemoteInspectInput) -> Result<InspectReply, RemoteError> {
+            SourcePort {
+                reads: Rc::clone(&self.reads),
+                corrupt: Rc::new(Cell::new(false)),
+            }
+            .inspect(r)
+        }
+        fn source(
+            &self,
+            r: forge_ide::remote_source::RemoteSourceInput,
+        ) -> Result<forge_ide::remote_source::SourceReply, RemoteError> {
+            SourcePort {
+                reads: Rc::clone(&self.reads),
+                corrupt: Rc::new(Cell::new(false)),
+            }
+            .source(r)
+        }
+        fn managed_write(
+            &self,
+            input: forge_remote_https::managed_write::ManagedCall,
+        ) -> Result<forge_remote_https::managed_write::ManagedReply, RemoteError> {
+            let header = (&input.request.header).into();
+            let payload = match input.request.payload.command {
+                ManagedCommand::BaseRevision { digest, .. } => {
+                    let revision: ManagedRevision = serde_json::from_value(json!({
+                        "device": 1,
+                        "inode": 2,
+                        "digest": digest
+                    }))
+                    .unwrap();
+                    ManagedResponse::BaseRevision { revision }
                 }
-                let (name, value) = line.trim_end().split_once(": ").unwrap();
-                headers.insert(name.to_ascii_lowercase(), value.to_owned());
-            }
-            assert_eq!(headers["authorization"], format!("Bearer {token}"));
-            assert_eq!(headers["forge-destination"], destination);
-            assert_eq!(headers["forge-request-id"], "request-1");
-            assert_eq!(headers["forge-envelope-version"], "1");
-            assert_eq!(headers["forge-contract-version"], "1");
-            for browser_only in ["cookie", "origin", "forge-csrf"] {
-                assert!(!headers.contains_key(browser_only));
-            }
-            let mut bytes = vec![0; headers["content-length"].parse().unwrap()];
-            request.read_exact(&mut bytes).unwrap();
-            assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap(), delete);
-            let reply = reply.to_string();
-            write!(
-                stream,
-                "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n{reply}",
-                reply.len()
-            )
-            .unwrap();
+                ManagedCommand::Execute { request } => {
+                    self.writes.set(self.writes.get() + 1);
+                    let outcome = match request.intent {
+                        WriteIntent::Apply { replacement, .. } => WriteOutcome::Applied {
+                            digest: forge_ide::source::digest(replacement.as_bytes()),
+                        },
+                        WriteIntent::Undo { .. } => WriteOutcome::Reverted {
+                            digest: forge_ide::source::digest(b"exact caf\xc3\xa9 <script> text\n"),
+                        },
+                    };
+                    ManagedResponse::Receipt {
+                        receipt: WriteReceipt {
+                            operation: request.operation,
+                            outcome,
+                            undo_until_unix_ms: Some(9_000_000_000_000),
+                        },
+                    }
+                }
+                ManagedCommand::Status { .. } => ManagedResponse::Status { receipt: None },
+            };
+            Ok(forge_remote_https::managed_write::ManagedReply {
+                responder: input.target,
+                response: Response { header, payload },
+            })
+        }
+    }
+
+    let files = Files::new();
+    let reads = Rc::new(Cell::new(0));
+    let writes = Rc::new(Cell::new(0));
+    let ((), factory) = Registry::new()
+        .register(register_host("write-host", config(&files)).unwrap())
+        .unwrap()
+        .freeze()
+        .unwrap()
+        .into_factories();
+    let host = factory
+        .create_with_ports(BTreeMap::from([(
+            "lab".into(),
+            Box::new(WritePort {
+                reads: Rc::clone(&reads),
+                writes: Rc::clone(&writes),
+            }) as Box<dyn InspectionPort>,
+        )]))
+        .unwrap();
+    let (cookie, csrf, epoch) = paired(&host);
+    let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
+    assert!(
+        exchange(&host, inspect(&host, &cookie, &csrf, &epoch, "workspace"))
+            .starts_with("HTTP/1.1 200")
+    );
+    let original = "exact café <script> text\n";
+    let digest = format!("{:x}", Sha256::digest(original.as_bytes()));
+
+    // Legacy Apply proposal intent is rejected cleanly without touching the port.
+    let apply = json!({
+        "kind": "edit_write",
+        "request": {
+            "request_id": "request-1",
+            "operation": "op-apply",
+            "intent": {"kind": "apply", "proposal_id": "stale-proposal"}
         }
     });
-    for (status, expected) in [
-        (409, conflict),
-        (503, json!({"error":"unavailable"})),
-        (200, success),
-    ] {
-        let result = exchange(&host, request.clone());
-        assert!(
-            result.starts_with(&format!("HTTP/1.1 {status} ")),
-            "{result}"
-        );
-        let (_, body) = result.split_once("\r\n\r\n").unwrap();
-        assert_eq!(serde_json::from_str::<Value>(body).unwrap(), expected);
-    }
-    worker.join().unwrap();
+    let apply_resp = exchange(&host, post(&host, "ide.edit_write", apply, &auth));
+    assert!(apply_resp.starts_with("HTTP/1.1 200"), "{apply_resp}");
+    let apply_json: Value =
+        serde_json::from_str(apply_resp.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(apply_json["event"]["outcome"], json!({"kind": "rejected"}));
+    assert_eq!(writes.get(), 0);
+
+    // Direct Workbench SaveDocument and Undo execute through managed_write.
+    let save = json!({
+        "kind": "edit_write",
+        "request": {
+            "request_id": "request-1",
+            "operation": "op-save-1",
+            "intent": {
+                "kind": "save_document",
+                "file": {
+                    "report": {"session_epoch": epoch, "revision": 1, "request_id": "request-1"},
+                    "node_key": "lab",
+                    "project": "workspace",
+                    "entry": 1,
+                    "sha256": digest,
+                    "byte_start": 0,
+                    "byte_end": original.len()
+                },
+                "text": "updated line\n"
+            }
+        }
+    });
+    let save_resp = exchange(&host, post(&host, "ide.edit_write", save, &auth));
+    assert!(save_resp.starts_with("HTTP/1.1 200"), "{save_resp}");
+    let save_json: Value =
+        serde_json::from_str(save_resp.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(save_json["event"]["outcome"]["kind"], "applied");
+    assert_eq!(writes.get(), 1);
+
+    let undo = json!({
+        "kind": "edit_write",
+        "request": {
+            "request_id": "request-1",
+            "operation": "op-undo-1",
+            "intent": {"kind": "undo", "applied_operation": "op-save-1"}
+        }
+    });
+    let undo_resp = exchange(&host, post(&host, "ide.edit_write", undo, &auth));
+    assert!(undo_resp.starts_with("HTTP/1.1 200"), "{undo_resp}");
+    let undo_json: Value =
+        serde_json::from_str(undo_resp.split_once("\r\n\r\n").unwrap().1).unwrap();
+    assert_eq!(undo_json["event"]["outcome"]["kind"], "reverted");
+    assert_eq!(writes.get(), 2);
 }
 
 #[cfg(unix)]
@@ -2526,120 +2536,18 @@ fn studio_catalog_uses_the_private_relay_and_filters_project_grants() {
     worker.join().unwrap();
 }
 
-#[cfg(unix)]
-#[test]
-fn mail_relays_only_admitted_and_correlated_dispatch_requests() {
-    use std::io::{BufRead, BufReader};
-    use std::net::TcpListener;
-    use std::os::unix::fs::PermissionsExt;
-
-    let files = Files::new();
-    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
-    let token_path = files.0.join("mail-runner.token");
-    fs::write(&token_path, "0123456789abcdef".repeat(4)).unwrap();
-    fs::set_permissions(&token_path, fs::Permissions::from_mode(0o600)).unwrap();
-    let mut settings = config(&files);
-    settings.chat = Some(forge_ide_web_host::ChatConfig {
-        endpoint: upstream.local_addr().unwrap(),
-        token_file: token_path,
-        workspace_persistence: true,
-        async_dispatch: true,
-        mail_enabled: true,
-        mail_archive_enabled: false,
-    });
-    let (host, _) = host_with_config(settings);
-    let (cookie, csrf, _) = paired(&host);
-    let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
-    let thread_id = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
-    let run_id = "9769c742-9e27-418a-8a08-a9f01b018c86";
-    let send = json!({
-        "kind":"mail_send","request_id":"request-1","thread_id":thread_id,
-        "subject":"Maintenance","content":"Draft a maintenance note","idempotency_key":thread_id
-    });
-    for (destination, auth, status) in [
-        ("ide.mail.send", "", 401),
-        ("ide.mail.send", &format!("Cookie: {cookie}\r\n"), 401),
-        ("ide.mail.list", &auth, 400),
-    ] {
-        assert!(
-            exchange(&host, post(&host, destination, send.clone(), auth))
-                .starts_with(&format!("HTTP/1.1 {status}"))
-        );
-    }
-
-    let expected = send.clone();
-    let runner = thread::spawn(move || {
-        for returned_thread in [thread_id, run_id] {
-            let (mut stream, _) = upstream.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .unwrap();
-            let mut request = BufReader::new(&mut stream);
-            let mut line = String::new();
-            request.read_line(&mut line).unwrap();
-            assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
-            let mut headers = BTreeMap::new();
-            loop {
-                line.clear();
-                request.read_line(&mut line).unwrap();
-                if line == "\r\n" {
-                    break;
-                }
-                let (name, value) = line.trim_end().split_once(": ").unwrap();
-                headers.insert(name.to_ascii_lowercase(), value.to_owned());
-            }
-            assert_eq!(headers["forge-destination"], "ide.mail.send");
-            let mut body = vec![0; headers["content-length"].parse().unwrap()];
-            request.read_exact(&mut body).unwrap();
-            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
-            let response = json!({"protocol_version":1,"event":{
-                "kind":"mail_sent","request_id":"request-1","thread_id":returned_thread,
-                "run_id":run_id,"status":"queued"
-            }})
-            .to_string();
-            write!(
-                stream,
-                "HTTP/1.1 202 Accepted\r\nContent-Length: {}\r\n\r\n{response}",
-                response.len()
-            )
-            .unwrap();
-        }
-    });
-    let accepted = exchange(&host, post(&host, "ide.mail.send", send.clone(), &auth));
-    assert!(accepted.starts_with("HTTP/1.1 202"));
-    let uncorrelated = exchange(&host, post(&host, "ide.mail.send", send, &auth));
-    assert!(uncorrelated.starts_with("HTTP/1.1 503"));
-    runner.join().unwrap();
-}
-
-/// Direct tests of the new native authority boundary using only owned loopback
-/// resources. This is not evidence of an old browser or a production runner.
+/// Direct tests of ChatConfig compatibility and strict catalog schema boundaries.
 #[cfg(unix)]
 mod manual_mail_archive_boundary {
     use super::*;
-    use std::io::{BufRead, BufReader};
     use std::net::TcpListener;
     use std::os::unix::fs::PermissionsExt;
-    use std::time::Instant;
-
-    const THREAD: &str = "4fb285b2-5a53-4caa-90b6-d0aff012c0a4";
-    const OTHER: &str = "9769c742-9e27-418a-8a08-a9f01b018c86";
-
-    fn request() -> Value {
-        json!({"kind":"mail_archive_thread","request_id":"request-1",
-            "thread_id":THREAD,"expected_revision":2})
-    }
-
-    fn receipt() -> Value {
-        json!({"protocol_version":1,"event":{"kind":"mail_archived",
-            "request_id":"request-1","thread_id":THREAD,"base_revision":2,"result_revision":3}})
-    }
 
     fn settings(files: &Files, upstream: &TcpListener, enabled: bool) -> HostConfig {
         let token_file = files.0.join("owned-archive-runner.token");
         fs::write(&token_file, "ab".repeat(32)).unwrap();
         fs::set_permissions(&token_file, fs::Permissions::from_mode(0o600)).unwrap();
-        // Deliberately omit the new property to prove backwards-compatible
+        // Deliberately omit the property to prove backwards-compatible
         // configuration parsing keeps manual archival off until explicit opt-in.
         let mut chat: forge_ide_web_host::ChatConfig = serde_json::from_value(json!({
             "endpoint":upstream.local_addr().unwrap(),"token_file":token_file,
@@ -2688,217 +2596,6 @@ mod manual_mail_archive_boundary {
         );
         let (cookie, csrf, _) = session_values(host, &response);
         (cookie, csrf, catalog(&response))
-    }
-
-    #[test]
-    fn default_off_catalog_and_gate_never_contact_runner() {
-        let (_files, upstream, host, calls) = fixture(false);
-        let (cookie, csrf, catalog) = pair_catalog(&host);
-        assert!(catalog.get("mail_archive_enabled").is_none());
-        let current: forge_ide_ui::protocol::Catalog = serde_json::from_value(catalog).unwrap();
-        assert!(current.mail_enabled && !current.mail_archive_enabled);
-        let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
-        let response = exchange(&host, post(&host, "ide.mail.archive", request(), &auth));
-        assert!(response.starts_with("HTTP/1.1 503"));
-        no_upstream(&upstream);
-        assert_eq!(calls.get(), 0);
-    }
-
-    #[test]
-    fn malformed_or_unadmitted_archive_requests_stop_before_runner() {
-        let (_files, upstream, host, calls) = fixture(true);
-        let (cookie, csrf, catalog) = pair_catalog(&host);
-        assert_eq!(catalog["mail_archive_enabled"], true);
-        let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
-        let mut cases = vec![
-            (
-                "no session",
-                post(&host, "ide.mail.archive", request(), ""),
-                401,
-            ),
-            (
-                "no CSRF",
-                post(
-                    &host,
-                    "ide.mail.archive",
-                    request(),
-                    &format!("Cookie: {cookie}\r\n"),
-                ),
-                401,
-            ),
-            (
-                "destination/body mismatch",
-                post(&host, "ide.mail.list", request(), &auth),
-                400,
-            ),
-            (
-                "wrong variant",
-                post(
-                    &host,
-                    "ide.mail.archive",
-                    json!({"kind":"mail_open",
-                "request_id":"request-1","thread_id":THREAD}),
-                    &auth,
-                ),
-                400,
-            ),
-        ];
-        for (name, key, value) in [
-            ("malformed thread", "thread_id", json!("not-a-uuid")),
-            ("zero revision", "expected_revision", json!(0)),
-            ("negative revision", "expected_revision", json!(-1)),
-            (
-                "unsafe integer revision",
-                "expected_revision",
-                json!(9_007_199_254_740_992_u64),
-            ),
-            ("revision type", "expected_revision", json!("2")),
-            (
-                "body/header request mismatch",
-                "request_id",
-                json!("other-request"),
-            ),
-            (
-                "unrecognized property",
-                "client_endpoint",
-                json!("http://untrusted.invalid"),
-            ),
-        ] {
-            let mut body = request();
-            body[key] = value;
-            cases.push((name, post(&host, "ide.mail.archive", body, &auth), 400));
-        }
-        let valid = post(&host, "ide.mail.archive", request(), &auth);
-        cases.extend([
-            (
-                "malformed request header",
-                valid.replace(
-                    "Forge-Request-Id: request-1",
-                    "Forge-Request-Id: bad request",
-                ),
-                400,
-            ),
-            (
-                "duplicate request header",
-                post(
-                    &host,
-                    "ide.mail.archive",
-                    request(),
-                    &format!("{auth}Forge-Request-Id: other\r\n"),
-                ),
-                400,
-            ),
-            (
-                "unsupported contract",
-                valid.replace("Forge-Contract-Version: 1", "Forge-Contract-Version: 2"),
-                400,
-            ),
-        ]);
-        for (name, request, status) in cases {
-            let response = exchange(&host, request);
-            assert!(
-                response.starts_with(&format!("HTTP/1.1 {status}")),
-                "{name}: incorrect admission status"
-            );
-            no_upstream(&upstream);
-        }
-        assert_eq!(calls.get(), 0);
-    }
-
-    fn serve_replies(
-        upstream: TcpListener,
-        expected: Value,
-        replies: Vec<(u16, Value)>,
-    ) -> thread::JoinHandle<usize> {
-        thread::spawn(move || {
-            let count = replies.len();
-            for (status, response) in replies {
-                let deadline = Instant::now() + Duration::from_secs(3);
-                let mut stream = loop {
-                    match upstream.accept() {
-                        Ok((stream, _)) => break stream,
-                        Err(error)
-                            if error.kind() == std::io::ErrorKind::WouldBlock
-                                && Instant::now() < deadline =>
-                        {
-                            thread::sleep(Duration::from_millis(1))
-                        }
-                        _ => panic!("owned runner did not receive the expected admitted request"),
-                    }
-                };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(2)))
-                    .unwrap();
-                let mut input = BufReader::new(&mut stream);
-                let mut line = String::new();
-                input.read_line(&mut line).unwrap();
-                assert_eq!(line, "POST /v1/dispatch HTTP/1.1\r\n");
-                let mut headers = BTreeMap::new();
-                loop {
-                    line.clear();
-                    input.read_line(&mut line).unwrap();
-                    if line == "\r\n" {
-                        break;
-                    }
-                    let (name, value) = line.trim_end().split_once(": ").unwrap();
-                    headers.insert(name.to_ascii_lowercase(), value.to_owned());
-                }
-                assert_eq!(headers["forge-destination"], "ide.mail.archive");
-                assert_eq!(headers["forge-request-id"], "request-1");
-                assert_eq!(headers["forge-envelope-version"], "1");
-                assert_eq!(headers["forge-contract-version"], "1");
-                let mut body = vec![0; headers["content-length"].parse::<usize>().unwrap()];
-                assert!(body.len() < 1024);
-                input.read_exact(&mut body).unwrap();
-                assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
-                let response = response.to_string();
-                write!(stream, "HTTP/1.1 {status} Fixture\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
-            }
-            count
-        })
-    }
-
-    #[test]
-    fn admitted_archive_forwards_exact_dto_and_validates_every_receipt_field() {
-        let (_files, upstream, host, calls) = fixture(true);
-        let (cookie, csrf, _) = pair_catalog(&host);
-        let auth = format!("Cookie: {cookie}\r\nForge-CSRF: {csrf}\r\n");
-        let mut replies = vec![(200, receipt())];
-        for (key, value) in [
-            ("request_id", json!("other-request")),
-            ("thread_id", json!(OTHER)),
-            ("base_revision", json!(1)),
-            ("result_revision", json!(4)),
-            ("result_revision", json!(9_007_199_254_740_992_u64)),
-            ("extra", json!(true)),
-        ] {
-            let mut response = receipt();
-            response["event"][key] = value;
-            replies.push((200, response));
-        }
-        replies.push((202, receipt()));
-        let mut wrong_version = receipt();
-        wrong_version["protocol_version"] = json!(2);
-        replies.push((200, wrong_version));
-        let expected_replies = replies.len();
-        let runner = serve_replies(upstream, request(), replies);
-        for index in 0..expected_replies {
-            let response = exchange(&host, post(&host, "ide.mail.archive", request(), &auth));
-            let expected_status = if index == 0 { 200 } else { 503 };
-            assert!(
-                response.starts_with(&format!("HTTP/1.1 {expected_status}")),
-                "receipt case {index}: incorrect native result"
-            );
-            if index == 0 {
-                assert_eq!(
-                    serde_json::from_str::<Value>(response.split_once("\r\n\r\n").unwrap().1)
-                        .unwrap(),
-                    receipt()
-                );
-            }
-        }
-        assert_eq!(runner.join().unwrap(), expected_replies);
-        assert_eq!(calls.get(), 0);
     }
 
     #[test]

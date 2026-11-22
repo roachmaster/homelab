@@ -1,4 +1,4 @@
-//! Native proposal ownership and browser operation routing.
+//! Direct Workbench document write execution and operation status tracking.
 use super::*;
 use forge_ide::managed_edit::{
     ManagedCommand, ManagedResponse, ManagedWriteRequest, WriteIntent, WriteOutcome, WriteRequest,
@@ -6,21 +6,12 @@ use forge_ide::managed_edit::{
 };
 use std::path::PathBuf;
 
-const PROPOSAL_TTL_MS: u64 = 120_000;
 const MAX_OPERATIONS: usize = 32;
 
 pub(super) struct VerifiedSource {
     pub source: String,
     pub path: PathBuf,
     pub digest: [u8; 32],
-}
-struct Staged {
-    id: String,
-    owner: String,
-    file: ChatFileContext,
-    path: Vec<String>,
-    intent: WriteIntent,
-    expires: u64,
 }
 #[derive(Clone)]
 struct Operation {
@@ -36,7 +27,6 @@ struct Operation {
 }
 #[derive(Default)]
 pub(super) struct Writes {
-    staged: Option<Staged>,
     operations: BTreeMap<String, Operation>,
 }
 
@@ -55,72 +45,6 @@ impl State {
             path: operation.path.clone(),
             outcome: operation.outcome.clone(),
         })
-    }
-
-    pub(super) fn stage_edit(
-        &self,
-        file: ChatFileContext,
-        source: VerifiedSource,
-        plan: crate::edit::PreviewPlan,
-        request_id: &str,
-        deadline: Instant,
-    ) -> EditPreview {
-        let crate::edit::PreviewPlan {
-            mut preview,
-            bytes,
-            replacement,
-        } = plan;
-        self.writes.borrow_mut().staged = None;
-        let Some(path) = source.path.to_str() else {
-            return preview;
-        };
-        let Ok(expires) = deadline_ms(deadline) else {
-            return preview;
-        };
-        let response = self.write_call(
-            &file.node_key,
-            &file.project,
-            request_id,
-            expires,
-            ManagedCommand::BaseRevision {
-                path: path.into(),
-                digest: source.digest,
-            },
-        );
-        let Ok(ManagedResponse::BaseRevision { revision }) = response else {
-            return preview;
-        };
-        if revision.digest() != source.digest {
-            return preview;
-        }
-        let Ok(id) = crate::session::random_token() else {
-            return preview;
-        };
-        let Ok(now) = now_unix_ms() else {
-            return preview;
-        };
-        let owner = self.session.borrow().epoch().to_owned();
-        self.writes.borrow_mut().staged = Some(Staged {
-            id: id.clone(),
-            owner,
-            file,
-            path: source
-                .path
-                .iter()
-                .map(|part| part.to_string_lossy().into_owned())
-                .collect(),
-            expires: now.saturating_add(PROPOSAL_TTL_MS),
-            intent: WriteIntent::Apply {
-                proposal: id.clone(),
-                path: path.into(),
-                expected: revision,
-                byte_start: bytes.start,
-                byte_end: bytes.end,
-                replacement,
-            },
-        });
-        preview.proposal_id = Some(id);
-        preview
     }
 
     pub(super) fn edit_write(
@@ -179,7 +103,6 @@ impl State {
             (operation, command)
         } else {
             let expires = deadline_ms(deadline).map_err(|_| Rejection::Unavailable)?;
-            let now = now_unix_ms().map_err(|_| Rejection::Unavailable)?;
             let mut writes = self.writes.borrow_mut();
             writes
                 .operations
@@ -194,32 +117,8 @@ impl State {
                 return Ok(EditWriteOutcome::Rejected);
             }
             let (node, project, path, intent) = match &request.intent {
-                EditWriteIntent::Apply { proposal_id } => {
-                    let Some(staged) = &writes.staged else {
-                        return Ok(EditWriteOutcome::Rejected);
-                    };
-                    let allowed = staged.owner == owner
-                        && staged.id == *proposal_id
-                        && now < staged.expires
-                        && self
-                            .accepted_sources
-                            .borrow()
-                            .as_ref()
-                            .is_some_and(|accepted| {
-                                accepted.token == staged.file.report
-                                    && accepted.node_key == staged.file.node_key
-                                    && accepted.project == staged.file.project
-                            });
-                    if !allowed {
-                        return Ok(EditWriteOutcome::Rejected);
-                    }
-                    let staged = writes.staged.take().expect("checked staged edit");
-                    (
-                        staged.file.node_key,
-                        staged.file.project,
-                        staged.path,
-                        staged.intent,
-                    )
+                EditWriteIntent::Apply { .. } | EditWriteIntent::Status {} => {
+                    return Ok(EditWriteOutcome::Rejected);
                 }
                 EditWriteIntent::Undo { applied_operation } => {
                     let Some(applied) = writes.operations.get(applied_operation) else {
@@ -245,7 +144,6 @@ impl State {
                         Err(outcome) => return Ok(outcome),
                     }
                 }
-                EditWriteIntent::Status {} => return Ok(EditWriteOutcome::Rejected),
             };
             let native_id = hex_digest(forge_ide::source::digest(
                 format!("{owner}\0{}", request.operation).as_bytes(),
