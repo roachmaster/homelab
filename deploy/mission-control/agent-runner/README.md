@@ -475,6 +475,18 @@ Only the new pending review is prepared again against current main; no author
 task or model attempt is created. This is an explicit owner operation, never a
 coordinator retry loop. Original receipts remain replayable.
 
+After a fresh independent Code REVISE following the original owner source turn,
+the owner may explicitly Resume the same task for one further correction. The
+v2 action is bound once to that distinct peer/source, with complete current CI,
+a completed independent critic, unchanged Plan/recipes and a genuinely newer
+native stop/reconciliation receipt. It preserves the original v1 marker, M26
+automatic-repair fence, old artifacts and spent counters; `auto_repair` stays
+false. At most32 explicit source-owner actions are retained per workflow.
+Standard immutable control receipts replay before current policy/readiness or
+retained-artifact checks. A new key alone, an expired author without a fresh
+peer verdict, or malformed/orphaned history cannot start another author. This
+uses the existing owner-control port and Resume command, never a scanner loop.
+
 A later correction to a Completed task uses `ide.work.repair` with an explicit
 approved-project candidate. If that legacy parent has no bound review, trusted
 source import verifies the exact project commit/digest before materializing the

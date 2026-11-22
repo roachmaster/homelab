@@ -7,7 +7,7 @@ native workspace feedback, not a substituted candidate-tree receipt.
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from psycopg2.extras import Json
@@ -18,6 +18,8 @@ from work_config import sha256_canonical
 from work_store import _resume_intent_digest
 
 OWNER_CODE_RESUME = 'forge-owner-code-resume-v1'
+OWNER_CODE_FOLLOWUP = 'forge-owner-code-resume-v2'
+MAX_OWNER_SOURCE_ACTIONS = 32
 OWNER_VERIFY_RETRY = 'forge-owner-verification-retry-v1'
 
 
@@ -82,6 +84,136 @@ def _verification_failure(review):
 
 def owner_source_key(workflow_id):
     return 'owner-code-resume:' + str(workflow_id)
+
+
+def followup_source_key(workflow_id, peer_id):
+    return 'owner-code-resume-v2:' + str(workflow_id) + ':' + str(peer_id)
+
+
+def _followup_replay(cursor,store,task,action,request,digest):
+    intent=action['intent'];finish=action['finish_receipt']
+    if not isinstance(intent,dict)or not isinstance(intent.get('request'),dict)or not isinstance(finish,dict):
+        raise Rejected(409,'reconcile_required')
+    if intent['request']!=request:raise Rejected(409,'idempotency_conflict')
+    try:
+        peer=intent['peer_review_id'];valid=str(UUID(peer))==peer
+    except(KeyError,TypeError,ValueError,AttributeError):valid=False
+    expected=dict(project_alias=task['project_alias'],task_id=str(task['id']),base_revision=request['expected_revision'],
+        revision=request['expected_revision']+1,status='queued',recipe_digest=intent.get('recipe_digest'))
+    cursor.execute('SELECT * FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND idempotency_key=%s',
+        (store.owner,task['project_alias'],task['id'],request['idempotency_key']))
+    control=cursor.fetchone()
+    if (not valid or action['status']!='completed'or action['owner_id']!=store.owner or action['project_alias']!=task['project_alias']
+            or intent.get('policy')!=OWNER_CODE_FOLLOWUP or intent.get('workflow_id')!=str(task['workflow_id'])
+            or action['source_key']!=followup_source_key(task['workflow_id'],peer)
+            or finish.get('status')!='owner_continued'or finish.get('receipt')!=expected
+            or type(intent.get('manual_source_sequence'))is not int or not 2<=intent['manual_source_sequence']<=MAX_OWNER_SOURCE_ACTIONS
+            or intent.get('automatic_allowance_renewed')is not False or intent.get('auto_repair')is not False
+            or not isinstance(intent.get('recipe_digest'),str)or not re.fullmatch('[0-9a-f]{64}',intent['recipe_digest'])
+            or not control or control['action']!='resume'or control['intent_digest']!=digest
+            or control['base_revision']!=request['expected_revision']or control['result_revision']!=request['expected_revision']+1
+            or control['receipt_json']!=expected):
+        raise Rejected(409,'reconcile_required')
+    return dict(expected)
+
+
+def _owner_source_history(flow, cursor, task, first):
+    """Validate the immutable manual source ledger, independent of live policy."""
+    store=flow.store
+    cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND (source_key=%s OR source_key LIKE %s OR intent->>'policy'=ANY(%s)) ORDER BY created_at,action_id LIMIT %s",
+        (task['workflow_id'],owner_source_key(task['workflow_id']),'owner-code-resume-v2:'+str(task['workflow_id'])+':%',
+         [OWNER_CODE_RESUME,OWNER_CODE_FOLLOWUP],MAX_OWNER_SOURCE_ACTIONS+1))
+    history=cursor.fetchall()
+    if not history or history[0]['action_id']!=first['action_id']or len(history)>MAX_OWNER_SOURCE_ACTIONS:
+        raise Rejected(409,'reconcile_required')
+    previous=None;peers=set()
+    for index,action in enumerate(history):
+        intent=action['intent'];finish=action['finish_receipt']
+        if (not isinstance(intent,dict)or not isinstance(finish,dict)
+                or not isinstance(intent.get('request'),dict)or not isinstance(finish.get('receipt'),dict)):
+            raise Rejected(409,'reconcile_required')
+        request=intent['request'];receipt=finish['receipt'];policy=OWNER_CODE_RESUME if index==0 else OWNER_CODE_FOLLOWUP
+        required_intent={'policy_digest','recipe_digest','plan_decision_id','plan_sha256','plan_revisions','repair_policy','source_attempt_id','source_result_sha256','source_workspace_digest','candidate_commit','gate_manifest_sha256','verification_sha256','peer_review_id','review_id','target_sha256','verdict_sha256','reviewer_attempt_id','reviewer_result_sha256','repair_rounds','stagnant_rounds','review_round','review_stagnant_rounds','infrastructure_retries','auto_repair'}
+        if (not required_intent<=intent.keys()or not isinstance(intent['repair_policy'],dict)
+                or any(type(intent[key])is not int or not 0<=intent[key]<2**53 for key in('plan_revisions','repair_rounds','stagnant_rounds','review_round','review_stagnant_rounds','infrastructure_retries'))
+                or type(intent['auto_repair'])is not bool
+                or any(not isinstance(intent[key],str)or not re.fullmatch('[0-9a-f]{64}',intent[key])for key in('policy_digest','recipe_digest','plan_sha256','source_result_sha256','source_workspace_digest','gate_manifest_sha256','verification_sha256','target_sha256','verdict_sha256','reviewer_result_sha256'))):
+            raise Rejected(409,'reconcile_required')
+        required={'project_alias','task_id','expected_revision','agent_profile','reconciliation_receipt_id','note','idempotency_key'}
+        try:
+            valid=(set(request)==required and type(request['expected_revision'])is int and 1<=request['expected_revision']<2**53
+                and str(UUID(request['reconciliation_receipt_id']))==request['reconciliation_receipt_id']
+                and isinstance(request['idempotency_key'],str)and re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',request['idempotency_key'])
+                and isinstance(request['note'],str)and request['note'].strip()and len(request['note'].encode())<=1536
+                and str(UUID(intent['peer_review_id']))==intent['peer_review_id']
+                and str(UUID(intent['review_id']))==intent['review_id'])
+        except(KeyError,ValueError,TypeError,AttributeError):valid=False
+        if not valid:raise Rejected(409,'reconcile_required')
+        expected=dict(project_alias=task['project_alias'],task_id=str(task['id']),base_revision=request['expected_revision'],
+            revision=request['expected_revision']+1,status='queued',recipe_digest=intent.get('recipe_digest'))
+        key=owner_source_key(task['workflow_id'])if index==0 else followup_source_key(task['workflow_id'],intent['peer_review_id'])
+        if (action['status']!='completed'or action['owner_id']!=store.owner or action['project_alias']!=task['project_alias']
+                or action['source_key']!=key or intent.get('policy')!=policy or intent.get('workflow_id')!=str(task['workflow_id'])
+                or request['task_id']!=str(task['id'])or request['project_alias']!=task['project_alias']
+                or finish.get('status')!='owner_continued'or receipt!=expected or intent['peer_review_id']in peers
+                or previous and(intent.get('previous_owner_action_id')!=str(previous['action_id'])
+                    or intent.get('previous_peer_review_id')!=previous['intent']['peer_review_id']
+                    or type(intent.get('manual_source_sequence'))is not int or intent.get('manual_source_sequence')!=index+1
+                    or intent.get('automatic_allowance_renewed')is not False or intent['auto_repair']is not False
+                    or request['expected_revision']<previous['finish_receipt']['receipt']['revision']+2
+                    or intent.get('source_attempt_id')==previous['intent'].get('source_attempt_id'))):
+            raise Rejected(409,'reconcile_required')
+        cursor.execute("SELECT * FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND idempotency_key=%s",
+            (store.owner,task['project_alias'],task['id'],request['idempotency_key']))
+        control=cursor.fetchone()
+        if (not control or control['action']!='resume'or control['base_revision']!=request['expected_revision']
+                or control['result_revision']!=receipt['revision']or control['receipt_json']!=receipt
+                or control['intent_digest']!=_resume_intent_digest(**{k:v for k,v in request.items()if k!='idempotency_key'})):
+            raise Rejected(409,'reconcile_required')
+        cursor.execute('SELECT * FROM forge_agent.coding_reviews WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND review_id=%s',
+            (store.owner,task['project_alias'],task['id'],intent['review_id']))
+        source=cursor.fetchone()
+        cursor.execute("SELECT * FROM forge_agent.coding_workflow_reviews WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s AND workflow_review_id=%s",
+            (store.owner,task['project_alias'],task['workflow_id'],intent['peer_review_id']))
+        peer=cursor.fetchone()
+        if (not source or not peer or peer['status']!='decided'or peer['target_kind']!='code'
+                or str(source['attempt_id'])!=intent.get('source_attempt_id')or source['source_revision']!=request['expected_revision']
+                or source['parent_result_sha256']!=intent.get('source_result_sha256')or source['workspace_digest']!=intent.get('source_workspace_digest')
+                or source['candidate_commit']!=intent.get('candidate_commit')or source['gate_manifest_sha256']!=intent.get('gate_manifest_sha256')
+                or sha256_canonical(source['verification'])!=intent.get('verification_sha256')
+                or (peer['source_task_id'],peer['source_attempt_id'],peer['source_review_id'])!=(task['id'],source['attempt_id'],source['review_id'])
+                or peer['source_revision']!=source['source_revision']or peer['source_result_sha256']!=source['parent_result_sha256']
+                or peer['target_sha256']!=intent.get('target_sha256')or peer['verdict_sha256']!=intent.get('verdict_sha256')
+                or str(peer['reviewer_attempt_id'])!=intent.get('reviewer_attempt_id')or peer['reviewer_result_sha256']!=intent.get('reviewer_result_sha256')
+                or not isinstance(peer['verdict_json'],str)or hashlib.sha256(peer['verdict_json'].encode()).hexdigest()!=peer['verdict_sha256']):
+            raise Rejected(409,'reconcile_required')
+        try:
+            target=parse_review_target(peer['target_json'],peer['target_sha256']);verdict=parse_review_verdict(peer['verdict_json'],target)
+        except(ValueError,TypeError,KeyError,AttributeError):raise Rejected(409,'reconcile_required')from None
+        if verdict['decision']!='revise'or not verdict['findings']:
+            raise Rejected(409,'reconcile_required')
+        if (flow._artifact(cursor,task['id'],source['attempt_id'])['result_sha256']!=source['parent_result_sha256']
+                or flow._artifact(cursor,peer['reviewer_task_id'],peer['reviewer_attempt_id'])['content']!=peer['verdict_json']):
+            raise Rejected(409,'reconcile_required')
+        cursor.execute('SELECT * FROM forge_agent.coding_reconciliation_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND receipt_id=%s',
+            (store.owner,task['project_alias'],task['id'],request['reconciliation_receipt_id']))
+        rec=cursor.fetchone()
+        cursor.execute('SELECT * FROM forge_agent.coding_attempts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s',
+            (store.owner,task['project_alias'],task['id'],source['attempt_id']))
+        attempt=cursor.fetchone();proof=rec['stop_proof']if rec else {}
+        try:
+            checked=datetime.fromisoformat(proof['checked_at'].replace('Z','+00:00'))
+        except(ValueError,TypeError,KeyError,AttributeError):raise Rejected(409,'reconcile_required')from None
+        if (not rec or not attempt or rec['attempt_id']!=source['attempt_id']or rec['task_revision']!=source['source_revision']
+                or rec['workspace_digest']!=source['workspace_digest']or rec['receipt_id']==source['reconciliation_receipt_id']
+                or not peer['updated_at']<=rec['created_at']<=action['created_at']or checked.tzinfo is None
+                or not peer['updated_at']<=checked<=datetime.now(timezone.utc)
+                or proof.get('scope_stopped')is not True or proof.get('source')!='systemd'or proof.get('unit_name')!=attempt['unit_name']
+                or attempt['phase']!='stopped'or attempt['reservation_active']or attempt['lease_expires_at']is not None
+                or attempt['result_sha256']!=source['parent_result_sha256']or attempt['recipe_digest']!=intent['recipe_digest']):
+            raise Rejected(409,'reconcile_required')
+        peers.add(intent['peer_review_id']);previous=action
+    return history
 
 
 def require_owner_capability(cursor):
@@ -320,10 +452,10 @@ class NativeOwnerControl:
                 raise Rejected(400, 'invalid_request')
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s", (task['workflow_id'], owner_source_key(task['workflow_id'])))
             prior = cursor.fetchone()
-            if prior:
-                if (prior['intent'] or {}).get('request') != request:
-                    raise Rejected(409, 'idempotency_conflict')
+            followup = prior is not None
+            if prior and isinstance(prior['intent'],dict) and prior['intent'].get('request') == request:
                 saved = prior['finish_receipt'] or {}
+                if not isinstance(saved,dict):raise Rejected(409,'reconcile_required')
                 receipt = saved.get('receipt')
                 expected = dict(project_alias=command.project_alias, task_id=str(task['id']),
                     base_revision=command.expected_revision, revision=command.expected_revision+1,
@@ -335,6 +467,16 @@ class NativeOwnerControl:
                         or saved.get('status') != 'owner_continued' or receipt != expected):
                     raise Rejected(409, 'reconcile_required')
                 return dict(receipt)
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE owner_id=%s AND project_alias=%s AND workflow_id=%s AND kind='decide' AND (source_key LIKE %s OR intent->>'policy'=%s) AND intent->'request'->>'task_id'=%s AND intent->'request'->>'idempotency_key'=%s LIMIT 2",
+                (store.owner,command.project_alias,task['workflow_id'],'owner-code-resume-v2:'+str(task['workflow_id'])+':%',OWNER_CODE_FOLLOWUP,str(task['id']),command.idempotency_key))
+            saved=cursor.fetchall()
+            if len(saved)>1:raise Rejected(409,'reconcile_required')
+            if saved:return _followup_replay(cursor,store,task,saved[0],request,digest)
+            if prior is None:
+                cursor.execute("SELECT EXISTS(SELECT 1 FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND (source_key LIKE %s OR intent->>'policy'=%s)) AS orphaned",
+                    (task['workflow_id'],'owner-code-resume-v2:'+str(task['workflow_id'])+':%',OWNER_CODE_FOLLOWUP))
+                if cursor.fetchone()['orphaned']:raise Rejected(409,'reconcile_required')
+            history = _owner_source_history(flow,cursor,task,prior) if followup else []
             cursor.execute('SELECT * FROM forge_agent.coding_control_receipts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND idempotency_key=%s',
                 (store.owner, command.project_alias, command.task_id, command.idempotency_key))
             if cursor.fetchone():
@@ -363,7 +505,7 @@ class NativeOwnerControl:
             if (not q or q['attempt_id'] != task['latest_attempt_id'] or q['source_revision'] != task['revision']
                     or q['status'] != 'awaiting_review' or q['base_revision'] != task['base_revision']
                     or q['plan_decision_id'] != task['plan_decision_id'] or q['scope_plan_decision_id'] != task['scope_plan_decision_id']
-                    or q['verification'].get('checks_passed') is not True or q['verification'].get('cleanup_confirmed') is not True
+                    or not isinstance(q['verification'],dict)or q['verification'].get('checks_passed') is not True or q['verification'].get('cleanup_confirmed') is not True
                     or not q['candidate_commit'] or not q['gate_manifest_sha256']
                     or task['repair_source_review_id'] == q['review_id']):
                 raise Rejected(409, 'result_mismatch')
@@ -375,13 +517,15 @@ class NativeOwnerControl:
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND workflow_review_id=%s AND kind='decide' AND status='completed'", (w['workflow_id'], peer['workflow_review_id']))
             decided = cursor.fetchone()
             handoff = decided['finish_receipt'] if decided else None
-            if (not handoff or decided['finish_token'] is None or handoff.get('status') != 'escalated' or handoff.get('reason') != 'repair_budget_exhausted'
+            if (not isinstance(handoff,dict)or decided['finish_token'] is None or handoff.get('status') != 'escalated' or handoff.get('reason') != ('owner_continuation_exhausted' if followup else 'repair_budget_exhausted')
                     or handoff.get('review_id') != str(q['review_id'])
                     or handoff.get('workflow_review_id') != str(peer['workflow_review_id'])
                     or handoff.get('workflow_id') != str(w['workflow_id'])):
                 raise Rejected(409, 'not_reviewable')
-            target = parse_review_target(peer['target_json'], peer['target_sha256'])
-            verdict = parse_review_verdict(peer['verdict_json'], target)
+            try:
+                target = parse_review_target(peer['target_json'], peer['target_sha256'])
+                verdict = parse_review_verdict(peer['verdict_json'], target)
+            except(ValueError,TypeError,KeyError,AttributeError):raise Rejected(409,'result_mismatch')from None
             if (verdict['decision'] != 'revise' or not 1 <= len(verdict['findings']) <= 3
                     or hashlib.sha256(peer['verdict_json'].encode()).hexdigest() != peer['verdict_sha256']
                     or peer['source_attempt_id'] != task['latest_attempt_id'] or peer['source_revision'] != task['revision']
@@ -396,6 +540,28 @@ class NativeOwnerControl:
                     or target['review_id'] != str(q['review_id']) or target['workspace_digest'] != q['verification'].get('candidate_workspace_digest')
                     or target['candidate_commit'] != q['candidate_commit'] or target['gate_manifest_sha256'] != q['gate_manifest_sha256']):
                 raise Rejected(409, 'result_mismatch')
+            if followup:
+                previous=history[-1];old=previous['intent']
+                if (len(history)>=MAX_OWNER_SOURCE_ACTIONS or task['auto_repair']
+                        or str(peer['workflow_review_id'])in{x['intent']['peer_review_id']for x in history}
+                        or peer['updated_at']<=previous['created_at']or peer['created_at']<=previous['created_at']
+                        or str(task['latest_attempt_id'])==old['source_attempt_id']
+                        or task['revision']<previous['finish_receipt']['receipt']['revision']+2
+                        or old['policy_digest']!=w['policy_digest']or old['recipe_digest']!=recipe.digest
+                        or old['plan_decision_id']!=target['plan_decision_id']or old['plan_sha256']!=target['approved_plan']['sha256']
+                        or old['plan_revisions']!=w['plan_revisions']or old['repair_policy']!=p['repair_policy']):
+                    raise Rejected(409,'not_reviewable')
+                completed=q['finish_receipt'];outcome=completed.get('outcome')if isinstance(completed,dict)else None
+                if (q['finish_token']is None or not isinstance(outcome,dict)or completed.get('review_id')!=str(q['review_id'])
+                        or completed.get('status')!='awaiting_review'or outcome.get('disposition')!='awaiting_review'
+                        or outcome.get('candidate_commit')!=q['candidate_commit']or outcome.get('gate_manifest_sha256')!=q['gate_manifest_sha256']
+                        or outcome.get('verification')!=q['verification']):
+                    raise Rejected(409,'result_mismatch')
+                checks=q['verification'].get('checks')
+                if (not isinstance(checks,list)or len(checks)!=3
+                        or {x.get('check_id')for x in checks if isinstance(x,dict)}!={'make-ci','browser-acceptance','agent-runner-tests'}
+                        or any(not isinstance(x,dict)or x.get('status')!='passed'or x.get('head_sha')!=q['candidate_commit']for x in checks)):
+                    raise Rejected(409,'result_mismatch')
             cursor.execute('SELECT * FROM forge_agent.coding_tasks WHERE owner_id=%s AND project_alias=%s AND id=%s FOR UPDATE',
                 (store.owner, command.project_alias, peer['reviewer_task_id']))
             critic = cursor.fetchone()
@@ -440,6 +606,7 @@ class NativeOwnerControl:
             if (not rec or not attempt or rec['attempt_id'] != task['latest_attempt_id'] or rec['task_revision'] != task['revision']
                     or rec['workspace_digest'] != q['workspace_digest'] or rec['receipt_id'] == q['reconciliation_receipt_id']
                     or rec['created_at'] <= peer['updated_at'] or checked.tzinfo is None or checked < peer['updated_at']
+                    or followup and checked>datetime.now(timezone.utc)
                     or proof.get('scope_stopped') is not True or proof.get('source') != 'systemd' or proof.get('unit_name') != attempt['unit_name']
                     or attempt['phase'] != 'stopped' or attempt['reservation_active'] or attempt['lease_expires_at'] is not None
                     or attempt['published_at'] is None or attempt['result_sha256'] != q['parent_result_sha256']
@@ -452,7 +619,7 @@ class NativeOwnerControl:
                 (store.owner, command.project_alias, task['repair_root_task_id'] or task['id']))
             budget = cursor.fetchone()
             exhausted = flow._exhausted_code_budget(cursor, task, q)
-            if not budget or not exhausted or handoff.get('budget') != exhausted or budget['policy'] != p['repair_policy']:
+            if not budget or (not followup and not exhausted) or handoff.get('budget') != exhausted or budget['policy'] != p['repair_policy']:
                 raise Rejected(409, 'not_reviewable')
             require_owner_capability(cursor)
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s", (w['workflow_id'],))
@@ -493,7 +660,8 @@ class NativeOwnerControl:
             revision = cursor.fetchone()['revision']
             receipt = dict(project_alias=command.project_alias, task_id=str(task['id']), base_revision=command.expected_revision,
                 revision=revision, status='queued', recipe_digest=recipe.digest)
-            intent = dict(policy=OWNER_CODE_RESUME, request=request, workflow_id=str(w['workflow_id']), policy_digest=w['policy_digest'],
+            policy = OWNER_CODE_FOLLOWUP if followup else OWNER_CODE_RESUME
+            intent = dict(policy=policy, request=request, workflow_id=str(w['workflow_id']), policy_digest=w['policy_digest'],
                 review_id=str(q['review_id']), source_attempt_id=str(task['latest_attempt_id']), source_result_sha256=q['parent_result_sha256'],
                 source_workspace_digest=q['workspace_digest'], candidate_commit=q['candidate_commit'], gate_manifest_sha256=q['gate_manifest_sha256'],
                 verification_sha256=sha256_canonical(q['verification']), peer_review_id=str(peer['workflow_review_id']),
@@ -502,11 +670,14 @@ class NativeOwnerControl:
                 recipe_digest=recipe.digest, repair_rounds=budget['repair_rounds'], stagnant_rounds=budget['stagnant_rounds'],
                 review_stagnant_rounds=q['stagnant_rounds'], infrastructure_retries=q['infrastructure_retries'],
                 plan_revisions=w['plan_revisions'], review_round=q['round'], auto_repair=task['auto_repair'], repair_policy=budget['policy'])
+            if followup:
+                intent.update(previous_owner_action_id=str(history[-1]['action_id']),previous_peer_review_id=history[-1]['intent']['peer_review_id'],manual_source_sequence=len(history)+1,automatic_allowance_renewed=False)
+            key=followup_source_key(w['workflow_id'],peer['workflow_review_id'])if followup else owner_source_key(w['workflow_id'])
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
-                (w['workflow_id'], store.owner, command.project_alias, owner_source_key(w['workflow_id']), Json(intent), Json(dict(status='owner_continued', receipt=receipt))))
+                (w['workflow_id'], store.owner, command.project_alias, key, Json(intent), Json(dict(status='owner_continued', receipt=receipt))))
             cursor.execute("INSERT INTO forge_agent.coding_control_receipts(owner_id,project_alias,task_id,action,idempotency_key,intent_digest,base_revision,result_revision,receipt_json) VALUES(%s,%s,%s,'resume',%s,%s,%s,%s,%s)",
                 (store.owner, command.project_alias, task['id'], command.idempotency_key, digest, command.expected_revision, revision, Json(receipt)))
-            payload = dict(receipt, policy=OWNER_CODE_RESUME, workflow_id=str(w['workflow_id']), review_id=str(q['review_id']),
+            payload = dict(receipt, policy=policy, workflow_id=str(w['workflow_id']), review_id=str(q['review_id']),
                 verdict_sha256=peer['verdict_sha256'], feedback_id=str(feedback_id), reconciliation_receipt_id=str(rec['receipt_id']),
                 workspace_digest=q['workspace_digest'], spent_budget=exhausted, auto_repair=False)
             cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'resumed',%s FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s",
