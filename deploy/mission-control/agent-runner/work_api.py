@@ -390,6 +390,11 @@ class WorkService:
     def review_decide(self, command):
         self._require_project(command.project_alias)
         self._external_control_guard(command)
+        owner_decide = getattr(self._native_control, "review_decide", None)
+        if callable(owner_decide):
+            result = owner_decide(command)
+            if result is not None:
+                return result
         def resolve_recipe():
             if ("implement" not in self._config.allowed_modes or command.agent_profile not in self._config.profiles
                     or not self._config.profiles[command.agent_profile].execution_enabled
