@@ -3411,19 +3411,47 @@ async function agentsJourney() {
     await eventDetails.locator('summary').focus();await page.keyboard.press('Enter');
     await check(eventDetails).toHaveJSProperty('open',true);
     const eventNode=await eventDetails.elementHandle();
+    const historyResponse = afterSequence => page.waitForResponse(response => {
+      if (new URL(response.url()).pathname !== '/forge/v1/dispatch') return false;
+      const request = response.request().postDataJSON();
+      return request?.kind === 'work_events' && request.task_id === historyTaskId
+        && request.after_sequence === afterSequence;
+    }, { timeout: 10000 });
+    await check(page.locator('#agents-refresh')).toBeEnabled();
+    // Refresh also reads unseen milestones at cursor61, independently of the visible page.
+    const refreshedHistory = historyResponse(61);
     await page.locator('#agents-refresh').click();
+    const refreshResponse = await refreshedHistory;
+    assert.equal(refreshResponse.status(),200);
+    assert.equal(await refreshResponse.finished(),null);
+    await check(page.locator('#agents-refresh')).toBeEnabled();
+    await check(page.locator('#agents-history-next')).toBeEnabled();
     await check(eventDetails).toHaveJSProperty('open',true);
     assert.equal(await eventNode.evaluate(node=>node.isConnected),true,'event disclosure nodes survive refresh');
     await check(page.locator('#agents-history script,#agents-history img')).toHaveCount(0);
     assert.equal(await page.evaluate(()=>globalThis.__historyExecuted),undefined);
-    relay.faults.denyNextEvents=true;
+    const historyReadStart=relay.eventReads.length;
+    relay.faults.denyNextEvents={task_id:historyTaskId,after_sequence:50};
+    const deniedHistory=historyResponse(50);
     await page.locator('#agents-history-next').click();
+    const deniedResponse=await deniedHistory;
+    assert.equal(deniedResponse.status(),503);
+    assert.equal(await deniedResponse.finished(),null);
+    await check(page.locator('#agents-status')).toContainText('agent service is unavailable');
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
     await check(page.locator('#agents-history-next')).toBeEnabled();
+    const retriedHistory=historyResponse(50);
     await page.locator('#agents-history-next').click();
+    const retryResponse=await retriedHistory;
+    assert.equal(retryResponse.status(),200);
+    assert.equal(await retryResponse.finished(),null);
     await check(page.locator('#agents-history-range')).toHaveText('Events 51–61');
     await check(page.locator('#agents-history > li')).toHaveCount(11);
     await check(page.locator('#agents-history-next')).toBeDisabled();
+    assert.deepEqual(relay.eventReads.slice(historyReadStart),[
+      {request_id:deniedResponse.request().postDataJSON().request_id,task_id:historyTaskId,after_sequence:50,denied:true},
+      {request_id:retryResponse.request().postDataJSON().request_id,task_id:historyTaskId,after_sequence:50,denied:false},
+    ],'the selected page is denied once and retried at the same cursor');
     await page.locator('#agents-history-previous').click();
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
     await page.locator('#agents-history-next').click();

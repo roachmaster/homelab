@@ -113,9 +113,9 @@ export async function startAgentsRelay() {
   const controls = new Map();
   const calls = [];
   const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
-    dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false,externalWorkflow:false,denyNextEvents:false };
+    dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false,externalWorkflow:false,denyNextEvents:null };
   const planDecisions = [], reviewDecisions = [], publicationRevisions = [], workflowSubmissions=[];
-  const verificationRetries = [], reviewReads = [];
+  const verificationRetries = [], reviewReads = [], eventReads = [];
   let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
     try {
@@ -199,7 +199,11 @@ export async function startAgentsRelay() {
         send(200, 'work_opened', { task: detail(selected) }); return;
       }
       if (input.kind === 'work_events') {
-        if(faults.denyNextEvents){faults.denyNextEvents=false;failed(503,'unavailable');return;}
+        const afterSequence = input.after_sequence ?? 0;
+        const denied = faults.denyNextEvents?.task_id === selected.task_id
+          && faults.denyNextEvents.after_sequence === afterSequence;
+        eventReads.push({ request_id: requestId, task_id: selected.task_id, after_sequence: afterSequence, denied });
+        if (denied) { faults.denyNextEvents = null; failed(503, 'unavailable'); return; }
         if (selected.status === 'running' && !selected.progress_emitted) progress(selected);
         else if (selected.status === 'running' && !faults.holdProgressCompletion) {
           selected.status = 'awaiting_review'; selected.revision++; event(selected, 'awaiting_review');
@@ -306,7 +310,7 @@ export async function startAgentsRelay() {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
-    planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,verificationRetries,reviewReads,
+    planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,verificationRetries,reviewReads,eventReads,
     requireVerificationRetry(taskId){
       const selected=tasks.get(taskId);
       if(selected?.mode!=='implement'||selected.status!=='awaiting_review'||!selected.review)throw new Error('No finished fixture implementation');

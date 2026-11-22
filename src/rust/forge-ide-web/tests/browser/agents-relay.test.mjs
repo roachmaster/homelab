@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { startAgentsRelay } from './agents-relay.mjs';
 
-async function implementationFixture(t) {
+async function relayFixture(t) {
   const relay = await startAgentsRelay();
   t.after(() => relay.close());
   const token = await readFile(relay.tokenFile, 'utf8');
@@ -20,6 +20,11 @@ async function implementationFixture(t) {
     });
     return { status: response.status, body: await response.json(), request_id };
   }
+  return { relay, post };
+}
+
+async function implementationFixture(t) {
+  const { relay, post } = await relayFixture(t);
   const submitted = await post('work_submit', { base_revision: 'a'.repeat(40), mode: 'implement',
     agent_profile: 'agy-primary', prompt: 'Owned verification retry fixture',
     acceptance_criteria: 'Preserve the finished author', idempotency_key: 'fixture-assignment' });
@@ -96,4 +101,37 @@ test('verification retry keeps request correlation, project, revision and review
   }
   assert.equal(relay.taskCount, tasks);
   assert.deepEqual(relay.reviewSnapshot(before.task_id), before);
+});
+
+test('history page denial survives watermark and other-task reads, then retries the same cursor', async t => {
+  const { relay, post } = await relayFixture(t);
+  const task_id = relay.addHistory();
+  const otherTask = relay.addHistory();
+  relay.faults.denyNextEvents = { task_id, after_sequence: 50 };
+  const watermark = await post('work_events', { task_id, after_sequence: 61, limit: 50 });
+  assert.equal(watermark.status, 200);
+  assert.deepEqual(watermark.body.event.events, []);
+  assert.equal(watermark.body.event.next_sequence, 61);
+  const unrelated = await post('work_events', { task_id: otherTask, after_sequence: 50, limit: 50 });
+  assert.equal(unrelated.status, 200);
+  assert.deepEqual(unrelated.body.event.events.map(event => event.sequence), Array.from({ length: 11 }, (_, i) => i + 51));
+  assert.deepEqual(relay.faults.denyNextEvents, { task_id, after_sequence: 50 });
+  const denied = await post('work_events', { task_id, after_sequence: 50, limit: 50 });
+  assert.equal(denied.status, 503);
+  assert.equal(denied.body.event.kind, 'work_failed');
+  assert.equal(denied.body.event.code, 'unavailable');
+  assert.equal(denied.body.event.request_id, denied.request_id);
+  assert.equal(relay.faults.denyNextEvents, null);
+  const retry = await post('work_events', { task_id, after_sequence: 50, limit: 50 });
+  assert.equal(retry.status, 200);
+  assert.equal(retry.body.event.request_id, retry.request_id);
+  assert.equal(retry.body.event.task_id, task_id);
+  assert.equal(retry.body.event.next_sequence, 61);
+  assert.deepEqual(retry.body.event.events.map(event => event.sequence), Array.from({ length: 11 }, (_, i) => i + 51));
+  assert.deepEqual(relay.eventReads, [
+    { request_id: watermark.request_id, task_id, after_sequence: 61, denied: false },
+    { request_id: unrelated.request_id, task_id: otherTask, after_sequence: 50, denied: false },
+    { request_id: denied.request_id, task_id, after_sequence: 50, denied: true },
+    { request_id: retry.request_id, task_id, after_sequence: 50, denied: false },
+  ]);
 });
