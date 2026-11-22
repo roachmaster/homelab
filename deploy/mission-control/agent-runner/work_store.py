@@ -1575,7 +1575,7 @@ class WorkStore:
                 cursor.execute("SELECT forge_agent.coding_schedule_repair(%s,%s)",(review_id,feedback_id))
                 result['repair_task_id']=str(next(iter(cursor.fetchone().values())));result['status']='queued' if result['repair_task_id']==str(task_id) else task['status']
             elif decision=='retry_infrastructure':
-                result['review_id']=str(self._append_review_retry(cursor,task,review,note))
+                result['review_id']=str(self._append_review_retry(cursor,task,review,note,authority=_authority))
             elif decision=='escalate':
                 cursor.execute("UPDATE forge_agent.coding_reviews SET status='handoff',reason=%s,updated_at=clock_timestamp() WHERE review_id=%s",(note,review_id))
             else:
@@ -1585,11 +1585,15 @@ class WorkStore:
             self._control_record(cursor,task,expected_revision,idempotency_key,'review_decide',intent,result)
             return result
 
-    def _append_review_retry(self,cursor,task,review,note):
+    def _append_review_retry(self,cursor,task,review,note,*,authority=None):
         cursor.execute("SELECT coalesce((SELECT(b.policy->>'max_infrastructure_retries')::integer FROM forge_agent.coding_review_budget b WHERE b.owner_id=%s AND b.project_alias=%s AND b.root_task_id=%s),p.max_infrastructure_retries) AS max_infrastructure_retries FROM forge_agent.coding_review_policy p WHERE owner_id=%s AND project_alias=%s",(self._owner,task['project_alias'],task['repair_root_task_id'] or task['id'],self._owner,task['project_alias']))
         policy=cursor.fetchone()
-        if not policy or review['infrastructure_retries']>=policy['max_infrastructure_retries']:
+        from work_owner_reverification import BoundOwnerVerificationAuthority
+        manual = isinstance(authority, BoundOwnerVerificationAuthority) and authority.store is self
+        if not policy or not manual and review['infrastructure_retries']>=policy['max_infrastructure_retries']:
             raise Rejected(409,'not_reviewable')
+        if manual:
+            authority.validate_append(cursor,task,review)
         cursor.execute("""INSERT INTO forge_agent.coding_reviews(owner_id,project_alias,task_id,attempt_id,plan_decision_id,scope_plan_decision_id,reconciliation_receipt_id,
             base_revision,workspace_digest,parent_result_sha256,source_revision,review_no,round,stagnant_rounds,infrastructure_retries,previous_review_id,candidate_commit,summary,phase,owner_decision,verification,target_publication_id,source_publication_id,gate_manifest_sha256)
             SELECT owner_id,project_alias,task_id,attempt_id,plan_decision_id,scope_plan_decision_id,reconciliation_receipt_id,base_revision,workspace_digest,parent_result_sha256,%s,
