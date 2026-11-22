@@ -229,3 +229,261 @@ fn yaml_roundtrip_structure_and_output_bound() {
     );
     assert!(forge_ide::yaml::to_yaml(&report, 5).is_err());
 }
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    use std::error::Error;
+    assert_eq!(
+        InspectError::Configuration("limits must be positive and within documented hard ceilings")
+            .to_string(),
+        "configuration: limits must be positive and within documented hard ceilings"
+    );
+    assert_eq!(
+        InspectError::Limit("entries").to_string(),
+        "inspection limit: entries"
+    );
+    assert_eq!(
+        InspectError::Protocol("expected directory listing").to_string(),
+        "filesystem protocol: expected directory listing"
+    );
+    assert_eq!(
+        InspectError::Filesystem(FsError::InvalidLimit { name: "bytes" }).to_string(),
+        "invalid bytes limit"
+    );
+    assert!(InspectError::Configuration("x").source().is_none());
+    assert!(
+        InspectError::Filesystem(FsError::InvalidLimit { name: "bytes" })
+            .source()
+            .is_some()
+    );
+    assert_eq!(
+        FsError::InvalidPath(PathBuf::from("../escape")).to_string(),
+        "invalid filesystem path \"../escape\""
+    );
+    assert_eq!(
+        FsError::LimitExceeded {
+            name: "entries",
+            limit: 10
+        }
+        .to_string(),
+        "entries limit exceeded (10)"
+    );
+    assert_eq!(
+        FsError::Symlink(PathBuf::from("link")).to_string(),
+        "symlink access is not allowed: \"link\""
+    );
+    assert_eq!(
+        FsError::WrongKind {
+            path: PathBuf::from("file"),
+            expected: "directory"
+        }
+        .to_string(),
+        "expected directory: \"file\""
+    );
+    assert_eq!(
+        FsError::Io {
+            operation: "list",
+            path: PathBuf::from("root"),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        }
+        .to_string(),
+        "list failed at \"root\": denied"
+    );
+    assert!(FsError::InvalidLimit { name: "bytes" }.source().is_none());
+    assert!(FsError::Io {
+        operation: "list",
+        path: PathBuf::new(),
+        source: std::io::Error::other("x"),
+    }
+    .source()
+    .is_some());
+}
+
+#[test]
+fn default_limits_are_exact_and_boundaries_are_enforced() {
+    let limits = Limits::default();
+    assert_eq!(limits.max_entries, 10_000);
+    assert_eq!(limits.max_depth, 32);
+    assert_eq!(limits.max_file_bytes, 1024 * 1024);
+    assert_eq!(limits.max_total_bytes, 32 * 1024 * 1024);
+    assert_eq!(limits.max_declarations_per_file, 20_000);
+    assert_eq!(limits.max_syntax_depth, 32);
+    assert!(limits.validate().is_ok());
+    for (label, limits) in [
+        (
+            "entries zero",
+            Limits {
+                max_entries: 0,
+                ..Limits::default()
+            },
+        ),
+        (
+            "entries cap",
+            Limits {
+                max_entries: 100_001,
+                ..Limits::default()
+            },
+        ),
+        (
+            "depth zero",
+            Limits {
+                max_depth: 0,
+                ..Limits::default()
+            },
+        ),
+        (
+            "depth cap",
+            Limits {
+                max_depth: 65,
+                ..Limits::default()
+            },
+        ),
+        (
+            "file zero",
+            Limits {
+                max_file_bytes: 0,
+                ..Limits::default()
+            },
+        ),
+        (
+            "file cap",
+            Limits {
+                max_file_bytes: 4 * 1024 * 1024 + 1,
+                ..Limits::default()
+            },
+        ),
+        (
+            "total zero",
+            Limits {
+                max_total_bytes: 0,
+                ..Limits::default()
+            },
+        ),
+        (
+            "total cap",
+            Limits {
+                max_total_bytes: 256 * 1024 * 1024 + 1,
+                ..Limits::default()
+            },
+        ),
+        (
+            "declarations zero",
+            Limits {
+                max_declarations_per_file: 0,
+                ..Limits::default()
+            },
+        ),
+        (
+            "declarations cap",
+            Limits {
+                max_declarations_per_file: 100_001,
+                ..Limits::default()
+            },
+        ),
+        (
+            "syntax depth zero",
+            Limits {
+                max_syntax_depth: 0,
+                ..Limits::default()
+            },
+        ),
+        (
+            "syntax depth cap",
+            Limits {
+                max_syntax_depth: 65,
+                ..Limits::default()
+            },
+        ),
+    ] {
+        assert!(
+            matches!(
+                limits.validate(),
+                Err(InspectError::Configuration(
+                    "limits must be positive and within documented hard ceilings"
+                ))
+            ),
+            "{label}"
+        );
+    }
+    // Each hard ceiling itself is accepted.
+    assert!(Limits {
+        max_entries: 100_000,
+        ..Limits::default()
+    }
+    .validate()
+    .is_ok());
+    assert!(Limits {
+        max_depth: 64,
+        ..Limits::default()
+    }
+    .validate()
+    .is_ok());
+    assert!(Limits {
+        max_file_bytes: 4 * 1024 * 1024,
+        ..Limits::default()
+    }
+    .validate()
+    .is_ok());
+    assert!(Limits {
+        max_total_bytes: 256 * 1024 * 1024,
+        ..Limits::default()
+    }
+    .validate()
+    .is_ok());
+    assert!(Limits {
+        max_declarations_per_file: 100_000,
+        ..Limits::default()
+    }
+    .validate()
+    .is_ok());
+    assert!(Limits {
+        max_syntax_depth: 64,
+        ..Limits::default()
+    }
+    .validate()
+    .is_ok());
+}
+
+#[test]
+fn exclusion_rules_are_exact() {
+    let (client, _) = fake(&[]);
+    let many: Vec<std::ffi::OsString> = (0..128).map(|i| format!("name{i}").into()).collect();
+    assert!(InspectTask::new(client, Limits::default(), many).is_ok());
+    for excluded in [
+        vec!["".into()],
+        vec!["a/b".into()],
+        vec![".".into()],
+        vec!["..".into()],
+        (0..129).map(|i| format!("name{i}").into()).collect(),
+    ] {
+        let (client, _) = fake(&[]);
+        assert!(matches!(
+            InspectTask::new(client, Limits::default(), excluded),
+            Err(InspectError::Configuration(
+                "exclusions must be at most 128 single native names"
+            ))
+        ));
+    }
+}
+
+#[test]
+fn repeated_inspections_produce_identical_reports() {
+    let files: &[(&str, &[u8])] = &[
+        ("lib.rs", b"pub struct X;\n"),
+        ("notes.txt", b"a\nb\n"),
+        ("binary", b"\0\xff"),
+    ];
+    let run_once = || {
+        let (client, _) = fake(files);
+        InspectTask::new(client, Limits::default(), vec![])
+            .unwrap()
+            .run(InspectRequest::Project)
+            .unwrap()
+    };
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(first.format_version, 1);
+    assert_eq!(first.entries, 4);
+    assert_eq!(first.files, 3);
+}
