@@ -86,7 +86,7 @@ worker. This does not require a generic registry of unrelated runtime services.
 Explicit typed assembly and diagnostic binding identities coexist without `Any`
 or downcasts.
 
-The implemented [disk client](../../src/rust/forge-kernel/README.md) makes scope observable: each factory creation owns a fresh cwd; a shared singleton deliberately shares navigation, while transient acquisition starts again at the configured location. Registration is filesystem-free; factory construction validates the native directory. Provider scope is not filesystem authorization.
+The implemented [disk client](../../src/rust/forge-system/README.md) makes scope observable: each factory creation owns a fresh cwd; a shared singleton deliberately shares navigation, while transient acquisition starts again at the configured location. Registration is filesystem-free; factory construction validates the native directory. Provider scope is not filesystem authorization.
 
 ## Scope is a behavior, not a label
 

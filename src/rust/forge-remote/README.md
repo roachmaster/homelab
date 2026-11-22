@@ -1,7 +1,7 @@
 # Typed remote node conversation
 
 **Implemented, narrow synchronous contract:** one read-only `node.info @ 1` call.
-This optional capability owns no HTTP, TLS, JSON, async runtime or concrete kernel
+This optional capability owns no HTTP, TLS, JSON, async runtime or concrete system client
 client. The existing six execution contracts are unchanged.
 
 - `Target` owns separately validated logical node and host-incarnation labels.
@@ -14,7 +14,7 @@ client. The existing six execution contracts are unchanged.
   `validate_reply` checks node/incarnation, route/version, request/correlation IDs,
   and bounded projection fields. Request IDs do **not** implement deduplication.
 - `NodeInfoSource` is the destination's injected local observation port. The demo
-  adapts `forge-kernel::node`; this contract does not import that implementation.
+  adapts `forge-system::node`; this contract does not import that implementation.
 - `Destination<A>` registers only `node.info` in the **existing shared bridge**.
   It checks target, expiry, operation authorization and payload agreement before
   observing the source. Invalid projection/source failure is not a success.

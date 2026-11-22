@@ -4,15 +4,15 @@
 2026-11-22. Traced against main `c738faa`. Crate formalization complete
 22/22 (section 7); the `forge-core` merge is done (section 8);
 `forge-llama` and the demo crates were removed from the workspace
-(section 9). The `forge-kernel` and CI-matrix decisions below are
-still open.**
+(section 9); `forge-kernel` was renamed to `forge-system` (section 10).
+Only the CI-matrix decision below is still open.**
 
 ## Todo
 
 - [x] Decide the `forge-core` merge (eight contract crates into one) and the name — done, section 8
 - [x] Decide `forge-llama`: removed from the workspace (section 9)
 - [x] Decide the demo crates: removed from the workspace (section 9)
-- [ ] Decide `forge-kernel`: into `forge-core` as feature-gated modules, or separate
+- [x] Decide `forge-kernel`: kept separate, renamed to `forge-system` (section 10)
 - [x] Decide the layering enforcement: a layering test, or keep the eight crate boundaries — layering test, `forge-core/tests/layering.rs`
 - [ ] Rationalize the CI feature matrix (step two, after the layout decision) — pipeline split implemented in docs/architecture/ci-pipeline.md (branch/main gates, `make ci-main`, Jenkins + GitHub split); the one-combination cut (`forge-template` bare → check-only) in section 6 still needs a trial run
 
@@ -445,3 +445,52 @@ Verified: fmt clean; workspace tests 814 default / 910 all-features,
 0 failed; clippy `-D warnings` clean in both configurations;
 `check_dependencies.py`, `check_imports.py` (0 errors, 0 warnings),
 `rust_ast.py`, and the scripts discovery (110/110) all green.
+
+## 10. Rename: `forge-kernel` becomes `forge-system` (2026-11-22)
+
+Leonardo's call, the same day: the name was misleading — the crate is
+not an operating-system kernel, and every doc about it carried a
+disclaimer saying so. The new name says what it is: optional hosted
+system clients. The crate stays separate from `forge-core` (the section
+4 recommendation): it is implementation code with real `std::fs` calls
+in it, not a contract, so it does not belong in the zero-dependency
+core layer.
+
+What the crate is, for the record: two feature-gated modules.
+`disk` (default) is a native filesystem client — list, pwd,
+client-local cd, permission inspection — with a typed config, factory
+and registrar. `node` (opt-in) is a local identity and observation
+client — configured node id, compile-target facts, client-instance
+uptime — with no claim to machine health. Consumers: `forge-local`
+(always `node`, optional `disk`), `forge-agent` (`node`),
+`forge-remote-https` (`node`, dev only, for the loopback example).
+
+The rename covers the runtime surface too, not just the crate name:
+the factory bindings are now `system.node.client` and
+`system.disk.client`, and the group ids `system.node` and
+`system.disk` (they were `kernel.*`). Anything selecting a client by
+binding string — the terminal catalog, `system.commands`, the
+application tests — uses the new names. The disclaimers ("not a
+bootable kernel", "not an operating-system kernel") are gone from the
+crate docs and every doc that carried them; the name no longer needs
+one. What stays: the word "kernel" where it means the real thing —
+the Linux kernel in the research sources and systemd hardening
+directives, and the framework's "small kernel" concept (the minimal
+core, which is `forge-core`, not this crate).
+
+Also renamed with it: the plan and source-ledger docs
+(`forge-system-plan.md`, `forge-system-sources.md`), the DOT planning
+diagram (`07-hosted-system-plan`) and the M04 mermaid diagram
+(`m04-system-phases`, re-rendered with the pinned `mmdr` 0.3.1 and
+its hash manifest updated). The plan's anticipated "cohesive `system`
+module" became a "cohesive collector module" — a `system` module
+inside `forge-system` would have been the same confusion again.
+Historical docs (reviews, roadmap, proposals, the reuse map) keep
+their `forge-kernel` references as written.
+
+Measured after the rename: unchanged from section 9 — 15 crates, 32
+internal edges, max depth 4, 91,181 LOC — a rename moves no code.
+Verified the same way: fmt clean; workspace tests 814 default / 910
+all-features, 0 failed; clippy `-D warnings` clean in both
+configurations; the guards and the scripts discovery (110/110) green;
+`render.py --check` green for the mermaid diagrams.

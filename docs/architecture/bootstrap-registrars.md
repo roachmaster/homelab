@@ -16,7 +16,7 @@ The application chooses optional capability/implementation crates and supplies t
 
 A reusable implementation crate owns its concrete client, implementation dependencies, typed configuration (an enum when selecting supported modes), factories and registrar. It depends on the narrow contracts it implements; core never imports it. A caller needing another I/O mechanism selects another crate, not an extra dependency hidden in core. Pure computations need no I/O crate. Contract-only crates do not need meaningless registrars, and small coherent internals can remain modules.
 
-The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. The subsequently added [forge-kernel disk module](../../src/rust/forge-kernel/README.md) is a selected native filesystem client, not a mandatory integration or operating-system kernel.
+The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. The subsequently added [forge-system disk module](../../src/rust/forge-system/README.md) is a selected native filesystem client, not a mandatory integration.
 
 ## Configuration is not a command payload
 
@@ -36,7 +36,7 @@ A configuration enum can select only compatible implementations: fixed request/r
 
 ### Actual implemented composition
 
-The [local application](../../src/rust/forge-local/src/application.rs) calls two reusable registrars: the [node client](../../src/rust/forge-kernel/src/node.rs) and the optional [disk client](../../src/rust/forge-kernel/src/disk.rs). Reduced from that executable path (error mapping and the jobs group omitted):
+The [local application](../../src/rust/forge-local/src/application.rs) calls two reusable registrars: the [node client](../../src/rust/forge-system/src/node.rs) and the optional [disk client](../../src/rust/forge-system/src/disk.rs). Reduced from that executable path (error mapping and the jobs group omitted):
 
 ```rust,ignore
 let node = node::register(NodeConfig::Local { id: config.node_id })?;
@@ -54,7 +54,7 @@ No client/task is created during staging or freeze. The complete group's collisi
 
 ### Native client checkpoint
 
-The optional `disk` consumer feature calls `forge_kernel::disk::register` with an explicit absolute startup path. Registration checks configuration without filesystem access; only `DiskClientFactory::create` canonicalizes and validates the actual directory after freeze. New factory creations have independent cwd state. A retained singleton shares one navigation session; transient acquisition resets to the configured starting location. Core contracts remain unchanged. No environment lookup or process-wide cwd mutation occurs in the client.
+The optional `disk` consumer feature calls `forge_system::disk::register` with an explicit absolute startup path. Registration checks configuration without filesystem access; only `DiskClientFactory::create` canonicalizes and validates the actual directory after freeze. New factory creations have independent cwd state. A retained singleton shares one navigation session; transient acquisition resets to the configured starting location. Core contracts remain unchanged. No environment lookup or process-wide cwd mutation occurs in the client.
 
 ## Construction and provider lifetime
 

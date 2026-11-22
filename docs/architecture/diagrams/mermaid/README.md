@@ -1,13 +1,13 @@
 # Mermaid UML-like views
 
-Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** M11 shows implemented Forge IDE inspection. M12 shows the implemented HTTPS gateway; M13–M17 show the proposed two-machine IDE milestone. These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-kernel component planning view.
+Editable Mermaid sources and committed SVGs for the current Forge framework. **M01–M03 describe implemented synchronous code. M04 distinguishes the implemented local checkpoint from proposed later phases. M05/M06/M08 detail proposed future interfaces; M07 shows the implemented local counter lifecycle. M09/M10 describe the implemented optional template library and its development examples.** M11 shows implemented Forge IDE inspection. M12 shows the implemented HTTPS gateway; M13–M17 show the proposed two-machine IDE milestone. These complement, rather than replace, the existing [DOT/C4 architecture views](../README.md). M04 is a milestone view; DOT07 remains the hosted-system component planning view.
 
 | View | Status and purpose | Source | Image |
 | --- | --- | --- | --- |
 | M01 — Contracts | Independent execution/description traits, ownership and native examples | [Mermaid](m01-contracts.mmd) | [SVG](images/m01-contracts.svg) |
 | M02 — Bootstrap | Implemented disk singleton assembly, successful path | [Mermaid](m02-bootstrap.mmd) | [SVG](images/m02-bootstrap.svg) |
 | M03 — Request | Implemented checked list-current path, with rejection gates | [Mermaid](m03-disk-request.mmd) | [SVG](images/m03-disk-request.svg) |
-| M04 — Kernel phases | Implemented local system/jobs versus proposed remote phases | [Mermaid](m04-kernel-phases.mmd) | [SVG](images/m04-kernel-phases.svg) |
+| M04 — System phases | Implemented local system/jobs versus proposed remote phases | [Mermaid](m04-system-phases.mmd) | [SVG](images/m04-system-phases.svg) |
 | M09 — Template architecture | Implemented public integration and application-owned wiring | [Mermaid](m09-template-architecture.mmd) | [SVG](images/m09-template-architecture.svg) |
 | M10 — Template rendering | Implemented validation, method chains and escaped output | [Mermaid](m10-template-render.mmd) | [SVG](images/m10-template-render.svg) |
 
@@ -36,13 +36,13 @@ This is the successful `DiskApplication` assembly path. The disk registrar is an
 
 ![Implemented list-current request, header admission gates, task and native client](images/m03-disk-request.svg)
 
-The main arrows show **success**, with rejection points annotated rather than alternate executions drawn over the same path. Exact header destination/version lookup precedes admission, which precedes registered payload-kind consistency. Unknown route, denied policy or mismatched variant returns a typed error before calling the task/client. The task prepares `DiskRequest::List`; the injected handle acquires the singleton client; native filesystem inspection preserves paths and sorts entries. I/O errors propagate, not hidden retries. Header routing does not guess from payloads. The demo admission flag is not production authentication, and the current bridge is synchronous and not `Send`/`Sync`-shareable unchanged. A separate change-directory binding updates only client-local state after successful validation. See [typed ingress](../../framework-dsl.md) and [disk semantics](../../../../src/rust/forge-kernel/README.md).
+The main arrows show **success**, with rejection points annotated rather than alternate executions drawn over the same path. Exact header destination/version lookup precedes admission, which precedes registered payload-kind consistency. Unknown route, denied policy or mismatched variant returns a typed error before calling the task/client. The task prepares `DiskRequest::List`; the injected handle acquires the singleton client; native filesystem inspection preserves paths and sorts entries. I/O errors propagate, not hidden retries. Header routing does not guess from payloads. The demo admission flag is not production authentication, and the current bridge is synchronous and not `Send`/`Sync`-shareable unchanged. A separate change-directory binding updates only client-local state after successful validation. See [typed ingress](../../framework-dsl.md) and [disk semantics](../../../../src/rust/forge-system/README.md).
 
-## M04 — Local checkpoint and proposed kernel phases
+## M04 — Local checkpoint and proposed system phases
 
-![Existing core and disk foundation followed by proposed hosted kernel phases](images/m04-kernel-phases.svg)
+![Existing core and disk foundation followed by proposed hosted system phases](images/m04-system-phases.svg)
 
-The foundation, local node/discovery/terminal and explicitly stepped counter jobs are implemented. Teal marks existing code; amber marks proposed phases; gray marks host responsibilities or later gates. Later phase arrows show recommended delivery order, not runtime calls. The narrow M12 node-info proof selects optional mutual-TLS HTTPS on loopback; reachable remote deployment remains future. Jobs are not OS processes, and cancellation is cooperative. The host OS still supplies protected memory, processes and drivers. This is not a bootable kernel or a tested Raspberry Pi deployment. Follow the [researched kernel plan](../../forge-kernel-plan.md) for acceptance gates and open decisions.
+The foundation, local node/discovery/terminal and explicitly stepped counter jobs are implemented. Teal marks existing code; amber marks proposed phases; gray marks host responsibilities or later gates. Later phase arrows show recommended delivery order, not runtime calls. The narrow M12 node-info proof selects optional mutual-TLS HTTPS on loopback; reachable remote deployment remains future. Jobs are not OS processes, and cancellation is cooperative. The host OS still supplies protected memory, processes and drivers. This is not a bootable kernel or a tested Raspberry Pi deployment. Follow the [researched kernel plan](../../forge-system-plan.md) for acceptance gates and open decisions.
 
 ## Proposed foundation interfaces
 

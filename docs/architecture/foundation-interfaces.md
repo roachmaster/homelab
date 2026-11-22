@@ -18,7 +18,7 @@ signatures below are candidate contracts, not existing exports or a stability
 promise. Preserve the invariants; earn API stability through implementation,
 consumer tests and failure tests before freezing exact signatures.
 
-This refines the [kernel plan](forge-kernel-plan.md), not a replacement for it.
+This refines the [system plan](forge-system-plan.md), not a replacement for it.
 [Interface sketches](foundation-contracts.md) · [UML-like gallery](diagrams/mermaid/README.md#proposed-foundation-interfaces)
 
 ## 1. What we keep, and what is actually missing
@@ -51,12 +51,12 @@ no ceremonial registrar.
 
 | Unit and candidate home | Internal modules / visibility | Imports and forbidden knowledge |
 | --- | --- | --- |
-| Access, `forge_core::access` | Public `identity` facts/context and `policy` queries; private context issuance; `audit` bounded event contract | May use ingress `RouteKey` for action identity. No jobs, remote transport, database, kernel or credential SDK import |
+| Access, `forge_core::access` | Public `identity` facts/context and `policy` queries; private context issuance; `audit` bounded event contract | May use ingress `RouteKey` for action identity. No jobs, remote transport, database, system clients or credential SDK import |
 | Jobs, `forge-local::jobs` initially; `forge-jobs` candidate | Public `contract`, `program`, `service`; private `engine`, `admission`, `retention`, `intent`; `assembly` owns config/recipe/registrar if packaged | Access's narrow identity/policy types, optional command descriptions; bootstrap/provider in assembly. No terminal, network, concrete disk client, global business enum or mandatory Task dependency |
 | Remote boundary, `forge-remote` candidate | `address`, `call`, `outcome`; small `peer` resolution contract | Existing ingress and I/O-client contracts. Target-node identity is distinct from operation routing. No jobs policy, concrete protocol or credential provider |
 | Selected network/credential implementation, name chosen later | Private framing/codec/connection/verification modules; public typed config and cohesive registrar | Imports the contracts it implements plus its chosen libraries. Never imported by the existing core or by jobs |
 | Application, existing `forge-local` or a separately justified host | `composition`, finite `commands`, private `verified_ingress`, `job_pump`, capability-owned codecs | Owns selected implementations, result sum and route bindings. Keeps dependency wiring separate from job/business policy |
-| Native systems, existing `forge-kernel` | Related `disk`/`node` modules; later low-level clients only when needed | Remains hosted native I/O. Jobs, credential verification and transport do not become kernel catch-all modules |
+| Native systems, existing `forge-system` | Related `disk`/`node` modules; later low-level clients only when needed | Remains hosted native I/O. Jobs, credential verification and transport do not become system catch-all modules |
 
 The proposed normal-import direction is application → capabilities/contracts and
 selected adapters → their consumed contracts. Jobs may depend on access; access

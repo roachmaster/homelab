@@ -57,7 +57,7 @@ help:
 	  '  make ui-qa             Build and run sandboxed headless Chrome QA + reports' \
 	  '  make ui-qa-check       Test QA reporting/orchestration (not browser evidence)' \
 	  '  make remote            One-shot mutual-TLS node.info loopback demo' \
-	  '  make asm               Release assembly for forge-kernel library' \
+	  '  make asm               Release assembly for forge-system library' \
 	  '' \
 	  'Selections: PACKAGE=forge-terminal FEATURES=disk NO_DEFAULT_FEATURES=1' \
 	  '            ALL_FEATURES=1 (exclusive with FEATURES/NO_DEFAULT_FEATURES)' \
@@ -129,7 +129,7 @@ ci:
 	$(MAKE) test PACKAGE=forge-local FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test lint PACKAGE=forge-terminal FEATURES=jobs ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test lint PACKAGE=forge-terminal FEATURES=disk ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
-	$(MAKE) test PACKAGE=forge-kernel FEATURES=node ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
+	$(MAKE) test PACKAGE=forge-system FEATURES=node ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) test lint PACKAGE=forge-ide-web FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) ui-check
 	$(MAKE) ui-qa-check

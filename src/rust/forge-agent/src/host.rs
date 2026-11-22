@@ -25,7 +25,6 @@ use forge_ide::{
     remote::{RemoteInspectInput, RemoteInspectTask, ReportLimits, IDE_INSPECT},
     task::{InspectRequest, InspectTask},
 };
-use forge_kernel::node::{self, NodeClient, NodeCommand, NodeConfig, NodeResponse, NodeTask};
 use forge_remote::{
     now_unix_ms, NodeInfo, ReadNodeInfo, ReadNodeInput, ReadNodeTask, RemoteError, NODE_INFO,
 };
@@ -34,6 +33,7 @@ use forge_remote_https::{
     ide::{register_ide_client, IdeClientConfig},
     register_client,
 };
+use forge_system::node::{self, NodeClient, NodeCommand, NodeConfig, NodeResponse, NodeTask};
 use std::{
     collections::BTreeMap,
     path::Path,

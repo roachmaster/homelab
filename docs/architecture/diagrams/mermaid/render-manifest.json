@@ -10,8 +10,8 @@
     "package.json": "46866aab7ea4da9af89363b8ed83bdbba3b5f0b6de722d586501a741799b5070",
     "package-lock.json": "1065d0fa34545caf273df56db4e75e0685268c691955c0f807317fa87b2e91b2",
     "mermaid-config.json": "078a55cf5eab105ecdc62b18ae4ba56675c5b661a0c34a4cbc116c4635de3800",
-    "render.py": "a9b6521d72b2727a9e412f597aee92ae6b57c1ee4cfbc4c79c26fb9b3c65c52f",
-    "validate.mjs": "a131c9ed69a54cf7bd8d5fa8ac6360eea1ef1de13e57c80b03d353b38f43a6f2"
+    "render.py": "b64faca0f7b8939084e78f4089dc1a1510a17a34af0372cbb5b92544114b96fb",
+    "validate.mjs": "bc1e910167266932c90c7d84725f3e97aa34c97027baf26d39188fbef5280a4e"
   },
   "diagrams": [
     {
@@ -33,10 +33,10 @@
       "svg_sha256": "318261922190db33e44df83bf867d366214b68b611401651f6febca6b1e53205"
     },
     {
-      "source": "m04-kernel-phases.mmd",
-      "source_sha256": "a07a75946dbfcaf2de91a6011c46c248ad64268bff82dc86bee42cc30bce9561",
-      "svg": "images/m04-kernel-phases.svg",
-      "svg_sha256": "c09d5e95611f8fc9534486f63a66d6ca9c12652119a0fedf5d35159bfba2d8b5"
+      "source": "m04-system-phases.mmd",
+      "source_sha256": "41ca029ce5c90e2696d6d75f3024a52ea752e602cf03a2cf33e95a5687e2d8ca",
+      "svg": "images/m04-system-phases.svg",
+      "svg_sha256": "15863c47bc5dfbb771e8d45167db71705147aee881885fd7b7692f4af4e00be8"
     },
     {
       "source": "m05-foundation-modules.mmd",

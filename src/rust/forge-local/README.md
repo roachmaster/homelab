@@ -1,8 +1,8 @@
 # Forge local application
 
 A runnable **synchronous local application**, separate from the execution/description
-contracts and from its terminal adapter. It composes `forge-kernel::node` and an
-optional `forge-kernel::disk` through typed configuration and package registrars.
+contracts and from its terminal adapter. It composes `forge-system::node` and an
+optional `forge-system::disk` through typed configuration and package registrars.
 The application owns its finite `Command`/`Output` enums; core has no business enum.
 
 ## Bounded local jobs (optional)
@@ -87,10 +87,9 @@ not those business input enums.
 | `disk.permissions` | Native permission metadata, not effective access |
 
 The last four exist only with the `disk` Cargo feature **and** selected startup
-configuration. A no-default-features build compiles the kernel's `node` module but
-not its `disk` module. Both share one cohesive optional kernel crate; omission is
-a module/feature proof, not a claim that the entire kernel package vanishes.
-The older pure demo still excludes the entire kernel and I/O/provider packages.
+configuration. A no-default-features build compiles the system's `node` module but
+not its `disk` module. Both share one cohesive optional system crate; omission is
+a module/feature proof, not a claim that the entire system package vanishes.
 
 Node status is not machine boot uptime, CPU/memory telemetry, disk readiness or
 whole-host health. Configured node IDs are labels, not authenticated identities.

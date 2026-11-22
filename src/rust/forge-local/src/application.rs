@@ -12,8 +12,8 @@ use forge_core::io_client::IoClient;
 use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_core::task::Task;
 #[cfg(feature = "disk")]
-use forge_kernel::disk::{DiskError, DiskResponse};
-use forge_kernel::node::{
+use forge_system::disk::{DiskError, DiskResponse};
+use forge_system::node::{
     self, NodeCommand, NodeConfig, NodeConfigError, NodeError, NodeFactories, NodeRequest,
     NodeResponse, NodeTask,
 };
@@ -204,7 +204,7 @@ pub enum BootstrapError {
     #[cfg(feature = "jobs")]
     Jobs(crate::jobs::JobsConfigError),
     #[cfg(feature = "disk")]
-    DiskConfig(forge_kernel::disk::ConfigError),
+    DiskConfig(forge_system::disk::ConfigError),
     #[cfg(feature = "disk")]
     DiskFactory(DiskError),
     Registration(RegistrationError),
@@ -516,7 +516,7 @@ impl Application {
             .map_err(|e| BootstrapError::Registration(e.reason().clone()))?;
         #[cfg(feature = "disk")]
         if let Some(initial_directory) = config.disk_directory {
-            let disk = forge_kernel::disk::register(forge_kernel::disk::DiskConfig::Native {
+            let disk = forge_system::disk::register(forge_system::disk::DiskConfig::Native {
                 initial_directory,
             })
             .map_err(BootstrapError::DiskConfig)?;
@@ -624,7 +624,7 @@ impl Application {
 struct Resources<C> {
     node: C,
     #[cfg(feature = "disk")]
-    disk: Option<forge_kernel::disk::DiskClient>,
+    disk: Option<forge_system::disk::DiskClient>,
 }
 fn finish_registration<G, C>(
     pending: Registry<G>,

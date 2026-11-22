@@ -24,7 +24,7 @@ serde_json = "1"
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
-forge-kernel = { path = "../forge-kernel", default-features = false, features = ["node"] }
+forge-system = { path = "../forge-system", default-features = false, features = ["node"] }
 forge-core.workspace = true
 
 [lints]

@@ -209,8 +209,8 @@ impl<C: RemoteNodeClient> Task for ReadNodeTask<C> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReadNodeInfo;
-/// Local observation seam. A host adapts its existing kernel client here; the
-/// remote contract does not import a concrete kernel or assume health probes.
+/// Local observation seam. A host adapts its existing system client here; the
+/// remote contract does not import a concrete system client or assume health probes.
 pub trait NodeInfoSource:
     IoClient<Request = ReadNodeInfo, Response = NodeInfo, Error = RemoteError>
 {

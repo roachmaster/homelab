@@ -6,14 +6,14 @@ publish.workspace = true
 
 [features]
 default = ["disk", "jobs"]
-disk = ["forge-kernel/disk"]
+disk = ["forge-system/disk"]
 jobs = []
 jenkins = ["dep:forge-jenkins"]
 
 [dependencies]
 forge-core.workspace = true
 forge-jenkins = { path = "../forge-jenkins", default-features = false, optional = true }
-forge-kernel = { path = "../forge-kernel", default-features = false, features = ["node"] }
+forge-system = { path = "../forge-system", default-features = false, features = ["node"] }
 
 [lints]
 workspace = true

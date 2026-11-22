@@ -65,17 +65,17 @@
 <path fill="none" stroke="#56717d" stroke-width="1.3" d="M901.5,-637.82C898.68,-599.98 889.63,-536.57 860.75,-491 842.66,-462.46 815.67,-437.64 789.2,-417.87"/>
 <polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="790.45,-415.53 782.85,-413.21 787.34,-419.76 790.45,-415.53"/>
 </g>
-<!-- kernel -->
+<!-- system -->
 <g id="node6" class="node">
-<title>kernel</title>
+<title>system</title>
 <path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1283.25,-227C1283.25,-227 1058.25,-227 1058.25,-227 1052.25,-227 1046.25,-221 1046.25,-215 1046.25,-215 1046.25,-173 1046.25,-173 1046.25,-167 1052.25,-161 1058.25,-161 1058.25,-161 1283.25,-161 1283.25,-161 1289.25,-161 1295.25,-167 1295.25,-173 1295.25,-173 1295.25,-215 1295.25,-215 1295.25,-221 1289.25,-227 1283.25,-227"/>
-<text text-anchor="middle" x="1170.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;kernel</text>
+<text text-anchor="middle" x="1170.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;system</text>
 <text text-anchor="middle" x="1170.75" y="-190.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional disk / node modules</text>
 <text text-anchor="middle" x="1170.75" y="-176.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed clients / config / registrars</text>
 </g>
-<!-- agent&#45;&gt;kernel -->
+<!-- agent&#45;&gt;system -->
 <g id="edge4" class="edge">
-<title>agent&#45;&gt;kernel</title>
+<title>agent&#45;&gt;system</title>
 <path fill="none" stroke="#56717d" stroke-width="1.3" d="M975.84,-637.85C990.49,-628.86 1004.75,-617.93 1015.75,-605 1111.71,-492.25 1151.34,-314.05 1164.83,-235.02"/>
 <polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1167.49,-235.06 1166.13,-227.23 1162.31,-234.2 1167.49,-235.06"/>
 </g>
@@ -148,9 +148,9 @@
 <path fill="none" stroke="#56717d" stroke-width="1.3" d="M1335.62,-147.5C1279.11,-126.95 1212.79,-102.83 1157.56,-82.75"/>
 <polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1158.14,-80.17 1150.2,-80.07 1156.35,-85.1 1158.14,-80.17"/>
 </g>
-<!-- kernel&#45;&gt;core -->
+<!-- system&#45;&gt;core -->
 <g id="edge10" class="edge">
-<title>kernel&#45;&gt;core</title>
+<title>system&#45;&gt;core</title>
 <path fill="none" stroke="#56717d" stroke-width="1.3" d="M1143.6,-160.76C1125.34,-139.07 1101,-110.17 1080.8,-86.19"/>
 <polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1082.6,-84.25 1075.77,-80.21 1078.59,-87.63 1082.6,-84.25"/>
 </g>
@@ -162,9 +162,9 @@
 <text text-anchor="middle" x="1497.75" y="-362.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed application composition</text>
 <text text-anchor="middle" x="1497.75" y="-348.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Registered catalog + node / optional disk/jobs</text>
 </g>
-<!-- local&#45;&gt;kernel -->
+<!-- local&#45;&gt;system -->
 <g id="edge11" class="edge">
-<title>local&#45;&gt;kernel</title>
+<title>local&#45;&gt;system</title>
 <path fill="none" stroke="#56717d" stroke-width="1.3" d="M1435.86,-332.82C1379.81,-303.69 1297.38,-260.83 1239.34,-230.66"/>
 <polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1240.25,-228.17 1232.39,-227.04 1237.83,-232.83 1240.25,-228.17"/>
 </g>

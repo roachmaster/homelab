@@ -18,9 +18,9 @@ Start Forge capability and adapter work with [Wire Forge Providers](.agents/skil
 - [Remote Forge IDE: implementation and original proposal](docs/architecture/proposals/remote-ide.md) · [visual PDF](docs/architecture/proposals/remote-ide-proposal.pdf) · [five Mermaid/SVG views](docs/architecture/diagrams/mermaid/README.md#remote-ide-proposal).
 - [Detailed future jobs, access and remote interfaces](docs/architecture/foundation-interfaces.md) — proposed modules, typed contracts and ownership/state diagrams.
 - [Implementation roadmap](docs/roadmap/forge-framework.md).
-- [Hosted kernel research and phased plan](docs/architecture/forge-kernel-plan.md): implemented local node/status and bounded jobs, plus a narrow authenticated network proof; remote deployment remains future.
+- [Hosted system research and phased plan](docs/architecture/forge-system-plan.md): implemented local node/status and bounded jobs, plus a narrow authenticated network proof; remote deployment remains future.
 
-The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-kernel disk module](src/rust/forge-kernel/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. Broader federation and framework automation remain proposals; authenticated durable jobs and managed writes now have separate concrete implementations; earlier repository reviews are not fresh build/test certifications.
+The [first Rust core](src/rust/README.md) now implements typed contracts, a synchronous shared bridge, factory/provider/lease primitives, independent I/O-client/task contracts, and atomic typed bootstrap registration with runnable optional-package consumers and focused tests. An optional [forge-system disk module](src/rust/forge-system/README.md) adds native filesystem inspection and client-local navigation without shell commands. It is a hosted system-client crate, not a bootable OS. Broader federation and framework automation remain proposals; authenticated durable jobs and managed writes now have separate concrete implementations; earlier repository reviews are not fresh build/test certifications.
 
 ## Forge GPU inference
 
@@ -62,7 +62,7 @@ make ci                      # native + actual WASM/generation gates
 make ui-build                # generated assets; requires WASM target + Node
 make ui ARGS='--help'         # configured loopback IDE web host
 make ui-qa                   # build + sandboxed headless Chrome QA and reports
-make asm                     # release assembly for the kernel library
+make asm                     # release assembly for the system library
 ```
 
 The [root Makefile](Makefile) wraps Cargo in `src/rust/`; [target/feature selection,
@@ -179,7 +179,7 @@ make ide ARGS='inspect src/rust/forge-task'
 - [Contracts: SVG](docs/architecture/diagrams/mermaid/images/m01-contracts.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m01-contracts.mmd)
 - [Bootstrap sequence: SVG](docs/architecture/diagrams/mermaid/images/m02-bootstrap.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m02-bootstrap.mmd)
 - [Typed disk request: SVG](docs/architecture/diagrams/mermaid/images/m03-disk-request.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m03-disk-request.mmd)
-- [Local checkpoint and planned phases: SVG](docs/architecture/diagrams/mermaid/images/m04-kernel-phases.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m04-kernel-phases.mmd)
+- [Local checkpoint and planned phases: SVG](docs/architecture/diagrams/mermaid/images/m04-system-phases.svg) · [Mermaid source](docs/architecture/diagrams/mermaid/m04-system-phases.mmd)
 
 The **broader foundation** has a proposed module/interface set, with the narrow local counter lifecycle now implemented:
 
@@ -189,7 +189,7 @@ The **broader foundation** has a proposed module/interface set, with the narrow 
 
 M07 describes the implemented local counter lifecycle. The generic module/interface model and remote/authentication flows remain design artifacts, not completed services.
 
-[Diagram captions and reproducible local rendering](docs/architecture/diagrams/mermaid/README.md) distinguish implemented code from the [kernel plan](docs/architecture/forge-kernel-plan.md). No remote transport or bootable OS is implemented by these diagrams.
+[Diagram captions and reproducible local rendering](docs/architecture/diagrams/mermaid/README.md) distinguish implemented code from the [system plan](docs/architecture/forge-system-plan.md). No remote transport or bootable OS is implemented by these diagrams.
 
 ## Source sets
 

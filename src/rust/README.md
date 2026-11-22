@@ -32,11 +32,11 @@ payload fallback, transport library in core, global enum, global registry or ser
 
 ## Optional native system clients
 
-[`forge-kernel`](forge-kernel/README.md) groups hosted low-level clients; `disk` is the first module. Its real native filesystem operations are list, pwd, client-local cd and permission inspection. It imports forge-core contracts; core never imports it. No shell wrapper, process cwd mutation, file mutation API, bootable OS or Raspberry Pi image is included. The opt-in `node` module adds configured identity, compile-target facts and client-instance uptime; it does not claim machine health. `disk` remains enabled by default for existing consumers. New local consumers select kernel features explicitly.
+[`forge-system`](forge-system/README.md) groups hosted low-level clients; `disk` is the first module. Its real native filesystem operations are list, pwd, client-local cd and permission inspection. It imports forge-core contracts; core never imports it. No shell wrapper, process cwd mutation or file mutation API is included. The opt-in `node` module adds configured identity, compile-target facts and client-instance uptime; it does not claim machine health. `disk` remains enabled by default for existing consumers. New local consumers select system features explicitly.
 
 ## Runnable local system
 
-- [`forge-local`](forge-local/README.md) owns explicit node/disk/optional-jobs composition, per-application providers, typed command/result sums and registered command descriptors. It imports the forge-core contracts and selected kernel modules; no core imports it.
+- [`forge-local`](forge-local/README.md) owns explicit node/disk/optional-jobs composition, per-application providers, typed command/result sums and registered command descriptors. It imports the forge-core contracts and selected system modules; no core imports it.
 - [`forge-terminal`](forge-terminal/README.md) supplies the ordinary `forge` binary using the local application and injected console I/O, with core-contract ownership. Its optional `durable-jobs` feature adds a separate Unix `forge-jobs` executable and the selected jobs/store/signal dependencies; those are not mandatory terminal or core dependencies.
 
 ```bash
@@ -46,7 +46,7 @@ cargo run -p forge-terminal -- --session
 cargo run -p forge-terminal --no-default-features -- node.status
 ```
 
-The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them at assembly. `--no-default-features` omits both modules; add `--features jobs` or `--features disk` to select one. The node module still requires the kernel package; the older pure demo below remains the proof of whole-package omission. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. [Local jobs](forge-local/JOBS.md) are volatile pure counters, not OS processes; only explicit step advances computation. No network or destructive file operations are added.
+The default terminal enables disk and jobs; `--no-disk` / `--no-jobs` omit them at assembly. `--no-default-features` omits both modules; add `--features jobs` or `--features disk` to select one. The node module still requires the system package. Discovery/help and commands all pass the same bridge. Status means the node client responded, not that all resources are healthy. [Local jobs](forge-local/JOBS.md) are volatile pure counters, not OS processes; only explicit step advances computation. No network or destructive file operations are added.
 
 ## Optional verified access and durable jobs
 
@@ -167,7 +167,7 @@ features required by every selected consumer.
 ```bash
 make test PACKAGE=forge-core
 make test ALL_FEATURES=1
-make test PACKAGE=forge-kernel NO_DEFAULT_FEATURES=1 FEATURES=node
+make test PACKAGE=forge-system NO_DEFAULT_FEATURES=1 FEATURES=node
 make run ARGS='--node-id desk node.info'
 make run NO_DEFAULT_FEATURES=1 ARGS='--help'
 make session ARGS='--cwd "/path with spaces"'
@@ -184,9 +184,9 @@ running terminal, the separate literal-path session grammar still applies.
 ### Generate actual assembly
 
 ```bash
-make asm                                              # forge-kernel --lib
+make asm                                              # forge-system --lib
 make asm PACKAGE=forge-terminal ASM_TARGET=bin:forge    # concrete application
-make asm PACKAGE=forge-kernel FEATURES=node NO_DEFAULT_FEATURES=1
+make asm PACKAGE=forge-system FEATURES=node NO_DEFAULT_FEATURES=1
 make asm NATIVE=1                                      # explicit host-CPU tuning
 ```
 
@@ -217,7 +217,7 @@ can also affect output. See [rustc code-generation options](https://doc.rust-lan
    strict no-dependency Rustdoc.
 3. Node-only terminal tests/Clippy and local-application tests, plus separate jobs-only and disk-only terminal tests/Clippy.
 4. Pure demo tests/Clippy, then separate messages-only and disk-only demo tests.
-5. Node-only kernel tests and optional UI facade default-profile checks.
+5. Node-only system tests and optional UI facade default-profile checks.
 6. Deterministic generated assets, JavaScript grammar, actual WASM ABI and isolated worker-fault tests (`make ui-check`).
 7. Headless-QA reporting/orchestration regressions (`make ui-qa-check` plus the Python helper tests).
 

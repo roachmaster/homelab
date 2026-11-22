@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const CLIENT_BINDING: &str = "kernel.node.client";
+pub const CLIENT_BINDING: &str = "system.node.client";
 pub const MAX_NODE_ID_BYTES: usize = 128;
 
 /// Explicit startup input owned by the capability, not a runtime command.
@@ -64,7 +64,7 @@ pub fn register(config: NodeConfig) -> Result<PreparedGroup<NodeFactories>, Node
         return Err(NodeConfigError::InvalidId);
     }
     PreparedGroup::new(
-        "kernel.node",
+        "system.node",
         &[CLIENT_BINDING],
         &[],
         NodeFactories {

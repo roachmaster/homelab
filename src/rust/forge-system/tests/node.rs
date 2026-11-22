@@ -2,7 +2,7 @@ use forge_core::bootstrap::{RegistrationError, Registry};
 use forge_core::io_client::IoClient;
 use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
 use forge_core::task::Task;
-use forge_kernel::node::*;
+use forge_system::node::*;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 fn factory(id: &str) -> NodeClientFactory {
@@ -53,7 +53,7 @@ fn config_is_explicit_bounded_and_safe_for_presentation() {
 #[test]
 fn registrar_stages_only_a_typed_group_and_duplicates_preserve_original() {
     let group = register(NodeConfig::Local { id: "first".into() }).unwrap();
-    assert_eq!(group.info().id(), "kernel.node");
+    assert_eq!(group.info().id(), "system.node");
     assert_eq!(group.info().provides(), &[CLIENT_BINDING]);
     assert!(group.info().requires().is_empty());
     let registry = Registry::new().register(group).unwrap();
@@ -67,7 +67,7 @@ fn registrar_stages_only_a_typed_group_and_duplicates_preserve_original() {
         .unwrap_err();
     assert_eq!(
         rejection.reason(),
-        &RegistrationError::DuplicateGroup("kernel.node".into())
+        &RegistrationError::DuplicateGroup("system.node".into())
     );
     let (original, _incoming, _) = rejection.into_parts();
     let ((), factories) = original.freeze().unwrap().into_factories();
@@ -197,7 +197,7 @@ fn task_rejects_a_substituted_clients_wrong_response_kind() {
 fn command_description_is_optional_separate_and_has_no_client_bound_or_execution() {
     use forge_core::command::{validate_descriptors, DescribeCommand};
     // () is not a node client: reading metadata cannot require executing one.
-    let task = forge_kernel::node::NodeTask::new(());
+    let task = forge_system::node::NodeTask::new(());
     let descriptions = task.descriptors();
     validate_descriptors(descriptions).unwrap();
     assert_eq!(

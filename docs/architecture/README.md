@@ -33,6 +33,6 @@ Current synchronous core, native/remote adapters, authenticated durable job capa
 
 ## Evidence and historical plans
 
-[Mermaid implementation/proposal gallery](diagrams/mermaid/README.md) · [C4/DOT architecture views](diagrams/README.md) · [Remote node proof](remote-node-info.md) · [Remote IDE record](proposals/remote-ide.md) · [Hosted kernel plan](forge-kernel-plan.md) · [Source ledger](forge-kernel-sources.md) · [Decisions](decisions.md).
+[Mermaid implementation/proposal gallery](diagrams/mermaid/README.md) · [C4/DOT architecture views](diagrams/README.md) · [Remote node proof](remote-node-info.md) · [Remote IDE record](proposals/remote-ide.md) · [Hosted system plan](forge-system-plan.md) · [Source ledger](forge-system-sources.md) · [Decisions](decisions.md).
 
 Retained PDFs and original schematic views are dated records. Current source/API guides, source/configuration audits and fresh validation records establish present behavior. A plan, picture or successful localhost fixture does not establish production enablement.

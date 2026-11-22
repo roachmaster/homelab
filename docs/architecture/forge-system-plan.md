@@ -1,9 +1,9 @@
-# Forge hosted kernel research and implementation plan
+# Forge hosted system research and implementation plan
 
 **Recommendation:** keep Forge as a small, hosted application kernel on top of the
 existing OS. Add **local node information and truthful status first**, then a
 bounded job lifecycle, then one explicitly selected remote boundary. Reuse the
-six core crates and optional `forge-kernel` clients; do not start a new kernel,
+six core crates and optional `forge-system` clients; do not start a new kernel,
 distributed scheduler or shell platform.
 
 **Current checkpoint — 18 November 2026:** local node/disk/terminal and the
@@ -24,8 +24,8 @@ localhost tests are distinct from deployment and credential provisioning in the
 [service inventory](forge-ide-system-inventory.yaml). See the
 [current implementation inventory](forge-framework-blueprint.md#current-implementation).
 
-[Source ledger](forge-kernel-sources.md) · [Plan diagram](diagrams/07-hosted-kernel-plan.svg) ·
-[Existing bootstrap](bootstrap-registrars.md) · [Current disk client](../../src/rust/forge-kernel/README.md)
+[Source ledger](forge-system-sources.md) · [Plan diagram](diagrams/07-hosted-system-plan.svg) ·
+[Existing bootstrap](bootstrap-registrars.md) · [Current disk client](../../src/rust/forge-system/README.md)
 
 The [Pi Cluster Control review](../reviews/forge/pi-cluster-control.md) supplies historical node/coordinator use cases for this sequence. Its cluster behavior remains specification, not an implemented control plane; it adds no mandatory crate, transport or provisioning dependency.
 
@@ -64,7 +64,7 @@ does not replace those controls. [Linux cgroup v2 documentation](https://docs.ke
 | [Bootstrap](../../src/rust/forge-core/src/bootstrap.rs) | Atomic typed groups, dependency-order validation, consuming freeze | No automatic graph execution, route catalog or managed host lifecycle |
 | [Provider](../../src/rust/forge-core/src/provider.rs) | Explicit factories, singleton/transient ownership and leases | No pools, request scopes, async construction or service locator |
 | [Task](../../src/rust/forge-core/src/task.rs) and [IoClient](../../src/rust/forge-core/src/io_client.rs) | Task prepares/computes/orchestrates; client executes typed prepared requests | `run`/`execute` may block; neither supplies a scheduler or cancellation |
-| [Kernel disk module](../../src/rust/forge-kernel/src/disk.rs) | Native list/pwd/cd/permissions; config/factory/registrar | No sandbox, file mutation, bounded listing, remote codec or per-user session manager |
+| [System disk module](../../src/rust/forge-system/src/disk.rs) | Native list/pwd/cd/permissions; config/factory/registrar | No sandbox, file mutation, bounded listing, remote codec or per-user session manager |
 
 Current executed checks, including the new local application/terminal tests, are recorded in the [Rust workspace guide](../../src/rust/README.md). The earlier research-only pass did not execute source tests.
 The demo's caller-controlled admission flag is **not authentication**.
@@ -88,7 +88,7 @@ network reconfiguration and device management in these initial phases.
 
 ## Phase 1 Local node information and status
 
-**Implemented narrow checkpoint:** [`forge-kernel::node`](../../src/rust/forge-kernel/README.md), [`forge-local`](../../src/rust/forge-local/README.md) and [`forge-terminal`](../../src/rust/forge-terminal/README.md) now provide the local runnable system. The terminal selects typed startup config, obtains admitted command discovery and invokes node/disk requests through the shared bridge. Node status means the observation client responded and reports its own uptime—not whole-host readiness. Actual selected route/version descriptors are returned by `system.commands`. Disk remains optional at Cargo feature and startup-selection boundaries. Generic readiness, resource telemetry and a managed lifecycle remain deferred.
+**Implemented narrow checkpoint:** [`forge-system::node`](../../src/rust/forge-system/README.md), [`forge-local`](../../src/rust/forge-local/README.md) and [`forge-terminal`](../../src/rust/forge-terminal/README.md) now provide the local runnable system. The terminal selects typed startup config, obtains admitted command discovery and invokes node/disk requests through the shared bridge. Node status means the observation client responded and reports its own uptime—not whole-host readiness. Actual selected route/version descriptors are returned by `system.commands`. Disk remains optional at Cargo feature and startup-selection boundaries. Generic readiness, resource telemetry and a managed lifecycle remain deferred.
 
 **Original phase direction (broader than this checkpoint):** add one coherent node module to the consumer,
 with two typed request variants and two bridge bindings. No new core crate is
@@ -128,7 +128,7 @@ checkpointable computation—not arbitrary executable paths or blocking disk wor
 Use an application/capability-owned job module; extract a separate reusable
 package only when the boundary has a real consumer. That extraction now exists as
 `forge-jobs` for durable bounded sum work. Do not put
-workflow policy into `forge-kernel`, the bridge or a global business enum.
+workflow policy into `forge-system`, the bridge or a global business enum.
 
 Implemented local counter state model: accepted/queued → running → succeeded or failed. A cancel
 request records intent; it becomes **cancelled only after execution has stopped**.
@@ -241,7 +241,7 @@ anything now.
 
 ## Keep native access safe and optional
 
-`forge-kernel` may gain a cohesive `system` module when an actual native collector
+`forge-system` may gain a cohesive collector module when an actual native collector
 is needed. Keep its platform-specific code/config/factory/registrar beside `disk`;
 do not add empty modules now. Resource readings should identify units, sample age
 and unsupported fields. Queue budgets are application controls; hard process
@@ -272,7 +272,7 @@ application chooses optional packages + typed startup configuration
   -> publish host; later, attach one selected input/remote adapter
 ```
 
-Core remains dependency-inward. `forge-kernel` owns native mechanisms; node/job
+Core remains dependency-inward. `forge-system` owns native mechanisms; node/job
 policy belongs to capability modules, host lifecycle to composition, and remote
 encoding to its optional adapter. No mandatory new crate per command or lifecycle
 trait, dynamic plugin ABI, universal DI container or global service locator is

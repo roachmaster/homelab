@@ -292,9 +292,9 @@ dependencies = [
  "ctrlc",
  "forge-core",
  "forge-ide",
- "forge-kernel",
  "forge-remote",
  "forge-remote-https",
+ "forge-system",
  "nix",
  "rcgen",
  "rustls",
@@ -396,19 +396,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-kernel"
-version = "0.1.0"
-dependencies = [
- "forge-core",
-]
-
-[[package]]
 name = "forge-local"
 version = "0.1.0"
 dependencies = [
  "forge-core",
  "forge-jenkins",
- "forge-kernel",
+ "forge-system",
 ]
 
 [[package]]
@@ -424,8 +417,8 @@ version = "0.1.0"
 dependencies = [
  "forge-core",
  "forge-ide",
- "forge-kernel",
  "forge-remote",
+ "forge-system",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -435,6 +428,13 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "forge-system"
+version = "0.1.0"
+dependencies = [
+ "forge-core",
 ]
 
 [[package]]

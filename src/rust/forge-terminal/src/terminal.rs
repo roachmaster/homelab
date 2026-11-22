@@ -373,7 +373,7 @@ mod help_tests {
         let app = Application::bootstrap_with_node_registrar(LocalConfig::default(), move |_| {
             PreparedGroup::new(
                 "test.node",
-                &["kernel.node.client"],
+                &["system.node.client"],
                 &[],
                 NodeFactories {
                     client: move || {

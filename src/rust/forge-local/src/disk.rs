@@ -6,7 +6,7 @@ use forge_core::command::{
 };
 use forge_core::io_client::IoClient;
 use forge_core::task::Task;
-use forge_kernel::disk::{DiskError, DiskRequest, DiskResponse};
+use forge_system::disk::{DiskError, DiskRequest, DiskResponse};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

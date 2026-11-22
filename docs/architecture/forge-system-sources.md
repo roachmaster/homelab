@@ -1,6 +1,6 @@
-# Forge kernel plan source ledger
+# Forge system plan source ledger
 
-Checked **2026-10-31** for the [hosted-kernel plan](forge-kernel-plan.md).
+Checked **2026-10-31** for the [hosted-system plan](forge-system-plan.md).
 These are public primary/maintainer sources. Summaries are paraphrases, not copied
 book material. Source facts inform the design; none implements or endorses Forge.
 The plan's phases, package choices and command names are our proposed synthesis.
@@ -28,7 +28,7 @@ what was reviewed for this plan.
 - [Bridge source](../../src/rust/forge-core/src/bridge.rs): ordered checks, synchronous non-`Send`/`Sync` handler erasure, payload/context handler signature.
 - [Task source](../../src/rust/forge-core/src/task.rs) and [I/O client source](../../src/rust/forge-core/src/io_client.rs): synchronous contracts, no built-in job runner or cancellation.
 - [Bootstrap source](../../src/rust/forge-core/src/bootstrap.rs) and [provider source](../../src/rust/forge-core/src/provider.rs): typed consuming registration/freeze, explicit construction and acquisition.
-- [Disk source](../../src/rust/forge-kernel/src/disk.rs) and [contract](../../src/rust/forge-kernel/README.md): native path/session semantics, no sandbox, unbounded materialized listing, no network codec or file mutation API.
+- [Disk source](../../src/rust/forge-system/src/disk.rs) and [contract](../../src/rust/forge-system/README.md): native path/session semantics, no sandbox, unbounded materialized listing, no network codec or file mutation API.
 - [Recorded verification](../../src/rust/README.md): previous implementation checks. Reading those records is not a fresh test execution.
 
 No private repository source, private infrastructure addresses or credentials are

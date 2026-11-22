@@ -1,6 +1,6 @@
 # Forge terminal
 
-The first runnable, **local-only** Forge front door. This std-only adapter depends on the application facade and I/O-client contract, not on concrete kernel clients or the bridge implementation. Its native console implements typed `IoClient`; injected streams/fakes exercise the same parser and presentation code. Tasks remain in the application/capability layer and prepare requests before clients execute them.
+The first runnable, **local-only** Forge front door. This std-only adapter depends on the application facade and I/O-client contract, not on concrete system clients or the bridge implementation. Its native console implements typed `IoClient`; injected streams/fakes exercise the same parser and presentation code. Tasks remain in the application/capability layer and prepare requests before clients execute them.
 
 From `src/rust`:
 
@@ -65,7 +65,7 @@ Metadata is documentation, not reflection or an automatic converter. Decoding re
 - Status reports only that the configured node client answered and elapsed time since its construction. Target OS/architecture are compile-target constants, not hardware probes. This is not global health/readiness, OS uptime or authenticated machine identity. Permission metadata is not effective-access authorization.
 - Exit codes: **0** success, **2** malformed input/invalid configuration/unavailable command, **1** construction/application/console I/O failure. Sessions continue after command or rejected-line errors and return the highest command-error code seen; a console transport failure stops immediately with 1. EOF and `exit` otherwise finish successfully. Console transport failures stop execution; writes may have partially completed. No hidden retry, timeout, cancellation or rollback is provided.
 
-The local admission policy is not production authentication or a security boundary. This milestone has no process launcher, network/remote transport, async runtime or bootable OS behavior. See the [application assembly](../forge-local/README.md) and [kernel plan](../../../docs/architecture/forge-kernel-plan.md).
+The local admission policy is not production authentication or a security boundary. This milestone has no process launcher, network/remote transport, async runtime or bootable OS behavior. See the [application assembly](../forge-local/README.md) and [system plan](../../../docs/architecture/forge-system-plan.md).
 
 ## Check
 

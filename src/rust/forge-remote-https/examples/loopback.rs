@@ -4,7 +4,6 @@ use forge_core::ingress::Header;
 use forge_core::io_client::IoClient;
 use forge_core::provider::{Factory, InstanceProvider, Singleton};
 use forge_core::task::Task;
-use forge_kernel::node::{self, NodeClient, NodeCommand, NodeConfig, NodeResponse, NodeTask};
 use forge_remote::{
     now_unix_ms, Destination, NodeCall, NodeInfo, NodeReply, ReadNodeInfo, ReadNodeInput,
     ReadNodeTask, RemoteError, Target,
@@ -13,6 +12,7 @@ use forge_remote_https::{
     register_client, register_server, CertificateIdentity, ClientConfig, Credentials, HttpsClient,
     Limits, ServerConfig,
 };
+use forge_system::node::{self, NodeClient, NodeCommand, NodeConfig, NodeResponse, NodeTask};
 use rcgen::{
     BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose,

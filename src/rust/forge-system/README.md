@@ -1,10 +1,9 @@
-# forge-kernel — optional hosted system clients
+# forge-system — optional hosted system clients
 
 The default module, **`disk`**, provides native filesystem inspection and a
 client-owned working directory. Opt-in **`node`** adds local configured identity
-and narrow instance observations. The name groups related low-level system clients;
-it is **not a bootable operating-system kernel**, `no_std` runtime or Raspberry Pi
-image. It uses hosted Rust `std::fs`, `std::path` and metadata APIs—not Bash,
+and narrow instance observations. The name groups related low-level system clients.
+It uses hosted Rust `std::fs`, `std::path` and metadata APIs—not Bash,
 shell commands, subprocesses or command-output parsing. No unrelated system-client placeholder modules are added.
 
 This optional implementation crate depends on `forge-core` (its `bootstrap`,
@@ -19,7 +18,7 @@ into that feature selection.
 
 `NodeConfig::Local { id }` supplies an explicit logical label. The registrar
 accepts 1–128 ASCII letters/digits/dots/underscores/hyphens, stages the
-`kernel.node.client` factory binding, and reads no environment, clock or file.
+`system.node.client` factory binding, and reads no environment, clock or file.
 After consuming registration/freeze, `NodeFactories::client.create()` creates a
 fresh `NodeClient` and starts its monotonic instance timer. `NodeFactories<F>`
 keeps another selected registrar's compatible factory typed; its default factory
@@ -67,7 +66,7 @@ variables or the process cwd. Requiring an absolute startup value removes ambien
 working-directory dependence; it does **not** restrict subsequent navigation.
 
 `disk::register(config)` validates syntax and returns a
-`PreparedGroup<DiskFactories>` with binding `kernel.disk.client`. It performs no
+`PreparedGroup<DiskFactories>` with binding `system.disk.client`. It performs no
 filesystem access. After application registration/freeze,
 `DiskFactories::client.create()` checks the current filesystem, resolves symlinks
 and requires an existing directory. Missing paths and non-directories are typed
@@ -138,8 +137,8 @@ is protected by Rust ownership/mutexes, not a promise to catch arbitrary panics.
 From `src/rust/`:
 
 ```bash
-cargo test -p forge-kernel --all-features --offline --locked
-cargo test -p forge-kernel --no-default-features --features node --offline --locked
+cargo test -p forge-system --all-features --offline --locked
+cargo test -p forge-system --no-default-features --features node --offline --locked
 cargo test -p forge-bootstrap-demo --no-default-features --features disk --offline --locked
 cargo run -p forge-bootstrap-demo --example disk_access --no-default-features --features disk --offline --locked
 python3 scripts/check_dependencies.py
@@ -161,6 +160,6 @@ The node feature also opts into the dependency-free `forge_core::command` descri
 contract. `NodeTask` implements `DescribeCommand` separately from `Task`, exposing
 `node.info` and `node.status` as distinct no-argument operations. Metadata reads do
 not require a working I/O client; execution still uses the original typed client
-contract. The disk-only kernel feature does not import command description or
+contract. The disk-only system feature does not import command description or
 Task merely to expose filesystem I/O; its consuming application owns disk tasks
 and their descriptions.

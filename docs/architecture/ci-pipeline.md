@@ -134,7 +134,7 @@ split is structural.
 Nine minimal profiles stay as test runs because they guard real
 cfg-gated code the all-features run never exercises with the feature
 off: `forge-terminal` bare/jobs/disk (55 `cfg(feature)` sites),
-`forge-local` bare (97), `forge-kernel` node-only, `forge-ide`
+`forge-local` bare (97), `forge-system` node-only, `forge-ide`
 bare/remote, `forge-remote-https` bare, `forge-ide-web` bare.
 
 One combination downgrades to `check` (compile-only):
@@ -195,6 +195,6 @@ combination above.
   move back to the PR runs: the split today is by mechanism (the
   `PG16_AVAILABLE` gate skips DB tests on branches; whole suites run on
   main), not by a per-file classification.
-- The `forge-kernel` rename (crate-dependency-tree.md Todo). The
-  `forge-llama` and demo-crate decisions are done: both removed from
-  the workspace.
+- The `forge-kernel` rename is done: the crate is now `forge-system`
+  (crate-dependency-tree.md section 10). The `forge-llama` and
+  demo-crate decisions are done too: both removed from the workspace.

@@ -51,7 +51,7 @@ IDE and template local consumer profiles also omit this package. The default HTT
 profile omits `forge-ide`; enabling `ide` adds only its remote capability profile,
 not its CLI/YAML output or the agent application. TLS/HTTP/serde/Tokio
 are normal dependencies **only of this selected adapter**. `rcgen`, the concrete
-kernel and example task wiring are dev dependencies, not provisioning code shipped
+system-client and example task wiring are dev dependencies, not provisioning code shipped
 as part of its normal library tree. JSON DTOs are private; typed enums/results
 cross the application boundary, never `serde_json::Value`.
 

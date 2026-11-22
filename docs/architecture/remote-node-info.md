@@ -31,11 +31,11 @@ still require explicit conformance work; matching method signatures is insuffici
 
 | Package/module | Owns | Imports / must not import |
 | --- | --- | --- |
-| `forge-remote` | `Target`, typed `NodeCall`/`NodeReply`, `RemoteNodeClient`, `ReadNodeTask`, injected observation/policy seams, destination bridge | Existing ingress/bridge/task/I/O contracts; no TLS, HTTP, serde, kernel or runtime |
+| `forge-remote` | `Target`, typed `NodeCall`/`NodeReply`, `RemoteNodeClient`, `ReadNodeTask`, injected observation/policy seams, destination bridge | Existing ingress/bridge/task/I/O contracts; no TLS, HTTP, serde, system clients or runtime |
 | `forge-remote-https::assembly` | Public typed config, DER credentials, bounded peer mappings, staged factories/registrars | Bootstrap/provider and selected transport libraries; no runtime service lookup |
-| `forge-remote-https::transport` | Single-owner HTTPS client/server, standard certificate verification, peer mapping, I/O budgets | Typed remote port; no direct kernel/business-handler calls |
+| `forge-remote-https::transport` | Single-owner HTTPS client/server, standard certificate verification, peer mapping, I/O budgets | Typed remote port; no direct system/business-handler calls |
 | `forge-remote-https::wire` (private) | Strict versioned request/reply DTOs and bounded JSON conversion | No JSON/value-tree fallback escapes into task or bridge |
-| `examples/loopback.rs` | Concrete kernel-to-observation adapter, operation policy, chosen providers and ephemeral demo trust | Composition only; no reusable integration hidden in the example |
+| `examples/loopback.rs` | Concrete system-to-observation adapter, operation policy, chosen providers and ephemeral demo trust | Composition only; no reusable integration hidden in the example |
 
 The second crate is justified by an actual replaceable network dependency boundary,
 not one crate per type. Core crates and existing local/template/IDE profiles do
@@ -70,7 +70,7 @@ At runtime:
    rechecks time after policy, checks payload-kind agreement, then calls the injected
    local source. Only `Info` is representable; other wire payload variants fail
    decoding. Unknown versions/routes never become handler names or DI keys.
-5. The source adapts the existing kernel node observation. It reports configured
+5. The source adapts the existing system node observation. It reports configured
    node ID and compile-target OS/architecture, not uptime/health/hardware probes.
 6. Reply validation checks exact responder/incarnation, route/version,
    request/correlation and bounded fields. Final task validation protects against

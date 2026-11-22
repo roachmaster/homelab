@@ -1,7 +1,7 @@
 use forge_core::bootstrap::{RegistrationError, Registry};
 use forge_core::io_client::IoClient;
 use forge_core::provider::{Factory, InstanceProvider, Singleton, Transient};
-use forge_kernel::disk::*;
+use forge_system::disk::*;
 use std::{
     error::Error,
     ffi::OsString,
@@ -20,7 +20,7 @@ impl Fixture {
         let base = std::env::temp_dir();
         for _ in 0..100 {
             let path = base.join(format!(
-                "forge-kernel-test-{}-{}",
+                "forge-system-test-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));

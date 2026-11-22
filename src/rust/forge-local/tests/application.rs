@@ -85,7 +85,7 @@ fn fake_group(
     let NodeConfig::Local { id } = config;
     PreparedGroup::new(
         "test.node",
-        &["kernel.node.client"],
+        &["system.node.client"],
         &[],
         NodeFactories {
             client: FakeFactory {
@@ -239,7 +239,7 @@ fn validation_precedes_factory_effects() {
     let result = Application::bootstrap_with_node_registrar(LocalConfig::default(), |_| {
         PreparedGroup::new(
             "test.node",
-            &["kernel.node.client"],
+            &["system.node.client"],
             &["missing"],
             NodeFactories {
                 client: FakeFactory {
@@ -393,7 +393,7 @@ mod native_disk {
         let result = Application::bootstrap_with_node_registrar(f.config(), |_| {
             PreparedGroup::new(
                 "conflicting.node",
-                &["kernel.node.client", "kernel.disk.client"],
+                &["system.node.client", "system.disk.client"],
                 &[],
                 NodeFactories {
                     client: FakeFactory {

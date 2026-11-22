@@ -18,7 +18,7 @@ use std::{
     sync::Mutex,
 };
 
-pub const CLIENT_BINDING: &str = "kernel.disk.client";
+pub const CLIENT_BINDING: &str = "system.disk.client";
 
 /// Startup values supplied by composition, never read from the environment here.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +65,7 @@ pub fn register(config: DiskConfig) -> Result<PreparedGroup<DiskFactories>, Conf
         return Err(ConfigError::InitialDirectoryMustBeAbsolute);
     }
     PreparedGroup::new(
-        "kernel.disk",
+        "system.disk",
         &[CLIENT_BINDING],
         &[],
         DiskFactories {

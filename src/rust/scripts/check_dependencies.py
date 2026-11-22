@@ -14,14 +14,14 @@ ALLOWED = {
     "forge-game-runtime": set(),
     "forge-jobs": {("forge-core", "normal")},
     "forge-core": set(),
-    "forge-agent": {(name,"normal") for name in ("forge-core","forge-kernel","forge-ide","forge-remote","forge-remote-https")},
+    "forge-agent": {(name,"normal") for name in ("forge-core","forge-system","forge-ide","forge-remote","forge-remote-https")},
     "forge-remote": {("forge-core", "normal")},
-    "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-core", "forge-ide")} | {("forge-kernel", "dev"), ("forge-core", "dev")},
+    "forge-remote-https": {(name, "normal") for name in ("forge-remote", "forge-core", "forge-ide")} | {("forge-system", "dev"), ("forge-core", "dev")},
     "forge-ide": {(name, "normal") for name in ("forge-core", "forge-remote")},
     "forge-template": {("forge-core", "dev"), ("forge-core", "normal")},
-    "forge-kernel": {("forge-core", "normal")},
+    "forge-system": {("forge-core", "normal")},
     "forge-local": {("forge-jenkins", "normal")} | {(name, "normal") for name in
-                    ("forge-core", "forge-kernel")},
+                    ("forge-core", "forge-system")},
     "forge-terminal": {("forge-jenkins", "normal")} | {(name, "normal") for name in
                        ("forge-local", "forge-core", "forge-jobs")},
 }
@@ -153,8 +153,8 @@ def validate_packages(packages):
 def negative_fixtures(packages):
     fixtures = []
     bad = copy.deepcopy(packages)
-    bad["forge-core"]["dependencies"].append({"name": "forge-kernel", "kind": None,
-        "path": str(ROOT / "forge-kernel"), "optional": False})
+    bad["forge-core"]["dependencies"].append({"name": "forge-system", "kind": None,
+        "path": str(ROOT / "forge-system"), "optional": False})
     fixtures.append(("core-to-implementation edge", bad))
     bad = copy.deepcopy(packages)
     bad["forge-terminal"]["dependencies"][0]["path"] = str(ROOT / "wrong-package")
@@ -163,11 +163,11 @@ def negative_fixtures(packages):
     bad["unreviewed-package"] = {}
     fixtures.append(("unreviewed membership", bad))
     bad = copy.deepcopy(packages)
-    bad["forge-terminal"]["features"]["jobs"] = ["forge-kernel/disk"]
+    bad["forge-terminal"]["features"]["jobs"] = ["forge-system/disk"]
     fixtures.append(("incorrect jobs forwarding", bad))
     bad = copy.deepcopy(packages)
-    bad["forge-template"]["dependencies"].append({"name": "forge-kernel", "kind": None,
-        "path": str(ROOT / "forge-kernel"), "optional": False})
+    bad["forge-template"]["dependencies"].append({"name": "forge-system", "kind": None,
+        "path": str(ROOT / "forge-system"), "optional": False})
     fixtures.append(("renderer runtime dependency", bad))
     bad = copy.deepcopy(packages)
     bad["forge-template"]["features"]["default"] = ["cli"]
@@ -240,8 +240,8 @@ def main():
     if remote != {"forge-remote", "forge-core"}:
         raise SystemExit("Remote conversation port includes a transport/codec or implementation")
     https = consumer_tree(package="forge-remote-https")
-    if not {"rustls", "hyper", "tokio", "serde_json"} <= https or "rcgen" in https or {"forge-kernel", "forge-ide", "forge-agent"} & https:
-        raise SystemExit("HTTPS normal profile must own TLS/HTTP only; demo identity issuance/kernel stay dev-only")
+    if not {"rustls", "hyper", "tokio", "serde_json"} <= https or "rcgen" in https or {"forge-system", "forge-ide", "forge-agent"} & https:
+        raise SystemExit("HTTPS normal profile must own TLS/HTTP only; identity issuance/system clients stay dev-only")
     ide_remote = consumer_tree("--features", "remote", package="forge-ide")
     if not {"forge-remote"} <= ide_remote or {"serde_json", "rustls", "hyper", "forge-agent", "serde_yaml_ng"} & ide_remote:
         raise SystemExit("IDE remote contract must remain transport and presentation free")
@@ -279,9 +279,9 @@ def main():
     if {name for name in jenkins_tree if name.startswith("forge-")} != local_expected | {"forge-jenkins"}:
         raise SystemExit("Jenkins terminal changed unrelated Forge dependency edges")
     features = cargo("tree", "-p", "forge-terminal", "--no-default-features", "--edges", "features", "--prefix", "none")
-    if 'forge-kernel feature "disk"' in features or 'forge-kernel feature "default"' in features:
+    if 'forge-system feature "disk"' in features or 'forge-system feature "default"' in features:
         raise SystemExit("Node-only terminal unexpectedly includes native disk module")
-    if 'forge-kernel feature "node"' not in features:
+    if 'forge-system feature "node"' not in features:
         raise SystemExit("Node-only terminal must select its explicit node capability")
     # Resolved features, not just edges: forwarded root features may lack a
     # printed feature edge in cargo tree's --edges features representation.
@@ -295,7 +295,7 @@ def main():
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
     print("PASS: remote typed port is transport-free; HTTPS is absent from existing local/IDE/template consumers")
     print("PASS: optional IDE parser/rooted native client isolated; YAML/CLI absent from library default")
-    print("PASS: one contract core + optional kernel + local application/terminal; local allowed DAG")
+    print("PASS: one contract core + optional system clients + local application/terminal; local allowed DAG")
     print("PASS: renderer default exposes only forge-core assembly; opt-in CLI adds no crate; terminal omits it")
     print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk")
 

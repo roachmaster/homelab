@@ -81,7 +81,7 @@ def remote():
 
 
 def assembly():
-    package = os.environ.get("PACKAGE") or "forge-kernel"
+    package = os.environ.get("PACKAGE") or "forge-system"
     selection = os.environ.get("ASM_TARGET", "lib")
     features = feature_args()
     native = boolean("NATIVE")

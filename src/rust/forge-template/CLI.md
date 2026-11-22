@@ -131,7 +131,7 @@ make ci
 Default library consumers retain only `forge-core`.
 The `cli` feature additionally selects Task, command description, I/O-client,
 bridge and ingress contracts; it does not pull in `forge-local`, `forge-terminal`
-or kernel clients. The binary has `required-features = ["cli"]`. Existing separate
+or system clients. The binary has `required-features = ["cli"]`. Existing separate
 consumer tests still prove public assembly imports and whole-capability omission.
 The dependency guard checks both profiles, and rejects accidental default CLI or
 mandatory CLI-only dependencies. Tests execute the real binary, native bounded

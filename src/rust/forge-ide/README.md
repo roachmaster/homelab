@@ -119,7 +119,7 @@ errors can still follow partial delivery by the OS, with no rollback claim.
 
 ## Filesystem policy and limits
 
-The existing kernel navigation client is intentionally unchanged: it allows
+The existing disk navigation client is intentionally unchanged: it allows
 navigation outside its start directory and does not provide bounded file reads.
 The IDE's separate client holds a capability directory. Runtime paths reject
 absolute paths and `..`; every component and final file is opened no-follow.

@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parent
 EXPECTED_RENDERER = "mmdr 0.3.1"
 SOURCES = [ROOT / f"{name}.mmd" for name in (
-    "m01-contracts", "m02-bootstrap", "m03-disk-request", "m04-kernel-phases",
+    "m01-contracts", "m02-bootstrap", "m03-disk-request", "m04-system-phases",
     "m05-foundation-modules", "m06-foundation-interfaces", "m07-job-lifecycle", "m08-remote-admission",
     "m09-template-architecture", "m10-template-render", "m11-ide-inspection", "m12-remote-node-info",
     "m13-remote-ide-context", "m14-remote-ide-components", "m15-remote-ide-contracts", "m16-remote-ide-request", "m17-remote-ide-bootstrap", "m18-agent-implementation",

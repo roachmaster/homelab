@@ -10,7 +10,7 @@ globalThis.document = window.document;
 // Dynamic import is deliberate: DOMPurify must see the local DOM first.
 const { default: mermaid } = await import("mermaid");
 mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
-for (const name of ["m01-contracts", "m02-bootstrap", "m03-disk-request", "m04-kernel-phases",
+for (const name of ["m01-contracts", "m02-bootstrap", "m03-disk-request", "m04-system-phases",
   "m05-foundation-modules", "m06-foundation-interfaces", "m07-job-lifecycle", "m08-remote-admission",
   "m09-template-architecture", "m10-template-render", "m11-ide-inspection", "m12-remote-node-info",
   "m13-remote-ide-context", "m14-remote-ide-components", "m15-remote-ide-contracts", "m16-remote-ide-request", "m17-remote-ide-bootstrap", "m18-agent-implementation",

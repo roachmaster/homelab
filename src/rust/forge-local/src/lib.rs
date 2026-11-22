@@ -24,11 +24,11 @@ pub use application::{
 pub use disk::DiskCommand;
 pub use forge_core::ingress::RouteKey;
 #[cfg(feature = "disk")]
-pub use forge_kernel::disk::{
+pub use forge_system::disk::{
     DirectoryEntry, DirectoryListing, DiskError, DiskResponse, EntryKind, PermissionInfo,
     PermissionInspection,
 };
-pub use forge_kernel::node::{
+pub use forge_system::node::{
     NodeCommand, NodeConfig, NodeConfigError, NodeError, NodeFactories, NodeInfo, NodeRequest,
     NodeResponse, NodeState, NodeStatus,
 };

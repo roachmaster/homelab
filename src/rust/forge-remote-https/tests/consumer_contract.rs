@@ -49,7 +49,7 @@ fn public_consumer_can_select_or_omit_https_without_importing_examples() {
     ]);
     assert!(selected.contains("forge-remote-https "));
     assert!(selected.contains("rustls "));
-    assert!(!selected.contains("forge-kernel "));
+    assert!(!selected.contains("forge-system "));
     assert!(!selected.contains("forge-ide "));
     // serde derive itself uses syn; absence of the IDE capability is the boundary proof.
 }
