@@ -174,7 +174,9 @@ fn job_from_url(endpoint: &Url, input: &str) -> Result<String, Error> {
         return Err(Error::InvalidResponse);
     }
     let mut names = Vec::new();
-    for pair in segments.chunks_exact(2) {
+    // The even-length check above guarantees the remainder is empty.
+    let (pairs, _) = segments.as_chunks::<2>();
+    for pair in pairs {
         if pair[0] != "job" {
             return Err(Error::InvalidResponse);
         }

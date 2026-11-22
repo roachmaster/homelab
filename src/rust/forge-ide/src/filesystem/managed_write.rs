@@ -557,6 +557,19 @@ mod tests {
     const ORIGINAL: &str = "first\r\nbase café\r\nlast\r\n";
     const EDITED: &str = "first\r\nchanged café\r\nlast\r\n";
 
+    /// ManagedWriter deliberately refuses to open as root: the ownership
+    /// checks it enforces are meaningless for uid 0, so the managed-write
+    /// safety model collapses. The behavior tests therefore only run as a
+    /// non-root user; `refuses_to_open_as_root` pins the refusal itself.
+    /// Returns true when the caller should skip the test.
+    fn skip_when_root() -> bool {
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipping: managed-write tests require a non-root user");
+            return true;
+        }
+        false
+    }
+
     struct Fixture(PathBuf);
     impl Fixture {
         fn new() -> Self {
@@ -616,6 +629,9 @@ mod tests {
 
     #[test]
     fn refuses_undo_after_the_receipts_eligibility_window() {
+        if skip_when_root() {
+            return;
+        }
         let fixture = Fixture::new();
         let writer = fixture.writer();
         let applied = writer.execute(apply(&writer, "apply-one")).unwrap();
@@ -633,6 +649,9 @@ mod tests {
 
     #[test]
     fn applies_once_and_undoes_exact_bytes_after_reopening() {
+        if skip_when_root() {
+            return;
+        }
         let f = Fixture::new();
         fs::set_permissions(f.0.join("Makefile"), fs::Permissions::from_mode(0o750)).unwrap();
         let writer = f.writer();
@@ -689,6 +708,9 @@ mod tests {
 
     #[test]
     fn rejects_same_bytes_in_a_replacement_inode_and_blocks_undo_after_drift() {
+        if skip_when_root() {
+            return;
+        }
         let f = Fixture::new();
         let writer = f.writer();
         let first = apply(&writer, "stale");
@@ -719,6 +741,9 @@ mod tests {
 
     #[test]
     fn recovers_both_sides_of_a_lost_publication_receipt() {
+        if skip_when_root() {
+            return;
+        }
         for published in [false, true] {
             let f = Fixture::new();
             let writer = f.writer();
@@ -769,6 +794,9 @@ mod tests {
 
     #[test]
     fn rejects_unmanaged_roots_symlinks_wrong_line_endings_and_competing_writers() {
+        if skip_when_root() {
+            return;
+        }
         let f = Fixture::new();
         fs::set_permissions(&f.0, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(matches!(
@@ -801,5 +829,25 @@ mod tests {
         drop(lock);
         writer.execute(request).unwrap();
         assert_eq!(f.contents(), EDITED);
+    }
+
+    #[test]
+    fn refuses_to_open_as_root() {
+        let fixture = Fixture::new();
+        match ManagedWriter::open(&fixture.0) {
+            Err(WriteError::Unmanaged) => {
+                assert!(
+                    nix::unistd::geteuid().is_root(),
+                    "open refused a non-root user"
+                );
+            }
+            Ok(_) => {
+                assert!(
+                    !nix::unistd::geteuid().is_root(),
+                    "open accepted the root user"
+                );
+            }
+            Err(other) => panic!("unexpected open error: {other:?}"),
+        }
     }
 }
