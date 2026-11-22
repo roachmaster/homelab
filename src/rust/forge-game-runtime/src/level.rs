@@ -284,3 +284,188 @@ impl TileGrid for Level {
         x >= self.width || y >= self.height || self.tiles[(y * self.width + x) as usize] == b'#'
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_spec() -> LevelSpec {
+        LevelSpec {
+            id: LevelId::RoomOne,
+            mode: LevelMode::Tile,
+            width: 5,
+            height: 5,
+            tiles: vec![
+                "#####".into(),
+                "#...#".into(),
+                "#...#".into(),
+                "#...#".into(),
+                "#####".into(),
+            ],
+            spawns: vec![
+                SpawnSpec {
+                    id: 1,
+                    kind: SpawnKind::Player,
+                    x: 1,
+                    y: 1,
+                    patrol: None,
+                },
+                SpawnSpec {
+                    id: 2,
+                    kind: SpawnKind::Key,
+                    x: 3,
+                    y: 3,
+                    patrol: None,
+                },
+                SpawnSpec {
+                    id: 3,
+                    kind: SpawnKind::Exit,
+                    x: 3,
+                    y: 1,
+                    patrol: None,
+                },
+            ],
+            surfaces: vec![SurfaceSpec {
+                id: "stone".into(),
+                friction_q16: 16_384,
+                restitution_q16: 0,
+            }],
+            surface: "stone".into(),
+            timing: AnimationTiming::default(),
+            collider: Collider::default(),
+        }
+    }
+
+    #[test]
+    fn valid_spec_validates_and_builtin_matches_the_authored_room() {
+        let level = Level::validate(valid_spec()).unwrap();
+        assert_eq!(
+            (level.id(), level.width, level.height),
+            (LevelId::RoomOne, 5, 5)
+        );
+        assert!(level.solid(Position { x: 0, y: 2 }));
+        assert!(!level.solid(Position { x: 2, y: 2 }));
+        assert!(level.solid(Position { x: 99, y: 99 }));
+        assert_eq!(level.surface().id, "stone");
+        let builtin = Level::builtin();
+        assert_eq!(
+            (builtin.id(), builtin.width, builtin.height),
+            (LevelId::RoomOne, 13, 9)
+        );
+        assert_eq!(builtin.player.spawn, Position { x: 1, y: 1 });
+        assert_eq!(builtin.key.spawn, Position { x: 1, y: 7 });
+        assert_eq!(builtin.exit.spawn, Position { x: 11, y: 4 });
+        assert!(builtin.guard.is_some());
+    }
+
+    #[test]
+    fn validate_rejects_a_mode_mismatch_and_bad_boards() {
+        let mut spec = valid_spec();
+        spec.mode = LevelMode::Platform;
+        assert!(matches!(Level::validate(spec), Err(LevelError::Mode)));
+        let mut spec = valid_spec();
+        spec.width = 2;
+        assert!(matches!(Level::validate(spec), Err(LevelError::Board)));
+        let mut spec = valid_spec();
+        spec.tiles[0] = "#...#".into();
+        assert!(matches!(Level::validate(spec), Err(LevelError::Board)));
+        let mut spec = valid_spec();
+        spec.tiles[1] = "#.x.#".into();
+        assert!(matches!(Level::validate(spec), Err(LevelError::Board)));
+        let mut spec = valid_spec();
+        spec.tiles[1] = "#..#".into();
+        assert!(matches!(Level::validate(spec), Err(LevelError::Board)));
+    }
+
+    #[test]
+    fn validate_rejects_bad_animation_collider_and_surfaces() {
+        let mut spec = valid_spec();
+        spec.timing.idle = [0];
+        assert!(matches!(Level::validate(spec), Err(LevelError::Animation)));
+        let mut spec = valid_spec();
+        spec.collider = Collider::from_edges(-100, -100, 100, 100).unwrap();
+        assert!(matches!(Level::validate(spec), Err(LevelError::Collider)));
+        let mut spec = valid_spec();
+        spec.surfaces = Vec::new();
+        assert!(matches!(Level::validate(spec), Err(LevelError::Surface)));
+        let mut spec = valid_spec();
+        spec.surface = "missing".into();
+        assert!(matches!(Level::validate(spec), Err(LevelError::Surface)));
+        let mut spec = valid_spec();
+        spec.surfaces.push(SurfaceSpec {
+            id: "stone".into(),
+            friction_q16: 0,
+            restitution_q16: 0,
+        });
+        assert!(matches!(Level::validate(spec), Err(LevelError::Surface)));
+        let mut spec = valid_spec();
+        spec.surfaces[0].friction_q16 = TILE as u32 + 1;
+        assert!(matches!(Level::validate(spec), Err(LevelError::Surface)));
+    }
+
+    #[test]
+    fn validate_rejects_bad_spawns_and_patrols() {
+        let mut spec = valid_spec();
+        spec.spawns.remove(1);
+        assert!(matches!(Level::validate(spec), Err(LevelError::Spawn)));
+        let mut spec = valid_spec();
+        spec.spawns[1].id = 1;
+        assert!(matches!(Level::validate(spec), Err(LevelError::Spawn)));
+        let mut spec = valid_spec();
+        spec.spawns[1].id = 0;
+        assert!(matches!(Level::validate(spec), Err(LevelError::Spawn)));
+        let mut spec = valid_spec();
+        spec.spawns[1].x = 0;
+        assert!(matches!(Level::validate(spec), Err(LevelError::Spawn)));
+        let mut spec = valid_spec();
+        spec.spawns[1].kind = SpawnKind::Player;
+        assert!(matches!(Level::validate(spec), Err(LevelError::Spawn)));
+        let mut spec = valid_spec();
+        spec.spawns.push(SpawnSpec {
+            id: 4,
+            kind: SpawnKind::Guard,
+            x: 2,
+            y: 2,
+            patrol: None,
+        });
+        assert!(matches!(Level::validate(spec), Err(LevelError::Spawn)));
+        let mut spec = valid_spec();
+        spec.spawns.push(SpawnSpec {
+            id: 4,
+            kind: SpawnKind::Guard,
+            x: 2,
+            y: 2,
+            patrol: Some(PatrolSpec {
+                first_x: 2,
+                last_x: 2,
+                period_ticks: 12,
+            }),
+        });
+        assert!(matches!(Level::validate(spec), Err(LevelError::Spawn)));
+        let mut spec = valid_spec();
+        spec.spawns.push(SpawnSpec {
+            id: 4,
+            kind: SpawnKind::Guard,
+            x: 2,
+            y: 2,
+            patrol: Some(PatrolSpec {
+                first_x: 1,
+                last_x: 3,
+                period_ticks: 12,
+            }),
+        });
+        assert!(Level::validate(spec).is_ok());
+    }
+
+    #[test]
+    fn validation_is_deterministic_for_the_same_spec() {
+        let first = Level::validate(valid_spec()).unwrap();
+        let second = Level::validate(valid_spec()).unwrap();
+        assert_eq!(
+            (first.id(), first.width, first.height),
+            (second.id(), second.width, second.height)
+        );
+        assert_eq!(first.player.spawn, second.player.spawn);
+        assert_eq!(first.surface().id, second.surface().id);
+    }
+}

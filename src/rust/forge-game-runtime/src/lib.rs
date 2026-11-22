@@ -12,6 +12,11 @@ pub mod physics;
 mod queries;
 mod ring;
 
+#[cfg(test)]
+mod game_runtime_bdd_tests;
+#[cfg(test)]
+mod game_runtime_component_tests;
+
 use animation::Animator;
 pub use animation::{AnimationTiming, PlayerPose};
 pub use entity::EntityView;

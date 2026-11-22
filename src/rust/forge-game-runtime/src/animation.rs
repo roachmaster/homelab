@@ -130,3 +130,62 @@ impl Animator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_timing_is_valid_and_bounds_are_exact() {
+        assert!(AnimationTiming::default().valid());
+        assert!(!AnimationTiming {
+            idle: [0],
+            ..AnimationTiming::default()
+        }
+        .valid());
+        assert!(!AnimationTiming {
+            walk: [105, 85, 105, 60_001],
+            ..AnimationTiming::default()
+        }
+        .valid());
+        assert!(AnimationTiming {
+            jump: [1, 60_000, 50, 50, 50, 50, 50, 50, 50, 80, 80, 100],
+            ..AnimationTiming::default()
+        }
+        .valid());
+    }
+
+    #[test]
+    fn animator_starts_idle_and_walk_advances_frames_on_schedule() {
+        let mut animator = Animator::new();
+        let timing = AnimationTiming::default();
+        let pose = animator.view(1, false, None);
+        assert_eq!((pose.phase, pose.frame), (MotionPhase::Idle, 0));
+        assert!(pose.grounded);
+        assert_eq!(pose.contacts, 0);
+        animator.advance_tile(false, timing);
+        assert_eq!(animator.view(1, false, None).phase, MotionPhase::Idle);
+        animator.advance_tile(true, timing);
+        let walking = animator.view(1, false, None);
+        assert_eq!((walking.phase, walking.frame), (MotionPhase::Walk, 0));
+        // Walk frame 0 lasts 105 ms = 6300 sixtieths-ms units; each tick adds 1000.
+        for _ in 0..6 {
+            animator.advance_tile(true, timing);
+        }
+        assert_eq!(animator.view(1, false, None).frame, 0);
+        animator.advance_tile(true, timing);
+        assert_eq!(animator.view(1, false, None).frame, 1);
+        animator.advance_tile(false, timing);
+        let idle = animator.view(1, false, None);
+        assert_eq!((idle.phase, idle.frame), (MotionPhase::Idle, 0));
+    }
+
+    #[test]
+    fn view_reports_entity_facing_and_grounding_exactly() {
+        let animator = Animator::new();
+        let pose = animator.view(7, true, None);
+        assert_eq!(pose.entity_id, 7);
+        assert!(pose.left);
+        assert!(pose.grounded);
+    }
+}
