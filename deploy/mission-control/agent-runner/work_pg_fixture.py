@@ -11,7 +11,10 @@ import psycopg2
 POSTGRES_BIN = Path("/usr/lib/postgresql/16/bin")
 SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PG16_AVAILABLE = os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file()
+# Branch-scope Jenkins runs set FORGE_DISABLE_DISPOSABLE_POSTGRES=1: DB
+# tests run only on the main pipeline build (docs/architecture/ci-pipeline.md).
+PG16_AVAILABLE = (os.environ.get("FORGE_DISABLE_DISPOSABLE_POSTGRES") != "1"
+                  and os.geteuid() != 0 and (POSTGRES_BIN / "initdb").is_file())
 
 
 def _outside_repo_tempdir():

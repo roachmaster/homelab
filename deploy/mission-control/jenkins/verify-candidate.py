@@ -70,6 +70,28 @@ CHECKS = (
      'deploy/mission-control/agent-runner', '-p', 'test_*.py', '-v'),
 )
 CHECK_LABELS = ('make ci', 'make ui-qa', 'unittest')
+# Branch-scope verification runs the in-memory subset only: `make ui-qa`
+# is a headless-browser test and runs only on the main pipeline build
+# (docs/architecture/ci-pipeline.md). The cache key and the gate manifest
+# always use the full CHECKS: the compiled artifacts are identical
+# whether or not `make ui-qa` subsequently runs, so branch runs keep
+# reusing main's snapshots. Branch runs additionally set
+# FORGE_DISABLE_DISPOSABLE_POSTGRES=1, which makes the disposable-DB
+# tests in the unittest check skip (see work_pg_fixture.py); those tests
+# run only on main.
+BRANCH_CHECKS = (
+    ('/usr/bin/make', 'ci'),
+    ('/usr/bin/python3', '-B', '-m', 'unittest', 'discover', '-s',
+     'deploy/mission-control/agent-runner', '-p', 'test_*.py', '-v'),
+)
+BRANCH_CHECK_LABELS = ('make ci', 'unittest')
+
+
+def checks_for_scope(branch_scope):
+    """Return the (checks, labels) pair a verification scope runs."""
+    if branch_scope == 'main':
+        return CHECKS, CHECK_LABELS
+    return BRANCH_CHECKS, BRANCH_CHECK_LABELS
 SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
 BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
@@ -2514,6 +2536,10 @@ def _execute_locked(action, config, *, cache_port):
             'GIT_CONFIG_COUNT': '2', 'GIT_CONFIG_KEY_0': 'safe.directory',
             'GIT_CONFIG_VALUE_0': str(source), 'GIT_CONFIG_KEY_1': 'core.hooksPath',
             'GIT_CONFIG_VALUE_1': '/dev/null'}
+        active_checks, active_labels = checks_for_scope(branch_scope)
+        if branch_scope != 'main':
+            # DB tests run only on the main pipeline build.
+            environment['FORGE_DISABLE_DISPOSABLE_POSTGRES'] = '1'
         cancelled = directory / 'cancelled'
         log_path = results / (action + '.log')
         fd = open_log(log_path, submitter.pw_gid)
@@ -2631,6 +2657,10 @@ def _execute_locked(action, config, *, cache_port):
                 project_alias=request['project_alias'],
                 branch_scope=branch_scope,
                 verification_profile=config['verification_profile'],
+                # The key always covers the full gate, even though a branch
+                # run executes only the in-memory subset: the compiled
+                # artifacts are identical, so branch runs keep reusing
+                # main's snapshots.
                 checks=CHECKS,
                 toolchain_path=config['toolchain'],
                 environment=environment,
@@ -2658,7 +2688,7 @@ def _execute_locked(action, config, *, cache_port):
                     f'files={restore_outcome.restored_files} bytes={restore_outcome.restored_bytes}\n'
                 ).encode('utf-8'))
                 log.flush()
-                for index, argv in enumerate(CHECKS):
+                for index, argv in enumerate(active_checks):
                     remaining = config['timeout_seconds'] - (time.time() - started)
                     if remaining <= 0:
                         failure = 'deadline_exceeded'
@@ -2680,7 +2710,7 @@ def _execute_locked(action, config, *, cache_port):
                     checks.append({'index': index, 'argv': list(argv), 'returncode': code})
                     stages.append({
                         'name': f'check_{index}',
-                        'label': CHECK_LABELS[index] if index < len(CHECK_LABELS) else f'check_{index}',
+                        'label': active_labels[index] if index < len(active_labels) else f'check_{index}',
                         'status': 'passed' if code == 0 else 'failed',
                         'returncode': code,
                         'elapsed_ms': check_elapsed_ms,
@@ -2709,13 +2739,15 @@ def _execute_locked(action, config, *, cache_port):
                 # Enrich check_0 and check_1 stages with Cargo compilation & ui-qa telemetry.
                 if check_log_spans:
                     raw_log_now = log_path.read_bytes()
+                    ui_qa_index = (active_labels.index('make ui-qa')
+                                   if 'make ui-qa' in active_labels else None)
                     for stage in stages:
                         if stage['name'] in {'check_0', 'check_1'}:
                             idx = int(stage['name'].split('_', 1)[1])
                             if idx in check_log_spans:
                                 s0, s1 = check_log_spans[idx]
                                 stage.update(parse_cargo_telemetry(raw_log_now[s0:s1]))
-                            if idx == 1:
+                            if ui_qa_index is not None and idx == ui_qa_index:
                                 ui_qa_stages = _read_ui_qa_stages(layout.qa, expected_uid=account.pw_uid)
                                 if ui_qa_stages is not None:
                                     stage['ui_qa_stages'] = ui_qa_stages
@@ -2727,7 +2759,7 @@ def _execute_locked(action, config, *, cache_port):
                     publish_outcome = CachePublishOutcome(status='skipped_cancelled', reason='cancelled_or_timed_out')
                 elif failure == 'source_changed_during_checks':
                     publish_outcome = CachePublishOutcome(status='skipped_dirty', reason='source_changed_during_checks')
-                elif failure is not None or len(checks) != len(CHECKS):
+                elif failure is not None or len(checks) != len(active_checks):
                     publish_outcome = CachePublishOutcome(status='skipped_failed', reason=failure or 'incomplete_checks')
                 elif branch_scope == 'detached':
                     publish_outcome = CachePublishOutcome(status='skipped_unscoped', reason='detached_scope')
@@ -2807,7 +2839,7 @@ def _execute_locked(action, config, *, cache_port):
             'correlation_id', 'branch_scope')},
             'version': 1, 'request_sha256': identity, 'checks': checks,
             'cache': cache_summary, 'stages': stages,
-            'status': 'passed' if failure is None and len(checks) == len(CHECKS) else 'failed',
+            'status': 'passed' if failure is None and len(checks) == len(active_checks) else 'failed',
             'failure': failure, 'cleanup_confirmed': True,
             'log_sha256': hashlib.sha256(log_path.read_bytes()).hexdigest(),
             'elapsed_ms': int((time.time() - started) * 1000)}

@@ -852,6 +852,8 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         expected_main,
         branch_scope,
         checks=None,
+        branch_checks=None,
+        branch_labels=None,
         profile='fixture-profile',
         cache_config_override=None,
         cache_port=None,
@@ -872,6 +874,16 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
                  '{"id": "browser-journeys", "status": "passed", "duration_ms": 33}]}))'),
                 ('/usr/bin/python3', '-c', 'print("unit-ok")'),
             )
+        if branch_checks is None:
+            # Fixture parity: the branch run executes the same fixture
+            # checks under the same labels, so scope-independent tests
+            # (cache reuse, telemetry, cancellation) behave identically
+            # on every scope. Scope selection itself is covered by the
+            # dedicated split tests, which pass explicit branch fixtures.
+            branch_checks = checks
+            branch_labels = CI.CHECK_LABELS
+        elif branch_labels is None:
+            branch_labels = CI.BRANCH_CHECK_LABELS
         bundle = self._make_bundle(commit)
         tree = self._git('rev-parse', commit + '^{tree}').decode().strip()
         helper_digest, manifest = self._gate_manifest(commit, checks, profile=profile)
@@ -941,6 +953,8 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
                 return orig_open_log(path, reader_group)
 
         with patch.object(CI, 'CHECKS', checks), \
+             patch.object(CI, 'BRANCH_CHECKS', branch_checks), \
+             patch.object(CI, 'BRANCH_CHECK_LABELS', branch_labels), \
              patch.object(CI, 'TRUSTED_CACHE_ROOT_PREFIX', self.root), \
              patch.object(CI.pwd, 'getpwnam', side_effect=lambda name: build if name == 'forge_ci' else submitter), \
              patch.object(CI.grp, 'getgrgid', return_value=SimpleNamespace(gr_name='forge_ci')), \
@@ -1099,6 +1113,88 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         for env in seen_envs:
             self.assertEqual(env['CARGO_INCREMENTAL'], '0')
             self.assertEqual(env['CARGO_PROFILE_DEV_DEBUG'], 'line-tables-only')
+
+    def test_branch_checks_are_a_subset_of_the_full_gate(self):
+        self.assertEqual(set(CI.BRANCH_CHECKS) - set(CI.CHECKS), set())
+        self.assertEqual(CI.checks_for_scope('main'), (CI.CHECKS, CI.CHECK_LABELS))
+        self.assertEqual(CI.checks_for_scope('branch/feat/x'),
+                         (CI.BRANCH_CHECKS, CI.BRANCH_CHECK_LABELS))
+        self.assertEqual(CI.checks_for_scope('detached'),
+                         (CI.BRANCH_CHECKS, CI.BRANCH_CHECK_LABELS))
+        self.assertNotIn('make ui-qa', CI.BRANCH_CHECK_LABELS)
+        self.assertEqual(len(CI.BRANCH_CHECKS), len(CI.BRANCH_CHECK_LABELS))
+
+    def test_branch_scope_runs_in_memory_checks_only(self):
+        full = (
+            ('/usr/bin/python3', '-c', 'print("one")'),
+            ('/usr/bin/python3', '-c', 'print("two")'),
+            ('/usr/bin/python3', '-c', 'print("three")'),
+        )
+        subset = (full[0], full[2])
+        seen = []
+        def capture(argv, *, cwd, env, account, log, timeout, cancelled):
+            seen.append(tuple(argv))
+            proc = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                  stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+            return proc.returncode
+        r1, log1, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40,
+            branch_scope='branch/' + CI.canonical_branch_slug('feat/split'),
+            checks=full, branch_checks=subset,
+            workflow_id=str(uuid4()), run_child_override=capture,
+        )
+        self.assertEqual(r1['status'], 'passed', log1)
+        self.assertEqual(seen, list(subset))
+        self.assertEqual([c['argv'] for c in r1['checks']], [list(a) for a in subset])
+
+    def test_main_scope_runs_the_full_gate(self):
+        full = (
+            ('/usr/bin/python3', '-c', 'print("one")'),
+            ('/usr/bin/python3', '-c', 'print("two")'),
+            ('/usr/bin/python3', '-c', 'print("three")'),
+        )
+        subset = (full[0], full[2])
+        seen = []
+        def capture(argv, *, cwd, env, account, log, timeout, cancelled):
+            seen.append(tuple(argv))
+            proc = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                  stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+            return proc.returncode
+        r1, log1, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main=self.base_commit,
+            branch_scope='main',
+            checks=full, branch_checks=subset,
+            workflow_id=str(uuid4()), run_child_override=capture,
+        )
+        self.assertEqual(r1['status'], 'passed', log1)
+        self.assertEqual(seen, list(full))
+
+    def test_branch_scope_disables_disposable_postgres(self):
+        seen_envs = []
+        def capture_env(argv, *, cwd, env, account, log, timeout, cancelled):
+            seen_envs.append(dict(env))
+            proc = subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                  stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+            return proc.returncode
+        r1, log1, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main='0' * 40,
+            branch_scope='branch/' + CI.canonical_branch_slug('feat/split-env'),
+            workflow_id=str(uuid4()), run_child_override=capture_env,
+        )
+        self.assertEqual(r1['status'], 'passed', log1)
+        self.assertTrue(seen_envs)
+        for env in seen_envs:
+            self.assertEqual(env.get('FORGE_DISABLE_DISPOSABLE_POSTGRES'), '1')
+        seen_envs.clear()
+        r2, log2, _ = self._run_supervisor(
+            commit=self.base_commit, expected_main=self.base_commit,
+            branch_scope='main',
+            workflow_id=str(uuid4()), run_child_override=capture_env,
+        )
+        self.assertEqual(r2['status'], 'passed', log2)
+        self.assertTrue(seen_envs)
+        for env in seen_envs:
+            self.assertNotIn('FORGE_DISABLE_DISPOSABLE_POSTGRES', env)
 
     def test_publish_syncs_once_at_snapshot_boundary(self):
         with patch.object(CI.os, 'sync') as mock_sync:

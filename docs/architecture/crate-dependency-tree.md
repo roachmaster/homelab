@@ -13,7 +13,7 @@ are still open.**
 - [ ] Decide the demo crates: keep in the workspace for every CI combination, or gate them to a single job / separate example workspace
 - [ ] Decide `forge-kernel`: into `forge-core` as feature-gated modules, or separate
 - [x] Decide the layering enforcement: a layering test, or keep the eight crate boundaries — layering test, `forge-core/tests/layering.rs`
-- [ ] Rationalize the CI feature matrix (step two, after the layout decision) — drafted in docs/architecture/ci-pipeline.md: the imports check is built and wired, the branch/main split and the three-combination cut are specified, Jenkins/GitHub changes still to implement
+- [ ] Rationalize the CI feature matrix (step two, after the layout decision) — pipeline split implemented in docs/architecture/ci-pipeline.md (branch/main gates, `make ci-main`, Jenkins + GitHub split); the three-combination cut in section 6 still needs a trial run
 
 Built to answer: which crates are cohesive enough to merge into a higher-order
 crate, as the first step toward revising the CI portion of the Forge build.

@@ -14,8 +14,12 @@ The exclusive `forge-mission-control-ci` node has one executor and label
 connects through WebSocket. `forge-exact-candidate` invokes the root-owned
 `/usr/local/libexec/forge-ci-check` wrapper with seven validated correlation and
 source parameters. The installed verifier reads a digest-bound bundle, verifies
-the exact commit/tree and fixed gate manifest, then runs `make ci`, `make ui-qa`
-and the complete Python backend suite. Candidate commands run as the dedicated
+the exact commit/tree and fixed gate manifest, then runs the scope's gate:
+on a branch, `make ci` plus the in-memory Python backend suite (the
+disposable-PostgreSQL tests skip); on `main`, the full gate — `make ci`,
+`make ui-qa`, and the complete Python backend suite including the
+disposable-PostgreSQL tests. Out-of-memory tests run only on the main
+pipeline build (see `docs/architecture/ci-pipeline.md`). Candidate commands run as the dedicated
 unprivileged `forge_ci` account with private network, read-only source and owned
 outputs. Jenkins and model credentials are outside that boundary.
 

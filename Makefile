@@ -23,7 +23,7 @@ export ALLOW_GLOBAL ?= 0
 export REFRESH_AST ?= 1
 export AFFECTED_PLAN_OUT ?=
 
-.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast check-imports build-affected check-affected test-affected lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
+.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast check-imports build-affected check-affected test-affected lint test test-release doc check-deps ci ci-main backend-suites run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
 
 help:
 	@printf '%s\n' \
@@ -44,6 +44,8 @@ help:
 	  '  make doc               Rustdoc, no dependencies, warnings denied' \
 	  '  make check-deps        Package DAG and optional-feature regression guard' \
 	  '  make ci                Fixed full + minimal-feature quality gates; no deploy' \
+	  '  make ci-main           Branch gates (make ci) + headless browser QA + live-DB backend suites; main only' \
+	  '  make backend-suites    Mission Control backend suites, zero silent skips (main only)' \
 	  '  make run ARGS="node.info"  Run the Forge terminal (default: --help)' \
 	  '  make session           Interactive terminal; Ctrl-D or exit finishes' \
 	  '  make template ARGS="methods"  Run the opt-in template CLI' \
@@ -134,6 +136,19 @@ ci:
 	$(MAKE) test lint PACKAGE=forge-ide-web FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1
 	$(MAKE) ui-check
 	$(MAKE) ui-qa-check
+
+# Main pipeline build (docs/architecture/ci-pipeline.md): the branch gates
+# plus the out-of-memory stages — headless browser QA and the backend
+# suites (which spin up disposable PostgreSQL clusters). Runs only on
+# main; branches gate on `make ci` alone. Sequential on purpose: the
+# stages share the build output directory.
+backend-suites:
+	@python3 -B deploy/mission-control/backend-suites.py
+
+ci-main:
+	$(MAKE) ci
+	$(MAKE) ui-qa
+	$(MAKE) backend-suites
 
 session: ARGS =
 

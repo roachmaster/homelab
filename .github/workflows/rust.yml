@@ -35,11 +35,19 @@ jobs:
           node --version
       - name: Fetch locked optional capability dependencies
         run: cargo fetch --manifest-path src/rust/Cargo.toml --locked
-      - name: Install game asset cooker and Mission Control PostgreSQL test prerequisites
+      - name: Install game asset cooker prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgdk-pixbuf2.0-bin librsvg2-common imagemagick \
+            libgdk-pixbuf2.0-bin librsvg2-common imagemagick
+      # Out-of-memory stage (docs/architecture/ci-pipeline.md): the
+      # disposable-PostgreSQL backend suites run only on the main pipeline
+      # build. Pull requests run the in-memory gates only.
+      - name: Install Mission Control PostgreSQL test prerequisites
+        if: github.event_name != 'pull_request'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
             postgresql-16 postgresql-client-16 libpq-dev python3-psycopg2 python3-yaml
           test -x /usr/lib/postgresql/16/bin/initdb
           command -v pg_config
@@ -51,37 +59,8 @@ jobs:
       - name: Authoritative shared repository quality gates
         run: make ci
       - name: Verify Mission Control portal backend suites (zero silent skips)
-        run: |
-          ASSETS_DIR="$(python3 -B src/rust/scripts/ui_tools.py build | awk '/^ASSETS / {print $2}' | tail -n 1)"
-          test -d "$ASSETS_DIR"
-          export FORGE_STUDIO_HOST_FIXTURE="$PWD/src/rust/target/debug/examples/loopback_fixture"
-          export FORGE_STUDIO_AGENT="$PWD/src/rust/target/debug/forge-agent"
-          export FORGE_STUDIO_ASSETS="$ASSETS_DIR"
-          test -x "$FORGE_STUDIO_HOST_FIXTURE"
-          test -x "$FORGE_STUDIO_AGENT"
-          python3 -B - <<'PY'
-          import os, subprocess, sys, unittest
-
-          suites = [
-              ("deploy/mission-control", "test_services.py"),
-              ("deploy/mission-control/agent-driver", "test_*.py"),
-              ("deploy/mission-control/agent-runner", "test_*.py"),
-              ("deploy/mission-control/studio", "test_*.py"),
-          ]
-          for start_dir, pattern in suites:
-              print(f"=== Running backend suite: {start_dir} ({pattern}) ===", flush=True)
-              code = (
-                  "import sys, unittest\n"
-                  f"suite = unittest.defaultTestLoader.discover('.', pattern={pattern!r})\n"
-                  "res = unittest.TextTestRunner(verbosity=2).run(suite)\n"
-                  "print(f'SUITE_SUMMARY tests={res.testsRun} skipped={len(res.skipped)} failures={len(res.failures)} errors={len(res.errors)}', flush=True)\n"
-                  "if not res.wasSuccessful() or res.testsRun == 0 or res.skipped:\n"
-                  "    sys.exit(1)\n"
-              )
-              proc = subprocess.run([sys.executable, "-B", "-c", code], cwd=start_dir, check=False)
-              if proc.returncode != 0:
-                  sys.exit(proc.returncode)
-          PY
+        if: github.event_name != 'pull_request'
+        run: python3 -B deploy/mission-control/backend-suites.py
 
   pr-fast-gate:
     if: github.event_name == 'pull_request'
@@ -105,12 +84,11 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo fetch --manifest-path src/rust/Cargo.toml --locked
           node --version
-      - name: Install game asset cooker and portal Python prerequisites
+      - name: Install game asset cooker and YAML prerequisites
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgdk-pixbuf2.0-bin librsvg2-common imagemagick \
-            postgresql-16 postgresql-client-16 libpq-dev python3-psycopg2 python3-yaml
+            libgdk-pixbuf2.0-bin librsvg2-common imagemagick python3-yaml
       - name: Formatting, portal style, and DAG guard
         run: |
           make fmt-check
@@ -164,7 +142,7 @@ jobs:
           {
             echo "## Forge PR Fast Gate (Selective 1-Hop Direct-Dependent Check)"
             echo ""
-            echo "Authoritative full-workspace verification runs in the \`check\` job (\`make ci\` + Mission Control backend suites)."
+            echo "Authoritative full-workspace verification runs in the \`check\` job (\`make ci\` on this PR; the Mission Control backend suites run on the main pipeline build)."
             echo ""
             if [ -f "$CARGO_TARGET_DIR/ast/affected-plan.yaml" ]; then
               echo '```yaml'

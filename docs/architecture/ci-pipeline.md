@@ -1,8 +1,9 @@
 # CI pipeline: branch and main
 
 **Status: drafted 2026-11-22 from Leonardo's pipeline spec (below). The
-imports check is built and wired into `make ci`; the branch/main split of
-Jenkins and GitHub Actions is specified here but not yet implemented.**
+imports check is built and wired into `make ci`; the branch/main split
+is implemented (section 7). The three-combination cut in section 6 is
+still a proposal, not yet applied.**
 
 ## 1. The spec
 
@@ -152,18 +153,37 @@ would remove all three demo combinations outright; removing
 `forge-llama` from the workspace would stop it compiling in every
 combination.
 
-## 7. What changes where
+## 7. What changed (implemented 2026-11-22)
 
-- **Makefile**: add a `make ci-main` target (`make ci` + `make ui-qa` +
-  the live-DB Python suites). Apply the three-combination cut from
-  section 6 after the trial run.
-- **Jenkins** (`verify-candidate.py`): pre-merge candidate verification
-  becomes `make ci` only. The main pipeline build runs `make ci-main`
-  as a separate job (or the same job conditioned on branch).
-- **GitHub `rust.yml`**: PR runs become `make ci` only (no PostgreSQL,
-  no DB-backed suites); the main/validation runs become `make ci-main`.
-- **GitHub `ide-ui-browser.yml`**: drop the `pull_request` trigger;
-  main/validation only.
+- **Makefile**: `make ci-main` runs `make ci`, then `make ui-qa`, then
+  `make backend-suites` (sequential on purpose: the stages share the
+  build output directory). `backend-suites` runs
+  `deploy/mission-control/backend-suites.py`, which is the single
+  implementation of the four-suite zero-skips runner previously inlined
+  in `rust.yml`.
+- **Jenkins** (`verify-candidate.py`): candidate verification is
+  scope-dependent. A branch scope runs `BRANCH_CHECKS` — `make ci` plus
+  the agent-runner unittest discover with
+  `FORGE_DISABLE_DISPOSABLE_POSTGRES=1`, which makes the
+  disposable-PostgreSQL tests skip (`work_pg_fixture.py`). The `main`
+  scope runs the full `CHECKS`. The cache key and the gate manifest
+  always use the full `CHECKS`: the compiled artifacts are identical
+  whether or not `make ui-qa` subsequently runs, so branch runs keep
+  reusing main's snapshots.
+- **GitHub `rust.yml`**: the PostgreSQL install and the backend-suites
+  step carry `if: github.event_name != 'pull_request'`; PR runs are
+  `make ci` only (plus the game-asset tests and the `pr-fast-gate`
+  job, which no longer installs PostgreSQL). The backend-suites step
+  calls `backend-suites.py`.
+- **GitHub `ide-ui-browser.yml`**: the `pull_request` trigger STAYS —
+  `real-browser` is a required hosted check
+  (`DEFAULT_REQUIRED_HOSTED_CHECKS` in `work_verification.py`), and a
+  missing check would stall Forge tasks forever. Instead, the `make
+  ui-qa` step carries `if: github.event_name != 'pull_request'`: on a
+  PR the job runs the in-memory harness checks (`unittest discover` +
+  `make ui-qa-check`) and stops; the real browser run happens only on
+  the main pipeline build. Same shape as the `rust.yml` split: the job
+  runs on PRs, the out-of-memory steps do not.
 - **`make dead-code`**: keeps its own overlapping profile set and is not
   part of `make ci`; out of scope for this revision.
 
@@ -171,7 +191,9 @@ combination.
 
 - Per-combination wall time (cold/warm) and a trial run of the reduced
   `make ci` before applying the section 6 cut.
-- Live-DB audit of the Python suites: which files need a live
-  PostgreSQL and which run in-memory.
+- Whether any of the four backend suites is fully in-memory and could
+  move back to the PR runs: the split today is by mechanism (the
+  `PG16_AVAILABLE` gate skips DB tests on branches; whole suites run on
+  main), not by a per-file classification.
 - The `forge-llama`, demo-crate, and `forge-kernel` decisions
   (crate-dependency-tree.md Todo), which change the matrix further.

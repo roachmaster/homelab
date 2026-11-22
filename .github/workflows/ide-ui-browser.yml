@@ -4,7 +4,10 @@ on:
   push:
     branches: [main, validation/forge-ide-ui]
     paths: ['src/rust/forge-ide-ui/**', 'src/rust/forge-ide-web/**', 'src/rust/forge-ide-web-host/**', 'src/rust/forge-game-runtime/**', 'src/python/game-assets/**', 'src/python/pixel-art/**', 'src/rust/forge-agent/**', 'src/rust/forge-ide/**', 'src/rust/forge-remote*/**', 'src/rust/Cargo.*', 'src/rust/forge-core/**', 'src/rust/forge-template/**', 'Makefile', 'src/rust/scripts/ui_tools.py', 'src/rust/scripts/ui_qa.py', 'src/rust/scripts/tests/test_ui_qa.py', '.github/workflows/ide-ui-browser.yml']
-  # Backend/docs-only agent PRs also require the real-browser check.
+  # The job runs on every PR (it is a required hosted check: a missing
+  # check would stall Forge tasks forever), but the headless-browser
+  # step runs only on the main pipeline build — see the step below and
+  # docs/architecture/ci-pipeline.md.
   pull_request: {}
   workflow_dispatch:
 
@@ -47,7 +50,12 @@ jobs:
         run: |
           python3 -B -m unittest discover -s src/rust/scripts/tests -v
           make ui-qa-check
+      # Out-of-memory stage (docs/architecture/ci-pipeline.md): the real
+      # browser run happens only on the main pipeline build. On pull
+      # requests the job still runs — it is a required hosted check —
+      # but stops after the in-memory harness checks above.
       - name: Build and run headless QA through the root entry point
+        if: github.event_name != 'pull_request'
         env:
           QA_OUTPUT_ROOT: ${{ runner.temp }}/forge-ui-qa
         run: make ui-qa
