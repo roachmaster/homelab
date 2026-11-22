@@ -134,16 +134,20 @@ TASK_ORGANIZATION_CONTEXT_SHA256 = {
     "src/rust/forge-ide-web/tests/browser/agents-relay.test.mjs": "6603adbcc3e73f4cfab45f984c663285b4630502e51a6004438828fb5d688312"
 }
 
-# Exact reviewed retirement context bytes and intentional UI composition deltas.
-# Composition pins qualify source; Root still requires genuine consolidated CI.
+# Retirement feature origin is retained below. Its source fingerprints are
+# qualified against main370bcffd6d4c71d83ba0fa8742257713da8cf76d after the
+# reviewed module formalization, forge-core imports and additive contract tests.
+# Those structural changes preserve dormant Chat/Mail data and retired routing.
+# Historical migrations and authority AST guards remain independently pinned.
+# These fingerprints qualify source only; they confer no CI or merge authority.
 RETIREMENT_CONTEXT_REVISION = "243742283dc1a182738c2d4ecf131618b1dc7b8e"
 INCLUDED_RETIREMENT_CONTEXT_SHA256 = {
-    "src/rust/forge-ide-ui/src/lib.rs": "b65ac3943ce794065da85f5ab932539adf35c79982a88f7b35aedb65283994a1",
+    "src/rust/forge-ide-ui/src/lib.rs": "251d2bdde5ad1fb385f36fde134edb07b3832f448375e6405bdfcb5e79488b34",
     "src/rust/forge-ide-ui/src/model/bookmark.rs": "429b2b860a19c1402c08e6eae7b2f63413b6fef4db9a602c7617c1f8a5efa496",
-    "src/rust/forge-ide-ui/src/model/edit.rs": "e92db9ce49cae250d60a87b7cb6b3956bcc219b1bfba7f44e996fc3179b8be99",
+    "src/rust/forge-ide-ui/src/model/edit.rs": "e86329d9bacbcae64dd0001fb48a1cc66f12c28e7e585d85309163c27f1e2d7e",
     "src/rust/forge-ide-ui/src/model/projection.rs": "a45f8dcad634b1723d95df341cd4f569a999d8ae9c4c66145f88f0d3ef653597",
     "src/rust/forge-ide-ui/src/model/source.rs": "ab667c5794ef6b64ef92161cc349583feb17f3e344253353f28075500fda533f",
-    "src/rust/forge-ide-ui/src/protocol/legacy.rs": "50c68db600746ee5839bc499d85c2787d46c2133279b85848e03fa38a6a9a740",
+    "src/rust/forge-ide-ui/src/protocol/legacy.rs": "41166392429986311d1523e05dc9a5869732d1268eaa4a477aced8d956402c32",
     "src/rust/forge-ide-ui/src/view.rs": "8ccd4caf02eec07539a3c13199908a6378ea730de305d851aaa3cdb934e97517",
     "src/rust/forge-ide-ui/tests/chat_retirement.rs": "de5d96a3423cc4e101ab086bfde48b239a132fdae495de3f3b9091028335d44c",
     "src/rust/forge-ide-ui/tests/mail_archive.rs": "9f712228d7e3c6528fb821402c0c94e8e0c2485f7240be73ac87e1510fb18514",
@@ -151,19 +155,19 @@ INCLUDED_RETIREMENT_CONTEXT_SHA256 = {
     "src/rust/forge-ide-ui/tests/wasm_abi.mjs": "33f15dcfd90c02d2959a9e3fb226d5d9e66e4582d77521dd9dc91ba91f7c38fe",
     "src/rust/forge-ide-ui/tests/worker_glue.mjs": "4ebf78598e8808f0d30ff69645be729ece0d6d94bf7f785f6ec28365f221e71c",
     "src/rust/forge-ide-web-host/README.md": "5acf671a20c8085f620f5268f0c7560e2719038a1e73df87fa9545ef7b2b7c54",
-    "src/rust/forge-ide-web-host/src/assets.rs": "a30df3865db8c97960669f03fabfa9c51f8ca2912c028c98d172cf00553c1b79",
-    "src/rust/forge-ide-web-host/src/chat.rs": "58f1f68c45627ce3c99ed57dc62da0e8980b8dcaa5070b1df347f8ed96cf66a9",
-    "src/rust/forge-ide-web-host/src/http.rs": "0a86fd564fd4f1077de2f867d78727c776edc99b3e5e1c1465fb616da53b7e66",
-    "src/rust/forge-ide-web-host/src/lib.rs": "89c351cb11948317e775c8b6c232122e7252e69da80c20cf6af13ab4d18a8132",
-    "src/rust/forge-ide-web-host/src/service.rs": "94d9c8c17d4214464248b7ca5d4e815d73a570b9768332d76b9aec645e743622",
+    "src/rust/forge-ide-web-host/src/assets.rs": "28fce4e5d3f74d4b50e979595521bf22a0ac666eb8f2892d43b6b66966ca717f",
+    "src/rust/forge-ide-web-host/src/chat.rs": "1cdf9da99a655a2c6112e35125d97f86ee161f5fcb013a5f738eb75abde67756",
+    "src/rust/forge-ide-web-host/src/http.rs": "7d0fdae9a170186a4b3fe482d645d18194ef64496b05021fbd2ce778d56328f2",
+    "src/rust/forge-ide-web-host/src/lib.rs": "94cb9ea44720babe100348ebf28bde0357a96ff0590abcb7dd298db249492a25",
+    "src/rust/forge-ide-web-host/src/service.rs": "bb683078c9c4fb6e5ac7961e27af608c0bb470db2b7522d21071887c900b1ae8",
     "src/rust/forge-ide-web-host/src/service/edit_write.rs": "ecceaf207765cc76061852cb7aa76208f8de1cfe3db38299a4f04bd18829450c",
     "src/rust/forge-ide-web-host/src/session.rs": "492341fc9132ef2d0bed973f08c2cef8853f0c9dfb4b19b1630a71f2ab4da2cf",
     "src/rust/forge-ide-web-host/src/workspace.rs": "f3ee8f4c5b59ed8d5702d96f880235e34c248324cd2541566fb346200dfaf606",
-    "src/rust/forge-ide-web-host/tests/consumer.rs": "dfa1af228cce9224f54b265b383fffefa18c4d4c725a07dbfb59b6f6d2c3ace7",
+    "src/rust/forge-ide-web-host/tests/consumer.rs": "fdda3df4e4941d055b87d078881c4582b5b603857d7805df50ba05d1cf159bec",
     "src/rust/forge-ide-web/README.md": "9934b131016de8eaa76dfb0a5907beeacb5dd83567eac629cdabceb85b63aadc",
     "src/rust/forge-ide-web/src/generate/javascript.rs": "e3efa60edc38d95b51aa30c2608059c997ccfceeb6656174788e58c079b08622",
-    "src/rust/forge-ide-web/src/generate/mod.rs": "f3a45afe2693baaad1756e9379ff84d8bede3d91ea78214d17263567ffd90c3d",
-    "src/rust/forge-ide-web/tests/generation.rs": "dd02f0b132fb0af5084174dabe2ee8dfa25d5f0d5f235f7f6a2857b1a6d9e89d",
+    "src/rust/forge-ide-web/src/generate/mod.rs": "77a6552cb4017cac4184b9e4a211c8e77892a3dc568889d212553f81af6e93a7",
+    "src/rust/forge-ide-web/tests/generation.rs": "a22651fe5b5d49b25ffad267016b6c839cfed04a6c1393e4ac7f4655ad4dfa23",
     "src/rust/forge-ide-web/tests/playtest-wire.mjs": "44c28f99689fc3147af455c5357f1876792c3405ea24ae65dad8d7062ea50937"
 }
 

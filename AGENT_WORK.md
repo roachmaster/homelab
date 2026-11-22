@@ -1,3 +1,27 @@
+# Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
+
+The user authorizes pulling latest Homelab, running Jenkins, fixing failures and
+deploying the verified result to the portal. Root owns integration, real Jenkins
+execution and live deployment. `latest_source_audit` owns only this isolated
+`fix/m27-retirement-context-20261122` checkout from
+`370bcffd6d4c71d83ba0fa8742257713da8cf76d`.
+
+Preflight found eleven stale Rust source fingerprints in the M27 retirement
+boundary test. Their reviewed changes are the existing module extraction,
+`forge-core` import migration and additive tests. Refresh those fingerprints and
+clarify their current source qualification while retaining the retirement origin.
+Preserve all twenty authority AST guards, migrations 1–26, retired Chat/Mail
+behavior, dormant data and ABI13. Production code, policy, SQL and runtime
+configuration are unchanged by this fix. Full Jenkins verification and deployment
+remain Root-owned; this checkpoint makes no live-delivery claim.
+
+Focused validation: all 24 source-boundary, codec, event/config and normal-host
+reviewer/Jenkins composition tests pass in 0.792 seconds, with zero skips. The
+nine boundary tests retain migrations 1–26 and all twenty authority AST guards;
+all eleven refreshed Rust fingerprints match the reviewed current source.
+
+--- Earlier task checkpoints ---
+
 # Current: Consolidate reviewed Forge features on actual merged main — 2026-11-22
 
 The user explicitly requests committing and merging current reviewed feature changes and cleaning confusing task presentation. Root assigns this isolated task/consolidate-main-20261122 source checkout, based on actual verified cache merge9bf50625c86197e38a3d5fe75a51f8dc29faac09. Main9bf is tree-identical to corrected cache4dc. Import only reviewed feature deltas:4dc→351e (Jenkins M27 plus reviewer-only corrections),351e→11fa (server task scopes and typed generated UI), and351e→2437422 (reviewed Chat/Mail retirement). Do not import unreviewed541 ancestry.
