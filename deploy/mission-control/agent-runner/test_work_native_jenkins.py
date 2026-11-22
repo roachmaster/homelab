@@ -258,6 +258,104 @@ class NativeJenkinsTest(unittest.TestCase):
         self.assertEqual(binding['request']['candidate_commit'],self.head)
         self.assertEqual(self.driver.submissions,0)
 
+    def receipt_result(self,checks,*,status='failed',failure='checks_failed',cleanup=True):
+        return {'status':status,'summary':'Jenkins verification failed: '+str(failure),
+            'receipt':{'cleanup_confirmed':cleanup,'build_number':4,'checks':checks,'failure':failure}}
+
+    def test_actual_completed_gate_prefix_preserves_pass_before_browser_failure(self):
+        verify=self.driver.verify
+        def failed(request,require):
+            value=verify(request,require)
+            return {**value,**self.receipt_result([
+                {'index':0,'argv':list(CHECKS[0]),'returncode':0},
+                {'index':1,'argv':list(CHECKS[1]),'returncode':2}])}
+        self.driver.verify=failed
+        with self.assertRaises(VerificationFailure)as failure:
+            self.provider.run(self.job,self.repository,threading.Event())
+        report=failure.exception.report
+        self.assertFalse(report.checks_passed)
+        self.assertEqual([check['status']for check in report.checks],['passed','failed','not_run'])
+        self.assertEqual(report.findings[0]['check_id'],'browser-acceptance')
+        self.assertTrue(report.cleanup_confirmed)
+        self.assertEqual(self.driver.submissions,1)
+        self.assertEqual(self.driver.cancellations,0)
+
+    def test_malformed_protected_check_mapping_never_promotes_success(self):
+        valid=[{'index':i,'argv':list(argv),'returncode':0}for i,argv in enumerate(CHECKS)]
+        cases=[None,{},[valid[1]],valid+[valid[0]],
+            [valid[0],valid[0]],[{**valid[0],'index':False}],
+            [{**valid[0],'argv':['/usr/bin/make','weaker']}],
+            [{**valid[0],'returncode':False}],[{**valid[0],'returncode':None}],
+            [{**valid[0],'returncode':'0'}],[{**valid[0],'returncode':256}],
+            [{**valid[0],'extra':'unverified'}],[{**valid[0],'returncode':2},valid[1]]]
+        for checks in cases:
+            with self.subTest(checks=checks):
+                report=self.provider._report({'request':{'action_id':str(uuid4())}},
+                    self.receipt_result(checks,status='passed',failure=None))
+                self.assertFalse(report.checks_passed)
+                self.assertEqual([check['status']for check in report.checks],['not_run']*3)
+                self.assertEqual(report.code,'verification_receipt_invalid')
+        result={'status':'passed','receipt':{'cleanup_confirmed':True},'summary':'Claimed success without records'}
+        report=self.provider._report({'request':{'action_id':str(uuid4())}},result)
+        self.assertFalse(report.checks_passed)
+        self.assertEqual([check['status']for check in report.checks],['not_run']*3)
+
+    def test_incomplete_success_and_missing_cleanup_cannot_make_overall_pass(self):
+        valid=[{'index':i,'argv':list(argv),'returncode':0}for i,argv in enumerate(CHECKS)]
+        for count in range(3):
+            report=self.provider._report({'request':{'action_id':str(uuid4())}},
+                self.receipt_result(valid[:count],status='passed',failure=None))
+            self.assertFalse(report.checks_passed)
+            self.assertEqual([check['status']for check in report.checks],['passed']*count+['not_run']*(3-count))
+        report=self.provider._report({'request':{'action_id':str(uuid4())}},
+            self.receipt_result(valid,status='passed',failure=None,cleanup=False))
+        self.assertFalse(report.checks_passed);self.assertFalse(report.cleanup_confirmed)
+        self.assertEqual([check['status']for check in report.checks],['passed']*3)
+
+    def test_cancellation_and_preflight_do_not_invent_run_checks(self):
+        binding={'request':{'action_id':str(uuid4())}}
+        for failure in('main_ancestor_required','cancelled_or_timed_out','verification_unavailable'):
+            report=self.provider._report(binding,self.receipt_result([],failure=failure))
+            self.assertFalse(report.checks_passed)
+            self.assertEqual([check['status']for check in report.checks],['not_run']*3)
+        report=self.provider._report(binding,self.receipt_result([
+            {'index':0,'argv':list(CHECKS[0]),'returncode':0},
+            {'index':1,'argv':list(CHECKS[1]),'returncode':124}],failure='cancelled_or_timed_out'))
+        self.assertEqual([check['status']for check in report.checks],['passed','failed','not_run'])
+        self.assertEqual(report.category,'infrastructure')
+        report=self.provider._report(binding,{'status':'failed','summary':'lease lost'},
+            code='verification_timeout_or_cancelled',cleanup=True)
+        self.assertEqual([check['status']for check in report.checks],['not_run']*3)
+
+    def test_hosted_reobservation_uses_the_same_actual_per_check_outcomes(self):
+        self.local_pass()
+        self.driver.verify=Mock(return_value=self.receipt_result([
+            {'index':0,'argv':list(CHECKS[0]),'returncode':0},
+            {'index':1,'argv':list(CHECKS[1]),'returncode':2}]))
+        report=self.provider.observe(self.hosted)
+        self.assertEqual(report.status,'failed')
+        self.assertEqual([(check['name'],check['status'])for check in report.checks],
+            [('check','success'),('real-browser','failure'),('pr-fast-gate','skipped')])
+        self.assertEqual(report.findings[0]['check_id'],'real-browser')
+        self.assertEqual(self.driver.submissions,1)
+
+    def test_hosted_global_failure_or_inconsistent_green_receipt_cannot_persist_green_rows(self):
+        self.local_pass()
+        valid=[{'index':i,'argv':list(argv),'returncode':0}for i,argv in enumerate(CHECKS)]
+        for result in(self.receipt_result(valid,failure='source_changed_during_checks'),
+                self.receipt_result(valid,status='passed',failure=None,cleanup=False),
+                self.receipt_result(valid[:1],status='passed',failure=None),
+                self.receipt_result(None,status='passed',failure=None)):
+            with self.subTest(result=result):
+                self.driver.verify=Mock(return_value=result)
+                with self.assertRaises(PublicationError):self.provider.observe(self.hosted)
+        # Local reporting can truthfully retain completed gate facts while
+        # refusing source success after an overall post-check source failure.
+        report=self.provider._report({'request':{'action_id':str(uuid4())}},
+            self.receipt_result(valid,failure='source_changed_during_checks'))
+        self.assertFalse(report.checks_passed)
+        self.assertEqual([check['status']for check in report.checks],['passed']*3)
+
     def test_completed_prefix_does_not_starve_later_cancelled_actions(self):
         binding = self.local_pass()
         original = self.provider._directory(binding['request']['action_id'])

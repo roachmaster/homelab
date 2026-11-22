@@ -414,7 +414,13 @@ the frozen logical `check`, `pr-fast-gate` and `real-browser` outcomes on the ex
 candidate. With Jenkins selected, these identify the full fixed suite, and the
 observations explicitly name Jenkins. No GitHub Actions run is required or
 claimed. Missing/pending/failed/stale checks block final acceptance.
-Publication and verification retries append new runs and retain prior failures.
+Publication and verification retries append new runs and retain prior failures. Protected native
+check rows are projected individually from the exact sequential receipt indices,
+fixed argv and integer return codes: an earlier passing gate remains passed when
+a later gate fails; unstarted gates remain not run. Missing or invalid accounting
+never establishes overall success. Overall source/cleanup failure cannot create
+an all-green hosted-check record, even when all commands returned zero. Existing
+build results and historical review receipts are never rewritten.
 
 The native Jenkins check runner executes the complete fixed suite once per
 admitted verification action before independent code review. Publication and
