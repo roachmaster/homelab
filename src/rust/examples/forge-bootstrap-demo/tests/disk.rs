@@ -426,3 +426,45 @@ fn bridge_preserves_native_non_utf8_names_and_explicit_symlink_permission_choice
         assert_eq!(inspection.kind, expected_kind);
     }
 }
+
+#[test]
+fn repeated_applications_list_identically() {
+    let fixture = Fixture::new();
+    let first = listing(&fixture.app());
+    let second = listing(&fixture.app());
+    assert_eq!(first, second);
+    assert_eq!(first.directory, fixture.canonical());
+    assert_eq!(first.entries.len(), 2);
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    assert_eq!(
+        DiskRunError::UnexpectedCommand.to_string(),
+        "unexpected admitted disk command"
+    );
+    assert_eq!(
+        DiskRunError::Client(DiskError::StatePoisoned).to_string(),
+        "disk session state was poisoned by a panic"
+    );
+    assert_eq!(
+        DiskRunError::ListCurrent(ListCurrentError::UnexpectedResponse).to_string(),
+        "list-current client returned a non-listing response"
+    );
+    assert_eq!(
+        DiskBootstrapError::Config(ConfigError::InitialDirectoryMustBeAbsolute).to_string(),
+        "initial disk directory must be an explicit absolute path"
+    );
+    assert_eq!(
+        DiskBootstrapError::Factory(DiskError::StatePoisoned).to_string(),
+        "disk session state was poisoned by a panic"
+    );
+    assert_eq!(
+        ListCurrentError::<DiskError>::UnexpectedResponse.to_string(),
+        "list-current client returned a non-listing response"
+    );
+    assert!(DiskRunError::UnexpectedCommand.source().is_none());
+    assert!(DiskRunError::Client(DiskError::StatePoisoned)
+        .source()
+        .is_some());
+}

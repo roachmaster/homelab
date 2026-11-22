@@ -85,3 +85,56 @@ fn unselected_optional_route_is_absent_even_when_package_feature_is_enabled() {
         Err(DispatchError::UnknownRoute(route))
     );
 }
+
+#[test]
+fn repeated_applications_produce_identical_sums() {
+    fn run_once() -> i64 {
+        let app = bootstrap(AppConfig {
+            pure: PureConfig { bias: 2 },
+            ..AppConfig::default()
+        })
+        .unwrap();
+        let response = app
+            .dispatch(sum(20, 20), &DemoContext { allow: true })
+            .unwrap();
+        match response.payload {
+            Outcome::Sum(value) => value,
+            #[cfg(feature = "messages")]
+            Outcome::Greet(_) => panic!("expected sum"),
+        }
+    }
+    assert_eq!(run_once(), 42);
+    assert_eq!(run_once(), run_once());
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    use forge_bootstrap::{RegistrationError, ValidationError};
+    use forge_bootstrap_demo::BootstrapError;
+    use forge_bridge::DuplicateRoute;
+    use std::error::Error;
+    assert_eq!(SumOverflow.to_string(), "sum overflow");
+    assert_eq!(RunError::Sum(SumOverflow).to_string(), "sum overflow");
+    assert_eq!(
+        RunError::UnexpectedCommand.to_string(),
+        "unexpected admitted command"
+    );
+    assert_eq!(
+        BootstrapError::Registration(RegistrationError::DuplicateGroup("g".into())).to_string(),
+        "factory group g is already registered"
+    );
+    assert_eq!(
+        BootstrapError::Validation(ValidationError::MissingRequirement {
+            group: "g".into(),
+            binding: "b".into()
+        })
+        .to_string(),
+        "group g requires missing binding b"
+    );
+    assert_eq!(
+        BootstrapError::Routes(DuplicateRoute(sum_route())).to_string(),
+        "duplicate route demo.sum@1"
+    );
+    assert!(RunError::Sum(SumOverflow).source().is_some());
+    assert!(RunError::UnexpectedCommand.source().is_none());
+}

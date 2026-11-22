@@ -522,3 +522,56 @@ fn task_startup_failure_does_not_force_transient_creation_for_cleanup() {
     assert_eq!(observed.default_client.snapshot().create_attempts, 0);
     assert_eq!(observed.default_client.snapshot().drops, 0);
 }
+
+#[test]
+fn bootstrap_error_display_names_each_failure_exactly() {
+    assert_eq!(
+        MessagesBootstrapError::MissingClient.to_string(),
+        "message task requires a selected client"
+    );
+    assert_eq!(
+        MessagesBootstrapError::ConflictingExplicitClients.to_string(),
+        "multiple explicit message clients conflict"
+    );
+    assert_eq!(
+        MessagesBootstrapError::ClientConfig(memory::ConfigError::ZeroSequence).to_string(),
+        "initial receipt sequence must be nonzero"
+    );
+    assert_eq!(
+        MessagesBootstrapError::TaskConfig(capability::ConfigError::EmptySalutation).to_string(),
+        "salutation must not be blank"
+    );
+    assert_eq!(
+        MessagesBootstrapError::ClientFactory(MemoryFactoryError).to_string(),
+        "demo memory client construction failed"
+    );
+    assert_eq!(
+        MessagesBootstrapError::TaskFactory(TaskBuildError).to_string(),
+        "demo task construction failed"
+    );
+    assert_eq!(
+        BootstrapError::Messages(MessagesBootstrapError::MissingClient).to_string(),
+        "message task requires a selected client"
+    );
+}
+
+#[test]
+fn repeated_hosts_produce_identical_greetings() {
+    fn run_once() -> Delivery {
+        let observed = Observations::default();
+        let app = bootstrap_messages(
+            PureConfig::default(),
+            MessagesBootstrapConfig::default(),
+            observed.clone(),
+        )
+        .unwrap();
+        match send(&app).unwrap().payload {
+            Outcome::Greet(delivery) => delivery,
+            Outcome::Sum(_) => panic!("expected greeting"),
+        }
+    }
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(first, Delivery { sequence: 1 });
+}
