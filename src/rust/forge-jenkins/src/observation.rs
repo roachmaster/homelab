@@ -1,6 +1,7 @@
 //! Bounded read projections. Raw action/parameter values never implement Debug
 //! and never escape this parser; only explicitly selected public strings do.
-use crate::{job_path, Error, Executable};
+use crate::client::job_path;
+use crate::{Error, Executable};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,7 +37,7 @@ pub struct BuildSummary {
     pub parameters: BTreeMap<String, String>,
 }
 
-pub(super) fn tree_path(path: &str, tree: &str) -> String {
+pub(crate) fn tree_path(path: &str, tree: &str) -> String {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("tree", tree)
         .finish();
@@ -109,7 +110,7 @@ struct QueueItem {
 struct Queue {
     items: Vec<QueueItem>,
 }
-pub(super) fn queue_listing(
+pub(crate) fn queue_listing(
     body: &[u8],
     endpoint: &Url,
     selected: &BTreeSet<String>,
@@ -229,7 +230,7 @@ struct Build {
 struct Builds {
     builds: Vec<Build>,
 }
-pub(super) fn recent_builds(
+pub(crate) fn recent_builds(
     body: &[u8],
     job: String,
     limit: u8,
