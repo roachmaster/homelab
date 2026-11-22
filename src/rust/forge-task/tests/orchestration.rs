@@ -242,3 +242,81 @@ fn factory_and_provider_compose_clients_without_a_task_service_locator() {
         &[expected()]
     );
 }
+
+#[test]
+fn repeated_runs_record_identical_calls_and_outputs() {
+    fn run_once() -> (Vec<Fetch>, Vec<Publish>, Receipt) {
+        let fetch = source();
+        let publish = sink();
+        let task = PublishTask {
+            fetch: &fetch,
+            publish: &publish,
+        };
+        let receipt = task.run(input()).unwrap();
+        (
+            fetch.calls.into_inner(),
+            publish.calls.into_inner(),
+            receipt,
+        )
+    }
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(
+        first.0,
+        vec![Fetch {
+            key: "document-1".into()
+        }]
+    );
+    assert_eq!(first.1, vec![expected()]);
+    assert_eq!(first.2, Receipt(42));
+}
+
+#[test]
+fn sequential_runs_accumulate_exact_calls_in_order() {
+    let fetch = source();
+    let publish = sink();
+    let task = PublishTask {
+        fetch: &fetch,
+        publish: &publish,
+    };
+    assert_eq!(task.run(input()), Ok(Receipt(42)));
+    let second = Input {
+        key: "document-2".into(),
+        destination: "archive".into(),
+    };
+    assert_eq!(task.run(second), Ok(Receipt(42)));
+    assert_eq!(
+        fetch.calls.borrow().as_slice(),
+        &[
+            Fetch {
+                key: "document-1".into()
+            },
+            Fetch {
+                key: "document-2".into()
+            },
+        ]
+    );
+    assert_eq!(
+        publish.calls.borrow().as_slice(),
+        &[
+            expected(),
+            Publish {
+                destination: "archive".into(),
+                body: "Title: same".into(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn task_error_display_names_the_failing_stage_exactly() {
+    assert_eq!(
+        TaskError::Fetch(FetchError("source unavailable")).to_string(),
+        "fetch: source unavailable"
+    );
+    assert_eq!(
+        TaskError::Publish(PublishError("ambiguous send")).to_string(),
+        "publish: ambiguous send"
+    );
+}

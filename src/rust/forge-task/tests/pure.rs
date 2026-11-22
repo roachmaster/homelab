@@ -32,3 +32,15 @@ fn pure_task_preserves_its_own_typed_error() {
     }
     assert_eq!(Add.run((255, 1)), Err(Overflow));
 }
+
+#[test]
+fn pure_task_runs_through_a_static_generic_bound() {
+    fn run_task<T>(task: &T, input: String) -> Result<usize, Infallible>
+    where
+        T: Task<Input = String, Output = usize, Error = Infallible>,
+    {
+        task.run(input)
+    }
+    assert_eq!(run_task(&CharacterCount, "é!".into()), Ok(2));
+    assert_eq!(run_task(&CharacterCount, String::new()), Ok(0));
+}
