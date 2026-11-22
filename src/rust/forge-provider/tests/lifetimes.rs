@@ -104,3 +104,42 @@ fn factories_and_providers_substitute_behind_a_consumer_owned_port() {
     assert_eq!(use_port(live.acquire().unwrap().as_ref()), "hello");
     assert_eq!(use_port(fake.acquire().unwrap().as_ref()), "controlled");
 }
+
+#[test]
+fn failed_acquire_leaves_no_partial_state_for_the_next_acquire() {
+    let attempts = Cell::new(0);
+    let factory = || {
+        attempts.set(attempts.get() + 1);
+        if attempts.get() == 1 {
+            Err("construction failed")
+        } else {
+            Ok(attempts.get())
+        }
+    };
+    let provider = Transient::new(factory);
+    assert!(matches!(provider.acquire(), Err("construction failed")));
+    assert_eq!(*provider.acquire().unwrap(), 2);
+    assert_eq!(*provider.acquire().unwrap(), 3);
+    assert_eq!(attempts.get(), 3);
+}
+
+#[test]
+fn identical_providers_produce_identical_acquisition_sequences() {
+    fn run_sequence() -> Vec<i32> {
+        let creations = Cell::new(0);
+        let factory = || {
+            creations.set(creations.get() + 1);
+            Ok::<_, Infallible>(creations.get())
+        };
+        let provider = Transient::new(factory);
+        vec![
+            *provider.acquire().unwrap(),
+            *provider.acquire().unwrap(),
+            *provider.acquire().unwrap(),
+        ]
+    }
+    let first = run_sequence();
+    let second = run_sequence();
+    assert_eq!(first, vec![1, 2, 3]);
+    assert_eq!(first, second);
+}
