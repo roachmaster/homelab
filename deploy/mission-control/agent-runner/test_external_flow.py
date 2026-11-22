@@ -14,6 +14,7 @@ from work_external_review_context import canonical,validate_target,parse_verdict
 from test_work_execution_and_usage import make_v2_config,make_submit,make_stop_proof
 from work_worker_store import WorkerDB,WorkerAccessError
 from work_external_delivery_store import ExternalDeliveryStoreFactory
+from work_external_workflow import derive_branch_scope
 from queue_store import Rejected
 import work_policy
 
@@ -122,7 +123,8 @@ class ExternalFlowPGTest(unittest.TestCase):
   flow.run_once();return job
  def prepared(self,flow):
   action=self.delivery.claim('owned-delivery');self.assertEqual(action.kind,'prepare')
-  candidate={'candidate_commit':'c'*40,'candidate_tree':'d'*40,'integration_base':'a'*40,'author_candidate_commit':'b'*40,'diff_sha256':'e'*64,'verification_profile':'owned-tests','gate_source_sha256':'f'*64,'gate_manifest_sha256':'1'*64,'protected_gate_changes':[]}
+  scope=derive_branch_scope(candidate_commit='c'*40,expected_main='a'*40,source_branch='feat/owned-flow')
+  candidate={'candidate_commit':'c'*40,'candidate_tree':'d'*40,'integration_base':'a'*40,'author_candidate_commit':'b'*40,'source_branch':'feat/owned-flow','branch_scope':scope,'diff_sha256':'e'*64,'verification_profile':'owned-tests','gate_source_sha256':'f'*64,'gate_manifest_sha256':'1'*64,'protected_gate_changes':[]}
   self.delivery.checkpoint(action,{'status':'passed','receipt':candidate,'summary':'Prepared exact clean candidate'})
   flow.run_once();return candidate
  def implementation(self,flow):
@@ -148,7 +150,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.pg.admin_exec("UPDATE forge_external_workflow.actions SET poll_after=clock_timestamp() WHERE action_id='%s'"%action.action_id)
   again=self.delivery.claim('owned-delivery');self.assertEqual(again.action_id,action.action_id);self.assertEqual(again.request['previous_receipt'],{'queue_id':99})
   with self.assertRaises(Rejected):self.delivery.renew(action)
-  verified={k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256')};verified.update(result='SUCCESS',build_id=13)
+  verified={k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope')};verified.update(result='SUCCESS',build_id=13)
   self.delivery.checkpoint(again,{'status':'passed','receipt':verified,'summary':'Exact source checks passed'})
   flow.run_once();flow.run_once();merge=self.delivery.claim('owned-delivery');self.assertEqual(merge.kind,'merge');self.assertEqual(merge.request['verification'],verified)
   rootrow=self.rows('SELECT revision FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]
@@ -217,7 +219,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.assertEqual(self.db.project_revisions(),{})
  def test_main_changed_selects_new_source_before_author_rebase(self):
   service,root,flow,_=self.submit_plan();candidate=self.implementation(flow);self.review(flow);flow.run_once();verify=self.delivery.claim('owned-delivery')
-  self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256')},'result':'SUCCESS'},'summary':'Passed'})
+  self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope')},'result':'SUCCESS'},'summary':'Passed'})
   flow.run_once();flow.run_once();merge=self.delivery.claim('owned-delivery')
   self.delivery.checkpoint(merge,{'status':'main_changed','receipt':{},'summary':'Trusted main changed'})
   self.assertTrue(flow.run_once());self.assertIsNone(self.call('claim','homelab',ALIAS))
@@ -339,7 +341,7 @@ class ExternalFlowPGTest(unittest.TestCase):
   self.review(flow,'revise');self.author(flow,'Revised approved Plan with original work preserved.')
   candidate=self.implementation(flow);self.review(flow);flow.run_once();verify=self.delivery.claim('owned-delivery')
   self.assertEqual(self.rows('SELECT status FROM forge_agent.coding_tasks WHERE id=%s',(root['task_id'],))[0]['status'],'awaiting_review')
-  self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256')},'result':'SUCCESS'},'summary':'Exact fixed checks passed'})
+  self.delivery.checkpoint(verify,{'status':'passed','receipt':{**{k:candidate[k] for k in ('candidate_commit','candidate_tree','gate_manifest_sha256','branch_scope')},'result':'SUCCESS'},'summary':'Exact fixed checks passed'})
   flow.run_once();flow.run_once();merge=self.delivery.claim('owned-delivery')
   self.delivery.checkpoint(merge,{'status':'merged','receipt':{'merge_commit':'c'*40,'candidate_tree':'d'*40,'expected_main':'a'*40},'summary':'Actual trusted merge observed'})
   self.assertTrue(flow.run_once())
