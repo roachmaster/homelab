@@ -264,3 +264,114 @@ fn application_owned_sum_checks_nested_capability_variants() {
     }
     assert_eq!(calls.get(), 0);
 }
+
+#[test]
+fn repeated_dispatches_produce_identical_responses() {
+    fn run_once() -> (Reply, RouteKey, String, Option<String>) {
+        let mut builder = Builder::new();
+        builder
+            .register(
+                route("example.echo", 1),
+                Kind::Echo,
+                |payload, _| match payload {
+                    Command::Echo(text) => Ok(Reply::Text(text)),
+                    Command::Count => Err(Failure("binding invariant")),
+                },
+            )
+            .unwrap();
+        let bridge = Bridge::new(builder.freeze(), admission);
+        let reply = bridge
+            .dispatch(
+                request("example.echo", 1, Command::Echo("hello".into())),
+                &true,
+            )
+            .unwrap();
+        (
+            reply.payload,
+            reply.header.route().clone(),
+            reply.header.request_id().to_string(),
+            reply.header.correlation_id().map(str::to_string),
+        )
+    }
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(first.0, Reply::Text("hello".into()));
+    assert_eq!(first.1, route("example.echo", 1));
+    assert_eq!(first.2, "r1");
+    assert_eq!(first.3.as_deref(), Some("c1"));
+}
+
+#[test]
+fn sequential_dispatches_invoke_handlers_in_exact_order() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let echo_log = log.clone();
+    let count_log = log.clone();
+    let mut builder = Builder::new();
+    builder
+        .register(route("example.echo", 1), Kind::Echo, move |payload, _| {
+            echo_log.borrow_mut().push("echo");
+            match payload {
+                Command::Echo(text) => Ok(Reply::Text(text)),
+                Command::Count => Err(Failure("binding invariant")),
+            }
+        })
+        .unwrap();
+    builder
+        .register(route("example.count", 1), Kind::Count, move |_, _| {
+            count_log.borrow_mut().push("count");
+            Ok(Reply::Count(1))
+        })
+        .unwrap();
+    let registry = builder.freeze();
+    assert_eq!(registry.len(), 2);
+    let bridge = Bridge::new(registry, admission);
+    assert_eq!(
+        bridge
+            .dispatch(request("example.echo", 1, Command::Echo("a".into())), &true)
+            .unwrap()
+            .payload,
+        Reply::Text("a".into())
+    );
+    assert_eq!(
+        bridge
+            .dispatch(request("example.count", 1, Command::Count), &true)
+            .unwrap()
+            .payload,
+        Reply::Count(1)
+    );
+    assert_eq!(
+        bridge
+            .dispatch(request("example.echo", 1, Command::Echo("b".into())), &true)
+            .unwrap()
+            .payload,
+        Reply::Text("b".into())
+    );
+    assert_eq!(*log.borrow(), vec!["echo", "count", "echo"]);
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    assert_eq!(
+        DispatchError::<Failure>::UnknownRoute(route("example.echo", 1)).to_string(),
+        "unregistered route example.echo@1"
+    );
+    assert_eq!(
+        DispatchError::<Failure>::Admission(AdmissionDenied).to_string(),
+        "admission denied"
+    );
+    assert_eq!(
+        DispatchError::<Failure>::PayloadMismatch(route("example.echo", 1)).to_string(),
+        "payload variant does not match example.echo@1"
+    );
+    assert_eq!(
+        DispatchError::Handler(Failure("boom")).to_string(),
+        "handler failed: boom"
+    );
+    assert_eq!(
+        DuplicateRoute(route("example.echo", 1)).to_string(),
+        "duplicate route example.echo@1"
+    );
+}
