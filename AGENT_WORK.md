@@ -1,4 +1,11 @@
-## Current: Verification-retry response contract — 2026-11-22
+## Current: Explicit source-bound verification recovery — 2026-11-22
+
+- Native build 5 genuinely passed `make ci`, then failed browser acceptance at history pagination; backend checks were not run and cleanup passed. Keep its original receipt and failed review intact. The global fixture fault could be consumed by a background Refresh watermark instead of the intended Next page. An owned forced-order HTTP case proved this mechanism. The corrected task/cursor-scoped fixture passed all 28 actual browser groups with all three cleanup records; production history logic was unchanged.
+- Explicit recovery now appends one verification per failed review using the same stopped artifact and original published stop proof. It validates the intervening owner/control lineage and uses a private source-bound authority. Manual counters increase honestly beyond the unchanged automatic allowance; no author, model attempt, Plan reset, automatic budget renewal or migration is created. Original v1 receipts retain exact replay.
+- The reviewed source passed 40 focused PostgreSQL/API/compatibility cases, including races, lost acknowledgements, malformed history, immutable source and automatic fencing. Native check accounting passed 74 relevant cases and now retains each protected receipt's actual passed/failed/not-run outcome without allowing invalid hosted success. The integrated recovery, v1 compatibility, native-Jenkins and API suite passed 57 tests in 101.077s with zero skips. Runtime activation and subsequent real verification are recorded in the external recovery checkpoint. Running Rust assets stay unchanged until the matched host/WASM bundle is deployed after genuine verification.
+- The earlier main-freeze and deferred-next-M27 integration instructions below describe the first CI run. That run is terminal. The reviewed contract, fixture, accounting and explicit owner-recovery fixes are now integrated for the next real verification of the preserved source. Do not reset old counters or manufacture approval; complete genuine CI, independent review and guarded merge.
+
+## Earlier: Verification-retry response contract — 2026-11-22
 
 Root delegates a source-only Rust contract fix on isolated branch `task/review-retry-ack-20261122`, based exactly on `a1ee6f64ee377a6c3640b86d70de5ece8373aacc`. The backend correctly commits one infrastructure retry and returns a new review UUID; the portable response validator incorrectly requires the old review UUID, causing a gateway failure after success. Accept a distinct valid review UUID with AwaitingReview only for RetryInfrastructure; retain request/project/task/revision/repair-task guards and exact target identity for all other decisions. Add protocol, real host-consumer and generated-application browser-fixture regressions. This is pure contract behavior with no new factory, API field or ABI version.
 
@@ -14,7 +21,7 @@ Follow-up browser history investigation: genuine Jenkins build5 failed an existi
 
 External evidence is under /mnt/data/homelab-build/cleanup-conflicts-20261121/review-retry-evidence: legacy-history-race.json, browser-runs/forge-ui-qa-3l9a_nui and browser-runs/forge-ui-qa-mr9uycp_. The final clean browser source is 397f711d2c29cabc3d00043c88f69af7eb5774a8 with source fingerprint 832a2a40295e7b18e4460845ffdba4f381ad13e47ba961d01ffabace5182d591. The subsequent checkpoint changes this file only; production and test bytes remain identical to that qualified source.
 
-## Current: Recover native publication ancestry — 2026-11-22
+## Earlier: Recover native publication ancestry — 2026-11-22
 
 - The continued cache author finished normally with the corrected cache helper and measured qualification report. Native Jenkins build4 then rejected its old-base candidate at `main_ancestor_required` before running checks. The finished native workspace and all failed evidence are preserved; the idle publisher was stopped pending the controller fix.
 - Trusted branch-first preparation now snapshots authored source in its private clone and three-way merges actual current main before branch push, the durable event and Jenkins. Version2 receipts freeze both authored and integrated identities; historical receipts replay unchanged. Conflicts produce unapproved source findings before any push or build.

@@ -464,6 +464,17 @@ The failed review and build remain intact. A durable, once-only owner action
 and normal control receipt make exact request replay safe; fresh full CI,
 independent review and guarded merge are still required.
 
+After a further genuine failed check, the owner may explicitly request another
+verification of the same stopped artifact. The recovery records one durable
+action per failed review and proves every intervening review/control receipt
+back to the original published stop receipt. A private typed authority permits
+only that append: the recorded infrastructure count increases, while the frozen
+automatic limit, source, Plan and author-recovery fences remain intact. Unknown
+cleanup, changed source, invalid history and concurrent work reject admission.
+Only the new pending review is prepared again against current main; no author
+task or model attempt is created. This is an explicit owner operation, never a
+coordinator retry loop. Original receipts remain replayable.
+
 A later correction to a Completed task uses `ide.work.repair` with an explicit
 approved-project candidate. If that legacy parent has no bound review, trusted
 source import verifies the exact project commit/digest before materializing the
