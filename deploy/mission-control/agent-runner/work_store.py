@@ -1133,7 +1133,7 @@ class WorkStore:
                 (lock_scope, ADVISORY_LOCK_SALT),
             )
             cursor.execute("""
-                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id
+                SELECT id, project_alias, mode, status, revision, latest_attempt_id, plan_decision_id,review_required,workflow_required,workflow_id,workflow_review_id
                 FROM forge_agent.coding_tasks
                 WHERE owner_id = %s AND project_alias = %s AND id = %s
                 FOR UPDATE
@@ -1156,7 +1156,7 @@ class WorkStore:
                     raise Rejected(409, "idempotency_conflict")
                 return dict(existing["receipt_json"])
 
-            self._require_transition_authority(cursor,task,_authority,"native_timeout")
+            self._require_transition_authority(cursor,task,_authority,"reviewer_correction" if task["mode"]=="review" else "native_timeout")
             if task["revision"] != expected_revision or expected_revision >= MAX_REVISION:
                 raise Rejected(409, "revision_conflict")
 
@@ -1279,7 +1279,8 @@ class WorkStore:
             with self._transaction() as cursor:yield cursor
         else:
             from work_workflow import BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority
-            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority)) or authority.store is not self:
+            from work_reviewer_correction import BoundReviewerCorrectionAuthority
+            if not isinstance(authority,(BoundDelegatedAuthority,BoundNativeRetryAuthority,BoundPreparationRetryAuthority,BoundReviewerCorrectionAuthority)) or authority.store is not self:
                 raise Rejected(403,"denied")
             yield authority.cursor
 

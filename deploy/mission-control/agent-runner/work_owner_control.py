@@ -428,6 +428,10 @@ class NativeOwnerControl:
             return receipt
 
     def resume(self, command):
+        correction = self.workflows.reviewer_correction
+        if correction is not None:
+            result = correction.resume(command)
+            if result is not None:return result
         flow = self.workflows
         store = flow.store
         store._require_project(command.project_alias)
@@ -691,5 +695,5 @@ class NativeOwnerControlFactory:
         self.config, self.catalog, self.store = config, catalog, store
 
     def create(self):
-        from work_workflow import WorkflowStore
-        return NativeOwnerControl(WorkflowStore(self.config, self.catalog, self.store))
+        from work_workflow import WorkflowStoreFactory
+        return NativeOwnerControl(WorkflowStoreFactory(self.config, self.catalog, self.store).create())
