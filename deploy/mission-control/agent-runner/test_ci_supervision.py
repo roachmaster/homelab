@@ -1747,6 +1747,57 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         self.assertEqual((entry / 'current.json').read_bytes(), before['pointer'])
         self.assertEqual((entry / 'last_used.json').read_bytes(), before['last_used'])
 
+    def test_postcommit_receipt_or_gc_unavailability_does_not_downgrade_success(self):
+        for operation in ('receipt_read', 'predecessor_delete', 'journal_unlink'):
+            with self.subTest(operation=operation):
+                scope = 'branch/' + CI.canonical_branch_slug('terminal/' + operation)
+                seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                entry = self._entry_dir(CI.scope_directory_name(scope), seed['cache']['compat_key'])
+                pointer = (entry / 'current.json').read_bytes()
+                previous = entry / json.loads(pointer)['snapshot_id']
+                pending = entry / 'pending-publication.json'
+                reader = CI.read_file
+                remover = CI._safe_rmtree
+                unlink = Path.unlink
+                fired = False
+                def committed():
+                    return pending.exists() and json.loads(pending.read_text())['committed'] is True
+                def read_fault(path, **kwargs):
+                    nonlocal fired
+                    if not fired and operation == 'receipt_read' and path.parent == self.results and path.suffix == '.json' and committed():
+                        fired = True
+                        raise OSError('committed result temporarily unavailable')
+                    return reader(path, **kwargs)
+                def delete_fault(path):
+                    nonlocal fired
+                    if not fired and operation == 'predecessor_delete' and path == previous and committed():
+                        fired = True
+                        raise OSError('deferred predecessor cleanup unavailable')
+                    return remover(path)
+                def unlink_fault(path, *args, **kwargs):
+                    nonlocal fired
+                    if not fired and operation == 'journal_unlink' and path == pending and committed():
+                        fired = True
+                        raise OSError('committed journal cleanup unavailable')
+                    return unlink(path, *args, **kwargs)
+                with patch.object(CI, 'read_file', side_effect=read_fault), \
+                     patch.object(CI, '_safe_rmtree', side_effect=delete_fault), \
+                     patch.object(Path, 'unlink', unlink_fault):
+                    result, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
+                self.assertTrue(fired)
+                self.assertEqual(result['status'], 'passed')
+                self.assertEqual(result['cache']['publish_status'], 'published')
+                after = (entry / 'current.json').read_bytes()
+                self.assertNotEqual(after, pointer)
+                self.assertTrue(json.loads(pending.read_text())['committed'])
+                # Re-read the genuine root result and complete only deferred GC;
+                # neither another build nor an unapproved pointer is introduced.
+                self._local_cache_provider().recover_pending()
+                self.assertFalse(pending.exists())
+                self.assertEqual((entry / 'current.json').read_bytes(), after)
+                self.assertEqual(json.loads((self.results / (result['action_id'] + '.json')).read_text())['status'], 'passed')
+                self.assertFalse(previous.exists())
+
     def test_orphan_gc_is_link_safe_and_does_not_hide_cleanup_failures(self):
         scope = 'branch/' + CI.canonical_branch_slug('gc/safety')
         seed, _, _ = self._run_supervisor(commit=self.base_commit, expected_main='0' * 40, branch_scope=scope)
