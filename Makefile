@@ -23,7 +23,7 @@ export ALLOW_GLOBAL ?= 0
 export REFRESH_AST ?= 1
 export AFFECTED_PLAN_OUT ?=
 
-.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml build-affected check-affected test-affected lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
+.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast build-affected check-affected test-affected lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
 
 help:
 	@printf '%s\n' \
@@ -33,6 +33,7 @@ help:
 	  '  make portal-style-check Verify Rust fmt + portal Python syntax/LF + UI YAML parsing' \
 	  '  make dead-code         Layered dead-code check (SCOPE=all|portal, CHANGED_ONLY=0|1)' \
 	  '  make ast-yaml          Generate deterministic workspace YAML AST + dependency graph' \
+	  '  make rust-ast          Parse all Rust sources (pure Python) and report parse notes' \
 	  '  make build-affected    Rebuild changed + strictly 1-hop direct dependents (no transitive)' \
 	  '  make check-affected    Type-check changed + strictly 1-hop direct dependents' \
 	  '  make test-affected     Test changed + strictly 1-hop direct dependents (includes dev edges)' \
@@ -97,6 +98,8 @@ dead-code:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/dead_code.py"
 ast-yaml:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/ast_graph.py"
+rust-ast:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/rust_ast.py" "$$FORGE_RUST_ROOT" --quiet
 build-affected:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/affected_build.py" build
 check-affected:
