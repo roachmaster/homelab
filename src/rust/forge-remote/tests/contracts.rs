@@ -290,3 +290,105 @@ fn local_connection_budget_can_shorten_but_not_extend_call_deadline() {
         })
     );
 }
+
+#[test]
+fn repeated_dispatches_produce_identical_replies() {
+    fn run_once() -> NodeReply {
+        let calls = Rc::new(Cell::new(0));
+        let destination = Destination::new(
+            target(),
+            Source(calls.clone(), Ok(info())),
+            |subject: &str, _: &Target, _: &Header| subject == "reader",
+        );
+        let reply = destination
+            .dispatch_verified(call(NODE_INFO), "reader")
+            .unwrap();
+        assert_eq!(calls.get(), 1);
+        reply
+    }
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(first.responder, target());
+    assert_eq!(first.response.payload, info());
+}
+
+#[test]
+fn sequential_dispatches_invoke_the_source_once_each() {
+    let calls = Rc::new(Cell::new(0));
+    let destination = Destination::new(
+        target(),
+        Source(calls.clone(), Ok(info())),
+        |subject: &str, _: &Target, _: &Header| subject == "reader",
+    );
+    let first = destination
+        .dispatch_verified(call(NODE_INFO), "reader")
+        .unwrap();
+    let second = destination
+        .dispatch_verified(call(NODE_INFO), "reader")
+        .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(calls.get(), 2);
+}
+
+#[test]
+fn node_info_validate_checks_each_projection_field() {
+    assert_eq!(info().validate(), Ok(()));
+    for invalid in [
+        NodeInfo {
+            node: "".into(),
+            ..info()
+        },
+        NodeInfo {
+            target_os: "has space".into(),
+            ..info()
+        },
+        NodeInfo {
+            target_arch: "a/b".into(),
+            ..info()
+        },
+    ] {
+        assert_eq!(invalid.validate(), Err(RemoteError::InvalidResponse));
+    }
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    let cases = [
+        (RemoteError::InvalidRequest, "invalid remote request"),
+        (RemoteError::InvalidResponse, "invalid remote response"),
+        (RemoteError::Unauthenticated, "peer authentication failed"),
+        (RemoteError::Forbidden, "operation forbidden"),
+        (RemoteError::WrongTarget, "wrong target node or incarnation"),
+        (RemoteError::UnknownRoute, "unregistered remote route"),
+        (RemoteError::Limit, "remote limit exceeded"),
+        (RemoteError::Unavailable, "node observation unavailable"),
+        (
+            RemoteError::Deadline {
+                may_have_executed: false,
+            },
+            "deadline expired before dispatch",
+        ),
+        (
+            RemoteError::Deadline {
+                may_have_executed: true,
+            },
+            "deadline expired; remote execution may have occurred",
+        ),
+        (
+            RemoteError::Transport {
+                may_have_executed: false,
+            },
+            "transport failed before request send",
+        ),
+        (
+            RemoteError::Transport {
+                may_have_executed: true,
+            },
+            "transport failed; remote execution may have occurred",
+        ),
+    ];
+    for (error, message) in cases {
+        assert_eq!(error.to_string(), message);
+    }
+}
