@@ -115,6 +115,7 @@ export async function startAgentsRelay() {
   const faults = { dropNextSubmit: false, denyNextSubmit: false, holdProgressCompletion: false,
     dropNextPlanDecision: false, holdPublication: false, autonomousPolicy:false,externalWorkflow:false,denyNextEvents:false };
   const planDecisions = [], reviewDecisions = [], publicationRevisions = [], workflowSubmissions=[];
+  const verificationRetries = [], reviewReads = [];
   let refreshes = 0, progressRefetches = 0;
   const server = createServer(async (request, response) => {
     try {
@@ -193,6 +194,8 @@ export async function startAgentsRelay() {
         if(selected.workflow && selected.status==='running'){
           progress(selected);selected.status='awaiting_review';selected.revision++;event(selected,'awaiting_review');
         }
+        if(selected.review)reviewReads.push({task_id:selected.task_id,review_id:selected.review.review_id,
+          revision:selected.revision,source_attempt_id:selected.attempt_id});
         send(200, 'work_opened', { task: detail(selected) }); return;
       }
       if (input.kind === 'work_events') {
@@ -214,6 +217,26 @@ export async function startAgentsRelay() {
       if(input.kind==='work_review_decide'){
         if(request.headers['forge-destination']!=='ide.work.review.decide')throw new Error('fixture review destination');
         reviewDecisions.push({...input});
+        if(input.decision==='retry_infrastructure'){
+          const intent=JSON.stringify(Object.fromEntries(Object.entries(input).filter(([key])=>key!=='request_id')));
+          let saved=controls.get(input.idempotency_key);
+          if(saved&&(saved.kind!=='work_review_decide'||saved.intent!==intent)){failed(409,'idempotency_conflict');return;}
+          if(!saved){
+            if(input.expected_revision!==selected.revision||input.review_id!==selected.review?.review_id){failed(409,'revision_conflict');return;}
+            if(selected.mode!=='implement'||selected.status!=='awaiting_review'||!selected.review.can_retry
+                ||!input.note?.trim()||(input.findings??[]).length||(input.verified_finding_ids??[]).length){failed(400,'invalid_request');return;}
+            const before=selected.revision,previousReview=selected.review.review_id;
+            selected.revision++;
+            selected.review={...selected.review,review_id:randomUUID(),stage:'awaiting_decision',
+              latest_check_status:'passed',handoff_reason:null,can_retry:false,can_repair:true};
+            saved={kind:'work_review_decide',intent,receipt:{project_alias:project,task_id:selected.task_id,
+              base_revision:before,revision:selected.revision,status:selected.status,review_id:selected.review.review_id}};
+            controls.set(input.idempotency_key,saved);
+            verificationRetries.push({request:{...input},previous_review_id:previousReview,receipt:{...saved.receipt},
+              source_attempt_id:selected.attempt_id,round:selected.review.round});
+          }
+          send(202,'work_review_decided',saved.receipt);return;
+        }
         if(input.expected_revision!==selected.revision||input.review_id!==selected.review?.review_id){failed(409,'revision_conflict');return;}
         if(input.decision!=='approve'||!input.note?.trim()||JSON.stringify(input.verified_finding_ids)!==JSON.stringify(['compiler-fixture'])){failed(400,'invalid_request');return;}
         const before=selected.revision;selected.revision++;
@@ -283,7 +306,16 @@ export async function startAgentsRelay() {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   return { endpoint: `127.0.0.1:${server.address().port}`, tokenFile, faults, calls,
-    planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,
+    planDecisions, reviewDecisions, publicationRevisions,workflowSubmissions,verificationRetries,reviewReads,
+    requireVerificationRetry(taskId){
+      const selected=tasks.get(taskId);
+      if(selected?.mode!=='implement'||selected.status!=='awaiting_review'||!selected.review)throw new Error('No finished fixture implementation');
+      selected.review={...selected.review,stage:'handoff',latest_check_status:'unavailable',
+        handoff_reason:'Controlled verification infrastructure failure; author source is preserved.',can_retry:true,can_repair:false};
+      selected.revision++;
+      return JSON.parse(JSON.stringify(detail(selected)));
+    },
+    reviewSnapshot(taskId){const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');return JSON.parse(JSON.stringify(detail(selected)));},
     enableAutonomy(){faults.autonomousPolicy=true;},
     enableExternal(){if(profiles.some(p=>p.alias==='muse-db-primary'))return;profiles.push({alias:'muse-db-primary',label:'Muse database runner',backend:'muse',model:'External runner',modes:['plan','review'],transport:'external_db'});},
     enableExternalWorkflow(){faults.externalWorkflow=true;profiles.find(p=>p.alias==='muse-db-primary').modes=['plan','review','implement'];},
