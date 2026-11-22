@@ -387,3 +387,21 @@ fn the_public_renderer_does_not_invent_a_greeting_or_forbid_empty_inline_source(
         .unwrap();
     assert_eq!(response.payload, Outcome::Rendered(String::new()));
 }
+
+#[test]
+fn assembly_error_display_names_each_failure_exactly() {
+    assert_eq!(
+        AssemblyError::Configuration(TemplateError::Configuration("limits must be positive"))
+            .to_string(),
+        "renderer configuration: template configuration: limits must be positive"
+    );
+    assert_eq!(
+        AssemblyError::Registration(RegistrationError::DuplicateGroup("g".into())).to_string(),
+        "factory group g is already registered"
+    );
+    assert!(
+        AssemblyError::Configuration(TemplateError::Limit("work steps"))
+            .source()
+            .is_some()
+    );
+}

@@ -503,3 +503,88 @@ fn an_undeclared_complete_dotted_path_can_resolve_in_parent_schema() {
         "outer"
     );
 }
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    let cases = [
+        (
+            TemplateError::Configuration("limits must be positive and within documented caps"),
+            "template configuration: limits must be positive and within documented caps",
+        ),
+        (
+            TemplateError::Syntax {
+                offset: 3,
+                reason: "expected ASCII dotted identifiers or '.'",
+            },
+            "template byte 3: expected ASCII dotted identifiers or '.'",
+        ),
+        (
+            TemplateError::Schema {
+                path: "$.name".into(),
+                reason: "expected text",
+            },
+            "template schema at $.name: expected text",
+        ),
+        (
+            TemplateError::UnknownPath("extra".into()),
+            "undeclared template path: extra",
+        ),
+        (
+            TemplateError::CompositeInterpolation("items".into()),
+            "use a section for composite template path: items",
+        ),
+        (
+            TemplateError::Limit("output bytes"),
+            "template output bytes limit exceeded",
+        ),
+        (
+            TemplateError::Method {
+                name: "welcome".into(),
+                reason: "expected text".into(),
+            },
+            "template method welcome: expected text",
+        ),
+    ];
+    for (error, message) in cases {
+        assert_eq!(error.to_string(), message);
+    }
+}
+
+#[test]
+fn default_limits_are_exact() {
+    let limits = Limits::default();
+    assert_eq!(limits.max_source_bytes, 1_048_576);
+    assert_eq!(limits.max_depth, 32);
+    assert_eq!(limits.max_nodes, 10_000);
+    assert_eq!(limits.max_data_bytes, 1_048_576);
+    assert_eq!(limits.max_steps, 100_000);
+    assert_eq!(limits.max_output_bytes, 1_048_576);
+    assert_eq!(Template::parse("").unwrap().limits(), limits);
+}
+
+#[test]
+fn repeated_renders_produce_identical_output() {
+    let schema = shape([
+        ("title", Schema::Text, true),
+        (
+            "items",
+            Schema::List(Box::new(shape([("name", Schema::Text, true)]))),
+            true,
+        ),
+    ]);
+    let value = object([
+        ("title", text("T")),
+        (
+            "items",
+            Value::List(vec![
+                object([("name", text("a"))]),
+                object([("name", text("b"))]),
+            ]),
+        ),
+    ]);
+    let template = Template::parse("{{title}}{{#items}}:{{name}}{{/items}}").unwrap();
+    let first = template.render(&value, &schema).unwrap();
+    let second = template.render(&value, &schema).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first, "T:a:b");
+}
