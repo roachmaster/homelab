@@ -171,3 +171,87 @@ fn transient_execution_failure_also_releases_its_owned_lease() {
     assert_eq!(probe.snapshot().drops, 1);
     assert_eq!(probe.snapshot().requests, vec![prepared()]);
 }
+
+#[test]
+fn repeated_clients_record_identical_requests_and_deliveries() {
+    fn run_once() -> (Vec<PreparedMessage>, Vec<Delivery>) {
+        let probe = MemoryProbe::default();
+        let client = factory(MemoryConfig::default(), probe.clone())
+            .create()
+            .unwrap();
+        let first = client.execute(prepared()).unwrap();
+        let second = client.execute(prepared()).unwrap();
+        (probe.snapshot().requests, vec![first, second])
+    }
+    let first = run_once();
+    let second = run_once();
+    assert_eq!(first, second);
+    assert_eq!(first.0, vec![prepared(), prepared()]);
+    assert_eq!(
+        first.1,
+        vec![Delivery { sequence: 1 }, Delivery { sequence: 2 }]
+    );
+}
+
+#[test]
+fn custom_first_sequence_starts_receipts_there() {
+    let probe = MemoryProbe::default();
+    let client = factory(
+        MemoryConfig {
+            mode: MemoryMode::Record { first_sequence: 10 },
+            ..MemoryConfig::default()
+        },
+        probe.clone(),
+    )
+    .create()
+    .unwrap();
+    assert_eq!(client.execute(prepared()), Ok(Delivery { sequence: 10 }));
+    assert_eq!(client.execute(prepared()), Ok(Delivery { sequence: 11 }));
+    assert_eq!(probe.snapshot().executing_instances, vec![1, 1]);
+}
+
+#[test]
+fn probe_log_records_create_execute_and_drop_in_order() {
+    use std::cell::RefCell;
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let probe = MemoryProbe::with_log(log.clone());
+    let client = factory(MemoryConfig::default(), probe.clone())
+        .create()
+        .unwrap();
+    assert_eq!(*log.borrow(), vec!["client.create"]);
+    client.execute(prepared()).unwrap();
+    assert_eq!(*log.borrow(), vec!["client.create", "client.execute"]);
+    drop(client);
+    assert_eq!(
+        *log.borrow(),
+        vec!["client.create", "client.execute", "client.drop"]
+    );
+    assert_eq!(probe.snapshot().create_attempts, 1);
+    assert_eq!(probe.snapshot().drops, 1);
+}
+
+#[test]
+fn error_display_names_each_failure_exactly() {
+    use forge_bootstrap::RegistrationError;
+    use forge_demo_memory_client::{ConfigError, MemoryAccessError, MemoryFactoryError};
+    assert_eq!(
+        ConfigError::ZeroSequence.to_string(),
+        "initial receipt sequence must be nonzero"
+    );
+    assert_eq!(
+        ConfigError::Registration(RegistrationError::DuplicateGroup("g".into())).to_string(),
+        "factory group g is already registered"
+    );
+    assert_eq!(
+        MemoryFactoryError.to_string(),
+        "demo memory client construction failed"
+    );
+    assert_eq!(
+        MemoryAccessError::Factory(MemoryFactoryError).to_string(),
+        "demo memory client construction failed"
+    );
+    assert_eq!(
+        MemoryAccessError::Execution(DeliveryError::Rejected).to_string(),
+        "message rejected"
+    );
+}
