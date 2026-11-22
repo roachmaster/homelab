@@ -132,7 +132,7 @@ The application is the composition boundary. Handler bindings and small feature-
 
 The contract layer is one crate, `forge-core`, with one module per
 contract: `ingress`, `bridge`, `provider`, `io_client`, `task`,
-`command`, `bootstrap`, and `access`. Optional `forge-kernel` groups hosted native system clients; it is not a bootable OS kernel. Separate demo packages prove optional selection. The table below describes architectural roles, including the deferred general runtime; implemented capability/adaptor crates and their actual dependency edges are in the [workspace manifest](../../src/rust/Cargo.toml) and linked implementation checkpoint above.
+`command`, `bootstrap`, and `access`. Optional `forge-kernel` groups hosted native system clients; it is not a bootable OS kernel. Optional selection is proven by the local application's feature-gated disk client. The table below describes architectural roles, including the deferred general runtime; implemented capability/adaptor crates and their actual dependency edges are in the [workspace manifest](../../src/rust/Cargo.toml) and linked implementation checkpoint above.
 
 | Unit | Owns | May depend on | Must not depend on |
 | --- | --- | --- | --- |

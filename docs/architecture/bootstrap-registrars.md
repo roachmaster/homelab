@@ -3,8 +3,8 @@
 **Status: typed bootstrap is implemented and used by concrete hosts.** Reviewed
 against the repository on 18 November 2026. [`forge-core`](../../src/rust/forge-core/README.md)
 provides atomic typed group registration, consuming validation/freeze and explicit
-assembly. Native disk, the HTTPS agent, generated browser host, model runtime and
-durable jobs now consume the pattern; they are not all future demos. Automatic
+assembly. Native disk, the HTTPS agent, generated browser host and
+durable jobs now consume the pattern. Automatic
 graph execution, dynamic loading, pooled scopes and a universal managed lifecycle
 engine remain deferred. See the [current implementation inventory](forge-framework-blueprint.md#current-implementation),
 [canonical vocabulary](framework-dsl.md), [DI ownership](dependency-injection.md)
@@ -16,7 +16,7 @@ The application chooses optional capability/implementation crates and supplies t
 
 A reusable implementation crate owns its concrete client, implementation dependencies, typed configuration (an enum when selecting supported modes), factories and registrar. It depends on the narrow contracts it implements; core never imports it. A caller needing another I/O mechanism selects another crate, not an extra dependency hidden in core. Pure computations need no I/O crate. Contract-only crates do not need meaningless registrars, and small coherent internals can remain modules.
 
-The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. The original message implementation remains an observable in-memory fake. The subsequently added [forge-kernel disk module](../../src/rust/forge-kernel/README.md) is a selected native filesystem client, not a mandatory integration or operating-system kernel.
+The goal is a simple application front door to installed capabilities, including tools that may eventually be remote—not merely argument parsing. CLI, HTTP, IPC and filesystem access are examples, not required integrations. The subsequently added [forge-kernel disk module](../../src/rust/forge-kernel/README.md) is a selected native filesystem client, not a mandatory integration or operating-system kernel.
 
 ## Configuration is not a command payload
 
@@ -36,24 +36,25 @@ A configuration enum can select only compatible implementations: fixed request/r
 
 ### Actual implemented composition
 
-The [demo bootstrap](../../src/rust/examples/forge-bootstrap-demo/src/messages.rs) calls two reusable registrars: [message capability](../../src/rust/examples/forge-demo-messages/src/lib.rs) and [optional memory client](../../src/rust/examples/forge-demo-memory-client/src/lib.rs). Reduced from that executable path (application error mapping and the pure group omitted):
+The [local application](../../src/rust/forge-local/src/application.rs) calls two reusable registrars: the [node client](../../src/rust/forge-kernel/src/node.rs) and the optional [disk client](../../src/rust/forge-kernel/src/disk.rs). Reduced from that executable path (error mapping and the jobs group omitted):
 
 ```rust,ignore
-let clients = memory::register(client_config, client_probe)?;
-let tasks = capability::register(task_config, task_probe)?;
-let registry = Registry::new().register(clients)?.register(tasks)?;
-let (((), clients), tasks) = registry.freeze()?.into_factories();
-// Construct the chosen client/provider, bind its handle to tasks.greeting,
-// create the task and register its typed bridge closure before publication.
+let node = node::register(NodeConfig::Local { id: config.node_id })?;
+let pending = Registry::new().register(node)?;
+let disk = disk::register(DiskConfig::Native { initial_directory })?;
+let pending = pending.register(disk)?;
+let (((), node), disk) = pending.freeze()?.into_factories();
+// Construct the chosen clients, bind their handles to tasks, and register
+// typed bridge closures before publication.
 ```
 
-This fragment names real APIs but is not a standalone program; error mapping and lifetime selection are in the linked source. The default demo consumer contains only pure arithmetic and has **no normal dependency on either message package**. Its opt-in Cargo `messages` feature adds the selected packages; the `io_client`/`provider` modules it uses are part of `forge-core`, always compiled but only used when the feature is enabled. Tests/normal-dependency trees prove actual inclusion/omission, not just a runtime `if`.
+This fragment names real APIs but is not a standalone program; error mapping and lifetime selection are in the linked source. The local application always registers the node client; the `disk` feature adds the native filesystem client. The `io_client`/`provider` modules it uses are part of `forge-core`, always compiled but only used when the feature is enabled. Tests and normal-dependency trees prove actual inclusion/omission, not just a runtime `if`.
 
 No client/task is created during staging or freeze. The complete group's collisions are checked before metadata or typed values move into the next builder. Preparation errors occur before registration; registration errors retain the prior plan; construction errors return no application. The sample composes only owned in-memory resources and makes no remote/durable/authentication guarantee.
 
 ### Native client checkpoint
 
-The optional `disk` consumer feature calls `forge_kernel::disk::register` with an explicit absolute startup path. Registration checks configuration without filesystem access; only `DiskClientFactory::create` canonicalizes and validates the actual directory after freeze. New factory creations have independent cwd state. A retained singleton shares one navigation session; transient acquisition resets to the configured starting location. Core contracts and the existing message/pure profiles remain unchanged. No environment lookup or process-wide cwd mutation occurs in the client.
+The optional `disk` consumer feature calls `forge_kernel::disk::register` with an explicit absolute startup path. Registration checks configuration without filesystem access; only `DiskClientFactory::create` canonicalizes and validates the actual directory after freeze. New factory creations have independent cwd state. A retained singleton shares one navigation session; transient acquisition resets to the configured starting location. Core contracts remain unchanged. No environment lookup or process-wide cwd mutation occurs in the client.
 
 ## Construction and provider lifetime
 
@@ -65,15 +66,15 @@ For a client-using task the explicit order is:
 4. Construct the task, optionally retain it in a task provider, and register a typed bridge binding that calls `Task::run`. The task still prepares requests; `IoClient::execute` only executes prepared requests and required boundary encoding.
 5. Freeze the route registry and expose the fully assembled application. Header selection, admission and variant checks remain on the existing path.
 
-Factories and dependent recipes are typed values stored during registration; creating a factory object is not creating its client. A shared handle must satisfy actual Rust bounds. The demo uses owned `Rc` client/provider handles in a single-threaded application. For another returned application, prefer owned handles or externally owned scoped backing; do not build a self-referential struct whose tasks borrow movable sibling provider fields. `Arc` alone does not confer thread safety, and the current bridge remains synchronous/non-`Send`.
+Factories and dependent recipes are typed values stored during registration; creating a factory object is not creating its client. A shared handle must satisfy actual Rust bounds. The local application uses owned client/provider handles in a single-threaded application. For another returned application, prefer owned handles or externally owned scoped backing; do not build a self-referential struct whose tasks borrow movable sibling provider fields. `Arc` alone does not confer thread safety, and the current bridge remains synchronous/non-`Send`.
 
 A singleton task must not accidentally retain a short operation/pool lease for its entire lifetime. Keep per-call acquisition private to the client when possible, or inject a purposeful narrow provider when the workflow needs a session. Pools, async factories and awaited cleanup are deferred. A pure task has no client recipe or provider dependency.
 
 ## Validate, freeze, assemble; do not publish partial state
 
 - **Prepare:** validate typed config and group-local identities; stage all factory recipes together. No client construction, network/file operations, worker starts or route exposure. This is a contract for trusted registrar code, verified with effect counters—not a sandbox that proves arbitrary Rust code pure.
-- **Validate the selected application:** reject duplicate groups/bindings and missing selected requirements before factory effects. The demo resolves conflicting explicit/default choices before calling registrars. Runtime route collisions remain the existing bridge builder's responsibility, checked before application publication. Check the explicitly declared construction order: required groups must precede consumers. Reject invalid/self/forward dependencies rather than inventing runtime resolution. Typed constructors additionally enforce actual dependency types/lifetimes; string metadata does not replace them.
-- **Freeze:** consume the pending application plan, keeping its typed groups and validated metadata together. No additions or implicit replacements afterward. The implemented metadata describes assembly bindings, not a route-descriptor catalog. Existing bridge registration rejects route collisions, and the demo tests its known routes; generic declared-route coverage validation remains deferred.
+- **Validate the selected application:** reject duplicate groups/bindings and missing selected requirements before factory effects. The application resolves conflicting explicit/default choices before calling registrars. Runtime route collisions remain the existing bridge builder's responsibility, checked before application publication. Check the explicitly declared construction order: required groups must precede consumers. Reject invalid/self/forward dependencies rather than inventing runtime resolution. Typed constructors additionally enforce actual dependency types/lifetimes; string metadata does not replace them.
+- **Freeze:** consume the pending application plan, keeping its typed groups and validated metadata together. No additions or implicit replacements afterward. The implemented metadata describes assembly bindings, not a route-descriptor catalog. Existing bridge registration rejects route collisions, and the application tests its known routes; generic declared-route coverage validation remains deferred.
 - **Assemble:** application-owned code calls factories in that declared order and injects dependencies. It is not automatic heterogeneous graph execution. Tests compare actual creation order with the declared order. If construction fails, release already-owned synchronous resources in reverse dependency order (using explicit ownership scopes/drop order), preserve the original error, and return no application. Core registration errors describe metadata; application-owned typed error variants preserve specific factory/provider causes instead of adding every client failure to a framework-global enum. Effects outside memory are not rolled back by `Drop`; future adapters need explicit close/cleanup contracts before claiming such guarantees.
 
 An omitted required binding/configuration is an assembly error. The implemented registry checks declared order and preserves failed builders; broader configuration/override policy remains application-owned. A full auto-wiring graph, arbitrary cycle resolution/diagnostics, dynamic registration and managed startup/shutdown are later work, not promises supplied by these metadata checks.

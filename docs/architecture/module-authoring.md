@@ -3,10 +3,9 @@
 **Status: implemented extension conventions, with broader lifecycle hooks still
 proposed.** Reviewed against the repository on 18 November 2026. The six core
 crates retain their narrow contracts; native disk, remote HTTPS, project/source
-inspection, managed writes, generated web assets, model runtime and durable jobs
+inspection, managed writes, generated web assets and durable jobs
 now provide real optional consumers of [typed registrar assembly](bootstrap-registrars.md).
-Use their actual public config/factory/registrar exports rather than treating the
-original demo as the only integration. This is not a stable universal SDK or
+Use their actual public config/factory/registrar exports. This is not a stable universal SDK or
 every future lifecycle hook below. [Current implementation inventory](forge-framework-blueprint.md#current-implementation).
 
 ## Plug-and-play should mean three explicit steps

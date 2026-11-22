@@ -74,9 +74,9 @@ expose project information. Bodies are omitted, but that is not secret redaction
 
 ```rust
 use forge_ide::{assembly::{register_ide, IdeConfig}, task::InspectRequest};
-use forge_bootstrap::Registry;
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_task::Task;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::task::Task;
 
 # fn inspect(root: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
 let group = register_ide("project.inspector", IdeConfig::project(root))?;
@@ -255,7 +255,7 @@ Bootstrap registers this capability effect-free via `assembly::register_ast_grap
 with `AstGraphConfig`, freezes the `Registry`, and creates `AstGraphTask<NativeFiles>`
 through `AstGraphFactory::create()` (keeping default `forge-ide` features empty).
 The opt-in CLI binds `forge-ide ast-graph [--format yaml|json] ROOT` on
-`ide.ast_graph@1` through the same `forge_bridge::Bridge`. Root Make targets
+`ide.ast_graph@1` through the same `forge_core::bridge::Bridge`. Root Make targets
 (`make ast-yaml`, `make dead-code`, `make build-affected`, `make check-affected`,
 `make test-affected`, and `make portal-style-check`) merge `forge-ide ast-graph
 --format json` output with `cargo metadata`, Python stdlib AST, global build-file

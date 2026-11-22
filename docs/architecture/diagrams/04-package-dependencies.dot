@@ -2,33 +2,24 @@ digraph Packages {
 graph [fontname="DejaVu Sans", fontsize=21, labelloc=t, labeljust=l, pad=0.35, nodesep=0.55, ranksep=0.9, bgcolor="white"];
 node [shape=box, style="rounded,filled", fontname="DejaVu Sans", fontsize=13, margin="0.22,0.16", color="#24576b", fillcolor="#e8f4f7", fontcolor="#163744", penwidth=1.4];
 edge [fontname="DejaVu Sans", fontsize=11, color="#56717d", fontcolor="#34505f", penwidth=1.3, arrowsize=0.75];
-rankdir=TB; label="04  Implemented package dependencies — forge-core + optional capabilities + local / remote apps + demos\nArrows are normal imports; dashed edges are optional Cargo dependencies. Dev-only example/test imports are excluded. Third-party parser/filesystem, YAML and HTTPS/TLS/runtime imports are not shown.";
+rankdir=TB; label="04  Implemented package dependencies — forge-core + optional capabilities + local / remote apps\nArrows are normal imports; dashed edges are optional Cargo dependencies. Dev-only example/test imports are excluded. Third-party parser/filesystem, YAML and HTTPS/TLS/runtime imports are not shown.";
 agent [label="forge-agent\nConfigured server / named-node CLI\nTyped app sum / alias policy / lifecycle", fillcolor="#fff1d6", color="#ae7b26"];
 remote [label="forge-remote\nTyped node.info call / reply / task\nInjected observation / policy\nExisting synchronous destination bridge"];
 https [label="forge-remote-https\nOptional HTTP / TLS implementation\nPrivate wire DTOs and owner runtime\nPublic config / factories / registrars"];
 ide [label="forge-ide\nOptional project inspection task\nRooted native client + syn parser\nPublic config / factory / registrar\nOpt-in YAML / CLI / remote contracts"];
 renderer [label="forge-template\nOptional template renderer\nTyped schema / explicit methods\nPublic config / factory / registrar\nOpt-in template CLI binary"];
-app [label="forge-bootstrap-demo\nApplication-owned config / command enum\nCalls registrars; constructs explicitly\nPure default; opt-in messages / disk", fillcolor="#fff1d6", color="#ae7b26"];
 kernel [label="forge-kernel\nOptional disk / node modules\nTyped clients / config / registrars"];
 local [label="forge-local\nTyped application composition\nRegistered catalog + node / optional disk/jobs", fillcolor="#fff1d6", color="#ae7b26"];
 terminal [label="forge-terminal / forge binary\nThin terminal + console I/O client\nReads catalog; invokes checked ingress"];
-feature [label="forge-demo-messages\nCapability contracts + task\nTyped config / recipe / registrar"];
-impl [label="forge-demo-memory-client\nIn-memory fake + typed config\nFactory / provider handle / registrar"];
 core [label="forge-core\nprovider / io_client / command / ingress\ntask / bootstrap / bridge / access\nOne crate, one module per contract", fillcolor="#fff1d6", color="#ae7b26"];
 agent -> {https ide remote kernel core};
 remote -> core;
 https -> {remote core};
 https -> ide [style=dashed, label="ide codec"];
-app -> core;
-app -> {impl feature} [style=dashed, label="messages"];
-app -> kernel [style=dashed, label="disk"];
 kernel -> core;
 local -> {core kernel};
 terminal -> {local core};
-feature -> core;
-impl -> {feature core};
 ide -> core;
 ide -> remote [style=dashed, label="remote contract"];
 renderer -> core;
-{rank=same; impl; feature; kernel;}
 }

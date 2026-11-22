@@ -1,5 +1,5 @@
 [workspace]
-members = ["forge-jenkins", "forge-llama", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-kernel", "examples/forge-demo-messages", "examples/forge-demo-memory-client", "examples/forge-bootstrap-demo", "forge-local", "forge-terminal", "forge-jobs"]
+members = ["forge-jenkins", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-agent", "forge-remote", "forge-remote-https", "forge-ide", "forge-template", "forge-core", "forge-kernel", "forge-local", "forge-terminal", "forge-jobs"]
 resolver = "2"
 
 [workspace.package]
@@ -13,9 +13,6 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 forge-jenkins = { path = "forge-jenkins", default-features = false }
 forge-core = { path = "forge-core" }
-
-forge-demo-messages = { path = "examples/forge-demo-messages" }
-forge-demo-memory-client = { path = "examples/forge-demo-memory-client" }
 
 forge-kernel = { path = "forge-kernel" }
 

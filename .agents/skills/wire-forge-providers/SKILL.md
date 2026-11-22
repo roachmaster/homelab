@@ -48,8 +48,6 @@ pooling, request scope, lease constraints, and failure recovery. The
   It creates one managed writer per writable project after freeze.
 - **Host-scoped dependency** follows the [Portal host factory](../../../src/rust/forge-ide-web-host/src/service.rs).
   It owns the selected asset source and relay instances.
-- **Runtime lease** follows the [model runtime provider](../../../src/rust/forge-llama/src/model_runtime.rs).
-  It holds a GPU reservation across model replacement and creates the selected child.
 - **Shared store and owned worker** follow the [durable jobs executable](../../../src/rust/forge-terminal/src/bin/forge-jobs.rs).
   It selects the verifier, store, and worker recipe through explicit startup wiring.
 - **Browser I/O** follows the [Playtest wiring](../../../src/rust/forge-ide-web-host/README.md).

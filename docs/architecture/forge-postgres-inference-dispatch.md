@@ -132,8 +132,7 @@ deadline is four hours and the local adapter allows up to 30 minutes of inferenc
 The adapter can be configured up to 8,192 context tokens, but Mission Control's
 admission budget and Forge's profile must agree; adapter capacity alone is not
 an enabled 8k Mail profile.
-[Profile](../../deploy/mission-control/agent-runner/mail_tokenizer.py) ·
-[Adapter validation](../../src/rust/forge-llama/src/driver.rs)
+[Profile](../../deploy/mission-control/agent-runner/mail_tokenizer.py)
 
 The IDE checkpoints a pending Chat run ID and resumes event pages after reload,
 including before a first reply creates a visible saved chat. The generated worker

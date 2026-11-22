@@ -260,11 +260,9 @@ let (((), client_recipe), task_recipe) = plan.into_factories();
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The closures above only illustrate typed storage. The [optional consumer](../examples/forge-bootstrap-demo/README.md)
-and its [capability](../examples/forge-demo-messages/README.md) /
-[implementation](../examples/forge-demo-memory-client/README.md) registrars demonstrate
-actual existing `Factory`, `Singleton`, lazy `Transient`, `IoClient`, `Task` and
-bridge composition with fake-only effects.
+The closures above only illustrate typed storage. The [local application](../forge-local/README.md)
+demonstrates actual existing `Factory`, `Singleton`, lazy `Transient`, `IoClient`, `Task` and
+bridge composition with the node and optional disk clients.
 
 ## Exact scope
 

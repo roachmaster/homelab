@@ -2,8 +2,11 @@
 
 **Status: drafted 2026-11-22 from Leonardo's pipeline spec (below). The
 imports check is built and wired into `make ci`; the branch/main split
-is implemented (section 7). The three-combination cut in section 6 is
-still a proposal, not yet applied.**
+is implemented (section 7). The one-combination cut in section 6
+(`forge-template` bare → check-only) is still a proposal, not yet
+applied. `forge-llama` and the demo crates were removed from the
+workspace (crate-dependency-tree.md section 9), which took `make ci`
+from 14 cargo configurations to 11.**
 
 ## 1. The spec
 
@@ -29,10 +32,10 @@ Working rules that go with it:
 
 ## 2. Current state (measured 2026-11-22)
 
-`make ci` today is **14 cargo configurations**: 1 all-features workspace
+`make ci` today is **11 cargo configurations**: 1 all-features workspace
 pass (build, check, lint, test, test-release, doc — the only place
-doc/release tests run; 968 tests) plus 13 minimal no-default-features
-profiles. Totals: 15 test runs, 10 Clippy runs, then `ui-check` and
+doc/release tests run) plus 10 minimal no-default-features
+profiles. Totals: 12 test runs, 9 Clippy runs, then `ui-check` and
 `ui-qa-check` (harness tests only; the real `make ui-qa` is a separate
 gate). Measured cost (Jenkins qualification 2026-11-21):
 **20m25s cold / 5m30s warm** for `make ci`; the total Jenkins run was
@@ -128,30 +131,27 @@ split is structural.
 
 ## 6. The minimal-profile cut
 
-Ten minimal profiles stay as test runs because they guard real
+Nine minimal profiles stay as test runs because they guard real
 cfg-gated code the all-features run never exercises with the feature
 off: `forge-terminal` bare/jobs/disk (55 `cfg(feature)` sites),
 `forge-local` bare (97), `forge-kernel` node-only, `forge-ide`
 bare/remote, `forge-remote-https` bare, `forge-ide-web` bare.
 
-Three combinations downgrade to `check` (compile-only):
+One combination downgrades to `check` (compile-only):
 
 - `forge-template` bare — its `cli` feature is an empty marker; the
   binary is already built in the all-features run.
-- `forge-bootstrap-demo` messages-only and disk-only — the demo has
-  zero `cfg(feature)` sites in its own code; its features only swap
-  dependencies, which are tested in their own crates and in the
-  all-features run.
 
 Per-combination wall time was **not** measured, so no minutes-saved
 figure is claimed. A trial run of the reduced target is needed before
 cutting (open item, section 7). The cut is a proposal in this doc, not
 yet applied to the Makefile.
 
-Tied decisions, still Leonardo's: demo crates to a single gated job
-would remove all three demo combinations outright; removing
-`forge-llama` from the workspace would stop it compiling in every
-combination.
+Decided 2026-11-22: the demo crates and `forge-llama` left the
+workspace outright (crate-dependency-tree.md section 9), which removed
+all three demo combinations and the llama build from every
+configuration. The remaining cut is the single `forge-template` bare
+combination above.
 
 ## 7. What changed (implemented 2026-11-22)
 
@@ -195,5 +195,6 @@ combination.
   move back to the PR runs: the split today is by mechanism (the
   `PG16_AVAILABLE` gate skips DB tests on branches; whole suites run on
   main), not by a per-file classification.
-- The `forge-llama`, demo-crate, and `forge-kernel` decisions
-  (crate-dependency-tree.md Todo), which change the matrix further.
+- The `forge-kernel` rename (crate-dependency-tree.md Todo). The
+  `forge-llama` and demo-crate decisions are done: both removed from
+  the workspace.

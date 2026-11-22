@@ -1,6 +1,6 @@
 # Forge Jenkins I/O client
 
-`forge_jenkins` is an optional synchronous `forge_io_client::IoClient` capability.
+`forge_jenkins` is an optional synchronous `forge_core::io_client::IoClient` capability.
 It requires Rust1.89 or newer, matching existing optional workspace capabilities.
 Use an installed supported toolchain explicitly, for example `cargo +1.97.1`.
 Its default features contain no native HTTP runtime. Feature `http` adds the
@@ -21,9 +21,9 @@ dependency registry is used.
 ```rust,no_run
 # #[cfg(feature="http")]
 # fn example() -> Result<(), Box<dyn std::error::Error>> {
-use forge_bootstrap::Registry;
-use forge_provider::{Factory, InstanceProvider, Singleton};
-use forge_io_client::IoClient;
+use forge_core::bootstrap::Registry;
+use forge_core::provider::{Factory, InstanceProvider, Singleton};
+use forge_core::io_client::IoClient;
 use forge_jenkins::{register_http, Config, Credentials, Request};
 let group = register_http(
     Config::new("http://127.0.0.1:18084/")?,

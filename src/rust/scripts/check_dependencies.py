@@ -8,7 +8,6 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWED = {
     "forge-jenkins": {("forge-core", "normal")},
-    "forge-llama": {("forge-core", "normal")},
     "forge-ide-ui": set(),
     "forge-ide-web": {(name,"normal") for name in ("forge-ide-ui","forge-core","forge-template","forge-game-runtime")},
     "forge-ide-web-host": {(name,"normal") for name in ("forge-core","forge-ide","forge-ide-ui","forge-remote","forge-remote-https")} | {("forge-ide-ui", "build")},
@@ -25,17 +24,11 @@ ALLOWED = {
                     ("forge-core", "forge-kernel")},
     "forge-terminal": {("forge-jenkins", "normal")} | {(name, "normal") for name in
                        ("forge-local", "forge-core", "forge-jobs")},
-    "forge-demo-messages": {("forge-core", "normal")},
-    "forge-demo-memory-client": {(name, "normal") for name in
-                                 ("forge-core", "forge-demo-messages")},
-    "forge-bootstrap-demo": {(name, "normal") for name in
-                             ("forge-core", "forge-kernel", "forge-demo-messages", "forge-demo-memory-client")},
 }
 EXTERNAL_DEV = {"forge-ide-ui":{"serde_json"},"forge-ide-web-host":{"rcgen"},"forge-agent": {"rcgen", "nix", "rustls"},"forge-remote-https": {"rcgen"}}
 EXTERNAL_BUILD = {"forge-ide-web-host": {"serde", "serde_json", "sha2"}}
 EXTERNAL = {
     "forge-jenkins": {"serde", "serde_json", "url", "base64", "ureq"},
-    "forge-llama": {"ctrlc", "nix", "http-body-util", "hyper", "hyper-util", "serde", "serde_json", "subtle", "tokio"},
     "forge-ide-ui": {"serde"},
     "forge-terminal": {"ctrlc", "nix", "serde", "serde_json"},
     "forge-jobs": {"cap-std", "serde", "serde_json"},
@@ -49,11 +42,6 @@ EXTERNAL = {
                   "nix", "serde_json"},
 }
 
-DEMO_PACKAGES = {"forge-demo-messages", "forge-demo-memory-client", "forge-bootstrap-demo"}
-PURE_PROFILE = {"forge-bootstrap-demo", "forge-core"}
-OPTIONAL = {"forge-demo-messages", "forge-demo-memory-client", "forge-kernel"}
-MESSAGES_PROFILE = PURE_PROFILE | {"forge-demo-messages", "forge-demo-memory-client"}
-DISK_PROFILE = PURE_PROFILE | {"forge-kernel"}
 WASM_PLAYTEST_PROFILE = {
     "forge-game-runtime", "sha2", "cfg-if", "digest", "block-buffer", "generic-array",
     "typenum", "crypto-common",
@@ -67,7 +55,7 @@ def cargo(*args):
     ).stdout
 
 
-def consumer_tree(*feature_args, package="forge-bootstrap-demo"):
+def consumer_tree(*feature_args, package):
     output = cargo("tree", "-p", package, "--edges", "normal", "--prefix", "none",
                    "--format", "{p}", "--no-default-features", *feature_args)
     return {line.split()[0] for line in output.splitlines() if line.strip()}
@@ -88,11 +76,9 @@ def validate_packages(packages):
                 continue
             if (target, kind) not in ALLOWED[name]:
                 raise SystemExit(f"Forbidden dependency: {name} -> {target} ({kind})")
-            expected_path = (ROOT / ("examples" if target in DEMO_PACKAGES else "") / target).resolve()
+            expected_path = (ROOT / target).resolve()
             if not dependency.get("path") or Path(dependency["path"]).resolve() != expected_path:
                 raise SystemExit(f"Dependency is not the intended local package: {name} -> {target}")
-            if name == "forge-bootstrap-demo" and target in OPTIONAL and not dependency["optional"]:
-                raise SystemExit(f"Demo capability dependency must be optional: {target}")
             edges[name].add(target)
     jenkins = packages["forge-jenkins"]
     if jenkins["features"].get("default", []) != []:
@@ -143,8 +129,6 @@ def validate_packages(packages):
     binaries = [t for t in template["targets"] if "bin" in t["kind"]]
     if len(binaries) != 1 or binaries[0].get("required-features") != ["cli"]:
         raise SystemExit("Template binary must require its explicit cli feature")
-    if packages["forge-bootstrap-demo"]["features"].get("default", []) != []:
-        raise SystemExit("Demo default must remain pure; do not enable the optional capability by default.")
     if packages["forge-local"]["features"].get("jobs") != []:
         raise SystemExit("Jobs must remain an optional application module.")
     if packages["forge-terminal"]["features"].get("jobs") != ["forge-local/jobs"]:
@@ -172,9 +156,6 @@ def negative_fixtures(packages):
     bad["forge-core"]["dependencies"].append({"name": "forge-kernel", "kind": None,
         "path": str(ROOT / "forge-kernel"), "optional": False})
     fixtures.append(("core-to-implementation edge", bad))
-    bad = copy.deepcopy(packages)
-    bad["forge-bootstrap-demo"]["features"]["default"] = ["disk"]
-    fixtures.append(("impure default", bad))
     bad = copy.deepcopy(packages)
     bad["forge-terminal"]["dependencies"][0]["path"] = str(ROOT / "wrong-package")
     fixtures.append(("wrong dependency origin", bad))
@@ -255,17 +236,6 @@ def main():
         raise SystemExit("IDE CLI lacks required YAML contract")
     if {name for name in ide_default if name.startswith("forge-")} != {"forge-ide", "forge-core"}:
         raise SystemExit("IDE default has unexpected Forge dependencies")
-    pure = consumer_tree()
-    messages = consumer_tree("--features", "messages")
-    disk = consumer_tree("--features", "disk")
-    combined = consumer_tree("--all-features")
-    if pure != PURE_PROFILE:
-        raise SystemExit(f"Pure consumer dependency mismatch: {sorted(pure)}")
-    for name, actual, expected in [("messages", messages, MESSAGES_PROFILE),
-                                   ("disk", disk, DISK_PROFILE),
-                                   ("combined", combined, MESSAGES_PROFILE | DISK_PROFILE)]:
-        if actual != expected:
-            raise SystemExit(f"{name} consumer dependency mismatch: {sorted(actual)}")
     remote = consumer_tree(package="forge-remote")
     if remote != {"forge-remote", "forge-core"}:
         raise SystemExit("Remote conversation port includes a transport/codec or implementation")
@@ -284,7 +254,7 @@ def main():
         raise SystemExit("Only the playtest runtime and digest verifier may expand the default WASM profile")
     if any(name.startswith("forge-") and name not in {"forge-ide-ui","forge-ide-web"} for name in portable | web_native) or {"cap-std","tokio","rustls","serde_yaml_ng"} & (portable | wasm):
         raise SystemExit("Portable UI/WASM includes native/parser/generator dependencies")
-    local_expected = (set(ALLOWED) - DEMO_PACKAGES - {"forge-jenkins", "forge-llama", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs"})
+    local_expected = (set(ALLOWED) - {"forge-jenkins", "forge-template", "forge-ide", "forge-remote", "forge-remote-https", "forge-agent", "forge-ide-ui", "forge-ide-web", "forge-ide-web-host", "forge-game-runtime", "forge-jobs"})
     for args in [(), ("--features", "disk"), ("--features", "jobs")]:
         if consumer_tree(*args, package="forge-terminal") != local_expected:
             raise SystemExit("Local terminal consumer has unexpected package dependencies")
@@ -325,10 +295,9 @@ def main():
             raise SystemExit(f"Application feature mismatch: {actual} != {expected}")
     print("PASS: remote typed port is transport-free; HTTPS is absent from existing local/IDE/template consumers")
     print("PASS: optional IDE parser/rooted native client isolated; YAML/CLI absent from library default")
-    print("PASS: one contract core + optional kernel + local application/terminal + three demos; local allowed DAG")
-    print("PASS: renderer default exposes only forge-core assembly; opt-in CLI adds no crate; terminal/demo omit it")
-    print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk; no demo implementations")
-    print("PASS: pure/messages/disk/combined profiles include only selected implementation packages")
+    print("PASS: one contract core + optional kernel + local application/terminal; local allowed DAG")
+    print("PASS: renderer default exposes only forge-core assembly; opt-in CLI adds no crate; terminal omits it")
+    print("PASS: node-only terminal omits disk/jobs; jobs-only omits disk")
 
 
 if __name__ == "__main__":

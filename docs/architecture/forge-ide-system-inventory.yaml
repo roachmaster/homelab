@@ -129,7 +129,6 @@ components:
   - Load and switch allowlisted models and own the llama.cpp child process.
   - Submit one text chat at a time and return a complete reply.
   boot_behavior: The adapter comes up with the GPU idle until a client selects a model.
-  source: ../../src/rust/forge-llama/README.md
 - id: llama-cpp-sycl
   status: deployed
   placement: forge-gpu

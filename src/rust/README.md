@@ -121,9 +121,6 @@ command remains structural analysis, not a shell or full compiler AST.
 
 The demo packages live under `examples/`, not inside core:
 
-- [forge-demo-messages](examples/forge-demo-messages/README.md): capability-owned input/prepared request/result, injected-client task, typed config and registrar.
-- [forge-demo-memory-client](examples/forge-demo-memory-client/README.md): fake client, its config/factories/registrar and explicit singleton/transient handle.
-- [forge-bootstrap-demo](examples/forge-bootstrap-demo/README.md): pure-default application; the Cargo `messages` feature opts in to the two packages above. Its default normal dependency graph excludes both, `forge-kernel`, `forge-io-client` and `forge-provider`. A separate opt-in `disk` feature selects the native kernel module without importing the message packages.
 
 The application selects configurations/registrars before constructing resources.
 `Registry<G>` owns metadata and typed groups together; a rejected complete group

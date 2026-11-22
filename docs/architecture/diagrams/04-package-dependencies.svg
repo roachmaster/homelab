@@ -9,260 +9,190 @@
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(25.2 783.2)">
 <title>Packages</title>
 <polygon fill="white" stroke="transparent" points="-25.2,25.2 -25.2,-783.2 2220.2,-783.2 2220.2,25.2 -25.2,25.2"/>
-<text text-anchor="middle" x="1097.5" y="-737.2" font-family="DejaVu Sans" font-size="21.00">04 &#160;Implemented package dependencies — forge&#45;core + optional capabilities + local / remote apps + demos</text>
+<text text-anchor="middle" x="1097.5" y="-737.2" font-family="DejaVu Sans" font-size="21.00">04 &#160;Implemented package dependencies — forge&#45;core + optional capabilities + local / remote apps</text>
 <text text-anchor="middle" x="1097.5" y="-714.2" font-family="DejaVu Sans" font-size="21.00">Arrows are normal imports; dashed edges are optional Cargo dependencies. Dev&#45;only example/test imports are excluded. Third&#45;party parser/filesystem, YAML and HTTPS/TLS/runtime imports are not shown.</text>
 <!-- agent -->
 <g id="node1" class="node">
 <title>agent</title>
-<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M679.75,-704C679.75,-704 415.75,-704 415.75,-704 409.75,-704 403.75,-698 403.75,-692 403.75,-692 403.75,-650 403.75,-650 403.75,-644 409.75,-638 415.75,-638 415.75,-638 679.75,-638 679.75,-638 685.75,-638 691.75,-644 691.75,-650 691.75,-650 691.75,-692 691.75,-692 691.75,-698 685.75,-704 679.75,-704"/>
-<text text-anchor="middle" x="547.75" y="-681.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;agent</text>
-<text text-anchor="middle" x="547.75" y="-667.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Configured server / named&#45;node CLI</text>
-<text text-anchor="middle" x="547.75" y="-653.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed app sum / alias policy / lifecycle</text>
+<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M1034.75,-704C1034.75,-704 770.75,-704 770.75,-704 764.75,-704 758.75,-698 758.75,-692 758.75,-692 758.75,-650 758.75,-650 758.75,-644 764.75,-638 770.75,-638 770.75,-638 1034.75,-638 1034.75,-638 1040.75,-638 1046.75,-644 1046.75,-650 1046.75,-650 1046.75,-692 1046.75,-692 1046.75,-698 1040.75,-704 1034.75,-704"/>
+<text text-anchor="middle" x="902.75" y="-681.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;agent</text>
+<text text-anchor="middle" x="902.75" y="-667.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Configured server / named&#45;node CLI</text>
+<text text-anchor="middle" x="902.75" y="-653.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed app sum / alias policy / lifecycle</text>
 </g>
 <!-- remote -->
 <g id="node2" class="node">
 <title>remote</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M317.25,-234C317.25,-234 44.25,-234 44.25,-234 38.25,-234 32.25,-228 32.25,-222 32.25,-222 32.25,-166 32.25,-166 32.25,-160 38.25,-154 44.25,-154 44.25,-154 317.25,-154 317.25,-154 323.25,-154 329.25,-160 329.25,-166 329.25,-166 329.25,-222 329.25,-222 329.25,-228 323.25,-234 317.25,-234"/>
-<text text-anchor="middle" x="180.75" y="-211.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;remote</text>
-<text text-anchor="middle" x="180.75" y="-197.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed node.info call / reply / task</text>
-<text text-anchor="middle" x="180.75" y="-183.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Injected observation / policy</text>
-<text text-anchor="middle" x="180.75" y="-169.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Existing synchronous destination bridge</text>
+<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M672.25,-234C672.25,-234 399.25,-234 399.25,-234 393.25,-234 387.25,-228 387.25,-222 387.25,-222 387.25,-166 387.25,-166 387.25,-160 393.25,-154 399.25,-154 399.25,-154 672.25,-154 672.25,-154 678.25,-154 684.25,-160 684.25,-166 684.25,-166 684.25,-222 684.25,-222 684.25,-228 678.25,-234 672.25,-234"/>
+<text text-anchor="middle" x="535.75" y="-211.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;remote</text>
+<text text-anchor="middle" x="535.75" y="-197.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed node.info call / reply / task</text>
+<text text-anchor="middle" x="535.75" y="-183.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Injected observation / policy</text>
+<text text-anchor="middle" x="535.75" y="-169.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Existing synchronous destination bridge</text>
 </g>
 <!-- agent&#45;&gt;remote -->
 <g id="edge1" class="edge">
 <title>agent&#45;&gt;remote</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M403.27,-647.03C315.36,-630.05 214.45,-604.14 184.75,-571 102.97,-479.75 138.96,-320.19 163.99,-241.53"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="166.55,-242.12 166.37,-234.18 161.56,-240.5 166.55,-242.12"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M758.27,-647.03C670.36,-630.05 569.45,-604.14 539.75,-571 457.97,-479.75 493.96,-320.19 518.99,-241.53"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="521.55,-242.12 521.37,-234.18 516.56,-240.5 521.55,-242.12"/>
 </g>
 <!-- https -->
 <g id="node3" class="node">
 <title>https</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M474.25,-571C474.25,-571 217.25,-571 217.25,-571 211.25,-571 205.25,-565 205.25,-559 205.25,-559 205.25,-503 205.25,-503 205.25,-497 211.25,-491 217.25,-491 217.25,-491 474.25,-491 474.25,-491 480.25,-491 486.25,-497 486.25,-503 486.25,-503 486.25,-559 486.25,-559 486.25,-565 480.25,-571 474.25,-571"/>
-<text text-anchor="middle" x="345.75" y="-548.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;remote&#45;https</text>
-<text text-anchor="middle" x="345.75" y="-534.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional HTTP / TLS implementation</text>
-<text text-anchor="middle" x="345.75" y="-520.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Private wire DTOs and owner runtime</text>
-<text text-anchor="middle" x="345.75" y="-506.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Public config / factories / registrars</text>
+<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M829.25,-571C829.25,-571 572.25,-571 572.25,-571 566.25,-571 560.25,-565 560.25,-559 560.25,-559 560.25,-503 560.25,-503 560.25,-497 566.25,-491 572.25,-491 572.25,-491 829.25,-491 829.25,-491 835.25,-491 841.25,-497 841.25,-503 841.25,-503 841.25,-559 841.25,-559 841.25,-565 835.25,-571 829.25,-571"/>
+<text text-anchor="middle" x="700.75" y="-548.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;remote&#45;https</text>
+<text text-anchor="middle" x="700.75" y="-534.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional HTTP / TLS implementation</text>
+<text text-anchor="middle" x="700.75" y="-520.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Private wire DTOs and owner runtime</text>
+<text text-anchor="middle" x="700.75" y="-506.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Public config / factories / registrars</text>
 </g>
 <!-- agent&#45;&gt;https -->
 <g id="edge2" class="edge">
 <title>agent&#45;&gt;https</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M500.9,-637.99C473.7,-619.41 439.05,-595.74 409.41,-575.49"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="410.84,-573.29 403.16,-571.22 407.87,-577.62 410.84,-573.29"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M855.9,-637.99C828.7,-619.41 794.05,-595.74 764.41,-575.49"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="765.84,-573.29 758.16,-571.22 762.87,-577.62 765.84,-573.29"/>
 </g>
 <!-- ide -->
 <g id="node4" class="node">
 <title>ide</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M474.75,-413C474.75,-413 224.75,-413 224.75,-413 218.75,-413 212.75,-407 212.75,-401 212.75,-401 212.75,-331 212.75,-331 212.75,-325 218.75,-319 224.75,-319 224.75,-319 474.75,-319 474.75,-319 480.75,-319 486.75,-325 486.75,-331 486.75,-331 486.75,-401 486.75,-401 486.75,-407 480.75,-413 474.75,-413"/>
-<text text-anchor="middle" x="349.75" y="-390.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;ide</text>
-<text text-anchor="middle" x="349.75" y="-376.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional project inspection task</text>
-<text text-anchor="middle" x="349.75" y="-362.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Rooted native client + syn parser</text>
-<text text-anchor="middle" x="349.75" y="-348.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Public config / factory / registrar</text>
-<text text-anchor="middle" x="349.75" y="-334.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Opt&#45;in YAML / CLI / remote contracts</text>
+<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M829.75,-413C829.75,-413 579.75,-413 579.75,-413 573.75,-413 567.75,-407 567.75,-401 567.75,-401 567.75,-331 567.75,-331 567.75,-325 573.75,-319 579.75,-319 579.75,-319 829.75,-319 829.75,-319 835.75,-319 841.75,-325 841.75,-331 841.75,-331 841.75,-401 841.75,-401 841.75,-407 835.75,-413 829.75,-413"/>
+<text text-anchor="middle" x="704.75" y="-390.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;ide</text>
+<text text-anchor="middle" x="704.75" y="-376.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional project inspection task</text>
+<text text-anchor="middle" x="704.75" y="-362.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Rooted native client + syn parser</text>
+<text text-anchor="middle" x="704.75" y="-348.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Public config / factory / registrar</text>
+<text text-anchor="middle" x="704.75" y="-334.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Opt&#45;in YAML / CLI / remote contracts</text>
 </g>
 <!-- agent&#45;&gt;ide -->
 <g id="edge3" class="edge">
 <title>agent&#45;&gt;ide</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M546.5,-637.82C543.68,-599.98 534.63,-536.57 505.75,-491 487.66,-462.46 460.67,-437.64 434.2,-417.87"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="435.45,-415.53 427.85,-413.21 432.34,-419.76 435.45,-415.53"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M901.5,-637.82C898.68,-599.98 889.63,-536.57 860.75,-491 842.66,-462.46 815.67,-437.64 789.2,-417.87"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="790.45,-415.53 782.85,-413.21 787.34,-419.76 790.45,-415.53"/>
 </g>
 <!-- kernel -->
-<g id="node7" class="node">
+<g id="node6" class="node">
 <title>kernel</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1928.25,-227C1928.25,-227 1703.25,-227 1703.25,-227 1697.25,-227 1691.25,-221 1691.25,-215 1691.25,-215 1691.25,-173 1691.25,-173 1691.25,-167 1697.25,-161 1703.25,-161 1703.25,-161 1928.25,-161 1928.25,-161 1934.25,-161 1940.25,-167 1940.25,-173 1940.25,-173 1940.25,-215 1940.25,-215 1940.25,-221 1934.25,-227 1928.25,-227"/>
-<text text-anchor="middle" x="1815.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;kernel</text>
-<text text-anchor="middle" x="1815.75" y="-190.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional disk / node modules</text>
-<text text-anchor="middle" x="1815.75" y="-176.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed clients / config / registrars</text>
+<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1283.25,-227C1283.25,-227 1058.25,-227 1058.25,-227 1052.25,-227 1046.25,-221 1046.25,-215 1046.25,-215 1046.25,-173 1046.25,-173 1046.25,-167 1052.25,-161 1058.25,-161 1058.25,-161 1283.25,-161 1283.25,-161 1289.25,-161 1295.25,-167 1295.25,-173 1295.25,-173 1295.25,-215 1295.25,-215 1295.25,-221 1289.25,-227 1283.25,-227"/>
+<text text-anchor="middle" x="1170.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;kernel</text>
+<text text-anchor="middle" x="1170.75" y="-190.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional disk / node modules</text>
+<text text-anchor="middle" x="1170.75" y="-176.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed clients / config / registrars</text>
 </g>
 <!-- agent&#45;&gt;kernel -->
 <g id="edge4" class="edge">
 <title>agent&#45;&gt;kernel</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M691.85,-641.54C874.06,-602.78 1195.19,-525.14 1453.75,-413 1571.28,-362.03 1696.9,-279.17 1764.89,-231.63"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1766.66,-233.6 1771.29,-227.15 1763.64,-229.3 1766.66,-233.6"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M975.84,-637.85C990.49,-628.86 1004.75,-617.93 1015.75,-605 1111.71,-492.25 1151.34,-314.05 1164.83,-235.02"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1167.49,-235.06 1166.13,-227.23 1162.31,-234.2 1167.49,-235.06"/>
 </g>
 <!-- core -->
-<g id="node12" class="node">
+<g id="node9" class="node">
 <title>core</title>
-<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M1034.25,-80C1034.25,-80 761.25,-80 761.25,-80 755.25,-80 749.25,-74 749.25,-68 749.25,-68 749.25,-12 749.25,-12 749.25,-6 755.25,0 761.25,0 761.25,0 1034.25,0 1034.25,0 1040.25,0 1046.25,-6 1046.25,-12 1046.25,-12 1046.25,-68 1046.25,-68 1046.25,-74 1040.25,-80 1034.25,-80"/>
-<text text-anchor="middle" x="897.75" y="-57.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;core</text>
-<text text-anchor="middle" x="897.75" y="-43.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">provider / io_client / command / ingress</text>
-<text text-anchor="middle" x="897.75" y="-29.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">task / bootstrap / bridge / access</text>
-<text text-anchor="middle" x="897.75" y="-15.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">One crate, one module per contract</text>
+<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M1179.25,-80C1179.25,-80 906.25,-80 906.25,-80 900.25,-80 894.25,-74 894.25,-68 894.25,-68 894.25,-12 894.25,-12 894.25,-6 900.25,0 906.25,0 906.25,0 1179.25,0 1179.25,0 1185.25,0 1191.25,-6 1191.25,-12 1191.25,-12 1191.25,-68 1191.25,-68 1191.25,-74 1185.25,-80 1179.25,-80"/>
+<text text-anchor="middle" x="1042.75" y="-57.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;core</text>
+<text text-anchor="middle" x="1042.75" y="-43.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">provider / io_client / command / ingress</text>
+<text text-anchor="middle" x="1042.75" y="-29.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">task / bootstrap / bridge / access</text>
+<text text-anchor="middle" x="1042.75" y="-15.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">One crate, one module per contract</text>
 </g>
 <!-- agent&#45;&gt;core -->
 <g id="edge5" class="edge">
 <title>agent&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M580.16,-638C603.08,-611.85 629.75,-572.69 629.75,-532 629.75,-532 629.75,-532 629.75,-193 629.75,-131.96 683,-95.14 742.03,-73.07"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="743.09,-75.47 749.25,-70.45 741.3,-70.54 743.09,-75.47"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M935.16,-638C958.08,-611.85 984.75,-572.69 984.75,-532 984.75,-532 984.75,-532 984.75,-193 984.75,-155.61 1000.26,-116.24 1015.24,-86.94"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1017.67,-87.96 1018.82,-80.09 1013.02,-85.52 1017.67,-87.96"/>
 </g>
 <!-- remote&#45;&gt;core -->
 <g id="edge6" class="edge">
 <title>remote&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M280.44,-153.92C320.72,-139.33 367.95,-123.73 411.75,-113 520.44,-86.37 645.37,-68.13 741.35,-56.67"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="741.94,-59.24 749.08,-55.75 741.33,-54.03 741.94,-59.24"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M643.01,-153.9C681.78,-140.28 726.03,-125.34 766.75,-113 805.34,-101.3 847.31,-89.76 886.6,-79.46"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="887.31,-81.99 893.9,-77.55 885.98,-76.91 887.31,-81.99"/>
 </g>
 <!-- https&#45;&gt;remote -->
 <g id="edge7" class="edge">
 <title>https&#45;&gt;remote</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M270,-490.97C240.61,-471.69 209.95,-445.52 192.75,-413 164.47,-359.52 166.79,-287.98 172.54,-241.69"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="175.15,-241.99 173.53,-234.21 169.95,-241.3 175.15,-241.99"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M625,-490.97C595.61,-471.69 564.95,-445.52 547.75,-413 519.47,-359.52 521.79,-287.98 527.54,-241.69"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="530.15,-241.99 528.53,-234.21 524.95,-241.3 530.15,-241.99"/>
 </g>
 <!-- https&#45;&gt;ide -->
 <g id="edge9" class="edge">
 <title>https&#45;&gt;ide</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M346.71,-490.96C347.22,-469.97 347.87,-443.78 348.43,-420.88"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="351.06,-420.82 348.61,-413.25 345.81,-420.69 351.06,-420.82"/>
-<text text-anchor="middle" x="374.25" y="-449.2" font-family="DejaVu Sans" font-size="11.00" fill="#34505f">ide codec</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M701.71,-490.96C702.22,-469.97 702.87,-443.78 703.43,-420.88"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="706.06,-420.82 703.61,-413.25 700.81,-420.69 706.06,-420.82"/>
+<text text-anchor="middle" x="729.25" y="-449.2" font-family="DejaVu Sans" font-size="11.00" fill="#34505f">ide codec</text>
 </g>
 <!-- https&#45;&gt;core -->
 <g id="edge8" class="edge">
 <title>https&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M419.51,-490.75C450.34,-471.06 484.17,-444.64 506.75,-413 587.78,-299.49 497.16,-208.55 598.75,-113 620.61,-92.44 680.94,-76.05 741.74,-64.13"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="742.28,-66.7 749.15,-62.7 741.29,-61.55 742.28,-66.7"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M774.51,-490.75C805.34,-471.06 839.17,-444.64 861.75,-413 942.78,-299.49 875.69,-228.57 953.75,-113 960.48,-103.04 968.99,-93.77 978.07,-85.42"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="979.92,-87.29 983.78,-80.34 976.43,-83.36 979.92,-87.29"/>
 </g>
 <!-- ide&#45;&gt;remote -->
-<g id="edge23" class="edge">
+<g id="edge16" class="edge">
 <title>ide&#45;&gt;remote</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M304.02,-319C279.48,-294.31 249.37,-264.03 225.06,-239.57"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="226.79,-237.59 219.64,-234.12 223.07,-241.29 226.79,-237.59"/>
-<text text-anchor="middle" x="315.75" y="-277.2" font-family="DejaVu Sans" font-size="11.00" fill="#34505f">remote contract</text>
+<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M659.02,-319C634.48,-294.31 604.37,-264.03 580.06,-239.57"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="581.79,-237.59 574.64,-234.12 578.07,-241.29 581.79,-237.59"/>
+<text text-anchor="middle" x="670.75" y="-277.2" font-family="DejaVu Sans" font-size="11.00" fill="#34505f">remote contract</text>
 </g>
 <!-- ide&#45;&gt;core -->
-<g id="edge22" class="edge">
+<g id="edge15" class="edge">
 <title>ide&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M367.07,-318.8C391.29,-260.93 441,-163.3 516.75,-113 553.67,-88.49 653.39,-70.14 741.55,-58.11"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="742.15,-60.68 749.23,-57.07 741.44,-55.47 742.15,-60.68"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M725.13,-318.56C751.65,-262.92 802.85,-170.1 871.75,-113 885.31,-101.76 900.89,-92.04 916.99,-83.69"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="918.4,-85.92 923.92,-80.2 916.04,-81.23 918.4,-85.92"/>
 </g>
 <!-- renderer -->
 <g id="node5" class="node">
 <title>renderer</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1010.75,-241C1010.75,-241 784.75,-241 784.75,-241 778.75,-241 772.75,-235 772.75,-229 772.75,-229 772.75,-159 772.75,-159 772.75,-153 778.75,-147 784.75,-147 784.75,-147 1010.75,-147 1010.75,-147 1016.75,-147 1022.75,-153 1022.75,-159 1022.75,-159 1022.75,-229 1022.75,-229 1022.75,-235 1016.75,-241 1010.75,-241"/>
-<text text-anchor="middle" x="897.75" y="-218.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;template</text>
-<text text-anchor="middle" x="897.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional template renderer</text>
-<text text-anchor="middle" x="897.75" y="-190.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed schema / explicit methods</text>
-<text text-anchor="middle" x="897.75" y="-176.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Public config / factory / registrar</text>
-<text text-anchor="middle" x="897.75" y="-162.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Opt&#45;in template CLI binary</text>
+<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1573.75,-241C1573.75,-241 1347.75,-241 1347.75,-241 1341.75,-241 1335.75,-235 1335.75,-229 1335.75,-229 1335.75,-159 1335.75,-159 1335.75,-153 1341.75,-147 1347.75,-147 1347.75,-147 1573.75,-147 1573.75,-147 1579.75,-147 1585.75,-153 1585.75,-159 1585.75,-159 1585.75,-229 1585.75,-229 1585.75,-235 1579.75,-241 1573.75,-241"/>
+<text text-anchor="middle" x="1460.75" y="-218.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;template</text>
+<text text-anchor="middle" x="1460.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Optional template renderer</text>
+<text text-anchor="middle" x="1460.75" y="-190.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed schema / explicit methods</text>
+<text text-anchor="middle" x="1460.75" y="-176.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Public config / factory / registrar</text>
+<text text-anchor="middle" x="1460.75" y="-162.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Opt&#45;in template CLI binary</text>
 </g>
 <!-- renderer&#45;&gt;core -->
-<g id="edge24" class="edge">
+<g id="edge17" class="edge">
 <title>renderer&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M897.75,-146.98C897.75,-128.24 897.75,-106.61 897.75,-87.79"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="900.38,-87.69 897.75,-80.19 895.13,-87.69 900.38,-87.69"/>
-</g>
-<!-- app -->
-<g id="node6" class="node">
-<title>app</title>
-<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M1421.75,-406C1421.75,-406 1123.75,-406 1123.75,-406 1117.75,-406 1111.75,-400 1111.75,-394 1111.75,-394 1111.75,-338 1111.75,-338 1111.75,-332 1117.75,-326 1123.75,-326 1123.75,-326 1421.75,-326 1421.75,-326 1427.75,-326 1433.75,-332 1433.75,-338 1433.75,-338 1433.75,-394 1433.75,-394 1433.75,-400 1427.75,-406 1421.75,-406"/>
-<text text-anchor="middle" x="1272.75" y="-383.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;bootstrap&#45;demo</text>
-<text text-anchor="middle" x="1272.75" y="-369.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Application&#45;owned config / command enum</text>
-<text text-anchor="middle" x="1272.75" y="-355.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Calls registrars; constructs explicitly</text>
-<text text-anchor="middle" x="1272.75" y="-341.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Pure default; opt&#45;in messages / disk</text>
-</g>
-<!-- app&#45;&gt;kernel -->
-<g id="edge13" class="edge">
-<title>app&#45;&gt;kernel</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M1368.26,-325.9C1413.13,-308.47 1467.66,-288.62 1517.75,-274 1584.53,-254.51 1603.52,-258.87 1670.75,-241 1683.99,-237.48 1697.83,-233.5 1711.47,-229.38"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1712.61,-231.78 1719.02,-227.09 1711.08,-226.76 1712.61,-231.78"/>
-<text text-anchor="middle" x="1528.75" y="-277.2" font-family="DejaVu Sans" font-size="11.00" fill="#34505f">disk</text>
-</g>
-<!-- feature -->
-<g id="node10" class="node">
-<title>feature</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1638.75,-227C1638.75,-227 1422.75,-227 1422.75,-227 1416.75,-227 1410.75,-221 1410.75,-215 1410.75,-215 1410.75,-173 1410.75,-173 1410.75,-167 1416.75,-161 1422.75,-161 1422.75,-161 1638.75,-161 1638.75,-161 1644.75,-161 1650.75,-167 1650.75,-173 1650.75,-173 1650.75,-215 1650.75,-215 1650.75,-221 1644.75,-227 1638.75,-227"/>
-<text text-anchor="middle" x="1530.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;demo&#45;messages</text>
-<text text-anchor="middle" x="1530.75" y="-190.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Capability contracts + task</text>
-<text text-anchor="middle" x="1530.75" y="-176.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed config / recipe / registrar</text>
-</g>
-<!-- app&#45;&gt;feature -->
-<g id="edge11" class="edge">
-<title>app&#45;&gt;feature</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M1308.28,-325.79C1325.2,-308.54 1346.37,-288.86 1367.75,-274 1391.57,-257.44 1419.39,-242.55 1445.23,-230.29"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1446.43,-232.62 1452.11,-227.06 1444.21,-227.87 1446.43,-232.62"/>
-<text text-anchor="middle" x="1395.75" y="-277.2" font-family="DejaVu Sans" font-size="11.00" fill="#34505f">messages</text>
-</g>
-<!-- impl -->
-<g id="node11" class="node">
-<title>impl</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1318.75,-227C1318.75,-227 1074.75,-227 1074.75,-227 1068.75,-227 1062.75,-221 1062.75,-215 1062.75,-215 1062.75,-173 1062.75,-173 1062.75,-167 1068.75,-161 1074.75,-161 1074.75,-161 1318.75,-161 1318.75,-161 1324.75,-161 1330.75,-167 1330.75,-173 1330.75,-173 1330.75,-215 1330.75,-215 1330.75,-221 1324.75,-227 1318.75,-227"/>
-<text text-anchor="middle" x="1196.75" y="-204.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;demo&#45;memory&#45;client</text>
-<text text-anchor="middle" x="1196.75" y="-190.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">In&#45;memory fake + typed config</text>
-<text text-anchor="middle" x="1196.75" y="-176.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Factory / provider handle / registrar</text>
-</g>
-<!-- app&#45;&gt;impl -->
-<g id="edge12" class="edge">
-<title>app&#45;&gt;impl</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" stroke-dasharray="5,2" d="M1249.9,-325.81C1243.02,-313.29 1235.71,-299.24 1229.75,-286 1222.27,-269.39 1215.21,-250.53 1209.55,-234.31"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1211.98,-233.29 1207.05,-227.05 1207.01,-235 1211.98,-233.29"/>
-<text text-anchor="middle" x="1257.75" y="-277.2" font-family="DejaVu Sans" font-size="11.00" fill="#34505f">messages</text>
-</g>
-<!-- app&#45;&gt;core -->
-<g id="edge10" class="edge">
-<title>app&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1111.64,-348.3C975.93,-330.51 797,-297.04 752.75,-241 726.86,-208.21 733.84,-184.25 752.75,-147 765.71,-121.48 788.02,-100.63 811.31,-84.38"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="812.83,-86.52 817.57,-80.14 809.88,-82.17 812.83,-86.52"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1335.62,-147.5C1279.11,-126.95 1212.79,-102.83 1157.56,-82.75"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1158.14,-80.17 1150.2,-80.07 1156.35,-85.1 1158.14,-80.17"/>
 </g>
 <!-- kernel&#45;&gt;core -->
-<g id="edge14" class="edge">
+<g id="edge10" class="edge">
 <title>kernel&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1722.79,-160.93C1705.63,-155.75 1687.75,-150.83 1670.75,-147 1459.91,-99.47 1211.61,-70.01 1054.45,-54.56"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1054.28,-51.91 1046.56,-53.79 1053.77,-57.13 1054.28,-51.91"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1143.6,-160.76C1125.34,-139.07 1101,-110.17 1080.8,-86.19"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1082.6,-84.25 1075.77,-80.21 1078.59,-87.63 1082.6,-84.25"/>
 </g>
 <!-- local -->
-<g id="node8" class="node">
+<g id="node7" class="node">
 <title>local</title>
-<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M2010.75,-399C2010.75,-399 1694.75,-399 1694.75,-399 1688.75,-399 1682.75,-393 1682.75,-387 1682.75,-387 1682.75,-345 1682.75,-345 1682.75,-339 1688.75,-333 1694.75,-333 1694.75,-333 2010.75,-333 2010.75,-333 2016.75,-333 2022.75,-339 2022.75,-345 2022.75,-345 2022.75,-387 2022.75,-387 2022.75,-393 2016.75,-399 2010.75,-399"/>
-<text text-anchor="middle" x="1852.75" y="-376.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;local</text>
-<text text-anchor="middle" x="1852.75" y="-362.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed application composition</text>
-<text text-anchor="middle" x="1852.75" y="-348.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Registered catalog + node / optional disk/jobs</text>
+<path fill="#fff1d6" stroke="#ae7b26" stroke-width="1.4" d="M1655.75,-399C1655.75,-399 1339.75,-399 1339.75,-399 1333.75,-399 1327.75,-393 1327.75,-387 1327.75,-387 1327.75,-345 1327.75,-345 1327.75,-339 1333.75,-333 1339.75,-333 1339.75,-333 1655.75,-333 1655.75,-333 1661.75,-333 1667.75,-339 1667.75,-345 1667.75,-345 1667.75,-387 1667.75,-387 1667.75,-393 1661.75,-399 1655.75,-399"/>
+<text text-anchor="middle" x="1497.75" y="-376.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;local</text>
+<text text-anchor="middle" x="1497.75" y="-362.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Typed application composition</text>
+<text text-anchor="middle" x="1497.75" y="-348.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Registered catalog + node / optional disk/jobs</text>
 </g>
 <!-- local&#45;&gt;kernel -->
-<g id="edge15" class="edge">
+<g id="edge11" class="edge">
 <title>local&#45;&gt;kernel</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1845.7,-332.62C1839.63,-304.74 1830.85,-264.39 1824.37,-234.59"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1826.93,-234.03 1822.77,-227.26 1821.8,-235.14 1826.93,-234.03"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1435.86,-332.82C1379.81,-303.69 1297.38,-260.83 1239.34,-230.66"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1240.25,-228.17 1232.39,-227.04 1237.83,-232.83 1240.25,-228.17"/>
 </g>
 <!-- local&#45;&gt;core -->
-<g id="edge16" class="edge">
+<g id="edge12" class="edge">
 <title>local&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1889.96,-332.91C1938.47,-287.3 2011.49,-203.05 1960.75,-147 1901.12,-81.13 1335.05,-54.48 1054.21,-45.24"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1053.98,-42.61 1046.39,-44.98 1053.81,-47.85 1053.98,-42.61"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1535.08,-332.74C1582.78,-287.66 1653.74,-204.87 1605.75,-147 1554.95,-85.75 1347.7,-59.65 1199.43,-48.7"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1199.19,-46.05 1191.52,-48.12 1198.81,-51.29 1199.19,-46.05"/>
 </g>
 <!-- terminal -->
-<g id="node9" class="node">
+<g id="node8" class="node">
 <title>terminal</title>
-<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M2150.75,-564C2150.75,-564 1878.75,-564 1878.75,-564 1872.75,-564 1866.75,-558 1866.75,-552 1866.75,-552 1866.75,-510 1866.75,-510 1866.75,-504 1872.75,-498 1878.75,-498 1878.75,-498 2150.75,-498 2150.75,-498 2156.75,-498 2162.75,-504 2162.75,-510 2162.75,-510 2162.75,-552 2162.75,-552 2162.75,-558 2156.75,-564 2150.75,-564"/>
-<text text-anchor="middle" x="2014.75" y="-541.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;terminal / forge binary</text>
-<text text-anchor="middle" x="2014.75" y="-527.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Thin terminal + console I/O client</text>
-<text text-anchor="middle" x="2014.75" y="-513.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Reads catalog; invokes checked ingress</text>
+<path fill="#e8f4f7" stroke="#24576b" stroke-width="1.4" d="M1795.75,-564C1795.75,-564 1523.75,-564 1523.75,-564 1517.75,-564 1511.75,-558 1511.75,-552 1511.75,-552 1511.75,-510 1511.75,-510 1511.75,-504 1517.75,-498 1523.75,-498 1523.75,-498 1795.75,-498 1795.75,-498 1801.75,-498 1807.75,-504 1807.75,-510 1807.75,-510 1807.75,-552 1807.75,-552 1807.75,-558 1801.75,-564 1795.75,-564"/>
+<text text-anchor="middle" x="1659.75" y="-541.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">forge&#45;terminal / forge binary</text>
+<text text-anchor="middle" x="1659.75" y="-527.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Thin terminal + console I/O client</text>
+<text text-anchor="middle" x="1659.75" y="-513.6" font-family="DejaVu Sans" font-size="13.00" fill="#163744">Reads catalog; invokes checked ingress</text>
 </g>
 <!-- terminal&#45;&gt;local -->
-<g id="edge17" class="edge">
+<g id="edge13" class="edge">
 <title>terminal&#45;&gt;local</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1982.74,-497.8C1956.12,-471.01 1918.18,-432.83 1890.16,-404.64"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1891.84,-402.61 1884.69,-399.14 1888.11,-406.31 1891.84,-402.61"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1627.74,-497.8C1601.12,-471.01 1563.18,-432.83 1535.16,-404.64"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1536.84,-402.61 1529.69,-399.14 1533.11,-406.31 1536.84,-402.61"/>
 </g>
 <!-- terminal&#45;&gt;core -->
-<g id="edge18" class="edge">
+<g id="edge14" class="edge">
 <title>terminal&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M2025.55,-497.77C2047.72,-424.88 2089.16,-246.03 1999.75,-147 1937.61,-78.17 1342.96,-52.88 1053.94,-44.6"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1053.89,-41.97 1046.32,-44.38 1053.74,-47.22 1053.89,-41.97"/>
-</g>
-<!-- feature&#45;&gt;core -->
-<g id="edge19" class="edge">
-<title>feature&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1410.29,-161.86C1390.42,-156.82 1370.02,-151.72 1350.75,-147 1252.12,-122.86 1141.12,-96.87 1053.68,-76.66"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1054.26,-74.1 1046.36,-74.97 1053.08,-79.22 1054.26,-74.1"/>
-</g>
-<!-- impl&#45;&gt;feature -->
-<g id="edge20" class="edge">
-<title>impl&#45;&gt;feature</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1330.81,-194C1354.77,-194 1378.73,-194 1402.69,-194"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1402.97,-196.63 1410.47,-194 1402.97,-191.38 1402.97,-196.63"/>
-</g>
-<!-- impl&#45;&gt;core -->
-<g id="edge21" class="edge">
-<title>impl&#45;&gt;core</title>
-<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1133.71,-160.95C1089.36,-138.41 1029.55,-108 981.24,-83.45"/>
-<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="982.38,-81.08 974.51,-80.02 980,-85.76 982.38,-81.08"/>
+<path fill="none" stroke="#56717d" stroke-width="1.3" d="M1669.68,-497.59C1676.27,-474.31 1684.32,-442.04 1687.75,-413 1701.79,-294 1715.1,-243.27 1643.75,-147 1591.94,-77.09 1359.16,-53.25 1198.99,-45.15"/>
+<polygon fill="#56717d" stroke="#56717d" stroke-width="1.3" points="1199.04,-42.52 1191.42,-44.77 1198.78,-47.76 1199.04,-42.52"/>
 </g>
 </g>
 </svg>

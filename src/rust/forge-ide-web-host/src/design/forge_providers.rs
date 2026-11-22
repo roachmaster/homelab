@@ -77,13 +77,6 @@ pub(super) const BODY: &[Node] = &[
                 ),
             ),
             element!(Div;
-                element!(Dt; text("Model runtime")),
-                element!(Dd; text("The provider supplies a GPU reservation. A factory starts the selected model process. Model switches retain the reservation.")),
-                element!(Dd;
-                    element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/src/rust/forge-llama/src/model_runtime.rs"]; text("Model runtime provider source")),
-                ),
-            ),
-            element!(Div;
                 element!(Dt; text("Durable jobs")),
                 element!(Dd; text("The optional Unix jobs command stages its operator verifier, private file store and worker recipe. After freeze it creates the verifier/store, authenticates the account, and injects the acquired store into the admitted bridge or owned worker. Receipts and results survive reopening that store.")),
                 element!(Dd;

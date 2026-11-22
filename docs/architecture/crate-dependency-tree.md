@@ -2,18 +2,19 @@
 
 **Status: working todo list for the crate consolidation and CI revision,
 2026-11-22. Traced against main `c738faa`. Crate formalization complete
-22/22 (section 7); the `forge-core` merge is done (section 8); the
-`forge-llama`, demo-crate, `forge-kernel`, and CI-matrix decisions below
-are still open.**
+22/22 (section 7); the `forge-core` merge is done (section 8);
+`forge-llama` and the demo crates were removed from the workspace
+(section 9). The `forge-kernel` and CI-matrix decisions below are
+still open.**
 
 ## Todo
 
 - [x] Decide the `forge-core` merge (eight contract crates into one) and the name — done, section 8
-- [ ] Decide `forge-llama`: remove from the workspace, wire into the host, or keep deliberately
-- [ ] Decide the demo crates: keep in the workspace for every CI combination, or gate them to a single job / separate example workspace
+- [x] Decide `forge-llama`: removed from the workspace (section 9)
+- [x] Decide the demo crates: removed from the workspace (section 9)
 - [ ] Decide `forge-kernel`: into `forge-core` as feature-gated modules, or separate
 - [x] Decide the layering enforcement: a layering test, or keep the eight crate boundaries — layering test, `forge-core/tests/layering.rs`
-- [ ] Rationalize the CI feature matrix (step two, after the layout decision) — pipeline split implemented in docs/architecture/ci-pipeline.md (branch/main gates, `make ci-main`, Jenkins + GitHub split); the three-combination cut in section 6 still needs a trial run
+- [ ] Rationalize the CI feature matrix (step two, after the layout decision) — pipeline split implemented in docs/architecture/ci-pipeline.md (branch/main gates, `make ci-main`, Jenkins + GitHub split); the one-combination cut (`forge-template` bare → check-only) in section 6 still needs a trial run
 
 Built to answer: which crates are cohesive enough to merge into a higher-order
 crate, as the first step toward revising the CI portion of the Forge build.
@@ -382,3 +383,65 @@ outside the allowed set (task -> io_client/provider, bridge -> ingress /
 io_client / provider / task, access -> ingress), and it fails if a module
 is added without a layering rule. Both guards are part of the merge
 commit, not follow-ups.
+
+## 9. Removals: `forge-llama` and the demo crates (2026-11-22)
+
+Leonardo's call, the same day. The demo crates went because, in his
+words, "we have enough examples of a working system": the real system
+(`forge-local`, `forge-agent`, `forge-terminal`) demonstrates the
+framework, so the three sample apps were redundant. `forge-llama` went
+with them — with one correction to this doc's section 3.2 on the way.
+
+### 9.1 `forge-llama` was not dead code
+
+Section 3.2 said it "has no internal consumer", which was true only in
+the narrow Cargo sense: no other crate imports it. It was the live GPU
+inference adapter — a loopback REST service (binary + systemd unit +
+`setup-boot.sh` + GPU config example) that starts, switches, prompts
+and stops a local llama.cpp server on the Forge GPU box (Arc B50 via
+SYCL, GPT-OSS 20B), consumed over HTTP by the GPU worker, not by Cargo.
+Leonardo removed it knowing that. What the removal means: the adapter
+source, unit, deploy scripts, `ARCHITECTURE.md`, README and KV-cache
+benchmark are gone from the repo. The *deployed* service on the GPU box
+is untouched by a repo deletion — it keeps running until someone stops
+it or rebuilds it — so the operational references stay: the
+`forge-gpu-worker.service` dependency, the `monitor-forge-mail.py`
+watch, and the `forge-llama-adapter` entry in the system inventory
+(its `source:` link to the deleted README was dropped). Retiring the
+service itself is a separate step, if he wants it.
+
+### 9.2 What changed
+
+- **Measured:** 15 crates (was 19), 32 internal edges (was 40), max
+  depth 4 (unchanged), 91,181 LOC (was 96,213). `forge-core` has 12
+  dependents (was 16 — the four removed crates).
+- **Guard:** `check_dependencies.py` lost the demo profiles
+  (`PURE`/`MESSAGES`/`DISK`), `DEMO_PACKAGES`, and `OPTIONAL`;
+  `consumer_tree()` now takes its package as a required argument
+  (every remaining call already passed one explicitly); 21 negative
+  fixtures (was 22 — the "impure default" fixture went with the demo).
+- **Makefile:** the three `forge-bootstrap-demo` combinations are gone;
+  `make ci` is 11 cargo configurations (1 all-features + 10 minimal),
+  12 test runs, 9 Clippy runs. The section 6 cut in the CI pipeline
+  doc is now a single combination (`forge-template` bare).
+- **Docs rewired:** `bootstrap-registrars.md` now uses the `forge-local`
+  application as the worked registrar example (node + optional disk);
+  the `forge-core` README points at `forge-local`; the
+  `wire-forge-providers` skill dropped the runtime-lease bullet (its
+  example no longer exists in the workspace); the Design reference
+  page dropped the model-runtime section; the package diagram lost
+  the demo nodes.
+- **Stale doctest fixed on the way in:** `forge-template`'s README is
+  included as crate docs (`#![doc = include_str!]`), and its example
+  still used the pre-merge `forge_bootstrap`/`forge_provider` paths —
+  the merge's rename covered `.rs` files, not `.md` files included as
+  docs — so the workspace test failed until it was fixed. The same
+  stale paths were fixed in `forge-ide`'s README (markdown-only, not
+  included as docs) and `forge-jenkins`'s README (latent: its doctest
+  is cfg-gated behind the `http` feature, so it only failed under
+  `--all-features`).
+
+Verified: fmt clean; workspace tests 814 default / 910 all-features,
+0 failed; clippy `-D warnings` clean in both configurations;
+`check_dependencies.py`, `check_imports.py` (0 errors, 0 warnings),
+`rust_ast.py`, and the scripts discovery (110/110) all green.

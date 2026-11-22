@@ -303,33 +303,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "forge-bootstrap-demo"
-version = "0.1.0"
-dependencies = [
- "forge-core",
- "forge-demo-memory-client",
- "forge-demo-messages",
- "forge-kernel",
-]
-
-[[package]]
 name = "forge-core"
 version = "0.1.0"
-
-[[package]]
-name = "forge-demo-memory-client"
-version = "0.1.0"
-dependencies = [
- "forge-core",
- "forge-demo-messages",
-]
-
-[[package]]
-name = "forge-demo-messages"
-version = "0.1.0"
-dependencies = [
- "forge-core",
-]
 
 [[package]]
 name = "forge-game-runtime"
@@ -425,22 +400,6 @@ name = "forge-kernel"
 version = "0.1.0"
 dependencies = [
  "forge-core",
-]
-
-[[package]]
-name = "forge-llama"
-version = "0.1.0"
-dependencies = [
- "ctrlc",
- "forge-core",
- "http-body-util",
- "hyper",
- "hyper-util",
- "nix",
- "serde",
- "serde_json",
- "subtle",
- "tokio",
 ]
 
 [[package]]

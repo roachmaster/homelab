@@ -24,8 +24,6 @@ The [first Rust core](src/rust/README.md) now implements typed contracts, a sync
 
 ## Forge GPU inference
 
-The [SYCL llama.cpp adapter](src/rust/forge-llama/README.md) exposes authenticated loopback REST commands to start, switch, prompt and stop a local model on Forge GPU.
-
 The [Mission Control runner](deploy/mission-control/agent-runner/README.md) records Chat requests and events in PostgreSQL and sends inference requests over the private Forge tunnel. See the [service inventory](docs/architecture/forge-ide-system-inventory.yaml) for the deployed endpoints.
 
 ## Forge IDE read-only workbench
