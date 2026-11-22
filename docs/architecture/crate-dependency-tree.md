@@ -1,0 +1,223 @@
+# Rust crate dependency tree and consolidation analysis
+
+**Status: working todo list for the crate consolidation and CI revision,
+2026-11-22. Traced against main `c738faa`. No code changes.**
+
+## Todo
+
+- [ ] Decide the `forge-core` merge (eight contract crates into one) and the name
+- [ ] Decide `forge-llama`: remove from the workspace, wire into the host, or keep deliberately
+- [ ] Decide the demo crates: keep in the workspace for every CI combination, or gate them to a single job / separate example workspace
+- [ ] Decide `forge-kernel`: into `forge-core` as feature-gated modules, or separate
+- [ ] Decide the layering enforcement: a layering test, or keep the eight crate boundaries
+- [ ] Rationalize the CI feature matrix (step two, after the layout decision)
+
+Built to answer: which crates are cohesive enough to merge into a higher-order
+crate, as the first step toward revising the CI portion of the Forge build.
+Method: every `Cargo.toml` in `src/rust/` parsed (workspace members, path
+dependencies, workspace-inherited dependencies, features); LOC counted over
+`.rs` files under `src/`, `tests/`, `examples/`, `benches/`. No `cargo tree`
+invocation was needed — the internal graph is fully determined by the
+manifests, and every internal reference resolves to a workspace member.
+
+## 1. The workspace in numbers
+
+- **26 workspace members** (23 crates, 3 examples), **91,503 lines** of Rust.
+- **111 internal dependency edges.** Maximum dependency depth: **6 layers**.
+- **6 top crates** with no internal dependents: `forge-agent`,
+  `forge-ide-web`, `forge-ide-web-host`, `forge-terminal`, `forge-llama`, and
+  the `forge-bootstrap-demo` example.
+- **7 foundation crates** with no internal dependencies: `forge-bootstrap`,
+  `forge-command`, `forge-ingress-contract`, `forge-provider`,
+  `forge-io-client`, `forge-ide-ui`, `forge-game-runtime`.
+- The IDE family (`forge-ide-ui`, `forge-ide-web-host`, `forge-ide`,
+  `forge-ide-web`) is **53,683 lines, 59% of the workspace**.
+
+## 2. The dependency tree, by layer
+
+Depth is the longest path from a foundation crate. An arrow `A -> B` means A
+depends on B.
+
+### Layer 0 — foundation, no internal dependencies
+
+| Crate | LOC | Dependents | Role |
+| --- | --- | --- | --- |
+| `forge-bootstrap` | 690 | 15 | Typed, effect-free registration and freeze (DI registrars) |
+| `forge-command` | 633 | 5 | Static, transport-neutral command descriptions |
+| `forge-ingress-contract` | 261 | 13 | Typed ingress request/response values |
+| `forge-provider` | 223 | 17 | Typed construction and synchronous acquisition |
+| `forge-io-client` | 86 | 15 | `IoClient` typed I/O boundary |
+| `forge-ide-ui` | 20,505 | 2 | WASM model, serde-only |
+| `forge-game-runtime` | 3,300 | 1 | Game engine runtime |
+
+### Layer 1
+
+| Crate | LOC | Depends on | Dependents |
+| --- | --- | --- | --- |
+| `forge-task` | 304 | io-client, provider | 11 |
+| `forge-access` | 147 | ingress-contract | 2 |
+| `forge-jenkins` | 2,260 | bootstrap, io-client, provider | 2 |
+
+### Layer 2
+
+| Crate | LOC | Depends on | Dependents |
+| --- | --- | --- | --- |
+| `forge-bridge` | 809 | ingress-contract, io-client, provider, task | 9 |
+| `forge-kernel` | 1,307 | bootstrap, command, io-client, provider, task | 4 |
+| `forge-demo-messages` | 410 | bootstrap, io-client, provider, task | 2 |
+
+### Layer 3
+
+| Crate | LOC | Depends on | Dependents |
+| --- | --- | --- | --- |
+| `forge-remote` | 670 | bridge, ingress-contract, io-client, task | 4 |
+| `forge-jobs` | 1,190 | access, bootstrap, bridge, ingress-contract, provider | 1 |
+| `forge-llama` | 1,462 | bootstrap, bridge, ingress-contract, provider | **0** |
+| `forge-template` | 6,972 | bootstrap, bridge, command, ingress-contract, io-client, provider, task | 1 |
+| `forge-local` | 4,236 | bootstrap, bridge, command, ingress-contract, io-client, jenkins, kernel, provider, task | 1 |
+| `forge-demo-memory-client` | 416 | bootstrap, demo-messages, io-client, provider | 1 |
+
+### Layer 4
+
+| Crate | LOC | Depends on | Dependents |
+| --- | --- | --- | --- |
+| `forge-ide` | 8,172 | bootstrap, bridge, command, ingress-contract, io-client, provider, remote, task | 3 |
+| `forge-ide-web` | 7,224 | bootstrap, game-runtime, ide-ui, provider, template | 0 |
+| `forge-terminal` | 3,282 | access, bootstrap, ingress-contract, io-client, jenkins, jobs, local, provider | 0 |
+| `forge-bootstrap-demo` | 1,905 | bootstrap, bridge, demo-memory-client, demo-messages, ingress-contract, io-client, kernel, provider, task | 0 |
+
+### Layer 5
+
+| Crate | LOC | Depends on | Dependents |
+| --- | --- | --- | --- |
+| `forge-remote-https` | 4,747 | bootstrap, ide, ingress-contract, io-client, kernel, provider, remote, task | 2 |
+
+### Layer 6 — application tops
+
+| Crate | LOC | Depends on |
+| --- | --- | --- |
+| `forge-agent` | 2,510 | bootstrap, bridge, command, ide, ingress-contract, io-client, kernel, provider, remote, remote-https, task |
+| `forge-ide-web-host` | 17,782 | bootstrap, bridge, ide, ide-ui, ingress-contract, io-client, provider, remote, remote-https, task |
+
+### Features
+
+Nine crates define features; the rest have none. The feature-bearing crates
+are the CI multiplier (see section 5): `forge-ide` (cli, managed-writes,
+remote, write-contract, yaml), `forge-terminal` (disk, durable-jobs, jenkins,
+jobs), `forge-local` (disk, jenkins, jobs), `forge-remote-https` (ide,
+managed-writes), `forge-kernel` (disk, node), `forge-template` (cli),
+`forge-ide-web` (build-assets), `forge-jenkins` (http),
+`forge-bootstrap-demo` (disk, messages).
+
+## 3. Findings
+
+### 3.1 The contract layer is eight crates that behave as one
+
+`forge-provider`, `forge-io-client`, `forge-command`,
+`forge-ingress-contract`, `forge-task`, `forge-bootstrap`, `forge-bridge`, and
+`forge-access` share one character: transport-neutral, no business enums, no
+async runtime, no global registry, **zero external dependencies, zero
+features**, 3,153 lines across 19 files. Sixteen of the eighteen other crates
+depend on at least one of them; `forge-agent` alone depends on seven of the
+eight.
+
+The fine granularity is the dependency-inversion mechanism — a consumer takes
+only the contract it needs. But at this size the granularity buys almost
+nothing in build time: the whole layer is 3% of the workspace, and a consumer
+that takes one contract usually takes several.
+
+**Recommendation: merge the eight into one crate, `forge-core`, with one
+module per current crate** (`provider`, `io_client`, `command`, `ingress`,
+`task`, `bootstrap`, `bridge`, `access`). Measured effect: crates 26 -> 19,
+internal edges 111 -> 40. The current graph is acyclic, so the module
+structure preserves the layering — but only by convention. The honest
+trade-off: the crate boundary currently **enforces** the layering (for
+example, `forge-command` documents that it has no task, I/O-client, or
+ingress dependency, and the compiler proves it). Merging loses that
+enforcement. Mitigation: keep the modules private behind re-exports, and add
+a layering test in the style of the existing `check_dependencies.py` /
+boundary-hash tests that fails if a lower module imports a higher one.
+
+### 3.2 `forge-llama` has no internal consumer
+
+1,462 lines, 9 external dependencies, **zero internal dependents**. It is
+referenced in design documentation (`forge-ide-web-host/src/design/forge_providers.rs`)
+and in the Wire Forge Providers skill as the model-runtime provider example,
+but no Rust code in the workspace depends on it. The host relays chat to a
+local llama.cpp model without it. Either it is dead weight that CI builds in
+every combination for nothing, or its consumer is missing. This needs
+Leonardo's call: remove it from the workspace, wire it into the host, or keep
+it deliberately as a standalone provider.
+
+### 3.3 The demo crates are a CI question, not a cohesion question
+
+`forge-demo-messages` (410), `forge-demo-memory-client` (416), and
+`forge-bootstrap-demo` (1,905) exist to demonstrate the DI wiring; they have
+no production dependents. They are cohesive as a group and should stay
+together. The question is whether they belong in the workspace for **every**
+CI combination, or in a separate example workspace (or a single gated CI job)
+so the main matrix does not pay for them ten times over.
+
+### 3.4 `forge-kernel` is the judgment call
+
+1,307 lines, features `disk` and `node`, depends on five of the contract
+crates. It is "optional hosted, low-level system clients grouped by cohesive
+modules" — disk and node observations, not contracts. It could join
+`forge-core` as feature-gated modules, or stay separate as the system-client
+crate. Either is defensible; the deciding factor is whether the system-client
+role deserves its own boundary. Recommendation: keep it separate for now —
+its features give it a different shape from the featureless contract layer,
+and it is the natural home if more system clients arrive.
+
+## 4. Considered and rejected
+
+- **`forge-remote` + `forge-remote-https`.** They look like a pair, but the
+  split is the point: `forge-remote` (670) is the transport-neutral node-info
+  conversation with no network, serialization, or TLS; `forge-remote-https`
+  (4,747) is the implementation. Merging mixes the contract with the
+  transport. The only form worth considering is a feature-gated merge
+  (`https` as an optional feature of one crate), which preserves the layering
+  through features instead of crates — but it complicates the feature matrix
+  CI is trying to shrink.
+- **`forge-jobs`, `forge-local`, `forge-template` into their single
+  dependents.** Each has exactly one internal dependent, which looks like
+  fragmentation, but each is a coherent capability: durable jobs, local
+  application composition, the template engine. A single dependent means a
+  leaf capability, not a fragment. Keep.
+- **The IDE family.** `forge-ide-ui` is the WASM model and must stay separate
+  (WASM target, serde-only). `forge-ide-web` generates assets, `forge-ide`
+  is the core library, `forge-ide-web-host` is the server. These splits are
+  target and architecture boundaries, not accidents. Keep all four.
+- **`forge-agent`, `forge-jenkins`, `forge-terminal`.** Application tops and a
+  coherent Jenkins client. Keep.
+
+## 5. What this means for the CI revision
+
+Consolidation is step one of the CI revision, not the whole of it. Merging
+the contract layer takes the workspace from 26 crates to 19 and the edge
+count from 111 to 40, which removes seven compile units from **every**
+combination CI runs. But the bigger multiplier is the feature matrix: `make
+ci` runs on the order of ten feature combinations (default, all-features,
+no-default-features, the six minimal no-default profiles in
+`scripts/dead_code.py`, wasm, release), and every combination rebuilds every
+crate it touches. Consolidation shrinks the per-combination cost; it does not
+shrink the number of combinations.
+
+The CI revision itself — step two, after the layout decision — needs to
+rationalize the matrix: which crates genuinely need all-features, which need
+the minimal profiles, whether the demo crates build in every combination, and
+whether `forge-llama` builds at all. Those decisions belong with the CI
+design, not this analysis.
+
+## 6. Open questions
+
+- Confirm the `forge-core` merge, and the name (`forge-core`,
+  `forge-contracts`, `forge-foundation`)?
+- `forge-llama`: remove from the workspace, wire into the host, or keep
+  deliberately?
+- Demo crates: keep in the workspace for every CI combination, or gate them
+  to a single job / separate example workspace?
+- `forge-kernel`: into `forge-core` as feature-gated modules, or separate?
+- Is the layering test (section 3.1) the right mitigation for losing the
+  compiler-enforced crate boundaries, or is that enforcement worth keeping
+  the eight crates separate?
