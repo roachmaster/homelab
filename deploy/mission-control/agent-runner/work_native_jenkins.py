@@ -4,7 +4,7 @@ Only a current local-review lease may create a CI action. Later hosted and merge
 checks reobserve that action; they cannot start another build. Parent-owned
 sidecars retain the native-to-Jenkins gate binding and restart cleanup intent.
 """
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from contextlib import contextmanager
 import hashlib
 import json
@@ -22,12 +22,41 @@ from work_hosted_checks import HostedCheckReport
 from work_publication_checks import VerificationFailure
 from work_publication_clients import PublicationError, branch_name
 from work_review import gate_source_digest
-from work_verification import VerificationMetadata, gate_manifest_sha256, project_verification
+from work_verification import VerificationMetadata, check_id, gate_manifest_sha256, project_verification
 
 LOG = logging.getLogger('forge-native-jenkins')
 VERSION = 'forge-native-jenkins-v1'
 LOGICAL_CHECKS = ('check', 'real-browser', 'pr-fast-gate')
 IDENTITY = ('owner_id', 'project_alias', 'task_id', 'attempt_id', 'review_id', 'workflow_id', 'correlation_id')
+
+
+@dataclass(frozen=True)
+class NativeCheckAccounting:
+    checks: tuple
+    failed_index: int | None
+    complete: bool
+    valid: bool
+
+
+def native_check_accounting(commands, receipt):
+    """Project only an exact sequential protected receipt, never stdout markers."""
+    empty=tuple({'check_id':check_id(command,index),'status':'not_run','command':list(command)}
+        for index,command in enumerate(commands))
+    rows=receipt.get('checks')if isinstance(receipt,dict)else None
+    if not isinstance(rows,list)or len(rows)>len(commands):
+        return NativeCheckAccounting(empty,None,False,False)
+    failed=None
+    for index,row in enumerate(rows):
+        if (not isinstance(row,dict)or set(row)!={'index','argv','returncode'}
+                or type(row.get('index'))is not int or row['index']!=index
+                or not isinstance(row.get('argv'),list)or row['argv']!=list(commands[index])
+                or type(row.get('returncode'))is not int or not -255<=row['returncode']<=255
+                or failed is not None):
+            return NativeCheckAccounting(empty,None,False,False)
+        if row['returncode']!=0:failed=index
+    checks=tuple({**check,'status':('passed'if rows[index]['returncode']==0 else'failed')if index<len(rows)else'not_run'}
+        for index,check in enumerate(empty))
+    return NativeCheckAccounting(checks,failed,len(rows)==len(commands)and failed is None,True)
 
 
 class NativeJenkinsVerification:
@@ -346,23 +375,28 @@ class NativeJenkinsVerification:
             raise PublicationError('prior_verification_scope_unstopped')
 
     def _report(self, binding, result, *, code=None, cleanup=None):
-        receipt = result.get('receipt', {})
-        passed = result.get('status') == 'passed'
+        raw_receipt = result.get('receipt', {})
+        receipt = raw_receipt if isinstance(raw_receipt,dict) else {}
+        accounting = native_check_accounting(self.config.checks, raw_receipt)
+        passed = (result.get('status') == 'passed' and accounting.complete
+            and receipt.get('failure') is None)
         clean = receipt.get('cleanup_confirmed') is True if cleanup is None else cleanup
         metadata = VerificationMetadata(len(self.config.checks))
-        for check in receipt.get('checks', ()) or ():
-            if isinstance(check, dict) and check.get('returncode'):
-                metadata.active_index = check.get('index', 0)
-                break
+        metadata.active_index = accounting.failed_index if accounting.failed_index is not None else 0
         summary = str(result.get('summary', ''))
         inferred_code = ('verification_process_unavailable' if any(x in summary for x in (
             'cancelled_or_timed_out', 'verification_unavailable', 'deadline_exceeded', 'no trusted verification receipt'))
             else 'verification_failed')
+        if not accounting.valid or result.get('status') == 'passed' and not passed:
+            inferred_code = 'verification_receipt_invalid'
         report = project_verification(self.config.checks,
             code=code if code is not None else None if passed else inferred_code,
-            returncode=0 if passed else 1, output=str(result.get('summary', '')).encode('utf-8'),
-            evidence_digest=hashlib.sha256(canonical({'binding': binding, 'receipt': receipt})).hexdigest(),
+            returncode=0 if passed else 1, output=summary.encode('utf-8'),
+            evidence_digest=hashlib.sha256(canonical({'binding': binding, 'receipt': raw_receipt})).hexdigest(),
             cleanup_confirmed=clean, metadata=metadata)
+        # The stdout projector supplies bounded findings, never gate outcomes.
+        # Overall failure must not relabel an earlier genuinely completed gate.
+        report = replace(report, checks=accounting.checks)
         if type(receipt.get('build_number')) is int:
             reference = ('Jenkins build #' + str(receipt['build_number']) + ' (action '
                 + binding['request']['action_id'] + '). ')
@@ -457,16 +491,35 @@ class NativeJenkinsVerification:
         result = self.delivery.verify(binding['request'], require_source)
         self._pr(job)
         receipt = result.get('receipt', {})
+        if not isinstance(receipt,dict):raise PublicationError('native_ci_check_accounting_invalid')
         status = result['status']
-        checks = tuple({'name': name, 'status': 'success' if status == 'passed' else 'pending' if status == 'pending' else 'failure',
+        findings = ()
+        if status in {'passed','failed'}:
+            report = self._report(binding,result)
+            accounting = native_check_accounting(self.config.checks,receipt)
+            if not accounting.valid or result['status']=='passed' and not report.checks_passed:
+                raise PublicationError('native_ci_check_accounting_invalid')
+            if not report.cleanup_confirmed:
+                raise PublicationError('native_ci_scope_unstopped')
+            if not report.checks_passed and all(check['status']=='passed'for check in report.checks):
+                # Hosted SQL records per-check success before overall status.
+                # Its schema cannot represent a global/source failure with all
+                # commands green, so never persist an all-green hosted set.
+                raise PublicationError('native_ci_failure_outside_fixed_checks')
+            status = 'passed' if report.checks_passed else 'failed'
+            states = tuple({'passed':'success','failed':'failure','not_run':'skipped'}[check['status']]
+                for check in report.checks)
+            logical = {check_id(command,index):LOGICAL_CHECKS[index]
+                for index,command in enumerate(self.config.checks)}
+            findings = tuple({**finding,'check_id':logical.get(finding['check_id'],LOGICAL_CHECKS[0])}
+                for finding in report.findings)
+        else:
+            states = ('pending',)*len(LOGICAL_CHECKS)
+        checks = tuple({'name':name,'status':state,
             'head_sha': job['candidate_commit'], 'provider': 'jenkins',
             'job': self.delivery.config.jenkins_job,
             'action_id': binding['request']['action_id'], 'queue_id': receipt.get('queue_id'),
-            'build_number': receipt.get('build_number')} for name in LOGICAL_CHECKS)
-        findings = ()
-        if status == 'failed':
-            report = self._report(binding, result)
-            findings = tuple({**finding, 'check_id': LOGICAL_CHECKS[0]} for finding in report.findings)
+            'build_number': receipt.get('build_number')} for name,state in zip(LOGICAL_CHECKS,states))
         return HostedCheckReport(status, checks, findings,
             'Jenkins: ' + result['summary'], 'Not reported',
             hashlib.sha256(canonical({'binding': binding, 'receipt': receipt})).hexdigest())

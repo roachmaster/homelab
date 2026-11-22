@@ -148,11 +148,23 @@ class NativeOwnerControl:
             request = {**vars(command), 'task_id': str(command.task_id), 'review_id': str(command.review_id),
                        'findings': [], 'verified_finding_ids': []}
             intent_digest = sha256_canonical({k: v for k, v in request.items() if k != 'idempotency_key'} | {'action': 'review_decide'})
+            from work_owner_reverification import source_key as recovery_key, replay, recover
+            cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
+                           (task['workflow_id'], recovery_key(task['workflow_id'], command.review_id)))
+            recovered = cursor.fetchone()
+            if recovered:
+                return replay(cursor, store, task, recovered, request, intent_digest)
             key = verification_source_key(task['workflow_id'])
             cursor.execute("SELECT * FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key=%s",
                            (task['workflow_id'], key))
             prior = cursor.fetchone()
             if prior:
+                prior_intent, prior_finish = prior['intent'], prior['finish_receipt']
+                if (not isinstance(prior_intent, dict) or not isinstance(prior_intent.get('request'), dict)
+                        or not isinstance(prior_finish, dict) or not isinstance(prior_finish.get('receipt'), dict)):
+                    raise Rejected(409, 'reconcile_required')
+                if prior_intent['request'].get('review_id') != str(command.review_id):
+                    return recover(flow, cursor, task, owner, command, request, intent_digest)
                 if (prior['intent'] or {}).get('request') != request:
                     raise Rejected(409, 'idempotency_conflict')
                 saved = (prior['finish_receipt'] or {}).get('receipt')

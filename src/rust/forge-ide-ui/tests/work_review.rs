@@ -2,6 +2,92 @@ use forge_ide_ui::protocol::*;
 
 const TASK: &str = "11111111-1111-4111-8111-111111111111";
 const REVIEW: &str = "22222222-2222-4222-8222-222222222222";
+const RETRY_REVIEW: &str = "33333333-3333-4333-8333-333333333333";
+
+fn review_request(decision: WorkReviewDecision) -> WorkRequest {
+    WorkRequest::WorkReviewDecide {
+        request_id: "review-retry".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        expected_revision: 7,
+        review_id: REVIEW.into(),
+        decision,
+        agent_profile: "agy-primary".into(),
+        note: "Retry verification after the controller fix.".into(),
+        findings: vec![],
+        verified_finding_ids: vec![],
+        idempotency_key: "one-verification-intent".into(),
+    }
+}
+
+fn review_receipt(review_id: &str, status: WorkStatus) -> WorkResponse {
+    WorkResponse::WorkReviewDecided {
+        request_id: "review-retry".into(),
+        project_alias: "homelab".into(),
+        task_id: TASK.into(),
+        base_revision: 7,
+        revision: 8,
+        status,
+        review_id: review_id.into(),
+        repair_task_id: None,
+    }
+}
+
+#[test]
+fn infrastructure_retry_accepts_the_new_review_but_preserves_receipt_scope() {
+    let request = review_request(WorkReviewDecision::RetryInfrastructure);
+    let receipt = review_receipt(RETRY_REVIEW, WorkStatus::AwaitingReview);
+    assert!(receipt.valid_for(&request, 202));
+    assert!(receipt.valid_for(&request, 200));
+    assert!(!receipt.valid_for(&request, 500));
+
+    let valid = serde_json::to_value(&receipt).unwrap();
+    for changes in [
+        serde_json::json!({"request_id": "another-request"}),
+        serde_json::json!({"project_alias": "another-project"}),
+        serde_json::json!({"task_id": RETRY_REVIEW}),
+        serde_json::json!({"base_revision": 6, "revision": 7}),
+        serde_json::json!({"revision": 9}),
+        serde_json::json!({"review_id": REVIEW}),
+        serde_json::json!({"review_id": "not-a-review-uuid"}),
+        serde_json::json!({"review_id": "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"}),
+        serde_json::json!({"status": "queued"}),
+        serde_json::json!({"status": "running"}),
+        serde_json::json!({"status": "completed"}),
+        serde_json::json!({"status": "cancelled"}),
+        serde_json::json!({"repair_task_id": "44444444-4444-4444-8444-444444444444"}),
+    ] {
+        let mut value = valid.clone();
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(changes.as_object().unwrap().clone());
+        let response: WorkResponse = serde_json::from_value(value).unwrap();
+        assert!(
+            !response.valid_for(&request, 202),
+            "rejected mutation: {changes}"
+        );
+    }
+}
+
+#[test]
+fn other_review_decisions_keep_the_original_review_identity() {
+    for decision in [
+        WorkReviewDecision::Approve,
+        WorkReviewDecision::Repair,
+        WorkReviewDecision::Escalate,
+        WorkReviewDecision::Cancel,
+    ] {
+        let request = review_request(decision);
+        let status = if decision == WorkReviewDecision::Cancel {
+            WorkStatus::Cancelled
+        } else {
+            WorkStatus::AwaitingReview
+        };
+        assert!(review_receipt(REVIEW, status).valid_for(&request, 202));
+        assert!(!review_receipt(RETRY_REVIEW, status).valid_for(&request, 202));
+    }
+}
 
 fn finding() -> WorkFinding {
     WorkFinding {

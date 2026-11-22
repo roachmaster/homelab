@@ -3222,6 +3222,43 @@ async function agentsJourney() {
     await check(page.locator('#agents-retry')).toBeHidden();
     await check(page.locator('#agents-plan-actions')).toBeHidden();
     await check(page.locator('#agents-verification-status')).toHaveText('Awaiting independent review');
+    const verificationTarget=relay.requireVerificationRetry(approvedPlan);
+    const tasksBeforeVerification=relay.taskCount;
+    const submissionsBeforeVerification=relay.calls.filter(kind=>kind==='work_submit').length;
+    const verificationEffectsBefore=relay.verificationRetries.length;
+    await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-verification-status')).toHaveText('Coordinator handoff');
+    await check(page.locator('#agents-review-retry')).toBeEnabled();
+    await page.locator('#agents-review-note').fill('Retry verification only against the same finished author source.');
+    await page.locator('#agents-review-retry').click();
+    await check(page.locator('#agents-verification-status')).toHaveText('Awaiting independent review');
+    await check(page.locator('#agents-retry')).toBeHidden();
+    await check(page.locator('#agents-review-retry')).toBeHidden();
+    await check(page.locator('#agents-review-note')).toHaveValue('');
+    await check.poll(()=>relay.verificationRetries.length).toBe(verificationEffectsBefore+1);
+    const verificationRetry=relay.verificationRetries.at(-1);
+    assert.equal(verificationRetry.request.decision,'retry_infrastructure');
+    assert.equal(verificationRetry.request.project_alias,'workspace');
+    assert.equal(verificationRetry.request.task_id,approvedPlan);
+    assert.equal(verificationRetry.request.expected_revision,verificationTarget.revision);
+    assert.equal(verificationRetry.request.review_id,verificationTarget.review.review_id);
+    assert.equal(typeof verificationRetry.request.request_id,'string');
+    assert(verificationRetry.request.request_id.length>0);
+    assert.equal(verificationRetry.receipt.base_revision,verificationTarget.revision);
+    assert.equal(verificationRetry.receipt.revision,verificationTarget.revision+1);
+    assert.notEqual(verificationRetry.receipt.review_id,verificationTarget.review.review_id);
+    assert.match(verificationRetry.receipt.review_id,/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+    await check.poll(()=>relay.reviewReads.some(value=>value.task_id===approvedPlan
+      &&value.review_id===verificationRetry.receipt.review_id&&value.revision===verificationRetry.receipt.revision)).toBe(true);
+    const verifiedTask=relay.reviewSnapshot(approvedPlan);
+    assert.equal(verifiedTask.attempt.attempt_id,verificationTarget.attempt.attempt_id);
+    assert.equal(verifiedTask.review.source_attempt_id,verificationTarget.review.source_attempt_id);
+    assert.equal(verifiedTask.review.round,verificationTarget.review.round);
+    assert.equal(verifiedTask.agent_profile,verificationTarget.agent_profile);
+    assert.equal(relay.taskCount,tasksBeforeVerification,'verification retry never creates an author task');
+    assert.equal(relay.calls.filter(kind=>kind==='work_submit').length,submissionsBeforeVerification,
+      'verification retry does not submit another assignment');
+    assert.equal(relay.reviewDecisions.filter(value=>value.task_id===approvedPlan&&value.decision==='retry_infrastructure').length,1);
     await check(page.locator('#agents-review-approve')).toBeDisabled();
     await page.locator('#agents-verification-details summary').click();
     await check(page.locator('#agents-verification-findings')).toContainText('compiler-fixture');
@@ -3374,19 +3411,47 @@ async function agentsJourney() {
     await eventDetails.locator('summary').focus();await page.keyboard.press('Enter');
     await check(eventDetails).toHaveJSProperty('open',true);
     const eventNode=await eventDetails.elementHandle();
+    const historyResponse = afterSequence => page.waitForResponse(response => {
+      if (new URL(response.url()).pathname !== '/forge/v1/dispatch') return false;
+      const request = response.request().postDataJSON();
+      return request?.kind === 'work_events' && request.task_id === historyTaskId
+        && request.after_sequence === afterSequence;
+    }, { timeout: 10000 });
+    await check(page.locator('#agents-refresh')).toBeEnabled();
+    // Refresh also reads unseen milestones at cursor61, independently of the visible page.
+    const refreshedHistory = historyResponse(61);
     await page.locator('#agents-refresh').click();
+    const refreshResponse = await refreshedHistory;
+    assert.equal(refreshResponse.status(),200);
+    assert.equal(await refreshResponse.finished(),null);
+    await check(page.locator('#agents-refresh')).toBeEnabled();
+    await check(page.locator('#agents-history-next')).toBeEnabled();
     await check(eventDetails).toHaveJSProperty('open',true);
     assert.equal(await eventNode.evaluate(node=>node.isConnected),true,'event disclosure nodes survive refresh');
     await check(page.locator('#agents-history script,#agents-history img')).toHaveCount(0);
     assert.equal(await page.evaluate(()=>globalThis.__historyExecuted),undefined);
-    relay.faults.denyNextEvents=true;
+    const historyReadStart=relay.eventReads.length;
+    relay.faults.denyNextEvents={task_id:historyTaskId,after_sequence:50};
+    const deniedHistory=historyResponse(50);
     await page.locator('#agents-history-next').click();
+    const deniedResponse=await deniedHistory;
+    assert.equal(deniedResponse.status(),503);
+    assert.equal(await deniedResponse.finished(),null);
+    await check(page.locator('#agents-status')).toContainText('agent service is unavailable');
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
     await check(page.locator('#agents-history-next')).toBeEnabled();
+    const retriedHistory=historyResponse(50);
     await page.locator('#agents-history-next').click();
+    const retryResponse=await retriedHistory;
+    assert.equal(retryResponse.status(),200);
+    assert.equal(await retryResponse.finished(),null);
     await check(page.locator('#agents-history-range')).toHaveText('Events 51–61');
     await check(page.locator('#agents-history > li')).toHaveCount(11);
     await check(page.locator('#agents-history-next')).toBeDisabled();
+    assert.deepEqual(relay.eventReads.slice(historyReadStart),[
+      {request_id:deniedResponse.request().postDataJSON().request_id,task_id:historyTaskId,after_sequence:50,denied:true},
+      {request_id:retryResponse.request().postDataJSON().request_id,task_id:historyTaskId,after_sequence:50,denied:false},
+    ],'the selected page is denied once and retried at the same cursor');
     await page.locator('#agents-history-previous').click();
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
     await page.locator('#agents-history-next').click();

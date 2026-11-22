@@ -414,7 +414,13 @@ the frozen logical `check`, `pr-fast-gate` and `real-browser` outcomes on the ex
 candidate. With Jenkins selected, these identify the full fixed suite, and the
 observations explicitly name Jenkins. No GitHub Actions run is required or
 claimed. Missing/pending/failed/stale checks block final acceptance.
-Publication and verification retries append new runs and retain prior failures.
+Publication and verification retries append new runs and retain prior failures. Protected native
+check rows are projected individually from the exact sequential receipt indices,
+fixed argv and integer return codes: an earlier passing gate remains passed when
+a later gate fails; unstarted gates remain not run. Missing or invalid accounting
+never establishes overall success. Overall source/cleanup failure cannot create
+an all-green hosted-check record, even when all commands returned zero. Existing
+build results and historical review receipts are never rewritten.
 
 The native Jenkins check runner executes the complete fixed suite once per
 admitted verification action before independent code review. Publication and
@@ -457,6 +463,17 @@ start another author, approve source or renew automatic repair allowance.
 The failed review and build remain intact. A durable, once-only owner action
 and normal control receipt make exact request replay safe; fresh full CI,
 independent review and guarded merge are still required.
+
+After a further genuine failed check, the owner may explicitly request another
+verification of the same stopped artifact. The recovery records one durable
+action per failed review and proves every intervening review/control receipt
+back to the original published stop receipt. A private typed authority permits
+only that append: the recorded infrastructure count increases, while the frozen
+automatic limit, source, Plan and author-recovery fences remain intact. Unknown
+cleanup, changed source, invalid history and concurrent work reject admission.
+Only the new pending review is prepared again against current main; no author
+task or model attempt is created. This is an explicit owner operation, never a
+coordinator retry loop. Original receipts remain replayable.
 
 A later correction to a Completed task uses `ide.work.repair` with an explicit
 approved-project candidate. If that legacy parent has no bound review, trusted
