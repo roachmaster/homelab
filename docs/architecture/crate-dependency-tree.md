@@ -1,7 +1,8 @@
 # Rust crate dependency tree and consolidation analysis
 
 **Status: working todo list for the crate consolidation and CI revision,
-2026-11-22. Traced against main `c738faa`. No code changes.**
+2026-11-22. Traced against main `c738faa`. Crate formalization complete
+22/22 (section 7); consolidation decisions below are still open.**
 
 ## Todo
 
@@ -221,3 +222,92 @@ design, not this analysis.
 - Is the layering test (section 3.1) the right mitigation for losing the
   compiler-enforced crate boundaries, or is that enforcement worth keeping
   the eight crates separate?
+
+## 7. Formalization patterns (2026-11-22)
+
+Before consolidation, every crate was formalized to the framework shape:
+`lib.rs` holds only `mod` declarations and `pub use` re-exports (plus the
+crate doc header and crate attributes) — no traits, functions, structs, or
+other item definitions. 22 of 26 crates needed it; `forge-ide-web`,
+`forge-ide`, `forge-kernel`, and `forge-remote-https` were already clean.
+All 22 are done on this branch, one crate per commit, public API
+byte-identical everywhere, no behavior changes, every crate's tests passing
+unchanged. The sweep found coupling, not bugs. The patterns below are the
+record of what it found, and they matter for the consolidation step because
+the same visibility questions recur when crates become modules.
+
+### 7.1 Root-private items were hidden crate-wide coupling
+
+Anything defined in `lib.rs` is visible to every submodule, so crates had
+grown dependencies on private root items that nothing declared. Moving the
+definitions into a module exposed each one, and the compiler found them all.
+The fix everywhere was `pub(crate)` widening — the coupling was real, just
+undeclared:
+
+- `forge-game-runtime`: room fields, the `entity()` method, constants, and
+  `RoomCollision` widened for `level.rs`, `queries.rs`, and the component
+  tests.
+- `forge-jenkins`: `job_path` and `Limits::validate` widened for
+  `observation.rs` and `http.rs`.
+- `forge-jobs`: `check_token`, `Work::validate`/`execute`, and `Owner`'s
+  field widened for `store.rs` and `worker.rs`.
+- `forge-template`: `Limits::validate` widened for `assembly.rs`.
+- `forge-local`: `Bindings`, `Context`, `descriptor_for`, and
+  `Bindings::register` widened for `disk.rs` and `jenkins.rs`.
+- `forge-bootstrap-demo`: `stage_pure`, `bind_sum`, `publish`, the `Routes`
+  alias, and `DemoAdmission` widened for `messages.rs` and `disk.rs`.
+
+### 7.2 `pub(super)` only works while `lib.rs` is the parent
+
+`forge-jenkins`' observation parsers were `pub(super)` — visible to `lib.rs`
+and nothing else. Once the client code moved to `client.rs`, a sibling, the
+parsers needed `pub(crate)`. Same shape as 7.1: visibility tied to module
+position, not intent.
+
+### 7.3 Sibling modules imported private root items through `super::`
+
+`forge-local`'s `disk.rs` and `jenkins.rs` imported `descriptor_for` and
+`Bindings` via `super::`; `forge-bootstrap-demo`'s `messages.rs` did the
+same for the private staging helpers. After the move they import from the
+new module (`crate::application`, `crate::demo`). Same hidden dependency as
+7.1, different spelling — and it is invisible to a `crate::` grep, so the
+check has to cover `super::` too.
+
+### 7.4 Bare module paths need `crate::` prefixes after a move
+
+Moved code referencing sibling modules (`jobs::`, `jenkins::`, `disk::`,
+`messages::`, `parser::`, `schema::`, `render::`) had to become `crate::`
+paths. Mechanical, but the replacement must be path-aware: a naive string
+replace also rewrites `forge_jenkins::` and `forge_jobs::` (it did, once —
+`forge_crate::jenkins::`). Match on a word boundary with no preceding colon.
+
+### 7.5 Inline test modules travel with their definitions
+
+`forge-game-runtime`, `forge-local`, and `forge-terminal` had inline
+`#[cfg(test)] mod tests` using `use super::*;`, which pulls in the parent's
+private imports as well as its items. Moving the tests with the definitions
+kept them working (`game-runtime`'s went to a sibling file via `#[path]`).
+One catch: imports used only by the tests (`forge-local`'s
+`ArgumentDescriptor`/`DataType`/`Presence`) belong in the tests module, not
+the moved module, or non-test builds fail on unused imports under
+`-D warnings`.
+
+### 7.6 The house pattern, now universal
+
+`forge-remote-https` was already the exemplar: private concept-named modules
+plus `pub use` re-exports at the root. All 26 crates now match it. Small
+crates collapsed to exactly one concept-named module each (`task.rs`,
+`client.rs`, `provider.rs`, `access.rs`, `bridge.rs`, `remote.rs`,
+`messages.rs`, `memory.rs`, and so on); larger crates gathered their root
+definitions into one new module beside the ones they already had.
+
+### 7.7 What this means for the consolidation
+
+The `pub(crate)` widenings in 7.1 are a map of the real intra-crate
+coupling — the places where a module boundary is crossed in practice. When
+the eight contract crates merge into `forge-core` (section 3.1), the same
+questions recur at module level: which items the merged modules share, and
+whether that sharing is declared or accidental. That is the concrete reason
+the layering test matters: without it, a merge re-creates the root-private
+pattern at a larger scale, with eight modules' privates silently visible to
+each other through the crate root.
