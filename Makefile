@@ -23,7 +23,7 @@ export ALLOW_GLOBAL ?= 0
 export REFRESH_AST ?= 1
 export AFFECTED_PLAN_OUT ?=
 
-.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast build-affected check-affected test-affected lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
+.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast check-imports build-affected check-affected test-affected lint test test-release doc check-deps ci run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
 
 help:
 	@printf '%s\n' \
@@ -34,6 +34,7 @@ help:
 	  '  make dead-code         Layered dead-code check (SCOPE=all|portal, CHANGED_ONLY=0|1)' \
 	  '  make ast-yaml          Generate deterministic workspace YAML AST + dependency graph' \
 	  '  make rust-ast          Parse all Rust sources (pure Python) and report parse notes' \
+	  '  make check-imports     Imports / pub use check (runs before compile)' \
 	  '  make build-affected    Rebuild changed + strictly 1-hop direct dependents (no transitive)' \
 	  '  make check-affected    Type-check changed + strictly 1-hop direct dependents' \
 	  '  make test-affected     Test changed + strictly 1-hop direct dependents (includes dev edges)' \
@@ -100,6 +101,8 @@ ast-yaml:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/ast_graph.py"
 rust-ast:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/rust_ast.py" "$$FORGE_RUST_ROOT" --quiet
+check-imports:
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/check_imports.py" "$$FORGE_RUST_ROOT"
 build-affected:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/affected_build.py" build
 check-affected:
@@ -113,6 +116,7 @@ check-deps:
 ci:
 	@python3 -B -m unittest discover -s "$$FORGE_RUST_ROOT/scripts/tests" -v
 	$(MAKE) fmt-check PACKAGE= CHANGED_ONLY=0
+	$(MAKE) check-imports
 	$(MAKE) check-deps
 	$(MAKE) build check lint test test-release doc PACKAGE= FEATURES= ALL_FEATURES=1 NO_DEFAULT_FEATURES=0
 	$(MAKE) test lint PACKAGE=forge-remote-https FEATURES= ALL_FEATURES=0 NO_DEFAULT_FEATURES=1

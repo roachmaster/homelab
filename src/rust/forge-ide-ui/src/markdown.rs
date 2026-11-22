@@ -24,7 +24,7 @@
 
 /// Maximum rendered HTML bytes for one message. Replies are already bounded
 /// to 4 KiB of source text; this cap bounds the expansion of escaping and tags.
-pub const MAX_RENDERED_HTML_BYTES: usize = 32_768;
+pub(crate) const MAX_RENDERED_HTML_BYTES: usize = 32_768;
 const MAX_MARKDOWN_FILE_BYTES: usize = 64 * 1024;
 const MAX_MARKDOWN_FILE_HTML_BYTES: usize = 128 * 1024;
 const MAX_INLINE_FILE_WORK: u64 = 4 * 1024 * 1024;

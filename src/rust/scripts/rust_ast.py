@@ -283,11 +283,13 @@ class Item:
     cfg: str | None = None
     line: int = 0
     module: list[str] = field(default_factory=list)  # inline mods enclosing it
+    macro_export: bool = False  # #[macro_export] macro_rules!
 
     def to_dict(self) -> dict:
         return {"name": self.name, "kind": self.kind,
                 "visibility": self.visibility, "cfg": self.cfg,
-                "line": self.line, "module": self.module}
+                "line": self.line, "module": self.module,
+                "macro_export": self.macro_export}
 
 
 @dataclass
@@ -298,11 +300,12 @@ class ModDecl:
     cfg: str | None = None
     line: int = 0
     module: list[str] = field(default_factory=list)  # inline mods enclosing it
+    visibility: str = ""     # "", "pub", "pub(crate)", ...
 
     def to_dict(self) -> dict:
         return {"name": self.name, "inline": self.inline,
                 "path": self.path_attr, "cfg": self.cfg, "line": self.line,
-                "module": self.module}
+                "module": self.module, "visibility": self.visibility}
 
 
 @dataclass
@@ -322,6 +325,12 @@ class ParsedFile:
     mods: list[ModDecl] = field(default_factory=list)
     notes: list[ParseNote] = field(default_factory=list)
     inner_attrs: list[str] = field(default_factory=list)  # #![...] at file top
+    includes: list[str] = field(default_factory=list)  # include!("...") targets
+    # Item-position macro invocations: {name, first_ident, line, module}.
+    # first_ident is the first identifier inside the delimiters, if any —
+    # the name a defining macro (e.g. html_names!(Tag { ... })) gives its
+    # item. The check uses it to resolve macro-generated items.
+    macros: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {"path": self.path,
@@ -329,7 +338,9 @@ class ParsedFile:
                 "imports": [i.to_dict() for i in self.imports],
                 "mods": [m.to_dict() for m in self.mods],
                 "notes": [n.to_dict() for n in self.notes],
-                "inner_attrs": self.inner_attrs}
+                "inner_attrs": self.inner_attrs,
+                "includes": self.includes,
+                "macros": self.macros}
 
 
 # Item keywords the parser recognises at module scope.
@@ -480,7 +491,11 @@ class Parser:
             while not self.at_eof() and not self.at(")"):
                 parts.append(self.next().text)
             self.eat(")")
-            return "".join(parts) + ")"
+            # Join with spaces, then collapse around :: and parens so
+            # `pub ( in crate :: foo )` reads as `pub(in crate::foo)`.
+            joined = " ".join(parts) + ")"
+            return (joined.replace(" :: ", "::").replace("( ", "(")
+                    .replace(" )", ")"))
         return "pub"
 
     # -- use trees ------------------------------------------------------------
@@ -596,7 +611,7 @@ class Parser:
                 self._parse_use(visibility, cfg)
                 continue
             if tok.text == "mod" and tok.kind == "IDENT":
-                self._parse_mod(module, cfg)
+                self._parse_mod(module, cfg, visibility)
                 continue
             if tok.text == "extern" and self.peek(1).text == "crate":
                 self._parse_extern_crate(visibility, cfg)
@@ -617,7 +632,8 @@ class Parser:
                     self.result.items.append(Item(
                         name=name_tok.text, kind="macro",
                         visibility=visibility, cfg=cfg, line=name_tok.line,
-                        module=list(self._module_stack[-1])))
+                        module=list(self._module_stack[-1]),
+                        macro_export="macro_export" in attrs))
                 if self.peek().text in OPEN_TO_CLOSE:
                     self.skip_balanced(self.peek().text)
                 elif self.at(";"):
@@ -631,7 +647,8 @@ class Parser:
             self.note(tok.line, f"unrecognised item starting with {tok.text!r}")
             self.skip_to_item_end()
 
-    def _parse_mod(self, module: list[str], cfg: str | None) -> None:
+    def _parse_mod(self, module: list[str], cfg: str | None,
+                   visibility: str) -> None:
         line = self.peek().line
         self.next()  # 'mod'
         if self.peek().kind != "IDENT":
@@ -645,13 +662,15 @@ class Parser:
             self.result.mods.append(ModDecl(name, inline=False,
                                             path_attr=path_attr, cfg=cfg,
                                             line=line,
-                                            module=list(self._module_stack[-1])))
+                                            module=list(self._module_stack[-1]),
+                                            visibility=visibility))
             return
         if self.at("{"):
             self.result.mods.append(ModDecl(name, inline=True,
                                             path_attr=path_attr, cfg=cfg,
                                             line=line,
-                                            module=list(self._module_stack[-1])))
+                                            module=list(self._module_stack[-1]),
+                                            visibility=visibility))
             self.next()  # '{'
             self.parse_module_body(module + [name])
             if not self.eat("}"):
@@ -725,12 +744,45 @@ class Parser:
 
     def _skip_macro_invocation(self) -> None:
         # name ! [delimited] [;] — also handles path::name!(...)
+        line = self.peek().line
+        segments: list[str] = []
         while not self.at_eof() and self.peek().text != "!":
-            self.next()
+            tok = self.next()
+            if tok.kind == "IDENT":
+                segments.append(tok.text)
         self.eat("!")
+        first_ident: str | None = None
         if self.peek().text in OPEN_TO_CLOSE:
-            self.skip_balanced(self.peek().text)
+            opener = self.peek().text
+            # One scan of the delimited tokens captures both the include!
+            # target and the first identifier argument.
+            depth = 0
+            scan = self.i
+            while scan < len(self.toks):
+                tok = self.toks[scan]
+                if tok.text in OPEN_TO_CLOSE:
+                    depth += 1
+                elif tok.text in OPEN_TO_CLOSE.values():
+                    depth -= 1
+                    if depth == 0:
+                        break
+                elif depth == 1:
+                    if (segments and segments[-1] == "include"
+                            and tok.kind == "STRING"):
+                        # include!("file.rs") textually includes a file:
+                        # record it so the graph does not report the
+                        # included file as an orphan.
+                        self.result.includes.append(tok.text.strip('"'))
+                        break
+                    if first_ident is None and tok.kind == "IDENT":
+                        first_ident = tok.text
+                scan += 1
+            self.skip_balanced(opener)
         self.eat(";")
+        self.result.macros.append({
+            "name": "::".join(segments), "first_ident": first_ident,
+            "line": line, "module": list(self._module_stack[-1]),
+        })
 
 
 def parse_source(source: str, path: str) -> ParsedFile:
@@ -798,47 +850,56 @@ class ModuleInfo:
     imports: list[dict] = field(default_factory=list)
     # Resolved edges: {"to": module-or-crate path, "kind": ..., "names": [...]}
     edges: list[dict] = field(default_factory=list)
+    # Mod declarations in this module, each with its declared full path.
+    mods: list[dict] = field(default_factory=list)
+    # Item-position macro invocations in this module.
+    macros: list[dict] = field(default_factory=list)
+    # The crate root this module belongs to (lib, bin, build, test, ...).
+    root: str = ""
 
 
-def _module_path_for_file(crate: str, crate_dir: Path, rs_file: Path) -> str | None:
-    """Compute a file's module path from layout conventions.
+def _normalize_path(path: Path) -> Path:
+    """Resolve ./ and ../ segments textually (no filesystem access)."""
+    parts: list[str] = []
+    for seg in path.parts:
+        if seg in ("", ".", path.anchor):
+            continue
+        if seg == "..":
+            if parts:
+                parts.pop()
+        else:
+            parts.append(seg)
+    return Path(path.anchor, *parts) if path.is_absolute() else Path(*parts)
 
-    src/lib.rs | src/main.rs -> the crate root; src/a/b.rs -> crate::a::b;
-    src/a/mod.rs -> crate::a. tests/<name>.rs, examples/<name>.rs and
-    benches/<name>.rs are separate roots named by file stem.
-    Returns None for files that are not under a known root.
+
+def _module_dir_of_file(path: Path) -> Path:
+    """Directory a module's file-mods live in.
+
+    mod.rs, lib.rs and main.rs keep their siblings in their own directory;
+    any other file foo.rs keeps its submodules under foo/.
     """
-    try:
-        rel = rs_file.relative_to(crate_dir)
-    except ValueError:
+    if path.name in ("mod.rs", "lib.rs", "main.rs"):
+        return path.parent
+    return path.parent / path.stem
+
+
+def _resolve_mod_file(decl_dir: Path, file_dir: Path, name: str,
+                      path_attr: str | None, existing: set[Path]) -> Path | None:
+    """Resolve a `mod name;` declaration to a file.
+
+    #[path] is relative to the declaring file's directory; otherwise the
+    declaration's module directory is searched for name.rs / name/mod.rs.
+    """
+    if path_attr:
+        candidate = _normalize_path(file_dir / path_attr)
+        for cand in (candidate, candidate.with_suffix(".rs"),
+                     candidate / "mod.rs"):
+            if cand in existing:
+                return cand
         return None
-    parts = list(rel.parts)
-    if len(parts) == 1 and parts[0] == "build.rs":
-        # Build scripts are their own crate root, separate from lib/bin.
-        return f"{crate}::build"
-    if len(parts) >= 2 and parts[0] == "src":
-        stem = rs_file.stem
-        if parts[-1] == "lib.rs" and len(parts) == 2:
-            return crate
-        if parts[-1] == "main.rs" and len(parts) == 2:
-            # The default binary is a separate root from the library.
-            return f"{crate}::bin"
-        if parts[-1] == "mod.rs":
-            mods = parts[1:-1]
-        elif parts[1] == "bin" and len(parts) == 3:
-            return f"{crate}::bin::{stem}"
-        else:
-            mods = parts[1:-1] + [stem]
-        return "::".join([crate] + mods) if mods else crate
-    if len(parts) >= 2 and parts[0] in ("tests", "examples", "benches"):
-        stem = rs_file.stem
-        if len(parts) == 2:
-            return f"{crate}::{parts[0]}::{stem}"
-        if parts[-1] == "mod.rs":
-            mods = parts[1:-1]
-        else:
-            mods = parts[1:-1] + [stem]
-        return "::".join([crate, parts[0]] + mods)
+    for cand in (decl_dir / f"{name}.rs", decl_dir / name / "mod.rs"):
+        if cand in existing:
+            return cand
     return None
 
 
@@ -851,30 +912,32 @@ def _walk_up(target: list[str], modules: set[str]) -> str:
     return "::".join(target)
 
 
-def _resolve_import(path: list[str], from_module: list[str], crate: str,
+def _resolve_import(path: list[str], from_module: list[str], root: list[str],
                     modules: set[str], crates: set[str]) -> tuple[str, str]:
     """Resolve an import path to (target, kind).
 
     Kinds: local (same-crate module), crate (another workspace crate),
     std, external (third-party crate), unresolved. Targets are always
-    modules: an item path walks up to its enclosing module.
+    modules: an item path walks up to its enclosing module. `root` is the
+    importing module's crate root (lib, bin, test, ...), which `crate::`
+    and `super` chains resolve against.
     """
     if not path:
         return "", "unresolved"
     head = path[0]
     if head == "":
         # 2015 absolute path ::foo::bar -> crate root.
-        return _walk_up([crate] + path[1:], modules), "local"
+        return _walk_up(root + path[1:], modules), "local"
     if head == "crate":
-        return _walk_up([crate] + path[1:], modules), "local"
+        return _walk_up(root + path[1:], modules), "local"
     if head == "super":
         ups = 0
         rest = list(path)
         while rest and rest[0] == "super":
             ups += 1
             rest.pop(0)
-        base = from_module[:max(0, len(from_module) - ups)]
-        target = base + rest or [crate]
+        base = from_module[:max(len(root), len(from_module) - ups)]
+        target = base + rest or root
         return _walk_up(target, modules), "local"
     if head == "self":
         return _walk_up(from_module + path[1:], modules), "local"
@@ -894,80 +957,153 @@ def _resolve_import(path: list[str], from_module: list[str], crate: str,
 
 
 def build_graph(rust_root: str | Path) -> dict:
-    """Parse every .rs file under rust_root and build the dependency graph."""
-    root = Path(rust_root)
+    """Parse every .rs file under rust_root and build the dependency graph.
+
+    Module assignment follows `mod` declarations, not file layout: a file
+    belongs to a module tree only when a crate root (src/lib.rs,
+    src/main.rs, src/bin/*.rs, tests/*.rs, examples/*.rs, benches/*.rs,
+    build.rs) reaches it through declarations, honouring #[path]. A file
+    can sit in two trees when both lib.rs and main.rs declare it. Files
+    no root reaches are reported as orphans; declarations with no file
+    are reported as missing modules.
+    """
+    root = Path(rust_root).resolve()
     crates = discover_crates(root)
     crate_names = {name.replace("-", "_") for name in crates}
     parsed: dict[str, ParsedFile] = {}
-    file_module: dict[str, list[str]] = {}
-    # Pass 1: parse all files; assign module paths by layout.
-    for crate_name, crate_dir in sorted(crates.items()):
-        crate_mod = crate_name.replace("-", "_")
+    existing: set[Path] = set()
+    for crate_dir in crates.values():
         for rs_file in sorted(crate_dir.rglob("*.rs")):
             if any(part in SKIP_DIRS for part in rs_file.parts):
                 continue
-            mod_path = _module_path_for_file(crate_mod, crate_dir, rs_file)
-            if mod_path is None:
-                continue
             rel = str(rs_file.relative_to(root))
+            existing.add(rs_file)
             try:
                 parsed[rel] = parse_file(rs_file)
             except (OSError, UnicodeDecodeError) as exc:
                 parsed[rel] = ParsedFile(path=rel)
                 parsed[rel].notes.append(ParseNote(0, f"unreadable: {exc}"))
-            file_module[rel] = mod_path.split("::")
-    # Pass 2: apply #[path] overrides from mod declarations.
-    for rel, pf in parsed.items():
-        base_mod = file_module[rel]
-        file_dir = Path(rel).parent
-        for decl in pf.mods:
-            if decl.path_attr is None or decl.inline:
-                continue
-            target = (file_dir / decl.path_attr).as_posix()
-            # Normalise ./ and ../ segments.
-            parts: list[str] = []
-            for seg in target.split("/"):
-                if seg in ("", "."):
-                    continue
-                if seg == "..":
-                    parts.pop()
-                else:
-                    parts.append(seg)
-            target = "/".join(parts)
-            if target in file_module:
-                file_module[target] = base_mod + decl.module + [decl.name]
-    # Pass 3: assemble modules and resolve imports.
-    modules: dict[str, ModuleInfo] = {}
-    module_names = {"::".join(m) for m in file_module.values()}
-    # Inline modules get their own entries, sharing the file.
-    for rel, pf in sorted(parsed.items()):
-        base = file_module[rel]
-        seen_inline: set[str] = set()
+    # Crate roots: (file, module path).
+    roots: list[tuple[Path, list[str]]] = []
+    for crate_name, crate_dir in sorted(crates.items()):
+        crate_mod = crate_name.replace("-", "_")
+        src = crate_dir / "src"
+        if (src / "lib.rs") in existing:
+            roots.append((src / "lib.rs", [crate_mod]))
+        if (src / "main.rs") in existing:
+            roots.append((src / "main.rs", [crate_mod, "bin"]))
+        bin_dir = src / "bin"
+        if bin_dir.is_dir():
+            for f in sorted(bin_dir.glob("*.rs")):
+                roots.append((f, [crate_mod, "bin", f.stem]))
+        if (crate_dir / "build.rs") in existing:
+            roots.append((crate_dir / "build.rs", [crate_mod, "build"]))
+        for kind in ("tests", "examples", "benches"):
+            kind_dir = crate_dir / kind
+            if kind_dir.is_dir():
+                for f in sorted(kind_dir.glob("*.rs")):
+                    roots.append((f, [crate_mod, kind, f.stem]))
+    # Declaration-driven walk: file -> [(module path, crate root)].
+    file_modules: dict[str, list[tuple[list[str], list[str]]]] = {}
+    missing: list[dict] = []
+    visited: set[tuple[str, str]] = set()
+
+    def walk(file_abs: Path, module: list[str], mod_dir: Path,
+             crate_root: list[str]) -> None:
+        rel = str(file_abs.relative_to(root))
+        key = (rel, "::".join(module))
+        if key in visited:
+            return
+        visited.add(key)
+        file_modules.setdefault(rel, []).append((list(module), list(crate_root)))
+        pf = parsed.get(rel)
+        if pf is None:
+            return
         for decl in pf.mods:
             if decl.inline:
-                full = "::".join(base + decl.module + [decl.name])
-                seen_inline.add(full)
-        for full in sorted(seen_inline):
-            modules.setdefault(full, ModuleInfo(path=full, crate=base[0], file=rel))
-        modules.setdefault("::".join(base),
-                           ModuleInfo(path="::".join(base), crate=base[0], file=rel))
+                continue
+            decl_dir = mod_dir
+            for seg in decl.module:
+                decl_dir = decl_dir / seg
+            child = module + decl.module + [decl.name]
+            child_file = _resolve_mod_file(decl_dir, file_abs.parent,
+                                           decl.name, decl.path_attr, existing)
+            if child_file is None:
+                missing.append({"file": rel, "line": decl.line,
+                                "module": "::".join(module + decl.module),
+                                "name": decl.name, "cfg": decl.cfg})
+                continue
+            walk(child_file, child, _module_dir_of_file(child_file), crate_root)
+
+    for root_file, root_module in roots:
+        # A crate root's module directory is its own directory, even for
+        # test/bin roots like tests/foo.rs (their submodules sit beside
+        # them, not under foo/).
+        walk(root_file, root_module, root_file.parent, root_module)
+    # include!("...") targets are textually included, not modules.
+    included: set[str] = set()
+    for rel, pf in parsed.items():
+        parent = Path(rel).parent
+        for target in pf.includes:
+            included.add(_normalize_path(parent / target).as_posix())
+    orphans = sorted(rel for rel in parsed
+                     if rel not in file_modules and rel not in included)
+    # Module set: file modules plus inline modules (for import walk-up).
+    # Only real modules go in: a base is real, and inline nesting below a
+    # base is real; prefixes cutting into a base (crate::bin for a
+    # src/bin/foo.rs root) are not modules and stay out.
+    module_names: set[str] = set()
+    for rel, bases in file_modules.items():
+        pf = parsed.get(rel)
+        for base, _ in bases:
+            module_names.add("::".join(base))
+            if pf is None:
+                continue
+            for decl in pf.mods:
+                if not decl.inline:
+                    continue
+                path = base + decl.module + [decl.name]
+                for cut in range(len(base), len(path) + 1):
+                    module_names.add("::".join(path[:cut]))
+    # Assemble modules and resolve imports (per file-module pair).
+    modules: dict[str, ModuleInfo] = {}
     for rel, pf in sorted(parsed.items()):
-        base = file_module[rel]
-        for item in pf.items:
-            mod_path = "::".join(base + item.module)
-            entry = modules.setdefault(mod_path, ModuleInfo(path=mod_path, crate=base[0], file=rel))
-            entry.items.append(item.to_dict())
-        for imp in pf.imports:
-            mod_path = "::".join(base + imp.module)
-            entry = modules.setdefault(mod_path, ModuleInfo(path=mod_path, crate=base[0], file=rel))
-            from_mod = base + imp.module
-            target, kind = _resolve_import(imp.path, from_mod, base[0],
-                                           module_names, crate_names)
-            record = imp.to_dict()
-            record["target"] = target
-            record["kind"] = kind
-            entry.imports.append(record)
-    # Pass 4: collapse imports into per-module edges.
+        for base, crate_root in file_modules.get(rel, []):
+            root_path = "::".join(crate_root)
+            modules.setdefault("::".join(base),
+                               ModuleInfo(path="::".join(base), crate=base[0], file=rel,
+                                          root=root_path))
+            for decl in pf.mods:
+                if decl.inline:
+                    inline_path = "::".join(base + decl.module + [decl.name])
+                    modules.setdefault(inline_path,
+                                       ModuleInfo(path=inline_path, crate=base[0], file=rel,
+                                                  root=root_path))
+            for item in pf.items:
+                mod_path = "::".join(base + item.module)
+                entry = modules.setdefault(mod_path, ModuleInfo(path=mod_path, crate=base[0], file=rel, root=root_path))
+                entry.items.append(item.to_dict())
+            for decl in pf.mods:
+                mod_path = "::".join(base + decl.module)
+                entry = modules.setdefault(mod_path, ModuleInfo(path=mod_path, crate=base[0], file=rel, root=root_path))
+                record = decl.to_dict()
+                record["declared"] = "::".join(base + decl.module + [decl.name])
+                entry.mods.append(record)
+            for macro in pf.macros:
+                mod_path = "::".join(base + macro["module"])
+                entry = modules.setdefault(mod_path, ModuleInfo(path=mod_path, crate=base[0], file=rel, root=root_path))
+                entry.macros.append(macro)
+            for imp in pf.imports:
+                mod_path = "::".join(base + imp.module)
+                entry = modules.setdefault(mod_path, ModuleInfo(path=mod_path, crate=base[0], file=rel, root=root_path))
+                from_mod = base + imp.module
+                target, kind = _resolve_import(imp.path, from_mod, crate_root,
+                                               module_names, crate_names)
+                record = imp.to_dict()
+                record["target"] = target
+                record["kind"] = kind
+                entry.imports.append(record)
+    # Collapse imports into per-module edges.
     for mod_path, entry in modules.items():
         grouped: dict[tuple[str, str], dict] = {}
         for imp in entry.imports:
@@ -989,9 +1125,12 @@ def build_graph(rust_root: str | Path) -> dict:
         "crates": sorted(crate_names),
         "files": len(parsed),
         "modules": {k: {"crate": v.crate, "file": v.file, "items": v.items,
-                        "imports": v.imports, "edges": v.edges}
+                        "imports": v.imports, "edges": v.edges, "mods": v.mods,
+                        "macros": v.macros, "root": v.root}
                     for k, v in sorted(modules.items())},
         "errors": errors,
+        "orphans": orphans,
+        "missing_modules": missing,
     }
 
 
