@@ -595,3 +595,168 @@ fn stop_build_requires_mutation_policy_and_never_claims_execution_stopped_or_ret
         assert_eq!(calls.borrow().len(), 1);
     }
 }
+
+#[test]
+fn error_display_names_each_failure_exactly_without_secrets() {
+    use forge_bootstrap::RegistrationError;
+    let cases = [
+        (Error::Configuration, "invalid Jenkins configuration"),
+        (Error::InvalidRequest, "invalid Jenkins request"),
+        (
+            Error::MutationDenied,
+            "Jenkins mutations are disabled for this client",
+        ),
+        (
+            Error::Unauthorized,
+            "Jenkins denied authentication or permission",
+        ),
+        (Error::NotFound, "Jenkins resource was not found"),
+        (
+            Error::UnexpectedStatus(302),
+            "unexpected Jenkins HTTP status 302",
+        ),
+        (Error::InvalidResponse, "invalid Jenkins response"),
+        (Error::BodyLimit, "Jenkins response exceeded its byte limit"),
+        (Error::Timeout, "Jenkins request deadline expired"),
+        (Error::Transport, "Jenkins transport failed"),
+        (
+            Error::MutationUncertain,
+            "Jenkins write outcome is uncertain; reconcile before retrying",
+        ),
+        (
+            Error::Registration(RegistrationError::DuplicateGroup("g".into())),
+            "factory group g is already registered",
+        ),
+    ];
+    for (error, message) in cases {
+        assert_eq!(error.to_string(), message);
+        assert!(!error.to_string().contains("fixture-token"));
+    }
+}
+
+#[test]
+fn request_validate_checks_preparation_without_transport() {
+    for request in [
+        Request::Controller,
+        Request::Jobs,
+        Request::QueueList,
+        Request::RecentBuilds {
+            job: "suite".into(),
+            limit: 50,
+        },
+        Request::StopBuild {
+            job: "suite".into(),
+            number: 1,
+        },
+        Request::Build {
+            job: "suite".into(),
+            parameters: BTreeMap::new(),
+        },
+        Request::Queue { id: 1 },
+        Request::BuildStatus {
+            job: "suite".into(),
+            number: 1,
+        },
+        Request::CancelQueue { id: 1 },
+    ] {
+        assert_eq!(request.validate(), Ok(()));
+    }
+    for request in [
+        Request::RecentBuilds {
+            job: "suite".into(),
+            limit: 0,
+        },
+        Request::RecentBuilds {
+            job: "suite".into(),
+            limit: 51,
+        },
+        Request::StopBuild {
+            job: "suite".into(),
+            number: 0,
+        },
+        Request::Queue { id: 0 },
+        Request::BuildStatus {
+            job: "".into(),
+            number: 1,
+        },
+        Request::BuildStatus {
+            job: "suite".into(),
+            number: 0,
+        },
+        Request::CancelQueue { id: 0 },
+        Request::Build {
+            job: "suite".into(),
+            parameters: BTreeMap::from([("".into(), "v".into())]),
+        },
+    ] {
+        assert_eq!(request.validate(), Err(Error::InvalidRequest));
+    }
+}
+
+#[test]
+fn identical_request_sequences_produce_identical_wire_vectors_and_responses() {
+    fn run() -> (Vec<(Method, String)>, Vec<Response>) {
+        let (client, calls) = configured(
+            config(),
+            vec![
+                reply(
+                    200,
+                    r#"{"useSecurity":true,"numExecutors":0}"#,
+                    &[("x-jenkins", "fixture-version")],
+                ),
+                reply(200, r#"{"jobs":[{"name":"folder","color":null}]}"#, &[]),
+                reply(200, r#"{"id":7,"why":"waiting"}"#, &[]),
+                reply(
+                    200,
+                    r#"{"number":9,"building":false,"result":"SUCCESS","duration":123,"queueId":-1}"#,
+                    &[],
+                ),
+            ],
+        );
+        let responses = vec![
+            client.execute(Request::Controller).unwrap(),
+            client.execute(Request::Jobs).unwrap(),
+            client.execute(Request::Queue { id: 7 }).unwrap(),
+            client
+                .execute(Request::BuildStatus {
+                    job: "folder/suite".into(),
+                    number: 9,
+                })
+                .unwrap(),
+        ];
+        let wire = calls
+            .borrow()
+            .iter()
+            .map(|call| (call.method, call.url.clone()))
+            .collect();
+        (wire, responses)
+    }
+    let first = run();
+    let second = run();
+    assert_eq!(first, second);
+    assert_eq!(
+        first
+            .0
+            .iter()
+            .map(|(method, url)| (*method, url.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                Method::Get,
+                "http://127.0.0.1:18084/jenkins/api/json?tree=useSecurity,numExecutors"
+            ),
+            (
+                Method::Get,
+                "http://127.0.0.1:18084/jenkins/api/json?tree=jobs[name,color]"
+            ),
+            (
+                Method::Get,
+                "http://127.0.0.1:18084/jenkins/queue/item/7/api/json"
+            ),
+            (
+                Method::Get,
+                "http://127.0.0.1:18084/jenkins/job/folder/job/suite/9/api/json"
+            ),
+        ]
+    );
+}
