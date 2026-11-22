@@ -2,9 +2,9 @@
 //! before invoking registrars. No default is registered and later overwritten.
 
 use super::{
-    bind_sum, publish, stage_pure, Application, BootstrapError, Command, CommandKind, Outcome,
-    PureConfig, Routes, RunError, SumTask,
+    Application, BootstrapError, Command, CommandKind, Outcome, PureConfig, RunError, SumTask,
 };
+use crate::demo::{bind_sum, publish, stage_pure, Routes};
 use forge_bootstrap::Registry;
 use forge_demo_memory_client::{
     self as memory, MemoryClientHandle, MemoryConfig, MemoryFactoryError, MemoryProbe,

@@ -2,7 +2,8 @@
 //! pure/messages host's public config and command types. It is not a bootable
 //! kernel, security sandbox, shell, parser or production authorization boundary.
 
-use crate::{DemoAdmission, DemoContext};
+use crate::demo::DemoAdmission;
+use crate::DemoContext;
 use forge_bootstrap::{RegistrationError, Registry, ValidationError};
 use forge_bridge::{Bridge, DispatchError, DuplicateRoute, RegistryBuilder};
 use forge_ingress_contract::{Envelope, Payload, Response, RouteKey};
