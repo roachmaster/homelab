@@ -175,3 +175,162 @@ fn valid_chat_messages(messages: &[ChatMessage]) -> bool {
             }
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CHAT_ID: &str = "11111111-1111-4111-8111-111111111111";
+    const OTHER_ID: &str = "22222222-2222-4222-8222-222222222222";
+
+    fn message(role: ChatRole, content: &str) -> ChatMessage {
+        ChatMessage {
+            role,
+            content: content.into(),
+        }
+    }
+
+    fn conversation() -> ChatConversationSnapshot {
+        ChatConversationSnapshot {
+            messages: vec![
+                message(ChatRole::User, "hi"),
+                message(ChatRole::Assistant, "hello"),
+            ],
+            draft: String::new(),
+            chat_id: None,
+            revision: None,
+        }
+    }
+
+    fn chat_snapshot() -> ChatSnapshot {
+        ChatSnapshot {
+            selected: 0,
+            conversations: vec![conversation()],
+            model_id: None,
+            pending_run: None,
+        }
+    }
+
+    fn pending_run() -> PendingChatRunSnapshot {
+        PendingChatRunSnapshot {
+            chat_id: CHAT_ID.into(),
+            idempotency_key: OTHER_ID.into(),
+            run_id: None,
+            expected_revision: None,
+            model_id: None,
+        }
+    }
+
+    fn mail_snapshot() -> MailNavigationSnapshot {
+        MailNavigationSnapshot {
+            active: true,
+            archived: false,
+            composing: true,
+            thread_id: None,
+            subject: "Hello".into(),
+            draft: "Body".into(),
+        }
+    }
+
+    #[test]
+    fn pending_run_validates_exact_rules() {
+        assert!(pending_run().is_valid());
+        let mut run = pending_run();
+        run.chat_id = "not-a-uuid".into();
+        assert!(!run.is_valid());
+        let mut run = pending_run();
+        run.idempotency_key = "not-a-uuid".into();
+        assert!(!run.is_valid());
+        let mut run = pending_run();
+        run.expected_revision = Some(0);
+        assert!(!run.is_valid());
+        let mut run = pending_run();
+        run.expected_revision = Some(MAX_SAFE_INTEGER + 1);
+        assert!(!run.is_valid());
+        let mut run = pending_run();
+        run.expected_revision = Some(MAX_SAFE_INTEGER);
+        assert!(run.is_valid());
+        let mut run = pending_run();
+        run.model_id = Some("Model-1".into());
+        assert!(!run.is_valid());
+        let mut run = pending_run();
+        run.model_id = Some("model-1.2_x".into());
+        assert!(run.is_valid());
+    }
+
+    #[test]
+    fn mail_navigation_validates_exact_rules() {
+        assert!(mail_snapshot().is_valid());
+        let mut mail = mail_snapshot();
+        mail.thread_id = Some(CHAT_ID.into());
+        assert!(!mail.is_valid());
+        let mut mail = mail_snapshot();
+        mail.composing = false;
+        assert!(!mail.is_valid());
+        mail.subject.clear();
+        mail.draft.clear();
+        assert!(mail.is_valid());
+        let mut mail = mail_snapshot();
+        mail.subject = "x".repeat(MAX_MAIL_SUBJECT_BYTES + 1);
+        assert!(!mail.is_valid());
+        let mut mail = mail_snapshot();
+        mail.subject = "bad\u{1}subject".into();
+        assert!(!mail.is_valid());
+        let mut mail = mail_snapshot();
+        mail.draft = "x".repeat(MAX_MAIL_DRAFT_BYTES + 1);
+        assert!(!mail.is_valid());
+        let mut mail = mail_snapshot();
+        mail.draft = "line one\nline two\ttabbed".into();
+        assert!(mail.is_valid());
+    }
+
+    #[test]
+    fn chat_snapshot_validates_exact_rules() {
+        assert!(valid_chat_snapshot(&chat_snapshot()));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations = vec![conversation(); MAX_CONVERSATIONS + 1];
+        assert!(!valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.selected = 1;
+        assert!(!valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].draft = "x".repeat(MAX_CHAT_PROMPT_BYTES + 1);
+        assert!(!valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].revision = Some(1);
+        assert!(!valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].chat_id = Some(CHAT_ID.into());
+        snapshot.conversations[0].revision = Some(1);
+        assert!(valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].messages = vec![message(ChatRole::Assistant, "hello")];
+        assert!(!valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].messages = vec![
+            message(ChatRole::User, "hi"),
+            message(ChatRole::User, "again"),
+        ];
+        assert!(!valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].messages = vec![message(ChatRole::User, "hi")];
+        assert!(!valid_chat_snapshot(&snapshot));
+    }
+
+    #[test]
+    fn pending_run_requires_exactly_one_matching_conversation() {
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].chat_id = Some(CHAT_ID.into());
+        snapshot.conversations[0].draft = "resume me".into();
+        snapshot.pending_run = Some(pending_run());
+        assert!(valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.pending_run = Some(pending_run());
+        assert!(!valid_chat_snapshot(&snapshot));
+        let mut snapshot = chat_snapshot();
+        snapshot.conversations[0].chat_id = Some(CHAT_ID.into());
+        snapshot.conversations[0].draft = "   ".into();
+        snapshot.pending_run = Some(pending_run());
+        assert!(!valid_chat_snapshot(&snapshot));
+    }
+}

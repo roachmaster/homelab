@@ -671,3 +671,73 @@ fn entry_names(report: &ReportView, entry: u32) -> Option<Vec<NativeName>> {
 fn valid_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn editor(original: &str, text: &str, crlf: bool) -> Editor {
+        Editor {
+            id: "editor-1".into(),
+            file: ChatFileContext {
+                report: RequestToken {
+                    session_epoch: "s".into(),
+                    revision: 1,
+                    request_id: "r".into(),
+                },
+                node_key: "lab".into(),
+                project: "workspace".into(),
+                entry: 1,
+                sha256: "a".repeat(64),
+                byte_start: 0,
+                byte_end: 0,
+            },
+            original: original.into(),
+            text: text.into(),
+            crlf,
+            conflict: false,
+            rejected: false,
+            navigation_blocked: false,
+        }
+    }
+
+    #[test]
+    fn dirty_and_final_newline_rules_are_exact() {
+        assert!(!editor("same\n", "same\n", false).dirty());
+        assert!(editor("before\n", "after\n", false).dirty());
+        assert!(editor("original\n", "", false).preserves_final_newline());
+        assert!(editor("original\n", "edited\n", false).preserves_final_newline());
+        assert!(editor("original", "edited", false).preserves_final_newline());
+        assert!(!editor("original\n", "edited", false).preserves_final_newline());
+        assert!(!editor("original", "edited\n", false).preserves_final_newline());
+    }
+
+    #[test]
+    fn crlf_replacement_limit_counts_each_line_ending() {
+        let at_limit = format!("{}{}", "a".repeat(MAX_EDITOR_BYTES - 1), "\n");
+        assert_eq!(at_limit.len(), MAX_EDITOR_BYTES);
+        assert!(editor("", &at_limit, false).replacement_within_limit());
+        assert!(!editor("", &at_limit, true).replacement_within_limit());
+        let with_room = format!("{}{}", "a".repeat(MAX_EDITOR_BYTES - 4), "\n\n");
+        assert_eq!(with_room.len(), MAX_EDITOR_BYTES - 2);
+        assert!(editor("", &with_room, true).replacement_within_limit());
+        let over = "a".repeat(MAX_EDITOR_BYTES + 1);
+        assert!(!editor("", &over, false).replacement_within_limit());
+        assert!(!editor("", &over, true).replacement_within_limit());
+    }
+
+    #[test]
+    fn can_save_requires_dirty_clean_and_within_limits() {
+        assert!(!editor("same\n", "same\n", false).can_save());
+        assert!(editor("before\n", "after\n", false).can_save());
+        let mut conflicted = editor("before\n", "after\n", false);
+        conflicted.conflict = true;
+        assert!(!conflicted.can_save());
+        assert!(!editor("before\n", "after", false).can_save());
+        let over = "a".repeat(MAX_EDITOR_BYTES + 1);
+        assert!(!editor("before\n", &over, false).can_save());
+        let mut rejected = editor("before\n", "after\n", false);
+        rejected.rejected = true;
+        assert!(rejected.can_save());
+    }
+}

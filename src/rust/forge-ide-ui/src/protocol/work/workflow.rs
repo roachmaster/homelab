@@ -123,3 +123,120 @@ impl WorkWorkflowSummary {
             ) || !self.can_cancel)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_policy() -> WorkWorkflowPolicy {
+        WorkWorkflowPolicy {
+            policy_digest: "c".repeat(64),
+            author_profile: "agy-primary".into(),
+            reviewer_profile: "codex-primary".into(),
+            max_plan_revisions: 3,
+            max_code_revisions: 10,
+            auto_merge: true,
+        }
+    }
+
+    fn valid_summary() -> WorkWorkflowSummary {
+        WorkWorkflowSummary {
+            kind: WorkWorkflowKind::Native,
+            workflow_id: "11111111-1111-4111-8111-111111111111".into(),
+            policy_digest: "c".repeat(64),
+            phase: WorkWorkflowPhase::Plan,
+            author_profile: "agy-primary".into(),
+            reviewer_profile: "codex-primary".into(),
+            plan_revisions: 0,
+            max_plan_revisions: 3,
+            code_revisions: 0,
+            max_code_revisions: 10,
+            escalation_reason: None,
+            can_cancel: true,
+            reviewer_task_id: None,
+            candidate_commit: None,
+            merge_commit: None,
+        }
+    }
+
+    #[test]
+    fn policy_validates_exact_boundaries() {
+        assert!(valid_policy().is_valid());
+        let mut policy = valid_policy();
+        policy.policy_digest = "c".repeat(63);
+        assert!(!policy.is_valid());
+        let mut policy = valid_policy();
+        policy.policy_digest = "C".repeat(64);
+        assert!(!policy.is_valid());
+        let mut policy = valid_policy();
+        policy.author_profile.clear();
+        assert!(!policy.is_valid());
+        let mut policy = valid_policy();
+        policy.reviewer_profile = policy.author_profile.clone();
+        assert!(!policy.is_valid());
+        let mut policy = valid_policy();
+        policy.max_plan_revisions = 4;
+        assert!(!policy.is_valid());
+        let mut policy = valid_policy();
+        policy.max_code_revisions = 11;
+        assert!(!policy.is_valid());
+    }
+
+    #[test]
+    fn phase_labels_and_processing_are_exact() {
+        let cases = [
+            (WorkWorkflowPhase::Plan, "Authoring plan", true),
+            (WorkWorkflowPhase::PlanReview, "Reviewing plan", true),
+            (WorkWorkflowPhase::PlanRevision, "Revising plan", true),
+            (WorkWorkflowPhase::Implement, "Implementing", true),
+            (WorkWorkflowPhase::Checks, "Running checks", true),
+            (WorkWorkflowPhase::CodeReview, "Reviewing code", true),
+            (WorkWorkflowPhase::Repair, "Repairing", true),
+            (WorkWorkflowPhase::Publishing, "Publishing", true),
+            (WorkWorkflowPhase::Hosted, "Hosted checks pending", true),
+            (WorkWorkflowPhase::Merging, "Merging", true),
+            (WorkWorkflowPhase::Completed, "Merged", false),
+            (WorkWorkflowPhase::Cancelled, "Cancelled", false),
+            (WorkWorkflowPhase::Escalated, "Needs attention", false),
+        ];
+        assert_eq!(cases.len(), 13);
+        for (phase, label, processing) in cases {
+            assert_eq!(phase.label(), label);
+            assert_eq!(phase.is_processing(), processing);
+        }
+    }
+
+    #[test]
+    fn summary_validates_exact_rules() {
+        assert!(valid_summary().is_valid());
+        let mut summary = valid_summary();
+        summary.workflow_id = "not-a-uuid".into();
+        assert!(!summary.is_valid());
+        let mut summary = valid_summary();
+        summary.candidate_commit = Some("a".repeat(39));
+        assert!(!summary.is_valid());
+        let mut summary = valid_summary();
+        summary.merge_commit = Some("g".repeat(40));
+        assert!(!summary.is_valid());
+        let mut summary = valid_summary();
+        summary.plan_revisions = 4;
+        assert!(!summary.is_valid());
+        let mut summary = valid_summary();
+        summary.code_revisions = 11;
+        assert!(!summary.is_valid());
+        let mut summary = valid_summary();
+        summary.reviewer_profile = summary.author_profile.clone();
+        assert!(!summary.is_valid());
+        let mut summary = valid_summary();
+        summary.phase = WorkWorkflowPhase::Completed;
+        assert!(!summary.is_valid());
+        summary.can_cancel = false;
+        assert!(summary.is_valid());
+        let mut summary = valid_summary();
+        summary.escalation_reason = Some("x".repeat(2049));
+        assert!(!summary.is_valid());
+        let mut summary = valid_summary();
+        summary.escalation_reason = Some("x".repeat(2048));
+        assert!(summary.is_valid());
+    }
+}
