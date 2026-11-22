@@ -316,6 +316,66 @@ fn set_validation_checks_each_member_and_returns_the_first_error() {
 }
 
 #[test]
+fn catalog_composition_collects_exact_descriptors_in_registration_order() {
+    struct ExtraCatalog;
+    impl DescribeCommand for ExtraCatalog {
+        fn descriptors(&self) -> &'static [CommandDescriptor] {
+            &[CommandDescriptor {
+                name: "files.remove",
+                help: "Remove the selected file.",
+                arguments: &[PATH],
+            }]
+        }
+    }
+    struct DuplicateCatalog;
+    impl DescribeCommand for DuplicateCatalog {
+        fn descriptors(&self) -> &'static [CommandDescriptor] {
+            &[INSPECT]
+        }
+    }
+    fn collect(catalogs: &[&dyn DescribeCommand]) -> Vec<CommandDescriptor> {
+        catalogs
+            .iter()
+            .flat_map(|catalog| catalog.descriptors().iter().copied())
+            .collect()
+    }
+    let composed = collect(&[&NonTaskCatalog, &ExtraCatalog]);
+    assert_eq!(
+        composed.iter().map(|d| d.name).collect::<Vec<_>>(),
+        vec!["files.inspect", "files.status", "files.remove"]
+    );
+    assert_eq!(validate_descriptors(&composed), Ok(()));
+    let colliding = collect(&[&NonTaskCatalog, &DuplicateCatalog]);
+    assert_eq!(colliding.len(), 3);
+    assert_eq!(
+        validate_descriptors(&colliding),
+        Err(DescriptorError::DuplicateCommandName {
+            command: "files.inspect"
+        })
+    );
+}
+
+#[test]
+fn descriptors_and_validation_are_deterministic_across_repeated_runs() {
+    let catalog = NonTaskCatalog;
+    let first = catalog.descriptors();
+    let second = catalog.descriptors();
+    assert!(std::ptr::eq(first, second));
+    assert_eq!(first, second);
+    assert_eq!(validate_descriptors(first), Ok(()));
+    assert_eq!(validate_descriptors(second), Ok(()));
+    let invalid = [CommandDescriptor { name: "", ..STATUS }];
+    assert_eq!(
+        validate_descriptors(&invalid),
+        validate_descriptors(&invalid)
+    );
+    assert_eq!(
+        validate_descriptors(&invalid),
+        Err(DescriptorError::EmptyCommandName)
+    );
+}
+
+#[test]
 fn errors_implement_standard_error_and_provide_actionable_context() {
     let cases = [
         (
