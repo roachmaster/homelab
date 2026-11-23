@@ -1,3 +1,26 @@
+# Current: Coordinator-owned post-merge verification — 2026-11-23
+
+Implement the approved missing handler inside the existing coordinator. PostgreSQL
+owns durable queue/state and wakeups; the coordinator selects/injects ready ports
+through factories and invokes the existing Rust Jenkins IoClient. No new service,
+broker, runtime registry or model publication credentials. Persist confirmed
+merge receipt and follow-up action atomically; bind the actual merged/main commit,
+not merely the authored candidate. Recover durable build intent on restart and
+reconcile uncertain submission before any new write. Successful premerge work
+remains immutable; a failed main check is new follow-up work, not a rewritten
+historical success. Legacy v1 workflows stay valid; new main checks require v2.
+
+Root owns coordinator integration, config, review, final verification/publication.
+Store agent owns additive SQL/DAO contract and actual DB tests. Provider agent
+owns scoped Jenkins preparation/reconciliation adapter. Tests/docs agent owns
+focused workflow regressions and documented component/sequence views after the
+shared contract is agreed. Each writer uses an isolated worktree. Preserve all
+existing worktrees, untracked data, historical migrations and protected receipts.
+This task implements source; no live schema/config/profile/service activation,
+model task, GitHub Actions run or automatic portal deployment is assumed.
+
+--- Previous task record ---
+
 # Current: Fix repository review findings — 2026-11-23
 
 Completed all five review findings: explicit compatible CI profile contracts,
