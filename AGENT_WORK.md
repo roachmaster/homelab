@@ -19,6 +19,17 @@ existing worktrees, untracked data, historical migrations and protected receipts
 This task implements source; no live schema/config/profile/service activation,
 model task, GitHub Actions run or automatic portal deployment is assumed.
 
+Provider handoff (`jenkins_main_run`): added the coordinator-owned v2 main
+verification adapter and its private Git/Jenkins tests. The frozen request binds
+the actual merge commit/tree, uses the durable post-merge ID as the verify action,
+and derives its prepare ID with UUIDv5. It does not reopen a review lease or
+rewrite/push source. Existing trusted delivery owns the spool, uncertain-submit
+journal, exact result validation and confirmed cancellation. The effect-free
+factory selects the ready Rust-backed delivery only after validating private
+configuration against owner, repository, canonical source and GitHub scope.
+Focused provider/existing-delivery/v1-v2 consumer tests: 33 passed, zero skips,
+4.005s; `git diff --check` passed. No live operations or broad build was run.
+
 --- Previous task record ---
 
 # Current: Fix repository review findings — 2026-11-23
