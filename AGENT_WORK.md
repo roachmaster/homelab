@@ -1,3 +1,26 @@
+# Current: Fix repository review findings — 2026-11-23
+
+User authorizes implementing all five findings from the review of be38906 through 95651a5. Root integrates reviewed changes, qualifies intentional source fingerprints, verifies and publishes. Preserve live services and existing history.
+
+Use the Forge provider entry skill. Keep one writer per worktree and preserve all old receipts, SQL migrations1–26, legacy profile compatibility and unrelated untracked data. Never replace historical success/failure evidence, bypass verification, submit model work or enable GitHub Actions. Record meaningful checks against actual source. Root owns main/publication and any explicit rollout.
+
+Ownership: `jenkins_main_run` owns the isolated CI branch; `latest_source_audit`
+owns layer enforcement; `portal_release_ready` owns active documentation. Root
+integrates the reviewed commits here and reconciles only intentional source
+qualifications before running inexpensive checks and the required full gates.
+
+The CI design retains exact legacy v1 receipts and introduces an explicitly
+selected scope-aware v2 contract. Both v2 scopes have three real stages: branch
+source/Python qualification, Rust, and in-memory backend; main early qualification
+with Rust, browser QA, and all four backend suites with zero skips. No synthetic
+browser success, shortened legacy receipt, database migration or historical
+policy reset is authorized. Source/profile/scope and gate inputs remain bound.
+The installed runtime remains at the separately qualified 95651a5 deployment
+until any later rollout is explicitly verified; source changes confer no live
+activation claim.
+
+--- Previous task record ---
+
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
 
 Jenkins16 passed Rust/browser gates and the corrected cache E2E, then exposed
