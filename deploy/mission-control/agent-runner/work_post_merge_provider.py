@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 from uuid import UUID, uuid5
 
-from work_ci_contract import SCOPED_PROFILE, contract_for_config
+from work_ci_contract import SCOPED_PROFILE, EVENT_PROFILE, contract_for_config
 from work_external_delivery import (DeliveryConfig, DeliveryProviderFactory,
     canonical, digest, durable_json, read_private, sha, uid)
 
@@ -22,8 +22,8 @@ IDENTITY = ('post_merge_id', 'owner_id', 'project_alias', 'workflow_id',
 
 class PostMergeVerificationProvider:
     def __init__(self, delivery):
-        if contract_for_config(delivery.config).profile != SCOPED_PROFILE:
-            raise ValueError('Post-merge verification requires scoped Jenkins v2')
+        if contract_for_config(delivery.config).profile not in {SCOPED_PROFILE, EVENT_PROFILE}:
+            raise ValueError('Post-merge verification requires a scoped Jenkins profile')
         self.delivery = delivery
 
     def _scope(self, job):
@@ -77,7 +77,7 @@ class PostMergeVerificationProvider:
             'workflow_id': scope['workflow_id'], 'project_alias': scope['project_alias'],
             'candidate_commit': scope['merge_commit'], 'candidate_tree': scope['merge_tree'],
             'integration_base': scope['merge_commit'], 'source_branch': 'main',
-            'branch_scope': 'main', 'verification_profile': SCOPED_PROFILE,
+            'branch_scope': 'main', 'verification_profile': self.delivery.config.verification_profile,
             'correlation_id': scope['correlation_id']}
         if (not isinstance(request, dict) or set(request) != set(expected) | {'gate_manifest_sha256'}
                 or any(request.get(key) != value for key, value in expected.items())):
@@ -116,7 +116,7 @@ class PostMergeVerificationProvider:
         expected = {'candidate_commit': scope['merge_commit'], 'candidate_tree': tree,
             'integration_base': scope['merge_commit'], 'author_candidate_commit': scope['merge_commit'],
             'source_branch': 'main', 'branch_scope': 'main',
-            'verification_profile': SCOPED_PROFILE, 'no_change': True,
+            'verification_profile': self.delivery.config.verification_profile, 'no_change': True,
             'prepare_action_id': prepare}
         if any(prepared.get(key) != value for key, value in expected.items()):
             raise ValueError('Post-merge preparation changed the merged source')
@@ -125,7 +125,7 @@ class PostMergeVerificationProvider:
             'workflow_id': scope['workflow_id'], 'project_alias': scope['project_alias'],
             'candidate_commit': scope['merge_commit'], 'candidate_tree': tree,
             'integration_base': scope['merge_commit'], 'source_branch': 'main',
-            'branch_scope': 'main', 'verification_profile': SCOPED_PROFILE,
+            'branch_scope': 'main', 'verification_profile': self.delivery.config.verification_profile,
             'gate_manifest_sha256': digest(prepared['gate_manifest_sha256']),
             'correlation_id': scope['correlation_id']}
         self._validate_request(scope, request)
@@ -168,7 +168,7 @@ class PostMergeProviderFactory:
         config = self.config
         selected = DeliveryConfig.parse(json.loads(read_private(
             config.post_merge_jenkins_delivery_config, owner=os.geteuid())))
-        if (selected.verification_profile != SCOPED_PROFILE
+        if (selected.verification_profile not in {SCOPED_PROFILE, EVENT_PROFILE}
                 or selected.owner != config.worker.owner
                 or selected.github_config_dir != config.github_config_dir
                 or set(selected.projects) != set(config.repositories)):

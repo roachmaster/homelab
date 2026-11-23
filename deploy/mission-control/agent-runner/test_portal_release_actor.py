@@ -223,6 +223,45 @@ class PortalReleaseActorTest(unittest.TestCase):
         actual_config = json.loads(Path(self.system.config_path).read_text())
         self.assertEqual(actual_config['preserved'], self.old_config['preserved'])
 
+    def test_v3_proof_requires_every_exact_phase_without_candidate_policy_import(self):
+        from work_ci_phases import event_phases_for_scope
+        expected = [{'index': index, 'phase_id': phase.phase_id, 'kind': phase.kind,
+            'argv': list(phase.argv), 'returncode': 0}
+            for index, phase in enumerate(event_phases_for_scope('main'))]
+        self.assertEqual(ACTOR.V3_MAIN_PHASES, expected)
+        self.result.update(version=3, verification_profile='forge-sdlc-jenkins-v3',
+            checks=[{'index': row['index'], 'argv': row['argv'], 'returncode': 0} for row in expected],
+            phase_results=expected, failure_kind=None,
+            passed_kinds=sorted({row['kind'] for row in expected}))
+        self.save_result()
+        self.assertEqual(self.invoke('plan')['status'], 'planned')
+        self.result['phase_results'] = expected[:-1]
+        self.save_result()
+        self.job['release_id'] = str(uuid4())
+        with self.assertRaises(ValueError):
+            self.invoke('plan')
+        self.assertEqual(self.system.restarts, 0)
+
+    def test_abi15_artifacts_require_the_matching_selected_abi(self):
+        assets = json.loads(self.inventory['assets/manifest.json'])
+        assets['abi_version'] = 15
+        self.inventory['assets/manifest.json'] = ACTOR.canonical(assets)
+        self.put(self.packet / 'assets/manifest.json', self.inventory['assets/manifest.json'])
+        for item in self.manifest['files']:
+            if item['path'] == 'assets/manifest.json':
+                item.update(sha256=ACTOR.sha(self.inventory[item['path']]),
+                    byte_count=len(self.inventory[item['path']]))
+        manifest = ACTOR.canonical(self.manifest) + b'\n'
+        self.put(self.packet / 'manifest.json', manifest)
+        self.result['artifact_export'].update(manifest_sha256=ACTOR.sha(manifest),
+            total_bytes=sum(map(len, self.inventory.values())))
+        self.save_result()
+        with self.assertRaises(ValueError):
+            self.invoke('plan')
+        self.config.expected_abi = 15
+        self.assertEqual(self.invoke('plan')['status'], 'planned')
+        self.assertEqual(self.system.restarts, 0)
+
     def test_ready_provider_and_actual_actor_agree_on_plan_replay_and_activation(self):
         from work_delivery_ops import ReleaseProvider
         config = SimpleNamespace(worker=SimpleNamespace(owner='owner'),

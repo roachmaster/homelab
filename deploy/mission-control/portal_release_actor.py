@@ -39,6 +39,58 @@ MAIN_CHECKS = [
     ['/usr/bin/make', 'ci-verified'], ['/usr/bin/make', 'ui-qa'],
     ['/usr/bin/python3', '-B', 'deploy/mission-control/backend-suites.py', '--scope', 'main'],
 ]
+# Closed v3 phase witnesses mirrored from the reviewed verifier. The privileged
+# actor never imports policy or executable code from a candidate checkout.
+V3_MAIN_PHASES = [
+    {"index":0,"phase_id":"source-preflight","kind":"verification","argv":["/usr/bin/make","ci-preflight"],"returncode":0},
+    {"index":1,"phase_id":"script-tests","kind":"tests","argv":["/usr/bin/python3","-B","-m","unittest","discover","-s","src/rust/scripts/tests","-v"],"returncode":0},
+    {"index":2,"phase_id":"formatting","kind":"formatting","argv":["/usr/bin/make","fmt-check","PACKAGE=","CHANGED_ONLY=0"],"returncode":0},
+    {"index":3,"phase_id":"imports","kind":"verification","argv":["/usr/bin/make","check-imports"],"returncode":0},
+    {"index":4,"phase_id":"dependencies","kind":"verification","argv":["/usr/bin/make","check-deps"],"returncode":0},
+    {"index":5,"phase_id":"all-features-build","kind":"compilation","argv":["/usr/bin/make","build","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":6,"phase_id":"all-features-check","kind":"compilation","argv":["/usr/bin/make","check","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":7,"phase_id":"all-features-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":8,"phase_id":"all-features-test-release-compile","kind":"compilation","argv":["/usr/bin/make","test-release-compile","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":9,"phase_id":"remote-https-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-remote-https","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":10,"phase_id":"ide-remote-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-ide","FEATURES=remote","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":11,"phase_id":"ide-minimal-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-ide","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":12,"phase_id":"template-minimal-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-template","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":13,"phase_id":"terminal-minimal-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-terminal","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":14,"phase_id":"local-minimal-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-local","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":15,"phase_id":"terminal-jobs-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-terminal","FEATURES=jobs","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":16,"phase_id":"terminal-disk-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-terminal","FEATURES=disk","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":17,"phase_id":"system-node-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-system","FEATURES=node","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":18,"phase_id":"web-minimal-test-compile","kind":"compilation","argv":["/usr/bin/make","test-compile","PACKAGE=forge-ide-web","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":19,"phase_id":"ui-compilation","kind":"compilation","argv":["/usr/bin/make","ci-ui-compile"],"returncode":0},
+    {"index":20,"phase_id":"all-features-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":21,"phase_id":"all-features-test","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":22,"phase_id":"all-features-test-release","kind":"tests","argv":["/usr/bin/make","test-release","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":23,"phase_id":"all-features-doc","kind":"verification","argv":["/usr/bin/make","doc","PACKAGE=","FEATURES=","ALL_FEATURES=1","NO_DEFAULT_FEATURES=0"],"returncode":0},
+    {"index":24,"phase_id":"remote-https-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-remote-https","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":25,"phase_id":"remote-https-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-remote-https","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":26,"phase_id":"ide-remote-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-ide","FEATURES=remote","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":27,"phase_id":"ide-remote-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-ide","FEATURES=remote","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":28,"phase_id":"ide-minimal-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-ide","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":29,"phase_id":"ide-minimal-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-ide","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":30,"phase_id":"template-minimal-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-template","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":31,"phase_id":"template-minimal-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-template","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":32,"phase_id":"terminal-minimal-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-terminal","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":33,"phase_id":"terminal-minimal-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-terminal","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":34,"phase_id":"local-minimal-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-local","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":35,"phase_id":"terminal-jobs-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-terminal","FEATURES=jobs","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":36,"phase_id":"terminal-jobs-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-terminal","FEATURES=jobs","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":37,"phase_id":"terminal-disk-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-terminal","FEATURES=disk","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":38,"phase_id":"terminal-disk-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-terminal","FEATURES=disk","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":39,"phase_id":"system-node-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-system","FEATURES=node","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":40,"phase_id":"web-minimal-tests","kind":"tests","argv":["/usr/bin/make","test","PACKAGE=forge-ide-web","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":41,"phase_id":"web-minimal-lint","kind":"lint","argv":["/usr/bin/make","lint","PACKAGE=forge-ide-web","FEATURES=","ALL_FEATURES=0","NO_DEFAULT_FEATURES=1"],"returncode":0},
+    {"index":42,"phase_id":"ui-contracts","kind":"verification","argv":["/usr/bin/make","ui-check"],"returncode":0},
+    {"index":43,"phase_id":"browser-driver-tests","kind":"tests","argv":["/usr/bin/make","ui-qa-check"],"returncode":0},
+    {"index":44,"phase_id":"browser-journeys","kind":"browser","argv":["/usr/bin/make","ui-qa"],"returncode":0},
+    {"index":45,"phase_id":"backend-main","kind":"tests","argv":["/usr/bin/python3","-B","deploy/mission-control/backend-suites.py","--scope","main"],"returncode":0},
+]
+V3_MAIN_CHECKS = [row['argv'] for row in V3_MAIN_PHASES]
+
 ARTIFACT_COMMANDS = [
     {'argv': ['/opt/forge-ci/toolchain/bin/cargo', 'build', '--manifest-path', 'src/rust/Cargo.toml',
               '--offline', '--locked', '--release', '-p', 'forge-ide-web-host', '--jobs', '2'], 'returncode': 0},
@@ -173,7 +225,7 @@ class ActorConfig:
                 or not values['override'].name.endswith('.conf')
                 or not isinstance(values['owner'], str) or not 1 <= len(values['owner']) <= 128
                 or type(values['candidate_port']) is not int or not 1024 < values['candidate_port'] < 65536
-                or type(values['expected_abi']) is not int or values['expected_abi'] != 14):
+                or type(values['expected_abi']) is not int or values['expected_abi'] not in {14, 15}):
             raise ValueError('Release configuration exceeds the fixed portal boundary')
         return cls(**values)
 
@@ -454,13 +506,22 @@ class PortalReleaseActor:
         result = decode(raw)
         if sha(raw) != job['ci_receipt_sha256']:
             raise ValueError('CI result digest mismatch')
+        profile = result.get('verification_profile')
+        if profile not in {'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'}:
+            raise ValueError('Unsupported full main proof')
+        version = 3 if profile == 'forge-sdlc-jenkins-v3' else 2
+        commands = V3_MAIN_CHECKS if version == 3 else MAIN_CHECKS
+        if version == 3 and (result.get('phase_results') != V3_MAIN_PHASES
+                or result.get('failure_kind') is not None
+                or result.get('passed_kinds') != sorted({row['kind'] for row in V3_MAIN_PHASES})):
+            raise ValueError('Release requires every exact protected v3 phase')
         expected = {'action_id': job['ci_action_id'], 'candidate_commit': job['commit_sha'],
             'candidate_tree': job['tree_sha'], 'expected_main': job['commit_sha'],
             'gate_manifest_sha256': job['gate_manifest_sha256'], 'branch_scope': 'main',
-            'verification_profile': 'forge-sdlc-jenkins-v2', 'status': 'passed', 'version': 2}
+            'verification_profile': profile, 'status': 'passed', 'version': version}
         if (any(result.get(k) != v for k, v in expected.items()) or type(result.get('version')) is not int
                 or result.get('cleanup_confirmed') is not True
-                or result.get('checks') != [{'index': i, 'argv': argv, 'returncode': 0} for i, argv in enumerate(MAIN_CHECKS)]
+                or result.get('checks') != [{'index': i, 'argv': argv, 'returncode': 0} for i, argv in enumerate(commands)]
                 or any(type(row.get('index')) is not int or type(row.get('returncode')) is not int
                        for row in result.get('checks', []))
                 or result.get('coverage') != {'scope': 'main', 'browser': 'required',

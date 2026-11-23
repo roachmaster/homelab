@@ -1,4 +1,33 @@
-# Current: Apply a shared twenty-attempt agent policy — 2026-11-23
+# Current: Twenty tries for each failure event — 2026-11-23
+
+The user corrected the earlier interpretation: "20 tries per event", for every
+agent. Compilation fixes, tests, and other independently failed phases have
+separate budgets. A task may therefore exceed20 total repairs. Aggregate plan,
+code and delivery counts remain history and must never be reset or used as a
+task-wide20 ceiling.
+
+Use a durable event UUID and an independently verified phase identity. New
+builds, commits, findings text, deliveries and agent handoffs retain the same
+unresolved event. Reserve a retry atomically with work admission; duplicate
+delivery consumes once. Only a protected passing phase receipt closes the event.
+The21st retry for one unresolved event requires attention; another event retains
+its own20. Quota, permission, cancellation and stopped-process guards remain.
+
+Core owns the common factory/DAO, additiveM31 and native integration. External
+owns database-agent orchestration, continuation and ABI15 UI/transport. CI owner
+owns protected v3 phase execution; Root owns delivery lineage integration,
+privileged proof validation, source qualification and release. Use separate
+worktrees and preserve all saved approvals, reviews, hashes, counters and
+receipts. M1–30 are immutable. M30 was applied with no Muse history changes;
+the superseded task-wide runtime/configuration was not activated.
+
+Current source checks:105 existing native/delivery/post-merge/release contracts
+and6 protected phase-consumer tests pass. CI producer proved real compiler and
+assertion failures separately with forged stdout ignored; all80 producer and
+supervision contracts passed. Full current-source native/browser/backend gates
+and guarded deployment remain required, separately recorded operational work.
+
+# Previous, superseded interpretation: task-wide twenty-attempt policy — 2026-11-23
 
 The user explicitly clarifies that the twenty-attempt allowance is agent-wide,
 including Muse, native authors and independent reviewers. Use one provider-neutral

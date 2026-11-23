@@ -265,7 +265,7 @@ class PublicationWorkerFactory:
         self.post_merge_provider_factory = post_merge_provider_factory
         self.post_merge_worker_factory = post_merge_worker_factory
         if (config.delivery_enabled and (not config.post_merge_enabled
-                or config.jenkins_verification_profile != 'forge-sdlc-jenkins-v2')
+                or config.jenkins_verification_profile not in {'forge-sdlc-jenkins-v2', 'forge-sdlc-jenkins-v3'})
                 or (config.release_enabled or config.source_observation_enabled) and not config.delivery_enabled):
             raise ValueError('Delivery capabilities require the unified scoped Jenkins consumer')
         if (any(type(value) is not bool for value in (config.delivery_enabled,

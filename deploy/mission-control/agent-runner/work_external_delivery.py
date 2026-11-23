@@ -24,8 +24,9 @@ import psycopg2
 from work_publication_clients import artifact_guard, command, PublicationError
 from work_review import protected_gate_path
 from work_external_delivery_store import ExternalDeliveryStoreFactory
-from work_ci_contract import (LEGACY_CHECKS, LEGACY_PROFILE, SCOPED_PROFILE,
+from work_ci_contract import (LEGACY_CHECKS, LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE,
     CiGateContractFactory, contract_for_config)
+from work_verification import protected_retry_observation
 
 LOG = logging.getLogger('forge-external-delivery')
 SHA = re.compile('[0-9a-f]{40}')
@@ -142,12 +143,16 @@ def jenkins_gate_manifest(config, files, branch_scope=None):
     helper_digest = hashlib.sha256(read_private(config.verifier, owner=0, maximum=1024 * 1024)).hexdigest()
     plan = contract.plan(branch_scope or 'detached')
     policy = {'version': plan.result_version, 'provider': 'jenkins', 'profile': contract.profile,
-        'checks': plan.checks if contract.profile == SCOPED_PROFILE else CHECKS,
+        'checks': plan.checks if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} else CHECKS,
         'verifier_sha256': helper_digest, 'source_gate_sha256': source_digest}
-    if contract.profile == SCOPED_PROFILE:
+    if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
         if branch_scope is None:
             raise ValueError('Scoped verification requires an explicit branch scope')
         policy['branch_scope'] = branch_scope
+    if contract.profile == EVENT_PROFILE:
+        policy['phase_plan'] = [{'phase_id': phase.phase_id, 'kind': phase.kind,
+            'argv': list(phase.argv), 'logical_gate': phase.logical_gate}
+            for phase in plan.phases]
     gate = hashlib.sha256(canonical(policy)).hexdigest()
     return source_digest, helper_digest, gate
 
@@ -530,7 +535,7 @@ class TrustedDeliveryPort:
         )
         contract = contract_for_config(self.config)
         source_digest, _helper_digest, gate = (jenkins_gate_manifest(self.config, files, branch_scope)
-            if contract.profile == SCOPED_PROFILE else jenkins_gate_manifest(self.config, files))
+            if contract.profile in {SCOPED_PROFILE, EVENT_PROFILE} else jenkins_gate_manifest(self.config, files))
         require_lease()
         reference = 'refs/forge/external-candidates/' + request['action_id']
         self.git(repository, 'update-ref', reference, clean)
@@ -679,9 +684,16 @@ class TrustedDeliveryPort:
             receipt['stages'] = result['stages']
         checks = result.get('checks')
         plan = contract_for_config(self.config).plan(record['branch_scope'])
-        if plan.profile == SCOPED_PROFILE:
+        if plan.profile in {SCOPED_PROFILE, EVENT_PROFILE}:
             receipt.update(verification_profile=result.get('verification_profile'),
                 result_version=result.get('version'), coverage=result.get('coverage'))
+        if plan.profile == EVENT_PROFILE and result.get('cleanup_confirmed') is True:
+            # Only the protected result file can supply fixed-phase witnesses.
+            # Copy exact validated fields; never classify a failure from logs.
+            witness = protected_retry_observation(plan, result, receipt['check_receipt_sha256'])
+            for key in ('failure_kind', 'passed_kinds', 'phase_results'):
+                receipt[key] = result[key]
+            receipt['retry_observation'] = witness
         complete = (type(result.get('version')) is int and result['version'] == plan.result_version
             and (plan.coverage is None or result.get('coverage') == plan.coverage)
             and isinstance(checks, list) and len(checks) == len(plan.checks)
