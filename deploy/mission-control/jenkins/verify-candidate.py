@@ -2522,6 +2522,67 @@ def build_portal_artifacts(config, *, source, environment, account, log, log_pat
     return Path(paths[0].decode('utf-8')), records
 
 
+def read_portal_host(target, *, owner, maximum):
+    """Read only Cargo's fixed host output after all build-user processes stopped.
+
+    Cargo links release/NAME to release/deps/NAME-HASH. This is a build-output
+    exception, never an exception to the single-link authority/input reader.
+    """
+    release = target / 'release'
+    regular_directory(release, owner=owner)
+    host = release / 'forge-ide-web-host'
+    alias_fd = None
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                info.st_ctime_ns, info.st_uid, info.st_mode, info.st_nlink)
+    def check(info):
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner
+                or info.st_mode & 0o022 or info.st_nlink not in (1, 2)
+                or not 0 < info.st_size <= maximum):
+            raise ValueError('Unsafe fixed Cargo host output')
+    fd = os.open(host, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        with os.fdopen(fd, 'rb') as stream:
+            before = os.fstat(stream.fileno())
+            check(before)
+            if identity(host.lstat()) != identity(before):
+                raise ValueError('Cargo host output changed before read')
+            alias = None
+            if before.st_nlink == 2:
+                deps = release / 'deps'
+                regular_directory(deps, owner=owner)
+                matches = []
+                for index, path in enumerate(deps.iterdir()):
+                    if index >= 65536:
+                        raise ValueError('Cargo dependency output bound exceeded')
+                    if not re.fullmatch(r'forge_ide_web_host-[0-9a-f]{16,64}', path.name):
+                        continue
+                    info = path.lstat()
+                    if (info.st_dev, info.st_ino) == (before.st_dev, before.st_ino):
+                        check(info)
+                        if identity(info) != identity(before):
+                            raise ValueError('Cargo host alias changed')
+                        matches.append(path)
+                if len(matches) != 1:
+                    raise ValueError('Cargo host requires its exact owned dependency alias')
+                alias = matches[0]
+                alias_fd = os.open(alias, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                if identity(os.fstat(alias_fd)) != identity(before):
+                    raise ValueError('Cargo host alias was replaced')
+            data = stream.read(maximum + 1)
+            if (len(data) != before.st_size or len(data) > maximum
+                    or identity(os.fstat(stream.fileno())) != identity(before)
+                    or identity(host.lstat()) != identity(before)
+                    or (alias is not None and (
+                        identity(os.fstat(alias_fd)) != identity(before)
+                        or identity(alias.lstat()) != identity(before)))):
+                raise ValueError('Cargo host output changed while reading')
+            return data
+    finally:
+        if alias_fd is not None:
+            os.close(alias_fd)
+
+
 def seal_portal_artifacts(request, *, request_sha256, layout, assets, build_commands,
                           account, results, reader_group, cancelled):
     """After process cleanup, copy regular build outputs into a Root-owned export."""
@@ -2552,9 +2613,11 @@ def seal_portal_artifacts(request, *, request_sha256, layout, assets, build_comm
         raise ValueError('Portal artifact file bound exceeded')
     payloads, inventory, total = {}, {}, 0
     for name, path in files:
-        raw = read_file(path, owner=account.pw_uid, maximum=64 * 1024 * 1024)
+        raw = (read_portal_host(target, owner=account.pw_uid, maximum=64 * 1024 * 1024)
+               if name == 'bin/forge-ide-web-host'
+               else read_file(path, owner=account.pw_uid, maximum=64 * 1024 * 1024))
         info = path.lstat()
-        if info.st_nlink != 1 or not raw:
+        if (name != 'bin/forge-ide-web-host' and info.st_nlink != 1) or not raw:
             raise ValueError('Linked or empty portal artifact')
         total += len(raw)
         if total > 256 * 1024 * 1024:
@@ -2945,10 +3008,15 @@ def _execute_locked(action, config, *, cache_port):
                 post_check_quiesced = True
 
                 if portal_assets is not None and failure is None:
-                    portal_export = seal_portal_artifacts(request, request_sha256=identity,
-                        layout=layout, assets=portal_assets, build_commands=portal_builds,
-                        account=account, results=results, reader_group=submitter.pw_gid,
-                        cancelled=cancelled)
+                    try:
+                        portal_export = seal_portal_artifacts(request, request_sha256=identity,
+                            layout=layout, assets=portal_assets, build_commands=portal_builds,
+                            account=account, results=results, reader_group=submitter.pw_gid,
+                            cancelled=cancelled)
+                    except (OSError, ValueError):
+                        stages.append({'name': 'portal_artifact_export', 'status': 'failed',
+                                       'failure': 'artifact_validation_failed'})
+                        raise
                     stages.append({'name': 'portal_artifact_export', 'status': 'sealed',
                         'file_count': portal_export['file_count'], 'total_bytes': portal_export['total_bytes']})
 

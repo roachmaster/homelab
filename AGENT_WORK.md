@@ -155,6 +155,15 @@ commit after activation: the main observer would correctly schedule another full
 verification/release. This record claims prepared source and the checks stated
 above, not a prospective Jenkins pass or activation outcome.
 
+Ops artifact correction: native build20 passed all three full-main gates and both
+fixed artifact build commands, then failed export safely because Cargo's normal
+release/deps hardlink was rejected by the generic single-link reader. Preserve
+that failed receipt and its diagnostics. The fixed-host-only reader now admits
+exactly the same-inode owned Cargo pair, pins both descriptors and rechecks
+metadata after reading; authority and asset inputs retain the single-link rule.
+A real tiny offline Cargo release regression verifies the normal two-link input
+and independent immutable one-link export, with hostile link and mutation cases.
+
 --- Previous task record ---
 
 # Current: Coordinator-owned post-merge verification — 2026-11-23

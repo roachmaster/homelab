@@ -2338,7 +2338,7 @@ class PortalArtifactExportTest(unittest.TestCase):
         root = Path(temporary.name)
         target = root / 'target'; target.mkdir()
         assets = target / 'ui-assets/build-owned/assets'; assets.mkdir(parents=True)
-        host = target / 'release/forge-ide-web-host'; host.parent.mkdir()
+        host = target / 'release/forge-ide-web-host'; host.parent.mkdir(mode=0o755)
         host.write_bytes(b'owned isolated host'); host.chmod(0o755)
         for name in ('index.html', 'main.js', 'worker.js', 'style.css', 'app.wasm', 'manifest.json'):
             (assets / name).write_bytes(('owned ' + name).encode()); (assets / name).chmod(0o600)
@@ -2380,6 +2380,7 @@ class PortalArtifactExportTest(unittest.TestCase):
             file = path / row['path']
             self.assertEqual(hashlib.sha256(file.read_bytes()).hexdigest(), row['sha256'])
             self.assertEqual(file.stat().st_mode & 0o222, 0)
+            self.assertEqual(file.stat().st_nlink, 1)
             self.assertEqual(row['executable'], row['path'] == 'bin/forge-ide-web-host')
         self.assertEqual(CI.seal_portal_artifacts(request, **args), attestation)
         altered = path / 'assets/index.html'; altered.chmod(0o600); altered.write_bytes(b'altered')
@@ -2403,6 +2404,63 @@ class PortalArtifactExportTest(unittest.TestCase):
             CI.seal_portal_artifacts(request, **args)
         self.assertFalse((args['results'] / (request['action_id'] + '.artifacts')).exists())
 
+    @unittest.skipUnless(TOOLCHAIN_AVAILABLE, 'Requires installed isolated toolchain fixture')
+    def test_real_cargo_release_hardlink_is_sealed_as_independent_immutable_file(self):
+        request, args = self.fixture()
+        root = args['layout'].target.parent
+        project = root / 'tiny-cargo'; (project / 'src').mkdir(parents=True)
+        (project / 'Cargo.toml').write_text('[package]\nname="forge-ide-web-host"\nversion="0.1.0"\nedition="2021"\n')
+        (project / 'Cargo.lock').write_text('version = 4\n[[package]]\nname = "forge-ide-web-host"\nversion = "0.1.0"\n')
+        (project / 'src/main.rs').write_text('fn main() { println!("real Cargo artifact fixture"); }\n')
+        environment = {'PATH': str(TOOLCHAIN / 'bin') + ':/usr/bin:/bin',
+            'CARGO_HOME': str(root / 'cargo-home'), 'RUSTC': str(TOOLCHAIN / 'bin/rustc'),
+            'LANG': 'C.UTF-8'}
+        built = subprocess.run([str(TOOLCHAIN / 'bin/cargo'), 'build', '--offline', '--locked',
+            '--release', '--manifest-path', str(project / 'Cargo.toml'),
+            '--target-dir', str(args['layout'].target)], env=environment,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
+            preexec_fn=lambda: os.umask(0o077))
+        self.assertEqual(built.returncode, 0, built.stderr)
+        host = args['layout'].target / 'release/forge-ide-web-host'
+        self.assertEqual(host.stat().st_nlink, 2, 'the regression must exercise actual Cargo hardlinks')
+        with self.assertRaises(ValueError):
+            CI.read_file(host, owner=os.getuid(), maximum=64 * 1024 * 1024)
+        attestation = CI.seal_portal_artifacts(request, **args)
+        copied = args['results'] / (request['action_id'] + '.artifacts/bin/forge-ide-web-host')
+        self.assertEqual(copied.read_bytes(), host.read_bytes())
+        self.assertEqual(copied.stat().st_nlink, 1)
+        self.assertNotEqual(copied.stat().st_ino, host.stat().st_ino)
+        self.assertEqual(copied.stat().st_mode & 0o222, 0)
+        self.assertEqual(attestation['file_count'], 7)
+
+    def test_fixed_cargo_host_requires_the_exact_second_alias_and_stable_owned_metadata(self):
+        _request, args = self.fixture()
+        target = args['layout'].target; host = target / 'release/forge-ide-web-host'
+        deps = target / 'release/deps'; deps.mkdir(mode=0o755)
+        alias = deps / ('forge_ide_web_host-' + 'a' * 16)
+        os.link(host, alias)
+        read = lambda: CI.read_portal_host(target, owner=os.getuid(), maximum=1024)
+        self.assertEqual(read(), host.read_bytes())
+        foreign = target.parent / 'foreign'; os.link(host, foreign)
+        with self.assertRaises(ValueError): read()
+        alias.unlink()
+        with self.assertRaises(ValueError): read()
+        alias.symlink_to(host)
+        with self.assertRaises(ValueError): read()
+        alias.unlink(); foreign.unlink(); os.link(host, alias)
+        metadata = host.stat()
+        wrong_owner = SimpleNamespace(**{name: getattr(metadata, name) for name in (
+            'st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_mode', 'st_nlink')},
+            st_uid=os.getuid() + 1)
+        with patch.object(CI.os, 'fstat', return_value=wrong_owner), self.assertRaises(ValueError): read()
+        original_fstat = os.fstat; calls = []
+        def changed_after_read(fd):
+            calls.append(fd)
+            if len(calls) == 3:
+                with host.open('ab') as stream: stream.write(b'changed')
+            return original_fstat(fd)
+        with patch.object(CI.os, 'fstat', side_effect=changed_after_read), self.assertRaises(ValueError): read()
+
     def test_hardlinked_build_output_never_becomes_root_artifact(self):
         request, args = self.fixture()
         os.link(args['assets'] / 'index.html', args['assets'] / 'second.html')
@@ -2418,7 +2476,7 @@ class PortalArtifactExportTest(unittest.TestCase):
             order.append('child')
             if '-p' in argv and 'forge-ide-web-host' in argv:
                 host = Path(env['CARGO_TARGET_DIR']) / 'release/forge-ide-web-host'
-                host.parent.mkdir(exist_ok=True); host.write_bytes(b'isolated executable'); host.chmod(0o755)
+                host.parent.mkdir(mode=0o700, exist_ok=True); host.write_bytes(b'isolated executable'); host.chmod(0o755)
             if 'src/rust/scripts/ui_tools.py' in argv:
                 assets = Path(env['CARGO_TARGET_DIR']) / 'ui-assets/build-test/assets'
                 assets.mkdir(parents=True)
@@ -2442,6 +2500,16 @@ class PortalArtifactExportTest(unittest.TestCase):
         self.assertTrue(result['cleanup_confirmed'])
         self.assertIn('artifact_export', result)
         self.assertFalse((fixture.work / 'active').exists())
+        with patch.object(CI, 'seal_portal_artifacts', side_effect=ValueError('private diagnostic')):
+            rejected, _log, _ = fixture._run_supervisor(commit=fixture.base_commit,
+                expected_main=fixture.base_commit, branch_scope='main', profile=CI.SCOPED_PROFILE,
+                run_child_override=child, portal_artifact_export=True,
+                cache_config_override={'enabled': False}, kill_build_user_override=lambda _a: None)
+        self.assertEqual(rejected['status'], 'failed')
+        self.assertTrue(rejected['cleanup_confirmed'])
+        self.assertIn({'name': 'portal_artifact_export', 'status': 'failed',
+                       'failure': 'artifact_validation_failed'}, rejected['stages'])
+        self.assertNotIn('private diagnostic', json.dumps(rejected))
         for profile, scope in ((CI.LEGACY_PROFILE, 'main'), (CI.SCOPED_PROFILE, 'branch/fixture')):
             result, _log, _ = fixture._run_supervisor(commit=fixture.base_commit,
                 expected_main=fixture.base_commit if scope == 'main' else '0' * 40,
