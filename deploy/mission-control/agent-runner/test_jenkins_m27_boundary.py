@@ -337,6 +337,7 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
 # guarded methods below; roles, grants, recipes, source and replay checks remain.
 # These fingerprints qualify source; they confer no CI or deployment authority.
 AGENT_WIDE_RETRY_CONTEXT_SHA256 = {
+    "src/rust/forge-ide-ui/tests/work_review.rs": "0b3bfed9322842760840823fed6589cbf1875b4f3b42cd2c01c9135d8a0d01c1",
     "deploy/mission-control/agent-runner/setup-runner.sh": "c25bc0c27040d513095c1cdeb31b80748548ba3c3384eef06070d52f40757a30",
     "deploy/mission-control/agent-runner/test_external_flow.py": "b6fc29b6ef427b06656104b5426bce8f71b1a01fc64f345c8e1c7e30148febdb",
     "deploy/mission-control/agent-runner/test_work_owner_followup.py": "e7ffcd27aca76da7c1937cc2f5afb8876e58aa25808069b5774048f036d3836e",

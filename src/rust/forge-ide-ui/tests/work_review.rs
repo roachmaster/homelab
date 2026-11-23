@@ -283,8 +283,10 @@ fn zero_repair_budget_keeps_initial_review_readable_without_authorizing_rounds()
         "zero authorized rounds cannot contain a repair round"
     );
     review.round = 0;
-    review.max_rounds = 11;
-    assert!(!review.is_valid(), "the upper policy bound remains ten");
+    review.max_rounds = MAX_AGENT_RETRIES;
+    assert!(review.is_valid(), "the shared allowance accepts twenty");
+    review.max_rounds = MAX_AGENT_RETRIES + 1;
+    assert!(!review.is_valid(), "the shared allowance stops at twenty");
 }
 
 #[test]

@@ -22,6 +22,16 @@ skips. Actual PostgreSQL tests cover20→21, immutable snapshots/counters and ra
 continuation. Final exact-main Jenkins proof and protected deployment are separate
 live gates; no task history or allowance was changed by this source checkpoint.
 
+Follow-up qualification: all206 native UI tests pass, including the complete
+integration targets and zero-budget/20/21 boundary. The additional44 Python
+reviewer, worker and delivery contracts pass without skips. Two pre-release test
+corrections (Rust formatting and the historical upper-bound assertion) retain
+their failed Jenkins receipts; redundant repair tasks were cancelled through
+normal WorkService admission and confirmed stopped. Production policy and
+recipe identities remain as reviewed. M30 live strict verification and backup
+restore evidence are recorded outside Git; matching UI/runtime activation remains
+a separate exact-main gate.
+
 # Previous: Recover feedback delivery through the event stream — 2026-11-23
 
 The user explicitly requests implementing recovery for the stopped diagram
