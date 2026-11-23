@@ -33,6 +33,11 @@ MAIN_CHECKS = [
     ['/usr/bin/make', 'ci-verified'], ['/usr/bin/make', 'ui-qa'],
     ['/usr/bin/python3', '-B', 'deploy/mission-control/backend-suites.py', '--scope', 'main'],
 ]
+ARTIFACT_COMMANDS = [
+    {'argv': ['/opt/forge-ci/toolchain/bin/cargo', 'build', '--manifest-path', 'src/rust/Cargo.toml',
+              '--offline', '--locked', '--release', '-p', 'forge-ide-web-host', '--jobs', '2'], 'returncode': 0},
+    {'argv': ['/usr/bin/python3', '-B', 'src/rust/scripts/ui_tools.py', 'check'], 'returncode': 0},
+]
 SHA40 = re.compile('[0-9a-f]{40}')
 SHA64 = re.compile('[0-9a-f]{64}')
 
@@ -214,6 +219,7 @@ class SystemPort:
             '--property=PrivateTmp=yes', '--property=RestrictAddressFamilies=AF_UNIX AF_INET',
             '--property=IPAddressDeny=any', '--property=IPAddressAllow=localhost',
             '--property=CapabilityBoundingSet=', '--property=RuntimeMaxSec=180',
+            '--property=TimeoutStopSec=10', '--property=KillMode=control-group',
             str(binary), 'serve', '--config', str(candidate_config)])
 
     def candidate_stop(self, release_id):
@@ -286,9 +292,11 @@ class PortalProbe:
 
 
 class PortalReleaseActor:
-    def __init__(self, config, system, *, reader=read_root, writer=write_root, probe_factory=PortalProbe):
+    def __init__(self, config, system, *, reader=read_root, writer=write_root,
+                 probe_factory=PortalProbe, public_directory=None):
         self.config, self.system = config, system
         self.read, self.write, self.probe_factory = reader, writer, probe_factory
+        self.public_directory = public_directory if public_directory is not None else self._public_parent
 
     def _job(self, job):
         if not isinstance(job, dict) or set(job) != set(IDENTITY):
@@ -324,6 +332,8 @@ class PortalReleaseActor:
         if (any(result.get(k) != v for k, v in expected.items()) or type(result.get('version')) is not int
                 or result.get('cleanup_confirmed') is not True
                 or result.get('checks') != [{'index': i, 'argv': argv, 'returncode': 0} for i, argv in enumerate(MAIN_CHECKS)]
+                or any(type(row.get('index')) is not int or type(row.get('returncode')) is not int
+                       for row in result.get('checks', []))
                 or result.get('coverage') != {'scope': 'main', 'browser': 'required',
                     'database': 'required_zero_skips', 'backend_suites': 'all_four'}):
             raise ValueError('Release requires exact full main verification and cleanup')
@@ -343,6 +353,7 @@ class PortalReleaseActor:
                 or manifest.get('action_id') != job['ci_action_id']
                 or manifest.get('source_commit') != job['commit_sha']
                 or manifest.get('source_tree') != job['tree_sha']
+                or manifest.get('commands') != ARTIFACT_COMMANDS
                 or manifest.get('request_sha256') != result.get('request_sha256')):
             raise ValueError('Artifact provenance mismatch')
         files = manifest.get('files')
@@ -407,7 +418,7 @@ class PortalReleaseActor:
                 if entry.get('path') != name or entry.get('sha256') != sha(raw):
                     raise ValueError('Old replay source no longer matches its manifest')
             target = old / name
-            self._public_parent(self.config.replay_archive_root, target.parent)
+            self.public_directory(self.config.replay_archive_root, target.parent)
             if target.exists():
                 if self.read(target) != raw:
                     raise ValueError('Retained replay archive conflict')
@@ -421,12 +432,12 @@ class PortalReleaseActor:
             state = decode(self.read(path))
             if state.get('job') != job:
                 raise ValueError('Release identity replay conflict')
+            if state.get('outcome') is not None:
+                return state['outcome']
             if state.get('phase') in {'staging', 'candidate'}:
                 return self.reconcile(job, state['plan'])
             return {'status': 'planned', 'plan': state['plan']}
         packet, manifest_sha, inventory = self._proof(job)
-        if self.system.main_head(self.config) != job['commit_sha']:
-            return {'status': 'superseded', 'receipt': {}, 'summary': 'Main advanced before release preparation.'}
         current = self._current()
         public = {'version': 1, 'policy': POLICY, **job, 'artifact_manifest_sha256': manifest_sha}
         public['plan_sha256'] = sha(canonical(public))
@@ -434,6 +445,9 @@ class PortalReleaseActor:
                  'release': str(release), 'inventory': inventory, 'restart_requested': False,
                  'rollback_restart_requested': False}
         self._save(directory, state)
+        if self.system.main_head(self.config) != job['commit_sha']:
+            return self._receipt(directory, state, 'superseded',
+                                 summary='Main advanced before release preparation; portal was not changed.')
         return self._finish_stage(directory, state, packet)
 
     def _public_parent(self, root, directory):
@@ -457,7 +471,7 @@ class PortalReleaseActor:
             if sha(raw) != expected['sha256']:
                 raise ValueError('Sealed packet changed')
             target = release / name
-            self._public_parent(release, target.parent)
+            self.public_directory(release, target.parent)
             if target.exists():
                 if self.read(target, 128 * 1024 * 1024) != raw:
                     raise ValueError('Release staging conflict')
@@ -496,7 +510,7 @@ class PortalReleaseActor:
     def _load(self, job, public):
         directory, _ = self._paths(job)
         state = decode(self.read(directory / 'state.json'))
-        if state.get('job') != job or public != state.get('plan'):
+        if state.get('job') != job or canonical(public) != canonical(state.get('plan')):
             raise ValueError('Release plan replay conflict')
         return directory, state
 
@@ -583,7 +597,9 @@ class PortalReleaseActor:
         self.system.reload()
         if current['process_binary'] != before['binary']:
             if state['rollback_restart_requested']:
-                return {'status': 'pending', 'receipt': {}, 'summary': 'Reconciling the already requested rollback restart.'}
+                return {'status': 'pending', 'receipt': {**state['plan'], 'unit': UNIT,
+                    'health_confirmed': False, 'cleanup_confirmed': False, 'rollback_confirmed': False},
+                    'summary': 'Reconciling the already requested rollback restart.'}
             state['rollback_restart_requested'] = True
             self._save(directory, state)
             self.system.restart()
@@ -591,7 +607,7 @@ class PortalReleaseActor:
         old_assets = Path(before['value']['assets'])
         inventory = {'assets/' + n: {'sha256': sha(self.read(old_assets / n, 8 * 1024 * 1024))} for n in CORE}
         self._health(before['value'], inventory)
-        return self._receipt(directory, state, 'failed', health=False, rollback=True,
+        return self._receipt(directory, state, 'failed', health=True, rollback=True,
                              summary='Release failed; the previous healthy portal was restored.')
 
     def invoke(self, action, job, public=None):
