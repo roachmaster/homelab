@@ -1,5 +1,23 @@
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
 
+Jenkins15 on `a3a14e9` passed Rust and browser gates, then found one backend
+fixture failure in 954 tests. Its delivery-to-supervisor cache test still
+replaced only the full gate commands after branch execution became a separate
+subset; it consequently ran production unittest discovery in a tiny fixture
+repository. Root assigns this isolated worktree the fixture-only correction:
+bind its branch cargo/unit subset, assert the exact executed checks, and retain
+the full gate identity and real cold/warm/corruption/cleanup checks. Preserve
+the failed receipt and production helper/delivery code. New Jenkins execution
+and portal deployment remain held until Root integrates the reviewed fix.
+
+The exact failure reproduced locally: the second nested check discovered the
+absent production test directory and returned 1, with cleanup confirmed. The
+fixture now binds cargo/unit branch commands and their labels while keeping
+the full three-command manifest/cache identity. Its three successful runs and
+dirty-source rejection all assert the exact two executed checks. All 32 focused
+delivery/cache E2E, branch/main selection and supervision-boundary tests pass in
+7.323 seconds with zero skips; no production source, helper or cache changed.
+
 Jenkins14 on `422db0f` failed in its first gate: the terminal startup-error
 test unconditionally expected disk-enabled diagnostics in a no-default-features
 build. Root assigns this same isolated worktree to correct the test's feature

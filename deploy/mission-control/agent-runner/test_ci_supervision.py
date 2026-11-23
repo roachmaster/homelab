@@ -2118,6 +2118,15 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             ('/usr/bin/python3', '-c', 'print("ui-qa-stub")'),
             ('/usr/bin/python3', '-c', 'print("unit-stub")'),
         )
+        # The gate/cache identity retains all three fixture commands while
+        # branch execution selects only its cargo/unit subset, just as the
+        # production profile omits browser QA on branches.
+        branch_checks = (checks[0], checks[2])
+        branch_labels = (CI.CHECK_LABELS[0], CI.CHECK_LABELS[2])
+        expected_branch_checks = [
+            {'index': i, 'argv': list(argv), 'returncode': 0}
+            for i, argv in enumerate(branch_checks)
+        ]
         uid_now, gid_now = os.getuid(), os.getgid()
         orig_del_read = delivery.read_private
         def owned_del_read(path, **kwargs):
@@ -2182,6 +2191,8 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
                     return orig_log(p, g)
 
             with patch.object(CI, 'CHECKS', checks), \
+                 patch.object(CI, 'BRANCH_CHECKS', branch_checks), \
+                 patch.object(CI, 'BRANCH_CHECK_LABELS', branch_labels), \
                  patch.object(CI, 'TRUSTED_CACHE_ROOT_PREFIX', self.root), \
                  patch.object(CI.pwd, 'getpwnam', side_effect=lambda name: build if name == 'forge_ci' else submitter), \
                  patch.object(CI.grp, 'getgrgid', return_value=SimpleNamespace(gr_name='forge_ci')), \
@@ -2191,7 +2202,13 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
                  patch.object(CI, 'open_log', side_effect=test_log), \
                  patch.object(CI, 'kill_build_user'), \
                  patch.object(CI, 'run_child', side_effect=lambda argv, *, cwd, env, account, log, timeout, cancelled: subprocess.run(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=timeout, check=False).returncode):
-                return CI.execute_locked(verify_action, cfg, cache_port=cache_port)
+                result = CI.execute_locked(verify_action, cfg, cache_port=cache_port)
+            self.assertEqual(result['checks'], expected_branch_checks, result)
+            self.assertEqual([
+                stage['label'] for stage in result['stages']
+                if stage['name'].startswith('check_')
+            ], list(branch_labels))
+            return result
 
         e1 = run_e2e_workflow()
         self.assertEqual(e1['status'], 'passed')
@@ -2237,8 +2254,10 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             return 0
         r_dirty, _, _ = self._run_supervisor(
             commit=self.base_commit, expected_main='0' * 40, branch_scope=scope,
+            checks=checks, branch_checks=branch_checks, branch_labels=branch_labels,
             run_child_override=dirty_source_check,
         )
+        self.assertEqual(r_dirty['checks'], expected_branch_checks, r_dirty)
         self.assertEqual(r_dirty['status'], 'failed')
         self.assertEqual(r_dirty['failure'], 'source_changed_during_checks')
         self.assertEqual(r_dirty['cache']['publish_status'], 'skipped_dirty')
