@@ -62,6 +62,26 @@ class FakeSystem:
 
 
 class PortalReleaseActorTest(unittest.TestCase):
+    def test_atomic_root_writer_handles_existing_near_name_max_override(self):
+        # Exercise real filesystem atomic replacement; substitute only Root
+        # ownership metadata so this regression also runs under the CI UID.
+        with TemporaryDirectory(prefix='forge-long-root-target-') as temporary:
+            target = Path(temporary) / ('z' * 240 + '.conf')
+            target.write_bytes(b'previous')
+            original_lstat = Path.lstat
+            def controlled_parent_metadata(path, *args, **kwargs):
+                value = original_lstat(path, *args, **kwargs)
+                if os.path.isdir(path):
+                    fields = list(value)
+                    fields[0] &= ~0o022
+                    fields[4] = 0
+                    return os.stat_result(fields)
+                return value
+            with patch.object(Path, 'lstat', autospec=True, side_effect=controlled_parent_metadata), patch.object(ACTOR.os, 'fchown'):
+                ACTOR.write_root(target, b'current', mode=0o644)
+            self.assertEqual(target.read_bytes(), b'current')
+            self.assertEqual([path.name for path in target.parent.iterdir()], [target.name])
+
     def setUp(self):
         temporary = TemporaryDirectory(prefix='forge-portal-actor-')
         self.addCleanup(temporary.cleanup)

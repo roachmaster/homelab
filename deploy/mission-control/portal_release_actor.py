@@ -106,7 +106,8 @@ def write_root(path, raw, *, mode=0o600, group=0):
             raise ValueError('Unsafe actor output ancestry')
     if path.is_symlink():
         raise ValueError('Unsafe actor output')
-    temporary = path.with_name(path.name + '.' + uuid4().hex + '.new')
+    # The existing systemd override can already be close to NAME_MAX.
+    temporary = path.parent / ('.forge-write-' + uuid4().hex + '.new')
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
     try:
         with os.fdopen(fd, 'wb') as stream:
