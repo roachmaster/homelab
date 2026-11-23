@@ -78,7 +78,11 @@ BEGIN
  ('forge_coding_reconciler_api.delivery_renew(uuid,integer,uuid)','59d776933079e4a302c1c739a09931310e09b86d520ed2009c4feccdb5688e24'),
  ('forge_coding_reconciler_api.delivery_start_allowed(uuid,integer,uuid)','fbfb727c9ba01707095dcb2ff85f063b670b27b777b660e0fe651b24097759a1'))x(signature,sha256) LOOP
  IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=31) THEN expected.sha256:=coalesce(forge_agent._retry_replacement_fingerprint(expected.signature),expected.sha256);END IF;
+ IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=32) THEN
+ SELECT encode(sha256(convert_to(jsonb_build_array(replace(pg_get_functiondef(p.oid),p.prosrc,forge_agent._delivery_lineage_legacy_source(p.oid,p.prosrc)),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex') INTO actual FROM pg_proc p WHERE p.oid=to_regprocedure(expected.signature);
+ ELSE
  SELECT encode(sha256(convert_to(jsonb_build_array(pg_get_functiondef(p.oid),pg_get_userbyid(p.proowner),p.proacl)::text,'UTF8')),'hex') INTO actual FROM pg_proc p WHERE p.oid=to_regprocedure(expected.signature);
+ END IF;
  IF actual IS DISTINCT FROM expected.sha256 THEN RAISE EXCEPTION 'Delivery function drift: %',expected.signature;END IF;
  END LOOP;
  SELECT encode(sha256(convert_to(pg_get_triggerdef(t.oid,false),'UTF8')),'hex') INTO actual FROM pg_trigger t WHERE t.tgrelid='forge_agent.post_merge_verifications'::regclass AND t.tgname='delivery_post_merge_sync' AND t.tgenabled='O' AND NOT t.tgisinternal;

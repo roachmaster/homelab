@@ -290,4 +290,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=31)
 \ir migrations/0031_retry_events.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(31,'retry_events');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=32) AS apply_0032
+\gset
+\if :apply_0032
+\ir migrations/0032_observer_retry_lineage.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(32,'observer_retry_lineage');
+\endif
 COMMIT;
