@@ -20,6 +20,14 @@ IDENTITY = ('release_id', 'verification_id', 'owner_id', 'project_alias',
 PLAN_KEYS = frozenset((*IDENTITY, 'version', 'policy', 'artifact_manifest_sha256', 'plan_sha256'))
 
 
+def release_authority(value):
+    if (not isinstance(value, dict) or set(value) != {'generation', 'lease_token'}
+            or type(value.get('generation')) is not int or value['generation'] <= 0):
+        raise ValueError('Invalid private release authority')
+    uid(value['lease_token'])
+    return dict(value)
+
+
 def decode(raw):
     def unique(pairs):
         result = {}
@@ -91,13 +99,14 @@ class RootActorPort:
                     != self.expected_sha256):
             raise ValueError('Selected root release actor changed')
 
-    def call(self, action, release_id, job, plan=None):
+    def call(self, action, release_id, job, plan=None, *, authority=None):
         if action not in {'plan', 'activate', 'reconcile', 'rollback'}:
             raise ValueError('Unsupported portal release operation')
         uid(release_id)
         if not isinstance(job, dict) or set(job) != set(IDENTITY) or job.get('release_id') != release_id:
             raise ValueError('Invalid release actor identity')
-        raw = canonical({'job': job, 'plan': plan})
+        authority = release_authority(authority)
+        raw = canonical({'job': job, 'plan': plan, 'authority': authority})
         if len(raw) > 16384:
             raise ValueError('Oversized release actor request')
         self.validate()
@@ -143,8 +152,9 @@ class ReleaseProvider:
 
     def plan(self, job, require_lease):
         identity = self._identity(job)
+        authority = release_authority({key: job.get(key) for key in ('generation', 'lease_token')})
         require_lease()
-        result = self.actor.call('plan', identity['release_id'], identity)
+        result = self.actor.call('plan', identity['release_id'], identity, authority=authority)
         if result.get('status') == 'planned':
             self._plan(identity, result.get('plan'))
         else:
@@ -177,9 +187,10 @@ class ReleaseProvider:
 
     def _call(self, action, job, plan, require_lease):
         identity = self._identity(job)
+        authority = release_authority({key: job.get(key) for key in ('generation', 'lease_token')})
         self._plan(identity, plan)
         require_lease()
-        result = self.actor.call(action, identity['release_id'], identity, plan)
+        result = self.actor.call(action, identity['release_id'], identity, plan, authority=authority)
         if result.get('status') == 'planned':
             if self._plan(identity, result.get('plan')) != plan:
                 raise ValueError('Portal release preparation replay changed')

@@ -185,15 +185,18 @@ class PortalReleaseActorTest(unittest.TestCase):
             repositories={'homelab': 'roachmaster/homelab'})
         actor = self.actor
         class Port:
-            def call(self, action, release_id, job, plan=None):
+            def call(self, action, release_id, job, plan=None, *, authority):
                 if release_id != job['release_id']:
                     raise ValueError('Action scope mismatch')
+                if set(authority) != {'generation', 'lease_token'}:
+                    raise ValueError('Missing private authority')
                 return actor.invoke(action, job, plan)
         provider = ReleaseProvider(config, Port())
-        plan = provider.plan(self.job, lambda: None)['plan']
-        self.assertEqual(provider.reconcile(self.job, plan, lambda: None)['status'], 'planned')
-        self.assertEqual(provider.activate(self.job, plan, lambda: None)['status'], 'deployed')
-        self.assertEqual(provider.reconcile(self.job, plan, lambda: None)['status'], 'deployed')
+        leased = {**self.job, 'generation': 1, 'lease_token': str(uuid4())}
+        plan = provider.plan(leased, lambda: None)['plan']
+        self.assertEqual(provider.reconcile(leased, plan, lambda: None)['status'], 'planned')
+        self.assertEqual(provider.activate(leased, plan, lambda: None)['status'], 'deployed')
+        self.assertEqual(provider.reconcile(leased, plan, lambda: None)['status'], 'deployed')
         self.assertEqual(self.system.restarts, 1)
 
     def test_crash_after_actual_restart_reconciles_without_a_second_restart(self):

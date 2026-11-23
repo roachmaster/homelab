@@ -27,6 +27,9 @@ class ReleaseOperationsTest(unittest.TestCase):
         unsigned = {**self.job, 'version': 1, 'policy': ops.POLICY,
             'artifact_manifest_sha256': 'b' * 64}
         self.plan = {**unsigned, 'plan_sha256': hashlib.sha256(canonical(unsigned)).hexdigest()}
+        self.identity = dict(self.job)
+        self.authority = {'generation': 1, 'lease_token': str(uuid4())}
+        self.job.update(self.authority)
         self.actor = Mock()
         self.provider = ops.ReleaseProvider(self.config, self.actor)
         self.require = Mock()
@@ -40,9 +43,9 @@ class ReleaseOperationsTest(unittest.TestCase):
 
     def test_fixed_plan_and_same_release_reconciliation_use_only_frozen_identity(self):
         self.actor.call.return_value = {'status': 'planned', 'plan': self.plan}
-        self.assertEqual(self.provider.plan({**self.job, 'lease_token': str(uuid4()),
+        self.assertEqual(self.provider.plan({**self.job,
             'verification_receipt': {'never_forward': 'process data'}}, self.require)['plan'], self.plan)
-        self.actor.call.assert_called_with('plan', self.job['release_id'], self.job)
+        self.actor.call.assert_called_with('plan', self.job['release_id'], self.identity, authority=self.authority)
         self.actor.call.return_value = self.response()
         self.assertEqual(self.provider.activate(self.job, self.plan, self.require)['status'], 'deployed')
         self.assertEqual(self.provider.reconcile(self.job, self.plan, self.require)['status'], 'deployed')
@@ -91,6 +94,24 @@ class ReleaseOperationsTest(unittest.TestCase):
         actor_factory.assert_called_once_with('a' * 64)
         self.actor.validate.assert_called_once()
 
+    def test_private_lease_authority_is_required_for_all_operations_and_denial_propagates(self):
+        for changes in ({'generation': None}, {'generation': False}, {'generation': 0},
+                        {'lease_token': 'invalid'}, {'lease_token': None}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.provider.plan({**self.job, **changes}, self.require)
+        self.actor.call.assert_not_called()
+        self.actor.call.side_effect = PublicationError('release_authority_denied')
+        for operation in (lambda: self.provider.plan(self.job, self.require),
+                          lambda: self.provider.activate(self.job, self.plan, self.require),
+                          lambda: self.provider.reconcile(self.job, self.plan, self.require),
+                          lambda: self.provider.rollback(self.job, self.plan, self.require)):
+            with self.assertRaises(PublicationError):
+                operation()
+        for call in self.actor.call.call_args_list:
+            self.assertEqual(call.kwargs, {'authority': self.authority})
+            self.assertEqual(call.args[2], self.identity)
+            self.assertNotIn('lease_token', call.args[2])
+
 
 class RootActorBoundaryTest(unittest.TestCase):
     def test_fixed_allowlist_private_pin_strict_json_and_size_limits(self):
@@ -107,22 +128,36 @@ class RootActorBoundaryTest(unittest.TestCase):
                 port = ops.RootActorPort(hashlib.sha256(actor.read_bytes()).hexdigest(), execute=execute)
                 action = str(uuid4())
                 job = {key: 'fixture' for key in ops.IDENTITY}; job['release_id'] = action
-                self.assertEqual(port.call('reconcile', action, job)['status'], 'pending')
+                authority = {'generation': 1, 'lease_token': str(uuid4())}
+                self.assertEqual(port.call('reconcile', action, job, authority=authority)['status'], 'pending')
                 args, kw = execute.call_args
                 self.assertEqual(args[0], ['/usr/bin/sudo', '-n', str(actor), 'reconcile', action])
-                self.assertEqual(json.loads(kw['data']), {'job': job, 'plan': None})
+                self.assertEqual(json.loads(kw['data']), {'job': job, 'plan': None, 'authority': authority})
                 for operation in ('shell', 'activate;rm', '--config'):
                     with self.assertRaises(ValueError):
-                        port.call(operation, action, job)
+                        port.call(operation, action, job, authority=authority)
                 with self.assertRaises(ValueError):
-                    port.call('plan', action, {**job, 'owner_id': 'x' * 16384})
+                    port.call('plan', action, {**job, 'owner_id': 'x' * 16384}, authority=authority)
                 for raw in (b'{"x":1,"x":2}', b'{"x":NaN}', b'[]', b'x' * 65537):
                     execute.return_value = raw
                     with self.assertRaises((ValueError, json.JSONDecodeError)):
-                        port.call('plan', action, job)
+                        port.call('plan', action, job, authority=authority)
                 actor.write_bytes(b'changed actor')
                 with self.assertRaises(ValueError):
-                    port.call('plan', action, job)
+                    port.call('plan', action, job, authority=authority)
+
+    def test_missing_or_extra_private_authority_is_rejected_before_actor_read_or_execution(self):
+        execute = Mock()
+        port = ops.RootActorPort('a' * 64, execute=execute)
+        action = str(uuid4())
+        job = {key: 'fixture' for key in ops.IDENTITY}; job['release_id'] = action
+        for authority in (None, {}, {'generation': True, 'lease_token': str(uuid4())},
+                          {'generation': 1, 'lease_token': str(uuid4()), 'allow': True}):
+            with self.subTest(authority=authority), patch.object(port, 'validate') as validate:
+                with self.assertRaises(ValueError):
+                    port.call('activate', action, job, authority=authority)
+                validate.assert_not_called()
+        execute.assert_not_called()
 
     def test_process_timeout_nonzero_and_output_limit_are_bounded_without_diagnostics(self):
         env = {'PATH': '/usr/bin:/bin'}
