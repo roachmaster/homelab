@@ -259,18 +259,21 @@ class OwnerContinuationFenceTest(unittest.TestCase):
                 service=WorkServiceFactory(make_v2_config(),lambda:cluster.connect('forge_agent')).create()
                 service.submit(make_submit(idempotency_key='before-owner26'))
                 tables=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND relname<>'schema_migrations' ORDER BY relname")]
+                # Snapshot every original relation, including its exact ACL.
+                # New M27/M28 tables are checked by the strict current verifier.
+                original_relations=[r[0] for r in execute("SELECT relname FROM pg_class WHERE relnamespace='forge_agent'::regnamespace ORDER BY relname")]
                 def snapshot():
                     return dict(
                         history=execute('SELECT version,name,applied_at FROM forge_agent.schema_migrations WHERE version<=25 ORDER BY version'),
                         rows={table:execute('SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text),\'[]\'::jsonb) FROM forge_agent.'+table+' t') for table in tables},
                         credentials=execute('SELECT md5(jsonb_agg(to_jsonb(r) ORDER BY rolname)::text) FROM pg_authid r'),
                         defaults=execute('SELECT to_jsonb(d) FROM pg_default_acl d ORDER BY oid'),
-                        relation_acls=execute("SELECT relname,relowner,relacl FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname !~ '^jenkins_' ORDER BY relname"),
+                        relation_acls=execute("SELECT relname,relowner,relacl FROM pg_class WHERE relnamespace='forge_agent'::regnamespace AND relname=ANY(%s) ORDER BY relname",(original_relations,)),
                         hba=hashlib.sha256((cluster.data/'pg_hba.conf').read_bytes()).hexdigest())
                 before=snapshot();DisposablePostgresCluster.apply_and_verify(cluster);DisposablePostgresCluster.apply_and_verify(cluster)
                 self.assertEqual(snapshot(),before)
-                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(27,)])
-                self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(16,)])
+                self.assertEqual(execute('SELECT max(version) FROM forge_agent.schema_migrations'),[(28,)])
+                self.assertEqual(execute("SELECT count(*) FROM pg_class r WHERE relnamespace='forge_agent'::regnamespace AND relkind='r' AND has_table_privilege('muse_events',r.oid,'SELECT')"),[(19,)])
                 self.assertEqual(execute("SELECT has_function_privilege('muse_events','forge_agent._coding_owner_continuation_fenced(uuid)','EXECUTE')"),[(False,)])
             finally:cluster.stop()
 
