@@ -140,6 +140,10 @@ class ReleaseWorker:
             if plan is not None:
                 validate_plan(identity, plan)
                 outcome = self.provider.reconcile(job, plan, require_lease)
+            elif (job.get('receipt') or {}).get('reconciliation_required') is True:
+                # An unknown acknowledgement may hide Root-owned staging.
+                # Discover that journal before considering any fresh plan.
+                outcome = self.provider.reconcile(job, None, require_lease)
             elif self.store.delivery_release_start_allowed(job):
                 outcome = self.provider.plan(job, require_lease)
             else:

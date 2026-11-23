@@ -60,6 +60,7 @@ class Store:
 
     def delivery_release_finish(self, _job, status, receipt, summary):
         self.records.append((status, receipt, summary))
+        self.job['receipt'] = deepcopy(receipt)
         return True
 
 
@@ -121,6 +122,26 @@ class DeliveryWorkerTest(unittest.TestCase):
         worker.run_once()
         self.assertEqual(provider.calls, ['plan'])
         self.assertEqual(store.records[-1][0], 'pending')
+
+    def test_unknown_precheckpoint_ack_discovers_root_journal_before_fresh_plan(self):
+        _job, store, provider, worker = self.fixture()
+        original_plan = provider.plan
+        def lose_ack(job, require_lease):
+            original_plan(job, require_lease)
+            raise OSError('controlled lost preparation acknowledgement')
+        provider.plan = lose_ack
+        worker.run_once()
+        self.assertEqual(store.records[-1][0], 'pending')
+        self.assertIsNone(store.job['request'])
+        def recover(job, plan, require_lease):
+            require_lease()
+            provider.calls.append('reconcile')
+            self.assertIsNone(plan)
+            return dict(status='planned', plan=deepcopy(provider.plan_value))
+        provider.reconcile = recover
+        worker.run_once()
+        self.assertEqual(provider.calls, ['plan', 'reconcile', 'activate'])
+        self.assertEqual(store.records[-1][0], 'deployed')
 
     def test_revoked_precheckpoint_attempt_only_reconciles_own_cleanup(self):
         _job, store, provider, worker = self.fixture()

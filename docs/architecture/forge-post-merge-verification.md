@@ -137,7 +137,7 @@ A failed-main check creates an independent durable repair operation with its
 source and diagnostics. Its consumer invokes the ready normal WorkService under
 the current project author/reviewer policy. A frozen idempotency key and verified
 queued receipt link the actual new task; the completed parent is never reopened.
-The lineage permits at most three repair admissions, including failures after a
+The lineage permits at most 20 repair admissions, including failures after a
 repair itself merges. A passed main check separately queues a release operation;
 only a healthy Root activation receipt establishes deployment.
 
@@ -273,7 +273,7 @@ cleanup of the previously admitted operation; it never starts a new candidate.
 | --- | --- | --- |
 | Unified main verification | `delivery_enabled` plus scoped v2 post-merge provider | One durable verification owner for coordinator and observed changes. |
 | Manual-main capture | `source_observation_enabled`, fixed 60-second interval | Durable scoped head observation, no OAuth quota polling. |
-| Failed-main repair | API `delivery_enabled` and `delivery_repair_projects` | Normal current-policy author/reviewer task, shared maximum three rounds. |
+| Failed-main repair | API `delivery_enabled` and `delivery_repair_projects` | Normal current-policy author/reviewer task, shared maximum 20 rounds. |
 | Portal activation | `release_enabled` and pinned `release_actor_sha256` | Fixed web-only Root actor after full main proof; automatic rollback. |
 
 Database grants separately fence observe, repair and release per worker role,
