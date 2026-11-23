@@ -14,10 +14,11 @@ from psycopg2.extras import Json
 from queue_store import Rejected
 from work_peer_review import PeerReviewError, IncompleteApprovalError, parse_review_target, validate_live_review_verdict
 from work_store import _resume_intent_digest
+from work_retry_policy import AGENT_RETRY_LIMIT
 
 
 POLICY = 'forge-peer-reviewer-correction-v1'
-MAX_CORRECTIONS = 3
+MAX_CORRECTIONS = AGENT_RETRY_LIMIT
 LEGACY_REASON = 'Peer review could not safely continue: not_reviewable'
 
 
@@ -214,7 +215,8 @@ class ReviewerCorrectionProvider:
         if used >= MAX_CORRECTIONS:
             if manual:
                 raise Rejected(409, 'not_reviewable')
-            self.flow._escalate(cursor, w, 'Independent reviewer approval remained incomplete after three correction attempts.')
+            self.flow._escalate(cursor, w, 'Independent reviewer approval remained incomplete after '
+                                + str(MAX_CORRECTIONS) + ' correction attempts.')
             cursor.execute("UPDATE forge_agent.coding_workflow_reviews SET status='escalated',updated_at=clock_timestamp() WHERE workflow_review_id=%s", (peer['workflow_review_id'],))
             return dict(status='escalated', reason='reviewer_correction_exhausted', workflow_id=str(w['workflow_id']))
         profile = w['snapshot']['reviewer_profile']

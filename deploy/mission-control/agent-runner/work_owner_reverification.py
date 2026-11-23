@@ -13,6 +13,7 @@ from psycopg2.extras import Json
 from queue_store import Rejected
 from work_config import sha256_canonical
 from work_store import _resume_intent_digest
+from work_retry_policy import budget_compatible_repair_policy, effective_repair_policy
 from work_workflow import BoundPreparationRetryAuthority, recipe_from_snapshot, _ready_for_recipe, NATIVE_POLICIES
 
 POLICY = 'forge-owner-verification-recovery-v2'
@@ -315,7 +316,7 @@ def recover(flow, cursor, task, owner, command, request, digest):
     cursor.execute('SELECT * FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                    (store.owner, task['project_alias'], task['repair_root_task_id'] or task['id']))
     budget = cursor.fetchone()
-    if (not budget or budget['policy'] != p['repair_policy'] or budget['repair_rounds'] != oi.get('repair_rounds')
+    if (not budget or not budget_compatible_repair_policy(p['repair_policy'], budget['policy']) or budget['repair_rounds'] != oi.get('repair_rounds')
             or q['round'] != budget['repair_rounds'] or q['stagnant_rounds'] != budget['stagnant_rounds']
             or budget['stagnant_rounds'] < oi.get('stagnant_rounds', 0)):
         raise Rejected(409, 'result_mismatch')
@@ -345,7 +346,8 @@ def recover(flow, cursor, task, owner, command, request, digest):
         reconciliation_receipt_id=str(rec['receipt_id']), published_revision=rec['task_revision'],
         repair_rounds=budget['repair_rounds'], stagnant_rounds=budget['stagnant_rounds'], plan_revisions=w['plan_revisions'],
         infrastructure_retries=q['infrastructure_retries'] + 1, previous_infrastructure_retries=q['infrastructure_retries'],
-        automatic_max_infrastructure_retries=p['repair_policy']['max_infrastructure_retries'],
+        automatic_max_infrastructure_retries=effective_repair_policy(
+            p['repair_policy'], dict(flow.config.repair_policy))['max_infrastructure_retries'],
         authority='explicit_owner_verification_only', automatic_allowance_renewed=False,
         prior_recovery_history=dict(native_deadline_recoveries=deadline_recoveries, verification_infrastructure_retries=verification_retries))
     cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",

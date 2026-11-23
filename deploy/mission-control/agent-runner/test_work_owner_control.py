@@ -61,6 +61,14 @@ class OwnerContinuationTest(unittest.TestCase):
   self.assertEqual(disabled_service.resume(command),replies[0]);self.assertEqual(self.code_handoff_state(source.task_id,checks['review_id'])[2],before[2])
   with closing(self.cluster.connect('postgres')) as connection,connection.cursor() as cursor:
    cursor.execute("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'owner-code-resume:%%'");self.assertEqual(cursor.fetchone()[0],1)
+ def test_increased_automatic_allowance_does_not_admit_a_new_manual_exhaustion_override(self):
+  source,checks,command,_,_=self.exhausted()
+  with closing(self.cluster.connect('postgres')) as connection,connection,connection.cursor() as cursor:
+   cursor.execute("UPDATE forge_agent.coding_review_budget SET policy=policy||'{\"max_rounds\":20,\"max_stagnant_rounds\":20,\"max_infrastructure_retries\":20}'::jsonb WHERE root_task_id=(SELECT coalesce(repair_root_task_id,id) FROM forge_agent.coding_tasks WHERE id=%s)",(source.task_id,))
+  before=self.code_handoff_state(source.task_id,checks['review_id'])
+  with self.assertRaises(Rejected):self.service.resume(command)
+  self.assertEqual(self.code_handoff_state(source.task_id,checks['review_id']),before)
+  self.assertIsNone(self.claim('agy-v2'))
  def test_wrong_workspace_stale_reconcile_and_changed_grants_readiness_reject_atomically(self):
   for fault in ('workspace','stale','grant','readiness'):
    with self.subTest(fault=fault):

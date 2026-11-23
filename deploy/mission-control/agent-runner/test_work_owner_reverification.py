@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from copy import deepcopy
 from dataclasses import replace
+import json
 import hashlib
 import unittest
 from uuid import UUID, uuid4
@@ -103,6 +104,24 @@ class OwnerReverificationTest(unittest.TestCase):
         self.assertEqual(intent['automatic_max_infrastructure_retries'], 1)
         self.assertIs(intent['automatic_allowance_renewed'], False)
         self.assertEqual(len(intent['source_lineage']), 1)
+
+    def test_shared_retry_policy_amendment_keeps_v1_receipt_and_source_lineage(self):
+        source, failed, request = self.failure()
+        historical = self.state(source, failed['review_id'])
+        policy = {**historical[1]['policy'], 'max_rounds': 20, 'max_stagnant_rounds': 20,
+                  'max_infrastructure_retries': 20}
+        self.cluster.admin_exec("UPDATE forge_agent.coding_review_budget SET policy='"
+            + json.dumps(policy).replace("'", "''") + "'::jsonb WHERE root_task_id=(SELECT "
+            "coalesce(repair_root_task_id,id) FROM forge_agent.coding_tasks WHERE id='"
+            + source.task_id + "')", owner=False)
+        amended = self.state(source, failed['review_id'])
+        reply = self.service.review_decide(request)
+        self.assertEqual(self.state(source, failed['review_id']), amended)
+        self.assertEqual(amended[1]['repair_rounds'], historical[1]['repair_rounds'])
+        self.assertEqual(amended[1]['stagnant_rounds'], historical[1]['stagnant_rounds'])
+        self.assertEqual(self.service.review_decide(self.v1_request), self.v1_receipt)
+        self.assertEqual(self.service.review_decide(request), reply)
+        self.assertIsNone(self.claim('agy-v2'))
 
     def test_race_and_lost_commit_ack_preserve_exact_v1_v2_receipts_after_policy_changes(self):
         source, failed, request = self.failure()

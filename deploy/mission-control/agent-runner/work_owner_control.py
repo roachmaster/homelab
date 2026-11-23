@@ -16,6 +16,7 @@ from work_feedback import validate_findings
 from work_peer_review import parse_review_target, parse_review_verdict
 from work_config import sha256_canonical
 from work_store import _resume_intent_digest
+from work_retry_policy import budget_compatible_repair_policy, effective_repair_policy
 
 OWNER_CODE_RESUME = 'forge-owner-code-resume-v1'
 OWNER_CODE_FOLLOWUP = 'forge-owner-code-resume-v2'
@@ -361,7 +362,8 @@ class NativeOwnerControl:
                     or str(q['previous_review_id']) != owner_intent.get('review_id') or q['source_revision'] != task['revision']
                     or q['base_revision'] != task['base_revision'] or q['plan_decision_id'] != task['plan_decision_id']
                     or q['scope_plan_decision_id'] != task['scope_plan_decision_id'] or not q['candidate_commit'] or not q['gate_manifest_sha256']
-                    or q['repair_task_id'] is not None or q['infrastructure_retries'] >= p['repair_policy']['max_infrastructure_retries']):
+                    or q['repair_task_id'] is not None or q['infrastructure_retries'] >= effective_repair_policy(
+                        p['repair_policy'], dict(flow.config.repair_policy))['max_infrastructure_retries']):
                 raise Rejected(409, 'not_reviewable')
             failure = _verification_failure(q)
             cursor.execute('SELECT * FROM forge_agent.coding_attempts WHERE owner_id=%s AND project_alias=%s AND task_id=%s AND attempt_id=%s',
@@ -391,7 +393,7 @@ class NativeOwnerControl:
             cursor.execute('SELECT * FROM forge_agent.coding_review_budget WHERE owner_id=%s AND project_alias=%s AND root_task_id=%s',
                            (store.owner, command.project_alias, task['repair_root_task_id'] or task['id']))
             budget = cursor.fetchone()
-            if (not budget or budget['policy'] != p['repair_policy'] or budget['repair_rounds'] != owner_intent.get('repair_rounds')
+            if (not budget or not budget_compatible_repair_policy(p['repair_policy'], budget['policy']) or budget['repair_rounds'] != owner_intent.get('repair_rounds')
                     or q['round'] != budget['repair_rounds'] or q['stagnant_rounds'] != budget['stagnant_rounds']
                     or budget['stagnant_rounds'] < owner_intent.get('stagnant_rounds', 0)):
                 raise Rejected(409, 'result_mismatch')
@@ -553,7 +555,7 @@ class NativeOwnerControl:
                         or task['revision']<previous['finish_receipt']['receipt']['revision']+2
                         or old['policy_digest']!=w['policy_digest']or old['recipe_digest']!=recipe.digest
                         or old['plan_decision_id']!=target['plan_decision_id']or old['plan_sha256']!=target['approved_plan']['sha256']
-                        or old['plan_revisions']!=w['plan_revisions']or old['repair_policy']!=p['repair_policy']):
+                        or old['plan_revisions']!=w['plan_revisions']or not budget_compatible_repair_policy(p['repair_policy'],old['repair_policy'])):
                     raise Rejected(409,'not_reviewable')
                 completed=q['finish_receipt'];outcome=completed.get('outcome')if isinstance(completed,dict)else None
                 if (q['finish_token']is None or not isinstance(outcome,dict)or completed.get('review_id')!=str(q['review_id'])
@@ -623,7 +625,7 @@ class NativeOwnerControl:
                 (store.owner, command.project_alias, task['repair_root_task_id'] or task['id']))
             budget = cursor.fetchone()
             exhausted = flow._exhausted_code_budget(cursor, task, q)
-            if not budget or (not followup and not exhausted) or handoff.get('budget') != exhausted or budget['policy'] != p['repair_policy']:
+            if not budget or (not followup and not exhausted) or handoff.get('budget') != exhausted or not budget_compatible_repair_policy(p['repair_policy'], budget['policy']):
                 raise Rejected(409, 'not_reviewable')
             require_owner_capability(cursor)
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='implement',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s", (w['workflow_id'],))
