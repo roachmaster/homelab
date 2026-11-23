@@ -292,30 +292,30 @@ class NativeJenkinsTest(unittest.TestCase):
             [{**valid[0],'extra':'unverified'}],[{**valid[0],'returncode':2},valid[1]]]
         for checks in cases:
             with self.subTest(checks=checks):
-                report=self.provider._report({'request':{'action_id':str(uuid4())}},
+                report=self.provider._report({'version':'forge-native-jenkins-v1','request':{'action_id':str(uuid4())}},
                     self.receipt_result(checks,status='passed',failure=None))
                 self.assertFalse(report.checks_passed)
                 self.assertEqual([check['status']for check in report.checks],['not_run']*3)
                 self.assertEqual(report.code,'verification_receipt_invalid')
         result={'status':'passed','receipt':{'cleanup_confirmed':True},'summary':'Claimed success without records'}
-        report=self.provider._report({'request':{'action_id':str(uuid4())}},result)
+        report=self.provider._report({'version':'forge-native-jenkins-v1','request':{'action_id':str(uuid4())}},result)
         self.assertFalse(report.checks_passed)
         self.assertEqual([check['status']for check in report.checks],['not_run']*3)
 
     def test_incomplete_success_and_missing_cleanup_cannot_make_overall_pass(self):
         valid=[{'index':i,'argv':list(argv),'returncode':0}for i,argv in enumerate(CHECKS)]
         for count in range(3):
-            report=self.provider._report({'request':{'action_id':str(uuid4())}},
+            report=self.provider._report({'version':'forge-native-jenkins-v1','request':{'action_id':str(uuid4())}},
                 self.receipt_result(valid[:count],status='passed',failure=None))
             self.assertFalse(report.checks_passed)
             self.assertEqual([check['status']for check in report.checks],['passed']*count+['not_run']*(3-count))
-        report=self.provider._report({'request':{'action_id':str(uuid4())}},
+        report=self.provider._report({'version':'forge-native-jenkins-v1','request':{'action_id':str(uuid4())}},
             self.receipt_result(valid,status='passed',failure=None,cleanup=False))
         self.assertFalse(report.checks_passed);self.assertFalse(report.cleanup_confirmed)
         self.assertEqual([check['status']for check in report.checks],['passed']*3)
 
     def test_cancellation_and_preflight_do_not_invent_run_checks(self):
-        binding={'request':{'action_id':str(uuid4())}}
+        binding={'version':'forge-native-jenkins-v1','request':{'action_id':str(uuid4())}}
         for failure in('main_ancestor_required','cancelled_or_timed_out','verification_unavailable'):
             report=self.provider._report(binding,self.receipt_result([],failure=failure))
             self.assertFalse(report.checks_passed)
@@ -353,7 +353,7 @@ class NativeJenkinsTest(unittest.TestCase):
                 with self.assertRaises(PublicationError):self.provider.observe(self.hosted)
         # Local reporting can truthfully retain completed gate facts while
         # refusing source success after an overall post-check source failure.
-        report=self.provider._report({'request':{'action_id':str(uuid4())}},
+        report=self.provider._report({'version':'forge-native-jenkins-v1','request':{'action_id':str(uuid4())}},
             self.receipt_result(valid,failure='source_changed_during_checks'))
         self.assertFalse(report.checks_passed)
         self.assertEqual([check['status']for check in report.checks],['passed']*3)
@@ -437,6 +437,25 @@ class NativeJenkinsTest(unittest.TestCase):
             with self.assertRaises(PublicationError):self.provider._read(binding['request']['action_id'])
         self.assertEqual(self.driver.cancellations,0)
         self.assertEqual({p:p.read_bytes() for p in original},original)
+
+    def test_new_profile_reads_inactive_v1_cleanup_without_reinterpreting_its_checks(self):
+        from work_ci_contract import SCOPED_PROFILE, CiGateContractFactory
+        binding, directory, root = self.historical_terminal_proof()
+        original = {p:p.read_bytes() for p in directory.iterdir() if p.is_file()}
+        plan = CiGateContractFactory(SCOPED_PROFILE).create().plan('detached')
+        self.driver.config.verification_profile = SCOPED_PROFILE
+        self.config.jenkins_verification_scope = 'branch'
+        self.config.checks = plan.checks
+        self.config.required_hosted_checks = plan.required_hosted_checks
+        replacement = NativeJenkinsVerification(self.config, self.store, self.git,
+            self.candidates, self.driver, self.supervisor, client=self.client)
+        with self.root_receipt_fixture(root):
+            self.assertTrue(replacement._historical_terminal(directory))
+            with self.assertRaises(PublicationError):
+                replacement._read(binding['request']['action_id'])
+            replacement.reconcile_once()
+        self.assertEqual(self.driver.cancellations, 0)
+        self.assertEqual({p:p.read_bytes() for p in original}, original)
 
     def test_retired_transport_supports_bound_new_branch_scope_and_failed_clean_root_result(self):
         _binding,directory,root = self.historical_terminal_proof(branch_scope=True)

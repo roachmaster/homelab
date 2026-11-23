@@ -13,15 +13,21 @@ The exclusive `forge-mission-control-ci` node has one executor and label
 `forge-ci`; controller executors remain zero. `forge-jenkins-ci-agent.service`
 connects through WebSocket. `forge-exact-candidate` invokes the root-owned
 `/usr/local/libexec/forge-ci-check` wrapper with seven validated correlation and
-source parameters. The installed verifier reads a digest-bound bundle, verifies
-the exact commit/tree and fixed gate manifest, then runs the scope's gate:
-on a branch, `make ci` plus the in-memory Python backend suite (the
-disposable-PostgreSQL tests skip); on `main`, the full gate — `make ci`,
-`make ui-qa`, and the complete Python backend suite including the
-disposable-PostgreSQL tests. Out-of-memory tests run only on the main
-pipeline build (see `docs/architecture/ci-pipeline.md`). Candidate commands run as the dedicated
-unprivileged `forge_ci` account with private network, read-only source and owned
-outputs. Jenkins and model credentials are outside that boundary.
+source parameters. The last installed native verifier is SHA256
+`8d0cdefcb034d486841587e6d5b4eb504c8e727730b9694a2a1fa0fa4e5c64c1`,
+profile `forge-sdlc-jenkins-v1`. It runs `make ci`, `make ui-qa` and the
+agent-runner Python suite on every scope. Source v1 preserves those exact
+commands and does not force database skips on branches. It does not run the
+other three backend suites automatically.
+
+The source-only v2 contract below fixes scope accounting and complete main
+coverage. It has not replaced the installed helper/configuration. The release
+at `95651a5` passed native #17 plus the separate operator companion #1: 954
+agent-runner tests and services 6 / driver 2 / studio 3, all with zero skips. That
+one-off companion is release evidence, not a permanent replacement for the
+standard v2 main gate. Candidate commands remain unprivileged `forge_ci`
+processes with private network, read-only source and owned outputs. Jenkins
+and model credentials stay outside that boundary.
 
 The configured wall deadline is 2,700 seconds after a measured cold smoke build
 took 29m 29s. Preserve that production value when preparing future configuration;
@@ -95,6 +101,74 @@ without weakening signature or listener checks. Private evidence remains in
 and performed the health and restart checks without reinstalling or recreating
 accounts. The final root-owned installer SHA-256 is
 `3b1f026d3d853a3bcc3739f990f8910fb40610f80219d4640974b7af975cc0da`.
+
+## Source profile v2: explicit rollout contract
+
+The pure `work_ci_contract.py` factory selects a frozen plan at bootstrap.
+The standalone root verifier contains the same closed declarations and never
+imports candidate code for privileged policy. New `setup-ci.py` installations
+render `forge-sdlc-jenkins-v2`; old configuration files remain v1 by default.
+Native-only setup inherits the existing profile unless the operator explicitly
+selects `--verification-profile forge-sdlc-jenkins-v2`. No setup command is
+executed as part of this source change.
+
+V2 runs three real argv vectors per scope:
+
+| Scope | Stage 1 | Stage 2 | Stage 3 |
+|---|---|---|---|
+| Branch/detached | `/usr/bin/make ci-preflight` | `/usr/bin/make ci` | `/usr/bin/python3 -B deploy/mission-control/backend-suites.py --scope branch` |
+| Main | `/usr/bin/make ci-verified` | `/usr/bin/make ui-qa` | `/usr/bin/python3 -B deploy/mission-control/backend-suites.py --scope main` |
+
+`ci-verified` runs the cheap qualification preflight before the Rust matrix.
+Main then runs real browser QA and the complete services, agent-driver,
+agent-runner and studio suites with zero skipped tests. Branch mode states
+browser/database `not_run`; it accepts only the declared PostgreSQL exclusions,
+rejecting other skips and empty execution. Its hosted names are
+`source-preflight`, `check`, `in-memory-backend`. Main names are `check`,
+`real-browser`, `backend-suites`. No omitted browser test is marked green.
+
+A v2 publication configuration must explicitly supply its profile, scope,
+exact checks and hosted tuples. For example, branch configuration adds:
+
+```json
+{
+  "jenkins_verification_profile": "forge-sdlc-jenkins-v2",
+  "jenkins_verification_scope": "branch",
+  "checks": [
+    ["/usr/bin/make", "ci-preflight"],
+    ["/usr/bin/make", "ci"],
+    ["/usr/bin/python3", "-B", "deploy/mission-control/backend-suites.py", "--scope", "branch"]
+  ],
+  "required_hosted_checks": [
+    ["jenkins/branch", "Forge branch CI v2", "source-preflight"],
+    ["jenkins/branch", "Forge branch CI v2", "check"],
+    ["jenkins/branch", "Forge branch CI v2", "in-memory-backend"]
+  ]
+}
+```
+
+The existing delivery config separately selects
+`"verification_profile": "forge-sdlc-jenkins-v2"`. The new workflow repair
+policy must freeze the same logical names in `required_hosted_checks`; an old
+workflow is not upgraded implicitly. Main selects scope `main` and its exact
+plan above. A main proof requires the candidate to equal observed main, so
+pre-merge branches cannot request main coverage under another label.
+
+V1 request/result identities and historical receipts remain strict and
+readable. V2 versions its request, result, native binding, scope and coverage;
+producer, delivery and native consumers all require the same exact records.
+Its new policy/runner paths are protected source inputs. Both profiles also
+protect the newly introduced shared contract; historical trees without that
+file retain the exact old v1 source map. Main and branch
+receipts cannot be substituted for one another, even when both have three
+rows. No SQL migration or historical evidence rewrite is involved.
+
+See [the pipeline design](../../../docs/architecture/ci-pipeline.md#7-versioned-execution-and-accounting).
+A future coordinated rollout must install matching worker/profile/verifier
+configuration. Composing the existing merge event into a main-scoped request
+is also still required for automatic post-merge execution; this source fix
+adds no broker, scheduler, live service or automatic invocation.
+
 
 ## GitHub access for the Jenkins user
 
@@ -239,6 +313,13 @@ any cache or filesystem access:
   `main` seed, the sibling entry is read-only during the restore and the
   compat-key match is still required — an incompatible entry is never reused.
   Detached runs do not seed from siblings.
+
+The sibling-seed and recursive `incremental`/`doc`/`ast` exclusions described
+here are source features pending a qualified helper rollout. The installed `8d…`
+native verifier has neither feature. Its last measured run was cold: 16m59s
+Rust, 2m54s browser and 13m00s backend, followed by 1m47s to publish 33,814 files
+(12.83 GB). Failed attempts published no snapshot. No warm-run speedup from
+that new snapshot has yet been measured.
 
 ### Compatibility key (`compat_key`)
 

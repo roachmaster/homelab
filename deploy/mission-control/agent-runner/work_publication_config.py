@@ -8,6 +8,7 @@ from types import MappingProxyType
 
 from work_worker_config import WorkerConfig, absolute_path, identifier, load_config as load_worker
 from work_verification import DEFAULT_REQUIRED_HOSTED_CHECKS
+from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, CiGateContractFactory
 
 CONFIG_ENV = "FORGE_PUBLICATION_CONFIG"
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -34,6 +35,8 @@ class PublicationConfig:
     hosted_provider: str = "github-actions"
     jenkins_delivery_config: Path | None = None
     native_delivery_mode: str = "integrate-first-v1"
+    jenkins_verification_profile: str = LEGACY_PROFILE
+    jenkins_verification_scope: str = "branch"
 
     @property
     def state_root(self):
@@ -45,7 +48,7 @@ def parse_config(raw, worker, *, source_path=None):
         raise ValueError("Publisher requires typed worker configuration")
     if not {"worker_config", "repositories", "github_config_dir"} <= raw.keys() <= {
         "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks",
-        "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode"
+        "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode", "jenkins_verification_profile", "jenkins_verification_scope"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -61,6 +64,14 @@ def parse_config(raw, worker, *, source_path=None):
     github_config = absolute_path(raw["github_config_dir"])
     if github_config != worker.account.home / ".config/gh":
         raise ValueError("Publisher uses only the existing configured GitHub account")
+    profile = raw.get("jenkins_verification_profile", LEGACY_PROFILE)
+    contract = CiGateContractFactory(profile).create()
+    execution_scope = raw.get("jenkins_verification_scope", "branch")
+    if not isinstance(execution_scope, str) or execution_scope not in {"branch", "main"}:
+        raise ValueError("Invalid Jenkins verification scope")
+    if profile == SCOPED_PROFILE and not {"jenkins_verification_scope", "checks", "required_hosted_checks"} <= raw.keys():
+        raise ValueError("Scoped Jenkins checks and hosted policy must be explicitly frozen")
+    plan = contract.plan('main' if execution_scope == 'main' else 'detached')
     checks = raw.get("checks", DEFAULT_CHECKS)
     if not isinstance(checks, (list, tuple)) or not 1 <= len(checks) <= 8:
         raise ValueError("Invalid fixed publication checks")
@@ -91,9 +102,9 @@ def parse_config(raw, worker, *, source_path=None):
         if delivery_path is None:
             raise ValueError("Jenkins verification requires explicit delivery configuration")
         delivery_path = absolute_path(delivery_path)
-        if tuple(frozen_checks) != DEFAULT_CHECKS:
-            raise ValueError("Jenkins verification requires the full fixed check suite")
-    elif delivery_path is not None:
+        if tuple(frozen_checks) != plan.checks:
+            raise ValueError("Jenkins verification requires the selected exact check suite")
+    elif delivery_path is not None or profile != LEGACY_PROFILE or "jenkins_verification_scope" in raw:
         raise ValueError("Unused Jenkins delivery configuration")
     delivery_mode = raw.get("native_delivery_mode", "integrate-first-v1")
     if not isinstance(delivery_mode, str) or delivery_mode not in {"integrate-first-v1", "branch-first-v1"}:
@@ -105,18 +116,19 @@ def parse_config(raw, worker, *, source_path=None):
             or any(not isinstance(row, (tuple, list)) or len(row) != 3
                    or any(not isinstance(value, str) or not value or len(value) > 200
                           or any(ord(char) < 32 for char in value) for value in row)
-                   or not row[0].startswith(".github/workflows/") or ".." in Path(row[0]).parts
+                   or not (row[0].startswith("jenkins/") if hosted_provider == "jenkins" and profile == SCOPED_PROFILE
+                           else row[0].startswith(".github/workflows/")) or ".." in Path(row[0]).parts
                    for row in required)
             or len({tuple(row) for row in required}) != len(required)
             or len({row[2] for row in required}) != len(required)):
         raise ValueError("Invalid required hosted checks")
-    if hosted_provider == "jenkins" and tuple(tuple(row) for row in required) != DEFAULT_REQUIRED_HOSTED_CHECKS:
-        raise ValueError("Jenkins verification requires the unchanged logical gate identities")
+    if hosted_provider == "jenkins" and tuple(tuple(row) for row in required) != plan.required_hosted_checks:
+        raise ValueError("Jenkins verification requires the selected exact logical gate identities")
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
                              tuple(tuple(row) for row in required), merge_enabled, merge_method,
-                             hosted_provider, delivery_path, delivery_mode)
+                             hosted_provider, delivery_path, delivery_mode, profile, execution_scope)
 
 
 def _object(pairs):

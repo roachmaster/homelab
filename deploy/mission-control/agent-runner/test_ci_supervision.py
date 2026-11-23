@@ -827,7 +827,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         self._git('bundle', 'create', str(bundle), ref)
         return bundle.read_bytes()
 
-    def _gate_manifest(self, commit, checks, profile='fixture-profile'):
+    def _gate_manifest(self, commit, checks, profile='fixture-profile', branch_scope='detached', branch_checks=None):
         rows = self._git('ls-tree', '-r', '-z', '--full-tree', commit)
         protected = {}
         for record in rows.split(b'\0'):
@@ -836,14 +836,19 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             descriptor, raw_path = record.split(b'\t', 1)
             mode, _kind, blob = descriptor.decode().split()
             path = raw_path.decode('utf-8')
-            if CI.protected_gate_path(path):
+            if CI.profile_protected_gate_path(path, profile):
                 protected[path] = [mode, blob]
         helper_digest = hashlib.sha256(Path(CI.__file__).read_bytes()).hexdigest()
-        return helper_digest, hashlib.sha256(CI.canonical({
-            'version': 1, 'provider': 'jenkins', 'profile': profile,
-            'checks': checks, 'verifier_sha256': helper_digest,
-            'source_gate_sha256': hashlib.sha256(CI.canonical(protected)).hexdigest(),
-        })).hexdigest()
+        policy = {'version': 2 if profile == CI.SCOPED_PROFILE else 1,
+            'provider': 'jenkins', 'profile': profile,
+            'checks': (branch_checks if branch_scope != 'main' else checks)
+                      if profile == CI.SCOPED_PROFILE else checks,
+            'verifier_sha256': helper_digest,
+            'source_gate_sha256': hashlib.sha256(CI.canonical(protected)).hexdigest()}
+        if profile == CI.SCOPED_PROFILE:
+            policy['branch_scope'] = branch_scope
+        return helper_digest, hashlib.sha256(CI.canonical(policy)).hexdigest()
+
 
     def _run_supervisor(
         self,
@@ -886,20 +891,21 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             branch_labels = CI.BRANCH_CHECK_LABELS
         bundle = self._make_bundle(commit)
         tree = self._git('rev-parse', commit + '^{tree}').decode().strip()
-        helper_digest, manifest = self._gate_manifest(commit, checks, profile=profile)
+        helper_digest, manifest = self._gate_manifest(commit, checks, profile=profile,
+            branch_scope=branch_scope, branch_checks=branch_checks)
         sub_dir = self.spool / action
         if not sub_dir.exists():
             sub_dir.mkdir(mode=0o700)
             (sub_dir / 'candidate.bundle').write_bytes(bundle)
             (sub_dir / 'candidate.bundle').chmod(0o600)
             req = {
-                'version': 1, 'action_id': action, 'workflow_id': workflow_id or str(uuid4()),
+                'version': 2 if profile == CI.SCOPED_PROFILE else 1, 'action_id': action, 'workflow_id': workflow_id or str(uuid4()),
                 'project_alias': 'homelab', 'candidate_commit': commit, 'candidate_tree': tree,
                 'expected_main': expected_main, 'branch_scope': branch_scope,
                 'gate_manifest_sha256': manifest, 'bundle_sha256': hashlib.sha256(bundle).hexdigest(),
                 'verification_profile': profile, 'correlation_id': str(uuid4()),
             }
-            (sub_dir / 'request.json').write_text(json.dumps(req, sort_keys=True))
+            (sub_dir / 'request.json').write_bytes(CI.canonical(req) + b'\n')
             (sub_dir / 'request.json').chmod(0o600)
         cache_raw = {
             'enabled': True,
@@ -954,6 +960,8 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
 
         with patch.object(CI, 'CHECKS', checks), \
              patch.object(CI, 'BRANCH_CHECKS', branch_checks), \
+             patch.object(CI, 'SCOPED_BRANCH_CHECKS', branch_checks), \
+             patch.object(CI, 'SCOPED_MAIN_CHECKS', checks), \
              patch.object(CI, 'BRANCH_CHECK_LABELS', branch_labels), \
              patch.object(CI, 'TRUSTED_CACHE_ROOT_PREFIX', self.root), \
              patch.object(CI.pwd, 'getpwnam', side_effect=lambda name: build if name == 'forge_ci' else submitter), \
@@ -1114,15 +1122,13 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             self.assertEqual(env['CARGO_INCREMENTAL'], '0')
             self.assertEqual(env['CARGO_PROFILE_DEV_DEBUG'], 'line-tables-only')
 
-    def test_branch_checks_are_a_subset_of_the_full_gate(self):
-        self.assertEqual(set(CI.BRANCH_CHECKS) - set(CI.CHECKS), set())
-        self.assertEqual(CI.checks_for_scope('main'), (CI.CHECKS, CI.CHECK_LABELS))
-        self.assertEqual(CI.checks_for_scope('branch/feat/x'),
-                         (CI.BRANCH_CHECKS, CI.BRANCH_CHECK_LABELS))
-        self.assertEqual(CI.checks_for_scope('detached'),
-                         (CI.BRANCH_CHECKS, CI.BRANCH_CHECK_LABELS))
-        self.assertNotIn('make ui-qa', CI.BRANCH_CHECK_LABELS)
-        self.assertEqual(len(CI.BRANCH_CHECKS), len(CI.BRANCH_CHECK_LABELS))
+    def test_versioned_scope_keeps_legacy_full_and_new_stages_explicit(self):
+        for scope in ('main', 'branch/feat-x', 'detached'):
+            self.assertEqual(CI.checks_for_scope(scope, CI.LEGACY_PROFILE), (CI.CHECKS, CI.CHECK_LABELS))
+        self.assertEqual(CI.checks_for_scope('main', CI.SCOPED_PROFILE)[0], CI.SCOPED_MAIN_CHECKS)
+        self.assertEqual(CI.checks_for_scope('branch/feat-x', CI.SCOPED_PROFILE)[0], CI.SCOPED_BRANCH_CHECKS)
+        self.assertEqual(len(CI.SCOPED_BRANCH_CHECKS), 3)
+        self.assertNotIn(('/usr/bin/make', 'ui-qa'), CI.SCOPED_BRANCH_CHECKS)
 
     def test_branch_scope_runs_in_memory_checks_only(self):
         full = (
@@ -1130,7 +1136,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             ('/usr/bin/python3', '-c', 'print("two")'),
             ('/usr/bin/python3', '-c', 'print("three")'),
         )
-        subset = (full[0], full[2])
+        subset = (('/usr/bin/python3', '-c', 'print("preflight")'), full[0], full[2])
         seen = []
         def capture(argv, *, cwd, env, account, log, timeout, cancelled):
             seen.append(tuple(argv))
@@ -1140,7 +1146,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         r1, log1, _ = self._run_supervisor(
             commit=self.base_commit, expected_main='0' * 40,
             branch_scope='branch/' + CI.canonical_branch_slug('feat/split'),
-            checks=full, branch_checks=subset,
+            checks=full, branch_checks=subset, profile=CI.SCOPED_PROFILE,
             workflow_id=str(uuid4()), run_child_override=capture,
         )
         self.assertEqual(r1['status'], 'passed', log1)
@@ -1153,7 +1159,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             ('/usr/bin/python3', '-c', 'print("two")'),
             ('/usr/bin/python3', '-c', 'print("three")'),
         )
-        subset = (full[0], full[2])
+        subset = (('/usr/bin/python3', '-c', 'print("preflight")'), full[0], full[2])
         seen = []
         def capture(argv, *, cwd, env, account, log, timeout, cancelled):
             seen.append(tuple(argv))
@@ -1179,7 +1185,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         r1, log1, _ = self._run_supervisor(
             commit=self.base_commit, expected_main='0' * 40,
             branch_scope='branch/' + CI.canonical_branch_slug('feat/split-env'),
-            workflow_id=str(uuid4()), run_child_override=capture_env,
+            workflow_id=str(uuid4()), run_child_override=capture_env, profile=CI.SCOPED_PROFILE,
         )
         self.assertEqual(r1['status'], 'passed', log1)
         self.assertTrue(seen_envs)
@@ -1189,7 +1195,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
         r2, log2, _ = self._run_supervisor(
             commit=self.base_commit, expected_main=self.base_commit,
             branch_scope='main',
-            workflow_id=str(uuid4()), run_child_override=capture_env,
+            workflow_id=str(uuid4()), run_child_override=capture_env, profile=CI.SCOPED_PROFILE,
         )
         self.assertEqual(r2['status'], 'passed', log2)
         self.assertTrue(seen_envs)
@@ -2118,11 +2124,10 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             ('/usr/bin/python3', '-c', 'print("ui-qa-stub")'),
             ('/usr/bin/python3', '-c', 'print("unit-stub")'),
         )
-        # The gate/cache identity retains all three fixture commands while
-        # branch execution selects only its cargo/unit subset, just as the
-        # production profile omits browser QA on branches.
-        branch_checks = (checks[0], checks[2])
-        branch_labels = (CI.CHECK_LABELS[0], CI.CHECK_LABELS[2])
+        # The legacy profile retains the full three-command execution and identity
+        # on branches. Versioned scope selection is exercised separately.
+        branch_checks = checks
+        branch_labels = CI.CHECK_LABELS
         expected_branch_checks = [
             {'index': i, 'argv': list(argv), 'returncode': 0}
             for i, argv in enumerate(branch_checks)
@@ -2192,6 +2197,8 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
 
             with patch.object(CI, 'CHECKS', checks), \
                  patch.object(CI, 'BRANCH_CHECKS', branch_checks), \
+             patch.object(CI, 'SCOPED_BRANCH_CHECKS', branch_checks), \
+             patch.object(CI, 'SCOPED_MAIN_CHECKS', checks), \
                  patch.object(CI, 'BRANCH_CHECK_LABELS', branch_labels), \
                  patch.object(CI, 'TRUSTED_CACHE_ROOT_PREFIX', self.root), \
                  patch.object(CI.pwd, 'getpwnam', side_effect=lambda name: build if name == 'forge_ci' else submitter), \

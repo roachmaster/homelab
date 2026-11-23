@@ -12,6 +12,7 @@ Used by `make backend-suites` and by the `check` job in
 .github/workflows/rust.yml (main runs only).
 """
 
+import argparse
 import os
 from pathlib import Path
 import subprocess
@@ -85,8 +86,47 @@ def run_suite(start_dir, pattern, env):
     return proc.returncode
 
 
-def main():
+# Fast source/profile checks precede the expensive workspace/browser stages.
+# The true tiny-Cargo E2E exercises the producer boundary rather than a mock receipt.
+PREFLIGHT_TESTS = (
+    'test_ci_contract', 'test_jenkins_m27_boundary', 'test_backend_suites',
+    'test_work_external_delivery', 'test_work_native_jenkins',
+    'test_ci_supervision.SupervisionBoundaryTest',
+    'test_ci_supervision.CargoCacheSupervisorIntegrationTest.test_end_to_end_delivery_prepare_submission_to_supervisor_reuse_and_extra_guards',
+)
+BRANCH_RUNNER_CODE = RUNNER_CODE.replace(
+    "if not res.wasSuccessful() or res.testsRun == 0 or res.skipped:\n",
+    "declared_db = [(test, reason) for test, reason in res.skipped "
+    "if getattr(type(test), '__unittest_skip__', False) is True "
+    "and getattr(type(test), '__unittest_skip_why__', None) == reason "
+    "and getattr(sys.modules.get(type(test).__module__), 'PG16_AVAILABLE', None) is False "
+    "and 'postgres' in reason.lower()]\n"
+    "unexpected = len(res.skipped) - len(declared_db)\n"
+    "executed = res.testsRun - len(res.skipped)\n"
+    "print(f'MEMORY_SUMMARY executed={executed} db_not_run={len(declared_db)} unexpected_skips={unexpected}', flush=True)\n"
+    "if not res.wasSuccessful() or executed == 0 or unexpected:\n",
+)
+
+
+def main(argv=()):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--scope', choices=('main', 'branch', 'preflight'), default='main')
+    scope = parser.parse_args(argv).scope
     env = dict(os.environ)
+    if scope == 'preflight':
+        code = RUNNER_CODE.replace(
+            "unittest.defaultTestLoader.discover('.', pattern=__PATTERN__)",
+            'unittest.defaultTestLoader.loadTestsFromNames(' + repr(PREFLIGHT_TESTS) + ')')
+        return subprocess.run([sys.executable, '-B', '-c', code],
+            cwd=REPO_ROOT / 'deploy/mission-control/agent-runner', env=env, check=False).returncode
+    if scope == 'branch':
+        env['FORGE_DISABLE_DISPOSABLE_POSTGRES'] = '1'
+        print('COVERAGE scope=branch browser=not_run database=not_run', flush=True)
+        return subprocess.run([sys.executable, '-B', '-c',
+            BRANCH_RUNNER_CODE.replace('__PATTERN__', repr('test_*.py'))],
+            cwd=REPO_ROOT / 'deploy/mission-control/agent-runner', env=env, check=False).returncode
+    if env.get('FORGE_DISABLE_DISPOSABLE_POSTGRES') == '1':
+        raise ValueError('Main backend verification must run disposable PostgreSQL tests')
     env.update(studio_env())
     for start_dir, pattern in SUITES:
         code = run_suite(REPO_ROOT / start_dir, pattern, env)
@@ -96,4 +136,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

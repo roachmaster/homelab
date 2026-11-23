@@ -1,12 +1,16 @@
 # CI pipeline: branch and main
 
-**Status: drafted 2026-11-22 from Leonardo's pipeline spec (below). The
-imports check is built and wired into `make ci`; the branch/main split
-is implemented (section 7). The one-combination cut in section 6
-(`forge-template` bare → check-only) is still a proposal, not yet
-applied. `forge-llama` and the demo crates were removed from the
-workspace (crate-dependency-tree.md section 9), which took `make ci`
-from 14 cargo configurations to 11.**
+**Source status, 2026-11-23:** the explicitly selected
+`forge-sdlc-jenkins-v2` contract implements the branch/main split below.
+It is not active on Mission Control yet. The last installed native verifier is
+`8d0cdefc…`, profile v1: three full legacy commands on every scope. Source v1
+keeps that behavior, including database/browser execution. The last release
+qualified `95651a5` with native Jenkins #17 and a separate three-suite operator
+companion #1. It did not replace the installed helper or activate v2.
+
+The imports/layers checks are wired into `make ci`. `forge-llama` and the demo
+crates are retired; `forge-kernel` is now `forge-system`. The `forge-template`
+check-only cut remains a proposal.
 
 ## 1. The spec
 
@@ -153,48 +157,92 @@ all three demo combinations and the llama build from every
 configuration. The remaining cut is the single `forge-template` bare
 combination above.
 
-## 7. What changed (implemented 2026-11-22)
+## 7. Versioned execution and accounting
 
-- **Makefile**: `make ci-main` runs `make ci`, then `make ui-qa`, then
-  `make backend-suites` (sequential on purpose: the stages share the
-  build output directory). `backend-suites` runs
-  `deploy/mission-control/backend-suites.py`, which is the single
-  implementation of the four-suite zero-skips runner previously inlined
-  in `rust.yml`.
-- **Jenkins** (`verify-candidate.py`): candidate verification is
-  scope-dependent. A branch scope runs `BRANCH_CHECKS` — `make ci` plus
-  the agent-runner unittest discover with
-  `FORGE_DISABLE_DISPOSABLE_POSTGRES=1`, which makes the
-  disposable-PostgreSQL tests skip (`work_pg_fixture.py`). The `main`
-  scope runs the full `CHECKS`. The cache key and the gate manifest
-  always use the full `CHECKS`: the compiled artifacts are identical
-  whether or not `make ui-qa` subsequently runs, so branch runs keep
-  reusing main's snapshots.
-- **GitHub `rust.yml`**: the PostgreSQL install and the backend-suites
-  step carry `if: github.event_name != 'pull_request'`; PR runs are
-  `make ci` only (plus the game-asset tests and the `pr-fast-gate`
-  job, which no longer installs PostgreSQL). The backend-suites step
-  calls `backend-suites.py`.
-- **GitHub `ide-ui-browser.yml`**: the `pull_request` trigger STAYS —
-  `real-browser` is a required hosted check
-  (`DEFAULT_REQUIRED_HOSTED_CHECKS` in `work_verification.py`), and a
-  missing check would stall Forge tasks forever. Instead, the `make
-  ui-qa` step carries `if: github.event_name != 'pull_request'`: on a
-  PR the job runs the in-memory harness checks (`unittest discover` +
-  `make ui-qa-check`) and stops; the real browser run happens only on
-  the main pipeline build. Same shape as the `rust.yml` split: the job
-  runs on PRs, the out-of-memory steps do not.
-- **`make dead-code`**: keeps its own overlapping profile set and is not
-  part of `make ci`; out of scope for this revision.
+`work_ci_contract.py` is the pure typed worker contract. Its factory validates
+an explicit profile before creating a scope plan. The root-owned standalone
+verifier mirrors the closed command declarations; it never imports candidate
+Python to select privileged policy. The producer and both consumers are tested
+together against actual supervisor request/result records.
+
+| Profile/scope | Exact execution rows, in order | Logical hosted checks |
+|---|---|---|
+| v1, every scope | `make ci`; `make ui-qa`; agent-runner unittest discovery | `check`, `real-browser`, `pr-fast-gate` |
+| v2 branch/detached | `make ci-preflight`; `make ci`; `python3 -B deploy/mission-control/backend-suites.py --scope branch` | `source-preflight`, `check`, `in-memory-backend` |
+| v2 main | `make ci-verified`; `make ui-qa`; `python3 -B deploy/mission-control/backend-suites.py --scope main` | `check`, `real-browser`, `backend-suites` |
+
+The executable paths in protected records are `/usr/bin/make` and
+`/usr/bin/python3`. Each scope produces three real command records. This keeps
+historical SQL repair envelopes compatible without inventing a browser pass or
+a synthetic third command. Main scope requires the candidate to equal the
+trusted observed main revision; a pre-merge branch cannot claim a main proof.
+
+`make ci-preflight` runs the fast source/profile/Python boundaries, including
+M27 fingerprints and the tiny real delivery/cache E2E, before workspace
+compilation. `make ci-verified` runs preflight then `make ci` sequentially.
+`make ci-main` runs that target, real browser QA, then all four backend suites.
+The main runner rejects disabled PostgreSQL, failures, errors, empty suites and
+any skipped test. Main browser QA prepares its real agent/host fixtures.
+
+Branch mode explicitly disables disposable PostgreSQL and records browser and
+database coverage as `not_run`. Only skips identified as the declared
+PostgreSQL fixture exclusions are allowed there; unexpected skips or zero
+executed tests fail. This branch proof is not a full-main proof. Its hosted
+names contain no `real-browser` result.
+
+### Explicit bootstrap and immutable identities
+
+Old delivery/publication configurations default to v1. New installations
+render v2; `setup-ci.py --native-only` inherits its installed profile unless
+`--verification-profile forge-sdlc-jenkins-v2` is explicitly supplied. No
+installer, live configuration, job or service is changed by this source fix.
+
+V2 publication configuration explicitly freezes
+`jenkins_verification_profile`, `jenkins_verification_scope`, the exact
+`checks` vectors and the exact `required_hosted_checks` tuples from the
+selected plan. Its separate delivery config must select the same
+`verification_profile`. The workflow's frozen repair policy must name that
+scope's logical checks as well. An old workflow requiring the old three names
+cannot silently become a branch-fast workflow after a config switch.
+
+V1 request/result version, gate hash inputs, transport digest and native action
+namespace remain compatible. V2 has distinct request/result and native-binding
+versions. Its gate digest additionally binds the actual branch scope and exact
+scoped commands. Coverage metadata must match the selected plan. Missing,
+extra, reordered, cross-profile or cross-scope command records fail closed.
+Inactive historical v1 cleanup evidence remains readable under a replacement
+transport, without rewriting history or authorizing an active v2 replay.
+
+New consumed policy files (the backend runner, shared contract and changed
+provider/configuration paths) are protected inputs for v2. Both profiles protect the new shared authority file; it is absent from
+historical trees, so their v1 source maps remain identical. Other added source
+paths remain v2-specific. The compiler compatibility identity includes the complete
+v2 execution graph, while storage and gate records retain their own validated
+branch scopes; cache reuse cannot upgrade branch coverage into main coverage.
+
+### Source and runtime separation
+
+A deliberate future rollout must qualify and install the matching verifier,
+profile and worker configuration together. Automatically invoking a full main
+verification after merge also requires the existing event composition to
+submit a main-scoped request. This change does not add a scheduler, broker,
+service or automatic post-merge invocation. The standalone main entrypoint and
+its strict consumer contract are implemented and testable independently.
+
+The GitHub workflow files are separate source artifacts from the earlier
+split. This change enables or submits no GitHub Actions workflow. Hosted
+labels in v2 Jenkins configuration use `jenkins/<scope>` metadata rather than
+pretending to be a GitHub browser job.
 
 ## 8. Open items
 
 - Per-combination wall time (cold/warm) and a trial run of the reduced
   `make ci` before applying the section 6 cut.
-- Whether any of the four backend suites is fully in-memory and could
-  move back to the PR runs: the split today is by mechanism (the
-  `PG16_AVAILABLE` gate skips DB tests on branches; whole suites run on
-  main), not by a per-file classification.
+- Classify remaining service/driver/studio cases before moving any into the
+  branch stage. The current branch plan runs only declared agent-runner
+  in-memory coverage; main runs all four suites.
+- Qualify an intentional v2 rollout and compose the existing post-merge event
+  into a main-scoped request; neither is claimed active by this source change.
 - The `forge-kernel` rename is done: the crate is now `forge-system`
   (crate-dependency-tree.md section 10). The `forge-llama` and
   demo-crate decisions are done too: both removed from the workspace.

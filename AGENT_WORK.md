@@ -25,6 +25,8 @@ Follow-up: replaced all six removed forge-bootstrap-demo commands in src/rust/RE
 
 Layer enforcement integration13301ce: actual source-aware Python graph/lexer guard replaces the weak literal scan; Rust-only contract tests retain no Python dependency.19 bypass/allowed regressions,39 parser/import tests,89 core tests/doctests, Clippy, formatting and source scans passed on the component. No production type/signature changes. Final integrated gates remain pending.
 
+CI integration7745032: explicit legacy/scoped contracts drive closed privileged producer and typed delivery/native consumers. Main runs all four zero-skip backend suites; declared branch tests keep browser/DB not-run.140 focused contract/producer/consumer/bootstrap/history/repair tests passed28.625s, zero outer skips; frozen v1 maps and current policy selection remain explicit.11 intentional raw qualifications follow independent review;26 historical migrations and20 authority ASTs remain unchanged. Installed services/configuration are untouched.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22

@@ -26,6 +26,8 @@ LOG = logging.getLogger("forge-review")
 SNAPSHOT_ACQUISITION_WAIT_SECONDS = 30
 
 
+from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, V2_PROTECTED_PATHS
+
 def validate_review(config, job):
     if not isinstance(job, dict):
         raise PublicationError("invalid_review_lease")
@@ -121,7 +123,7 @@ def _tree_map(git, repository, head):
     return result
 
 
-def protected_gate_path(path):
+def protected_gate_path(path, *, profile=LEGACY_PROFILE):
     name = path.rsplit("/", 1)[-1]
     return (path.startswith(".github/") or path.startswith(".cargo/") or "/.cargo/" in path
             or path.startswith("src/rust/scripts/") or path.startswith("tests/") or "/tests/" in path
@@ -130,12 +132,14 @@ def protected_gate_path(path):
                 "Makefile", "makefile", "GNUmakefile", "Cargo.toml", "Cargo.lock", "build.rs",
                 "rust-toolchain", "rust-toolchain.toml", "clippy.toml", ".clippy.toml",
                 "rustfmt.toml", ".rustfmt.toml", "deny.toml",
-                "work_publication_checks.py", "work_verification.py", "work_verification_init.py", "work_policy.py"})
+                "work_publication_checks.py", "work_verification.py", "work_verification_init.py", "work_policy.py"}
+            or path == 'deploy/mission-control/agent-runner/work_ci_contract.py'
+            or profile == SCOPED_PROFILE and path in V2_PROTECTED_PATHS)
 
 
-def gate_source_digest(git, repository, head):
+def gate_source_digest(git, repository, head, *, profile=LEGACY_PROFILE):
     selected = {path: value for path, value in _tree_map(git, repository, head).items()
-                if protected_gate_path(path)}
+                if protected_gate_path(path, profile=profile)}
     return hashlib.sha256(json.dumps(selected, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -195,7 +199,8 @@ class ReviewedCandidateProvider:
         if repository.is_symlink() or not repository.is_dir():
             raise PublicationError("review_candidate_changed")
         self.git.verify(repository, job["candidate_commit"])
-        source_digest = gate_source_digest(self.git, repository, job["candidate_commit"])
+        source_digest = gate_source_digest(self.git, repository, job["candidate_commit"],
+            profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
         if (manifest.get("gate_source_sha256") != source_digest
                 or manifest["gate_manifest_sha256"] != gate_manifest_sha256(
                     self.config.checks, self.config.required_hosted_checks, source_digest)):
@@ -357,12 +362,14 @@ class ReviewWorker:
                     candidate_digest = WorkspaceLease(repository, self.config.worker.projects[job["project_alias"]],
                         repository / ".git", job["task_id"], head).digest()
                 require_lease()
-                source_gate_digest = gate_source_digest(self.git, repository, head)
+                source_gate_digest = gate_source_digest(self.git, repository, head,
+                    profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
                 check_job = {**check_job, 'candidate_commit': head, 'integration_base': integration_base,
                     'gate_manifest_sha256': gate_manifest_sha256(self.config.checks,
                         self.config.required_hosted_checks, source_gate_digest)}
                 changed = self.git._git(repository, "diff", "--name-only", "-z", job["base_revision"], head).split(b"\0")
-                gate_changes = any(protected_gate_path(path.decode("utf-8")) for path in changed if path)
+                gate_changes = any(protected_gate_path(path.decode("utf-8"),
+                    profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE)) for path in changed if path)
                 stage = "checks"
                 try:
                     report = self.checks.run(check_job, repository, lost)
@@ -475,7 +482,8 @@ class ReviewWorker:
             'reproduction':'Inspect git diff '+conflict.integration_base+' HEAD and both commit parents; retain nonconflicting current-main files.',
             'expected':'Resolve source, then pass fresh fixed checks and independent code review.',
             'actual':diagnostic_text(json.dumps(details,sort_keys=True)), 'evidence_digest':evidence,'status':'open'}
-        gate_source=gate_source_digest(self.git,repository,head)
+        gate_source=gate_source_digest(self.git,repository,head,
+            profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
         gate=gate_manifest_sha256(self.config.checks,self.config.required_hosted_checks,gate_source)
         digest=WorkspaceLease(repository,self.config.worker.projects[job['project_alias']],repository/'.git',job['task_id'],head).source_digest()
         manifest={'version':1,'review_id':job['review_id'],'task_id':job['task_id'],'attempt_id':job['attempt_id'],
@@ -517,7 +525,8 @@ class ReviewWorker:
             with self._locked(job):
                 require_lease()
                 repository, head = self.candidates.import_source(job)
-                source_digest = gate_source_digest(self.git, repository, head)
+                source_digest = gate_source_digest(self.git, repository, head,
+                    profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
                 candidate_digest = WorkspaceLease(repository, self.config.worker.projects[job["project_alias"]],
                     repository / ".git", job["task_id"], head).digest()
                 manifest = {"version": 1, "review_id": job["review_id"], "task_id": job["task_id"],

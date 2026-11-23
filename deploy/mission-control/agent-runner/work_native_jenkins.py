@@ -16,6 +16,7 @@ import time
 from uuid import UUID, uuid5
 
 from work_executor import unit_name
+from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, CiGateContractFactory, contract_for_config
 from work_external_delivery import (CHECKS, DeliveryConfig, DeliveryProviderFactory,
     LeaseLost, PROFILE, canonical, derive_branch_scope, digest, durable_json, jenkins_gate_manifest, read_private, sha, uid)
 from work_hosted_checks import HostedCheckReport
@@ -26,6 +27,12 @@ from work_verification import VerificationMetadata, check_id, gate_manifest_sha2
 
 LOG = logging.getLogger('forge-native-jenkins')
 VERSION = 'forge-native-jenkins-v1'
+SCOPED_VERSION = 'forge-native-jenkins-v2'
+
+
+def binding_version(profile):
+    CiGateContractFactory(profile)
+    return VERSION if profile == LEGACY_PROFILE else SCOPED_VERSION
 LOGICAL_CHECKS = ('check', 'real-browser', 'pr-fast-gate')
 IDENTITY = ('owner_id', 'project_alias', 'task_id', 'attempt_id', 'review_id', 'workflow_id', 'correlation_id')
 
@@ -65,6 +72,8 @@ class NativeJenkinsVerification:
         self.config, self.store, self.git, self.candidates = config, store, git, candidates
         self.delivery, self.supervisor = delivery, supervisor
         self.client = client
+        self.contract = contract_for_config(delivery.config)
+        self.version = binding_version(self.contract.profile)
         self.stop = stop if stop is not None else threading.Event()
         self.clock = clock
         self.wait = wait if wait is not None else self.stop.wait
@@ -103,19 +112,43 @@ class NativeJenkinsVerification:
 
     def _read(self, action):
         value = json.loads(read_private(self._directory(action) / 'native-binding.json', owner=os.geteuid()))
-        if (value.get('version') != VERSION or value.get('request', {}).get('action_id') != action
+        if (value.get('version') != self.version or value.get('request', {}).get('action_id') != action
                 or value.get('transport_sha256') != self._transport_digest()):
             raise PublicationError('native_ci_state_changed')
+        if self.contract.profile == SCOPED_PROFILE:
+            plan = self._plan(value)
+            if plan.checks != self.config.checks or plan.required_hosted_checks != self.config.required_hosted_checks:
+                raise PublicationError('native_ci_configured_scope_changed')
         return value
 
     def _transport_digest(self):
         selected = self.delivery.config
-        return hashlib.sha256(canonical({
+        identity = {
             'binary_sha256': selected.jenkins_binary_sha256,
             'config_sha256': hashlib.sha256(read_private(selected.jenkins_config)).hexdigest(),
             'job': selected.jenkins_job, 'spool': str(selected.spool_root),
             'results': str(selected.results_root), 'verifier': str(selected.verifier),
-        })).hexdigest()
+        }
+        if self.contract.profile == SCOPED_PROFILE:
+            identity.update(verification_profile=self.contract.profile,
+                verification_scope=self.config.jenkins_verification_scope)
+        return hashlib.sha256(canonical(identity)).hexdigest()
+
+    def _plan(self, binding):
+        request = binding['request']
+        profile = request.get('verification_profile', LEGACY_PROFILE)
+        if binding.get('version') != binding_version(profile):
+            raise PublicationError('native_ci_profile_changed')
+        plan = CiGateContractFactory(profile).create().plan(request.get('branch_scope', 'detached'))
+        if profile == SCOPED_PROFILE and (binding.get('logical_checks') != list(plan.logical_checks)
+                or binding.get('policy_required_hosted_checks') != list(plan.logical_checks)):
+            raise PublicationError('native_ci_policy_scope_changed')
+        return plan
+
+    def _commands(self, binding):
+        plan = self._plan(binding)
+        return self.config.checks if plan.profile == LEGACY_PROFILE else plan.checks
+
 
     def _historical_terminal(self, directory):
         """Read-only cleanup proof for an inactive action's retired transport.
@@ -126,7 +159,9 @@ class NativeJenkinsVerification:
         try:
             action = uid(directory.name)
             binding = json.loads(read_private(directory / 'native-binding.json', owner=os.geteuid()))
-            if (binding.get('version') != VERSION or binding.get('transport_sha256') == self._transport_digest()
+            profile = binding.get('request', {}).get('verification_profile', LEGACY_PROFILE)
+            frozen_version = binding_version(profile)
+            if (binding.get('version') != frozen_version or binding.get('transport_sha256') == self._transport_digest()
                     or digest(binding['transport_sha256']) != binding['transport_sha256']):
                 return False
             request = binding['request']
@@ -136,7 +171,7 @@ class NativeJenkinsVerification:
             identity = {**scope, 'candidate_commit': sha(request['candidate_commit']),
                 'candidate_tree': sha(request['candidate_tree']),
                 'native_gate_manifest_sha256': digest(binding['native_gate_manifest_sha256'])}
-            expected_action = str(uuid5(UUID(scope['workflow_id']), VERSION + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
+            expected_action = str(uuid5(UUID(scope['workflow_id']), frozen_version + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
             if action != expected_action or request.get('prepare_action_id') != str(uuid5(UUID(action),'candidate-bundle')):
                 return False
             observed = None
@@ -153,11 +188,12 @@ class NativeJenkinsVerification:
                 return False
             raw_request = read_private(self.delivery.config.spool_root / action / 'request.json', owner=os.geteuid())
             submitted = json.loads(raw_request)
-            expected = {'version': 1, 'action_id': action, 'workflow_id': scope['workflow_id'],
+            plan = self._plan(binding)
+            expected = {'version': plan.result_version, 'action_id': action, 'workflow_id': scope['workflow_id'],
                 'project_alias': scope['project_alias'], 'candidate_commit': sha(request['candidate_commit']),
                 'candidate_tree': sha(request['candidate_tree']), 'expected_main': sha(request['integration_base']),
                 'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
-                'verification_profile': PROFILE, 'correlation_id': scope['correlation_id']}
+                'verification_profile': profile, 'correlation_id': scope['correlation_id']}
             if 'branch_scope' in request:
                 expected['branch_scope'] = request['branch_scope']
             if (set(submitted) != set(expected) | {'bundle_sha256'} or type(submitted['version']) is not int
@@ -167,7 +203,8 @@ class NativeJenkinsVerification:
             root_raw = read_private(self.delivery.config.results_root / (action + '.json'), owner=0, maximum=262144)
             root = json.loads(root_raw)
             if (digest(receipt['check_receipt_sha256']) != hashlib.sha256(root_raw).hexdigest()
-                    or type(root.get('version')) is not int or root['version'] != 1
+                    or type(root.get('version')) is not int or root['version'] != plan.result_version
+                    or plan.coverage is not None and root.get('coverage') != plan.coverage
                     or root.get('status') not in {'passed','failed'} or root.get('cleanup_confirmed') is not True
                     or any(root.get(key) != value for key,value in expected.items() if key != 'project_alias')
                     or root.get('request_sha256') != hashlib.sha256(raw_request).hexdigest()):
@@ -180,11 +217,12 @@ class NativeJenkinsVerification:
             if observed['status'] == 'passed' and root['status'] != 'passed':
                 return False
             checks = root.get('checks')
-            if (not isinstance(checks,list) or len(checks)>len(CHECKS)
+            commands = plan.checks
+            if (not isinstance(checks,list) or len(checks)>len(commands)
                     or any(not isinstance(check,dict) or set(check)!={'index','argv','returncode'}
-                        or type(check['index']) is not int or check['index']!=index or check['argv']!=list(CHECKS[index])
+                        or type(check['index']) is not int or check['index']!=index or check['argv']!=list(commands[index])
                         or type(check['returncode']) is not int for index,check in enumerate(checks))
-                    or root['status']=='passed' and (len(checks)!=len(CHECKS)
+                    or root['status']=='passed' and (len(checks)!=len(commands)
                         or any(check['returncode']!=0 for check in checks))):
                 return False
             current = self.store.native_ci_binding(scope)
@@ -320,16 +358,18 @@ class NativeJenkinsVerification:
             files[path] = [mode, blob]
         return files
 
-    def _source(self, job, repository):
+    def _source(self, job, repository, branch_scope=None):
         head = sha(self.git._git(repository, 'rev-parse', 'HEAD').decode().strip())
         if head != job['candidate_commit']:
             raise PublicationError('native_ci_candidate_changed')
         tree = sha(self.git._git(repository, 'rev-parse', head + '^{tree}').decode().strip())
         native_gate = gate_manifest_sha256(self.config.checks, self.config.required_hosted_checks,
-            gate_source_digest(self.git, repository, head))
+            gate_source_digest(self.git, repository, head, profile=self.contract.profile))
         if native_gate != job['gate_manifest_sha256']:
             raise PublicationError('native_ci_gate_changed')
-        source, helper, gate = jenkins_gate_manifest(self.delivery.config, self._files(repository, head))
+        files = self._files(repository, head)
+        source, helper, gate = (jenkins_gate_manifest(self.delivery.config, files, branch_scope)
+            if self.contract.profile == SCOPED_PROFILE else jenkins_gate_manifest(self.delivery.config, files))
         return head, tree, native_gate, source, helper, gate
 
     def _prepare(self, job, repository):
@@ -337,12 +377,8 @@ class NativeJenkinsVerification:
         scope = self._scope(context, job)
         if context.get('active') is not True:
             raise PublicationError('native_ci_scope_inactive')
-        head, tree, native_gate, source, helper, gate = self._source(job, repository)
+        head = sha(self.git._git(repository, 'rev-parse', 'HEAD').decode().strip())
         expected_main = sha(job['integration_base'])
-        identity = {**scope, 'candidate_commit': head, 'candidate_tree': tree,
-                    'native_gate_manifest_sha256': native_gate}
-        action = str(uuid5(UUID(scope['workflow_id']), VERSION + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
-        prepare = str(uuid5(UUID(action), 'candidate-bundle'))
         publication = None
         if getattr(self.config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1':
             path = self.delivery.config.state_root / 'branches' / (scope['review_id'] + '.json')
@@ -353,19 +389,36 @@ class NativeJenkinsVerification:
             publication['event_id'] = uid(event['event_id'])
             if publication.get('scope') != scope or publication.get('candidate_commit') != head:
                 raise PublicationError('native_branch_identity_changed')
-        source_branch = ('main' if head == expected_main
+        source_branch = (publication['branch'] if self.contract.profile == SCOPED_PROFILE and publication is not None
+                         else 'main' if head == expected_main
                          else publication['branch'] if publication is not None else None)
         branch_scope = derive_branch_scope(
             candidate_commit=head, expected_main=expected_main, source_branch=source_branch,
         )
+        plan = self.contract.plan(branch_scope)
+        if self.contract.profile == SCOPED_PROFILE and tuple(job.get('policy', {}).get('required_hosted_checks', ())) != plan.logical_checks:
+            raise PublicationError('native_ci_policy_scope_changed')
+        if self.contract.profile == SCOPED_PROFILE and (plan.checks != self.config.checks
+                or plan.required_hosted_checks != self.config.required_hosted_checks):
+            raise PublicationError('native_ci_configured_scope_changed')
+        head, tree, native_gate, source, helper, gate = self._source(job, repository, branch_scope)
+        identity = {**scope, 'candidate_commit': head, 'candidate_tree': tree,
+                    'native_gate_manifest_sha256': native_gate}
+        action = str(uuid5(UUID(scope['workflow_id']), self.version + ':' + hashlib.sha256(canonical(identity)).hexdigest()))
+        prepare = str(uuid5(UUID(action), 'candidate-bundle'))
         request = {**scope, 'action_id': action, 'prepare_action_id': prepare,
             'candidate_commit': head, 'candidate_tree': tree, 'integration_base': expected_main,
             'branch_scope': branch_scope, 'gate_manifest_sha256': gate}
         if source_branch is not None:
             request['source_branch'] = source_branch
-        binding = {'version': VERSION, 'scope': scope, 'request': request,
+        if self.contract.profile == SCOPED_PROFILE:
+            request['verification_profile'] = self.contract.profile
+        binding = {'version': self.version, 'scope': scope, 'request': request,
             'native_gate_manifest_sha256': native_gate, 'jenkins_gate_source_sha256': source,
             'verifier_sha256': helper, 'transport_sha256': self._transport_digest()}
+        if self.contract.profile == SCOPED_PROFILE:
+            binding['logical_checks'] = list(plan.logical_checks)
+            binding['policy_required_hosted_checks'] = list(job['policy']['required_hosted_checks'])
         if publication is not None:
             binding['source_publication'] = publication
         directory = self._directory(action)
@@ -402,7 +455,7 @@ class NativeJenkinsVerification:
             # journal or send its first POST. No native commit is rewritten.
             durable_json(path, binding)
         index = self._index(scope['review_id'])
-        expected_index = {'version': VERSION, 'action_id': action}
+        expected_index = {'version': self.version, 'action_id': action}
         if index.exists():
             if json.loads(read_private(index, owner=os.geteuid())) != expected_index:
                 raise PublicationError('native_ci_review_changed')
@@ -420,7 +473,7 @@ class NativeJenkinsVerification:
     def _cancel_once(self, binding):
         request = binding['request']
         directory = self._directory(request['action_id'])
-        cancellation = {'version': VERSION, 'action_id': request['action_id'], 'scope': binding['scope']}
+        cancellation = {'version': binding['version'], 'action_id': request['action_id'], 'scope': binding['scope']}
         marker = directory / 'cancel-intent.json'
         if marker.exists():
             if json.loads(read_private(marker, owner=os.geteuid())) != cancellation:
@@ -463,11 +516,17 @@ class NativeJenkinsVerification:
     def _report(self, binding, result, *, code=None, cleanup=None):
         raw_receipt = result.get('receipt', {})
         receipt = raw_receipt if isinstance(raw_receipt,dict) else {}
-        accounting = native_check_accounting(self.config.checks, raw_receipt)
+        commands = self._commands(binding)
+        plan = self._plan(binding)
+        schema_valid = (plan.profile == LEGACY_PROFILE or
+            (receipt.get('verification_profile') == plan.profile
+             and type(receipt.get('result_version')) is int and receipt['result_version'] == plan.result_version
+             and receipt.get('coverage') == plan.coverage))
+        accounting = native_check_accounting(commands, raw_receipt if schema_valid else None)
         passed = (result.get('status') == 'passed' and accounting.complete
             and receipt.get('failure') is None)
         clean = receipt.get('cleanup_confirmed') is True if cleanup is None else cleanup
-        metadata = VerificationMetadata(len(self.config.checks))
+        metadata = VerificationMetadata(len(commands))
         metadata.active_index = accounting.failed_index if accounting.failed_index is not None else 0
         summary = str(result.get('summary', ''))
         inferred_code = ('verification_process_unavailable' if any(x in summary for x in (
@@ -475,7 +534,7 @@ class NativeJenkinsVerification:
             else 'verification_failed')
         if not accounting.valid or result.get('status') == 'passed' and not passed:
             inferred_code = 'verification_receipt_invalid'
-        report = project_verification(self.config.checks,
+        report = project_verification(commands,
             code=code if code is not None else None if passed else inferred_code,
             returncode=0 if passed else 1, output=summary.encode('utf-8'),
             evidence_digest=hashlib.sha256(canonical({'binding': binding, 'receipt': raw_receipt})).hexdigest(),
@@ -518,7 +577,11 @@ class NativeJenkinsVerification:
                         report = self._report(binding, result, code='verification_scope_unstopped', cleanup=cleanup)
                     if not report.checks_passed:
                         raise VerificationFailure('verification_failed' if report.cleanup_confirmed else 'verification_scope_unstopped', report)
-                    return replace(report, summary='Jenkins completed all fixed exact-source checks.')
+                    plan = self._plan(binding)
+                    summary = ('Jenkins completed all fixed exact-source checks.' if plan.profile == LEGACY_PROFILE else
+                        'Jenkins completed branch in-memory checks; browser/database were not run.' if plan.scope == 'branch' else
+                        'Jenkins completed full main browser and four-suite backend checks.')
+                    return replace(report, summary=summary)
                 self.wait(2)
         except LeaseLost:
             cleanup = self._cancel_wait(binding)
@@ -539,7 +602,7 @@ class NativeJenkinsVerification:
     def evidence(self, job, repository):
         index = json.loads(read_private(self._index(job['review_id']), owner=os.geteuid()))
         binding = self._read(uid(index['action_id']))
-        if binding['scope']['review_id'] != job['review_id'] or self._source(job, repository)[2] != binding['native_gate_manifest_sha256']:
+        if binding['scope']['review_id'] != job['review_id'] or self._source(job, repository, binding['request'].get('branch_scope'))[2] != binding['native_gate_manifest_sha256']:
             raise PublicationError('native_ci_binding_changed')
         return binding
 
@@ -562,7 +625,7 @@ class NativeJenkinsVerification:
         self._scope(binding['scope'], {**normalized, 'owner_id': self.config.worker.owner})
         repository, _head = self.candidates.acquire(normalized)
         source_job = {**normalized, 'integration_base': manifest['integration_base']}
-        source = self._source(source_job, repository)
+        source = self._source(source_job, repository, binding['request'].get('branch_scope'))
         if (source[2] != binding['native_gate_manifest_sha256'] or source[4] != binding['verifier_sha256']
                 or source[5] != binding['request']['gate_manifest_sha256']):
             raise PublicationError('native_ci_gate_changed')
@@ -582,7 +645,9 @@ class NativeJenkinsVerification:
         findings = ()
         if status in {'passed','failed'}:
             report = self._report(binding,result)
-            accounting = native_check_accounting(self.config.checks,receipt)
+            commands = self._commands(binding)
+            plan = self._plan(binding)
+            accounting = native_check_accounting(commands,receipt)
             if not accounting.valid or result['status']=='passed' and not report.checks_passed:
                 raise PublicationError('native_ci_check_accounting_invalid')
             if not report.cleanup_confirmed:
@@ -595,17 +660,18 @@ class NativeJenkinsVerification:
             status = 'passed' if report.checks_passed else 'failed'
             states = tuple({'passed':'success','failed':'failure','not_run':'skipped'}[check['status']]
                 for check in report.checks)
-            logical = {check_id(command,index):LOGICAL_CHECKS[index]
-                for index,command in enumerate(self.config.checks)}
-            findings = tuple({**finding,'check_id':logical.get(finding['check_id'],LOGICAL_CHECKS[0])}
+            logical = {check_id(command,index):plan.logical_checks[index]
+                for index,command in enumerate(commands)}
+            findings = tuple({**finding,'check_id':logical.get(finding['check_id'],plan.logical_checks[0])}
                 for finding in report.findings)
         else:
-            states = ('pending',)*len(LOGICAL_CHECKS)
+            states = ('pending',)*len(self._plan(binding).logical_checks)
+        logical_names = self._plan(binding).logical_checks
         checks = tuple({'name':name,'status':state,
             'head_sha': job['candidate_commit'], 'provider': 'jenkins',
             'job': self.delivery.config.jenkins_job,
             'action_id': binding['request']['action_id'], 'queue_id': receipt.get('queue_id'),
-            'build_number': receipt.get('build_number')} for name,state in zip(LOGICAL_CHECKS,states))
+            'build_number': receipt.get('build_number')} for name,state in zip(logical_names,states))
         return HostedCheckReport(status, checks, findings,
             'Jenkins: ' + result['summary'], 'Not reported',
             hashlib.sha256(canonical({'binding': binding, 'receipt': receipt})).hexdigest())
@@ -668,9 +734,14 @@ def create_native_jenkins(config, store, git, candidates, supervisor, *, client=
                           delivery_factory=DeliveryProviderFactory):
     raw = json.loads(read_private(config.jenkins_delivery_config))
     selected = DeliveryConfig.parse(raw)
+    contract = contract_for_config(selected)
+    if contract.profile != getattr(config, 'jenkins_verification_profile', LEGACY_PROFILE):
+        raise ValueError('Native Jenkins profile selections disagree')
+    expected_plan = contract.plan('main' if getattr(config, 'jenkins_verification_scope', 'branch') == 'main' else 'detached')
     if (selected.owner != config.worker.owner or selected.github_config_dir != config.github_config_dir
-            or tuple(config.checks) != CHECKS
-            or {x[2] for x in config.required_hosted_checks} != set(LOGICAL_CHECKS)):
+            or tuple(config.checks) != expected_plan.checks
+            or (tuple(config.required_hosted_checks) != expected_plan.required_hosted_checks
+                if contract.profile == SCOPED_PROFILE else {x[2] for x in config.required_hosted_checks} != set(LOGICAL_CHECKS))):
         raise ValueError('Native Jenkins configuration does not match publication scope')
     if (getattr(config, 'native_delivery_mode', 'integrate-first-v1') == 'branch-first-v1'
             and selected.jenkins_job != 'forge-native-candidate'):

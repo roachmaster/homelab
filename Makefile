@@ -23,7 +23,7 @@ export ALLOW_GLOBAL ?= 0
 export REFRESH_AST ?= 1
 export AFFECTED_PLAN_OUT ?=
 
-.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast check-imports build-affected check-affected test-affected lint test test-release doc check-deps ci ci-main backend-suites run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
+.PHONY: help build check fmt fmt-check portal-style-check dead-code ast-yaml rust-ast check-imports build-affected check-affected test-affected lint test test-release doc check-deps ci ci-preflight ci-verified ci-main backend-suites run session template ide remote agent asm ui ui-build ui-check ui-qa ui-qa-check
 
 help:
 	@printf '%s\n' \
@@ -105,6 +105,7 @@ rust-ast:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/rust_ast.py" "$$FORGE_RUST_ROOT" --quiet
 check-imports:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/check_imports.py" "$$FORGE_RUST_ROOT"
+	@python3 -B "$$FORGE_RUST_ROOT/scripts/check_core_layers.py"
 build-affected:
 	@python3 -B "$$FORGE_RUST_ROOT/scripts/affected_build.py" build
 check-affected:
@@ -142,8 +143,15 @@ ci:
 backend-suites:
 	@python3 -B deploy/mission-control/backend-suites.py
 
-ci-main:
+ci-preflight:
+	@python3 -B deploy/mission-control/backend-suites.py --scope preflight
+
+ci-verified:
+	$(MAKE) ci-preflight
 	$(MAKE) ci
+
+ci-main:
+	$(MAKE) ci-verified
 	$(MAKE) ui-qa
 	$(MAKE) backend-suites
 

@@ -70,28 +70,63 @@ CHECKS = (
      'deploy/mission-control/agent-runner', '-p', 'test_*.py', '-v'),
 )
 CHECK_LABELS = ('make ci', 'make ui-qa', 'unittest')
-# Branch-scope verification runs the in-memory subset only: `make ui-qa`
-# is a headless-browser test and runs only on the main pipeline build
-# (docs/architecture/ci-pipeline.md). The cache key and the gate manifest
-# always use the full CHECKS: the compiled artifacts are identical
-# whether or not `make ui-qa` subsequently runs, so branch runs keep
-# reusing main's snapshots. Branch runs additionally set
-# FORGE_DISABLE_DISPOSABLE_POSTGRES=1, which makes the disposable-DB
-# tests in the unittest check skip (see work_pg_fixture.py); those tests
-# run only on main.
-BRANCH_CHECKS = (
+LEGACY_PROFILE = 'forge-sdlc-jenkins-v1'
+SCOPED_PROFILE = 'forge-sdlc-jenkins-v2'
+SCOPED_BRANCH_CHECKS = (
+    ('/usr/bin/make', 'ci-preflight'),
     ('/usr/bin/make', 'ci'),
-    ('/usr/bin/python3', '-B', '-m', 'unittest', 'discover', '-s',
-     'deploy/mission-control/agent-runner', '-p', 'test_*.py', '-v'),
+    ('/usr/bin/python3', '-B', 'deploy/mission-control/backend-suites.py', '--scope', 'branch'),
 )
-BRANCH_CHECK_LABELS = ('make ci', 'unittest')
+SCOPED_MAIN_CHECKS = (
+    ('/usr/bin/make', 'ci-verified'),
+    ('/usr/bin/make', 'ui-qa'),
+    ('/usr/bin/python3', '-B', 'deploy/mission-control/backend-suites.py', '--scope', 'main'),
+)
+V2_PROTECTED_PATHS = frozenset({
+    'deploy/mission-control/backend-suites.py',
+    'deploy/mission-control/agent-runner/work_ci_contract.py',
+    'deploy/mission-control/agent-runner/work_native_jenkins.py',
+    'deploy/mission-control/agent-runner/work_publication_config.py',
+    'deploy/mission-control/agent-runner/work_native_repair.py',
+    'deploy/mission-control/agent-runner/work_review.py',
+    'deploy/mission-control/agent-runner/work_external_delivery.py',
+    'deploy/mission-control/jenkins/verify-candidate.py',
+    'deploy/mission-control/jenkins/setup-ci.py',
+})
 
+BRANCH_CHECKS = SCOPED_BRANCH_CHECKS
+BRANCH_CHECK_LABELS = ('source and Python preflight', 'make ci', 'in-memory backend')
 
-def checks_for_scope(branch_scope):
-    """Return the (checks, labels) pair a verification scope runs."""
-    if branch_scope == 'main':
+def checks_for_scope(branch_scope, profile=LEGACY_PROFILE):
+    """Closed operator-selected execution policy; v1 remains full on every scope."""
+    if profile != SCOPED_PROFILE:
+        # Legacy trusted test profiles retain the same full CHECKS policy;
+        # the executable composition root accepts only the two public profiles.
         return CHECKS, CHECK_LABELS
-    return BRANCH_CHECKS, BRANCH_CHECK_LABELS
+    if branch_scope == 'main':
+        return SCOPED_MAIN_CHECKS, ('source preflight and make ci', 'make ui-qa', 'all backend suites')
+    return SCOPED_BRANCH_CHECKS, ('source and Python preflight', 'make ci', 'in-memory backend')
+
+
+def profile_coverage(profile, branch_scope):
+    if profile != SCOPED_PROFILE:
+        return None
+    main = branch_scope == 'main'
+    return {'scope': 'main' if main else 'branch', 'browser': 'required' if main else 'not_run',
+            'database': 'required_zero_skips' if main else 'not_run',
+            'backend_suites': 'all_four' if main else 'agent_runner_in_memory'}
+
+
+def profile_gate_manifest(profile, branch_scope, protected, helper_digest):
+    commands, _labels = checks_for_scope(branch_scope, profile)
+    policy = {'version': 2 if profile == SCOPED_PROFILE else 1, 'provider': 'jenkins',
+        'profile': profile, 'checks': commands if profile == SCOPED_PROFILE else CHECKS,
+        'verifier_sha256': helper_digest,
+        'source_gate_sha256': hashlib.sha256(canonical(protected)).hexdigest()}
+    if profile == SCOPED_PROFILE:
+        policy['branch_scope'] = branch_scope
+    return hashlib.sha256(canonical(policy)).hexdigest()
+
 SHA = re.compile('[0-9a-f]{40}')
 DIGEST = re.compile('[0-9a-f]{64}')
 BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
@@ -147,6 +182,12 @@ def protected_gate_path(path):
             'rust-toolchain', 'rust-toolchain.toml', 'clippy.toml', '.clippy.toml', 'rustfmt.toml',
             '.rustfmt.toml', 'deny.toml', 'work_publication_checks.py', 'work_verification.py',
             'work_verification_init.py', 'work_policy.py', 'work_external_delivery.py'})
+
+
+def profile_protected_gate_path(path, profile):
+    return (protected_gate_path(path)
+        or path == 'deploy/mission-control/agent-runner/work_ci_contract.py'
+        or profile == SCOPED_PROFILE and path in V2_PROTECTED_PATHS)
 
 
 # --- Pure branch-identity & compatibility helpers (no I/O or provisioning) ---
@@ -2462,7 +2503,9 @@ def _execute_locked(action, config, *, cache_port):
     required = {'version', 'action_id', 'workflow_id', 'project_alias', 'candidate_commit',
                 'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'bundle_sha256',
                 'verification_profile', 'correlation_id', 'branch_scope'}
-    if set(request) != required or request['version'] != 1 or request['action_id'] != action:
+    expected_version = 2 if config['verification_profile'] == SCOPED_PROFILE else 1
+    if (set(request) != required or type(request['version']) is not int
+            or request['version'] != expected_version or request['action_id'] != action):
         raise ValueError('Invalid CI request')
     for key in ('workflow_id', 'correlation_id'):
         if str(UUID(request[key])) != request[key]:
@@ -2536,8 +2579,8 @@ def _execute_locked(action, config, *, cache_port):
             'GIT_CONFIG_COUNT': '2', 'GIT_CONFIG_KEY_0': 'safe.directory',
             'GIT_CONFIG_VALUE_0': str(source), 'GIT_CONFIG_KEY_1': 'core.hooksPath',
             'GIT_CONFIG_VALUE_1': '/dev/null'}
-        active_checks, active_labels = checks_for_scope(branch_scope)
-        if branch_scope != 'main':
+        active_checks, active_labels = checks_for_scope(branch_scope, config['verification_profile'])
+        if config['verification_profile'] == SCOPED_PROFILE and branch_scope != 'main':
             # DB tests run only on the main pipeline build.
             environment['FORGE_DISABLE_DISPOSABLE_POSTGRES'] = '1'
         cancelled = directory / 'cancelled'
@@ -2593,15 +2636,12 @@ def _execute_locked(action, config, *, cache_port):
                     manifest_parents.append(str(Path(path).parent))
                 if path in REPO_BUILD_CONFIG_PATHS:
                     repo_build_config[path] = [mode, blob]
-                if protected_gate_path(path):
+                if profile_protected_gate_path(path, config['verification_profile']):
                     protected[path] = [mode, blob]
             helper_digest = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
             if helper_digest != config['verifier_sha256']:
                 raise ValueError('Installed verification policy changed')
-            manifest = hashlib.sha256(canonical({'version': 1, 'provider': 'jenkins',
-                'profile': config['verification_profile'], 'checks': CHECKS,
-                'verifier_sha256': helper_digest,
-                'source_gate_sha256': hashlib.sha256(canonical(protected)).hexdigest()})).hexdigest()
+            manifest = profile_gate_manifest(config['verification_profile'], branch_scope, protected, helper_digest)
             if manifest != request['gate_manifest_sha256']:
                 raise ValueError('Gate manifest does not match the installed policy and source')
             if require_main:
@@ -2661,7 +2701,8 @@ def _execute_locked(action, config, *, cache_port):
                 # run executes only the in-memory subset: the compiled
                 # artifacts are identical, so branch runs keep reusing
                 # main's snapshots.
-                checks=CHECKS,
+                checks=(SCOPED_BRANCH_CHECKS + SCOPED_MAIN_CHECKS
+                        if config['verification_profile'] == SCOPED_PROFILE else CHECKS),
                 toolchain_path=config['toolchain'],
                 environment=environment,
                 repo_build_config=repo_build_config,
@@ -2837,12 +2878,15 @@ def _execute_locked(action, config, *, cache_port):
         result = {**{key: request[key] for key in ('action_id', 'workflow_id', 'candidate_commit',
             'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'verification_profile',
             'correlation_id', 'branch_scope')},
-            'version': 1, 'request_sha256': identity, 'checks': checks,
+            'version': 2 if config['verification_profile'] == SCOPED_PROFILE else 1,
+            'request_sha256': identity, 'checks': checks,
             'cache': cache_summary, 'stages': stages,
             'status': 'passed' if failure is None and len(checks) == len(active_checks) else 'failed',
             'failure': failure, 'cleanup_confirmed': True,
             'log_sha256': hashlib.sha256(log_path.read_bytes()).hexdigest(),
             'elapsed_ms': int((time.time() - started) * 1000)}
+        if config['verification_profile'] == SCOPED_PROFILE:
+            result['coverage'] = profile_coverage(config['verification_profile'], branch_scope)
         try:
             cache_port.finish_result(result_path, result, submitter.pw_gid, cancelled=cancelled)
         except (OSError, ValueError) as error:
@@ -2858,6 +2902,8 @@ def main():
     if os.geteuid() != 0 or len(sys.argv) != 2 or str(UUID(sys.argv[1])) != sys.argv[1]:
         raise ValueError('Expected root-owned CI helper and canonical action UUID')
     config = json.loads(read_file(CONFIG, owner=0, maximum=65536))
+    if config.get('verification_profile') not in {LEGACY_PROFILE, SCOPED_PROFILE}:
+        raise ValueError('Unsupported Jenkins verification profile')
     # Stage and freeze the cache factory before any disk or process effect.
     cache_factory = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache')))
     cache_port = cache_factory.create()

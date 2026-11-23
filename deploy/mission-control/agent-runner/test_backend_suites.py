@@ -3,6 +3,8 @@ out-of-memory Python stage). All fixtures are tiny in-memory suites; no
 database or browser is involved."""
 
 import importlib.util
+import os
+from types import SimpleNamespace
 from pathlib import Path
 import subprocess
 import tempfile
@@ -99,6 +101,49 @@ class BackendSuitesTests(unittest.TestCase):
     def test_run_suite_fails_on_an_empty_suite(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertNotEqual(backend_suites.run_suite(tmp, "test_*.py", {}), 0)
+
+    def test_main_refuses_a_database_disable_flag_before_building_fixtures(self):
+        with patch.dict(os.environ, {'FORGE_DISABLE_DISPOSABLE_POSTGRES': '1'}), \
+             patch.object(backend_suites, 'studio_env') as assets:
+            with self.assertRaises(ValueError):
+                backend_suites.main(('--scope', 'main'))
+            assets.assert_not_called()
+
+    def test_preflight_selects_source_and_provider_boundaries_without_assets(self):
+        with patch.object(backend_suites, 'studio_env') as assets, \
+             patch.object(backend_suites.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as run:
+            self.assertEqual(backend_suites.main(('--scope', 'preflight')), 0)
+            assets.assert_not_called()
+            code = run.call_args.args[0][-1]
+            self.assertIn('loadTestsFromNames', code)
+            self.assertIn('test_jenkins_m27_boundary', code)
+            self.assertIn('test_ci_contract', code)
+
+    def test_branch_reports_declared_database_not_run_and_rejects_other_skips(self):
+        for reason, expected in (('Disposable PostgreSQL 16 requires its binaries', 0), ('deliberate', 1)):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                suite = root / 'deploy/mission-control/agent-runner'
+                suite.mkdir(parents=True)
+                self._write_suite(suite, 'import unittest\nPG16_AVAILABLE = False\nclass Memory(unittest.TestCase):\n'
+                    '    def test_memory(self): pass\n'
+                    '@unittest.skip(' + repr(reason) + ')\nclass DB(unittest.TestCase):\n    def test_db(self): pass\n')
+                with patch.object(backend_suites, 'REPO_ROOT', root):
+                    self.assertEqual(backend_suites.main(('--scope', 'branch')), expected)
+                # The exact same skipped suite must never satisfy main coverage.
+                self.assertNotEqual(backend_suites.run_suite(suite, 'test_*.py', {}), 0)
+
+    def test_branch_rejects_an_unrelated_method_skip_even_if_it_mentions_postgres(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            suite = root / 'deploy/mission-control/agent-runner'
+            suite.mkdir(parents=True)
+            self._write_suite(suite, 'import unittest\nPG16_AVAILABLE = False\nclass T(unittest.TestCase):\n'
+                '    def test_memory(self): pass\n'
+                '    @unittest.skip("postgres wording is not a class-level DB declaration")\n'
+                '    def test_unrelated(self): pass\n')
+            with patch.object(backend_suites, 'REPO_ROOT', root):
+                self.assertNotEqual(backend_suites.main(('--scope', 'branch')), 0)
 
 
 if __name__ == "__main__":

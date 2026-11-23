@@ -58,7 +58,7 @@ class TrustedJenkinsTest(unittest.TestCase):
         self.config=configuration(self.temp.name);self.config.results_root.mkdir()
         self.jenkins=Mock();self.port=delivery.TrustedDeliveryPort(self.config,self.jenkins)
         self.request=identity_request();self.record={k:self.request[k] for k in ('action_id','workflow_id','candidate_commit','candidate_tree','correlation_id','branch_scope')}
-        self.record.update(expected_main='a'*40,gate_manifest_sha256='e'*64,verification_profile=delivery.PROFILE)
+        self.record.update(version=1,expected_main='a'*40,gate_manifest_sha256='e'*64,verification_profile=delivery.PROFILE)
         self.port._submission=Mock(return_value=(Path(self.temp.name),self.record))
         self.require=Mock()
     def write_result(self,**changes):

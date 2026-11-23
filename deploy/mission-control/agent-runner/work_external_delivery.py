@@ -24,6 +24,8 @@ import psycopg2
 from work_publication_clients import artifact_guard, command, PublicationError
 from work_review import protected_gate_path
 from work_external_delivery_store import ExternalDeliveryStoreFactory
+from work_ci_contract import (LEGACY_CHECKS, LEGACY_PROFILE, SCOPED_PROFILE,
+    CiGateContractFactory, contract_for_config)
 
 LOG = logging.getLogger('forge-external-delivery')
 SHA = re.compile('[0-9a-f]{40}')
@@ -33,10 +35,8 @@ BRANCH_NAME_RE = re.compile(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,127}')
 BRANCH_SLUG_RE = re.compile(r'[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 BRANCH_SCOPE_RE = re.compile(r'branch/[a-z0-9](?:[a-z0-9._-]{0,56}[a-z0-9])?')
 EPHEMERAL_BRANCH_PREFIX = 'forge/external-candidate-'
-PROFILE = 'forge-sdlc-jenkins-v1'
-CHECKS = (('/usr/bin/make', 'ci'), ('/usr/bin/make', 'ui-qa'),
-          ('/usr/bin/python3', '-B', '-m', 'unittest', 'discover', '-s',
-           'deploy/mission-control/agent-runner', '-p', 'test_*.py', '-v'))
+PROFILE = LEGACY_PROFILE
+CHECKS = LEGACY_CHECKS
 DIFF_FLAGS = ('--binary', '--no-ext-diff', '--no-textconv', '--no-color',
               '--diff-algorithm=myers', '--no-renames')
 PARAMETERS = ('FORGE_ACTION_ID', 'FORGE_WORKFLOW_ID', 'FORGE_CANDIDATE_COMMIT',
@@ -128,18 +128,27 @@ def validate_branch_scope(scope, *, candidate_commit, expected_main):
     raise ValueError('Invalid delivery branch scope')
 
 
-def protected_delivery_gate(path):
-    return (protected_gate_path(path) or path.startswith('deploy/mission-control/jenkins/')
+def protected_delivery_gate(path, profile=PROFILE):
+    return (CiGateContractFactory(profile).create().protects(path, protected_gate_path) or path.startswith('deploy/mission-control/jenkins/')
             or path.rsplit('/', 1)[-1] == 'work_external_delivery.py')
 
 
-def jenkins_gate_manifest(config, files):
+def jenkins_gate_manifest(config, files, branch_scope=None):
     """Compute the source map and operator-owned installed verifier identity."""
-    protected = {path: value for path, value in files.items() if protected_delivery_gate(path)}
+    contract = contract_for_config(config)
+    protected = {path: value for path, value in files.items()
+                 if protected_delivery_gate(path, contract.profile)}
     source_digest = hashlib.sha256(canonical(protected)).hexdigest()
     helper_digest = hashlib.sha256(read_private(config.verifier, owner=0, maximum=1024 * 1024)).hexdigest()
-    gate = hashlib.sha256(canonical({'version': 1, 'provider': 'jenkins', 'profile': PROFILE,
-        'checks': CHECKS, 'verifier_sha256': helper_digest, 'source_gate_sha256': source_digest})).hexdigest()
+    plan = contract.plan(branch_scope or 'detached')
+    policy = {'version': plan.result_version, 'provider': 'jenkins', 'profile': contract.profile,
+        'checks': plan.checks if contract.profile == SCOPED_PROFILE else CHECKS,
+        'verifier_sha256': helper_digest, 'source_gate_sha256': source_digest}
+    if contract.profile == SCOPED_PROFILE:
+        if branch_scope is None:
+            raise ValueError('Scoped verification requires an explicit branch scope')
+        policy['branch_scope'] = branch_scope
+    gate = hashlib.sha256(canonical(policy)).hexdigest()
     return source_digest, helper_digest, gate
 
 
@@ -195,13 +204,14 @@ class DeliveryConfig:
     jenkins_config: Path
     verifier: Path
     jenkins_job: str = 'forge-exact-candidate'
+    verification_profile: str = PROFILE
 
     @classmethod
     def parse(cls, raw):
         required = {'owner', 'worker_id', 'database', 'projects', 'state_root', 'spool_root',
             'results_root', 'github_config_dir', 'jenkins_binary', 'jenkins_binary_sha256',
             'jenkins_config', 'verifier'}
-        if not isinstance(raw, dict) or not required <= set(raw) <= required | {'jenkins_job'}:
+        if not isinstance(raw, dict) or not required <= set(raw) <= required | {'jenkins_job', 'verification_profile'}:
             raise ValueError('Invalid delivery configuration fields')
         if not isinstance(raw['owner'], str) or not 1 <= len(raw['owner']) <= 128:
             raise ValueError('Invalid delivery owner')
@@ -233,8 +243,9 @@ class DeliveryConfig:
         job = raw.get('jenkins_job', 'forge-exact-candidate')
         if not isinstance(job, str) or job not in {'forge-exact-candidate', 'forge-native-candidate'}:
             raise ValueError('Invalid fixed Jenkins job')
+        profile = CiGateContractFactory(raw.get('verification_profile', PROFILE)).create().profile
         return cls(raw['owner'], raw['worker_id'], MappingProxyType(dict(database)),
-            MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'], jenkins_job=job)
+            MappingProxyType(frozen), **values, jenkins_binary_sha256=raw['jenkins_binary_sha256'], jenkins_job=job, verification_profile=profile)
 
 
 class ForgeJenkinsPort:
@@ -499,7 +510,6 @@ class TrustedDeliveryPort:
                 raise ValueError('External source exceeds checkout bounds')
             artifact_guard(name, data)
             files[name] = [mode, blob]
-        source_digest, _helper_digest, gate = jenkins_gate_manifest(self.config, files)
         base_tree = self.git(repository, 'rev-parse', expected + '^{tree}').decode().strip()
         if base_tree == claimed_tree:
             clean = expected
@@ -518,11 +528,16 @@ class TrustedDeliveryPort:
             requested_branch=requested_branch,
             require_lease=require_lease,
         )
+        contract = contract_for_config(self.config)
+        source_digest, _helper_digest, gate = (jenkins_gate_manifest(self.config, files, branch_scope)
+            if contract.profile == SCOPED_PROFILE else jenkins_gate_manifest(self.config, files))
         require_lease()
         reference = 'refs/forge/external-candidates/' + request['action_id']
         self.git(repository, 'update-ref', reference, clean)
         bundle = directory / 'candidate.bundle'
         self.git(repository, 'bundle', 'create', str(bundle), reference)
+        # Git inherits its caller's umask; the trusted private handoff does not.
+        bundle.chmod(0o600)
         canonical_repo = self.config.projects[project]['canonical_repo']
         self.git(canonical_repo, 'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--', str(bundle), reference + ':' + reference)
         patch = self.git(repository, 'diff', *DIFF_FLAGS, expected, clean)
@@ -530,13 +545,13 @@ class TrustedDeliveryPort:
                            '--name-only', '-z', expected, clean).split(b'\0')
         gate_changes = []
         for path in changed:
-            if path and protected_delivery_gate(path.decode()):
+            if path and protected_delivery_gate(path.decode(), contract.profile):
                 name = path.decode()
                 gate_changes.append({'path': name, 'finding_id': 'gate-' + hashlib.sha256(path).hexdigest()[:16]})
         result = {'candidate_commit': sha(clean), 'candidate_tree': claimed_tree,
             'integration_base': expected, 'author_candidate_commit': raw,
             'source_branch': resolved_source_branch, 'branch_scope': branch_scope,
-            'diff_sha256': hashlib.sha256(patch).hexdigest(), 'verification_profile': PROFILE,
+            'diff_sha256': hashlib.sha256(patch).hexdigest(), 'verification_profile': contract.profile,
             'gate_source_sha256': source_digest, 'gate_manifest_sha256': gate,
             'protected_gate_changes': gate_changes, 'no_change': clean == expected,
             'prepare_action_id': request['action_id']}
@@ -577,6 +592,10 @@ class TrustedDeliveryPort:
                 source_branch=raw_branch,
             )
 
+        contract = contract_for_config(self.config)
+        if request.get('verification_profile', PROFILE) != contract.profile:
+            raise ValueError('CI verification profile changed')
+        plan = contract.plan(branch_scope)
         prepared = self.config.state_root / 'actions' / uid(request['prepare_action_id']) / 'candidate.bundle'
         bundle = read_private(prepared, owner=os.geteuid(), maximum=128 * 1024 * 1024)
         path = self.config.spool_root / uid(request['action_id'])
@@ -586,12 +605,12 @@ class TrustedDeliveryPort:
             path.chmod(0o750)
         elif path.is_symlink():
             raise ValueError('Unsafe CI submission')
-        record = {'version': 1, 'action_id': uid(request['action_id']),
+        record = {'version': plan.result_version, 'action_id': uid(request['action_id']),
             'workflow_id': uid(request['workflow_id']), 'project_alias': request['project_alias'],
             'candidate_commit': candidate_commit, 'candidate_tree': sha(request['candidate_tree']),
             'expected_main': expected_main, 'branch_scope': branch_scope,
             'gate_manifest_sha256': digest(request['gate_manifest_sha256']),
-            'bundle_sha256': hashlib.sha256(bundle).hexdigest(), 'verification_profile': PROFILE,
+            'bundle_sha256': hashlib.sha256(bundle).hexdigest(), 'verification_profile': contract.profile,
             'correlation_id': uid(request['correlation_id'])}
         if (path / 'request.json').exists():
             if json.loads(read_private(path / 'request.json', owner=os.geteuid())) != record:
@@ -659,13 +678,25 @@ class TrustedDeliveryPort:
         if isinstance(result.get('stages'), list):
             receipt['stages'] = result['stages']
         checks = result.get('checks')
-        complete = (isinstance(checks, list) and len(checks) == len(CHECKS)
-            and all(check == {'index': index, 'argv': list(argv), 'returncode': 0}
-                    for index, (check, argv) in enumerate(zip(checks, CHECKS))))
+        plan = contract_for_config(self.config).plan(record['branch_scope'])
+        if plan.profile == SCOPED_PROFILE:
+            receipt.update(verification_profile=result.get('verification_profile'),
+                result_version=result.get('version'), coverage=result.get('coverage'))
+        complete = (type(result.get('version')) is int and result['version'] == plan.result_version
+            and (plan.coverage is None or result.get('coverage') == plan.coverage)
+            and isinstance(checks, list) and len(checks) == len(plan.checks)
+            and all(type(check) is dict and type(check.get('index')) is int
+                    and type(check.get('returncode')) is int
+                    and check == {'index': index, 'argv': list(argv), 'returncode': 0}
+                    for index, (check, argv) in enumerate(zip(checks, plan.checks))))
         if (value['result'] == 'SUCCESS' and result.get('status') == 'passed'
                 and result.get('cleanup_confirmed') is True and complete):
             receipt['result'] = 'SUCCESS'
-            return {'status': 'passed', 'receipt': receipt, 'summary': 'All fixed Jenkins gates passed on the exact reviewed candidate.'}
+            summary = ('All fixed Jenkins gates passed on the exact reviewed candidate.'
+                if plan.profile == LEGACY_PROFILE else
+                'Exact branch in-memory gates passed; browser/database were not run.' if plan.scope == 'branch' else
+                'Exact main gates passed, including real browser and all four zero-skip backend suites.')
+            return {'status': 'passed', 'receipt': receipt, 'summary': summary}
         summary = 'Jenkins verification failed: ' + str(result.get('failure', 'checks_failed'))[:128]
         for check in checks if isinstance(checks, list) else []:
             if check.get('returncode'):

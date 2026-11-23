@@ -7,6 +7,7 @@ from work_executor import WorkspaceLease
 from work_external_delivery import canonical, durable_json, read_private, sha
 from work_publication_clients import PublicationError
 from work_review import gate_source_digest
+from work_ci_contract import LEGACY_PROFILE
 from work_verification import diagnostic_text, gate_manifest_sha256
 
 
@@ -87,7 +88,8 @@ class BranchFirstRepairProvider:
         if parents != [head, main]:
             raise PublicationError('native_repair_parent_changed')
         self.git.verify(repository, candidate)
-        source_gate = gate_source_digest(self.git, repository, candidate)
+        source_gate = gate_source_digest(self.git, repository, candidate,
+            profile=getattr(self.config, "jenkins_verification_profile", LEGACY_PROFILE))
         result = {'candidate_commit': candidate, 'integration_base': main,
             'candidate_workspace_digest': WorkspaceLease(repository,
                 self.config.worker.projects[job['project_alias']], repository / '.git',
