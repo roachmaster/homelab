@@ -125,7 +125,8 @@ class BoundPreparationRetryAuthority:
 
 
 class WorkflowStore:
-    def __init__(self,config,catalog,store):
+    def __init__(self,config,catalog,store,*,retry_events=None):
+        self.retry_events=retry_events
         self.config=config;self.catalog=catalog;self.store=store
         self.reviewer_correction = None
         self.feedback_recovery = None
@@ -1058,22 +1059,23 @@ class WorkflowCoordinator:
 
 
 class WorkflowCoordinatorFactory:
-    def __init__(self,config,catalog,store,*,external_maintenance=None,external_workflow=None,delivery_repair=None):
-        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance;self.external_workflow=external_workflow;self.delivery_repair=delivery_repair
+    def __init__(self,config,catalog,store,*,external_maintenance=None,external_workflow=None,delivery_repair=None,retry_events=None):
+        self.config=config;self.catalog=catalog;self.store=store;self.external_maintenance=external_maintenance;self.external_workflow=external_workflow;self.delivery_repair=delivery_repair;self.retry_events=retry_events
     def create(self):
-        return WorkflowCoordinator(WorkflowStoreFactory(self.config,self.catalog,self.store).create(),external_maintenance=self.external_maintenance,external_workflow=self.external_workflow,delivery_repair=self.delivery_repair)
+        return WorkflowCoordinator(WorkflowStoreFactory(self.config,self.catalog,self.store,retry_events=self.retry_events).create(),external_maintenance=self.external_maintenance,external_workflow=self.external_workflow,delivery_repair=self.delivery_repair)
 
 
 class WorkflowStoreFactory:
     """Composition selects and injects the reviewer correction application port."""
-    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None):
+    def __init__(self,config,catalog,store,*,reviewer_correction_factory=None,feedback_recovery_factory=None,retry_events=None):
         self.config,self.catalog,self.store=config,catalog,store
+        self.retry_events=retry_events
         self.reviewer_correction_factory=reviewer_correction_factory
         self.feedback_recovery_factory=feedback_recovery_factory
     def create(self):
         from work_reviewer_correction import ReviewerCorrectionFactory
         from work_context_recovery import FeedbackRecoveryFactory
-        flow=WorkflowStore(self.config,self.catalog,self.store)
+        flow=WorkflowStore(self.config,self.catalog,self.store,retry_events=self.retry_events)
         factory=self.reviewer_correction_factory or ReviewerCorrectionFactory
         flow.reviewer_correction=factory(flow).create()
         if not all(callable(getattr(flow.reviewer_correction, name, None)) for name in ('correct','resume')):

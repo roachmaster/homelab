@@ -234,7 +234,8 @@ def _parse_result_cursor(cursor):
 class WorkStore:
     """Owner- and project-scoped durable store for coding jobs, results, and control receipts."""
 
-    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None, external_port=None, delivery_enabled=False):
+    def __init__(self, owner, allowed_projects, connect_factory, *, max_pending=DEFAULT_MAX_PENDING,repair_policy=None, external_port=None, delivery_enabled=False,retry_events=None):
+        self.retry_events=retry_events
         self._repair_policy=freeze_repair_policy(repair_policy or DEFAULT_REPAIR_POLICY)
         self._owner = validate_owner(owner)
         if not isinstance(allowed_projects, (frozenset, set, tuple, list)):
