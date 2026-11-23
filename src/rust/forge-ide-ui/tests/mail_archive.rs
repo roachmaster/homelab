@@ -223,6 +223,7 @@ fn removed_mail_replies_cannot_decode_or_interfere_with_pending_agents_request()
         UiEvent::Work(WorkResponse::WorkCatalog {
             request_id: id,
             projects: vec![WorkProject {
+                delivery: None,
                 external_workflow: None,
                 alias: "workspace".into(),
                 label: "Workspace".into(),

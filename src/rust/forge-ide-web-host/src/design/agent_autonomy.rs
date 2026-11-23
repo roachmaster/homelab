@@ -25,6 +25,12 @@ pub(super) const BODY: &[Node] = &[
             element!(Div; element!(Dt; text("Portal")), element!(Dd; text("Rust displays the phase, configured roles, separate plan/code revision counts and escalation reason. Generated JavaScript renders and relays actions. It does not infer approval from model prose or advance the workflow."))),
         ),
     ),
+    element!(Section [Class = "design-section", AriaLabelledby = "autonomy-delivery-title"];
+        element!(H2 [Id = "autonomy-delivery-title"]; text("After merge: verification, repair and release")),
+        element!(P; text("Merged is the preserved author/reviewer outcome. A separate durable action verifies the actual main commit and tree. A failed main check has its own bounded repair lineage; a successful check may prepare a guarded release. Deployed requires the matching activation receipt and health evidence.")),
+        element!(P; text("Task and project delivery show each stage with a semantic status pill and readable update time. Project delivery includes observed main changes without inventing a coding assignment. Exact source identities and receipts stay in an expandable disclosure. These projections do not authorize a transition.")),
+        element!(P; element!(A [Href = "https://github.com/roachmaster/homelab/blob/main/docs/architecture/forge-post-merge-verification.md"]; text("Post-merge ownership and sequence diagrams →"))),
+    ),
     element!(Section [Class = "design-section", AriaLabelledby = "autonomy-exceptions-title"];
         element!(H2 [Id = "autonomy-exceptions-title"]; text("Human exceptions and retained history")),
         element!(P; text("Cancel remains available only while the admitted workflow permits it. Exhausted revision budgets, quota/authentication stops, changed scope, conflicting remote state or uncertain cleanup preserve the artifacts and expose an escalation reason. Recovery is explicit and source-bound; ordinary Plan Resume, Approve and Accept controls are not part of this autonomous path.")),

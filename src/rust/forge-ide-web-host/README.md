@@ -160,7 +160,7 @@ Work and Usage remain disabled when their respective configuration is absent.
 
 See [the complete contracts and worker setup](../../../docs/architecture/coding-admission.md)
 and [the runner guide](../../../deploy/mission-control/agent-runner/README.md).
-The host validates browser ABI13; deploy the matching generated bundle atomically.
+The host validates browser ABI14; deploy the matching generated bundle atomically.
 
 Work requests are at most16 KiB on the wire, with an8 KiB UTF-8 prompt and2 KiB
 acceptance criteria. Escaped JSON may reach the wire limit first. Lists default to20
@@ -408,7 +408,7 @@ before UI assertions; changing a supported browser selection is not a passing te
 
 ### Workbench asset compatibility
 
-The host accepts asset manifest ABI 13. Rebuild and replace the complete generated
+The host accepts asset manifest ABI 14. Rebuild and replace the complete generated
 bundle for the retired browser codecs; ABI 12 or unknown asset versions fail
 before listening. Hashes bind the five files as a bundle, not publisher identity.
 The native session/inspection HTTP protocol remains 1. See the
@@ -437,4 +437,4 @@ denies reads, preserving inspection-only consumers. The native response is at mo
 1 MiB. The UI displays bounded windows (256 lines / 64 KiB) and safely renders text;
 this source-read operation does not grant mutation or execution. Optional direct
 editing uses its separate admitted `ide.edit_write`/`ide.managed_write` path.
-Generated assets and WASM ABI13 must be replaced atomically with this host.
+Generated assets and WASM ABI14 must be replaced atomically with this host.

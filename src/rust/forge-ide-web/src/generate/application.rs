@@ -2,6 +2,7 @@
 //! No application HTML, CSS, JS, raw-code field or string template lives here.
 use super::{Document, HeaderBinding, RequestBinding, RequestPolicy, TimerBinding, Transport};
 use crate::component;
+mod delivery;
 mod external_agents;
 
 pub fn ide_document() -> Document {
@@ -50,6 +51,7 @@ pub fn ide_document() -> Document {
                     component!(region "agents-unsupported"; [
                         component!(text "agents-unsupported-message", "Agents are not configured on this host."),
                     ]),
+                    delivery::panel("agents-project-delivery", "Project delivery"),
                     component!(region "agents-overview"; [
                         component!(region "agents-task-list"; [
                             component!(heading "agents-tasks-heading", "Tasks"),
@@ -110,6 +112,7 @@ pub fn ide_document() -> Document {
                             ]),
                             component!(document_link "agents-workflow-docs", "Workflow design →", AutonomousAgents),
                         ]),
+                        delivery::panel("agents-delivery", "Delivery"),
                         component!(region "agents-verification"; [
                             component!(row [
                                 component!(heading "agents-verification-heading", "Review and repair"),

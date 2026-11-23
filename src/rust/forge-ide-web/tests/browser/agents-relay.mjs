@@ -65,7 +65,15 @@ function progress(t) {
 }
 function taskScope(t) {
   const phase=t.workflow?.phase;
-  if(['completed','cancelled'].includes(phase))return 'history';
+  if(phase==='completed'||t.status==='completed'){
+    const d=t.delivery;
+    if(d){
+      if(['queued','running'].includes(d.verification.status)||['queued','running'].includes(d.repair.status)||['queued','building','deploying'].includes(d.release.status))return 'active';
+      if(d.repair.status==='needs_attention'||d.release.status==='failed'||d.verification.status==='failed')return 'attention';
+    }
+    return 'history';
+  }
+  if(phase==='cancelled')return 'history';
   if(phase==='escalated')return 'attention';
   if(phase)return 'active';
   if(t.workflow_required)return 'attention';
@@ -77,6 +85,7 @@ function summary(t) {
     ...Object.fromEntries(['task_id', 'correlation_id', 'project_alias', 'base_revision', 'mode', 'agent_profile', 'recipe_digest', 'status', 'revision', 'created_at', 'title'].map(k => [k, t[k]])),
     workflow_required:t.workflow_required===true,
     workflow_phase:t.workflow?.phase??null,
+    ...(t.delivery?{delivery:t.delivery}:{}),
   };
 }
 function detail(t) {
@@ -113,6 +122,16 @@ function usage(alias, tasks) {
   };
 }
 
+function deliveryProjection(stage) {
+  const activeRepair=stage==='repair';
+  const deployed=stage==='deployed';
+  return {verification_id:'77777777-7777-4777-8777-777777777777',source_kind:'native',
+    commit_sha:'f'.repeat(40),tree_sha:'c'.repeat(40),updated_at:time,
+    verification:{status:activeRepair?'failed':deployed?'passed':stage==='queued'?'queued':'running',updated_at:time,summary:activeRepair?'Main failed; source-bound repair is queued.':deployed?'All exact main gates passed.':'Main checks are running.',build_number:42},
+    repair:{status:activeRepair?'queued':deployed?'completed':'none',round:activeRepair||deployed?1:0,max_rounds:3,task_id:activeRepair?'11111111-1111-4111-8111-111111111111':null,updated_at:time,summary:activeRepair?'Independent author and reviewer policy applies.':'No active repair.'},
+    release:{status:deployed?'deployed':'none',release_id:deployed?'88888888-8888-4888-8888-888888888888':null,receipt_sha256:deployed?'e'.repeat(64):null,updated_at:time,summary:deployed?'Activation receipt and health confirmed.':'No activation receipt.'}};
+}
+
 export async function startAgentsRelay() {
   const directory = await mkdtemp(join(tmpdir(), 'forge-agents-ui-'));
   const tokenFile = join(directory, 'relay-token');
@@ -138,11 +157,12 @@ export async function startAgentsRelay() {
       const input = JSON.parse(Buffer.concat(chunks));
       const requestId = input.request_id;
       if (request.headers['forge-request-id'] !== requestId || request.headers['forge-envelope-version'] !== '1' || request.headers['forge-contract-version'] !== '1') throw new Error('fixture headers');
+      if(input.kind.startsWith('work_') && request.headers['forge-delivery-version']!=='1')throw new Error('fixed native delivery version missing');
       calls.push(input.kind);
       const send = (status, kind, fields = {}) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ protocol_version: 1, event: { kind, request_id: requestId, ...fields } })); };
       const failed = (status, code) => send(status, input.kind.startsWith('usage_') ? 'usage_failed' : 'work_failed', { code });
       if (input.kind === 'work_catalog') {
-        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}),...(faults.externalWorkflow?{external_workflow:externalWorkflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time }); return;
+        send(200, 'work_catalog', { projects: [{ alias: project, label: 'Fixture workspace', base_revision: base, ...(faults.autonomousPolicy?{workflow:workflowPolicy}:{}),...(faults.projectDelivery?{delivery:faults.projectDelivery}:{}),...(faults.externalWorkflow?{external_workflow:externalWorkflowPolicy}:{}) }], profiles, worker_status: 'ready', observed_at: time }); return;
       }
       if (input.project_alias !== project) { failed(403, 'denied'); return; }
       if (input.kind === 'usage_overview' || input.kind === 'usage_detail') {
@@ -341,6 +361,8 @@ export async function startAgentsRelay() {
     enableExternalWorkflow(){faults.externalWorkflow=true;profiles.find(p=>p.alias==='muse-db-primary').modes=['plan','review','implement'];},
     addHistory(){const next=task('awaiting_review',tasks.size,{prompt:'Complete event history fixture'});next.events=[];next.sequence=0;for(let i=1;i<=61;i++)event(next,'checkpoint',{attempt_id:next.attempt_id,sequence:Math.min(i,128),stage:i===1?'plan':'progress',summary:`History checkpoint ${i}. Literal <img src=x onerror=globalThis.__historyExecuted=true> remains text.`});tasks.set(next.task_id,next);return next.task_id;},
     get latestWorkflowTaskId(){return [...tasks.values()].filter(t=>t.workflow).at(-1)?.task_id;},
+    setDelivery(taskId,stage){const selected=tasks.get(taskId);if(!selected)throw new Error('No fixture task');selected.delivery=deliveryProjection(stage);},
+    setProjectDelivery(stage){faults.projectDelivery=deliveryProjection(stage);faults.projectDelivery.source_kind='observed';},
     workflowPhase(taskId,phase){
       const selected=tasks.get(taskId);if(!selected?.workflow)throw new Error('No fixture workflow');
       selected.workflow.phase=phase;selected.workflow.can_cancel=!['completed','cancelled','merging'].includes(phase);

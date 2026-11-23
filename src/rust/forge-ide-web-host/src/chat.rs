@@ -131,12 +131,17 @@ impl ChatRelay {
         body: Vec<u8>,
         deadline: Instant,
     ) -> Result<(StatusCode, Bytes), Rejection> {
-        let request = self
+        let mut request = self
             .request("/v1/dispatch")
             .header("Forge-Destination", destination)
             .header("Forge-Request-Id", request_id)
             .header("Forge-Envelope-Version", "1")
             .header("Forge-Contract-Version", "1");
+        // The native Work relay selects this fixed response capability. Browser
+        // headers cannot negotiate a different contract or affect other relays.
+        if destination.starts_with("ide.work.") {
+            request = request.header("Forge-Delivery-Version", "1");
+        }
         self.post(request, body, workspace::MAX_BYTES, true, deadline)
             .map_err(|_| Rejection::Unavailable)
     }

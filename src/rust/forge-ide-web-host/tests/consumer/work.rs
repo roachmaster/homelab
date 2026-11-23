@@ -12,6 +12,42 @@ const OTHER: &str = "00000000-0000-0000-0000-000000000002";
 const PROJECT: &str = "coding-only";
 const STAMP: &str = "2026-11-19T17:00:00Z";
 
+#[test]
+fn negotiated_delivery_is_typed_and_invalid_source_evidence_fails_closed() {
+    let files = Files::new();
+    let upstream = TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = configured(&files, &upstream);
+    let auth = authenticate(&host);
+    let mut response = opened();
+    response["event"]["task"]["delivery"] = json!({
+        "verification_id":OTHER,"source_kind":"native","commit_sha":"c".repeat(40),
+        "tree_sha":"d".repeat(40),"updated_at":STAMP,
+        "verification":{"status":"passed","updated_at":STAMP,"summary":"Exact main passed.","build_number":7},
+        "repair":{"status":"none","round":0,"max_rounds":3,"task_id":null,"updated_at":STAMP,"summary":"No repair."},
+        "release":{"status":"deployed","release_id":OTHER,"receipt_sha256":"e".repeat(64),"updated_at":STAMP,"summary":"Activation confirmed."}
+    });
+    let mut invalid = response.clone();
+    invalid["event"]["task"]["delivery"]["release"]["receipt_sha256"] = json!("not-proof");
+    let worker = backend(upstream, vec![(200, response.clone()), (200, invalid)]);
+    assert_reply(
+        &host,
+        "ide.work.get",
+        task_request("work_get"),
+        &auth,
+        200,
+        response,
+    );
+    assert_reply(
+        &host,
+        "ide.work.get",
+        task_request("work_get"),
+        &auth,
+        503,
+        failure("unavailable"),
+    );
+    worker.join().unwrap();
+}
+
 fn settings(files: &Files, upstream: &TcpListener) -> WorkConfig {
     let token_file = files.0.join("work.token");
     fs::write(&token_file, "a".repeat(64)).unwrap();
@@ -189,6 +225,11 @@ fn backend(upstream: TcpListener, responses: Vec<(u16, Value)>) -> thread::JoinH
             );
             assert_eq!(headers["forge-envelope-version"], "1");
             assert_eq!(headers["forge-contract-version"], "1");
+            if headers["forge-destination"].starts_with("ide.work.") {
+                assert_eq!(headers["forge-delivery-version"], "1");
+            } else {
+                assert!(!headers.contains_key("forge-delivery-version"));
+            }
             for key in ["cookie", "origin", "forge-csrf", "forge-target-node"] {
                 assert!(!headers.contains_key(key));
             }

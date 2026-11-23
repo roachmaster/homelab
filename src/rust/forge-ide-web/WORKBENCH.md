@@ -123,7 +123,7 @@ report cache, arbitrary source deep link, or cross-tab draft synchronization.
 | `generate/application.rs`, `ui/theme.yaml` | Typed component composition, transport declarations and bounded visual tokens |
 | Component/generator primitives | Semantic Source, Region and PaneLink components, safe DOM, focus, geometry and lifecycle |
 | `forge-ide-ui` model/projection | Context, report/search/selection, source acceptance, source windows and typed presentation |
-| Generated worker and `src/wasm.rs` | Real ABI13, bounded codecs, declared effects and transport cleanup |
+| Generated worker and `src/wasm.rs` | Real ABI14, bounded codecs, declared effects and transport cleanup |
 | Native host/agent | Session/Origin/CSRF, configured aliases, mTLS, independent admission and bounded source reads |
 
 Source is a reusable read-only display component, not a JavaScript editor widget.
@@ -134,7 +134,7 @@ runtimes. Non-IDE component fixtures exercise the same primitives.
 
 ## Compatibility and verification
 
-**ABI13 requires an atomic matching host/generated asset/WASM deployment.** It
+**ABI14 requires an atomic matching host/generated asset/WASM deployment.** It
 includes guarded source/direct-edit events, source windows, Agents workflows,
 unified search and pane reveal metadata. Legacy Chat/Mail snapshots remain inert;
 their retired controls/effects cannot run. Older workers/WASM, including ABI12,

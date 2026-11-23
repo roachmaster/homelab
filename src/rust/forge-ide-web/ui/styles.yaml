@@ -2847,3 +2847,27 @@
       declarations:
         - ["margin", "4px 0 12px"]
         - ["white-space", "pre-wrap"]
+
+    - selector: "#agents-project-delivery,#agents-delivery"
+      declarations:
+        - ["margin-block", "12px 20px"]
+        - ["padding-block", "12px"]
+        - ["border-block", "1px solid var(--border)"]
+        - ["min-width", "0"]
+    - selector: "#agents-project-delivery .fg-row,#agents-delivery .fg-row"
+      declarations:
+        - ["display", "flex"]
+        - ["align-items", "center"]
+        - ["flex-wrap", "wrap"]
+        - ["gap", "8px"]
+    - selector: "#agents-project-delivery-heading,#agents-delivery-heading"
+      declarations:
+        - ["margin", "0"]
+        - ["font-size", "1rem"]
+    - selector: "#agents-project-delivery-details>section,#agents-delivery-details>section"
+      declarations:
+        - ["padding-block", "8px"]
+    - selector: "#agents-project-delivery-source,#agents-delivery-source"
+      declarations:
+        - ["white-space", "pre-wrap"]
+        - ["overflow-wrap", "anywhere"]

@@ -2028,7 +2028,7 @@ async function implementationDesignJourney(page, designUrl) {
   await check(report).toContainText('Active navigation is Agents, Workbench, Home and Design');
   await check(report).toContainText('with Agents as the default admitted view');
   const browserContract = report.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Browser application', exact: true }) });
-  await check(browserContract).toContainText('browser ABI is 13');
+  await check(browserContract).toContainText('browser ABI is 14');
   await check(report).toContainText('The last qualified live deployment is main 95651a5 (tree 6d380c5a)');
   await check(report).toContainText('actual built revision a3a14e9');
   await check(report).toContainText('499 consumed build inputs');
@@ -3386,6 +3386,40 @@ async function agentsJourney() {
       await workflowRow.locator('.fg-row-select').click();
       await check(page.locator('#agents-workflow-phase')).toHaveText(phaseLabel);
     }
+    await check(page.locator('#agents-delivery')).toBeHidden();
+    for(const [stage,label] of [['queued','Main verification queued'],['running','Verifying main'],['repair','Repair queued'],['deployed','Deployed']]){
+      relay.setDelivery(workflowTaskId,stage);
+      await page.locator('#agents-refresh').click();
+      await check(page.locator('#agents-workflow-phase')).toHaveText('Merged');
+      await check(page.locator('#agents-delivery-state')).toHaveText(label);
+      await check(page.locator('#agents-task-status')).toHaveText(label);
+      const disclosure=page.locator('#agents-delivery-details');
+      if(await disclosure.getAttribute('open')===null)await disclosure.locator('summary').click();
+      await check(page.locator('#agents-delivery-verification-summary')).toContainText('Build 42');
+      await check(page.locator('#agents-delivery-summary')).not.toContainText('2026-11-19T');
+      await check(page.locator('#agents-delivery-source')).toContainText('Main commit · '+'f'.repeat(40));
+      for(const width of [320,390,1440]){
+        await page.setViewportSize({width,height:844});
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'delivery stage and source fit the viewport');
+      }
+      await page.setViewportSize({width:390,height:844});
+      if(stage==='repair'){
+        await check(page.locator('#agents-delivery-repair-summary')).toContainText('Round 1/3');
+        await check(page.locator('#agents-delivery-repair-task')).toBeEnabled();
+      }
+      if(stage==='deployed'){
+        await check(page.locator('#agents-delivery-state')).toHaveAttribute('data-tone','success');
+        await check(page.locator('#agents-delivery-source')).toContainText('Activation receipt · '+'e'.repeat(64));
+      }
+    }
+    await screenshot(page,'ide-agents-delivery-deployed.png');
+    const deliveryTaskCount=relay.taskCount;
+    relay.setProjectDelivery('deployed');
+    await page.locator('#agents-back').click();
+    await page.locator('#agents-refresh').click();
+    await check(page.locator('#agents-project-delivery-state')).toHaveText('Deployed');
+    assert.equal(relay.taskCount,deliveryTaskCount,'observed main delivery does not fabricate a coding task');
+    await workflowRow.locator('.fg-row-select').click();
     for(const width of [320,390,1440]){
       await page.setViewportSize({width,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'workflow roles and counters fit the viewport');

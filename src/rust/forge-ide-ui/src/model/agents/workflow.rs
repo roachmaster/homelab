@@ -3,6 +3,12 @@ use super::*;
 
 impl Agents {
     pub(super) fn task_summary_badge(&self, task: &WorkTaskSummary) -> BadgeView {
+        if let Some(delivery) = task.delivery.as_ref().filter(|_| {
+            task.status == WorkStatus::Completed
+                || task.workflow_phase == Some(WorkWorkflowPhase::Completed)
+        }) {
+            return delivery::delivery_badge(delivery);
+        }
         if let Some(phase) = task.workflow_phase {
             if task.workflow_enabled == Some(false) && phase.is_processing() {
                 return badge("Needs attention", BadgeTone::Warning);

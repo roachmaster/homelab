@@ -13,6 +13,7 @@ fn ready() -> Agents {
         mode: Some(WorkMode::Plan),
         catalog: Some(WorkCatalog {
             projects: vec![WorkProject {
+                delivery: None,
                 external_workflow: None,
                 alias: "workspace".into(),
                 label: "Workspace".into(),
@@ -49,6 +50,7 @@ fn step(agents: &mut Agents, event: UiEvent, id: &str) -> Vec<UiEffect> {
 }
 fn detail(status: WorkStatus) -> WorkTaskDetail {
     WorkTaskDetail {
+        delivery: None,
         task_id: TASK.into(),
         correlation_id: "99999999-9999-4999-8999-999999999999".into(),
         project_alias: "workspace".into(),
@@ -1314,6 +1316,7 @@ fn minimal_pending_publication_before_outbox_insertion_blocks_early_accept_and_r
     );
 }
 
+mod delivery;
 mod history;
 mod review;
 mod scopes;

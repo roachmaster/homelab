@@ -28,6 +28,29 @@ failed receipts and report coverage honestly. Live activation is now authorized,
 including required schema/config/scoped grants and normal-account included model
 work for a bounded harmless end-to-end proof. No external emails/messages.
 
+UI handoff: optional bounded delivery DTOs now cover catalog projects and task
+summaries/details. Native Work alone requests Forge-Delivery-Version1; new clients
+accept legacy payloads without delivery. ABI14 pins host, manifest, worker and
+WASM together. Rust projects separate semantic verification/repair/release pills,
+relative times, guarded repair links and source disclosures using generated
+Rust/YAML components. Completed merge history remains Merged; completed roots
+follow current lineage for Active/Attention/History filtering without downgrading
+ordinary active authors. The existing watch refreshes pending task/project
+delivery. Deployed requires an activation receipt, not merely main CI success.
+
+Focused current checks passed:110 UI library tests,7 host library tests,66 host
+consumer tests,31 build-assets generator tests,17 scope/review integration tests,
+35 Node harness tests, and all-target Clippy with warnings denied for the three UI
+crates (build-assets enabled). Formatting, diff checks and42 scoped documentation
+link targets pass. Eight new Rust delivery tests plus native relay and fixture
+regressions cover legacy absence, nullable IDs, bounds/source syntax, immutable
+merge history, repair links, delivery scope/watch, receipt-based deployment and
+observed project main without fake tasks. Full real-browser assertions were
+extended for queued/running/repair/deployed at320/390/1440 widths; they remain for
+Root's integrated atomic WASM/browser gate. No live activation or full Rust matrix
+ran in this component worktree. Current docs retain last qualified live956/ABI13/
+schema26 separately from new source support.
+
 --- Previous task record ---
 
 # Current: Coordinator-owned post-merge verification — 2026-11-23

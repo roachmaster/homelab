@@ -14,7 +14,7 @@ async function relayFixture(t) {
     const request_id = 'verification-fixture-' + ++sequence;
     const response = await fetch('http://' + relay.endpoint + '/v1/dispatch', {
       method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json',
-        'Forge-Request-Id': request_id, 'Forge-Envelope-Version': '1', 'Forge-Contract-Version': '1',
+        'Forge-Request-Id': request_id, 'Forge-Envelope-Version': '1', 'Forge-Contract-Version': '1', 'Forge-Delivery-Version': '1',
         'Forge-Destination': 'ide.' + kind.replaceAll('_', '.'), ...headers },
       body: JSON.stringify({ kind, request_id, project_alias: 'workspace', ...fields }),
     });
@@ -22,6 +22,27 @@ async function relayFixture(t) {
   }
   return { relay, post };
 }
+
+test('delivery stays source-bound, changes completed-root scope and does not invent manual-source tasks', async t => {
+  const { relay, post } = await relayFixture(t);
+  const taskId = relay.addPlan('completed', 'Delivery fixture');
+  relay.setDelivery(taskId, 'running');
+  const active = await post('work_list', { status_filter: 'active', limit: 20, cursor: null });
+  assert.equal(active.status, 200);
+  const root = active.body.event.tasks.find(task => task.task_id === taskId);
+  assert.equal(root.status, 'completed');
+  assert.equal(root.delivery.verification.status, 'running');
+  assert.equal(root.delivery.commit_sha, 'f'.repeat(40));
+  relay.setDelivery(taskId, 'deployed');
+  const history = await post('work_list', { status_filter: 'history', limit: 20, cursor: null });
+  const delivered = history.body.event.tasks.find(task => task.task_id === taskId);
+  assert.equal(delivered.delivery.release.receipt_sha256, 'e'.repeat(64));
+  const count = relay.taskCount;
+  relay.setProjectDelivery('deployed');
+  const catalog = await post('work_catalog', {});
+  assert.equal(catalog.body.event.projects[0].delivery.source_kind, 'observed');
+  assert.equal(relay.taskCount, count);
+});
 
 async function implementationFixture(t) {
   const { relay, post } = await relayFixture(t);

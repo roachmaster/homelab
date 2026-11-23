@@ -140,7 +140,7 @@ work or Explorer on narrow displays without becoming a domain-state controller.
 
 ## ABI and verification
 
-The current WASM ABI is **13**. Agents is the default admitted view; navigation
+The current WASM ABI is **14**. Agents is the default admitted view; navigation
 is Agents, Workbench, Home and Design. Chat/Mail reducers, inference effects and
 mutation controls are retired. Their supported legacy snapshots remain inert
 and cannot submit or replay work. Deploy the matching native host and generated
@@ -211,7 +211,7 @@ and impl generic parameters mean even those header matches are tentative.
 
 All shape rows use existing `SelectEntry` actions with the accepted report token.
 `MoreShape` and `PreviousShape`, originally introduced in ABI2, remain local
-intents in ABI13. The independent
+intents in ABI14. The independent
 page is bounded by the same 256-row/192-KiB budget as other lists, has reversible
 history, emits no pagination effects, ignores stale report tokens and clears with the report. Selecting a readable file prepares its source read.
 The additive bindings require rebuilding and deploying the generated assets and

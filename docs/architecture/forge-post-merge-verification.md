@@ -152,3 +152,28 @@ suites with zero silent skips. An in-memory branch run explicitly reports
 browser/database not-run. This source work does not install a verifier, apply
 migration28, modify live provider credentials or enable the coordinator in
 production; those actions require a separately verified rollout.
+
+
+## Portal lifecycle projection
+
+The ABI14 portal requests `Forge-Delivery-Version: 1` through its native Work
+relay. The header is fixed by the host, not selected by browser input. Matching
+backend responses may include an optional `delivery` on project catalog entries,
+task summaries and task details. Legacy requests omit the header and retain their
+previous payload; new clients also accept old responses without this field.
+
+A projection binds `verification_id`, source kind, actual commit/tree and update
+time to three independent stages: verification, repair and release. Completed
+merge history still says **Merged**. The current delivery pill distinguishes
+queued/running main checks, repair, release building/activation and **Deployed**.
+A successful verification does not imply deployment; missing activation evidence
+is displayed as unverified. Exact source identities and receipts remain in a
+native disclosure, with relative times in summaries. A project-level projection
+can show observed main work without inventing a coding task.
+
+The projection is read-only and creates no approval, cancellation or publication
+authority. A repair link opens the actual related task through the existing
+admitted Work path. Nullable IDs and absent delivery remain supported for inactive
+and historical data. The old ABI13 decoder rejects unknown response fields, so
+matching host, WASM and generated assets must be deployed atomically with the
+negotiated backend contract. Source support is separate from actual live rollout.

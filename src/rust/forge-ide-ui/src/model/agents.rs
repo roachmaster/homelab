@@ -1,6 +1,7 @@
 //! Owned coding-task and usage UI state. Network/DOM work stays at typed ports.
 use super::*;
 use crate::markdown::render_markdown;
+mod delivery;
 mod history;
 mod presentation;
 mod workflow;
@@ -355,12 +356,19 @@ impl Agents {
             || self.publication_processing()
             || self.review_processing()
             || self.workflow_processing()
+            || self
+                .task
+                .as_ref()
+                .and_then(|t| t.delivery.as_ref())
+                .is_some_and(WorkDelivery::is_processing)
             || self.pane == Pane::List
-                && self.tasks.iter().any(|t| {
-                    t.status.is_processing()
-                        || t.workflow_phase
-                            .is_some_and(WorkWorkflowPhase::is_processing)
-                })
+                && (self.project_delivery_processing()
+                    || self.tasks.iter().any(|t| {
+                        t.status.is_processing()
+                            || t.delivery.as_ref().is_some_and(WorkDelivery::is_processing)
+                            || t.workflow_phase
+                                .is_some_and(WorkWorkflowPhase::is_processing)
+                    }))
     }
     pub fn network_failed(&mut self, id: &str, watch: String, effects: &mut Vec<UiEffect>) {
         if self.pending.as_ref().is_some_and(|r| r.request_id() == id) {
@@ -447,6 +455,11 @@ impl Agents {
                     && self.pending.is_none()
                     && (self.publication_processing()
                         || self.review_processing()
+                        || self
+                            .task
+                            .as_ref()
+                            .and_then(|t| t.delivery.as_ref())
+                            .is_some_and(WorkDelivery::is_processing)
                         || self.workflow_processing())
                 {
                     // Publication can advance without changing the task revision.
@@ -473,7 +486,11 @@ impl Agents {
                     && self.pane == Pane::List
                     && self.processing()
                 {
-                    self.list(id, Direction::Current, effects);
+                    if self.project_delivery_processing() {
+                        self.request(WorkRequest::WorkCatalog { request_id: id }, effects);
+                    } else {
+                        self.list(id, Direction::Current, effects);
+                    }
                 }
                 if usage && (self.usage_waiting || self.processing()) {
                     self.usage_overview(aux, effects);
@@ -2558,7 +2575,11 @@ impl Agents {
                         badge: self.task_summary_badge(t),
                         tag: t.agent_profile.clone(),
                         time: timestamp(
-                            t.updated_at.as_deref().unwrap_or(&t.created_at),
+                            t.delivery
+                                .as_ref()
+                                .map(|d| d.updated_at.as_str())
+                                .or(t.updated_at.as_deref())
+                                .unwrap_or(&t.created_at),
                             self.now_ms,
                         ),
                     }),
@@ -2699,6 +2720,7 @@ impl Agents {
             }),
         });
         self.project_workflow(view, compose, reader);
+        self.project_delivery(view, active && work, reader, pending);
         self.project_history(view, active && work && reader);
     }
 }

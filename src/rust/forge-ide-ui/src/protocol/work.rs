@@ -2,7 +2,9 @@
 use super::{valid_chat_id, valid_chat_text};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+mod delivery;
 mod workflow;
+pub use delivery::*;
 pub use workflow::*;
 
 pub const MAX_WORK_PROMPT_BYTES: usize = 8192;
@@ -468,6 +470,16 @@ impl WorkListScope {
                 _ => Self::Attention,
             }
         };
+        let group = if group == Self::History
+            && (task.status == WorkStatus::Completed
+                || task.workflow_phase == Some(WorkWorkflowPhase::Completed))
+        {
+            task.delivery
+                .as_ref()
+                .map_or(group, WorkDelivery::list_scope)
+        } else {
+            group
+        };
         self == Self::All || self == group
     }
 }
@@ -570,6 +582,8 @@ pub enum WorkAttemptPhase {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkProject {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<WorkDelivery>,
     pub alias: String,
     pub label: String,
     #[serde(deserialize_with = "required_nullable")]
@@ -625,7 +639,8 @@ impl WorkCatalog {
         self.projects.len() <= 64
             && self.profiles.len() <= 64
             && self.projects.iter().all(|p| {
-                p.workflow.as_ref().is_none_or(WorkWorkflowPolicy::is_valid)
+                p.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
+                    && p.workflow.as_ref().is_none_or(WorkWorkflowPolicy::is_valid)
                     && p.external_workflow
                         .as_ref()
                         .is_none_or(WorkWorkflowPolicy::is_valid)
@@ -656,6 +671,8 @@ impl WorkCatalog {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskSummary {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<WorkDelivery>,
     pub task_id: String,
     pub correlation_id: String,
     pub project_alias: String,
@@ -680,7 +697,8 @@ pub struct WorkTaskSummary {
 }
 impl WorkTaskSummary {
     pub fn is_valid(&self) -> bool {
-        valid_chat_id(&self.task_id)
+        self.delivery.as_ref().is_none_or(WorkDelivery::is_valid)
+            && valid_chat_id(&self.task_id)
             && valid_chat_id(&self.correlation_id)
             && valid_work_name(&self.project_alias, 64)
             && valid_work_hex(&self.base_revision, 40)
@@ -736,6 +754,8 @@ impl WorkResultManifest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WorkTaskDetail {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivery: Option<WorkDelivery>,
     pub task_id: String,
     pub correlation_id: String,
     pub project_alias: String,
@@ -795,6 +815,7 @@ impl WorkExternalResult {
 impl WorkTaskDetail {
     pub fn summary(&self) -> WorkTaskSummary {
         WorkTaskSummary {
+            delivery: self.delivery.clone(),
             task_id: self.task_id.clone(),
             correlation_id: self.correlation_id.clone(),
             project_alias: self.project_alias.clone(),
