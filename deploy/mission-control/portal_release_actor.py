@@ -223,7 +223,15 @@ class SystemPort:
             str(binary), 'serve', '--config', str(candidate_config)])
 
     def candidate_stop(self, release_id):
-        self.call(['/usr/bin/systemctl', 'stop', 'forge-portal-candidate-' + release_id + '.service'])
+        unit = 'forge-portal-candidate-' + release_id + '.service'
+        try:
+            self.call(['/usr/bin/systemctl', 'stop', unit])
+        except subprocess.CalledProcessError:
+            # --collect can remove an already stopped transient unit. Absence
+            # is safe only when systemd confirms it has no running leader.
+            observed = self.call(['/usr/bin/systemctl', 'show', unit, '-p', 'LoadState', '-p', 'MainPID']).decode()
+            if not {'LoadState=not-found', 'MainPID=0'} <= set(observed.splitlines()):
+                raise
 
 
 class PortalProbe:
@@ -423,7 +431,7 @@ class PortalReleaseActor:
                 if self.read(target) != raw:
                     raise ValueError('Retained replay archive conflict')
             else:
-                self.write(target, raw, mode=0o644)
+                self.write(target, raw, mode=0o444)
 
     def plan(self, job):
         directory, release = self._paths(job)
@@ -476,7 +484,11 @@ class PortalReleaseActor:
                 if self.read(target, 128 * 1024 * 1024) != raw:
                     raise ValueError('Release staging conflict')
             else:
-                self.write(target, raw, mode=0o755 if expected['executable'] else 0o644)
+                self.write(target, raw, mode=0o555 if expected['executable'] else 0o444)
+        # The sealed release is never writable by its runtime service account.
+        for directory_path in sorted((p for p in release.rglob('*') if p.is_dir()), reverse=True):
+            os.chmod(directory_path, 0o555)
+        os.chmod(release, 0o555)
         self._archive(state['before'])
         config = dict(state['before']['value'])
         config.update(assets=str(release / 'assets'), cooked_replay_archive=str(self.config.replay_archive_root))
@@ -487,11 +499,27 @@ class PortalReleaseActor:
         self.write(candidate_path, canonical(candidate) + b'\n', mode=0o640, group=web_gid)
         state.update(live_config=str(live_path), live_config_sha256=sha(canonical(config) + b'\n'), phase='candidate')
         self._save(directory, state)
+        probe_failed = False
         try:
             self.system.candidate_start(self.config, state['job']['release_id'], release / 'bin/forge-ide-web-host', candidate_path)
             self._health(candidate, state['inventory'])
+        except Exception:
+            probe_failed = True
         finally:
             self.system.candidate_stop(state['job']['release_id'])
+        if probe_failed:
+            current = self._current()
+            if (current['binary'] != state['before']['binary']
+                    or current['override_sha256'] != state['before']['override_sha256']
+                    or current['config_sha256'] != state['before']['config_sha256']):
+                return self._receipt(directory, state, 'failed',
+                    summary='Candidate failed; an independent portal change was preserved.')
+            old_assets = Path(current['value']['assets'])
+            old_inventory = {'assets/' + n: {'sha256': sha(self.read(old_assets / n, 8 * 1024 * 1024))}
+                             for n in CORE}
+            self._health(current['value'], old_inventory)
+            return self._receipt(directory, state, 'failed', health=True, rollback=True,
+                summary='Candidate health failed; the existing healthy portal was retained without a restart.')
         state['phase'] = 'prepared'
         self._save(directory, state)
         return {'status': 'planned', 'plan': state['plan']}
