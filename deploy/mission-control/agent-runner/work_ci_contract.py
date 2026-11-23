@@ -27,6 +27,12 @@ SCOPED_MAIN_CHECKS = (
 V2_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/backend-suites.py',
     'deploy/mission-control/agent-runner/work_ci_contract.py',
+    'deploy/mission-control/agent-runner/work_post_merge.py',
+    'deploy/mission-control/agent-runner/work_post_merge_provider.py',
+    'deploy/mission-control/agent-runner/work_publication.py',
+    'deploy/mission-control/agent-runner/work_worker_store.py',
+    'deploy/mission-control/sql/migrations/0028_post_merge_verification.sql',
+    'deploy/mission-control/sql/management/verify-post-merge.sql',
     'deploy/mission-control/agent-runner/work_native_jenkins.py',
     'deploy/mission-control/agent-runner/work_publication_config.py',
     'deploy/mission-control/agent-runner/work_native_repair.py',

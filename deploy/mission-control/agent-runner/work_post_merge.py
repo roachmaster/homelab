@@ -109,9 +109,14 @@ class PostMergeWorker:
                            for key in ('merge_commit', 'merge_tree'))):
                 lost.set()
                 raise ValueError('Post-merge owner/project/source mismatch')
-            for key in ('post_merge_id', 'workflow_id', 'correlation_id', 'lease_token'):
-                if str(UUID(job[key])) != job[key]:
-                    raise ValueError('Invalid post-merge identity')
+            try:
+                valid_ids = all(str(UUID(job[key])) == job[key] for key in
+                    ('post_merge_id', 'workflow_id', 'correlation_id', 'lease_token'))
+            except (ValueError, TypeError, AttributeError, KeyError):
+                valid_ids = False
+            if not valid_ids:
+                lost.set()
+                raise ValueError('Invalid post-merge identity')
             require_lease()
             if request is not None:
                 validate_request(job, request)
