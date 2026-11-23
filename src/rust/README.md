@@ -1,10 +1,10 @@
 # Rust source sets — Forge implementations
 
-**Implementation review: 18 November 2026.** The six execution core packages and
-independent command-description contract remain narrow. Optional source sets now
+**Current source guide: 23 November 2026.** The execution and command-description
+contracts are modules of `forge-core`. Optional source sets
 include native tools, templates, remote adapters, verified access, durable jobs,
 IDE inspection and managed editing, generated browser assets, the portal host,
-model runtime and game runtime. The [workspace manifest](Cargo.toml) is the current
+and game runtime. The [workspace manifest](Cargo.toml) is the current
 package inventory; it is not a deployment manifest.
 
 Typed registrars/freeze and explicit factory/provider injection are implemented
@@ -119,8 +119,11 @@ command remains structural analysis, not a shell or full compiler AST.
 
 ## Optional consumer proof
 
-The demo packages live under `examples/`, not inside core:
-
+The former demo packages were removed. Current small consumer proofs are the
+[`in_process`](forge-core/examples/in_process.rs) and
+[`task_clients`](forge-core/examples/task_clients.rs) core examples. Normal native
+composition is exercised by [forge-local](forge-local/README.md) and the
+[forge-terminal](forge-terminal/README.md) front door.
 
 The application selects configurations/registrars before constructing resources.
 `Registry<G>` owns metadata and typed groups together; a rejected complete group
@@ -216,7 +219,8 @@ can also affect output. See [rustc code-generation options](https://doc.rust-lan
 2. All-feature workspace build, check, strict Clippy, debug/release tests and
    strict no-dependency Rustdoc.
 3. Node-only terminal tests/Clippy and local-application tests, plus separate jobs-only and disk-only terminal tests/Clippy.
-4. Pure demo tests/Clippy, then separate messages-only and disk-only demo tests.
+4. Core examples and public consumer proofs within the all-target workspace gates;
+   removed demo packages and their old feature combinations are not CI inputs.
 5. Node-only system tests and optional UI facade default-profile checks.
 6. Deterministic generated assets, JavaScript grammar, actual WASM ABI and isolated worker-fault tests (`make ui-check`).
 7. Headless-QA reporting/orchestration regressions (`make ui-qa-check` plus the Python helper tests).
@@ -226,14 +230,11 @@ or the [browser workflow](../../.github/workflows/ide-ui-browser.yml). See the
 [QA guide](forge-ide-web/tests/browser/README.md) for prerequisites, stable scenario
 inventory, safe artifacts, failure categories and real-versus-injected evidence.
 
-[GitHub Actions](../../.github/workflows/rust.yml) invokes exactly `make ci` on
-Rust/Makefile/workflow changes in pull requests and pushes to `main`, or by manual
-workflow dispatch. It uses an Ubuntu runner, stable Rust, a pinned official
-checkout action, read-only repository permissions and no persisted checkout
-credentials. There is no deploy job, secret, package publishing, destructive clean
-or Git mutation target. The workflow definition is checked locally; an actual
-hosted run is separate evidence after publication. Its structure follows the
-[official workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+The retained [GitHub Actions definition](../../.github/workflows/rust.yml) is
+disabled; it is not the current execution path. Trusted Jenkins verification and
+source-versus-live CI profile status are documented in the
+[pipeline guide](../../docs/architecture/ci-pipeline.md). Make checks do not deploy
+services or grant source approval by themselves.
 
 ## Run and check
 
@@ -249,22 +250,22 @@ cargo fmt --all -- --check
 cargo build --workspace --all-targets --all-features --offline --locked
 cargo test --workspace --all-features --offline --locked
 cargo test --workspace --all-features --release --offline --locked
-cargo test -p forge-bootstrap-demo --no-default-features --offline --locked
-cargo test -p forge-bootstrap-demo --no-default-features --features disk --offline --locked
+cargo test -p forge-core --offline --locked
+cargo test -p forge-local --no-default-features --features disk --offline --locked
 cargo clippy --workspace --all-targets --all-features --offline --locked -- -D warnings
-cargo clippy -p forge-bootstrap-demo --all-targets --no-default-features --offline --locked -- -D warnings
+cargo clippy -p forge-local --all-targets --no-default-features --offline --locked -- -D warnings
 cargo test -p forge-local -p forge-terminal --no-default-features --offline --locked
 cargo clippy -p forge-terminal --all-targets --no-default-features --offline --locked -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --offline --locked
-cargo run -p forge-bootstrap-demo --no-default-features --offline --locked
-cargo run -p forge-bootstrap-demo --features messages --offline --locked
-cargo run -p forge-bootstrap-demo --example disk_access --no-default-features --features disk --offline --locked
+cargo run -p forge-terminal --bin forge --no-default-features --offline --locked -- node.info
+cargo run -p forge-terminal --bin forge --no-default-features --features jobs --offline --locked -- jobs.submit --help
+cargo run -p forge-terminal --bin forge --no-default-features --features disk --offline --locked -- disk.list --help
 cargo run -p forge-core --example in_process --offline --locked
 cargo run -p forge-core --example task_clients --offline --locked
 python3 scripts/check_dependencies.py
 ```
 
-The example constructs a capability-owned greeting enum, factory and host-owned
+The `in_process` example constructs a capability-owned greeting enum, factory and host-owned
 provider, injects the ready port into a handler, registers it and invokes the same
 typed bridge entry point an adapter would use. Its correlation ID survives into
 the response. The second example wraps a `Task` behind the bridge: injected fake
@@ -272,7 +273,15 @@ clients fetch data and record a request prepared by the task, without network or
 disk operations. Neither example claims durable acceptance. The explicit demo
 policies are **not authentication**.
 
-These checks ran with Rust/Cargo **1.99.1** on Linux. The all-feature suite now passes **493 reported unit/integration results and nine doctests** (four compile-fail, five runnable), including separate public-consumer checks in debug/release, including the local application and terminal; the pure and node-only
+### Historical local verification record — 18 November 2026
+
+The earlier guide reported Rust/Cargo **1.99.1** on Linux and **493 reported
+unit/integration results and nine doctests** (four compile-fail, five runnable).
+These are retained historical claims, not the current toolchain requirement,
+current test totals or fresh execution evidence for this documentation change.
+The [current implementation reference](../../docs/design/implementation-status.md)
+separately records the last qualified deployment. That earlier record included
+separate public-consumer checks in debug/release, local application and terminal; the pure and node-only
 consumers are additionally checked separately. The inherited Unix special-socket
 fixture self-skipped on this local host because socket creation returned EPERM; it
 is not counted as exercised behavior. Actual browser acceptance is a separate

@@ -21,6 +21,8 @@ activation claim.
 
 Documentation integration: reviewed223ca465 corrects active guides, ABI13/schema26, current956 deployment provenance and inactive/optional capabilities. Its262 scoped local/repository links and current-state assertions passed. Historical rollout evidence stays separate; remaining deleted-package examples are handled in a scoped follow-up.
 
+Follow-up: replaced all six removed forge-bootstrap-demo commands in src/rust/README.md with actual forge-core/local/terminal targets and feature combinations. Linked real core examples, marked the old493-test/1.99.1 report as a dated18 November record, and corrected removed-demo/current CI wording. Verified manifests, disk/jobs features, forge binary path, both example files and all local links statically; no Rust build or runtime execution.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
