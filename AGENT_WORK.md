@@ -1,5 +1,21 @@
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
 
+Jenkins16 passed Rust/browser gates and the corrected cache E2E, then exposed
+the coupled M27 source fingerprint for that test fixture. This pin was missed
+in the fixture fix. Root assigns a one-hash qualification of reviewed `e5a1bd3`,
+retaining its historical fingerprint as provenance and every production, SQL and
+authority AST guard. Run the complete 24 M27 checks together with the 32 focused
+cache/supervision cases before integration. Root also assigns a full ordinary-user
+954-test backend preflight in parallel with the next genuine Jenkins execution;
+keep failed16 evidence intact and never treat local preflight as Jenkins proof.
+
+The combined 56 checks (all 24 M27 plus the 32 cache/supervision cases) pass in
+7.917 seconds with zero skips. Only the reviewed fixture's single hash changes;
+the old hash remains documented, all 26 historical migrations and 20 authority
+AST pins pass unchanged. Full ordinary-user backend discovery follows this
+checkpoint under a separate low-priority user unit, with actual source-bound
+logs retained outside Git.
+
 Jenkins15 on `a3a14e9` passed Rust and browser gates, then found one backend
 fixture failure in 954 tests. Its delivery-to-supervisor cache test still
 replaced only the full gate commands after branch execution became a separate

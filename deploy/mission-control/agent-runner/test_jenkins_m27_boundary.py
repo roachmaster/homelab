@@ -1,6 +1,7 @@
 """Pure source boundaries for the unreviewed Jenkins M27 reference port.
 
-Historical migrations and unchanged boundary files retain Owner26/cache4dc bytes.
+Historical migrations and unchanged production boundaries retain Owner26/cache4dc
+bytes. The reviewed branch-check fixture correction is qualified inline below.
 Selected reviewer files instead come from the explicitly included UNAPPROVED
 2df4908 source context, not the admitted cache baseline. AST pins preserve the
 unchanged legacy guards while actual functional tests exercise intended Resume
@@ -71,7 +72,10 @@ UNCHANGED_BASELINE_SHA256 = {
     "src/rust/forge-ide-ui/tests/work_review.rs": "bbc570e60b2532c2a4d7730505e26cd0470e738a50a37fda0491bc4983440d3f",
     "deploy/mission-control/agent-runner/test_work_owner_followup.py": "d791a3200da385177c3d2abd161be4bacfdac82eab2e98c3a26afd59a08bdce1",
     "deploy/mission-control/agent-runner/work_external_workflow.py": "29b94ec191e55565ad4455d8fa2b706a4cc1489fddc2a631715d94b0eafc8fd7",
-    "deploy/mission-control/agent-runner/test_ci_supervision.py": "892ddd6dce467bd2924fc4aff352ef329c94013d84d578dfc460b040ee4d9b86",
+    # Fixture-only branch execution correction reviewed in e5a1bd323a0182d845b87ec9303a408ce2612177.
+    # Historical fixture SHA892ddd6dce467bd2924fc4aff352ef329c94013d84d578dfc460b040ee4d9b86
+    # remains provenance; production helper, full gate and all authority AST pins are unchanged.
+    "deploy/mission-control/agent-runner/test_ci_supervision.py": "0f468c483f4cb47d07191d7a07bba1682a323d570c9f7332f57ed406aa7ec1e5",
     "deploy/mission-control/agent-runner/test_work_branch_first.py": "0ba0f4ad5fbc1a73a6dc7b9d368c27ad68903b2c23169300db2c3f8145aa8c18",
     "deploy/mission-control/agent-runner/test_work_external_delivery.py": "3f077e13d41b4a6eadcd99dd9f6f62a90d621c9a964ae223de9c672224f90732",
     "deploy/mission-control/agent-runner/test_external_workflow_branch_scope.py": "1f876c2008fa9cfd5a284d7a3817af53c85ad226f98c383e2af780eeaaa27df1",
