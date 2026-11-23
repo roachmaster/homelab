@@ -213,7 +213,25 @@ CONSOLIDATED_UI_CONTEXT_SHA256 = {
 
 RETIRED_BROWSER_SOURCE_FILES = ('src/rust/forge-ide-ui/src/model/chat.rs', 'src/rust/forge-ide-ui/src/model/chat/history.rs', 'src/rust/forge-ide-ui/src/model/chat/models.rs', 'src/rust/forge-ide-ui/src/model/chat/run.rs', 'src/rust/forge-ide-ui/src/model/mail.rs', 'src/rust/forge-ide-ui/src/presentation.rs', 'src/rust/forge-ide-ui/src/protocol/chat_run.rs', 'src/rust/forge-ide-ui/src/protocol/mail.rs', 'src/rust/forge-ide-web-host/src/edit.rs', 'src/rust/forge-ide-web-host/src/history.rs', 'src/rust/forge-ide-web-host/src/mail_dispatch.rs', 'src/rust/forge-ide-web-host/src/run_dispatch.rs')
 
+# Reviewed additive M28 coordinator context on main aae81e4. Historical raw
+# maps below remain literal provenance; only these explicit current paths change.
+# Functional/privilege tests and unchanged legacy AST guards remain mandatory.
+POST_MERGE_CONTEXT_SHA256 = {
+    "deploy/mission-control/agent-runner/test_work_post_merge.py": "39b7fd47aeb478cbf11909f546f3fcd81a668cbd6a26999eed5b038cc4ec207c",
+    "deploy/mission-control/agent-runner/test_work_post_merge_provider.py": "12939c18f7f390aa1e5aec240cafcca79a56ca07d87f2f73c8582f1ed5215bb2",
+    "deploy/mission-control/agent-runner/test_work_post_merge_store.py": "e176837ae4bf9ea317c71f65500f28d321abaa5371b31ee6ac87272a51848858",
+    "deploy/mission-control/agent-runner/work_post_merge.py": "e60b97397de161ffbee37d42a28f17b8feb45feae9bcf2f005eea7474cffdb16",
+    "deploy/mission-control/agent-runner/work_post_merge_provider.py": "a4959d8a5462c1eaaa9d8f62e45419f08550ab8c91c4cbb60890f03949d706cd",
+    "deploy/mission-control/agent-runner/work_publication_config.py": "03ebdeff74a4943962a397af47a8201dd45b0592138f5901db2df74b151db8c9",
+    "deploy/mission-control/agent-runner/work_worker_store.py": "c52f5c9267d3eb3152fc007589b8a7963a312b61b440174536661f6d7cf3f3a8",
+    "deploy/mission-control/jenkins/README.md": "39ac4d75f6c73fb952157e0fd620a1c88f70c162211b5bcc51e9f331168c2008",
+    "deploy/mission-control/jenkins/verify-candidate.py": "6d17f6da2fb6b4d8db5481d9d70e6c089c21b994f24df3728581b2480e36827d",
+    "deploy/mission-control/sql/management/verify-post-merge.sql": "e89742a93465c37c786c09aec7fec9ac00cd250f34e02d4a400f44e518272165",
+    "deploy/mission-control/sql/migrations/0028_post_merge_verification.sql": "dba349627f5583fbb37956d0742b521e7fb257879efbbe2d61389d792cbe4a00"
+}
+
 STRICT_VERIFIER_FILES = {
+    "verify-post-merge.sql",
     "verify.sql",
     "verify-owner-continuation.sql",
     "verify-agy-unattended.sql",
@@ -244,27 +262,31 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         # An explicitly reviewed context may qualify current source bytes while
         # the historical baseline remains available for exact provenance.
         self.assertTrue(set(REVIEWED_CI_CONTEXT_SHA256) <= set(UNCHANGED_BASELINE_SHA256))
-        current = {**UNCHANGED_BASELINE_SHA256, **REVIEWED_CI_CONTEXT_SHA256}
+        current = {**UNCHANGED_BASELINE_SHA256, **REVIEWED_CI_CONTEXT_SHA256, **POST_MERGE_CONTEXT_SHA256}
         for relative, expected in current.items():
             with self.subTest(source=relative):
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
+                    POST_MERGE_CONTEXT_SHA256.get(relative, expected))
 
     def test_explicit_reviewer_context_matches_included_unapproved_source(self):
         for name, expected in INCLUDED_REVIEWER_CONTEXT_SHA256.items():
             with self.subTest(context=REVIEWER_CONTEXT_REVISION, source=name):
-                self.assertEqual(hashlib.sha256((RUNNER / name).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((RUNNER / name).read_bytes()).hexdigest(),
+                    POST_MERGE_CONTEXT_SHA256.get("deploy/mission-control/agent-runner/" + name, expected))
 
     def test_task_organization_changes_match_explicit_unapproved_context(self):
         for relative, expected in TASK_ORGANIZATION_CONTEXT_SHA256.items():
             with self.subTest(context='unapproved task organization', source=relative):
-                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
+                    POST_MERGE_CONTEXT_SHA256.get(relative, expected))
 
     def test_retirement_and_ui_composition_match_their_explicit_source_contexts(self):
         for context, pins in ((RETIREMENT_CONTEXT_REVISION, INCLUDED_RETIREMENT_CONTEXT_SHA256),
                               ('consolidated task organization and retirement', CONSOLIDATED_UI_CONTEXT_SHA256)):
             for relative, expected in pins.items():
                 with self.subTest(context=context, source=relative):
-                    self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+                    self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
+                    POST_MERGE_CONTEXT_SHA256.get(relative, expected))
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
@@ -302,7 +324,8 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         }
         required = (
             "work_owner_control.py", "work_owner_reverification.py", "work_publication_clients.py", "work_review.py",
-            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py", "jenkins_events.py", "jenkins_config.py",
+            "work_store.py", "work_worker_store.py", "work_reviewer_correction.py",
+            "work_post_merge.py", "work_post_merge_provider.py", "jenkins_events.py", "jenkins_config.py",
             "jenkins_codec.py", "jenkins_store.py", "jenkins_consumer.py",
             "jenkins_api.py", "jenkins_emitter.py", "jenkins_emit_tool.py",
         )
