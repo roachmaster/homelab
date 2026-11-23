@@ -164,10 +164,22 @@ receipts cannot be substituted for one another, even when both have three
 rows. No SQL migration or historical evidence rewrite is involved.
 
 See [the pipeline design](../../../docs/architecture/ci-pipeline.md#7-versioned-execution-and-accounting).
-A future coordinated rollout must install matching worker/profile/verifier
-configuration. Composing the existing merge event into a main-scoped request
-is also still required for automatic post-merge execution; this source fix
-adds no broker, scheduler, live service or automatic invocation.
+A coordinated rollout must install matching worker/profile/verifier
+configuration. The existing publication coordinator now has an optional
+post-merge verification owner: migration28 captures confirmed native and external
+merges transactionally, and the selected worker submits the actual merged commit
+through the existing Rust-backed Jenkins provider. This adds no new service or
+broker. It is implemented in source and has not been activated on Mission Control.
+
+Publisher configuration explicitly selects both `post_merge_enabled: true` and
+an absolute `post_merge_jenkins_delivery_config` path. That separate private
+delivery configuration must select v2, matching repositories, credentials scope,
+job and verifier. Provision migration28 and its strict catalog/privilege checks,
+then an enabled owner/project worker grant before starting this configuration.
+Legacy configuration remains disabled, and historical completed merges are not
+backfilled. Failed verification writes independent remediation evidence; it
+neither reopens the completed task nor bypasses normal policy to admit model work.
+See [the coordinator ownership and sequence design](../../../docs/architecture/forge-post-merge-verification.md).
 
 
 ## GitHub access for the Jenkins user

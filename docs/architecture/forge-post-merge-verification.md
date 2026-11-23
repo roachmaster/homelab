@@ -131,10 +131,11 @@ codes. Cleanup must be confirmed. The delivery adapter additionally validates
 the protected verifier result and request binding; an application receipt does
 not create protected evidence.
 
-A failed-main event preserves the source and diagnostics for the admitted
-follow-up path. It grants no model permission to mutate or reopen the completed
-parent. Any repair assignment retains the applicable author/reviewer and
-publication policy. A passed main check is verification evidence, not portal
+A failed-main check creates an independent durable remediation record with its
+source and diagnostics. This record is follow-up evidence; this change does not
+automatically admit another coding task. A new repair assignment must pass the
+current WorkService author/reviewer and publication policy. The completed parent
+is never reopened. A passed main check is verification evidence, not portal
 activation or an automatic deployment instruction.
 
 ## Verification and rollout

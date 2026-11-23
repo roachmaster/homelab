@@ -77,7 +77,8 @@ def stopped_receipt(request, receipt):
         'gate_manifest_sha256': request['gate_manifest_sha256'],
         'verification_profile': SCOPED_PROFILE, 'branch_scope': 'main',
         'correlation_id': request['correlation_id']}
-    return bool(proof) and all(receipt.get(key) == value for key, value in expected.items())
+    return (bool(proof) and type(receipt.get('version')) is int and receipt['version'] == 2
+            and all(receipt.get(key) == value for key, value in expected.items()))
 
 
 class PostMergeWorker:

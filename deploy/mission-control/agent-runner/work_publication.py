@@ -64,6 +64,7 @@ class PublicationWorker:
         self.merger = merger
         self.native_ci = native_ci
         self.post_merge = post_merge
+        self._yield_post_merge = False
         self.stop = stop if stop is not None else threading.Event()
 
     @contextmanager
@@ -171,8 +172,14 @@ class PublicationWorker:
             return False
         if self.native_ci is not None:
             self.native_ci.reconcile_once()
-        if self.post_merge is not None and self.post_merge.run_once():
-            return True
+        if self.post_merge is not None:
+            # A slow observation can outlast the DB polling delay. Always give
+            # review/merge/publication one turn before claiming more main CI.
+            if self._yield_post_merge:
+                self._yield_post_merge = False
+            elif self.post_merge.run_once():
+                self._yield_post_merge = True
+                return True
         if self.reviewer is not None:
             review = self.store.review_claim(self.config.worker.worker_id[:54] + "-reviewer")
             if review is not None:

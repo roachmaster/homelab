@@ -15,7 +15,7 @@ from uuid import UUID, uuid4, uuid5
 from test_work_executor import raw_config
 from work_ci_contract import CiGateContractFactory, SCOPED_PROFILE
 from work_post_merge import PostMergeWorker
-from work_publication import PublicationWorkerFactory
+from work_publication import PublicationWorker, PublicationWorkerFactory
 from work_publication_config import parse_config
 from work_worker_config import parse_config as parse_worker
 
@@ -414,6 +414,21 @@ class PostMergeWorkerTest(unittest.TestCase):
 
 
 class PostMergeConfigurationAndFactoryTest(unittest.TestCase):
+    def test_slow_main_observations_cannot_starve_existing_review_work(self):
+        with TemporaryDirectory() as temporary:
+            config, _ = configuration(Path(temporary))
+            store, reviewer, main_ci = Mock(), Mock(), Mock()
+            review = {'review_id': 'queued review'}
+            store.review_claim.return_value = review
+            main_ci.run_once.return_value = True
+            worker = PublicationWorker(config, store, None, None, None, None,
+                candidates=None, reviewer=reviewer, post_merge=main_ci)
+            self.assertTrue(worker.run_once())
+            reviewer.process.assert_not_called()
+            self.assertTrue(worker.run_once())
+            reviewer.process.assert_called_once_with(review)
+            main_ci.run_once.assert_called_once_with()
+
     def test_legacy_default_remains_disabled_and_parsing_does_not_read_delivery_files(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
