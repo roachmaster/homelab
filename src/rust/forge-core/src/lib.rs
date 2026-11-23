@@ -3,9 +3,9 @@
 //! contract. No external dependencies, no features, no business enums, no
 //! async runtime, no global registry.
 //!
-//! The eight modules preserve the layering the eight crates used to enforce
-//! by crate boundary. The layering test (`tests/layering.rs`) fails the
-//! build if a module imports one above it. Allowed edges:
+//! The repository pre-compile gate (`scripts/check_core_layers.py`) checks the
+//! module DAG; standalone Rust tests keep the module inventory explicit without
+//! requiring Python. The source guard does not expand macros. Allowed edges:
 //!
 //! - `task` may use `io_client` and `provider`.
 //! - `bridge` may use `ingress`, `io_client`, `provider`, and `task`.

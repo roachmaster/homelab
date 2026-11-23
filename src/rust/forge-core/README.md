@@ -5,15 +5,26 @@ ingress, tasks, registration, dispatch, and admission. One module per
 contract, no external dependencies, no features. The eight crates this
 merges (`forge-provider`, `forge-io-client`, `forge-command`,
 `forge-ingress-contract`, `forge-task`, `forge-bootstrap`, `forge-bridge`,
-`forge-access`) are gone; their modules preserve the layering the crate
-boundaries used to enforce, and `tests/layering.rs` fails the build if a
-module imports one above it:
+`forge-access`) are gone. The repository's pre-compile core-layer check enforces
+the allowed module edges below, including grouped/relative imports, aliases,
+re-exports, nested module files and qualified paths in function bodies:
 
 - `task` may use `io_client` and `provider`.
 - `bridge` may use `ingress`, `io_client`, `provider`, and `task`.
 - `access` may use `ingress`.
 - `provider`, `io_client`, `command`, `ingress`, and `bootstrap` use no
   other `forge-core` module.
+
+Run `python3 -B scripts/check_core_layers.py` from `src/rust` (or `make
+check-imports` from the repository root). The check reuses the existing Rust
+module graph and tokenizer, ignores comments/string literals, and checks every
+conditional source branch. Missing source, unknown layers, incomplete parses,
+ambiguous aliases, textual `include!` sources and root glob imports fail closed;
+declare owned modules and import named core modules instead of `use crate::*`.
+Literal macro paths are checked, but macros are not
+expanded and this is not a replacement for the compiler. Standalone `cargo test
+-p forge-core` stays std-only and requires no Python; its inventory test does
+not claim to enforce the DAG by itself.
 
 Two modules export a `Registry`, and they are different types:
 `bootstrap::Registry` is the typed factory-group registry;
@@ -294,8 +305,8 @@ From `src/rust`:
 
 ```bash
 cargo test -p forge-core --offline --locked
-cargo run -p forge-core-demo --no-default-features --offline --locked
-cargo run -p forge-core-demo --features messages --offline --locked
+cargo run -p forge-core --example in_process --offline --locked
+cargo run -p forge-core --example task_clients --offline --locked
 python3 scripts/check_dependencies.py
 ```
 

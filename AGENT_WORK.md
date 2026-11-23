@@ -23,6 +23,8 @@ Documentation integration: reviewed223ca465 corrects active guides, ABI13/schema
 
 Follow-up: replaced all six removed forge-bootstrap-demo commands in src/rust/README.md with actual forge-core/local/terminal targets and feature combinations. Linked real core examples, marked the old493-test/1.99.1 report as a dated18 November record, and corrected removed-demo/current CI wording. Verified manifests, disk/jobs features, forge binary path, both example files and all local links statically; no Rust build or runtime execution.
 
+Layer enforcement integration13301ce: actual source-aware Python graph/lexer guard replaces the weak literal scan; Rust-only contract tests retain no Python dependency.19 bypass/allowed regressions,39 parser/import tests,89 core tests/doctests, Clippy, formatting and source scans passed on the component. No production type/signature changes. Final integrated gates remain pending.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
