@@ -123,13 +123,8 @@ class ExternalRetryContinuationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         fixture.ExternalFlowPGTest.setUpClass.__func__(cls)
-        # Full source applies30 at startup. The component test also runs against
-        # a legacy29 fixture while the additive migration is integrated.
-        with closing(cls.pg.connect('postgres')) as connection, connection.cursor() as cursor:
-            cursor.execute('SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=\'forge_external_workflow.workflows\'::regclass AND conname=\'workflows_plan_revisions_check\'')
-            definition = cursor.fetchone()[0]
-        if '20' not in definition:
-            cls.pg.admin_exec((SQL_DIR / 'migrations/0030_agent_wide_retry_policy.sql').read_text())
+        # The shared fixture applies the complete registry once. M31 deliberately
+        # removes the lifetime CHECK ceiling, so its shape cannot identify M30.
         from test_external_retry_events import apply_retry_event_migration
         apply_retry_event_migration(cls.pg)
 
