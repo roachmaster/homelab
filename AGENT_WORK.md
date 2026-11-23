@@ -31,6 +31,13 @@ and upgraded to31 in isolation with strict verification and identical Muse
 history. Full integrated Rust/browser/backend gates and guarded deployment are
 separate recorded operational work; component checks do not claim deployment.
 
+Integrated regressions also retain native workflow IDs in raw/scoped list
+projections, preserve lifetime rounds when an event exhausts, and authorize
+feedback for an existing repair child only through its exact saved peer-review
+event admission. Historical worker feedback branches and grants stay unchanged.
+Freeze source before importing test modules; retain failed integration logs as
+evidence rather than counting a pre-freeze module snapshot as final validation.
+
 # Previous, superseded interpretation: task-wide twenty-attempt policy — 2026-11-23
 
 The user explicitly clarifies that the twenty-attempt allowance is agent-wide,
