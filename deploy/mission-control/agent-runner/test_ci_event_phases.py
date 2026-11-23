@@ -5,7 +5,8 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from work_ci_contract import CiGateContractFactory, LEGACY_PROFILE, SCOPED_PROFILE
+from work_ci_contract import (CiGateContractFactory, LEGACY_PROFILE, SCOPED_PROFILE,
+    V2_PROTECTED_PATHS, V3_PROTECTED_PATHS)
 from work_ci_phases import (EVENT_PROFILE, CiPhase, FEATURE_VARIANTS,
     event_phases_for_scope,event_stage_evidence)
 import test_ci_supervision as supervision
@@ -98,6 +99,23 @@ class EventPhaseContractTest(unittest.TestCase):
             self.assertEqual(len(plan.checks),3)
             self.assertEqual(plan.phases,())
             self.assertEqual(plan.result_version,1 if profile==LEGACY_PROFILE else 2)
+
+    def test_retry_policy_and_schema_are_protected_in_both_v3_gate_paths(self):
+        from work_review import protected_gate_path
+        paths=set(V2_PROTECTED_PATHS)|set(V3_PROTECTED_PATHS)|{
+            'deploy/mission-control/sql/migrations/0031_retry_events.sql',
+            'deploy/mission-control/sql/fragments/0031_ci_stage_receipts.sql',
+            'deploy/mission-control/sql/fragments/0031_native_retry_events.sql',
+            'deploy/mission-control/sql/fragments/0031_delivery_retry_events.sql'}
+        contract=CiGateContractFactory(EVENT_PROFILE).create()
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue(contract.protects(path,lambda _path:False))
+                self.assertTrue(protected_gate_path(path,profile=EVENT_PROFILE))
+                self.assertTrue(supervision.CI.profile_protected_gate_path(path,EVENT_PROFILE))
+        for profile in (LEGACY_PROFILE,SCOPED_PROFILE):
+            self.assertFalse(CiGateContractFactory(profile).create().protects(
+                'deploy/mission-control/sql/migrations/0031_retry_events.sql',lambda _path:False))
 
 
 @unittest.skipUnless(supervision.TOOLCHAIN_AVAILABLE,'Requires the installed isolated Rust toolchain')

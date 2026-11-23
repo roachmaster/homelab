@@ -60,6 +60,20 @@ V2_PROTECTED_PATHS = frozenset({
     'deploy/mission-control/jenkins/verify-candidate.py',
     'deploy/mission-control/jenkins/setup-ci.py',
 })
+V3_PROTECTED_PATHS = frozenset({
+    'deploy/mission-control/agent-runner/work_ci_phases.py',
+    'deploy/mission-control/agent-runner/work_retry_policy.py',
+    'deploy/mission-control/agent-runner/work_retry_events.py',
+    'deploy/mission-control/agent-runner/work_reviewer_correction.py',
+    'deploy/mission-control/agent-runner/work_retry_continuation.py',
+    'deploy/mission-control/agent-runner/work_context_recovery.py',
+})
+
+
+def protected_event_policy_path(path):
+    return (path in V3_PROTECTED_PATHS
+        or path.startswith('deploy/mission-control/sql/migrations/0031_')
+        or path.startswith('deploy/mission-control/sql/fragments/0031_'))
 
 
 def scope_kind(scope):
@@ -137,7 +151,7 @@ class CiGateContract:
     def protects(self, path, legacy_predicate):
         return (legacy_predicate(path)
                 or path == 'deploy/mission-control/agent-runner/work_ci_contract.py'
-                or self.profile == EVENT_PROFILE and path == 'deploy/mission-control/agent-runner/work_ci_phases.py'
+                or self.profile == EVENT_PROFILE and protected_event_policy_path(path)
                 or self.profile in {SCOPED_PROFILE,EVENT_PROFILE} and path in V2_PROTECTED_PATHS)
 
 

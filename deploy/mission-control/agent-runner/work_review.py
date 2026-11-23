@@ -26,7 +26,8 @@ LOG = logging.getLogger("forge-review")
 SNAPSHOT_ACQUISITION_WAIT_SECONDS = 30
 
 
-from work_ci_contract import LEGACY_PROFILE, SCOPED_PROFILE, V2_PROTECTED_PATHS
+from work_ci_contract import (LEGACY_PROFILE, SCOPED_PROFILE, EVENT_PROFILE,
+    V2_PROTECTED_PATHS, protected_event_policy_path)
 
 def validate_review(config, job):
     if not isinstance(job, dict):
@@ -134,7 +135,8 @@ def protected_gate_path(path, *, profile=LEGACY_PROFILE):
                 "rustfmt.toml", ".rustfmt.toml", "deny.toml",
                 "work_publication_checks.py", "work_verification.py", "work_verification_init.py", "work_policy.py"}
             or path == 'deploy/mission-control/agent-runner/work_ci_contract.py'
-            or profile == SCOPED_PROFILE and path in V2_PROTECTED_PATHS)
+            or profile in {SCOPED_PROFILE, EVENT_PROFILE} and path in V2_PROTECTED_PATHS
+            or profile == EVENT_PROFILE and protected_event_policy_path(path))
 
 
 def gate_source_digest(git, repository, head, *, profile=LEGACY_PROFILE):
