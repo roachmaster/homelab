@@ -79,6 +79,7 @@ class DurablePostMergeStore:
     def __init__(self, job):
         self.job = deepcopy(job)
         self.live = True
+        self.start_allowed = True
         self.checkpoint_ok = True
         self.status = 'pending'
         self.events = []
@@ -92,6 +93,10 @@ class DurablePostMergeStore:
     def post_merge_renew(self, job):
         self.events.append(('renew', job['lease_token']))
         return self.live and job['lease_token'] == self.job['lease_token']
+
+    def post_merge_start_allowed(self, job):
+        self.events.append(('start_allowed', self.start_allowed))
+        return self.live and self.start_allowed
 
     def post_merge_checkpoint(self, job, request):
         self.events.append(('checkpoint', deepcopy(request)))
@@ -141,7 +146,8 @@ class SelectedPostMergeProvider:
         require_lease()
         self.cancellations.append(deepcopy(request))
         return {'status': 'cancelled', 'receipt': {'provider': 'jenkins',
-                'cleanup_confirmed': True, 'target_action_id': request['action_id']},
+                'cleanup_confirmed': True, 'target_action_id': request['action_id'],
+                'check_receipt_sha256': 'e' * 64},
                 'summary': 'Fixture cleanup confirmed'}
 
 
@@ -279,6 +285,80 @@ class PostMergeWorkerTest(unittest.TestCase):
             self.assertEqual(store.outcomes[-1][2]['action_id'], request['action_id'])
             self.assertEqual(store.outcomes[-1][2]['candidate_commit'], store.job['merge_commit'])
             self.assertFalse(PostMergeWorker(config, store, provider).run_once())
+
+    def test_foreign_failed_cleanup_cannot_close_the_owned_action(self):
+        mutations = (
+            lambda value: value.update(provider='another-provider', process_started=False),
+            lambda value: value.update(action_id=str(uuid4())),
+            lambda value: value.update(candidate_commit='a' * 40),
+            lambda value: value.update(workflow_id=str(uuid4())),
+        )
+        for index, mutate in enumerate(mutations):
+            with self.subTest(mutation=index), TemporaryDirectory() as temporary:
+                config, store, provider, _ = self.fixture(Path(temporary), status='failed')
+                provider.receipt['result'] = 'FAILURE'
+                mutate(provider.receipt)
+                PostMergeWorker(config, store, provider).run_once()
+                self.assertEqual(store.status, 'pending')
+                self.assertIs(store.job['receipt']['cancellation_required'], True)
+                self.assertFalse(any(row[1] in {'passed', 'failed'} for row in store.outcomes))
+
+    def test_foreign_cancel_target_cannot_close_the_owned_action(self):
+        with TemporaryDirectory() as temporary:
+            config, store, provider, _ = self.fixture(Path(temporary), saved_request=True)
+            store.job['cancel_requested'] = True
+            def wrong_action(job, request, require_lease):
+                require_lease()
+                return {'status': 'cancelled', 'receipt': {'provider': 'jenkins',
+                        'target_action_id': str(uuid4()), 'cleanup_confirmed': True,
+                        'check_receipt_sha256': 'e' * 64}, 'summary': 'Foreign action stopped'}
+            provider.cancel = wrong_action
+            PostMergeWorker(config, store, provider).run_once()
+            self.assertEqual(store.status, 'pending')
+            self.assertIs(store.job['receipt']['cancellation_required'], True)
+
+    def test_cleanup_claim_requires_a_valid_protected_receipt_digest(self):
+        for cancelling in (False, True):
+            for digest in (None, 'not-a-digest'):
+                with self.subTest(cancelling=cancelling, digest=digest), TemporaryDirectory() as temporary:
+                    config, store, provider, _ = self.fixture(Path(temporary), saved_request=True, status='failed')
+                    if cancelling:
+                        store.job['cancel_requested'] = True
+                        def no_proof(job, request, require_lease):
+                            require_lease()
+                            return {'status': 'cancelled', 'receipt': {'provider': 'jenkins',
+                                    'target_action_id': request['action_id'], 'cleanup_confirmed': True,
+                                    'check_receipt_sha256': digest}, 'summary': 'Unproven cleanup'}
+                        provider.cancel = no_proof
+                    else:
+                        provider.receipt.update(result='FAILURE', check_receipt_sha256=digest)
+                    PostMergeWorker(config, store, provider).run_once()
+                    self.assertEqual(store.status, 'pending')
+                    self.assertIs(store.job['receipt']['cancellation_required'], True)
+
+    def test_start_admission_is_rechecked_after_preparation_and_before_first_post(self):
+        for boundary in ('after_prepare', 'after_checkpoint'):
+            with self.subTest(boundary=boundary), TemporaryDirectory() as temporary:
+                config, store, provider, _ = self.fixture(Path(temporary))
+                if boundary == 'after_prepare':
+                    prepare = provider.prepare
+                    def revoked_prepare(job, require_lease):
+                        result = prepare(job, require_lease)
+                        store.start_allowed = False
+                        return result
+                    provider.prepare = revoked_prepare
+                else:
+                    checkpoint = store.post_merge_checkpoint
+                    def revoked_checkpoint(job, request):
+                        accepted = checkpoint(job, request)
+                        store.start_allowed = False
+                        return accepted
+                    store.post_merge_checkpoint = revoked_checkpoint
+                PostMergeWorker(config, store, provider).run_once()
+                self.assertEqual(provider.verifications, [], 'No first POST after start authority expires')
+                self.assertEqual(provider.cancellations, [])
+                self.assertEqual(store.status, 'pending')
+                self.assertTrue(any(event[0] == 'start_allowed' for event in store.events))
 
     def test_superseded_main_records_the_observation_without_submission(self):
         with TemporaryDirectory() as temporary:
