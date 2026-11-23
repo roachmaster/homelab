@@ -1,4 +1,5 @@
 """An owner-wide allowance resumes one genuine external revision without resetting it."""
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import replace
@@ -42,6 +43,61 @@ class ExternalSharedRetryPolicyTest(unittest.TestCase):
         w = {'project_alias':'homelab', 'snapshot':frozen}
         with self.assertRaises(ValueError):flow._retry_limit(w, 'max_plan_revisions')
         self.assertEqual(flow._project_retry_limit(w, 'max_plan_revisions'), 3)
+
+    def recorded_projection(self):
+        from work_config import sha256_canonical
+        from work_external_workflow import ExternalWorkflowStore
+        config=fixture.cfg()
+        frozen=config.external_workflows['homelab'].snapshot(config.catalog())
+        frozen['max_plan_revisions']=frozen['max_code_revisions']=3
+        frozen['policy_digest']=sha256_canonical({k:v for k,v in frozen.items() if k!='policy_digest'})
+        wid,root,source,assignment,token,task=(uuid4() for _ in range(6))
+        command=ExternalRetryPolicyContinuation('homelab',wid,root,source,10,5,token,'Apply the shared allowance.')
+        intent=command.intent(config.owner)
+        from work_external_review_context import canonical
+        import hashlib
+        receipt={'status':'plan_revision_queued','project_alias':'homelab','workflow_id':str(wid),'root_task_id':str(root),
+            'task_id':str(task),'workflow_revision':11,'root_revision':6,'plan_revisions':4,'max_plan_revisions':20,'max_code_revisions':20}
+        record={'policy':'forge-agent-retry-v1','frozen_policy_digest':frozen['policy_digest'],'intent':intent,
+            'intent_digest':hashlib.sha256(canonical(intent)).hexdigest(),'idempotency_key':str(token),
+            'source_review_id':str(source),'source_assignment_id':str(assignment),'source_sha256':'a'*64,'reviewer_result_sha256':'b'*64,
+            'prior_workflow_revision':10,'prior_root_revision':5,'plan_revisions_before':3,'code_revisions_before':0,
+            'max_plan_revisions':20,'max_code_revisions':20,'receipt':receipt}
+        w={'project_alias':'homelab','workflow_id':wid,'root_task_id':root,'revision':11,'plan_revisions':4,'code_revisions':0,
+            'snapshot':frozen,'policy_digest':frozen['policy_digest'],'state':{'retry_policy_updates':[record]}}
+        reviewer=config.external_workflows['homelab'].reviewer_profile
+        drifted=replace(config,profiles={**config.profiles,reviewer:replace(config.profiles[reviewer],model='replacement-model')})
+        return ExternalWorkflowStore(drifted,drifted.catalog()),w
+
+    def test_recorded_twenty_is_historical_display_evidence_after_config_drift(self):
+        flow,w=self.recorded_projection();before=deepcopy(w)
+        for key in ('max_plan_revisions','max_code_revisions'):
+            with self.assertRaises(ValueError):flow._retry_limit(w,key)
+            self.assertEqual(flow._project_retry_limit(w,key),20)
+        self.assertEqual(w,before)
+        flow.policies={}
+        self.assertEqual(flow._project_retry_limit(w,'max_plan_revisions'),20)
+
+    def test_missing_or_altered_allowance_record_never_authorizes_display_increase(self):
+        flow,original=self.recorded_projection()
+        transforms=[lambda w:w.update(state={}),lambda w:w['state'].update(retry_policy_updates={}),
+            lambda w:w['state']['retry_policy_updates'][0].update(policy='other'),
+            lambda w:w['state']['retry_policy_updates'][0].update(frozen_policy_digest='0'*64),
+            lambda w:w['state']['retry_policy_updates'][0].update(intent_digest='0'*64),
+            lambda w:w['state']['retry_policy_updates'][0].update(max_plan_revisions=21),
+            lambda w:w['state']['retry_policy_updates'][0].update(source_assignment_id='bad'),
+            lambda w:w['state']['retry_policy_updates'][0].update(source_sha256='bad'),
+            lambda w:w['state']['retry_policy_updates'][0]['receipt'].update(status='approved'),
+            lambda w:w['state']['retry_policy_updates'][0]['receipt'].update(workflow_id=str(uuid4())),
+            lambda w:w['state']['retry_policy_updates'][0]['receipt'].update(root_task_id=str(uuid4())),
+            lambda w:w['state']['retry_policy_updates'][0]['receipt'].update(max_code_revisions=True),
+            lambda w:w['state']['retry_policy_updates'][0]['receipt'].update(plan_revisions=5),
+            lambda w:w.update(policy_digest='0'*64)]
+        for index,change in enumerate(transforms):
+            with self.subTest(index=index):
+                w=deepcopy(original);change(w)
+                self.assertEqual(flow._project_retry_limit(w,'max_plan_revisions'),3)
+                with self.assertRaises(ValueError):flow._retry_limit(w,'max_plan_revisions')
 
 
 @unittest.skipUnless(PG16_AVAILABLE, 'Requires owned PostgreSQL16')
@@ -143,6 +199,14 @@ class ExternalRetryContinuationTest(unittest.TestCase):
         with flow._transaction() as cursor:
             projected = flow.project(cursor, 'homelab', UUID(root['task_id']))
         self.assertEqual((projected['plan_revisions'], projected['max_plan_revisions']), (4, 20))
+        current=fixture.cfg();reviewer=current.external_workflows['homelab'].reviewer_profile
+        drifted=replace(current,profiles={**current.profiles,reviewer:replace(current.profiles[reviewer],model='replacement-model')})
+        historical=self.private_flow(drifted)
+        with self.assertRaises(ValueError):historical._retry_limit(after,'max_plan_revisions')
+        with historical._transaction() as cursor:
+            preserved=historical.project(cursor,'homelab',UUID(root['task_id']))
+        self.assertEqual((preserved['plan_revisions'],preserved['max_plan_revisions'],preserved['max_code_revisions']),(4,20,20))
+
 
     def test_concurrent_delivery_is_one_continuation_and_one_author_assignment(self):
         root, w = self.legacy_exhaustion()

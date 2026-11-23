@@ -12,7 +12,7 @@ from queue_store import Rejected
 from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
 from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64
-from work_retry_policy import AGENT_RETRY_LIMIT,effective_limit
+from work_retry_policy import AGENT_RETRY_LIMIT,AGENT_RETRY_POLICY_ID,effective_limit
 
 TERMINAL={'completed','cancelled','escalated'}
 MAX_NATIVE_VERDICT=65536
@@ -98,7 +98,50 @@ class ExternalWorkflowStore:
         # Historical reads survive unrelated configuration changes. Mutating
         # paths keep the strict compatibility check in _retry_limit.
         try:return self._retry_limit(w,key)
-        except (ValueError,KeyError,TypeError):return effective_limit(w['snapshot'],key)
+        except (ValueError,KeyError,TypeError):
+            frozen=effective_limit(w['snapshot'],key)
+            return self._recorded_retry_limit(w,key,frozen)
+
+    def _recorded_retry_limit(self,w,key,frozen):
+        # A recorded allowance belongs to this immutable workflow, even after
+        # its current provider configuration changes. This is display evidence
+        # only: mutation paths still require _retry_limit's current delegation.
+        try:
+            snapshot=w['snapshot'];digest=w['policy_digest']
+            if digest!=snapshot['policy_digest'] or digest!=sha256_canonical({k:v for k,v in snapshot.items() if k!='policy_digest'}):return frozen
+            records=w['state'].get('retry_policy_updates',[])
+            if not isinstance(records,list) or len(records)>AGENT_RETRY_LIMIT:return frozen
+            for record in records:
+                if not isinstance(record,dict):continue
+                receipt=record.get('receipt');intent=record.get('intent')
+                if not isinstance(receipt,dict) or not isinstance(intent,dict):continue
+                if (record.get('policy')!=AGENT_RETRY_POLICY_ID or record.get('frozen_policy_digest')!=digest
+                    or intent.get('policy')!=AGENT_RETRY_POLICY_ID or intent.get('owner')!=self.owner
+                    or record.get('intent_digest')!=hashlib.sha256(canonical(intent)).hexdigest()
+                    or receipt.get('status')!='plan_revision_queued'):continue
+                if any(receipt.get(k)!=str(w[k]) or intent.get(k)!=str(w[k]) for k in ('workflow_id','root_task_id','project_alias')):continue
+                if (intent.get('source_review_id')!=record.get('source_review_id')
+                    or intent.get('idempotency_key')!=record.get('idempotency_key')
+                    or intent.get('expected_workflow_revision')!=record.get('prior_workflow_revision')
+                    or intent.get('expected_root_revision')!=record.get('prior_root_revision')):continue
+                for field in ('source_review_id','source_assignment_id','idempotency_key'):UUID(record[field])
+                UUID(receipt['task_id'])
+                if any(not isinstance(record.get(k),str) or not HEX64.fullmatch(record[k]) for k in ('source_sha256','reviewer_result_sha256')):continue
+                numeric=(record['prior_workflow_revision'],record['prior_root_revision'],receipt['workflow_revision'],receipt['root_revision'],
+                    receipt['plan_revisions'],record['plan_revisions_before'],record['code_revisions_before'],w['revision'],w['plan_revisions'],w['code_revisions'])
+                if any(type(n) is not int for n in numeric):continue
+                if (not 1<=record['prior_workflow_revision']<receipt['workflow_revision']<=w['revision']<2**53
+                    or receipt['workflow_revision']!=record['prior_workflow_revision']+1
+                    or not 1<=record['prior_root_revision']<receipt['root_revision']<2**53
+                    or receipt['root_revision']!=record['prior_root_revision']+1
+                    or not snapshot['max_plan_revisions']<=record['plan_revisions_before']<AGENT_RETRY_LIMIT
+                    or receipt['plan_revisions']!=record['plan_revisions_before']+1
+                    or not receipt['plan_revisions']<=w['plan_revisions']<=AGENT_RETRY_LIMIT
+                    or not 0<=record['code_revisions_before']<=w['code_revisions']<=AGENT_RETRY_LIMIT):continue
+                if all(type(item.get(k)) is int and item[k]==AGENT_RETRY_LIMIT for item in (record,receipt) for k in ('max_plan_revisions','max_code_revisions')):
+                    return AGENT_RETRY_LIMIT
+        except (ValueError,KeyError,TypeError,AttributeError):pass
+        return frozen
 
     def _scope(self,cursor,project,profile,*,active=True,require=True):
         cursor.execute('SELECT forge_external_workflow_api.service_scope(%s,%s,%s,%s) AS enabled',(self.owner,project,profile,active))
