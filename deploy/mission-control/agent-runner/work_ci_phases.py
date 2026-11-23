@@ -29,13 +29,14 @@ class CiPhase:
     phase_id: str
     kind: str
     argv: tuple[str, ...]
-    logical_gate: str = 'source'
+    logical_gate: str = 'check'
 
 
 def event_phases_for_scope(branch_scope: str) -> tuple[CiPhase, ...]:
     """Preserve the complete v2 feature matrix, with a test-build barrier."""
     phases = [
-        CiPhase('source-preflight', 'verification', ('/usr/bin/make','ci-preflight')),
+        CiPhase('source-preflight', 'verification', ('/usr/bin/make','ci-preflight'),
+            'check' if branch_scope == 'main' else 'source-preflight'),
         CiPhase('script-tests', 'tests', ('/usr/bin/python3','-B','-m','unittest','discover',
             '-s','src/rust/scripts/tests','-v')),
         CiPhase('formatting', 'formatting', ('/usr/bin/make','fmt-check','PACKAGE=','CHANGED_ONLY=0')),
@@ -61,18 +62,20 @@ def event_phases_for_scope(branch_scope: str) -> tuple[CiPhase, ...]:
     ))
     if branch_scope == 'main':
         phases.extend((
-            CiPhase('browser-journeys','browser',('/usr/bin/make','ui-qa'),'browser'),
-            CiPhase('backend-main','tests',('/usr/bin/python3','-B','deploy/mission-control/backend-suites.py','--scope','main'),'backend'),
+            CiPhase('browser-journeys','browser',('/usr/bin/make','ui-qa'),'real-browser'),
+            CiPhase('backend-main','tests',('/usr/bin/python3','-B','deploy/mission-control/backend-suites.py','--scope','main'),'backend-suites'),
         ))
     else:
         phases.append(CiPhase('backend-memory','tests',('/usr/bin/python3','-B',
-            'deploy/mission-control/backend-suites.py','--scope','branch'),'backend'))
+            'deploy/mission-control/backend-suites.py','--scope','branch'),'in-memory-backend'))
     return tuple(phases)
 
 
 def event_stage_evidence(branch_scope: str, checks: list, failure: str | None) -> dict:
     """Bind observed exit codes to the closed plan, never to stdout markers."""
     phases = event_phases_for_scope(branch_scope)
+    if failure is not None and (not isinstance(failure,str) or not failure):
+        raise ValueError('Invalid typed phase failure reason')
     if not isinstance(checks,list) or len(checks)>len(phases):
         raise ValueError('Invalid v3 phase execution count')
     records=[]

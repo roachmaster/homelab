@@ -889,6 +889,8 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             if CI.profile_protected_gate_path(path, profile):
                 protected[path] = [mode, blob]
         helper_digest = hashlib.sha256(Path(CI.__file__).read_bytes()).hexdigest()
+        if profile == CI.EVENT_PROFILE:
+            return helper_digest, CI.profile_gate_manifest(profile,branch_scope,protected,helper_digest)
         policy = {'version': 2 if profile == CI.SCOPED_PROFILE else 1,
             'provider': 'jenkins', 'profile': profile,
             'checks': (branch_checks if branch_scope != 'main' else checks)
@@ -951,7 +953,7 @@ class CargoCacheSupervisorIntegrationTest(unittest.TestCase):
             (sub_dir / 'candidate.bundle').write_bytes(bundle)
             (sub_dir / 'candidate.bundle').chmod(0o600)
             req = {
-                'version': 2 if profile == CI.SCOPED_PROFILE else 1, 'action_id': action, 'workflow_id': workflow_id or str(uuid4()),
+                'version': 3 if profile == CI.EVENT_PROFILE else 2 if profile == CI.SCOPED_PROFILE else 1, 'action_id': action, 'workflow_id': workflow_id or str(uuid4()),
                 'project_alias': 'homelab', 'candidate_commit': commit, 'candidate_tree': tree,
                 'expected_main': expected_main, 'branch_scope': branch_scope,
                 'gate_manifest_sha256': manifest, 'bundle_sha256': hashlib.sha256(bundle).hexdigest(),

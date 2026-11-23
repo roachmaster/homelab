@@ -121,8 +121,114 @@ V2_PROTECTED_PATHS = frozenset({
 BRANCH_CHECKS = SCOPED_BRANCH_CHECKS
 BRANCH_CHECK_LABELS = ('source and Python preflight', 'make ci', 'in-memory backend')
 
+# Closed v3 phase policy; mirrored from work_ci_phases, never imported from a candidate.
+EVENT_PROFILE = 'forge-sdlc-jenkins-v3'
+FAILURE_KINDS = frozenset({'compilation','tests','browser','lint','formatting',
+    'planning','review','merge','infrastructure','verification','feedback_delivery',
+    'reviewer_correction'})
+ALL_FEATURES = ('PACKAGE=', 'FEATURES=', 'ALL_FEATURES=1', 'NO_DEFAULT_FEATURES=0')
+FEATURE_VARIANTS = (
+    ('remote-https', 'forge-remote-https', '', True),
+    ('ide-remote', 'forge-ide', 'remote', True),
+    ('ide-minimal', 'forge-ide', '', True),
+    ('template-minimal', 'forge-template', '', True),
+    ('terminal-minimal', 'forge-terminal', '', True),
+    ('local-minimal', 'forge-local', '', False),
+    ('terminal-jobs', 'forge-terminal', 'jobs', True),
+    ('terminal-disk', 'forge-terminal', 'disk', True),
+    ('system-node', 'forge-system', 'node', False),
+    ('web-minimal', 'forge-ide-web', '', True),
+)
+
+
+@dataclass(frozen=True)
+class CiPhase:
+    phase_id: str
+    kind: str
+    argv: tuple[str, ...]
+    logical_gate: str = 'check'
+
+
+def event_phases_for_scope(branch_scope: str) -> tuple[CiPhase, ...]:
+    """Preserve the complete v2 feature matrix, with a test-build barrier."""
+    phases = [
+        CiPhase('source-preflight', 'verification', ('/usr/bin/make','ci-preflight'),
+            'check' if branch_scope == 'main' else 'source-preflight'),
+        CiPhase('script-tests', 'tests', ('/usr/bin/python3','-B','-m','unittest','discover',
+            '-s','src/rust/scripts/tests','-v')),
+        CiPhase('formatting', 'formatting', ('/usr/bin/make','fmt-check','PACKAGE=','CHANGED_ONLY=0')),
+        CiPhase('imports', 'verification', ('/usr/bin/make','check-imports')),
+        CiPhase('dependencies', 'verification', ('/usr/bin/make','check-deps')),
+    ]
+    for target in ('build','check','test-compile','test-release-compile'):
+        phases.append(CiPhase('all-features-'+target, 'compilation', ('/usr/bin/make',target,*ALL_FEATURES)))
+    for identity, package, features, _lint in FEATURE_VARIANTS:
+        flags = ('PACKAGE='+package,'FEATURES='+features,'ALL_FEATURES=0','NO_DEFAULT_FEATURES=1')
+        phases.append(CiPhase(identity+'-test-compile','compilation',('/usr/bin/make','test-compile',*flags)))
+    phases.append(CiPhase('ui-compilation','compilation',('/usr/bin/make','ci-ui-compile')))
+    for target, kind in (('lint','lint'),('test','tests'),('test-release','tests'),('doc','verification')):
+        phases.append(CiPhase('all-features-'+target,kind,('/usr/bin/make',target,*ALL_FEATURES)))
+    for identity, package, features, lint in FEATURE_VARIANTS:
+        flags = ('PACKAGE='+package,'FEATURES='+features,'ALL_FEATURES=0','NO_DEFAULT_FEATURES=1')
+        phases.append(CiPhase(identity+'-tests','tests',('/usr/bin/make','test',*flags)))
+        if lint:
+            phases.append(CiPhase(identity+'-lint','lint',('/usr/bin/make','lint',*flags)))
+    phases.extend((
+        CiPhase('ui-contracts','verification',('/usr/bin/make','ui-check')),
+        CiPhase('browser-driver-tests','tests',('/usr/bin/make','ui-qa-check')),
+    ))
+    if branch_scope == 'main':
+        phases.extend((
+            CiPhase('browser-journeys','browser',('/usr/bin/make','ui-qa'),'real-browser'),
+            CiPhase('backend-main','tests',('/usr/bin/python3','-B','deploy/mission-control/backend-suites.py','--scope','main'),'backend-suites'),
+        ))
+    else:
+        phases.append(CiPhase('backend-memory','tests',('/usr/bin/python3','-B',
+            'deploy/mission-control/backend-suites.py','--scope','branch'),'in-memory-backend'))
+    return tuple(phases)
+
+
+def event_stage_evidence(branch_scope: str, checks: list, failure: str | None) -> dict:
+    """Bind observed exit codes to the closed plan, never to stdout markers."""
+    phases = event_phases_for_scope(branch_scope)
+    if failure is not None and (not isinstance(failure,str) or not failure):
+        raise ValueError('Invalid typed phase failure reason')
+    if not isinstance(checks,list) or len(checks)>len(phases):
+        raise ValueError('Invalid v3 phase execution count')
+    records=[]
+    for index,check in enumerate(checks):
+        phase=phases[index]
+        if (not isinstance(check,dict) or set(check)!={'index','argv','returncode'}
+                or type(check['index']) is not int or check['index']!=index
+                or check['argv']!=list(phase.argv) or type(check['returncode']) is not int
+                or not -255<=check['returncode']<=255 or (index<len(checks)-1 and check['returncode']!=0)):
+            raise ValueError('Phase result does not match actual closed execution order')
+        records.append(dict(index=index,phase_id=phase.phase_id,kind=phase.kind,
+            argv=list(phase.argv),returncode=check['returncode']))
+    failed=records[-1] if records and records[-1]['returncode'] else None
+    if failure is None and (failed is not None or len(records)!=len(phases)):
+        raise ValueError('Incomplete phase execution cannot claim success')
+    passed=sorted({phase.kind for phase in phases
+        if all(index<len(records) and records[index]['returncode']==0
+            for index,item in enumerate(phases) if item.kind==phase.kind)})
+    if failure=='source_changed_during_checks':
+        return dict(failure_kind='verification',passed_kinds=[],phase_results=records)
+    if failure in {'cancelled_or_timed_out','verification_unavailable','deadline_exceeded'}:
+        kind='infrastructure'
+    elif failed is not None:
+        kind='infrastructure' if failed['returncode']==124 or failed['returncode']<0 else failed['kind']
+    elif failure is not None:
+        kind='verification'
+    else:
+        kind=None
+    return dict(failure_kind=kind,passed_kinds=passed,phase_results=records)
+
+
 def checks_for_scope(branch_scope, profile=LEGACY_PROFILE):
     """Closed operator-selected execution policy; v1 remains full on every scope."""
+    if profile == EVENT_PROFILE:
+        phases=event_phases_for_scope(branch_scope)
+        return tuple(p.argv for p in phases),tuple(p.phase_id for p in phases)
     if profile != SCOPED_PROFILE:
         # Legacy trusted test profiles retain the same full CHECKS policy;
         # the executable composition root accepts only the two public profiles.
@@ -133,7 +239,7 @@ def checks_for_scope(branch_scope, profile=LEGACY_PROFILE):
 
 
 def profile_coverage(profile, branch_scope):
-    if profile != SCOPED_PROFILE:
+    if profile not in {SCOPED_PROFILE,EVENT_PROFILE}:
         return None
     main = branch_scope == 'main'
     return {'scope': 'main' if main else 'branch', 'browser': 'required' if main else 'not_run',
@@ -143,12 +249,15 @@ def profile_coverage(profile, branch_scope):
 
 def profile_gate_manifest(profile, branch_scope, protected, helper_digest):
     commands, _labels = checks_for_scope(branch_scope, profile)
-    policy = {'version': 2 if profile == SCOPED_PROFILE else 1, 'provider': 'jenkins',
-        'profile': profile, 'checks': commands if profile == SCOPED_PROFILE else CHECKS,
+    policy = {'version': 3 if profile == EVENT_PROFILE else 2 if profile == SCOPED_PROFILE else 1, 'provider': 'jenkins',
+        'profile': profile, 'checks': commands if profile in {SCOPED_PROFILE,EVENT_PROFILE} else CHECKS,
         'verifier_sha256': helper_digest,
         'source_gate_sha256': hashlib.sha256(canonical(protected)).hexdigest()}
-    if profile == SCOPED_PROFILE:
+    if profile in {SCOPED_PROFILE,EVENT_PROFILE}:
         policy['branch_scope'] = branch_scope
+    if profile == EVENT_PROFILE:
+        policy['phase_plan']=[dict(phase_id=p.phase_id,kind=p.kind,argv=list(p.argv),logical_gate=p.logical_gate)
+            for p in event_phases_for_scope(branch_scope)]
     return hashlib.sha256(canonical(policy)).hexdigest()
 
 SHA = re.compile('[0-9a-f]{40}')
@@ -211,7 +320,8 @@ def protected_gate_path(path):
 def profile_protected_gate_path(path, profile):
     return (protected_gate_path(path)
         or path == 'deploy/mission-control/agent-runner/work_ci_contract.py'
-        or profile == SCOPED_PROFILE and path in V2_PROTECTED_PATHS)
+        or profile == EVENT_PROFILE and path == 'deploy/mission-control/agent-runner/work_ci_phases.py'
+        or profile in {SCOPED_PROFILE,EVENT_PROFILE} and path in V2_PROTECTED_PATHS)
 
 
 # --- Pure branch-identity & compatibility helpers (no I/O or provisioning) ---
@@ -2723,7 +2833,7 @@ def _execute_locked(action, config, *, cache_port):
     required = {'version', 'action_id', 'workflow_id', 'project_alias', 'candidate_commit',
                 'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'bundle_sha256',
                 'verification_profile', 'correlation_id', 'branch_scope'}
-    expected_version = 2 if config['verification_profile'] == SCOPED_PROFILE else 1
+    expected_version = 3 if config['verification_profile'] == EVENT_PROFILE else 2 if config['verification_profile'] == SCOPED_PROFILE else 1
     if (set(request) != required or type(request['version']) is not int
             or request['version'] != expected_version or request['action_id'] != action):
         raise ValueError('Invalid CI request')
@@ -2800,7 +2910,7 @@ def _execute_locked(action, config, *, cache_port):
             'GIT_CONFIG_VALUE_0': str(source), 'GIT_CONFIG_KEY_1': 'core.hooksPath',
             'GIT_CONFIG_VALUE_1': '/dev/null'}
         active_checks, active_labels = checks_for_scope(branch_scope, config['verification_profile'])
-        if config['verification_profile'] == SCOPED_PROFILE and branch_scope != 'main':
+        if config['verification_profile'] in {SCOPED_PROFILE,EVENT_PROFILE} and branch_scope != 'main':
             # DB tests run only on the main pipeline build.
             environment['FORGE_DISABLE_DISPOSABLE_POSTGRES'] = '1'
         cancelled = directory / 'cancelled'
@@ -2924,7 +3034,9 @@ def _execute_locked(action, config, *, cache_port):
                 # run executes only the in-memory subset: the compiled
                 # artifacts are identical, so branch runs keep reusing
                 # main's snapshots.
-                checks=(SCOPED_BRANCH_CHECKS + SCOPED_MAIN_CHECKS
+                checks=(tuple(p.argv for scope in ('branch/cache','main') for p in event_phases_for_scope(scope))
+                        if config['verification_profile'] == EVENT_PROFILE else
+                        SCOPED_BRANCH_CHECKS + SCOPED_MAIN_CHECKS
                         if config['verification_profile'] == SCOPED_PROFILE else CHECKS),
                 toolchain_path=config['toolchain'],
                 environment=environment,
@@ -2983,7 +3095,7 @@ def _execute_locked(action, config, *, cache_port):
                         failure = 'cancelled_or_timed_out' if code == 124 else 'checks_failed'
                         break
 
-                if (export_portal and config['verification_profile'] == SCOPED_PROFILE
+                if (export_portal and config['verification_profile'] in {SCOPED_PROFILE,EVENT_PROFILE}
                         and branch_scope == 'main' and failure is None
                         and len(checks) == len(active_checks)):
                     portal_assets, portal_builds = build_portal_artifacts(config, source=source,
@@ -3023,10 +3135,11 @@ def _execute_locked(action, config, *, cache_port):
                 # Enrich check_0 and check_1 stages with Cargo compilation & ui-qa telemetry.
                 if check_log_spans:
                     raw_log_now = log_path.read_bytes()
-                    ui_qa_index = (active_labels.index('make ui-qa')
-                                   if 'make ui-qa' in active_labels else None)
+                    ui_label='browser-journeys' if config['verification_profile']==EVENT_PROFILE else 'make ui-qa'
+                    ui_qa_index = active_labels.index(ui_label) if ui_label in active_labels else None
                     for stage in stages:
-                        if stage['name'] in {'check_0', 'check_1'}:
+                        if stage['name'].startswith('check_') and (config['verification_profile']==EVENT_PROFILE
+                                or stage['name'] in {'check_0','check_1'}):
                             idx = int(stage['name'].split('_', 1)[1])
                             if idx in check_log_spans:
                                 s0, s1 = check_log_spans[idx]
@@ -3121,15 +3234,17 @@ def _execute_locked(action, config, *, cache_port):
         result = {**{key: request[key] for key in ('action_id', 'workflow_id', 'candidate_commit',
             'candidate_tree', 'expected_main', 'gate_manifest_sha256', 'verification_profile',
             'correlation_id', 'branch_scope')},
-            'version': 2 if config['verification_profile'] == SCOPED_PROFILE else 1,
+            'version': 3 if config['verification_profile'] == EVENT_PROFILE else 2 if config['verification_profile'] == SCOPED_PROFILE else 1,
             'request_sha256': identity, 'checks': checks,
             'cache': cache_summary, 'stages': stages,
             'status': 'passed' if failure is None and len(checks) == len(active_checks) else 'failed',
             'failure': failure, 'cleanup_confirmed': True,
             'log_sha256': hashlib.sha256(log_path.read_bytes()).hexdigest(),
             'elapsed_ms': int((time.time() - started) * 1000)}
-        if config['verification_profile'] == SCOPED_PROFILE:
+        if config['verification_profile'] in {SCOPED_PROFILE,EVENT_PROFILE}:
             result['coverage'] = profile_coverage(config['verification_profile'], branch_scope)
+        if config['verification_profile'] == EVENT_PROFILE:
+            result.update(event_stage_evidence(branch_scope,checks,failure))
         if portal_export is not None:
             result['artifact_export'] = portal_export
         try:
@@ -3138,6 +3253,8 @@ def _execute_locked(action, config, *, cache_port):
             result['status'] = 'failed'
             result['failure'] = ('cancelled_or_timed_out' if isinstance(error, InterruptedError)
                                  else 'verification_unavailable')
+            if config['verification_profile'] == EVENT_PROFILE:
+                result.update(event_stage_evidence(branch_scope,checks,result['failure']))
             cache_port.rollback_result(result)
             write_result(result_path, result, submitter.pw_gid)
         return result
@@ -3147,7 +3264,7 @@ def main():
     if os.geteuid() != 0 or len(sys.argv) != 2 or str(UUID(sys.argv[1])) != sys.argv[1]:
         raise ValueError('Expected root-owned CI helper and canonical action UUID')
     config = json.loads(read_file(CONFIG, owner=0, maximum=65536))
-    if config.get('verification_profile') not in {LEGACY_PROFILE, SCOPED_PROFILE}:
+    if config.get('verification_profile') not in {LEGACY_PROFILE, SCOPED_PROFILE,EVENT_PROFILE}:
         raise ValueError('Unsupported Jenkins verification profile')
     # Stage and freeze the cache factory before any disk or process effect.
     cache_factory = CargoCacheFactory(CargoCacheConfig.parse(config.get('cargo_cache')))
