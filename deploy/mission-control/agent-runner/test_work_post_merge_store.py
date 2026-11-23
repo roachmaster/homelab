@@ -215,6 +215,11 @@ class PostMergeStoreTest(unittest.TestCase):
         self.pg.apply_and_verify()
         self.assertEqual(len(self.rows('SELECT * FROM forge_agent.post_merge_verifications')), 1)
         self.assertFalse(self.rows('SELECT * FROM forge_agent.post_merge_remediations'))
+        # M29 protects canonical provenance. Remove only this owned fixture's
+        # derived alias before exercising the original no-backfill assertion.
+        with self.assertRaises(psycopg2.errors.ForeignKeyViolation):
+            self.pg.admin_exec('DELETE FROM forge_agent.post_merge_verifications')
+        self.pg.admin_exec('DELETE FROM forge_agent.delivery_post_merge_links')
         self.pg.admin_exec('DELETE FROM forge_agent.post_merge_verifications')
         self.pg.apply_and_verify()
         self.assertFalse(self.rows('SELECT * FROM forge_agent.post_merge_verifications'))
