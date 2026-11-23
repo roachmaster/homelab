@@ -64,13 +64,22 @@ class DeliveryRepairConsumer:
         snapshot=policy.snapshot(self.catalog,self.config.repair_policy) if native else policy.snapshot(self.catalog)
         if any(not self.config.profiles[p].execution_enabled for p in (policy.author_profile,policy.reviewer_profile)):
             raise Rejected(403,'denied')
-        diagnostics=bounded(json.dumps(job.get('verification_receipt') or {},sort_keys=True,ensure_ascii=False),3500)
+        receipt=job.get('verification_receipt') or {}
+        identity={key:value for key,value in {
+            'verification_id':job.get('verification_id'),'commit_sha':job['merge_commit'],
+            'tree_sha':job['merge_tree'],'ci_action_id':receipt.get('action_id'),
+            'build_number':receipt.get('build_number'),'gate_manifest_sha256':receipt.get('gate_manifest_sha256'),
+        }.items() if value is not None}
+        diagnostics=bounded(json.dumps(receipt,sort_keys=True,ensure_ascii=False),2800)
         original=job.get('original') or {}
+        original_prompt=bounded(original.get('prompt','Source was observed directly on GitHub main.'),2500)
+        original_acceptance=bounded(original.get('acceptance_criteria','Keep existing behavior and make all fixed main checks pass.'),1000)
         prompt=bounded('Repair failing main verification '+job['merge_commit']+'.\n'
+            'Trusted CI identity: '+json.dumps(identity,sort_keys=True,ensure_ascii=False)+'\n'
+            'Trusted build diagnostics: '+diagnostics+'\n'
             'Create a plan, preserve Forge factory/provider boundaries, reproduce and fix the failing checks, and use the normal independent review and exact-source publication workflow. Do not reopen or rewrite the completed parent.\n'
-            'Original request: '+str(original.get('prompt','Source was observed directly on GitHub main.'))+'\n'
-            'Original acceptance: '+str(original.get('acceptance_criteria','Keep existing behavior and make all fixed main checks pass.'))+'\n'
-            'Trusted build diagnostics: '+diagnostics,7800)
+            'Original request: '+original_prompt+'\n'
+            'Original acceptance: '+original_acceptance,7800)
         command={'project_alias':project,'base_revision':job['base_revision'],'mode':'plan',
                  'agent_profile':policy.author_profile,'prompt':prompt,
                  'acceptance_criteria':'Fix the recorded main failure, pass the full fixed main gates, receive independent review, and publish through the configured trusted merge path. Preserve completed history, source identity and scoped I/O.',

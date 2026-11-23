@@ -337,10 +337,10 @@ BEGIN
  SELECT * INTO h FROM forge_agent.delivery_project_main_heads WHERE(owner_id,project_alias)=(d.owner_id,d.project_alias);
  IF p_status='deployed' AND(a.request IS NULL OR NOT a.actor_started OR NOT p_receipt@>a.request
  OR p_receipt->>'unit' IS DISTINCT FROM 'homelab-web.service' OR p_receipt->'health_confirmed' IS DISTINCT FROM 'true'::jsonb
- OR p_receipt->'cleanup_confirmed' IS DISTINCT FROM 'true'::jsonb OR(p_receipt->>'activation_receipt_sha256'~'^[0-9a-f]{64}$') IS DISTINCT FROM true
- OR jsonb_typeof(p_receipt->'rollback_confirmed') IS DISTINCT FROM 'boolean') THEN RAISE EXCEPTION 'Unproven exact source activation' USING ERRCODE='P0009';END IF;
- IF p_status IN('failed','superseded') AND a.request IS NOT NULL AND(p_receipt@>a.request AND(p_receipt->'cleanup_confirmed'='true'::jsonb OR p_receipt->'process_started'='false'::jsonb)) IS DISTINCT FROM true THEN RAISE EXCEPTION 'Unproven release cleanup' USING ERRCODE='P0009';END IF;
- IF p_status IN('failed','superseded') AND a.request IS NULL AND p_receipt->'process_started' IS DISTINCT FROM 'false'::jsonb AND(a.actor_started AND p_receipt@>jsonb_build_object('release_id',a.operation_id,'verification_id',d.verification_id,'owner_id',d.owner_id,'project_alias',d.project_alias,'commit_sha',d.commit_sha,'tree_sha',d.tree_sha,'ci_action_id',d.verification_receipt->>'action_id','ci_receipt_sha256',d.verification_receipt->>'check_receipt_sha256','gate_manifest_sha256',d.verification_receipt->>'gate_manifest_sha256') AND p_receipt->'cleanup_confirmed'='true'::jsonb AND p_receipt->'health_confirmed'='true'::jsonb AND p_receipt->'rollback_confirmed'='true'::jsonb AND p_receipt->>'activation_receipt_sha256'~'^[0-9a-f]{64}$') IS DISTINCT FROM true THEN RAISE EXCEPTION 'Unstarted release proof required' USING ERRCODE='P0009';END IF;
+ OR p_receipt->'cleanup_confirmed' IS DISTINCT FROM 'true'::jsonb OR p_receipt->'entry_bridge_confirmed' IS DISTINCT FROM 'true'::jsonb OR(p_receipt->>'activation_receipt_sha256'~'^[0-9a-f]{64}$') IS DISTINCT FROM true
+ OR p_receipt->'rollback_confirmed' IS DISTINCT FROM 'false'::jsonb) THEN RAISE EXCEPTION 'Unproven exact source activation' USING ERRCODE='P0009';END IF;
+ IF p_status IN('failed','superseded') AND a.request IS NOT NULL AND(p_receipt@>a.request AND p_receipt->>'unit'='homelab-web.service' AND p_receipt->'cleanup_confirmed'='true'::jsonb AND p_receipt->'health_confirmed'='true'::jsonb AND p_receipt->'entry_bridge_confirmed'='true'::jsonb AND p_receipt->'rollback_confirmed'='true'::jsonb AND p_receipt->>'activation_receipt_sha256'~'^[0-9a-f]{64}$') IS DISTINCT FROM true THEN RAISE EXCEPTION 'Unproven release cleanup' USING ERRCODE='P0009';END IF;
+ IF p_status IN('failed','superseded') AND a.request IS NULL AND p_receipt->'process_started' IS DISTINCT FROM 'false'::jsonb AND(a.actor_started AND p_receipt@>jsonb_build_object('release_id',a.operation_id,'verification_id',d.verification_id,'owner_id',d.owner_id,'project_alias',d.project_alias,'commit_sha',d.commit_sha,'tree_sha',d.tree_sha,'ci_action_id',d.verification_receipt->>'action_id','ci_receipt_sha256',d.verification_receipt->>'check_receipt_sha256','gate_manifest_sha256',d.verification_receipt->>'gate_manifest_sha256') AND p_receipt->>'unit'='homelab-web.service' AND p_receipt->'cleanup_confirmed'='true'::jsonb AND p_receipt->'health_confirmed'='true'::jsonb AND p_receipt->'entry_bridge_confirmed'='true'::jsonb AND p_receipt->'rollback_confirmed'='true'::jsonb AND p_receipt->>'activation_receipt_sha256'~'^[0-9a-f]{64}$') IS DISTINCT FROM true THEN RAISE EXCEPTION 'Unstarted release proof required' USING ERRCODE='P0009';END IF;
  RETURN forge_agent.delivery_operation_finish(p_id,p_generation,p_token,p_status,p_receipt,p_summary);
 END;$fn$;
 CREATE FUNCTION forge_agent.delivery_repair_claim(p_worker text) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $fn$
@@ -351,6 +351,7 @@ BEGIN
  SELECT * INTO d FROM forge_agent.delivery_ledger WHERE verification_id=a.verification_id;
  SELECT * INTO l FROM forge_agent.delivery_lineages WHERE lineage_id=d.lineage_id FOR UPDATE;
  IF a.request IS NULL AND l.rounds>=3 THEN
+  UPDATE forge_agent.delivery_operations SET round=l.rounds WHERE operation_id=a.operation_id;
   PERFORM forge_agent.delivery_operation_finish(a.operation_id,a.generation,a.lease_token,'needs_attention',jsonb_build_object('reason','lineage_budget_exhausted'),'Three main-repair assignments were reserved; human attention is required.');RETURN NULL;END IF;
  SELECT * INTO h FROM forge_agent.delivery_project_main_heads WHERE(owner_id,project_alias)=(d.owner_id,d.project_alias);
  IF a.request IS NULL AND h.commit_sha IS NOT NULL AND h.commit_sha<>d.commit_sha THEN
@@ -430,14 +431,14 @@ BEGIN
  WHEN r.status='superseded' THEN 'completed' WHEN r.status='admitted' AND r.task_id IS NULL THEN 'completed' WHEN r.status='admitted' AND t.status='completed' THEN 'completed'
  WHEN r.status='admitted' AND t.status='queued' THEN 'queued' WHEN r.status='admitted' AND t.status IN('running','awaiting_review','cancel_requested') THEN 'running'
  WHEN r.status='admitted' THEN 'needs_attention' WHEN r.status='leased' THEN 'running' ELSE 'queued' END;
- release_status:=CASE WHEN s.operation_id IS NULL THEN 'none' WHEN s.status IN('deployed','failed','superseded') THEN s.status
+ release_status:=CASE WHEN s.receipt->'operator_required'='true'::jsonb THEN 'failed' WHEN s.operation_id IS NULL THEN 'none' WHEN s.status IN('deployed','failed','superseded') THEN s.status
  WHEN s.request IS NOT NULL THEN 'deploying' WHEN s.status='leased' THEN 'building' ELSE 'queued' END;
  verification_status:=CASE WHEN d.superseded_by IS NOT NULL THEN 'superseded' WHEN d.verification_status='leased' THEN 'running' WHEN d.verification_status='pending' AND d.verification_receipt->'build_number' IS NOT NULL THEN 'running' WHEN d.verification_status='pending' THEN 'queued' ELSE d.verification_status END;
  RETURN jsonb_build_object('verification_id',d.verification_id,'source_kind',d.source_kind,'commit_sha',d.commit_sha,'tree_sha',d.tree_sha,
  'updated_at',forge_agent.delivery_timestamp(greatest(d.updated_at,coalesce(r.updated_at,d.updated_at),coalesce(s.updated_at,d.updated_at),coalesce(t.updated_at,d.updated_at))),
  'verification',jsonb_strip_nulls(jsonb_build_object('status',verification_status,'updated_at',forge_agent.delivery_timestamp(d.updated_at),'summary',left(coalesce(nullif(d.verification_summary,''),'Main verification is queued.'),512),'build_number',d.verification_receipt->'build_number')),
  'repair',jsonb_strip_nulls(jsonb_build_object('status',repair_status,'round',coalesce(r.round,0),'max_rounds',3,'task_id',r.task_id,'updated_at',forge_agent.delivery_timestamp(coalesce(r.updated_at,d.updated_at)),'summary',left(coalesce(nullif(r.summary,''),'No repair assignment is required.'),512))),
- 'release',jsonb_strip_nulls(jsonb_build_object('status',release_status,'release_id',s.operation_id,'receipt_sha256',s.receipt->>'activation_receipt_sha256','updated_at',forge_agent.delivery_timestamp(coalesce(s.updated_at,d.updated_at)),'summary',left(coalesce(nullif(s.summary,''),'No release is queued.'),512))));
+ 'release',jsonb_strip_nulls(jsonb_build_object('status',release_status,'release_id',s.operation_id,'receipt_sha256',s.receipt->>'activation_receipt_sha256','updated_at',forge_agent.delivery_timestamp(coalesce(s.updated_at,d.updated_at)),'summary',left(CASE WHEN s.receipt->'operator_required'='true'::jsonb THEN 'Portal recovery requires operator attention; cleanup remains unconfirmed.' ELSE coalesce(nullif(s.summary,''),'No release is queued.') END,512))));
 END;$fn$;
 CREATE FUNCTION forge_agent.delivery_scope(p_projection jsonb) RETURNS text LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,pg_temp AS $fn$
  SELECT CASE WHEN p_projection IS NULL THEN NULL
@@ -479,7 +480,7 @@ BEGIN
  IF NOT FOUND OR a.kind<>'release' OR p_start IS NULL THEN RETURN jsonb_build_object('allowed',false);END IF;
  SELECT * INTO d FROM forge_agent.delivery_ledger WHERE verification_id=a.verification_id;
  identity:=jsonb_build_object('release_id',a.operation_id,'verification_id',d.verification_id,'owner_id',d.owner_id,'project_alias',d.project_alias,'commit_sha',d.commit_sha,'tree_sha',d.tree_sha,'ci_action_id',d.verification_receipt->>'action_id','ci_receipt_sha256',d.verification_receipt->>'check_receipt_sha256','gate_manifest_sha256',d.verification_receipt->>'gate_manifest_sha256');
- allowed:=a.status='leased' AND a.generation=p_generation AND a.lease_token=p_token AND a.lease_role=a.action_role;
+ allowed:=a.status='leased' AND a.generation=p_generation AND a.lease_token=p_token AND a.lease_role=a.action_role AND a.lease_until>clock_timestamp();
  IF p_start THEN
   SELECT commit_sha INTO head FROM forge_agent.delivery_project_main_heads WHERE(owner_id,project_alias)=(d.owner_id,d.project_alias);
   allowed:=allowed AND a.lease_until>clock_timestamp() AND a.deadline_at>clock_timestamp() AND NOT a.cancel_requested AND head=d.commit_sha AND d.verification_status='passed'

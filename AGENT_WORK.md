@@ -66,6 +66,22 @@ rollback, staged-copy recovery, failed-candidate cleanup and source/proof tamper
 rejection. Provider/actor planned-replay handling is included. Final combined
 focused run: 71 passed, zero skips, 4.148s. These substitute system calls and do
 not constitute live activation evidence.
+## Backend verified follow-up
+
+The complete18-case focused contract suite passed on owned PostgreSQL16 and
+pure adapters (11.822s,zero skips), including three real normal admissions with
+shared lineage capacity and blocked fourth, lost-submit-ACK recovery without
+another task, atomic grant withdrawal, exact native/observer race deduplication,
+real-root projection plus pagination and ABI13 list semantics, repeated SHA/new
+release occurrence, fresh Root cleanup lease, exact checkpoint/hash, post-revoke
+activation facts, entry-bridge/rollback negatives and pending operator attention.
+Factory substitution injects the selected ready repair port and disabled config
+constructs no unused provider or DB connection. Repair prompts now retain trusted
+CI action/build identity first and bound original request/acceptance separately.
+No model/GitHub/native build or live operation was used. Root-requested guarded
+activation checks and affected historical fixtures continue in separate evidence;
+source context qualification and final rollout remain Root-owned.
+
 ## Backend initial implementation checkpoint
 
 Owner: backend, isolated `complete-sdlc-20261123/backend`, task-record base5262806.

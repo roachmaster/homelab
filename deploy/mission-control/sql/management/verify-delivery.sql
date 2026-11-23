@@ -27,7 +27,7 @@ BEGIN
  IF has_table_privilege(role_name,relation,privilege_name) OR(privilege_name IN('SELECT','INSERT','UPDATE','REFERENCES') AND has_any_column_privilege(role_name,relation,privilege_name)) THEN RAISE EXCEPTION 'Unexpected delivery table privilege: % % %',role_name,expected.name,privilege_name;END IF;
  END LOOP;END LOOP;END LOOP;
  FOR expected IN SELECT * FROM(VALUES
- ('forge_agent.delivery_actor_authorize(uuid,integer,uuid,boolean)','3f3a7650d9492ced353507529e2fe117dad1ec968d7facaf561ff6b1ac3097c3'),
+ ('forge_agent.delivery_actor_authorize(uuid,integer,uuid,boolean)','5d0b214d398ec896d523e483f76be1cb18ca27fab247519b206e926c6a0e4a9c'),
  ('forge_agent.delivery_canonical(jsonb)','a7dd3282f71921384ec8b1fe12da24cc3aad5c8ad8d4117d0ea98ee4cd15b75c'),
  ('forge_agent.delivery_capable(text,text)','1fa7d011b3831c4daea5b2d13a31838f9f874ded4afd30bf9b0f5fed776a896e'),
  ('forge_agent.delivery_enqueue_successors(uuid)','95f75e3edb49cf4a95f9b46ec63935be4ab41f294401495f2273a2b2b3bf13d9'),
@@ -39,12 +39,12 @@ BEGIN
  ('forge_agent.delivery_operation_replayed(uuid,integer,uuid,jsonb)','8332b5ea0e19f7c1bd82e86c02e380a2148e21ee56f18d4d5b19d5d744ce7c36'),
  ('forge_agent.delivery_own_cleanup(uuid,jsonb,jsonb,text)','324ea6520fae217330434c3bb933d80c1a860aec6f69bb8c12e066512144eb3d'),
  ('forge_agent.delivery_project_head(text)','7f471e7116ce8163692b4756de668015a7b7f26c3704ad760ad603e0628384a9'),
- ('forge_agent.delivery_projection(text,uuid)','57453249971e5a1d878e70d274130d96d28ae11aa1a52ba21a5b7bc0bdb0cf74'),
+ ('forge_agent.delivery_projection(text,uuid)','5a5bd056b29046b9be771b46c6fd74d9edd9a423d30a4a7ef4cf383a4171cacf'),
  ('forge_agent.delivery_register_post_merge(uuid)','33f8daed2d89b4aed4e9dcc0d9286da77309ef1dbe443f823d61130384473a06'),
  ('forge_agent.delivery_repair_admit(uuid,integer,uuid,text)','7387358a2471cd0a2c2398b5953b7d2857ea9ef466327bc98d823bb27adf4492'),
  ('forge_agent.delivery_repair_bind(uuid,integer,uuid,uuid,jsonb)','114ccac21314b3289fc30af5f508eb4813a4f0e0c4abad84c25cb91c8d07ac12'),
  ('forge_agent.delivery_repair_checkpoint(uuid,integer,uuid,jsonb)','74967bb9d32cc0e1bc917339a230d99d72a73f963578afe7ebc596fd01e980a7'),
- ('forge_agent.delivery_repair_claim(text)','ac85e05cfbe379320c1c416f76be9aa0b3cf7ee7584814caf44aeae1e5630e6a'),
+ ('forge_agent.delivery_repair_claim(text)','2c4c3904af68b7d60ac1654bfd9597fd313469dbb2e08d63cc847859ff7e7866'),
  ('forge_agent.delivery_repair_finish(uuid,integer,uuid,text,jsonb,text)','c748112144fa532aff625d031917ec295312a237c2611b65cee4f685c149ab28'),
  ('forge_agent.delivery_repair_renew(uuid,integer,uuid)','07f09d1eb7ede0d61600c009c4770aeb72351dc7cf60abf2801a9ed73f672a23'),
  ('forge_agent.delivery_request_valid(jsonb,uuid,uuid,text,text,text,uuid)','2fd460345d4cd5c07d94f6bd9189fed7e1b5c1477433e3aa40a7e238fbe3cb4f'),
@@ -61,7 +61,7 @@ BEGIN
  ('forge_coding_reconciler_api.delivery_project_head(text)','a8cc601ef3ef0d4cedf44ff90457b2b3278bddd6a8a427a472605e3f33d18119'),
  ('forge_coding_reconciler_api.delivery_release_checkpoint(uuid,integer,uuid,jsonb)','8d67ad42c0643d9cb0baaedc0b359e45d5bc21b0e4d5afc1c052fc729a448d8c'),
  ('forge_coding_reconciler_api.delivery_release_claim(text)','73eb4408353cd387a57e39460a41dec606b08e5603d8ff1299244703e75779e7'),
- ('forge_coding_reconciler_api.delivery_release_finish(uuid,integer,uuid,text,jsonb,text)','1e68cd057733d5889e1a491d687518d458145889e03f9776c45550c335d25465'),
+ ('forge_coding_reconciler_api.delivery_release_finish(uuid,integer,uuid,text,jsonb,text)','5f453a6c728c8f15e19dfc95a136707ba34d30d338735606363b1a4c585e74d1'),
  ('forge_coding_reconciler_api.delivery_release_renew(uuid,integer,uuid)','be4b29a5e14b3f8a4f9469557ec32507a39198e2a85da1765a634cc538463cd6'),
  ('forge_coding_reconciler_api.delivery_release_start_allowed(uuid,integer,uuid)','7670d9cb3e34179707edd9d39ce06bf12e0041fa9a327ca9312be0d3116baae4'),
  ('forge_coding_reconciler_api.delivery_renew(uuid,integer,uuid)','59d776933079e4a302c1c739a09931310e09b86d520ed2009c4feccdb5688e24'),

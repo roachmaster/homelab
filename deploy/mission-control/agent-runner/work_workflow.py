@@ -926,6 +926,8 @@ class WorkflowCoordinator:
         if external_maintenance is not None and not callable(external_maintenance):
             raise TypeError('External maintenance requires an injected callback')
         self.store=store;self.worker_id=worker_id;self.interval_seconds=interval_seconds;self.stop=threading.Event();self._thread=None
+        if delivery_repair is not None and not callable(getattr(delivery_repair,'run_once',None)):
+            raise TypeError('Delivery repair requires a ready run_once port')
         self._delivery_repair=delivery_repair
         self._external_workflow=external_workflow;self._external_maintenance=external_maintenance;self._clock=clock;self._next_external=float('-inf')
     def run_once(self):

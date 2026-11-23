@@ -215,6 +215,10 @@ class WorkService:
         self._native_control = native_control
         self.workflow_worker=None
 
+    @property
+    def delivery_projection_enabled(self):
+        return self._config.delivery_enabled
+
     def _require_project(self, project_alias):
         if project_alias not in self._config.allowed_projects:
             raise Rejected(403, "denied")
@@ -282,12 +286,13 @@ class WorkService:
 
     def list_tasks(self, command):
         self._require_project(command.project_alias)
+        options={'delivery_visible':command.delivery_visible} if self._config.delivery_enabled else {}
         return self._store.list_tasks(
             project_alias=command.project_alias,
             status_filter=command.status_filter,
             limit=command.limit,
             cursor_task_id=command.cursor,
-            delivery_visible=command.delivery_visible,
+            **options,
         )
 
     def events(self, command):
@@ -435,7 +440,7 @@ class WorkService:
 class WorkServiceFactory:
     """Effect-free startup factory producing a ready WorkService or None when unconfigured."""
 
-    def __init__(self, config, connect_factory=None, *, external_factory=None, native_control_factory=None):
+    def __init__(self, config, connect_factory=None, *, external_factory=None, native_control_factory=None, delivery_repair_factory=None):
         if config is not None:
             if not isinstance(config, WorkConfig):
                 raise TypeError("WorkServiceFactory requires a frozen WorkConfig or None")
@@ -443,6 +448,9 @@ class WorkServiceFactory:
                 raise TypeError("WorkServiceFactory requires a callable connect_factory when configured")
         elif connect_factory is not None and not callable(connect_factory):
             raise TypeError("connect_factory must be callable or None")
+        if delivery_repair_factory is not None and not callable(delivery_repair_factory):
+            raise TypeError('Delivery repair factory must be callable')
+        self._delivery_repair_factory=delivery_repair_factory
         self._config = config
         self._connect_factory = connect_factory
         if external_factory is not None and not callable(external_factory):
@@ -485,8 +493,11 @@ class WorkServiceFactory:
         service=WorkService(self._config,catalog,store,external_workflow=selected_flow,native_control=native_control)
         from work_workflow import WorkflowCoordinatorFactory
         maintenance = {"external_maintenance": store.maintain_external} if external is not None else {}
-        from work_delivery_repair import DeliveryRepairConsumerFactory
-        repair=DeliveryRepairConsumerFactory(self._config,catalog,store,service.submit).create()
+        repair=None
+        if self._config.delivery_repair_projects:
+            from work_delivery_repair import DeliveryRepairConsumerFactory
+            selected=self._delivery_repair_factory or DeliveryRepairConsumerFactory
+            repair=selected(self._config,catalog,store,service.submit).create()
         service.workflow_worker=WorkflowCoordinatorFactory(self._config,catalog,store,external_workflow=selected_flow,delivery_repair=repair,**maintenance).create()
         return service
 
@@ -798,7 +809,7 @@ def dispatch(route, correlation, command, service, *, delivery_version=1):
         opened = service.get(command)
         return HTTPStatus.OK, common.envelope("work_opened", correlation, task=opened)
     if route is Destination.LIST and isinstance(command, WorkList):
-        page = service.list_tasks(replace(command,delivery_visible=delivery_version==1))
+        page = service.list_tasks(replace(command,delivery_visible=delivery_version==1) if getattr(service,'delivery_projection_enabled',False) is True else command)
         return HTTPStatus.OK, common.envelope("work_listed", correlation, **page)
     if route is Destination.EVENTS and isinstance(command, WorkEvents):
         page = service.events(command)
