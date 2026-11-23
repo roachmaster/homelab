@@ -2029,10 +2029,11 @@ async function implementationDesignJourney(page, designUrl) {
   await check(report).toContainText('with Agents as the default admitted view');
   const browserContract = report.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Browser application', exact: true }) });
   await check(browserContract).toContainText('browser ABI is 14');
-  await check(report).toContainText('The last qualified live deployment is main 95651a5 (tree 6d380c5a)');
+  await check(report).toContainText('The retained pre-delivery live checkpoint is main 95651a5 (tree 6d380c5a)');
   await check(report).toContainText('actual built revision a3a14e9');
   await check(report).toContainText('499 consumed build inputs');
-  await check(report).toContainText('not deployed by updating this reference');
+  await check(report).toContainText('The Agents project/task delivery panel and protected Root receipts are the runtime authority for the latest source, checks and activation');
+  await check(report).toContainText('updating this reference does not establish a new rollout');
   const lastDeployment = report.locator('p').filter({ hasText: 'That Web-only rollout preserved' });
   await check(lastDeployment).toContainText('PostgreSQL schema26');
   await check(lastDeployment).toContainText('no Studio relay');
