@@ -432,7 +432,7 @@ EVENT_RETRY_CONTEXT_SHA256 = {
     "src/rust/forge-ide-ui/src/model/agents/delivery.rs": "a32081673201aedffd18bf0937243b2dd71cb41edd3ffbe2bd2796a12a3d3efd",
     "src/rust/forge-ide-ui/src/model/agents/tests.rs": "8a84dbe37b6489edf580674a0d7b48d73f3a8d357414c575071387ee15c55284",
     "src/rust/forge-ide-ui/src/model/agents/tests/delivery.rs": "eaf72e886fbd80e3c78bfe0e4ee8bd1960dae9e20e4f01f58e3f9c6995bd60b4",
-    "src/rust/forge-ide-ui/src/model/agents/workflow.rs": "ef0b5ac47f0575fa8afc2c6730c716d070767c71d283e257be3240775461a434",
+    "src/rust/forge-ide-ui/src/model/agents/workflow.rs": "bc24fadbd6254b4885d665de9cbdbb23489ec1fa9283baf7601613f05a5e503d",
     "src/rust/forge-ide-ui/src/protocol/work.rs": "c1fd35bd4ca84cd696a723c83b0ee2e53dc3339079a81a86cc2ddbe0d4855253",
     "src/rust/forge-ide-ui/src/protocol/work/delivery.rs": "afd99590187b2c6e2a2bd4d1315333e4f622e376ac0a898cdb7ff0d2907f7b6f",
     "src/rust/forge-ide-ui/tests/wasm_abi.mjs": "65e17657d542e26f89b87ab67a484e61950f4a273330807005ae577c47b0ff16",

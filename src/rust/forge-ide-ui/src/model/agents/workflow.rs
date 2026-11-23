@@ -362,7 +362,7 @@ impl Agents {
 
 pub(super) fn retry_badge(event: &WorkRetryEvent) -> BadgeView {
     badge(
-        &event.label(),
+        event.label(),
         match event.status {
             WorkRetryStatus::Open => BadgeTone::Accent,
             WorkRetryStatus::Resolved => BadgeTone::Success,
