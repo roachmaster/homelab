@@ -180,6 +180,10 @@ class ReleaseProvider:
         self._plan(identity, plan)
         require_lease()
         result = self.actor.call(action, identity['release_id'], identity, plan)
+        if result.get('status') == 'planned':
+            if self._plan(identity, result.get('plan')) != plan:
+                raise ValueError('Portal release preparation replay changed')
+            return result
         self._observation(identity, plan, result)
         return result
 

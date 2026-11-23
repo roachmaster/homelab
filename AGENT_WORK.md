@@ -60,6 +60,12 @@ steps after the existing three gates, quiesces the build account, and seals
 Root-owned host/assets with a source/request/action-bound manifest. Legacy and
 branch gates remain unchanged. Sixty-three focused tests passed with zero skips
 in 4.358s; diff check passed. No live operation was executed by this writer.
+The integrated Root actor was then exercised with owned temporary files and
+injected system/probe ports: activation and replay, crash after restart, healthy
+rollback, staged-copy recovery, failed-candidate cleanup and source/proof tamper
+rejection. Provider/actor planned-replay handling is included. Final combined
+focused run: 71 passed, zero skips, 4.148s. These substitute system calls and do
+not constitute live activation evidence.
 
 --- Previous task record ---
 

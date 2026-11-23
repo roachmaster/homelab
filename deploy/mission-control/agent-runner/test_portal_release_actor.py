@@ -1,0 +1,279 @@
+"""Actual portal actor state machine with owned files and substituted system I/O."""
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+from uuid import uuid4
+
+
+SPEC = importlib.util.spec_from_file_location('forge_portal_actor_tested',
+    Path(__file__).resolve().parents[1] / 'portal_release_actor.py')
+ACTOR = importlib.util.module_from_spec(SPEC)
+import sys
+sys.modules[SPEC.name] = ACTOR
+SPEC.loader.exec_module(ACTOR)
+
+
+class FakeSystem:
+    def __init__(self, config, job, old_binary, old_config):
+        self.config, self.head = config, job['commit_sha']
+        self.binary, self.config_path = str(old_binary), str(old_config)
+        self.process_binary = self.binary
+        self.restarts = self.reloads = self.candidate_starts = self.candidate_stops = 0
+        self.crash_after_restart = False
+
+    def current(self):
+        return {'binary': self.binary, 'config': self.config_path,
+                'process_binary': self.process_binary, 'pid': 100 + self.restarts}
+
+    def main_head(self, _config):
+        return self.head
+
+    def reload(self):
+        self.reloads += 1
+        line = next(line for line in self.config.override.read_text().splitlines()
+                    if line.startswith('ExecStart=') and line != 'ExecStart=')
+        binary, _serve, _flag, config = line.removeprefix('ExecStart=').split()
+        self.binary, self.config_path = binary, config
+
+    def restart(self):
+        self.restarts += 1
+        self.process_binary = self.binary
+        if self.crash_after_restart:
+            self.crash_after_restart = False
+            raise KeyboardInterrupt('controlled actor process crash after the service changed')
+
+    def candidate_start(self, *_args):
+        self.candidate_starts += 1
+
+    def candidate_stop(self, *_args):
+        self.candidate_stops += 1
+
+
+class PortalReleaseActorTest(unittest.TestCase):
+    def setUp(self):
+        temporary = TemporaryDirectory(prefix='forge-portal-actor-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.config = SimpleNamespace(owner='owner', project_alias='homelab',
+            repository='roachmaster/homelab', ci_results_root=self.root / 'results',
+            releases_root=self.root / 'releases', web_config_root=self.root / 'configs',
+            state_root=self.root / 'state', override=self.root / 'unit/portal.conf',
+            replay_archive_root=self.root / 'archive', web_group='fixture-web',
+            web_user='fixture-web', candidate_port=8789, expected_abi=14)
+        self.job = {'release_id': str(uuid4()), 'verification_id': str(uuid4()),
+            'owner_id': 'owner', 'project_alias': 'homelab', 'commit_sha': 'a' * 40,
+            'tree_sha': 'b' * 40, 'ci_action_id': str(uuid4()),
+            'ci_receipt_sha256': 'c' * 64, 'gate_manifest_sha256': 'd' * 64}
+        self.packet = self.config.ci_results_root / (self.job['ci_action_id'] + '.artifacts')
+        self.packet.mkdir(parents=True)
+        self.inventory = {}
+        for name in ('bin/forge-ide-web-host', *('assets/' + n for n in ACTOR.CORE)):
+            raw = ('new isolated ' + name).encode()
+            self.put(self.packet / name, raw)
+            self.inventory[name] = raw
+        assets_manifest = {'format_version': 1, 'abi_version': 14,
+            'files': [{'path': name.removeprefix('assets/'), 'sha256': ACTOR.sha(raw)}
+                      for name, raw in self.inventory.items() if name.startswith('assets/')]}
+        self.inventory['assets/manifest.json'] = ACTOR.canonical(assets_manifest)
+        self.put(self.packet / 'assets/manifest.json', self.inventory['assets/manifest.json'])
+        self.manifest = {'version': 1, 'policy': 'forge-portal-artifact-v1',
+            'action_id': self.job['ci_action_id'], 'source_commit': self.job['commit_sha'],
+            'source_tree': self.job['tree_sha'], 'request_sha256': 'e' * 64,
+            'commands': ACTOR.ARTIFACT_COMMANDS,
+            'files': [{'path': name, 'sha256': ACTOR.sha(raw), 'byte_count': len(raw),
+                       'executable': name.startswith('bin/')} for name, raw in sorted(self.inventory.items())]}
+        raw_manifest = ACTOR.canonical(self.manifest) + b'\n'
+        self.put(self.packet / 'manifest.json', raw_manifest)
+        self.result = {'version': 2, 'action_id': self.job['ci_action_id'],
+            'candidate_commit': self.job['commit_sha'], 'candidate_tree': self.job['tree_sha'],
+            'expected_main': self.job['commit_sha'], 'gate_manifest_sha256': self.job['gate_manifest_sha256'],
+            'request_sha256': 'e' * 64, 'branch_scope': 'main',
+            'verification_profile': 'forge-sdlc-jenkins-v2', 'status': 'passed',
+            'cleanup_confirmed': True,
+            'coverage': {'scope': 'main', 'browser': 'required', 'database': 'required_zero_skips', 'backend_suites': 'all_four'},
+            'checks': [{'index': i, 'argv': argv, 'returncode': 0} for i, argv in enumerate(ACTOR.MAIN_CHECKS)],
+            'artifact_export': {'version': 1, 'policy': 'forge-portal-artifact-v1',
+                'action_id': self.job['ci_action_id'], 'source_commit': self.job['commit_sha'],
+                'source_tree': self.job['tree_sha'], 'manifest_sha256': ACTOR.sha(raw_manifest),
+                'file_count': len(self.inventory), 'total_bytes': sum(map(len, self.inventory.values()))}}
+        self.save_result()
+        old = self.config.releases_root / 'prior'
+        old_binary, old_config = old / 'bin/forge-ide-web-host', self.config.web_config_root / 'old.json'
+        self.put(old_binary, b'previous isolated host')
+        for name in ACTOR.CORE:
+            self.put(old / 'assets' / name, ('old ' + name).encode())
+        old_game = {}
+        for name, key in (('levels/room-one.json', 'room-one'), ('levels/traversal-yard.json', 'traversal-yard')):
+            raw = ('old retained ' + key).encode()
+            self.put(old / 'assets/game-assets' / name, raw)
+            old_game[key] = {'path': name, 'sha256': ACTOR.sha(raw)}
+        self.put(old / 'assets/game-assets/manifest.json', ACTOR.canonical({'entries': old_game}))
+        self.old_config = {'bind': '127.0.0.1:8788', 'public_origin': 'https://portal.thedevex.com',
+            'session_auth': 'trusted_proxy', 'assets': str(old / 'assets'), 'preserved': 'existing relay selection'}
+        self.put(old_config, ACTOR.canonical(self.old_config))
+        self.old_override = ('[Service]\nExecStart=\nExecStart=' + str(old_binary) + ' serve --config ' + str(old_config) + '\n').encode()
+        self.put(self.config.override, self.old_override)
+        self.system = FakeSystem(self.config, self.job, old_binary, old_config)
+        self.probes, self.fail_live, self.fail_candidate = [], False, False
+        outer = self
+        class Probe:
+            def __init__(self, origin, port):
+                self.port = port
+            def check(self, inventory, project):
+                outer.probes.append((self.port, project))
+                if self.port == 8789 and outer.fail_candidate:
+                    raise RuntimeError('controlled unhealthy candidate')
+                if (self.port == 8788 and outer.fail_live
+                        and inventory['assets/app.wasm']['sha256'] == ACTOR.sha(outer.inventory['assets/app.wasm'])):
+                    raise RuntimeError('controlled unhealthy activated host')
+                return {'assets': 5, 'resume': True, 'work_catalog': True, 'negative_admission': 4}
+        self.probe = Probe
+        self.actor = self.new_actor()
+        group = patch.object(ACTOR.grp, 'getgrnam', return_value=SimpleNamespace(gr_gid=os.getgid()))
+        group.start(); self.addCleanup(group.stop)
+
+    @staticmethod
+    def put(path, raw, **_metadata):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
+
+    def reader(self, path, maximum=4 * 1024 * 1024):
+        raw = Path(path).read_bytes()
+        if len(raw) > maximum:
+            raise ValueError('owned fixture size limit')
+        return raw
+
+    def public(self, root, directory):
+        self.assertTrue(directory.is_relative_to(root))
+        directory.mkdir(parents=True, exist_ok=True)
+
+    def new_actor(self, writer=None):
+        return ACTOR.PortalReleaseActor(self.config, self.system,
+            reader=self.reader, writer=writer or self.put, probe_factory=self.probe,
+            public_directory=self.public)
+
+    def save_result(self):
+        raw = ACTOR.canonical(self.result) + b'\n'
+        self.put(self.config.ci_results_root / (self.job['ci_action_id'] + '.json'), raw)
+        self.job['ci_receipt_sha256'] = ACTOR.sha(raw)
+
+    def test_plan_stage_activate_and_terminal_replay_keep_single_restart(self):
+        planned = self.actor.invoke('plan', self.job)
+        self.assertEqual(planned['status'], 'planned')
+        self.assertEqual(self.system.restarts, 0)
+        plan = planned['plan']
+        outcome = self.actor.invoke('activate', self.job, plan)
+        self.assertEqual(outcome['status'], 'deployed')
+        self.assertTrue(outcome['receipt']['health_confirmed'])
+        self.assertTrue(outcome['receipt']['cleanup_confirmed'])
+        self.assertEqual(self.system.restarts, 1)
+        self.assertEqual(self.new_actor().invoke('reconcile', self.job, plan), outcome)
+        self.assertEqual(self.new_actor().invoke('activate', self.job, plan), outcome)
+        self.assertEqual(self.system.restarts, 1)
+        actual_config = json.loads(Path(self.system.config_path).read_text())
+        self.assertEqual(actual_config['preserved'], self.old_config['preserved'])
+
+    def test_ready_provider_and_actual_actor_agree_on_plan_replay_and_activation(self):
+        from work_delivery_ops import ReleaseProvider
+        config = SimpleNamespace(worker=SimpleNamespace(owner='owner'),
+            repositories={'homelab': 'roachmaster/homelab'})
+        actor = self.actor
+        class Port:
+            def call(self, action, release_id, job, plan=None):
+                if release_id != job['release_id']:
+                    raise ValueError('Action scope mismatch')
+                return actor.invoke(action, job, plan)
+        provider = ReleaseProvider(config, Port())
+        plan = provider.plan(self.job, lambda: None)['plan']
+        self.assertEqual(provider.reconcile(self.job, plan, lambda: None)['status'], 'planned')
+        self.assertEqual(provider.activate(self.job, plan, lambda: None)['status'], 'deployed')
+        self.assertEqual(provider.reconcile(self.job, plan, lambda: None)['status'], 'deployed')
+        self.assertEqual(self.system.restarts, 1)
+
+    def test_crash_after_actual_restart_reconciles_without_a_second_restart(self):
+        plan = self.actor.invoke('plan', self.job)['plan']
+        self.system.crash_after_restart = True
+        with self.assertRaises(KeyboardInterrupt):
+            self.actor.invoke('activate', self.job, plan)
+        self.assertEqual(self.system.restarts, 1)
+        result = self.new_actor().invoke('reconcile', self.job, plan)
+        self.assertEqual(result['status'], 'deployed')
+        self.assertEqual(self.system.restarts, 1)
+
+    def test_unhealthy_activation_restores_previous_config_and_proves_old_health(self):
+        plan = self.actor.invoke('plan', self.job)['plan']
+        self.fail_live = True
+        result = self.actor.invoke('activate', self.job, plan)
+        self.assertEqual(result['status'], 'failed')
+        self.assertTrue(result['receipt']['rollback_confirmed'])
+        self.assertTrue(result['receipt']['health_confirmed'])
+        self.assertTrue(result['receipt']['cleanup_confirmed'])
+        self.assertEqual(self.config.override.read_bytes(), self.old_override)
+        self.assertEqual(self.system.restarts, 2)
+        self.assertEqual(self.new_actor().invoke('reconcile', self.job, plan), result)
+        self.assertEqual(self.system.restarts, 2)
+
+    def test_bad_candidate_is_terminal_after_cleanup_without_live_restart_or_retry(self):
+        self.fail_candidate = True
+        outcome = self.actor.invoke('plan', self.job)
+        self.assertEqual(outcome['status'], 'failed')
+        self.assertTrue(outcome['receipt']['cleanup_confirmed'])
+        self.assertTrue(outcome['receipt']['health_confirmed'])
+        self.assertTrue(outcome['receipt']['rollback_confirmed'])
+        self.assertEqual(self.system.restarts, 0)
+        self.assertEqual(self.system.candidate_starts, 1)
+        self.assertEqual(self.system.candidate_stops, 1)
+        self.assertEqual(self.config.override.read_bytes(), self.old_override)
+        self.assertEqual(self.new_actor().invoke('plan', self.job), outcome)
+        self.assertEqual(self.system.candidate_starts, 1)
+
+    def test_interrupted_staging_resumes_hash_checked_files_before_any_live_switch(self):
+        interrupted = False
+        def writer(path, raw, **metadata):
+            nonlocal interrupted
+            if path.name == 'app.wasm' and not interrupted:
+                interrupted = True
+                raise OSError('controlled staging interruption')
+            self.put(path, raw, **metadata)
+        with self.assertRaises(OSError):
+            self.new_actor(writer).invoke('plan', self.job)
+        result = self.new_actor().invoke('plan', self.job)
+        self.assertEqual(result['status'], 'planned')
+        self.assertEqual(self.system.restarts, 0)
+        self.assertEqual(self.config.override.read_bytes(), self.old_override)
+
+    def test_source_advance_scope_and_artifact_tampering_have_no_activation_authority(self):
+        with self.assertRaises(ValueError):
+            self.actor.invoke('plan', {**self.job, 'owner_id': 'other'})
+        self.system.head = 'f' * 40
+        self.assertEqual(self.actor.invoke('plan', self.job)['status'], 'superseded')
+        self.assertEqual(self.system.restarts, 0)
+        self.system.head = self.job['commit_sha']
+        self.job['release_id'] = str(uuid4())  # A terminal superseded action stays immutable.
+        self.put(self.packet / 'assets/app.wasm', b'tampered')
+        with self.assertRaises(ValueError):
+            self.actor.invoke('plan', self.job)
+        self.assertEqual(self.system.restarts, 0)
+
+    def test_false_main_receipt_and_arbitrary_build_commands_are_rejected(self):
+        self.result['coverage']['database'] = 'not_run'; self.save_result()
+        with self.assertRaises(ValueError):
+            self.actor.invoke('plan', self.job)
+        self.result['coverage']['database'] = 'required_zero_skips'
+        self.manifest['commands'] = [{'argv': ['/bin/sh', '-c', 'arbitrary'], 'returncode': 0}]
+        raw = ACTOR.canonical(self.manifest) + b'\n'
+        self.put(self.packet / 'manifest.json', raw)
+        self.result['artifact_export']['manifest_sha256'] = ACTOR.sha(raw); self.save_result()
+        with self.assertRaises(ValueError):
+            self.actor.invoke('plan', self.job)
+        self.assertEqual(self.system.restarts, 0)
+
+
+if __name__ == '__main__':
+    unittest.main()
