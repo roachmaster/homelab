@@ -697,10 +697,11 @@ class PortalReleaseActor:
         self._save(directory, state)
         self.write(self.config.override, before['override'].encode(), mode=0o644)
         self.system.reload()
-        def pending(summary):
+        def pending(summary, *, operator_required=False):
             return {'status': 'pending', 'receipt': {**state['plan'], 'unit': UNIT,
                 'health_confirmed': False, 'cleanup_confirmed': False,
-                'entry_bridge_confirmed': False, 'rollback_confirmed': False}, 'summary': summary}
+                'entry_bridge_confirmed': False, 'rollback_confirmed': False,
+                'operator_required': operator_required}, 'summary': summary}
         if self.system.restart_pending():
             return pending('Reconciling the active portal systemd job before rollback proof.')
         current = self.system.current()
@@ -709,7 +710,7 @@ class PortalReleaseActor:
             if type(attempts) is not int or not 0 <= attempts <= ROLLBACK_RESTART_LIMIT:
                 raise ValueError('Invalid rollback restart budget')
             if attempts == ROLLBACK_RESTART_LIMIT:
-                return pending('Rollback restart budget exhausted; operator recovery is required.')
+                return pending('Rollback restart budget exhausted; operator recovery is required.', operator_required=True)
             state['rollback_restart_requested'] = True
             state['rollback_restart_attempts'] = attempts + 1
             self._save(directory, state)

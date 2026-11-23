@@ -152,6 +152,8 @@ class PortalReleaseRecoveryTest(unittest.TestCase):
             self.assertIs(result['receipt']['health_confirmed'], False)
         self.assertEqual(self.system.restarts, ACTOR.ROLLBACK_RESTART_LIMIT)
         self.assertIn('budget exhausted', result['summary'])
+        self.assertIs(result['receipt']['operator_required'], True)
+        self.assertIs(result['receipt']['cleanup_confirmed'], False)
 
     def test_expired_before_any_plan_closes_with_explicit_unstarted_release_proof(self):
         self.start_allowed = False
