@@ -184,6 +184,20 @@ class FeedbackRecoveryFactoryTest(unittest.TestCase):
         flow.config.project_workflows = {}
         self.assertIsNone(FeedbackRecoveryFactory(flow).create())
 
+    def test_missing_config_disables_recovery_without_effects(self):
+        flow = Mock()
+        flow.config = None
+        self.assertIsNone(FeedbackRecoveryFactory(flow).create())
+        reviewer = Mock()
+        selected = Mock()
+        reviewer.return_value.create.return_value = selected
+        wired = WorkflowStoreFactory(None, None, object(), reviewer_correction_factory=reviewer).create()
+        self.assertIsNone(wired.feedback_recovery)
+        self.assertIs(wired.reviewer_correction, selected)
+        reviewer.assert_called_once_with(wired)
+        selected.correct.assert_not_called()
+        selected.resume.assert_not_called()
+
     def test_selected_ready_provider_is_injected_without_effects(self):
         config = Mock()
         factory = Mock()

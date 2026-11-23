@@ -278,7 +278,7 @@ UI_DELIVERY_CONTEXT_SHA256 = {
 # Current additive delivery source; historical maps above remain provenance.
 DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/runner.py': '4e112cd0624e46c8964e37e66c86eb274ce7392cb02a1dd24b548fc8a075537c',
-    'deploy/mission-control/agent-runner/setup-runner.sh': '341784d296e7c984b3fe37fb78d86fd4aa924ba2c8dabb06d68c760c28b55eb5',
+    'deploy/mission-control/agent-runner/setup-runner.sh': 'a346e8e4fd5e64b47b4a40419f2e9195e7097e752340e486399054e63faf36b4',
     'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': 'de459b8d5a49922d5272c186f887bad40afb87421661d31fc0bfa85ac85e0664',
     'deploy/mission-control/agent-runner/test_ci_supervision.py': '8769a4232b38c14932917099c6f30ed7a6b22d725d29f412d48efcecf991cf3a',
     'deploy/mission-control/agent-runner/test_delivery_ops.py': 'd0d9428dfe0e264a7dce8f2edf9e2562eadbf29bb425adceae18040c39cf4a7a',
@@ -287,7 +287,7 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/test_portal_release_actor.py': '3e82a752626030b109a7703d80942dda81f947e0d75782125b7a2b95f965a324',
     'deploy/mission-control/agent-runner/test_portal_release_recovery.py': '83fdbff03f32d9403d055ade2fe90530a591dbe0df4cbe8a0e6fd61782b40249',
     'deploy/mission-control/agent-runner/test_portal_release_startup.py': 'e71343b033f13f443393ee605be95a6346b7b43481e502fd34b1ba65b1c50b9f',
-    'deploy/mission-control/agent-runner/test_work_context_recovery.py': '221874931d2469be42856cb335021dc2da2cde783a5703b8c5259aaa9b910efe',
+    'deploy/mission-control/agent-runner/test_work_context_recovery.py': 'c8d92523ee270f8e664c46b7c23358efca91005cc32f15352fb3aca9ae0a905c',
     'deploy/mission-control/agent-runner/test_work_delivery_automation.py': '5b6bc79250f91e85eab447eb358eb3107b6a6e1a73811055ad79f4965ec95c26',
     'deploy/mission-control/agent-runner/test_work_feedback_delivery.py': '6cabb6e884baf3d8172c7c5b8eff3351cead8a807ee3a6e1a51333d632092541',
     'deploy/mission-control/agent-runner/test_work_muse_intake.py': '94a79619048c5c8fbe599db9ae8f90782884da1652e877f5bcc9f2eeb8cac9c2',
@@ -297,7 +297,7 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
     'deploy/mission-control/agent-runner/work_api.py': 'a3707fae102279bbd2f7abaedc26bf43c0b2f543ab180f1b97cd96e164800898',
     'deploy/mission-control/agent-runner/work_ci_contract.py': '71b55c469064b394ab16aaae9ab336634eb3549417da0e1064dc015c3e59c37d',
     'deploy/mission-control/agent-runner/work_config.py': '1d67059a436ebe3b9bd4c3c470bb43cd0097d161fcf4fbd3a70f1f41e1b53172',
-    'deploy/mission-control/agent-runner/work_context_recovery.py': '83b235f3f269303ec5a095c6fda7dfe3fffbcf4f6096281fe2269b800ec75d0d',
+    'deploy/mission-control/agent-runner/work_context_recovery.py': '440d4cfb013ccdb0f028554c7978606a22c3cae3ad5c6500fc80adbb41c26e5c',
     'deploy/mission-control/agent-runner/work_context_recovery_contract.py': 'ecda9366299a734492b3837e1f1324e156f5da8eb2256266c18937c7da473071',
     'deploy/mission-control/agent-runner/work_delivery_ops.py': '05fcf5728e9ebbc0cd58a206e0345e24a24ad3151995d351613fc50fffd648da',
     'deploy/mission-control/agent-runner/work_delivery_repair.py': '3d06ea4e5edf6036b31187087c5c48b83d0fcbf021b3d9e259d39e0ce0150c6c',
