@@ -1,9 +1,11 @@
 """Trusted command exits, not candidate text, determine v3 failure stages."""
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 from work_ci_contract import (CiGateContractFactory, LEGACY_PROFILE, SCOPED_PROFILE,
     V2_PROTECTED_PATHS, V3_PROTECTED_PATHS)
@@ -180,6 +182,43 @@ class ActualCargoPhaseTest(unittest.TestCase):
             self.assertEqual([x[0] for x in observed],[p.argv for p in phases])
             self.assertTrue(all(x[1]==(None if scope=='main' else '1') for x in observed))
             self.assertEqual(len(result['phase_results']),len(phases))
+
+    def test_real_publication_crash_recomputes_recovered_v3_failure_evidence(self):
+        ci=supervision.CI
+        cargo=str(supervision.TOOLCHAIN/'bin/cargo')
+        phases=(ci.CiPhase('compile-check','compilation',(cargo,'check',
+            '--manifest-path','src/rust/Cargo.toml','--offline')),)
+        def run(**changes):
+            return self.fixture._run_supervisor(commit=self.fixture.base_commit,
+                expected_main=self.fixture.base_commit,branch_scope='main',
+                profile=EVENT_PROFILE,checks=tuple(p.argv for p in phases),**changes)
+        with patch.object(ci,'event_phases_for_scope',return_value=phases):
+            seed,_log,_=run()
+            self.assertEqual(seed['status'],'passed')
+            action=str(uuid4())
+            pid=os.fork()
+            if pid==0:
+                writer=ci.write_result
+                def die_after_receipt(path,result,group):
+                    with patch.object(ci.os,'fchown'):
+                        writer(path,result,group)
+                    if result['status']=='passed':
+                        os._exit(73)
+                try:
+                    with patch.object(ci,'write_result',side_effect=die_after_receipt):
+                        run(action=action)
+                except BaseException:
+                    os._exit(74)
+                os._exit(75)
+            _pid,status=os.waitpid(pid,0)
+            self.assertEqual(os.waitstatus_to_exitcode(status),73)
+            recovered,_log,_=run(action=action,run_child_override=lambda *a,**k:self.fail('Replay reran checks'))
+            self.assertEqual(recovered['status'],'failed')
+            self.assertEqual(recovered['failure'],'cancelled_or_timed_out')
+            self.assertEqual(recovered['failure_kind'],'infrastructure')
+            self.assertEqual(recovered['passed_kinds'],['compilation'])
+            self.assertEqual({key:recovered[key] for key in ('failure_kind','passed_kinds','phase_results')},
+                ci.event_stage_evidence('main',recovered['checks'],recovered['failure']))
 
 
 if __name__=='__main__':unittest.main()

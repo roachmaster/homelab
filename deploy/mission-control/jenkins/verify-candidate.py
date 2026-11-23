@@ -1412,6 +1412,9 @@ class LocalCargoCacheProvider(CargoCachePort):
                     info = result_path.lstat()
                     result = json.loads(read_file(result_path, owner=self.expected_owner, maximum=1024 * 1024))
                     result.update(status='failed', failure='cancelled_or_timed_out')
+                    if result.get('verification_profile') == EVENT_PROFILE:
+                        result.update(event_stage_evidence(result['branch_scope'],
+                            result['checks'], result['failure']))
                     self.rollback_result(result)
                     write_result(result_path, result, info.st_gid)
                 elif result_path.exists() or result_path.is_symlink():
