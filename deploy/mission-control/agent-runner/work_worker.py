@@ -18,7 +18,8 @@ from work_executor import (
 )
 from work_policy import POLICY, POLICY_DIGEST
 from work_sessions import AntigravitySessionProvider, CodexSessionProvider
-from work_review_context import ReviewContextError, ReviewContextProvider
+from work_review_context import FeedbackDeliveryUnavailable, ReviewContextError, ReviewContextProvider
+from work_context_recovery_contract import RECOVERY_SUMMARY
 from work_build_context import BuildContextProvider
 from work_consumer_cache import configured_consumer_caches
 from work_candidate_source import ReviewCandidateSourceProvider
@@ -28,6 +29,7 @@ from work_external_review_context import ExternalReviewContextProvider
 from work_worker_config import CONFIG_ENV, WorkerConfig, load_config, verify_recipe, validated_copy
 
 LOG = logging.getLogger("forge-coding-worker")
+FEEDBACK_INTEGRITY_SUMMARY = "Review feedback integrity could not be verified; explicit review is required."
 SCAN_SECONDS = 5
 ADVERTISE_SECONDS = 30
 
@@ -316,8 +318,11 @@ class CodingWorker:
                             feedback = self.review_contexts.acquire(lease, workspace)
                             if feedback is not None:
                                 arguments["feedback_context"] = feedback
+                        except FeedbackDeliveryUnavailable:
+                            self.store.checkpoint(lease, RECOVERY_SUMMARY)
+                            raise ExecutionError("needs_reconcile", RECOVERY_SUMMARY) from None
                         except Exception:
-                            raise ExecutionError("needs_reconcile", "The current review feedback could not be verified.") from None
+                            raise ExecutionError("needs_reconcile", FEEDBACK_INTEGRITY_SUMMARY) from None
                     if lease.get("workflow_feedback_review_id") is not None:
                         try:
                             if self.peer_contexts is None:

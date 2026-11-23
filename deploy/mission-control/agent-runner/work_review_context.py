@@ -9,6 +9,7 @@ from uuid import UUID
 
 from work_feedback import validate_feedback
 from work_candidate_source import linked_candidate_input
+from work_context_recovery_contract import validate_recovery_note
 
 MAX_FEEDBACK_BYTES = 64 * 1024
 DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -21,6 +22,10 @@ SECRET = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
 class ReviewContextError(ValueError):
     def __init__(self):
         super().__init__("Review feedback does not match the admitted attempt.")
+
+
+class FeedbackDeliveryUnavailable(ReviewContextError):
+    """Valid feedback cannot yet acquire its trusted build evidence."""
 
 
 def _require(value):
@@ -124,8 +129,9 @@ def validate_context(lease, workspace, envelope):
             # unchanged source bytes, proven above, permit that continuation.
             _require(candidate_input)
         else:
+            _require(typed["workspace_digest"] == lease.get("resume_workspace_digest"))
             _require(typed["parent_attempt_id"] == lease["resume_attempt_id"]
-                     and typed["workspace_digest"] == lease.get("resume_workspace_digest"))
+                     or validate_recovery_note(note, lease, typed))
     # The shared DTO validator is the schema authority. Additional secrecy
     # checks protect the read-only model artifact, without reserializing it.
     pending = [typed]
@@ -154,7 +160,12 @@ class ReviewContextProvider:
         try:
             context = validate_context(lease, workspace, self.store.read_feedback(lease))
             if self.build_provider is not None and context is not None and context.feedback_id is not None:
-                context = replace(context, build=self.build_provider.acquire(lease, context))
+                try:
+                    context = replace(context, build=self.build_provider.acquire(lease, context))
+                except OSError:
+                    raise FeedbackDeliveryUnavailable() from None
             return context
+        except FeedbackDeliveryUnavailable:
+            raise
         except (OSError, ValueError, KeyError, TypeError, AttributeError, UnicodeError):
             raise ReviewContextError() from None
