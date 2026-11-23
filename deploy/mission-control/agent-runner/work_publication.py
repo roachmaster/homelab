@@ -228,6 +228,10 @@ class PublicationWorkerFactory:
         if (type(config.merge_enabled) is not bool or config.merge_method != "merge"
                 or config.merge_enabled and not config.repositories.keys() & config.worker.autonomous_projects):
             raise ValueError("Trusted merge requires explicit verified project source selection")
+        if (type(config.post_merge_enabled) is not bool or config.post_merge_enabled and
+                (not config.merge_enabled or config.hosted_provider != 'jenkins'
+                 or config.post_merge_jenkins_delivery_config is None)):
+            raise ValueError('Post-merge verification requires explicit trusted Jenkins selection')
         self.config, self.store_factory, self.stop = config, store_factory, stop
         self.workspace_factory, self.snapshot_factory, self.git_factory = workspace_factory, snapshot_factory, git_factory
         self.supervisor_factory = (supervisor_factory if supervisor_factory is not None else

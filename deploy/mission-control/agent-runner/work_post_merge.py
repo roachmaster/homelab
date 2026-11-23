@@ -62,6 +62,24 @@ def passed_receipt(request, receipt):
                 for row in receipt.get('checks', [])))
 
 
+def stopped_receipt(request, receipt):
+    """Cleanup for another action cannot release this action's ownership."""
+    if not isinstance(receipt, dict) or receipt.get('provider') != 'jenkins':
+        return False
+    proof = (receipt.get('cleanup_confirmed') is True
+             and isinstance(receipt.get('check_receipt_sha256'), str)
+             and HEX64.fullmatch(receipt['check_receipt_sha256']))
+    if receipt.get('target_action_id') == request['action_id']:
+        return receipt.get('process_started') is False or bool(proof)
+    expected = {'action_id': request['action_id'], 'workflow_id': request['workflow_id'],
+        'project_alias': request['project_alias'], 'candidate_commit': request['candidate_commit'],
+        'candidate_tree': request['candidate_tree'], 'expected_main': request['integration_base'],
+        'gate_manifest_sha256': request['gate_manifest_sha256'],
+        'verification_profile': SCOPED_PROFILE, 'branch_scope': 'main',
+        'correlation_id': request['correlation_id']}
+    return bool(proof) and all(receipt.get(key) == value for key, value in expected.items())
+
+
 class PostMergeWorker:
     def __init__(self, config, store, provider, *, stop=None):
         if not getattr(config, 'post_merge_enabled', False):
@@ -95,6 +113,11 @@ class PostMergeWorker:
                     lost.set()
                     return
 
+        def require_start_lease():
+            require_lease()
+            if not self.store.post_merge_start_allowed(job):
+                raise PublicationError('post_merge_start_not_authorized')
+
         def finish(status, receipt, summary):
             require_lease()
             if not self.store.post_merge_finish(job, status, receipt, diagnostic_text(summary)):
@@ -127,7 +150,8 @@ class PostMergeWorker:
                 finish('failed', {'process_started': False}, 'Main verification expired before submission.')
                 return
             if request is None:
-                prepared = self.provider.prepare(job, require_lease)
+                require_start_lease()
+                prepared = self.provider.prepare(job, require_start_lease)
                 if prepared.get('status') == 'superseded':
                     observed = prepared.get('observed_main')
                     if not isinstance(observed, str) or not HEX40.fullmatch(observed) or observed == job['merge_commit']:
@@ -142,8 +166,11 @@ class PostMergeWorker:
                 require_lease()
                 if not self.store.post_merge_checkpoint(job, request):
                     raise PublicationError('post_merge_checkpoint_lost')
-            outcome = (self.provider.cancel(job, request, require_lease) if cancelling else
-                       self.provider.verify(job, request, require_lease))
+            if cancelling:
+                outcome = self.provider.cancel(job, request, require_lease)
+            else:
+                require_start_lease()
+                outcome = self.provider.verify(job, request, require_start_lease)
             if not isinstance(outcome, dict) or not isinstance(outcome.get('receipt'), dict):
                 raise ValueError('Invalid post-merge observation')
             receipt, status = outcome['receipt'], outcome.get('status')
@@ -155,8 +182,7 @@ class PostMergeWorker:
                 raise ValueError('Oversized post-merge receipt')
             if status == 'passed' and not cancelling and passed_receipt(request, receipt):
                 finish('passed', receipt, summary)
-            elif status in {'failed', 'cancelled'} and (receipt.get('cleanup_confirmed') is True
-                                                       or receipt.get('process_started') is False):
+            elif status in {'failed', 'cancelled'} and stopped_receipt(request, receipt):
                 finish('failed', receipt, previous.get('failure_summary', summary))
             elif status in {'pending', 'failed', 'cancelled', 'passed'}:
                 receipt = dict(receipt)
