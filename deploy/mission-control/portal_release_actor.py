@@ -179,7 +179,7 @@ class SystemPort:
     def show(self, key):
         return self.call(['/usr/bin/systemctl', 'show', UNIT, '-p', key, '--value']).decode().strip()
 
-    def authorize(self, job, authority, *, start):
+    def authorize(self, job, authority, *, start, plan_sha256=None):
         # Fixed local function/UUID arguments only. It returns the recorded
         # public identity as well as the fresh lease/capability decision.
         release_id, token = str(UUID(job['release_id'])), str(UUID(authority['lease_token']))
@@ -191,7 +191,9 @@ class SystemPort:
         if len(raw) > 16384:
             raise ValueError('Oversized release authority response')
         result = decode(raw)
-        return result.get('allowed') is True and result.get('job') == job
+        return (result.get('allowed') is True and result.get('job') == job
+                and (plan_sha256 is None or (result.get('checkpointed') is True
+                     and result.get('plan_sha256') == plan_sha256)))
 
     def current(self):
         value = self.show('ExecStart')
@@ -322,8 +324,11 @@ class PortalReleaseActor:
         self.authorizer = authorizer if authorizer is not None else system.authorize
         self._authority = None
 
-    def _authorize(self, job, *, start):
-        if self.authorizer(job, self._authority, start=start) is not True:
+    def _authorize(self, job, *, start, plan_sha256=None):
+        options = {'start': start}
+        if plan_sha256 is not None:
+            options['plan_sha256'] = plan_sha256
+        if self.authorizer(job, self._authority, **options) is not True:
             raise ValueError('Release lease or capability is no longer current')
 
     def _job(self, job):
@@ -590,7 +595,7 @@ class PortalReleaseActor:
             raise ValueError('Portal changed after preparation')
         if sha(self.read(Path(state['live_config']))) != state['live_config_sha256']:
             raise ValueError('Prepared live configuration changed')
-        self._authorize(job, start=True)
+        self._authorize(job, start=True, plan_sha256=state['plan']['plan_sha256'])
         command = str(Path(state['release']) / 'bin/forge-ide-web-host') + ' serve --config ' + state['live_config']
         override = ('[Service]\nExecStart=\nExecStart=' + command + '\n').encode()
         state.update(phase='activating', target_override_sha256=sha(override), restart_requested=True)
@@ -608,6 +613,11 @@ class PortalReleaseActor:
         if state.get('outcome') is not None:
             return state['outcome']
         if state['phase'] in {'staging', 'candidate'}:
+            try:
+                self._authorize(job, start=True)
+            except ValueError:
+                self.system.candidate_stop(job['release_id'])
+                return self.rollback(job, public)
             packet, _, _ = self._proof(job)
             # A crashed candidate is stopped before restarting the bounded probe.
             try:
@@ -659,6 +669,26 @@ class PortalReleaseActor:
         return self._receipt(directory, state, 'failed', health=True, rollback=True,
                              summary='Release failed; the previous healthy portal was restored.')
 
+    def _unstaged_failure(self, job):
+        """An authorized cleanup owner can close a failed pre-checkpoint call."""
+        directory, _ = self._paths(job)
+        current = self._current()
+        assets = Path(current['value']['assets'])
+        inventory = {'assets/' + name: {'sha256': sha(self.read(assets / name, 8 * 1024 * 1024))}
+                     for name in CORE}
+        self._health(current['value'], inventory)
+        body = {'version': 1, 'policy': POLICY, 'job': job, 'unit': UNIT,
+                'status': 'failed', 'health_confirmed': True, 'cleanup_confirmed': True,
+                'rollback_confirmed': True, 'activation_started': False}
+        raw = canonical(body) + b'\n'
+        self.write(directory / 'activation.json', raw)
+        outcome = {'status': 'failed', 'receipt': {**job, 'version': 1, 'policy': POLICY,
+            'unit': UNIT, 'health_confirmed': True, 'cleanup_confirmed': True,
+            'rollback_confirmed': True, 'activation_receipt_sha256': sha(raw)},
+            'summary': 'Release stopped before a plan was sealed; the existing healthy portal was retained.'}
+        self._save(directory, {'job': job, 'phase': 'failed', 'outcome': outcome})
+        return outcome
+
     def invoke(self, action, job, public=None, *, authority=None):
         job = self._job(job)
         if action not in {'plan', 'activate', 'reconcile', 'rollback'}:
@@ -669,11 +699,41 @@ class PortalReleaseActor:
                 or str(UUID(authority['lease_token'])) != authority['lease_token']):
             raise ValueError('Private release lease required')
         self._authority = dict(authority)
-        self._authorize(job, start=action in {'plan', 'activate'})
+        try:
+            self._authorize(job, start=action in {'plan', 'activate'})
+        except ValueError:
+            if action != 'plan':
+                raise
+            # A lost plan acknowledgement can precede revocation. Recover only
+            # the Root-owned prior state and cleanup; never start another probe.
+            self._authorize(job, start=False)
+            directory, _ = self._paths(job)
+            path = directory / 'state.json'
+            if not path.exists():
+                return self._unstaged_failure(job)
+            state = decode(self.read(path))
+            if state.get('job') != job:
+                raise ValueError('Release cleanup identity conflict')
+            if state.get('outcome') is not None:
+                return state['outcome']
+            if state['phase'] in {'staging', 'candidate'}:
+                self.system.candidate_stop(job['release_id'])
+            return self.rollback(job, state['plan'])
         if action == 'plan':
             if public is not None:
                 raise ValueError('A release plan is Root-owned')
             return self.plan(job)
+        if action == 'reconcile' and public is None:
+            directory, _ = self._paths(job)
+            path = directory / 'state.json'
+            if not path.exists():
+                return self._unstaged_failure(job)
+            state = decode(self.read(path))
+            if state.get('job') != job:
+                raise ValueError('Release reconciliation identity conflict')
+            if state.get('outcome') is not None:
+                return state['outcome']
+            public = state['plan']
         if not isinstance(public, dict):
             raise ValueError('Frozen release plan required')
         return getattr(self, action)(job, public)
