@@ -718,6 +718,59 @@ class WorkerDB:
             cursor.execute("SELECT forge_coding_reconciler_api.merge_finish(%s,%s,%s,%s)",(_coerce_uuid(job['merge_id']),_coerce_uuid(job['lease_token']),status,Json(receipt)))
             return dict(cursor.fetchone()[0])
 
+    def post_merge_available(self, owner=None):
+        """Opt-in startup probe; an unprovisioned historical schema stays inert."""
+        owner = self._owner if owner is None else validate_owner(owner)
+        if owner != self._owner:
+            return False
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT to_regprocedure('forge_coding_reconciler_api.post_merge_available(text)') IS NOT NULL")
+            if not cursor.fetchone()[0]:
+                return False
+            cursor.execute("SELECT forge_coding_reconciler_api.post_merge_available(%s)", (owner,))
+            return cursor.fetchone()[0] is True
+
+    def post_merge_claim(self, worker_id):
+        validate_identifier(worker_id, 'worker_id')
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.post_merge_claim(%s)", (worker_id,))
+            value = cursor.fetchone()[0]
+            return None if value is None else dict(value)
+
+    def post_merge_renew(self, job):
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.post_merge_renew(%s,%s,%s)",
+                           (_coerce_uuid(job['post_merge_id']), job['generation'], _coerce_uuid(job['lease_token'])))
+            return cursor.fetchone()[0] is True
+
+    def post_merge_checkpoint(self, job, request):
+        if not isinstance(request, dict):
+            raise ValueError('Invalid post-merge request')
+        from uuid import uuid5
+        if request.get('prepare_action_id') != str(uuid5(_coerce_uuid(job['post_merge_id']), 'prepare-v1')):
+            raise ValueError('Invalid post-merge preparation identity')
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.post_merge_checkpoint(%s,%s,%s,%s)",
+                           (_coerce_uuid(job['post_merge_id']), job['generation'], _coerce_uuid(job['lease_token']), Json(request)))
+            return cursor.fetchone()[0] is True
+
+    def post_merge_start_allowed(self, job):
+        """Database-time first-effect fence; renew alone still permits cleanup."""
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.post_merge_start_allowed(%s,%s,%s)",
+                           (_coerce_uuid(job['post_merge_id']), job['generation'], _coerce_uuid(job['lease_token'])))
+            return cursor.fetchone()[0] is True
+
+    def post_merge_finish(self, job, status, receipt, summary):
+        if status not in {'pending', 'passed', 'failed', 'superseded'} or not isinstance(receipt, dict):
+            raise ValueError('Invalid post-merge result')
+        if not isinstance(summary, str) or len(summary.encode('utf-8')) > MAX_SUMMARY_BYTES:
+            raise ValueError('Invalid post-merge summary')
+        with self._reconcile_cursor() as cursor:
+            cursor.execute("SELECT forge_coding_reconciler_api.post_merge_finish(%s,%s,%s,%s,%s,%s)",
+                           (_coerce_uuid(job['post_merge_id']), job['generation'], _coerce_uuid(job['lease_token']), status, Json(receipt), summary))
+            return cursor.fetchone()[0] is True
+
     def native_merge_failure(self, job, outcome):
         """Return one reconciled non-merge to its bounded native author loop."""
         from work_feedback import validate_findings

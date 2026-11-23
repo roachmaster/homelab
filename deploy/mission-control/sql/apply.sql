@@ -266,4 +266,10 @@ SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=27)
 \ir migrations/0027_jenkins_events.sql
 INSERT INTO forge_agent.schema_migrations(version,name) VALUES(27,'jenkins_events');
 \endif
+SELECT NOT EXISTS (SELECT 1 FROM forge_agent.schema_migrations WHERE version=28) AS apply_0028
+\gset
+\if :apply_0028
+\ir migrations/0028_post_merge_verification.sql
+INSERT INTO forge_agent.schema_migrations(version,name) VALUES(28,'post_merge_verification');
+\endif
 COMMIT;

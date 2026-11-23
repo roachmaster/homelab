@@ -41,6 +41,29 @@ and the CI guide now distinguishes implemented scheduling from unactivated
 runtime configuration. Scoped local links and both diagrams' official Mermaid
 grammar passed. No Rust/browser/Jenkins/live execution or portal page change.
 
+## Store component checkpoint
+
+Owner: `latest_source_audit`, isolated `store` worktree, base `aae81e4`.
+Added M28 future-only native/external merge signals, scoped durable verification
+queue/leases/frozen request, DB-time start/deadline fences and separate failure
+evidence. A revoked start grant retains only the same frozen action role's
+cleanup/recovery; startup recognizes that cleanup, and cancelled actions cannot
+pass. Existing authorized Muse read defaults remain explicit read-only; no
+historical SQL1–27, original merge/review authority, roles, credentials, HBA or
+completed task receipts are rewritten. No live schema/config/service effects.
+
+Verification: 38 actual PostgreSQL16 regressions passed with zero skips (12 new
+queue/transaction/receipt/ACL cases plus all26 policy-upgrade checks). After the
+final cancellation/startup defenses, reran all12 new actual-PG cases: passed,
+zero skips,32.295s. Full strict current catalog verification passed on fresh,
+reapply,26→28 and completed27→28 paths; the last preserves completed root rows
+and the exact original M16 merge_finish definition with no backfill. Evidence is
+outside Git under `post-merge-coordinator-20261123/post-merge-store-*.log`.
+Root owns coupled M27 context/inventory qualifications and overall CI/publication.
+A failed-main remediation row is durable independent work evidence; automatic
+model admission is not granted by this store component and needs explicit
+current-policy admission by the coordinator.
+
 --- Previous task record ---
 
 # Current: Fix repository review findings — 2026-11-23

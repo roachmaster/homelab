@@ -15,6 +15,9 @@ BEGIN
     IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=27 AND name='jenkins_events') THEN
         allowed_tables:=allowed_tables||ARRAY['jenkins_events','jenkins_event_deliveries','jenkins_observations'];
     END IF;
+    IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=28 AND name='post_merge_verification') THEN
+        allowed_tables:=allowed_tables||ARRAY['post_merge_verification_grants','post_merge_verifications','post_merge_remediations'];
+    END IF;
     IF current_database()<>'forge_agent' THEN
         RAISE EXCEPTION 'Muse reader contract requires forge_agent database';
     END IF;
@@ -93,7 +96,7 @@ BEGIN
     END LOOP;
     -- Preserve the operator's existing owner/schema-scoped future-table read.
     -- No global, other-owner, other-schema/type, extra grantee or grant option
-    -- is admitted by this exact catalog row. M27 adds only its three scoped tables.
+    -- is admitted by this exact catalog row. M27/M28 admit only their named tables.
     IF NOT EXISTS(SELECT FROM pg_default_acl d
         WHERE d.defaclrole=owner_role AND d.defaclnamespace='forge_agent'::regnamespace
           AND d.defaclobjtype='r'

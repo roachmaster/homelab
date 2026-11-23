@@ -133,3 +133,13 @@ SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=27) AS h
 GRANT SELECT,INSERT ON forge_agent.jenkins_events TO forge_agent;
 GRANT SELECT,INSERT,UPDATE ON forge_agent.jenkins_event_deliveries,forge_agent.jenkins_observations TO forge_agent;
 \endif
+
+-- M28: scoped verification; no direct table or model authority.
+SELECT EXISTS(SELECT 1 FROM forge_agent.schema_migrations WHERE version=28) AS has_post_merge_verification
+\gset
+\if :has_post_merge_verification
+GRANT EXECUTE ON FUNCTION forge_coding_reconciler_api.post_merge_available(text),forge_coding_reconciler_api.post_merge_claim(text),
+ forge_coding_reconciler_api.post_merge_renew(uuid,integer,uuid),forge_coding_reconciler_api.post_merge_checkpoint(uuid,integer,uuid,jsonb),
+ forge_coding_reconciler_api.post_merge_finish(uuid,integer,uuid,text,jsonb,text),
+ forge_coding_reconciler_api.post_merge_start_allowed(uuid,integer,uuid) TO forge_coding_reconciler;
+\endif

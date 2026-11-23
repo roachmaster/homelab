@@ -33,6 +33,13 @@ BEGIN
     END IF;
 END;
 $jenkins_reads$;
+DO $post_merge_reads$
+BEGIN
+    IF EXISTS(SELECT FROM forge_agent.schema_migrations WHERE version=28 AND name='post_merge_verification') THEN
+        GRANT SELECT ON forge_agent.post_merge_verification_grants,forge_agent.post_merge_verifications,forge_agent.post_merge_remediations TO muse_events;
+    END IF;
+END;
+$post_merge_reads$;
 -- Match the pre-existing permission for future tables from this owner/schema.
 ALTER DEFAULT PRIVILEGES FOR ROLE forge_agent_owner IN SCHEMA forge_agent
     GRANT SELECT ON TABLES TO muse_events;
