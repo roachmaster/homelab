@@ -626,6 +626,10 @@ class PortalReleaseActor:
                 pass
             return self._finish_stage(directory, state, packet)
         if state['phase'] == 'prepared':
+            try:
+                self._authorize(job, start=True)
+            except ValueError:
+                return self.rollback(job, public)
             return {'status': 'planned', 'plan': state['plan']}
         if state['phase'] == 'rolling_back':
             return self.rollback(job, public)
