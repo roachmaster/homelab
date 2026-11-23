@@ -25,6 +25,10 @@ from uuid import UUID, uuid4
 
 POLICY = 'forge-portal-web-only-v1'
 UNIT = 'homelab-web.service'
+ENTRY_UNIT = 'bitwave-portal-cloudflare.service'
+ENTRY_SOCKET = 'bitwave-portal-cloudflare.socket'
+ENTRY_PORT = 8090
+ROLLBACK_RESTART_LIMIT = 3
 CONFIG = Path('/etc/homelab-forge/portal-release.json')
 IDENTITY = ('release_id', 'verification_id', 'owner_id', 'project_alias',
             'commit_sha', 'tree_sha', 'ci_action_id', 'ci_receipt_sha256', 'gate_manifest_sha256')
@@ -227,6 +231,33 @@ class SystemPort:
 
     def restart(self):
         self.call(['/usr/bin/systemctl', 'restart', UNIT], timeout=90)
+
+    def restart_pending(self):
+        value = self.show('Job')
+        if value in {'', '0'}:
+            return False
+        if not re.fullmatch(r'[1-9][0-9]*', value):
+            raise ValueError('Unknown portal job schema')
+        return True
+
+    def ensure_entry_bridge(self):
+        # This existing dependency is the only additional unit this actor may
+        # start. Verify both ends before restoring an inactive bridge.
+        def property(unit, key):
+            return self.call(['/usr/bin/systemctl', 'show', unit, '-p', key, '--value']).decode().strip()
+        command = property(ENTRY_UNIT, 'ExecStart')
+        match = re.fullmatch(r'\{ path=(.*?) ; argv\[\]=(.*?) ; ignore_errors=.*', command)
+        if (match is None or match[1] not in {'/lib/systemd/systemd-socket-proxyd', '/usr/lib/systemd/systemd-socket-proxyd'}
+                or shlex.split(match[2]) != [match[1], '127.0.0.1:8788']
+                or property(ENTRY_SOCKET, 'Listen') != '127.0.0.1:8090 (Stream)'
+                or property(ENTRY_SOCKET, 'Triggers') != ENTRY_UNIT
+                or property(ENTRY_SOCKET, 'ActiveState') != 'active'):
+            raise ValueError('Entry bridge escaped the fixed portal boundary')
+        active = property(ENTRY_UNIT, 'ActiveState')
+        if active in {'inactive', 'failed'}:
+            self.call(['/usr/bin/systemctl', 'start', ENTRY_UNIT], timeout=30)
+        elif active not in {'active', 'activating'}:
+            raise ValueError('Entry bridge is not ready for recovery')
 
     def candidate_start(self, config, release_id, binary, candidate_config):
         unit = 'forge-portal-candidate-' + release_id
@@ -477,7 +508,7 @@ class PortalReleaseActor:
         public['plan_sha256'] = sha(canonical(public))
         state = {'job': job, 'plan': public, 'phase': 'staging', 'before': current,
                  'release': str(release), 'inventory': inventory, 'restart_requested': False,
-                 'rollback_restart_requested': False}
+                 'rollback_restart_requested': False, 'rollback_restart_attempts': 0}
         self._save(directory, state)
         if self.system.main_head(self.config) != job['commit_sha']:
             return self._receipt(directory, state, 'superseded',
@@ -543,8 +574,8 @@ class PortalReleaseActor:
             old_assets = Path(current['value']['assets'])
             old_inventory = {'assets/' + n: {'sha256': sha(self.read(old_assets / n, 8 * 1024 * 1024))}
                              for n in CORE}
-            self._health(current['value'], old_inventory)
-            return self._receipt(directory, state, 'failed', health=True, rollback=True,
+            self._live_health(current['value'], old_inventory)
+            return self._receipt(directory, state, 'failed', health=True, rollback=True, entry=True,
                 summary='Candidate health failed; the existing healthy portal was retained without a restart.')
         state['phase'] = 'prepared'
         self._save(directory, state)
@@ -561,6 +592,11 @@ class PortalReleaseActor:
                     raise ValueError('Portal health verification failed') from None
                 time.sleep(0.5)
 
+    def _live_health(self, config, inventory):
+        self._health(config, inventory)
+        self.system.ensure_entry_bridge()
+        self._health(dict(config, bind='127.0.0.1:' + str(ENTRY_PORT)), inventory)
+
     def _load(self, job, public):
         directory, _ = self._paths(job)
         state = decode(self.read(directory / 'state.json'))
@@ -568,14 +604,16 @@ class PortalReleaseActor:
             raise ValueError('Release plan replay conflict')
         return directory, state
 
-    def _receipt(self, directory, state, status, *, health=False, rollback=False, summary=''):
+    def _receipt(self, directory, state, status, *, health=False, rollback=False, entry=False, summary=''):
         body = {'version': 1, 'policy': POLICY, 'status': status, 'job': state['job'],
                 'plan_sha256': state['plan']['plan_sha256'], 'health_confirmed': health,
-                'cleanup_confirmed': True, 'rollback_confirmed': rollback, 'unit': UNIT}
+                'cleanup_confirmed': True, 'rollback_confirmed': rollback,
+                'entry_bridge_confirmed': entry, 'unit': UNIT}
         raw = canonical(body) + b'\n'
         self.write(directory / 'activation.json', raw)
         receipt = {**state['plan'], 'unit': UNIT, 'health_confirmed': health,
                    'cleanup_confirmed': True, 'rollback_confirmed': rollback,
+                   'entry_bridge_confirmed': entry,
                    'activation_receipt_sha256': sha(raw)}
         outcome = {'status': status, 'receipt': receipt, 'summary': summary}
         state.update(outcome=outcome, phase=status)
@@ -639,8 +677,8 @@ class PortalReleaseActor:
         if (current['binary'] == target and current['process_binary'] == target
                 and current['config'] == state['live_config']):
             try:
-                self._health(current['value'], state['inventory'])
-                return self._receipt(directory, state, 'deployed', health=True,
+                self._live_health(current['value'], state['inventory'])
+                return self._receipt(directory, state, 'deployed', health=True, entry=True,
                                      summary='Exact verified main is active; portal health and admission passed.')
             except Exception:
                 return self.rollback(job, public)
@@ -659,19 +697,34 @@ class PortalReleaseActor:
         self._save(directory, state)
         self.write(self.config.override, before['override'].encode(), mode=0o644)
         self.system.reload()
+        def pending(summary):
+            return {'status': 'pending', 'receipt': {**state['plan'], 'unit': UNIT,
+                'health_confirmed': False, 'cleanup_confirmed': False,
+                'entry_bridge_confirmed': False, 'rollback_confirmed': False}, 'summary': summary}
+        if self.system.restart_pending():
+            return pending('Reconciling the active portal systemd job before rollback proof.')
+        current = self.system.current()
         if current['process_binary'] != before['binary']:
-            if state['rollback_restart_requested']:
-                return {'status': 'pending', 'receipt': {**state['plan'], 'unit': UNIT,
-                    'health_confirmed': False, 'cleanup_confirmed': False, 'rollback_confirmed': False},
-                    'summary': 'Reconciling the already requested rollback restart.'}
+            attempts = state.get('rollback_restart_attempts', int(state['rollback_restart_requested']))
+            if type(attempts) is not int or not 0 <= attempts <= ROLLBACK_RESTART_LIMIT:
+                raise ValueError('Invalid rollback restart budget')
+            if attempts == ROLLBACK_RESTART_LIMIT:
+                return pending('Rollback restart budget exhausted; operator recovery is required.')
             state['rollback_restart_requested'] = True
+            state['rollback_restart_attempts'] = attempts + 1
             self._save(directory, state)
             self.system.restart()
+        if self.system.restart_pending():
+            return pending('Reconciling the requested rollback systemd job.')
+        restored = self.system.current()
+        if (restored['binary'] != before['binary'] or restored['config'] != before['config']
+                or restored['process_binary'] != before['binary']):
+            return pending('The previous portal process has not been confirmed yet.')
         # Rollback health verifies its own old bundle, never candidate bytes.
         old_assets = Path(before['value']['assets'])
         inventory = {'assets/' + n: {'sha256': sha(self.read(old_assets / n, 8 * 1024 * 1024))} for n in CORE}
-        self._health(before['value'], inventory)
-        return self._receipt(directory, state, 'failed', health=True, rollback=True,
+        self._live_health(before['value'], inventory)
+        return self._receipt(directory, state, 'failed', health=True, rollback=True, entry=True,
                              summary='Release failed; the previous healthy portal was restored.')
 
     def _unstaged_failure(self, job):
@@ -681,15 +734,18 @@ class PortalReleaseActor:
         assets = Path(current['value']['assets'])
         inventory = {'assets/' + name: {'sha256': sha(self.read(assets / name, 8 * 1024 * 1024))}
                      for name in CORE}
-        self._health(current['value'], inventory)
+        self._live_health(current['value'], inventory)
         body = {'version': 1, 'policy': POLICY, 'job': job, 'unit': UNIT,
                 'status': 'failed', 'health_confirmed': True, 'cleanup_confirmed': True,
-                'rollback_confirmed': True, 'activation_started': False}
+                'rollback_confirmed': True, 'entry_bridge_confirmed': True,
+                'activation_started': False, 'process_started': False}
         raw = canonical(body) + b'\n'
         self.write(directory / 'activation.json', raw)
         outcome = {'status': 'failed', 'receipt': {**job, 'version': 1, 'policy': POLICY,
             'unit': UNIT, 'health_confirmed': True, 'cleanup_confirmed': True,
-            'rollback_confirmed': True, 'activation_receipt_sha256': sha(raw)},
+            'rollback_confirmed': True, 'entry_bridge_confirmed': True,
+            'process_started': False,
+            'activation_receipt_sha256': sha(raw)},
             'summary': 'Release stopped before a plan was sealed; the existing healthy portal was retained.'}
         self._save(directory, {'job': job, 'phase': 'failed', 'outcome': outcome})
         return outcome
