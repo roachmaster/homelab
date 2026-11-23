@@ -1,5 +1,31 @@
 # Current: Coordinator-owned post-merge verification — 2026-11-23
 
+Completed source implementation. The existing coordinator now claims transactional
+post-merge verification actions for confirmed native and external merges. Ready
+factory-selected Jenkins v2 ports verify the actual merged commit/tree. Frozen
+requests, leased checkpoints, uncertain-ack reconciliation, deadline admission,
+correlated cleanup and cleanup-only recovery after revoked permission prevent
+new duplicate work while preserving completed author/reviewer history.
+
+Final code f1b8b3b has aggregate verification closure in
+/mnt/data/homelab-build/post-merge-coordinator-20261123/verification-closure.json.
+Clean `85303c1` passed 130 preflight tests and branch collection of 1,011 tests: 704 executed,
+307 declared PostgreSQL not-run, 0 unexpected skips/failures. Main ran services 6,
+driver 2 and all 1,011 runner tests with 0 skips; 17 failure/subtest entries were all
+stale current-schema/read-fixture expectations in exactly 4 test files. Preserve
+that failed receipt. The only code delta after this full collection is the
+reviewed 4-file fixture correction (11 additions/7 deletions), no application/SQL
+changes. Fresh f1b8b3b verification passed 9 source guards, all 36 affected database
+tests and remaining 3 Studio tests, zero skips/failures. This covers 1,022 distinct
+backend tests across original and affected scopes; it is not a new one-shot
+full-suite success claim. Native Rust/WASM/browser evidence is reused only after
+433 tracked native/cooker and 91 embedded inputs match aae81e4 byte-for-byte.
+
+Source publication targets main. No live schema 28, worker grant, v2 helper/profile,
+configuration, services or portal activation was performed. Failed-main results
+create separate durable remediation evidence; automatic admission of another
+coding task is outside this handler and must use current WorkService policy.
+
 Integration checkpoint: provider, fair coordinator scheduling, additive M28
 transactional native/external merge hooks, exact-main request/receipt fencing and
 cleanup-only recovery after permission revocation are integrated. Current source
