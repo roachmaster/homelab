@@ -48,6 +48,12 @@ class FakeSystem:
             self.crash_after_restart = False
             raise KeyboardInterrupt('controlled actor process crash after the service changed')
 
+    def ensure_entry_bridge(self):
+        pass
+
+    def restart_pending(self):
+        return False
+
     def candidate_start(self, *_args):
         self.candidate_starts += 1
 

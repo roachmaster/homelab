@@ -36,7 +36,7 @@ class ReleaseOperationsTest(unittest.TestCase):
 
     def response(self, status='deployed', **changes):
         receipt = {**self.plan, 'unit': 'homelab-web.service',
-            'health_confirmed': True, 'cleanup_confirmed': True,
+            'health_confirmed': True, 'cleanup_confirmed': True, 'entry_bridge_confirmed': True,
             'rollback_confirmed': False, 'activation_receipt_sha256': '1' * 64}
         receipt.update(changes)
         return {'status': status, 'receipt': receipt, 'summary': 'Owned actor observation.'}
@@ -61,6 +61,7 @@ class ReleaseOperationsTest(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.provider.activate(self.job, {**self.plan, **change}, self.require)
         for change in ({'health_confirmed': False}, {'cleanup_confirmed': False},
+                       {'entry_bridge_confirmed': False}, {'entry_bridge_confirmed': None},
                        {'unit': 'forge-coding-worker.service'}, {'commit_sha': 'a' * 40},
                        {'rollback_confirmed': True}, {'activation_receipt_sha256': None}):
             with self.subTest(change=change):
@@ -77,9 +78,11 @@ class ReleaseOperationsTest(unittest.TestCase):
         self.actor.call.assert_not_called()
         self.actor.call.return_value = self.response('failed', rollback_confirmed=True)
         self.assertTrue(self.provider.rollback(self.job, self.plan, self.require)['receipt']['rollback_confirmed'])
-        self.actor.call.return_value = self.response('failed', rollback_confirmed=True, health_confirmed=False)
-        with self.assertRaises(ValueError):
-            self.provider.rollback(self.job, self.plan, self.require)
+        for change in ({'health_confirmed': False}, {'entry_bridge_confirmed': False},
+                       {'entry_bridge_confirmed': None}):
+            self.actor.call.return_value = self.response('failed', rollback_confirmed=True, **change)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.provider.rollback(self.job, self.plan, self.require)
 
     def test_factory_is_inert_and_unused_actor_is_not_created(self):
         actor_factory = Mock(return_value=self.actor)

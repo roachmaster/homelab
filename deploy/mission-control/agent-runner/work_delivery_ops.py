@@ -176,12 +176,15 @@ class ReleaseProvider:
         if result['status'] == 'deployed':
             if (plan is None or receipt.get('unit') != 'homelab-web.service'
                     or receipt.get('health_confirmed') is not True
+                    or receipt.get('entry_bridge_confirmed') is not True
                     or receipt.get('cleanup_confirmed') is not True
                     or receipt.get('rollback_confirmed') is not False):
                 raise ValueError('Portal activation is not healthy and confirmed')
             digest(receipt.get('activation_receipt_sha256'))
         if result['status'] == 'failed' and receipt.get('rollback_confirmed') is True:
-            if receipt.get('health_confirmed') is not True or receipt.get('cleanup_confirmed') is not True:
+            if (receipt.get('health_confirmed') is not True
+                    or receipt.get('entry_bridge_confirmed') is not True
+                    or receipt.get('cleanup_confirmed') is not True):
                 raise ValueError('Portal rollback health remains unconfirmed')
             digest(receipt.get('activation_receipt_sha256'))
 
