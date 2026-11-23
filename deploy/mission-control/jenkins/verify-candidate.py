@@ -83,6 +83,16 @@ SCOPED_MAIN_CHECKS = (
     ('/usr/bin/python3', '-B', 'deploy/mission-control/backend-suites.py', '--scope', 'main'),
 )
 V2_PROTECTED_PATHS = frozenset({
+    'deploy/mission-control/agent-runner/work_delivery_ops.py',
+    'deploy/mission-control/agent-runner/work_delivery_worker.py',
+    'deploy/mission-control/agent-runner/work_delivery_repair.py',
+    'deploy/mission-control/portal_release_actor.py',
+    'deploy/mission-control/agent-runner/work_api.py',
+    'deploy/mission-control/agent-runner/work_config.py',
+    'deploy/mission-control/agent-runner/work_store.py',
+    'deploy/mission-control/agent-runner/work_workflow.py',
+    'deploy/mission-control/sql/migrations/0029_delivery_automation.sql',
+    'deploy/mission-control/sql/management/verify-delivery.sql',
     'deploy/mission-control/backend-suites.py',
     'deploy/mission-control/agent-runner/work_ci_contract.py',
     'deploy/mission-control/agent-runner/work_post_merge.py',

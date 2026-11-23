@@ -1,11 +1,13 @@
 # Coordinator-owned post-merge verification
 
-**Status: source implementation; activation is separate.** This closes the gap
+**Status: implemented delivery pipeline; runtime state requires receipts.** This closes the gap
 between a trusted exact-tree merge and full main verification. It extends the
 existing publication coordinator, PostgreSQL outbox and Rust Jenkins I/O client.
 It introduces no service, broker, global registry or model publication authority.
-The installed verifier/profile configuration and last qualified portal release
-are not changed by this document or by the source implementation.
+Migration29 extends the original migration28 handoff with bounded repair,
+observed-main verification and guarded portal activation. The Agents delivery
+projection and protected operational receipts identify actual runtime outcomes;
+a source document never substitutes for a successful rollout.
 
 See the [versioned CI contracts](ci-pipeline.md#7-versioned-execution-and-accounting),
 [native Jenkins workflow](forge-jenkins.md#native-gemini-workflow) and
@@ -131,12 +133,13 @@ codes. Cleanup must be confirmed. The delivery adapter additionally validates
 the protected verifier result and request binding; an application receipt does
 not create protected evidence.
 
-A failed-main check creates an independent durable remediation record with its
-source and diagnostics. This record is follow-up evidence; this change does not
-automatically admit another coding task. A new repair assignment must pass the
-current WorkService author/reviewer and publication policy. The completed parent
-is never reopened. A passed main check is verification evidence, not portal
-activation or an automatic deployment instruction.
+A failed-main check creates an independent durable repair operation with its
+source and diagnostics. Its consumer invokes the ready normal WorkService under
+the current project author/reviewer policy. A frozen idempotency key and verified
+queued receipt link the actual new task; the completed parent is never reopened.
+The lineage permits at most three repair admissions, including failures after a
+repair itself merges. A passed main check separately queues a release operation;
+only a healthy Root activation receipt establishes deployment.
 
 ## Verification and rollout
 
@@ -147,11 +150,13 @@ tests cover the atomic outbox, unique identities, replay/lease fencing,
 follow-up emission and privilege negatives. Source qualification must include
 the intentional changes and all strict verifier dependencies before full gates.
 
-Full main coverage still requires the real browser stage and all four backend
-suites with zero silent skips. An in-memory branch run explicitly reports
-browser/database not-run. This source work does not install a verifier, apply
-migration28, modify live provider credentials or enable the coordinator in
-production; those actions require a separately verified rollout.
+Full main coverage requires the real browser stage and all four backend suites
+with zero silent skips. An in-memory branch run explicitly reports
+browser/database not-run. Live rollout applies the additive migration, provisions
+scoped capabilities, installs the pinned Root verifier/actor, and activates the
+matching coordinator/API configuration. Preserve the database backup and prior
+portal release. Operational evidence is retained outside Git to avoid creating a
+new main build merely to record the preceding build.
 
 
 ## Portal lifecycle projection
@@ -177,3 +182,99 @@ admitted Work path. Nullable IDs and absent delivery remain supported for inacti
 and historical data. The old ABI13 decoder rejects unknown response fields, so
 matching host, WASM and generated assets must be deployed atomically with the
 negotiated backend contract. Source support is separate from actual live rollout.
+
+
+## Unified delivery and external main changes
+
+The publication composition root selects exactly one verification store: the
+legacy M28 port when delivery is disabled, or the M29 unified port when enabled.
+It injects ready verification, source-observation and release consumers. The
+scheduler rotates these consumers and yields between them to normal review,
+merge and publication work. No worker reads a global registry.
+
+The observer checks one configured project per turn, at most once per minute.
+PostgreSQL persists the previous head, compare-and-swap generation and next poll.
+A manual push/merge therefore enters the same exact-source verification path.
+Canonical owner/project/commit identity deduplicates an observation against a
+coordinator merge. A genuine manual change has no invented coding task or workflow;
+its Jenkins transport correlation UUID carries no coding authority. A later real
+merge link can associate its actual root with the canonical verification.
+Returning main to a previously seen commit creates a new release occurrence while
+retaining the old immutable evidence.
+
+```mermaid
+flowchart LR
+    G[GitHub main] --> O[Injected source observer]
+    M[Trusted merger] --> D[(PostgreSQL delivery ledger)]
+    O -->|Head CAS and deduplication| D
+    D --> V[Verification consumer]
+    V --> J[Jenkins v2 main and sealed artifacts]
+    J -->|Source-bound result and cleanup| D
+    D -->|Failed current main| R[Repair admission consumer]
+    R --> W[Ready normal WorkService]
+    W --> A[Configured independent author and reviewer]
+    A --> M
+    D -->|Passed current main| L[Release consumer]
+    L --> P[Pinned Root portal actor]
+    P --> H[Candidate health then web-only activation]
+    H -->|Confirmed receipt or rollback| D
+    D --> U[Read-only Agents lifecycle projection]
+```
+
+## Safe release sequence
+
+```mermaid
+sequenceDiagram
+    participant C as Publication coordinator
+    participant DB as PostgreSQL
+    participant R as Fixed Root actor
+    participant J as Root-sealed Jenkins export
+    participant W as Portal web service
+    C->>DB: Claim release and renew private generation/token lease
+    C->>R: Plan own release (private authority on stdin)
+    R->>DB: Verify current capability, lease and exact identity
+    R->>J: Verify main gates, request, source and artifact hashes
+    R->>R: Stage immutable binary/assets; preserve replay files
+    R->>W: Probe isolated candidate and stop it
+    R-->>C: Public immutable plan with digest (no lease token)
+    C->>DB: Checkpoint exact plan before activation
+    C->>R: Activate checkpointed plan
+    R->>DB: Fresh lease, current main and exact checkpoint digest
+    R->>R: Save restart intent before service write
+    R->>W: Replace fixed override and restart homelab-web only
+    alt Exact binary/config and authenticated health pass
+        R-->>C: Root activation receipt and confirmed cleanup
+        C->>DB: Record deployed
+    else Candidate or live health fails
+        R->>W: Restore preceding override and verify old portal
+        R-->>C: Failed receipt with confirmed rollback/health
+        C->>DB: Record failed; preserve evidence
+    end
+```
+
+The caller selects an identity, never a filesystem path, command or service. The
+Root actor validates a fixed configuration, protected ancestry and pinned export.
+Its public plan has nine identity fields plus version, policy, artifact manifest
+and plan digest. Private generation/lease tokens travel only over stdin. Model
+workers receive neither the actor sudo grant nor Jenkins/publication credentials.
+Fresh database authority is checked immediately before the privileged write.
+A lost acknowledgement reconciles the actual running binary/config without a
+second restart. If staging completed before the database checkpoint was saved,
+the actor recovers its own sealed journal. Revoked start authority still permits
+cleanup of the previously admitted operation; it never starts a new candidate.
+
+## Configuration and visibility
+
+| Capability | Explicit selection | Result |
+| --- | --- | --- |
+| Unified main verification | `delivery_enabled` plus scoped v2 post-merge provider | One durable verification owner for coordinator and observed changes. |
+| Manual-main capture | `source_observation_enabled`, fixed 60-second interval | Durable scoped head observation, no OAuth quota polling. |
+| Failed-main repair | API `delivery_enabled` and `delivery_repair_projects` | Normal current-policy author/reviewer task, shared maximum three rounds. |
+| Portal activation | `release_enabled` and pinned `release_actor_sha256` | Fixed web-only Root actor after full main proof; automatic rollback. |
+
+Database grants separately fence observe, repair and release per worker role,
+owner and project. Defaults remain disabled for an unprovisioned installation.
+The portal shows merged history separately from verification, repair and release.
+Pending successors remain Active; a terminal exhausted repair or failed release
+appears in Attention. Header-absent legacy clients retain their previous payload
+and scope behavior before pagination; ABI14 clients negotiate the new projection.

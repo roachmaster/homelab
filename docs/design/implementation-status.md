@@ -7,7 +7,7 @@ Mail remains retired. Their PostgreSQL history and supported inert local
 snapshots remain preserved. The current browser contract is **ABI14**; the
 native HTTP protocol remains version1.
 
-The last qualified live deployment is main `95651a5` (tree `6d380c5a`) on
+The retained pre-delivery live checkpoint is main `95651a5` (tree `6d380c5a`) on
 23 November 2026. Its Rust/UI artifacts and native/browser qualification retain
 their actual built revision `a3a14e9`: all **499 consumed build inputs** match
 the final source exactly. Genuine Jenkins native build 17 and companion build 1
@@ -23,10 +23,13 @@ had **no Studio relay**, and the `homelab` source project had neither managed-wr
 opt-in nor write grants. Protected activation and bridge receipts are retained
 under `/var/lib/forge-provisioning/portal-web-activation/operator-main-release/`.
 
-Repository changes after that checkpoint, including the current review fixes,
-are **not deployed by updating this reference**. A later rollout needs its own
-source, CI, artifact and activation evidence. Optional M27 Jenkins observations
-remain default-disabled and unactivated. The separate PostgreSQL/queue split is
+The current delivery implementation adds migration29, unified verification,
+automatic normal-policy repairs, observed-main capture and guarded web deployment.
+The Agents project/task delivery panel and protected Root receipts are the runtime
+authority for the latest source, checks and activation. This historical checkpoint
+remains for rollback/provenance; updating this reference does not establish a new
+rollout. Optional M27 Jenkins observations retain their separate default-off
+selection and never grant trusted verification or deployment authority. The separate PostgreSQL/queue split is
 a [proposal](https://github.com/roachmaster/homelab/blob/main/docs/architecture/proposals/postgres-queue-split.md), not an installed
 broker or orchestration service. Native `forge-coding-v10` and external
 `forge-external-db-v2` remain separate contracts.

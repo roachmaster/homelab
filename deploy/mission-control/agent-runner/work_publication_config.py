@@ -39,6 +39,11 @@ class PublicationConfig:
     jenkins_verification_scope: str = "branch"
     post_merge_enabled: bool = False
     post_merge_jenkins_delivery_config: Path | None = None
+    delivery_enabled: bool = False
+    source_observation_enabled: bool = False
+    source_observation_interval_seconds: int = 60
+    release_enabled: bool = False
+    release_actor_sha256: str | None = None
 
     @property
     def state_root(self):
@@ -51,7 +56,9 @@ def parse_config(raw, worker, *, source_path=None):
     if not {"worker_config", "repositories", "github_config_dir"} <= raw.keys() <= {
         "worker_config", "repositories", "github_config_dir", "checks", "commit_name", "commit_email", "required_hosted_checks",
         "merge_enabled", "merge_method", "hosted_provider", "jenkins_delivery_config", "native_delivery_mode", "jenkins_verification_profile", "jenkins_verification_scope",
-        "post_merge_enabled", "post_merge_jenkins_delivery_config"
+        "post_merge_enabled", "post_merge_jenkins_delivery_config", "delivery_enabled",
+        "source_observation_enabled", "source_observation_interval_seconds", "release_enabled",
+        "release_actor_sha256"
     }:
         raise ValueError("Invalid publication configuration fields")
     absolute_path(raw["worker_config"])
@@ -137,12 +144,32 @@ def parse_config(raw, worker, *, source_path=None):
         post_merge_delivery = absolute_path(post_merge_delivery)
     elif post_merge_delivery is not None:
         raise ValueError("Unused post-merge Jenkins configuration")
+    delivery_enabled = raw.get('delivery_enabled', False)
+    observation = raw.get('source_observation_enabled', False)
+    interval = raw.get('source_observation_interval_seconds', 60)
+    release_enabled = raw.get('release_enabled', False)
+    actor_digest = raw.get('release_actor_sha256')
+    if any(type(value) is not bool for value in (delivery_enabled, observation, release_enabled)):
+        raise ValueError('Invalid delivery capability selection')
+    if delivery_enabled and (not post_merge_enabled or profile != SCOPED_PROFILE):
+        raise ValueError('Unified delivery requires scoped main Jenkins verification')
+    if observation and not delivery_enabled or type(interval) is not int or interval != 60:
+        raise ValueError('Source observation requires the sixty-second delivery policy')
+    if not observation and 'source_observation_interval_seconds' in raw:
+        raise ValueError('Unused source observation interval')
+    if release_enabled:
+        if (not delivery_enabled or set(repositories) != {'homelab'}
+                or not isinstance(actor_digest, str) or not re.fullmatch(r'[0-9a-f]{64}', actor_digest)):
+            raise ValueError('Portal release requires the scoped pinned Root actor')
+    elif actor_digest is not None:
+        raise ValueError('Unused portal release actor')
     return PublicationConfig(worker, MappingProxyType(dict(repositories)), github_config,
                              tuple(frozen_checks), name, email,
                              absolute_path(source_path) if source_path else None,
                              tuple(tuple(row) for row in required), merge_enabled, merge_method,
                              hosted_provider, delivery_path, delivery_mode, profile, execution_scope,
-                             post_merge_enabled, post_merge_delivery)
+                             post_merge_enabled, post_merge_delivery, delivery_enabled,
+                             observation, interval, release_enabled, actor_digest)
 
 
 def _object(pairs):
