@@ -22,7 +22,7 @@ PLAN_KEYS = frozenset((*IDENTITY, 'version', 'policy', 'artifact_manifest_sha256
 
 def release_authority(value):
     if (not isinstance(value, dict) or set(value) != {'generation', 'lease_token'}
-            or type(value.get('generation')) is not int or value['generation'] <= 0):
+            or type(value.get('generation')) is not int or not 1 <= value['generation'] <= 100000):
         raise ValueError('Invalid private release authority')
     uid(value['lease_token'])
     return dict(value)
@@ -188,13 +188,20 @@ class ReleaseProvider:
     def _call(self, action, job, plan, require_lease):
         identity = self._identity(job)
         authority = release_authority({key: job.get(key) for key in ('generation', 'lease_token')})
-        self._plan(identity, plan)
+        if plan is None:
+            if action != 'reconcile':
+                raise ValueError('Only reconciliation may recover a missing public plan')
+        else:
+            self._plan(identity, plan)
         require_lease()
         result = self.actor.call(action, identity['release_id'], identity, plan, authority=authority)
         if result.get('status') == 'planned':
-            if self._plan(identity, result.get('plan')) != plan:
+            recovered = self._plan(identity, result.get('plan'))
+            if plan is not None and recovered != plan:
                 raise ValueError('Portal release preparation replay changed')
             return result
+        if plan is None and isinstance(result.get('receipt'), dict) and PLAN_KEYS <= result['receipt'].keys():
+            plan = self._plan(identity, {key: result['receipt'][key] for key in PLAN_KEYS})
         self._observation(identity, plan, result)
         return result
 

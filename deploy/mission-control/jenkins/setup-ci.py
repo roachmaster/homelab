@@ -159,6 +159,7 @@ def render_pipeline_config(*, operator, spool, state_root, toolchain, registry, 
         'node_modules': str(modules),
         'projects': ['homelab'],
         'verification_profile': verification_profile,
+        'portal_artifact_export': verification_profile == 'forge-sdlc-jenkins-v2',
         'timeout_seconds': DEFAULT_TIMEOUT_SECONDS,
         'verifier_sha256': verifier_sha256,
         'cargo_cache': {
@@ -221,7 +222,8 @@ def native_installation_plan(pipeline, verifier, *, verification_profile=None):
     profile = pipeline['verification_profile'] if verification_profile is None else verification_profile
     if profile not in {'forge-sdlc-jenkins-v1', 'forge-sdlc-jenkins-v2'}:
         raise ValueError('Unsupported Jenkins verification profile')
-    selected = {**pipeline, 'verification_profile': profile, 'require_main_ancestor': True, 'verifier_sha256': digest}
+    selected = {**pipeline, 'verification_profile': profile, 'require_main_ancestor': True,
+                'portal_artifact_export': profile == 'forge-sdlc-jenkins-v2', 'verifier_sha256': digest}
     return {'helper': native, 'helper_sha256': digest, 'pipeline': selected,
             'release': BASE / ('native-verifier-' + digest[:16]),
             'wrapper': Path('/usr/local/libexec/forge-native-ci-check'),

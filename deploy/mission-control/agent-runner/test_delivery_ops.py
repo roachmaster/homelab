@@ -95,7 +95,7 @@ class ReleaseOperationsTest(unittest.TestCase):
         self.actor.validate.assert_called_once()
 
     def test_private_lease_authority_is_required_for_all_operations_and_denial_propagates(self):
-        for changes in ({'generation': None}, {'generation': False}, {'generation': 0},
+        for changes in ({'generation': None}, {'generation': False}, {'generation': 0}, {'generation': 100001},
                         {'lease_token': 'invalid'}, {'lease_token': None}):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 self.provider.plan({**self.job, **changes}, self.require)
@@ -111,6 +111,19 @@ class ReleaseOperationsTest(unittest.TestCase):
             self.assertEqual(call.kwargs, {'authority': self.authority})
             self.assertEqual(call.args[2], self.identity)
             self.assertNotIn('lease_token', call.args[2])
+
+    def test_only_reconcile_can_recover_a_missing_plan_and_recovered_proofs_stay_bound(self):
+        for operation in (self.provider.activate, self.provider.rollback):
+            with self.assertRaises(ValueError):
+                operation(self.job, None, self.require)
+        self.actor.call.assert_not_called()
+        self.actor.call.return_value = {'status': 'planned', 'plan': self.plan}
+        self.assertEqual(self.provider.reconcile(self.job, None, self.require)['plan'], self.plan)
+        self.actor.call.return_value = self.response()
+        self.assertEqual(self.provider.reconcile(self.job, None, self.require)['status'], 'deployed')
+        self.actor.call.return_value = self.response(candidate_commit='a' * 40, commit_sha='a' * 40)
+        with self.assertRaises(ValueError):
+            self.provider.reconcile(self.job, None, self.require)
 
 
 class RootActorBoundaryTest(unittest.TestCase):

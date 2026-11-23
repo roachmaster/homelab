@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 
@@ -70,6 +70,11 @@ class PortalReleaseActorTest(unittest.TestCase):
             'owner_id': 'owner', 'project_alias': 'homelab', 'commit_sha': 'a' * 40,
             'tree_sha': 'b' * 40, 'ci_action_id': str(uuid4()),
             'ci_receipt_sha256': 'c' * 64, 'gate_manifest_sha256': 'd' * 64}
+        self.authority = {'generation': 1, 'lease_token': str(uuid4())}
+        self.authority_allowed = True
+        self.start_allowed = True
+        self.checkpointed_plan = None
+        self.authorization_calls = []
         self.packet = self.config.ci_results_root / (self.job['ci_action_id'] + '.artifacts')
         self.packet.mkdir(parents=True)
         self.inventory = {}
@@ -156,7 +161,20 @@ class PortalReleaseActorTest(unittest.TestCase):
     def new_actor(self, writer=None):
         return ACTOR.PortalReleaseActor(self.config, self.system,
             reader=self.reader, writer=writer or self.put, probe_factory=self.probe,
-            public_directory=self.public)
+            public_directory=self.public, authorizer=self.authorize)
+
+    def authorize(self, job, authority, *, start, plan_sha256=None):
+        self.authorization_calls.append({'job': dict(job), 'authority': dict(authority),
+            'start': start, 'plan_sha256': plan_sha256})
+        return (self.authority_allowed and job == self.job and authority == self.authority
+            and (not start or self.start_allowed)
+            and (plan_sha256 is None or plan_sha256 == self.checkpointed_plan))
+
+    def invoke(self, action, job=None, plan=None, *, actor=None, checkpoint=True):
+        if checkpoint and plan is not None:
+            self.checkpointed_plan = plan['plan_sha256']
+        return (actor or self.actor).invoke(action, self.job if job is None else job,
+            plan, authority=self.authority)
 
     def save_result(self):
         raw = ACTOR.canonical(self.result) + b'\n'
@@ -164,17 +182,17 @@ class PortalReleaseActorTest(unittest.TestCase):
         self.job['ci_receipt_sha256'] = ACTOR.sha(raw)
 
     def test_plan_stage_activate_and_terminal_replay_keep_single_restart(self):
-        planned = self.actor.invoke('plan', self.job)
+        planned = self.invoke('plan')
         self.assertEqual(planned['status'], 'planned')
         self.assertEqual(self.system.restarts, 0)
         plan = planned['plan']
-        outcome = self.actor.invoke('activate', self.job, plan)
+        outcome = self.invoke('activate', plan=plan)
         self.assertEqual(outcome['status'], 'deployed')
         self.assertTrue(outcome['receipt']['health_confirmed'])
         self.assertTrue(outcome['receipt']['cleanup_confirmed'])
         self.assertEqual(self.system.restarts, 1)
-        self.assertEqual(self.new_actor().invoke('reconcile', self.job, plan), outcome)
-        self.assertEqual(self.new_actor().invoke('activate', self.job, plan), outcome)
+        self.assertEqual(self.invoke('reconcile', plan=plan, actor=self.new_actor()), outcome)
+        self.assertEqual(self.invoke('activate', plan=plan, actor=self.new_actor()), outcome)
         self.assertEqual(self.system.restarts, 1)
         actual_config = json.loads(Path(self.system.config_path).read_text())
         self.assertEqual(actual_config['preserved'], self.old_config['preserved'])
@@ -190,9 +208,12 @@ class PortalReleaseActorTest(unittest.TestCase):
                     raise ValueError('Action scope mismatch')
                 if set(authority) != {'generation', 'lease_token'}:
                     raise ValueError('Missing private authority')
-                return actor.invoke(action, job, plan)
+                if action == 'activate' and plan is not None:
+                    outer.checkpointed_plan = plan['plan_sha256']
+                return actor.invoke(action, job, plan, authority=authority)
+        outer = self
         provider = ReleaseProvider(config, Port())
-        leased = {**self.job, 'generation': 1, 'lease_token': str(uuid4())}
+        leased = {**self.job, **self.authority}
         plan = provider.plan(leased, lambda: None)['plan']
         self.assertEqual(provider.reconcile(leased, plan, lambda: None)['status'], 'planned')
         self.assertEqual(provider.activate(leased, plan, lambda: None)['status'], 'deployed')
@@ -200,31 +221,31 @@ class PortalReleaseActorTest(unittest.TestCase):
         self.assertEqual(self.system.restarts, 1)
 
     def test_crash_after_actual_restart_reconciles_without_a_second_restart(self):
-        plan = self.actor.invoke('plan', self.job)['plan']
+        plan = self.invoke('plan')['plan']
         self.system.crash_after_restart = True
         with self.assertRaises(KeyboardInterrupt):
-            self.actor.invoke('activate', self.job, plan)
+            self.invoke('activate', plan=plan)
         self.assertEqual(self.system.restarts, 1)
-        result = self.new_actor().invoke('reconcile', self.job, plan)
+        result = self.invoke('reconcile', plan=plan, actor=self.new_actor())
         self.assertEqual(result['status'], 'deployed')
         self.assertEqual(self.system.restarts, 1)
 
     def test_unhealthy_activation_restores_previous_config_and_proves_old_health(self):
-        plan = self.actor.invoke('plan', self.job)['plan']
+        plan = self.invoke('plan')['plan']
         self.fail_live = True
-        result = self.actor.invoke('activate', self.job, plan)
+        result = self.invoke('activate', plan=plan)
         self.assertEqual(result['status'], 'failed')
         self.assertTrue(result['receipt']['rollback_confirmed'])
         self.assertTrue(result['receipt']['health_confirmed'])
         self.assertTrue(result['receipt']['cleanup_confirmed'])
         self.assertEqual(self.config.override.read_bytes(), self.old_override)
         self.assertEqual(self.system.restarts, 2)
-        self.assertEqual(self.new_actor().invoke('reconcile', self.job, plan), result)
+        self.assertEqual(self.invoke('reconcile', plan=plan, actor=self.new_actor()), result)
         self.assertEqual(self.system.restarts, 2)
 
     def test_bad_candidate_is_terminal_after_cleanup_without_live_restart_or_retry(self):
         self.fail_candidate = True
-        outcome = self.actor.invoke('plan', self.job)
+        outcome = self.invoke('plan')
         self.assertEqual(outcome['status'], 'failed')
         self.assertTrue(outcome['receipt']['cleanup_confirmed'])
         self.assertTrue(outcome['receipt']['health_confirmed'])
@@ -233,7 +254,7 @@ class PortalReleaseActorTest(unittest.TestCase):
         self.assertEqual(self.system.candidate_starts, 1)
         self.assertEqual(self.system.candidate_stops, 1)
         self.assertEqual(self.config.override.read_bytes(), self.old_override)
-        self.assertEqual(self.new_actor().invoke('plan', self.job), outcome)
+        self.assertEqual(self.invoke('plan', actor=self.new_actor()), outcome)
         self.assertEqual(self.system.candidate_starts, 1)
 
     def test_interrupted_staging_resumes_hash_checked_files_before_any_live_switch(self):
@@ -245,37 +266,102 @@ class PortalReleaseActorTest(unittest.TestCase):
                 raise OSError('controlled staging interruption')
             self.put(path, raw, **metadata)
         with self.assertRaises(OSError):
-            self.new_actor(writer).invoke('plan', self.job)
-        result = self.new_actor().invoke('plan', self.job)
+            self.invoke('plan', actor=self.new_actor(writer))
+        result = self.invoke('plan', actor=self.new_actor())
         self.assertEqual(result['status'], 'planned')
         self.assertEqual(self.system.restarts, 0)
         self.assertEqual(self.config.override.read_bytes(), self.old_override)
 
     def test_source_advance_scope_and_artifact_tampering_have_no_activation_authority(self):
         with self.assertRaises(ValueError):
-            self.actor.invoke('plan', {**self.job, 'owner_id': 'other'})
+            self.invoke('plan', {**self.job, 'owner_id': 'other'})
         self.system.head = 'f' * 40
-        self.assertEqual(self.actor.invoke('plan', self.job)['status'], 'superseded')
+        self.assertEqual(self.invoke('plan')['status'], 'superseded')
         self.assertEqual(self.system.restarts, 0)
         self.system.head = self.job['commit_sha']
         self.job['release_id'] = str(uuid4())  # A terminal superseded action stays immutable.
         self.put(self.packet / 'assets/app.wasm', b'tampered')
         with self.assertRaises(ValueError):
-            self.actor.invoke('plan', self.job)
+            self.invoke('plan')
         self.assertEqual(self.system.restarts, 0)
 
     def test_false_main_receipt_and_arbitrary_build_commands_are_rejected(self):
         self.result['coverage']['database'] = 'not_run'; self.save_result()
         with self.assertRaises(ValueError):
-            self.actor.invoke('plan', self.job)
+            self.invoke('plan')
         self.result['coverage']['database'] = 'required_zero_skips'
         self.manifest['commands'] = [{'argv': ['/bin/sh', '-c', 'arbitrary'], 'returncode': 0}]
         raw = ACTOR.canonical(self.manifest) + b'\n'
         self.put(self.packet / 'manifest.json', raw)
         self.result['artifact_export']['manifest_sha256'] = ACTOR.sha(raw); self.save_result()
         with self.assertRaises(ValueError):
-            self.actor.invoke('plan', self.job)
+            self.invoke('plan')
         self.assertEqual(self.system.restarts, 0)
+
+    def test_fresh_authority_is_required_again_immediately_before_live_write(self):
+        plan = self.invoke('plan')['plan']
+        calls = []
+        def revoke(job, authority, *, start, plan_sha256=None):
+            calls.append((start, plan_sha256))
+            return self.authorize(job, authority, start=start, plan_sha256=plan_sha256) and plan_sha256 is None
+        self.actor.authorizer = revoke
+        with self.assertRaises(ValueError):
+            self.invoke('activate', plan=plan)
+        self.assertEqual(calls, [(True, None), (True, plan['plan_sha256'])])
+        self.assertEqual(self.system.restarts, 0)
+        self.assertEqual(self.config.override.read_bytes(), self.old_override)
+
+    def test_activation_requires_the_exact_database_checkpoint_not_merely_a_sealed_plan(self):
+        plan = self.invoke('plan')['plan']
+        for checkpoint in (None, 'f' * 64):
+            self.checkpointed_plan = checkpoint
+            with self.subTest(checkpoint=checkpoint), self.assertRaises(ValueError):
+                self.invoke('activate', plan=plan, checkpoint=False)
+            self.assertEqual(self.system.restarts, 0)
+        self.assertEqual(self.invoke('activate', plan=plan)['status'], 'deployed')
+        private = self.authority['lease_token']
+        state, _ = self.actor._paths(self.job)
+        self.assertNotIn(private, (state / 'state.json').read_text())
+        self.assertNotIn(private, (state / 'activation.json').read_text())
+
+    def test_reconcile_without_checkpoint_recovers_sealed_plan_then_cleans_up_when_revoked(self):
+        plan = self.invoke('plan')['plan']
+        recovered = self.invoke('reconcile', actor=self.new_actor(), checkpoint=False)
+        self.assertEqual(recovered, {'status': 'planned', 'plan': plan})
+        self.start_allowed = False
+        outcome = self.invoke('reconcile', actor=self.new_actor(), checkpoint=False)
+        self.assertEqual(outcome['status'], 'failed')
+        self.assertTrue(outcome['receipt']['cleanup_confirmed'])
+        self.assertTrue(outcome['receipt']['rollback_confirmed'])
+        self.assertEqual(self.system.restarts, 0)
+        self.assertEqual(self.config.override.read_bytes(), self.old_override)
+
+    def test_missing_lease_or_denied_cleanup_cannot_use_an_old_green_ci_receipt(self):
+        with self.assertRaises(ValueError):
+            self.actor.invoke('plan', self.job)
+        self.authority_allowed = False
+        with self.assertRaises(ValueError):
+            self.invoke('plan')
+        self.assertEqual(self.system.candidate_starts, 0)
+        self.assertEqual(self.system.restarts, 0)
+        self.assertFalse(self.config.state_root.exists())
+
+    def test_database_authority_uses_private_stdin_and_matches_checkpointed_public_plan(self):
+        system = ACTOR.SystemPort()
+        plan_sha = 'f' * 64
+        system.call = Mock(return_value=ACTOR.canonical({'allowed': True, 'job': self.job,
+            'checkpointed': True, 'plan_sha256': plan_sha}))
+        self.assertTrue(system.authorize(self.job, self.authority, start=True, plan_sha256=plan_sha))
+        args, kwargs = system.call.call_args
+        self.assertNotIn(self.authority['lease_token'], ' '.join(args[0]))
+        self.assertIn(self.authority['lease_token'], kwargs['data'].decode())
+        self.assertEqual(args[0][-2:], ['-f', '-'])
+        system.call.return_value = ACTOR.canonical({'allowed': True, 'job': self.job,
+            'checkpointed': False, 'plan_sha256': plan_sha})
+        self.assertFalse(system.authorize(self.job, self.authority, start=True, plan_sha256=plan_sha))
+        system.call.return_value = ACTOR.canonical({'allowed': True, 'job': {**self.job, 'commit_sha': 'f' * 40},
+            'checkpointed': True, 'plan_sha256': plan_sha})
+        self.assertFalse(system.authorize(self.job, self.authority, start=True, plan_sha256=plan_sha))
 
 
 if __name__ == '__main__':

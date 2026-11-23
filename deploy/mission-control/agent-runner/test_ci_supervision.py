@@ -334,6 +334,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
             verifier_sha256='a' * 64,
         )
         self.assertEqual(cfg['timeout_seconds'], 2700)
+        self.assertIs(cfg['portal_artifact_export'], True)
         self.assertEqual(cfg['cargo_cache']['root'], '/mnt/data/forge-homelab/ci-cache')
         self.assertTrue(cfg['cargo_cache']['enabled'])
         self.assertTrue(cfg['cargo_cache']['seed_from_main'])
@@ -677,6 +678,7 @@ class SupervisionBoundaryTest(unittest.TestCase):
         selected = SETUP.native_installation_plan(pipeline, source)
         self.assertEqual(pipeline, original)
         self.assertTrue(selected['pipeline']['require_main_ancestor'])
+        self.assertIs(selected['pipeline']['portal_artifact_export'], False)
         self.assertEqual(selected['job'], 'forge-native-candidate')
         self.assertEqual(selected['config'], Path('/etc/forge-ci/native-pipeline.json'))
         self.assertEqual(selected['wrapper'], Path('/usr/local/libexec/forge-native-ci-check'))
@@ -689,6 +691,23 @@ class SupervisionBoundaryTest(unittest.TestCase):
             SETUP.native_installation_plan(pipeline, b'wrong helper')
         with self.assertRaises(ValueError):
             SETUP.native_installation_plan({**pipeline, 'version': True}, source)
+
+    def test_artifact_export_is_provisioned_only_for_explicit_v2_selection(self):
+        args = dict(operator='fixture', spool=Path('/tmp/spool'), state_root=Path('/tmp/state'),
+            toolchain=Path('/opt/forge-ci/toolchain'), registry=Path('/opt/forge-ci/registry'),
+            modules=Path('/opt/forge-ci/modules'), verifier_sha256='a' * 64)
+        for profile, enabled in ((CI.LEGACY_PROFILE, False), (CI.SCOPED_PROFILE, True)):
+            with self.subTest(profile=profile):
+                configured = SETUP.render_pipeline_config(**args, verification_profile=profile)
+                self.assertIs(configured['portal_artifact_export'], enabled)
+                before = json.loads(json.dumps(configured))
+                native = SETUP.native_installation_plan(configured, Path(CI.__file__).read_bytes())
+                self.assertEqual(configured, before)
+                self.assertIs(native['pipeline']['portal_artifact_export'], enabled)
+                opposite = CI.SCOPED_PROFILE if profile == CI.LEGACY_PROFILE else CI.LEGACY_PROFILE
+                changed = SETUP.native_installation_plan(configured, Path(CI.__file__).read_bytes(),
+                    verification_profile=opposite)
+                self.assertIs(changed['pipeline']['portal_artifact_export'], not enabled)
 
     def test_native_only_provisioning_never_restarts_or_replaces_the_legacy_job_executor(self):
         user = SimpleNamespace(pw_uid=43210)
