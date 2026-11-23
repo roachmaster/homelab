@@ -179,6 +179,20 @@ class SystemPort:
     def show(self, key):
         return self.call(['/usr/bin/systemctl', 'show', UNIT, '-p', key, '--value']).decode().strip()
 
+    def authorize(self, job, authority, *, start):
+        # Fixed local function/UUID arguments only. It returns the recorded
+        # public identity as well as the fresh lease/capability decision.
+        release_id, token = str(UUID(job['release_id'])), str(UUID(authority['lease_token']))
+        generation = authority['generation']
+        query = ("SELECT forge_agent.delivery_actor_authorize('" + release_id + "'::uuid,"
+                 + str(generation) + ",'" + token + "'::uuid," + ('true' if start else 'false') + ");")
+        raw = self.call(['/usr/sbin/runuser', '-u', 'postgres', '--', '/usr/bin/psql',
+            '-X', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-d', 'forge_agent', '-c', query])
+        if len(raw) > 16384:
+            raise ValueError('Oversized release authority response')
+        result = decode(raw)
+        return result.get('allowed') is True and result.get('job') == job
+
     def current(self):
         value = self.show('ExecStart')
         match = re.fullmatch(r'\{ path=(.*?) ; argv\[\]=(.*?) ; ignore_errors=.*', value)
@@ -301,10 +315,16 @@ class PortalProbe:
 
 class PortalReleaseActor:
     def __init__(self, config, system, *, reader=read_root, writer=write_root,
-                 probe_factory=PortalProbe, public_directory=None):
+                 probe_factory=PortalProbe, public_directory=None, authorizer=None):
         self.config, self.system = config, system
         self.read, self.write, self.probe_factory = reader, writer, probe_factory
         self.public_directory = public_directory if public_directory is not None else self._public_parent
+        self.authorizer = authorizer if authorizer is not None else system.authorize
+        self._authority = None
+
+    def _authorize(self, job, *, start):
+        if self.authorizer(job, self._authority, start=start) is not True:
+            raise ValueError('Release lease or capability is no longer current')
 
     def _job(self, job):
         if not isinstance(job, dict) or set(job) != set(IDENTITY):
@@ -570,6 +590,7 @@ class PortalReleaseActor:
             raise ValueError('Portal changed after preparation')
         if sha(self.read(Path(state['live_config']))) != state['live_config_sha256']:
             raise ValueError('Prepared live configuration changed')
+        self._authorize(job, start=True)
         command = str(Path(state['release']) / 'bin/forge-ide-web-host') + ' serve --config ' + state['live_config']
         override = ('[Service]\nExecStart=\nExecStart=' + command + '\n').encode()
         state.update(phase='activating', target_override_sha256=sha(override), restart_requested=True)
@@ -638,10 +659,17 @@ class PortalReleaseActor:
         return self._receipt(directory, state, 'failed', health=True, rollback=True,
                              summary='Release failed; the previous healthy portal was restored.')
 
-    def invoke(self, action, job, public=None):
+    def invoke(self, action, job, public=None, *, authority=None):
         job = self._job(job)
         if action not in {'plan', 'activate', 'reconcile', 'rollback'}:
             raise ValueError('Unknown release action')
+        if (not isinstance(authority, dict) or set(authority) != {'generation', 'lease_token'}
+                or type(authority['generation']) is not int or not 1 <= authority['generation'] <= 100000
+                or not isinstance(authority['lease_token'], str)
+                or str(UUID(authority['lease_token'])) != authority['lease_token']):
+            raise ValueError('Private release lease required')
+        self._authority = dict(authority)
+        self._authorize(job, start=action in {'plan', 'activate'})
         if action == 'plan':
             if public is not None:
                 raise ValueError('A release plan is Root-owned')
@@ -669,7 +697,7 @@ def main(argv=None):
     if len(raw) > 16384:
         raise ValueError('Oversized release request')
     request = decode(raw)
-    if not isinstance(request, dict) or set(request) != {'job', 'plan'} or request['job'].get('release_id') != args[1]:
+    if not isinstance(request, dict) or set(request) != {'job', 'plan', 'authority'} or request['job'].get('release_id') != args[1]:
         raise ValueError('Release command identity mismatch')
     actor = ActorFactory().create()
     actor.config.state_root.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -677,7 +705,7 @@ def main(argv=None):
     fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'wb') as stream:
         fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        outcome = actor.invoke(args[0], request['job'], request['plan'])
+        outcome = actor.invoke(args[0], request['job'], request['plan'], authority=request['authority'])
         sys.stdout.buffer.write(canonical(outcome) + b'\n')
 
 
