@@ -378,6 +378,8 @@ AGENT_WIDE_RETRY_GUARD_AST_SHA256 = {
 # predecessor source/guard maps remain provenance. These source identities do
 # not grant CI success, publication or privileged deployment authority.
 EVENT_RETRY_CONTEXT_SHA256 = {
+    "deploy/mission-control/jenkins/setup-ci.py": "99dbe52ff966ec62202c4f3fa16dfab0623b5a6463c0a990f3141026e7925e4a",
+    "deploy/mission-control/agent-runner/test_ci_installer_v3.py": "cff3378161f56c3649f9b827d00d870875e05100dd0bfc0d729e03bc68d0f843",
     "deploy/mission-control/agent-runner/runner.py": "fa8e8499b8f4e7cdebc2e247883d361e1c034ce71aef24c809e4c9d642c99269",
     "deploy/mission-control/agent-runner/setup-runner.sh": "52b0281e3d7883404d63b7e645acc00ec71875a0d33cf7bbd3770f8ff11629ec",
     "deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py": "c162a99ea675880e87e5e52179cca612893cdb3ec7d1bd37bad5316d1689c9bd",

@@ -21,11 +21,15 @@ worktrees and preserve all saved approvals, reviews, hashes, counters and
 receipts. M1–30 are immutable. M30 was applied with no Muse history changes;
 the superseded task-wide runtime/configuration was not activated.
 
-Current source checks:105 existing native/delivery/post-merge/release contracts
-and6 protected phase-consumer tests pass. CI producer proved real compiler and
-assertion failures separately with forged stdout ignored; all80 producer and
-supervision contracts passed. Full current-source native/browser/backend gates
-and guarded deployment remain required, separately recorded operational work.
+Component checks prove20 compilation repairs followed by20 test repairs in one
+native workflow, external workflow and delivery lineage. The21st retry of the
+same unresolved event stops. All154 core native/upgrade/security tests,38
+external transport/continuation tests,80 CI contracts and30 reviewer/feedback
+event tests pass. The explicit v3 Jenkins installer retains artifact export;
+all15 installer contracts pass. Fresh live-schema30 backup was actually restored
+and upgraded to31 in isolation with strict verification and identical Muse
+history. Full integrated Rust/browser/backend gates and guarded deployment are
+separate recorded operational work; component checks do not claim deployment.
 
 # Previous, superseded interpretation: task-wide twenty-attempt policy — 2026-11-23
 
