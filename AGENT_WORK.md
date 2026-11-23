@@ -31,6 +31,8 @@ Integrated source qualification: all104 historical raw paths resolved; two revie
 
 Actual branch attempt1 found missing installed contract and inherited PostgreSQL skip provenance; follow-up4bed406 adds required module publication and exact MRO declaration matching.21 focused packaging/runner/contract tests passed2.770s with no outer skips. Preserve original966-test branch failure; rerun on corrected source.
 
+Browser follow-up: Root integration passed Rust270/WASM/generated-JS checks, then the implementation reader journey found obsolete documentation assertions. Updated only implementationDesignJourney to verify the historical Mail profile label, current navigation/ABI13/schema26, scoped last-qualified956/builta3/499-input provenance and non-enabled Studio/write flags. Preserved the three-table, same-tab/back, viewport-overflow, script-absence and diagram-load checks. Node syntax check and all34 existing QA harness tests pass with zero skips. No production JS, Rust build or full browser run here; Root reruns actual browser acceptance on final integrated source and qualifies the changed journey hash.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22
