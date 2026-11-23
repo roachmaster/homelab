@@ -263,6 +263,7 @@ class DeliveryAutomationPGTest(unittest.TestCase):
             # admitted NEW workflow; model roles cannot insert these private rows.
             commit=f'{number+11:040x}';tree=f'{number+111:040x}';identity=uuid4()
             with closing(self.pg.connect('postgres')) as c,c,c.cursor() as q:
+                q.execute("SELECT pg_catalog.set_config('forge.coding_owner',%s,true)",(OWNER,))
                 q.execute("UPDATE forge_agent.coding_tasks SET status='completed',revision=revision+1,accepted_at=clock_timestamp() WHERE id=%s",(latest['id'],))
                 q.execute("INSERT INTO forge_agent.post_merge_verifications(post_merge_id,owner_id,project_alias,source_kind,workflow_id,source_action_id,root_task_id,merge_commit,merge_tree,merge_receipt,status,receipt,summary) VALUES(%s,%s,'homelab','native',%s,%s,%s,%s,%s,'{}','failed',%s,'Next real-main failure seam')",(identity,OWNER,latest['workflow_id'],uuid4(),latest['id'],commit,tree,Json({'cleanup_confirmed':True,'failure':'checks_failed'})))
                 q.execute("UPDATE forge_agent.delivery_project_main_heads SET commit_sha=%s,tree_sha=%s,verification_id=%s,generation=generation+1",(commit,tree,identity))

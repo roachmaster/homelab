@@ -690,7 +690,7 @@ class WorkStore:
 
             cursor.execute(f"""
                 SELECT t.id, t.correlation_id, t.project_alias, t.base_revision, t.mode, t.agent_profile,
-                       t.recipe_digest, t.status, t.revision, t.created_at, t.title,
+                       t.recipe_digest, t.status, t.revision, t.created_at, t.title, t.workflow_id,
                        t.workflow_required, w.phase AS workflow_phase
                 FROM forge_agent.coding_tasks t
                 LEFT JOIN forge_agent.coding_workflows w
@@ -767,10 +767,11 @@ class WorkStore:
                 WHERE (member_link.owner_id,member_link.project_alias,member_link.workflow_id)=
                       (ew.owner_id,ew.project_alias,ew.workflow_id)
             ),t.updated_at)"""
-        delivery = "forge_agent.delivery_projection(t.project_alias,t.id)" if self._delivery_enabled and delivery_visible else "NULL::jsonb"
+        delivery_function = 'delivery_retry_projection' if self.retry_events is not None else 'delivery_projection'
+        delivery = f"forge_agent.{delivery_function}(t.project_alias,t.id)" if self._delivery_enabled and delivery_visible else "NULL::jsonb"
         classified = f"""
             WITH classified AS (
-                SELECT t.id,t.correlation_id,t.project_alias,t.base_revision,t.mode,t.agent_profile,
+                SELECT t.id,t.correlation_id,t.project_alias,t.base_revision,t.mode,t.agent_profile,t.workflow_id,
                        t.recipe_digest,t.status,t.revision,t.created_at,t.title,
                        (t.workflow_required OR {phase} IS NOT NULL) AS workflow_required,
                        {phase} AS workflow_phase, {enabled} AS workflow_enabled,

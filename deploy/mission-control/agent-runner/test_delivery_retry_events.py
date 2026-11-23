@@ -74,6 +74,21 @@ class DeliveryRetryEventTest(unittest.TestCase):
     def event_rows(self):
         return self.rows("SELECT event_id,kind,phase_id,used,status FROM forge_agent.coding_retry_events WHERE scope_kind='delivery' AND scope_id IN(SELECT lineage_id FROM forge_agent.delivery_lineages) ORDER BY created_at,event_id")
 
+    def test_native_repair_roots_list_in_raw_and_scoped_views_without_changing_event_budget(self):
+        from work_api import WorkList
+        self.initial_failure('all-features-build')
+        service = self.service()
+        self.assertTrue(service.workflow_worker._delivery_repair.run_once())
+        task = self.rows('SELECT * FROM forge_agent.coding_tasks')[0]
+        before = self.event_rows()
+        for scope in (None, 'active', 'all'):
+            with self.subTest(scope=scope):
+                page = service.list_tasks(WorkList('homelab', scope, 50, None))
+                self.assertIn(str(task['id']), [row['task_id'] for row in page['tasks']])
+        self.assertEqual(self.event_rows(), before)
+        retry = service.catalog()['projects'][0]['delivery']['repair']['retry_event']
+        self.assertEqual((retry['kind'], retry['used'], retry['limit']), ('compilation', 1, 20))
+
     def test_twenty_compile_then_twenty_test_repairs_share_history_not_allowance(self):
         self.initial_failure('all-features-build')
         consumer = self.service().workflow_worker._delivery_repair

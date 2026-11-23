@@ -88,6 +88,7 @@ BEGIN
  event:=forge_agent.delivery_retry_observe(d.verification_id);
  IF a.request IS NULL AND (event IS NULL OR (event->>'used')::integer>=20) THEN
   IF event IS NOT NULL THEN PERFORM forge_agent.retry_event_reserve((event->>'event_id')::uuid,'delivery-repair.'||a.operation_id::text);END IF;
+  UPDATE forge_agent.delivery_operations SET round=l.rounds WHERE operation_id=a.operation_id;
   PERFORM forge_agent.delivery_operation_finish(a.operation_id,a.generation,a.lease_token,'needs_attention',
    jsonb_build_object('reason','retry_event_exhausted','retry_event',event),
    'This failure event exhausted its twenty repair attempts; other event budgets are independent.');RETURN NULL;END IF;
