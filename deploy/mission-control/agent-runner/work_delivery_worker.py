@@ -75,6 +75,7 @@ def validate_outcome(identity, plan, outcome):
         proof = receipt.get('activation_receipt_sha256')
         if (receipt.get('unit') != 'homelab-web.service' or receipt.get('cleanup_confirmed') is not True
                 or (outcome['status'] != 'superseded' and receipt.get('health_confirmed') is not True)
+                or (outcome['status'] != 'superseded' and receipt.get('entry_bridge_confirmed') is not True)
                 or not isinstance(proof, str) or len(proof) != 64
                 or any(c not in '0123456789abcdef' for c in proof)):
             raise ValueError('Release cleanup or health remains unconfirmed')

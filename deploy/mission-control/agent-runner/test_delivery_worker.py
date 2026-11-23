@@ -33,7 +33,7 @@ def plan_for(job):
 
 def outcome(plan, status='deployed'):
     return dict(status=status, summary='Confirmed own release.', receipt=dict(plan,
-        unit='homelab-web.service', health_confirmed=True, cleanup_confirmed=True,
+        unit='homelab-web.service', health_confirmed=True, entry_bridge_confirmed=True, cleanup_confirmed=True,
         rollback_confirmed=status=='failed', activation_receipt_sha256='f'*64))
 
 
@@ -153,7 +153,7 @@ class DeliveryWorkerTest(unittest.TestCase):
 
     def test_forged_or_unhealthy_terminal_result_stays_pending(self):
         for change in ({'release_id':str(uuid4())}, {'health_confirmed':False},
-                       {'cleanup_confirmed':False}, {'activation_receipt_sha256':'x'*64},
+                       {'cleanup_confirmed':False}, {'entry_bridge_confirmed':False}, {'activation_receipt_sha256':'x'*64},
                        {'rollback_confirmed':True}):
             with self.subTest(change=change):
                 _job, store, provider, worker = self.fixture()
