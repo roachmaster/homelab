@@ -1,5 +1,28 @@
 # Current: Fix repository review findings — 2026-11-23
 
+Completed all five review findings: explicit compatible CI profile contracts,
+all four main backend suites, source-aware core layer enforcement, early
+qualification, and current documentation/examples. Final code f3c2de0 passed
+98 preflight tests, 34 JS harness tests, all 79 host tests, all 28 real browser
+acceptance groups with cleanup, and 978 backend tests (6 services, 2 driver,
+967 runner, 3 Studio), zero outer failures/errors/skips. The actual branch run
+also passed with 672 executed and 295 declared database cases explicitly not-run.
+
+Original `8376d66` passed the full Rust feature/debug/release matrix, lint, docs and
+WASM/generated-asset checks. Its overall main attempt failed an obsolete browser
+assertion; both failed browser receipts remain preserved. Fresh final checks
+cover the corrected browser assertions, pin and embedded-document formatting.
+All 262 Rust files and 25 Cargo manifests/locks remain byte-identical; the refreshed
+host was rebuilt/retested and all six generated browser assets plus the agent
+match prior fingerprints. Reuse retains original execution attribution.
+
+Evidence: /mnt/data/homelab-build/review-fixes-20261123/{integrated-remaining-r2.json,
+integrated-branch-r2.json,native-input-identity.json,component-integration-review.json}.
+Final checks ran locally, not in a new Jenkins build. This completion record is
+the only post-verification change. Source publication targets main; no live
+helper/profile/configuration/database/portal activation occurred. Last qualified
+live release remains `95651a5`; the scope-aware profile needs separate activation.
+
 User authorizes implementing all five findings from the review of be38906 through 95651a5. Root integrates reviewed changes, qualifies intentional source fingerprints, verifies and publishes. Preserve live services and existing history.
 
 Use the Forge provider entry skill. Keep one writer per worktree and preserve all old receipts, SQL migrations1–26, legacy profile compatibility and unrelated untracked data. Never replace historical success/failure evidence, bypass verification, submit model work or enable GitHub Actions. Record meaningful checks against actual source. Root owns main/publication and any explicit rollout.
