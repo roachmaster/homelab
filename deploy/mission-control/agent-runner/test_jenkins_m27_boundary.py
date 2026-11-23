@@ -230,6 +230,48 @@ POST_MERGE_CONTEXT_SHA256 = {
     "deploy/mission-control/sql/migrations/0028_post_merge_verification.sql": "dba349627f5583fbb37956d0742b521e7fb257879efbbe2d61389d792cbe4a00"
 }
 
+# Reviewed ABI14 delivery projection in f246b1494f29cf86af8a32a24da80d56c17427d1.
+# Keep all earlier retirement/task-organization/UI hashes as literal provenance.
+# This narrow current overlay binds the negotiated DTO/header, typed rendering,
+# atomic ABI metadata and their tests/docs. It grants no live activation or CI
+# success and changes no SQL, native publication guard or backend source pin.
+UI_DELIVERY_CONTEXT_REVISION = "f246b1494f29cf86af8a32a24da80d56c17427d1"
+UI_DELIVERY_CONTEXT_SHA256 = {
+    ".github/workflows/ide-ui-browser.yml": "f4e6b1b31e45bcb639025624f0407e615db41eae87ba86edf3c562a9576727d9",
+    "docs/architecture/forge-post-merge-verification.md": "8996a8731a6444c16903f66ac5e92e7378aa2d968e6970ee9329e4d39b1d5d2a",
+    "docs/design/implementation-status.md": "c1eb6ed9a29082de176a5d6c5276de5d6e74bfd87d9cfb6711cbd7597d873939",
+    "src/rust/forge-ide-ui/README.md": "96e4edc242943139c8d5d3d8732c33d86d42e797801586397cd93bab87926043",
+    "src/rust/forge-ide-ui/src/model/agents.rs": "141d8a545fd1b5c2ed09ce12cb7d6955f3669b6f697e8a85d79b9667c6616b20",
+    "src/rust/forge-ide-ui/src/model/agents/delivery.rs": "309cc497753fa389cfd560ecadfcf734e58ce27cdc39caad412b4dc7d62dca6a",
+    "src/rust/forge-ide-ui/src/model/agents/tests.rs": "d6af0cf1803cb303b9df65ab61d5a57cea1783308fa1f1a1041bf9091ad8ec8c",
+    "src/rust/forge-ide-ui/src/model/agents/tests/delivery.rs": "76d33b51a8fc72b4ffc4ec6efec99f64390de871e85b5e50a6f0def183598f8f",
+    "src/rust/forge-ide-ui/src/model/agents/workflow.rs": "d32eb1fac1d684c9e9be6770e4efa606bd26ab7a9913e008e048aab7a4f98ee5",
+    "src/rust/forge-ide-ui/src/protocol/work.rs": "1ba9c548db04fcea2098d092e2a323535f3b151e2ec508915304abf3f5f358b9",
+    "src/rust/forge-ide-ui/src/protocol/work/delivery.rs": "27a4500fc1413995ff0db2ee1b850979f10e9c171edb232a5934afd9aa1ca16b",
+    "src/rust/forge-ide-ui/tests/mail_archive.rs": "f3248838fa6a715a7b2da95423748f40e5463da661868b0002fe8432253207c4",
+    "src/rust/forge-ide-ui/tests/wasm_abi.mjs": "42b0be15b84b6874fedf773098a7e4d74cfaf934199d42075a28598a7162c388",
+    "src/rust/forge-ide-web-host/README.md": "28e8e54458d6683a8b653ca1ac63c4378c2ac4d4e6b3cb990a7bd0d7d649a8e2",
+    "src/rust/forge-ide-web-host/deploy/README.md": "86365686bfdf9368a3facb6aef771e8fd60c3da8dfe41701de088ed1884bb811",
+    "src/rust/forge-ide-web-host/src/assets.rs": "61dbc342027700a1ca40cd34c2d30a61c99a0c6609f314ab6691c9f194b1fed1",
+    "src/rust/forge-ide-web-host/src/chat.rs": "a16649ddba509aa7f20f902405914b98404553d2d983ec58493e720c60e60bc5",
+    "src/rust/forge-ide-web-host/src/design/agent_autonomy.rs": "ebcb01e1d0c091c386737f7687d835580e2d318d3ac88fecab566961789977c6",
+    "src/rust/forge-ide-web-host/tests/consumer.rs": "0746ca8a66b971dc73fccb11748310ea6831eb7740317af16ec1878fc9501ea0",
+    "src/rust/forge-ide-web-host/tests/consumer/work.rs": "3eae52a847a46afe4638a650e5c44d02cfbecb9a85992d3b0cbe414860421156",
+    "src/rust/forge-ide-web/README.md": "54c8fd89b9d2da3e4b6d406e0eb561f7204f302cdfb78103497a054cebab8f24",
+    "src/rust/forge-ide-web/WORKBENCH.md": "eb33ed9814f1e4fdf13ba919e251cb046219fc9a494233ff922b00500d2d54d6",
+    "src/rust/forge-ide-web/src/generate/application.rs": "550b19bf64d32169d4ae906f5ca7136aefa0a2e260c8feb45ad3180ecbf22de9",
+    "src/rust/forge-ide-web/src/generate/application/delivery.rs": "2e466be23b1fa436c6d3094a53742eedc74983567385f90b3f99bfc2a01355fb",
+    "src/rust/forge-ide-web/src/generate/javascript.rs": "f4cb2f0a59be217c7c6b961b556fad71be3d4ef889d3dbc1dc35ea92de4bb44d",
+    "src/rust/forge-ide-web/src/generate/mod.rs": "d1e03f840fcf45e71a3469497643c620f1f6cdf30d2c81c071e1a19ae8c00af5",
+    "src/rust/forge-ide-web/src/wasm.rs": "bf857b74aabc157492665e3b8081bc9c11e1965dd21c43578f34fa53f102c2d3",
+    "src/rust/forge-ide-web/tests/browser/agents-relay.mjs": "19c7ef943a10590661807770b4428d1d0cc52960109c12c999a15f909a1d46a7",
+    "src/rust/forge-ide-web/tests/browser/agents-relay.test.mjs": "d0cf35feb49a7b100799ad4fd9e4271161442e6e1ed46942b7e09dd168db583a",
+    "src/rust/forge-ide-web/tests/browser/journey.mjs": "56602f5677b962c3440e3d4447206dca790ec9a39ba3f35d56d0d2a366a30bc2",
+    "src/rust/forge-ide-web/tests/generation.rs": "03c30669e72497842be36d6e638e232205e6c46c85d03c61e976d4a851f72e9d",
+    "src/rust/forge-ide-web/tests/playtest-wire.mjs": "4528a669e7fee2dca2c1fd099364793075cb3671de9ced507475c7f3cd1031bb",
+    "src/rust/forge-ide-web/ui/styles.yaml": "960473ec8185275bcf0901e48d0bf2fad48c27cfa05bc056c479b2705277a9a1",
+}
+
 STRICT_VERIFIER_FILES = {
     "verify-post-merge.sql",
     "verify.sql",
@@ -262,11 +304,11 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         # An explicitly reviewed context may qualify current source bytes while
         # the historical baseline remains available for exact provenance.
         self.assertTrue(set(REVIEWED_CI_CONTEXT_SHA256) <= set(UNCHANGED_BASELINE_SHA256))
-        current = {**UNCHANGED_BASELINE_SHA256, **REVIEWED_CI_CONTEXT_SHA256, **POST_MERGE_CONTEXT_SHA256}
+        current = {**UNCHANGED_BASELINE_SHA256, **REVIEWED_CI_CONTEXT_SHA256, **POST_MERGE_CONTEXT_SHA256, **UI_DELIVERY_CONTEXT_SHA256}
         for relative, expected in current.items():
             with self.subTest(source=relative):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
-                    POST_MERGE_CONTEXT_SHA256.get(relative, expected))
+                    UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
 
     def test_explicit_reviewer_context_matches_included_unapproved_source(self):
         for name, expected in INCLUDED_REVIEWER_CONTEXT_SHA256.items():
@@ -278,7 +320,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
         for relative, expected in TASK_ORGANIZATION_CONTEXT_SHA256.items():
             with self.subTest(context='unapproved task organization', source=relative):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
-                    POST_MERGE_CONTEXT_SHA256.get(relative, expected))
+                    UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
 
     def test_retirement_and_ui_composition_match_their_explicit_source_contexts(self):
         for context, pins in ((RETIREMENT_CONTEXT_REVISION, INCLUDED_RETIREMENT_CONTEXT_SHA256),
@@ -286,7 +328,16 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
             for relative, expected in pins.items():
                 with self.subTest(context=context, source=relative):
                     self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(),
-                    POST_MERGE_CONTEXT_SHA256.get(relative, expected))
+                    UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
+
+    def test_delivery_ui_overlay_is_scoped_to_reviewed_abi14_source(self):
+        self.assertEqual(UI_DELIVERY_CONTEXT_REVISION, "f246b1494f29cf86af8a32a24da80d56c17427d1")
+        self.assertEqual(len(UI_DELIVERY_CONTEXT_SHA256), 33)
+        for relative, expected in UI_DELIVERY_CONTEXT_SHA256.items():
+            with self.subTest(delivery_ui=relative):
+                self.assertTrue(relative.startswith(("src/rust/forge-ide-ui/", "src/rust/forge-ide-web/", "src/rust/forge-ide-web-host/"))
+                    or relative in {".github/workflows/ide-ui-browser.yml", "docs/architecture/forge-post-merge-verification.md", "docs/design/implementation-status.md"})
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:
