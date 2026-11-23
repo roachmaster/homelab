@@ -24,6 +24,7 @@ BASE = Path('/opt/forge-ci')
 NODE_MODULES = BASE / 'node_modules'
 PRIVATE = Path('/var/lib/forge-provisioning/jenkins-ci')
 CONFIG = Path('/etc/forge-ci')
+NATIVE_RESULTS = Path('/var/lib/forge-provisioning/delivery-ci-results')
 DEFAULT_TIMEOUT_SECONDS = 2700
 DEFAULT_CARGO_CACHE_MAX_BYTES = 20 * 1024 * 1024 * 1024
 DEFAULT_CARGO_CACHE_MAX_ENTRIES = 8
@@ -224,6 +225,8 @@ def native_installation_plan(pipeline, verifier, *, verification_profile=None):
         raise ValueError('Unsupported Jenkins verification profile')
     selected = {**pipeline, 'verification_profile': profile, 'require_main_ancestor': True,
                 'portal_artifact_export': profile == 'forge-sdlc-jenkins-v2', 'verifier_sha256': digest}
+    if profile == 'forge-sdlc-jenkins-v2':
+        selected['results_root'] = str(NATIVE_RESULTS)
     return {'helper': native, 'helper_sha256': digest, 'pipeline': selected,
             'release': BASE / ('native-verifier-' + digest[:16]),
             'wrapper': Path('/usr/local/libexec/forge-native-ci-check'),
@@ -254,12 +257,17 @@ def execute_native(client_path, operator, *, verification_profile=None):
         raise ValueError('Expected unprivileged operator account')
     client = json.loads(read_owned(client_path, user.pw_uid, 16384))
     client['_uid'] = user.pw_uid
-    selected = native_installation_plan(read_pipeline(CONFIG / 'pipeline.json'),
+    baseline = CONFIG / 'native-pipeline.json'
+    if not baseline.exists() and not baseline.is_symlink():
+        baseline = CONFIG / 'pipeline.json'
+    selected = native_installation_plan(read_pipeline(baseline),
                                         (HERE / 'verify-candidate.py').read_bytes(),
                                         verification_profile=verification_profile)
     # Root-controlled fixed paths only. Existing remoting, node, legacy job,
     # pipeline.json, wrapper and external delivery configuration are untouched.
     directory(PRIVATE, mode=0o700)
+    if selected['pipeline']['verification_profile'] == 'forge-sdlc-jenkins-v2':
+        directory(NATIVE_RESULTS, group=user.pw_gid, mode=0o750)
     directory(selected['release'])
     install(selected['release'] / 'verify-candidate.py', selected['helper'], mode=0o755)
     install(selected['wrapper'], selected['helper'], mode=0o755)
@@ -279,6 +287,8 @@ def execute_native(client_path, operator, *, verification_profile=None):
         'helper': str(selected['release'] / 'verify-candidate.py'),
         'helper_sha256': selected['helper_sha256'], 'wrapper': str(selected['wrapper']),
         'pipeline': str(selected['config']), 'require_main_ancestor': True,
+        'results_root': selected['pipeline'].get('results_root'),
+        'portal_artifact_export': selected['pipeline']['portal_artifact_export'],
         'existing_job_unchanged': 'forge-exact-candidate', 'no_service_restarted': True,
         'no_job_submitted': True}
     install(PRIVATE / 'native-provisioned.json', (json.dumps(report, indent=2) + '\n').encode(), mode=0o600)

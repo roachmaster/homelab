@@ -704,13 +704,17 @@ class SupervisionBoundaryTest(unittest.TestCase):
                 native = SETUP.native_installation_plan(configured, Path(CI.__file__).read_bytes())
                 self.assertEqual(configured, before)
                 self.assertIs(native['pipeline']['portal_artifact_export'], enabled)
+                if enabled:
+                    self.assertEqual(native['pipeline']['results_root'], str(SETUP.NATIVE_RESULTS))
+                else:
+                    self.assertEqual(native['pipeline']['results_root'], configured['results_root'])
                 opposite = CI.SCOPED_PROFILE if profile == CI.LEGACY_PROFILE else CI.LEGACY_PROFILE
                 changed = SETUP.native_installation_plan(configured, Path(CI.__file__).read_bytes(),
                     verification_profile=opposite)
                 self.assertIs(changed['pipeline']['portal_artifact_export'], not enabled)
 
     def test_native_only_provisioning_never_restarts_or_replaces_the_legacy_job_executor(self):
-        user = SimpleNamespace(pw_uid=43210)
+        user = SimpleNamespace(pw_uid=43210, pw_gid=43211)
         pipeline = {'version': 1, 'build_user': 'forge_ci', 'projects': ['homelab'],
             'verification_profile': 'forge-sdlc-jenkins-v1', 'verifier_sha256': 'a' * 64}
         installed = []
@@ -734,6 +738,33 @@ class SupervisionBoundaryTest(unittest.TestCase):
         body = request.call_args.kwargs['body'].decode()
         self.assertIn('forge-native-candidate', body)
         self.assertNotIn('createProject%28FreeStyleProject%2C+%27forge-exact-candidate%27', body)
+
+    def test_native_upgrade_preserves_existing_native_cache_and_uses_root_results(self):
+        user = SimpleNamespace(pw_uid=43210, pw_gid=43211)
+        cached = {'version': 1, 'build_user': 'forge_ci', 'projects': ['homelab'],
+            'verification_profile': CI.LEGACY_PROFILE, 'verifier_sha256': 'a' * 64,
+            'results_root': '/legacy/results', 'cargo_cache': {'enabled': True,
+                'root': '/mnt/data/forge-homelab/ci-cache', 'max_total_bytes': 64 * 1024**3}}
+        installed = {}
+        info = {'job': 'forge-native-candidate', 'node': 'forge-mission-control-ci',
+            'controller_executors': 0, 'no_job_submitted': True}
+        with patch.object(SETUP.os, 'geteuid', return_value=0), \
+             patch.object(SETUP.pwd, 'getpwnam', return_value=user), \
+             patch.object(SETUP, 'read_owned', return_value=b'{}'), \
+             patch.object(SETUP.Path, 'exists', return_value=True), \
+             patch.object(SETUP, 'read_pipeline', return_value=cached) as read_pipeline, \
+             patch.object(SETUP, 'directory') as directory, \
+             patch.object(SETUP, 'install', side_effect=lambda path, raw, **kw: installed.update({path: raw})), \
+             patch.object(SETUP, 'request', return_value=json.dumps(info).encode()), \
+             patch.object(SETUP.subprocess, 'run'), patch('builtins.print'):
+            SETUP.execute_native(Path('/private/client.json'), 'fixture', verification_profile=CI.SCOPED_PROFILE)
+        read_pipeline.assert_called_once_with(SETUP.CONFIG / 'native-pipeline.json')
+        selected = json.loads(installed[SETUP.CONFIG / 'native-pipeline.json'])
+        self.assertEqual(selected['cargo_cache'], cached['cargo_cache'])
+        self.assertEqual(selected['results_root'], str(SETUP.NATIVE_RESULTS))
+        self.assertTrue(selected['portal_artifact_export'])
+        self.assertNotIn(SETUP.CONFIG / 'pipeline.json', installed)
+        directory.assert_any_call(SETUP.NATIVE_RESULTS, group=user.pw_gid, mode=0o750)
 
     def test_real_node_import_resolves_sibling_packages_from_the_provisioned_cache_basename(self):
         with tempfile.TemporaryDirectory() as temporary:
