@@ -212,6 +212,17 @@ class SourceObservationTest(unittest.TestCase):
         self.observer.index -= 1
         self.assertFalse(self.observer.run_once())
 
+    def test_selected_ready_source_port_bypasses_every_unused_default_factory_effect(self):
+        unused = Mock(side_effect=AssertionError('unused source provider must not be constructed'))
+        selected = ops.SourceObserverFactory(self.config, self.store,
+            delivery=self.delivery, delivery_factory=unused)
+        with patch.object(ops, 'PostMergeProviderFactory', side_effect=AssertionError('no configuration reads')):
+            observer = selected.create()
+        self.assertIs(observer.delivery, self.delivery)
+        unused.assert_not_called()
+        self.assertTrue(observer.run_once())
+        self.delivery.source_head.assert_called_once_with('homelab')
+
     def test_not_due_disabled_foreign_scope_and_previous_head(self):
         self.store.delivery_project_head.side_effect = None
         self.store.delivery_project_head.return_value = {'due': False}

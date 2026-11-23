@@ -263,14 +263,17 @@ class SourceObserver:
 
 
 class SourceObserverFactory:
-    def __init__(self, config, store, *, delivery_factory=None):
+    def __init__(self, config, store, *, delivery=None, delivery_factory=None):
         self.config, self.store, self.delivery_factory = config, store, delivery_factory
+        self.delivery = delivery
 
     def create(self):
         if (getattr(self.config, 'source_observation_enabled', False) is not True
                 or type(self.config.source_observation_interval_seconds) is not int
                 or self.config.source_observation_interval_seconds != 60):
             raise ValueError('Source observer must be explicitly selected')
-        options = {} if self.delivery_factory is None else {'delivery_factory': self.delivery_factory}
-        ready = PostMergeProviderFactory(self.config, **options).create().delivery
+        ready = self.delivery
+        if ready is None:
+            options = {} if self.delivery_factory is None else {'delivery_factory': self.delivery_factory}
+            ready = PostMergeProviderFactory(self.config, **options).create().delivery
         return SourceObserver(self.config, self.store, ready)
