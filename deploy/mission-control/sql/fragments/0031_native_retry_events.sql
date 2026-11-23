@@ -30,11 +30,15 @@ BEGIN
  ON CONFLICT(review_id) DO UPDATE SET event_id=excluded.event_id,reservation_key=excluded.reservation_key;
 END;$f$;
 CREATE FUNCTION forge_agent._retry_native_context(p_task uuid) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $f$
-DECLARE t forge_agent.coding_tasks%ROWTYPE;v_scope_kind text;v_scope_id uuid;events jsonb;
+DECLARE t forge_agent.coding_tasks%ROWTYPE;v_scope_kind text;v_scope_id uuid;events jsonb;result_sha text;
 BEGIN
  SELECT * INTO t FROM forge_agent.coding_tasks WHERE id=p_task AND owner_id=current_setting('forge.coding_owner',true);
  IF NOT FOUND THEN RAISE EXCEPTION 'Retry task scope mismatch' USING ERRCODE='42501';END IF;
  v_scope_kind:=CASE WHEN t.workflow_id IS NULL THEN 'manual_task' ELSE 'native_workflow' END;v_scope_id:=coalesce(t.workflow_id,t.repair_root_task_id,t.id);
+ IF t.feedback_id IS NOT NULL THEN
+  SELECT a.result_sha256 INTO result_sha FROM forge_agent.coding_attempts a WHERE(a.owner_id,a.project_alias,a.task_id,a.attempt_id,a.feedback_id)=(t.owner_id,t.project_alias,t.id,t.latest_attempt_id,t.feedback_id) AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL AND a.published_at IS NOT NULL AND a.result_sha256 IS NOT NULL;
+  IF FOUND THEN PERFORM forge_agent.retry_event_resolve(t.project_alias,v_scope_kind,v_scope_id,'feedback_delivery',t.latest_attempt_id::text,result_sha,'feedback.'||t.feedback_id::text);END IF;
+ END IF;
  SELECT coalesce(jsonb_agg(forge_agent._retry_event_dto(e)||jsonb_build_object('phase_id',e.phase_id) ORDER BY e.updated_at DESC),'[]'::jsonb) INTO events
  FROM forge_agent.coding_retry_events e WHERE(e.owner_id,e.project_alias,e.scope_kind,e.scope_id)=(t.owner_id,t.project_alias,v_scope_kind,v_scope_id) AND e.status IN('open','exhausted');
  RETURN jsonb_build_object('retry_policy','event-v1','retry_events',events);
@@ -96,3 +100,24 @@ BEGIN
  END LOOP;
 END;$patch$;
 REVOKE ALL ON FUNCTION forge_agent._retry_native_patches(),forge_agent._retry_legacy_source(oid,text) FROM PUBLIC;
+CREATE FUNCTION forge_agent._retry_legacy_constraint(p_relation oid,p_name text,p_definition text) RETURNS text LANGUAGE plpgsql STABLE SET search_path=pg_catalog,pg_temp AS $f$
+DECLARE column_name text;bound integer;
+BEGIN
+ SELECT x.column_name,x.bound INTO column_name,bound FROM(VALUES
+ ('forge_agent.coding_workflows'::regclass,'coding_workflows_plan_revisions_check','plan_revisions',20),
+ ('forge_external_workflow.workflows'::regclass,'workflows_plan_revisions_check','plan_revisions',20),
+ ('forge_external_workflow.workflows'::regclass,'workflows_code_revisions_check','code_revisions',20),
+ ('forge_agent.coding_review_budget'::regclass,'coding_review_budget_repair_rounds_check','repair_rounds',20),
+ ('forge_agent.coding_review_budget'::regclass,'coding_review_budget_stagnant_rounds_check','stagnant_rounds',20),
+ ('forge_agent.coding_reviews'::regclass,'coding_reviews_round_check','round',32),
+ ('forge_agent.coding_reviews'::regclass,'coding_reviews_stagnant_rounds_check','stagnant_rounds',32),
+ ('forge_agent.coding_reviews'::regclass,'coding_reviews_infrastructure_retries_check','infrastructure_retries',32),
+ ('forge_agent.delivery_lineages'::regclass,'delivery_lineages_rounds_check','rounds',20),
+ ('forge_agent.delivery_task_lineages'::regclass,'delivery_task_lineages_round_check','round',20),
+ ('forge_agent.delivery_operations'::regclass,'delivery_operations_round_check','round',20)
+ )x(relation,name,column_name,bound) WHERE(x.relation,x.name)=(p_relation,p_name);
+ IF NOT FOUND THEN RETURN p_definition;END IF;
+ IF p_definition<>format('CHECK ((%s >= 0))',column_name) THEN RAISE EXCEPTION 'Event retry telemetry constraint drift: %',p_name;END IF;
+ RETURN format('CHECK (((%s >= 0) AND (%s <= %s)))',column_name,column_name,bound);
+END;$f$;
+REVOKE ALL ON FUNCTION forge_agent._retry_legacy_constraint(oid,text,text) FROM PUBLIC;

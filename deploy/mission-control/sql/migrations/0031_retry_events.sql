@@ -138,6 +138,9 @@ BEGIN
  ELSIF e.scope_kind='native_workflow' AND e.kind='reviewer_correction' AND e.phase_id~'^reviewer_correction\.[0-9a-f-]{36}$' THEN
   IF NOT EXISTS(SELECT FROM forge_agent.coding_workflow_reviews WHERE(owner_id,project_alias,workflow_id,workflow_review_id)=(e.owner_id,e.project_alias,e.scope_id,split_part(e.phase_id,'.',2)::uuid)) THEN RAISE EXCEPTION 'Retained review scope mismatch' USING ERRCODE='P0006';END IF;
   SELECT count(*) INTO spent FROM forge_agent.coding_workflow_actions WHERE workflow_id=e.scope_id AND kind='decide' AND source_key LIKE 'peer-reviewer-correction:'||split_part(e.phase_id,'.',2)||':%';
+ ELSIF e.scope_kind='native_workflow' AND e.kind='feedback_delivery' AND e.phase_id~'^feedback\.[0-9a-f-]{36}$' THEN
+  IF NOT EXISTS(SELECT FROM forge_agent.coding_feedback f JOIN forge_agent.coding_tasks t ON(t.owner_id,t.project_alias,t.id)=(f.owner_id,f.project_alias,f.task_id) WHERE(f.owner_id,f.project_alias,t.workflow_id,f.feedback_id)=(e.owner_id,e.project_alias,e.scope_id,split_part(e.phase_id,'.',2)::uuid)) THEN RAISE EXCEPTION 'Retained feedback scope mismatch' USING ERRCODE='P0006';END IF;
+  SELECT count(*) INTO spent FROM forge_agent.coding_workflow_actions WHERE workflow_id=e.scope_id AND kind='decide' AND status='completed' AND source_key LIKE 'feedback-delivery-retry:%' AND intent->>'feedback_id'=split_part(e.phase_id,'.',2);
  ELSE RAISE EXCEPTION 'Unsupported retained retry evidence' USING ERRCODE='P0009';END IF;
  IF spent IS DISTINCT FROM p_used THEN RAISE EXCEPTION 'Retained planning counter changed' USING ERRCODE='P0006';END IF;
  UPDATE forge_agent.coding_retry_events SET used=p_used,status=CASE WHEN p_used=20 THEN 'exhausted' ELSE 'open' END,legacy_used=p_used,legacy_source_id=p_source_id,legacy_source_digest=p_digest,updated_at=clock_timestamp() WHERE event_id=p_event RETURNING * INTO e;
@@ -149,3 +152,4 @@ GRANT EXECUTE ON FUNCTION forge_agent.retry_event_adopt_legacy(uuid,integer,text
 \ir ../fragments/0031_native_retry_events.sql
 \ir ../fragments/0031_ci_stage_receipts.sql
 \ir ../fragments/0031_delivery_retry_events.sql
+\ir ../fragments/0031_retry_event_fingerprints.sql
