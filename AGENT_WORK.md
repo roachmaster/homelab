@@ -27,6 +27,8 @@ Layer enforcement integration13301ce: actual source-aware Python graph/lexer gua
 
 CI integration7745032: explicit legacy/scoped contracts drive closed privileged producer and typed delivery/native consumers. Main runs all four zero-skip backend suites; declared branch tests keep browser/DB not-run.140 focused contract/producer/consumer/bootstrap/history/repair tests passed28.625s, zero outer skips; frozen v1 maps and current policy selection remain explicit.11 intentional raw qualifications follow independent review;26 historical migrations and20 authority ASTs remain unchanged. Installed services/configuration are untouched.
 
+Integrated source qualification: all104 historical raw paths resolved; two reviewed current-guide values and eleven explicit CI source-context overrides match actual bytes. Historical v1 baseline hashes remain literal provenance; all26 migrations and20 legacy authority ASTs pass unchanged. Full9-case M27 qualification passed0.626s before expensive checks. Actual branch-scope and full-main verification follow on this integrated revision.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22

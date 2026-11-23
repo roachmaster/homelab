@@ -103,6 +103,26 @@ INCLUDED_REVIEWER_CONTEXT_SHA256 = {
     "test_work_reviewer_correction.py": "fd406873395e011afe393d4d7f03e17251c5cc7d79a29ee34b585744f8b5dcd8"
 }
 
+# Reviewed CI contract correction 7745032, integrated on 23 November 2026.
+# Preserve the historical v1 baseline above as provenance. These exact reviewed
+# source bytes add scope-aware v2 while preserving v1 receipts and full checks;
+# regression tests cover producer/consumer agreement, policy/scope and skip fences.
+# All historical SQL and legacy authority AST guards remain independently pinned.
+# Source qualification does not grant deployment, CI success or merge authority.
+REVIEWED_CI_CONTEXT_SHA256 = {
+    "deploy/mission-control/agent-runner/work_review.py": "76edae6677e155bb7fcf470637a9c6b70c60d57b65003a922513354dca4acd5a",
+    "deploy/mission-control/agent-runner/work_native_jenkins.py": "71e1c7ffc9c0ea4ae165aa199c844598f5094ac079b403a919c3e354c6073ec4",
+    "deploy/mission-control/agent-runner/work_native_repair.py": "da4b1b1f423c588b567935eec7685b624a22addd51072a828904fc46546ee1dd",
+    "deploy/mission-control/agent-runner/work_publication_config.py": "d937d9ade6a6f9df0e7d1ed023d1cce5606269731d81dc461983cb20f2f263b0",
+    "deploy/mission-control/agent-runner/work_external_delivery.py": "f5319d992b195c91f1e811e4566f8ff8d90f60c7095458867211537452d130b4",
+    "deploy/mission-control/agent-runner/test_ci_supervision.py": "847e2dadfcc02e7e1e47e0e867d90af5e3bd510e1a7cee4642ba803d55fcd1da",
+    "deploy/mission-control/agent-runner/test_work_external_delivery.py": "ad65fdba13b676f7de35cd37b21b0bdb1d8d54ecc870f796125075fdc06e0d3d",
+    "deploy/mission-control/agent-runner/test_work_native_jenkins.py": "98996c669a8fa2618c2de15cc67e995285bf0a649d20f730efe899f42886d23d",
+    "deploy/mission-control/jenkins/verify-candidate.py": "0a998d4148cadf6522c1dea6523dfaf74644a765a447cfaad27dc8bcff212725",
+    "deploy/mission-control/jenkins/setup-ci.py": "5b6ba065820fb7528ffb3abe46e14960d8a0b304d34f22ca0a0ae769c507eae3",
+    "deploy/mission-control/jenkins/README.md": "667696432a4321a8e4a929cb2b76844f50eb4f02dfd5ac2f356afe2c980efb74",
+}
+
 # Python3.12 AST serialization; no Git or runtime imports are needed.
 UNCHANGED_LEGACY_GUARD_AST_SHA256 = {
     "work_workflow.py::BoundDelegatedAuthority.validate": "3c5684800e9fd927d175c1b184368e3fbe9b47f88011fbf01704ac42125c9ac0",
@@ -218,7 +238,11 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                 self.assertEqual(hashlib.sha256((MIGRATIONS / name).read_bytes()).hexdigest(), expected)
 
     def test_unchanged_baseline_boundaries_remain_byte_identical(self):
-        for relative, expected in UNCHANGED_BASELINE_SHA256.items():
+        # An explicitly reviewed context may qualify current source bytes while
+        # the historical baseline remains available for exact provenance.
+        self.assertTrue(set(REVIEWED_CI_CONTEXT_SHA256) <= set(UNCHANGED_BASELINE_SHA256))
+        current = {**UNCHANGED_BASELINE_SHA256, **REVIEWED_CI_CONTEXT_SHA256}
+        for relative, expected in current.items():
             with self.subTest(source=relative):
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
