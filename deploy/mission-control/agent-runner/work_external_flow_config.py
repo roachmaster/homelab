@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from types import MappingProxyType
 import re
+from work_retry_policy import AGENT_RETRY_LIMIT
 
 ID = re.compile(r'[A-Za-z0-9_.-]{1,64}')
 POLICY_ID = 'forge-external-db-v2'
@@ -11,8 +12,8 @@ POLICY_ID = 'forge-external-db-v2'
 class ExternalWorkflowPolicy:
     author_profile: str
     reviewer_profile: str
-    max_plan_revisions: int = 3
-    max_code_revisions: int = 3
+    max_plan_revisions: int = AGENT_RETRY_LIMIT
+    max_code_revisions: int = AGENT_RETRY_LIMIT
     auto_merge: bool = True
     merge_method: str = 'merge'
     version: str = 'forge-external-autonomy-v1'
@@ -21,7 +22,7 @@ class ExternalWorkflowPolicy:
         if (any(not isinstance(v,str) or not ID.fullmatch(v) for v in (self.author_profile,self.reviewer_profile))
                 or self.author_profile==self.reviewer_profile or self.version!='forge-external-autonomy-v1'
                 or type(self.auto_merge) is not bool or not self.auto_merge or self.merge_method!='merge'
-                or any(type(n) is not int or not 0<=n<=3 for n in (self.max_plan_revisions,self.max_code_revisions))):
+                or any(type(n) is not int or not 0<=n<=AGENT_RETRY_LIMIT for n in (self.max_plan_revisions,self.max_code_revisions))):
             raise ValueError('Invalid external workflow delegation')
 
     def snapshot(self,catalog):

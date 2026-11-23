@@ -12,6 +12,7 @@ from queue_store import Rejected
 from work_config import PinnedRecipe,prepare_title,sha256_canonical
 from work_external_policy import V2_POLICY_ID
 from work_external_review_context import canonical,validate_target,parse_verdict,strict_json,HEX40,HEX64
+from work_retry_policy import AGENT_RETRY_LIMIT,effective_limit
 
 TERMINAL={'completed','cancelled','escalated'}
 MAX_NATIVE_VERDICT=65536
@@ -90,6 +91,15 @@ class ExternalWorkflowStore:
         p=self.policies.get(project)
         return p.summary(self.catalog) if p is not None else None
 
+    def _retry_limit(self,w,key):
+        return effective_limit(w['snapshot'],key,self.policies[w['project_alias']].snapshot(self.catalog))
+
+    def _project_retry_limit(self,w,key):
+        # Historical reads survive unrelated configuration changes. Mutating
+        # paths keep the strict compatibility check in _retry_limit.
+        try:return self._retry_limit(w,key)
+        except (ValueError,KeyError,TypeError):return effective_limit(w['snapshot'],key)
+
     def _scope(self,cursor,project,profile,*,active=True,require=True):
         cursor.execute('SELECT forge_external_workflow_api.service_scope(%s,%s,%s,%s) AS enabled',(self.owner,project,profile,active))
         enabled=cursor.fetchone()['enabled']
@@ -107,7 +117,7 @@ class ExternalWorkflowStore:
         r=cursor.fetchone()
         result={'workflow_id':str(w['workflow_id']),'kind':'external_database','policy_digest':w['policy_digest'],'phase':w['phase'],
                 'author_profile':w['author_profile'],'reviewer_profile':w['reviewer_profile'],'plan_revisions':w['plan_revisions'],
-                'max_plan_revisions':w['snapshot']['max_plan_revisions'],'code_revisions':w['code_revisions'],'max_code_revisions':w['snapshot']['max_code_revisions'],
+                'max_plan_revisions':self._project_retry_limit(w,'max_plan_revisions'),'code_revisions':w['code_revisions'],'max_code_revisions':self._project_retry_limit(w,'max_code_revisions'),
                 'escalation_reason':w['state'].get('escalation_reason') if w['phase']=='escalated' else None,'can_cancel':w['phase'] not in TERMINAL|{'merging'}}
         if r:result['reviewer_task_id']=str(r['reviewer_task_id'])
         if w['state'].get('candidate'):result['candidate_commit']=w['state']['candidate']['candidate_commit']
@@ -128,12 +138,12 @@ class ExternalWorkflowStore:
         cursor.execute('SELECT EXISTS(SELECT FROM forge_external_workflow.tasks WHERE(owner_id,project_alias,workflow_id,task_id)=(%s,%s,%s,%s)) AS belongs',(self.owner,project,workflow_id,task_id))
         return cursor.fetchone()['belongs']
 
-    def _event(self,cursor,w,summary,related_task_id=None):
+    def _event(self,cursor,w,summary,related_task_id=None,*,details=None):
         cursor.execute('SELECT id FROM forge_agent.coding_tasks WHERE(owner_id,project_alias,id)=(%s,%s,%s) FOR UPDATE',(self.owner,w['project_alias'],w['root_task_id']))
         cursor.fetchone()
         cursor.execute('''INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload)
           SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events
-          WHERE(owner_id,project_alias,task_id)=(%s,%s,%s)''',(self.owner,w['project_alias'],w['root_task_id'],Json({'workflow_id':str(w['workflow_id']),'phase':w['phase'],'summary':summary[:4096],**({'related_task_id':str(related_task_id)} if related_task_id else {})}),self.owner,w['project_alias'],w['root_task_id']))
+          WHERE(owner_id,project_alias,task_id)=(%s,%s,%s)''',(self.owner,w['project_alias'],w['root_task_id'],Json({**(details or {}),'workflow_id':str(w['workflow_id']),'phase':w['phase'],'summary':summary[:4096],**({'related_task_id':str(related_task_id)} if related_task_id else {})}),self.owner,w['project_alias'],w['root_task_id']))
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
 
     def _save(self,cursor,w,summary,*,phase=None,related_task_id=None):
@@ -320,6 +330,10 @@ class ExternalWorkflowStore:
                 self._save(cursor,w,'Operator authorized one infrastructure review retry after deployed fix '+command.deployed_fix_revision+'. Selecting fresh trusted source; previous attempts and budgets remain preserved.',phase='plan',related_task_id=source['id'])
                 return receipt
 
+    def continue_after_retry_policy_update(self,command):
+        from work_retry_continuation import continue_external_plan
+        return continue_external_plan(self,command)
+
     def _source_key(self,w):return str(w['active_task_id'])+':'+str(w['plan_revisions'])+':'+str(w['code_revisions'])+(':'+w['state']['operator_source_epoch'] if w['state'].get('operator_source_epoch') else '')
 
     def _action(self,cursor,w,kind,key,request):
@@ -465,12 +479,19 @@ class ExternalWorkflowStore:
         cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) VALUES(%s,%s,%s,1,'queued',%s)",(self.owner,w['project_alias'],task_id,Json({'workflow_id':str(w['workflow_id']),'status':'queued','revision':1,'task_id':str(task_id),'project_alias':w['project_alias'],'recipe_digest':recipe['digest']})))
         cursor.execute("SELECT pg_notify('forge_coding_jobs','')")
 
-    def _native_artifact(self,cursor,w,task):
-        if task['status']!='awaiting_review' or task['latest_attempt_id'] is None:return None
+    def _native_artifact(self,cursor,w,task,*,accepted_revision=None):
+        if accepted_revision is None:
+            if task['status']!='awaiting_review':return None
+            revision=task['revision']
+        else:
+            if (type(accepted_revision) is not int or task['status']!='completed'
+                    or task['revision']!=accepted_revision+1):return None
+            revision=accepted_revision
+        if task['latest_attempt_id'] is None:return None
         cursor.execute('''SELECT a.*,r.receipt_id FROM forge_agent.coding_attempts a JOIN forge_agent.coding_reconciliation_receipts r
           ON(r.owner_id,r.project_alias,r.task_id,r.attempt_id,r.task_revision)=(a.owner_id,a.project_alias,a.task_id,a.attempt_id,%s)
           WHERE(a.owner_id,a.project_alias,a.task_id,a.attempt_id)=(%s,%s,%s,%s) AND a.phase='stopped' AND NOT a.reservation_active AND a.lease_expires_at IS NULL
-          AND a.outcome='awaiting_review' AND a.published_at IS NOT NULL ORDER BY r.created_at DESC LIMIT 1''',(task['revision'],self.owner,w['project_alias'],task['id'],task['latest_attempt_id']))
+          AND a.outcome='awaiting_review' AND a.published_at IS NOT NULL ORDER BY r.created_at DESC LIMIT 1''',(revision,self.owner,w['project_alias'],task['id'],task['latest_attempt_id']))
         a=cursor.fetchone()
         if not a:return None
         if not a['result_byte_count'] or a['result_byte_count']>MAX_NATIVE_VERDICT:raise ValueError('Native reviewer verdict exceeds contract')
@@ -510,10 +531,10 @@ class ExternalWorkflowStore:
     def _retry_review(self,cursor,w,review,task,source,summary):
         cursor.execute("SELECT EXISTS(SELECT FROM forge_agent.coding_attempts WHERE(owner_id,project_alias,task_id)=(%s,%s,%s) AND(phase<>'stopped' OR reservation_active OR lease_expires_at IS NOT NULL)) AS active",(self.owner,w['project_alias'],review['reviewer_task_id']))
         if cursor.fetchone()['active']:return False
-        if w['state'].get('review_retries',0)>=1:
+        if w['state'].get('review_retries',0)>=AGENT_RETRY_LIMIT:
             self._escalate(cursor,w,summary);return True
         cursor.execute("UPDATE forge_external_workflow.reviews SET status='retry',updated_at=clock_timestamp() WHERE review_id=%s",(review['review_id'],))
-        self._queue_review(cursor,w,task,source,review['target_kind'],retry=1,correction=summary);return True
+        self._queue_review(cursor,w,task,source,review['target_kind'],retry=w['state'].get('review_retries',0)+1,correction=summary);return True
 
     def _accept_task(self,cursor,w,task):
         # The root is the whole external envelope, not a completed Plan artifact.
@@ -524,7 +545,7 @@ class ExternalWorkflowStore:
         cursor.execute("UPDATE forge_agent.coding_tasks SET status='completed',accepted_at=clock_timestamp(),revision=revision+1,updated_at=clock_timestamp() WHERE(owner_id,project_alias,id)=(%s,%s,%s)",(self.owner,w['project_alias'],task['id']))
 
     def _revise(self,cursor,w,kind,feedback,source):
-        key='plan_revisions' if kind=='plan' else 'code_revisions';limit=w['snapshot']['max_'+key]
+        key='plan_revisions' if kind=='plan' else 'code_revisions';limit=self._retry_limit(w,'max_'+key)
         if w[key]>=limit:
             self._escalate(cursor,w,'The '+kind+' revision budget is exhausted. '+feedback['summary']);return True
         w[key]+=1
@@ -550,7 +571,7 @@ class ExternalWorkflowStore:
         self._insert_task(cursor,w,task_id,mode,w['author_profile'],recipe,
             self._author_prompt(mode),
             root['acceptance_criteria'],w['state'].get('base_revision',root['base_revision']),'author')
-        self._save(cursor,w,'Muse '+('revision' if feedback else 'implementation')+' queued from the reviewed artifact.',phase=phase,related_task_id=task_id)
+        self._save(cursor,w,w['author_profile']+' '+('revision' if feedback else 'implementation')+' queued from the reviewed artifact.',phase=phase,related_task_id=task_id)
         context={'version':2,'workflow_id':str(w['workflow_id']),'stage':mode,'request_prompt':root['prompt'],'acceptance_criteria':root['acceptance_criteria'],
                  'approved_plan':w['state'].get('approved_plan'),'previous_artifact':{k:source[k] for k in ('assignment_id','sha256','content')},'feedback':feedback,
                  'base_revision':w['state'].get('base_revision',root['base_revision']),
@@ -608,7 +629,7 @@ class ExternalWorkflowStore:
         return True
 
     def _request_rebase(self,cursor,w,summary):
-        if w['code_revisions']>=w['snapshot']['max_code_revisions']:
+        if w['code_revisions']>=self._retry_limit(w,'max_code_revisions'):
             self._escalate(cursor,w,'The bounded source/revision budget is exhausted. '+summary);return True
         w['state'].pop('base_revision',None);w['state']['pending_rebase']=summary[:2048]
         self._save(cursor,w,'Main changed; selecting the new trusted source before bounded rebase.',phase='repair')
