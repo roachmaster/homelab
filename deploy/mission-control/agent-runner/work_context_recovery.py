@@ -154,12 +154,31 @@ class FeedbackRecovery:
             cursor.execute("SELECT count(*) AS used,max(created_at) AS last,coalesce(max(created_at)<=clock_timestamp()-interval '60 seconds',true) AS ready FROM forge_agent.coding_workflow_actions WHERE workflow_id=%s AND kind='decide' AND source_key LIKE 'feedback-delivery-retry:%%'",
                 (w['workflow_id'],))
             budget = cursor.fetchone()
-            if budget['used'] >= MAX_RECOVERIES or not budget['ready']:
+            events = self.flow.retry_events
+            if (events is None and budget['used'] >= MAX_RECOVERIES) or not budget['ready']:
                 raise Rejected(409, 'not_reviewable')
             if budget['used']:
                 cursor.execute("SELECT %s<=clock_timestamp()-interval '60 seconds' AS ready", (attempt['finished_at'],))
                 if not cursor.fetchone()['ready']:
                     raise Rejected(409, 'not_reviewable')
+            event = None
+            if events is not None:
+                from work_retry_events import RetryScope
+                scope = RetryScope(self.store.owner, project_alias, 'native_workflow', w['workflow_id'])
+                event = events.observe_failure(cursor, scope, 'feedback_delivery', str(attempt['attempt_id']),
+                    attempt['outcome_digest'], phase_id='feedback.' + str(task['feedback_id']))
+                cursor.execute("SELECT count(*) AS used FROM forge_agent.coding_workflow_actions "
+                    "WHERE workflow_id=%s AND kind='decide' AND status='completed' "
+                    "AND source_key LIKE 'feedback-delivery-retry:%%' AND intent->>'feedback_id'=%s",
+                    (w['workflow_id'], str(task['feedback_id'])))
+                prior_used = cursor.fetchone()['used']
+                if event['used'] == 0 and prior_used:
+                    event = events.adopt_legacy(cursor, event['event_id'], prior_used,
+                        str(attempt['attempt_id']), attempt['outcome_digest'])
+                if event['used'] >= event['limit']:
+                    event = events.reserve(cursor, event['event_id'], key)
+                    return dict(status='needs_attention', reason='feedback_delivery_event_exhausted',
+                        workflow_id=str(w['workflow_id']), retry_event=event)
             cursor.execute("UPDATE forge_agent.coding_workflows SET enabled=true,phase='repair',escalation_reason='',updated_at=clock_timestamp() WHERE workflow_id=%s", (w['workflow_id'],))
             self.flow._grant(cursor, w, p['author_profile'], 'implement')
             self.flow._grant(cursor, w, p['reviewer_profile'], 'review')
@@ -175,12 +194,18 @@ class FeedbackRecovery:
                 workspace_digest=rec['workspace_digest'], reconciliation_receipt_id=rec['receipt_id'],
                 base_revision=task['base_revision'])
             authority = BoundNativeRetryAuthority(self.store, cursor, w['workflow_id'], task_id, attempt['attempt_id'], task['revision'])
+            if event is not None:
+                event = events.reserve(cursor, event['event_id'], key)
+                if event['status'] == 'exhausted':
+                    raise Rejected(409, 'not_reviewable')
             receipt = self.store.resume(project_alias=project_alias, task_id=task_id, expected_revision=expected_revision,
                 idempotency_key=idempotency_key, agent_profile=p['author_profile'], reconciliation_receipt_id=reconciliation_receipt_id,
                 note=note, allowed_modes={'implement'}, resolve_recipe=lambda _: recipe, _authority=authority)
             intent = dict(policy=POLICY, request=request, source_attempt_id=str(attempt['attempt_id']),
                 source_event_id=str(witness['event_id']), feedback_id=str(task['feedback_id']),
                 feedback_sha256=task['feedback_sha256'], workspace_digest=rec['workspace_digest'], max_recoveries=MAX_RECOVERIES)
+            if event is not None:
+                intent['retry_event'] = event
             cursor.execute("INSERT INTO forge_agent.coding_workflow_actions(workflow_id,owner_id,project_alias,kind,source_key,status,intent,finish_receipt) VALUES(%s,%s,%s,'decide',%s,'completed',%s,%s)",
                 (w['workflow_id'], self.store.owner, project_alias, key, Json(intent), Json({'status': 'feedback_delivery_recovered', 'receipt': receipt})))
             cursor.execute("INSERT INTO forge_agent.coding_events(owner_id,project_alias,task_id,sequence,event_kind,payload) SELECT %s,%s,%s,coalesce(max(sequence),0)+1,'checkpoint',%s FROM forge_agent.coding_events WHERE owner_id=%s AND project_alias=%s AND task_id=%s",
@@ -208,9 +233,9 @@ class FeedbackRecovery:
         changed = False
         for task in candidates:
             try:
-                self.retry(project_alias=task['project_alias'], task_id=task['id'], expected_revision=task['revision'],
+                receipt = self.retry(project_alias=task['project_alias'], task_id=task['id'], expected_revision=task['revision'],
                     reconciliation_receipt_id=task['receipt_id'], idempotency_key='feedback-delivery-' + str(task['attempt_id']))
-                changed = True
+                changed = changed or receipt.get('status') == 'queued'
             except Rejected:
                 pass
         return changed
