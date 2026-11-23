@@ -124,7 +124,7 @@ impl WorkDelivery {
             && optional_text(&self.verification.summary, 2048)
             && valid_work_timestamp(&self.repair.updated_at)
             && optional_text(&self.repair.summary, 2048)
-            && self.repair.max_rounds == 3
+            && (1..=20).contains(&self.repair.max_rounds)
             && self.repair.round <= self.repair.max_rounds
             && self.repair.task_id.as_deref().is_none_or(valid_chat_id)
             && valid_work_timestamp(&self.release.updated_at)

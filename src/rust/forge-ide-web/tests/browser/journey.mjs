@@ -3404,7 +3404,7 @@ async function agentsJourney() {
       }
       await page.setViewportSize({width:390,height:844});
       if(stage==='repair'){
-        await check(page.locator('#agents-delivery-repair-summary')).toContainText('Round 1/3');
+        await check(page.locator('#agents-delivery-repair-summary')).toContainText('Round 1/20');
         await check(page.locator('#agents-delivery-repair-task')).toBeEnabled();
       }
       if(stage==='deployed'){

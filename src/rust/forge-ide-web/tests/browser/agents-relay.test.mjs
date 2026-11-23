@@ -33,6 +33,7 @@ test('delivery stays source-bound, changes completed-root scope and does not inv
   assert.equal(root.status, 'completed');
   assert.equal(root.delivery.verification.status, 'running');
   assert.equal(root.delivery.commit_sha, 'f'.repeat(40));
+  assert.equal(root.delivery.repair.max_rounds, 20);
   relay.setDelivery(taskId, 'deployed');
   const history = await post('work_list', { status_filter: 'history', limit: 20, cursor: null });
   const delivered = history.body.event.tasks.find(task => task.task_id === taskId);

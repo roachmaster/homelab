@@ -6,7 +6,7 @@ fn projection() -> WorkDelivery {
         "verification_id": KEY, "source_kind":"native", "commit_sha":"f".repeat(40),
         "tree_sha":"c".repeat(40),"updated_at":"1970-01-01T00:00:00Z",
         "verification":{"status":"running","updated_at":"1970-01-01T00:00:00Z","summary":"Exact main gates are running.","build_number":42},
-        "repair":{"status":"none","round":0,"max_rounds":3,"task_id":null,"updated_at":"1970-01-01T00:00:00Z","summary":"No repair."},
+        "repair":{"status":"none","round":0,"max_rounds":20,"task_id":null,"updated_at":"1970-01-01T00:00:00Z","summary":"No repair."},
         "release":{"status":"none","release_id":null,"receipt_sha256":null,"updated_at":"1970-01-01T00:00:00Z","summary":"No activation."}
     })).unwrap()
 }
@@ -66,7 +66,7 @@ fn delivery_payload_is_strict_bounded_and_nullable_without_breaking_legacy_data(
             .is_valid());
     }
     let mut invalid = wire.clone();
-    invalid["repair"]["round"] = json!(4);
+    invalid["repair"]["round"] = json!(21);
     assert!(!serde_json::from_value::<WorkDelivery>(invalid)
         .unwrap()
         .is_valid());
@@ -86,6 +86,42 @@ fn delivery_payload_is_strict_bounded_and_nullable_without_breaking_legacy_data(
     let mut invalid = wire;
     invalid["approved"] = json!(true);
     assert!(serde_json::from_value::<WorkDelivery>(invalid).is_err());
+}
+
+#[test]
+fn main_repair_accepts_twenty_rounds_and_preserves_older_bounded_projections() {
+    let wire = serde_json::to_value(projection()).unwrap();
+    for (max_rounds, round, valid) in [
+        (20, 20, true),
+        (20, 21, false),
+        (21, 20, false),
+        (0, 0, false),
+        (3, 3, true),
+        (3, 4, false),
+        (1, 1, true),
+    ] {
+        let mut current = wire.clone();
+        current["repair"]["max_rounds"] = json!(max_rounds);
+        current["repair"]["round"] = json!(round);
+        let delivery: WorkDelivery = serde_json::from_value(current).unwrap();
+        assert_eq!(delivery.is_valid(), valid, "round {round}/{max_rounds}");
+        if valid {
+            let mut task = detail(WorkStatus::Completed);
+            task.delivery = Some(delivery);
+            assert!(task.is_valid());
+        }
+    }
+    let mut d = projection();
+    d.verification.status = WorkVerificationStatus::Failed;
+    d.repair.status = WorkRepairStatus::Running;
+    d.repair.round = 20;
+    let (_, view) = read_delivery(d);
+    assert!(view
+        .texts
+        .iter()
+        .any(|binding| binding.id == "agents-delivery-repair-summary"
+            && binding.text.contains("Round 20/20")));
+    assert_eq!(state(&view, "agents-workflow-phase").label, "Merged");
 }
 
 #[test]

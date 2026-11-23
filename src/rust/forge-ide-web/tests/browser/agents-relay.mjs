@@ -128,7 +128,7 @@ function deliveryProjection(stage) {
   return {verification_id:'77777777-7777-4777-8777-777777777777',source_kind:'native',
     commit_sha:'f'.repeat(40),tree_sha:'c'.repeat(40),updated_at:time,
     verification:{status:activeRepair?'failed':deployed?'passed':stage==='queued'?'queued':'running',updated_at:time,summary:activeRepair?'Main failed; source-bound repair is queued.':deployed?'All exact main gates passed.':'Main checks are running.',build_number:42},
-    repair:{status:activeRepair?'queued':deployed?'completed':'none',round:activeRepair||deployed?1:0,max_rounds:3,task_id:activeRepair?'11111111-1111-4111-8111-111111111111':null,updated_at:time,summary:activeRepair?'Independent author and reviewer policy applies.':'No active repair.'},
+    repair:{status:activeRepair?'queued':deployed?'completed':'none',round:activeRepair||deployed?1:0,max_rounds:20,task_id:activeRepair?'11111111-1111-4111-8111-111111111111':null,updated_at:time,summary:activeRepair?'Independent author and reviewer policy applies.':'No active repair.'},
     release:{status:deployed?'deployed':'none',release_id:deployed?'88888888-8888-4888-8888-888888888888':null,receipt_sha256:deployed?'e'.repeat(64):null,updated_at:time,summary:deployed?'Activation receipt and health confirmed.':'No activation receipt.'}};
 }
 

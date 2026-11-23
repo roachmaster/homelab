@@ -23,7 +23,7 @@ fn negotiated_delivery_is_typed_and_invalid_source_evidence_fails_closed() {
         "verification_id":OTHER,"source_kind":"native","commit_sha":"c".repeat(40),
         "tree_sha":"d".repeat(40),"updated_at":STAMP,
         "verification":{"status":"passed","updated_at":STAMP,"summary":"Exact main passed.","build_number":7},
-        "repair":{"status":"none","round":0,"max_rounds":3,"task_id":null,"updated_at":STAMP,"summary":"No repair."},
+        "repair":{"status":"none","round":0,"max_rounds":20,"task_id":null,"updated_at":STAMP,"summary":"No repair."},
         "release":{"status":"deployed","release_id":OTHER,"receipt_sha256":"e".repeat(64),"updated_at":STAMP,"summary":"Activation confirmed."}
     });
     let mut invalid = response.clone();
