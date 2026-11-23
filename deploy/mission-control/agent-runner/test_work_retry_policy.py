@@ -4,7 +4,7 @@ from copy import deepcopy
 from dataclasses import replace
 import hashlib
 import json
-from types import MappingProxyType
+from types import MappingProxyType,SimpleNamespace
 import unittest
 import psycopg2
 from psycopg2.extras import Json,RealDictCursor
@@ -78,7 +78,8 @@ class SharedRetryPostgresTest(unittest.TestCase):
     def configure_shared(self):
         self.config=replace(self.config,repair_policy=dict(DEFAULT_REPAIR_POLICY),
             project_workflows={'homelab':WorkflowPolicy('agy-v2','codex-v2')})
-        self.service=WorkServiceFactory(self.config,lambda:self.cluster.connect('forge_agent')).create()
+        self.service=WorkServiceFactory(self.config,lambda:self.cluster.connect('forge_agent'),
+            retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
         self.coordinator=self.service.workflow_worker
 
     def read(self,query,args=()):
@@ -99,8 +100,10 @@ class SharedRetryPostgresTest(unittest.TestCase):
             self.assertEqual(detail['plan_revisions'],n+1);self.assertEqual(detail['max_plan_revisions'],20)
         self.finish_plan_round('revise');detail=self.get(admitted['task_id'])['workflow']
         self.assertEqual((detail['phase'],detail['plan_revisions']),('escalated',20));self.assertIsNone(self.claim('agy-v2'))
+        # Lifetime totals remain telemetry when a later event has its own allowance.
+        self.cluster.admin_exec('UPDATE forge_agent.coding_workflows SET plan_revisions=21',owner=False)
         with self.assertRaises(psycopg2.errors.CheckViolation):
-            self.cluster.admin_exec('UPDATE forge_agent.coding_workflows SET plan_revisions=21',owner=False)
+            self.cluster.admin_exec('UPDATE forge_agent.coding_workflows SET plan_revisions=-1',owner=False)
 
     def test_legacy_approved_plan_counter_preservation_and_scope_guards(self):
         command,admitted=self.submit();self.finish_plan_round('approve')
@@ -128,10 +131,11 @@ class SharedRetryPostgresTest(unittest.TestCase):
             with self.subTest(owner=owner,project=project,policy=policy):
                 with self.assertRaises(psycopg2.Error):self.amend(admitted['task_id'],policy,owner,project)
         self.cluster.admin_exec('UPDATE forge_agent.coding_review_budget SET repair_rounds=20,stagnant_rounds=20',owner=False)
+        self.cluster.admin_exec('UPDATE forge_agent.coding_review_budget SET repair_rounds=21,stagnant_rounds=21',owner=False)
         with self.assertRaises(psycopg2.errors.CheckViolation):
-            self.cluster.admin_exec('UPDATE forge_agent.coding_review_budget SET repair_rounds=21',owner=False)
+            self.cluster.admin_exec('UPDATE forge_agent.coding_review_budget SET repair_rounds=-1',owner=False)
         with self.assertRaises(psycopg2.errors.CheckViolation):
-            self.cluster.admin_exec('UPDATE forge_agent.coding_review_budget SET stagnant_rounds=21',owner=False)
+            self.cluster.admin_exec('UPDATE forge_agent.coding_review_budget SET stagnant_rounds=-1',owner=False)
 
     def test_completed_root_active_workflow_is_eligible(self):
         _,admitted=self.submit();self.finish_plan_round('approve')
@@ -164,7 +168,8 @@ class SharedRetryPostgresTest(unittest.TestCase):
         frozen=fixture.rows('SELECT snapshot,policy_digest FROM forge_agent.coding_workflows')
         fixture.config=replace(fixture.config,repair_policy=dict(DEFAULT_REPAIR_POLICY),
             project_workflows={'homelab':WorkflowPolicy('agy-v2','codex-v2')})
-        fixture.service=WorkServiceFactory(fixture.config,lambda:self.cluster.connect('forge_agent')).create()
+        fixture.service=WorkServiceFactory(fixture.config,lambda:self.cluster.connect('forge_agent'),
+            retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
         fixture.coordinator=fixture.service.workflow_worker
         fixture.coordinator.store._apply_retry_allowances()
         self.assertEqual(fixture.rows("SELECT policy->>'max_infrastructure_retries' FROM forge_agent.coding_review_budget")[0][0],'20')
@@ -174,7 +179,8 @@ class SharedRetryPostgresTest(unittest.TestCase):
         self.assertEqual(fixture.rows("SELECT count(*) FROM forge_agent.coding_workflow_actions WHERE source_key LIKE 'source-readiness-delivery:%%'")[0][0],1)
 
     def test_manual_active_budget_uses_shared_policy(self):
-        manual=WorkServiceFactory(replace(self.config,project_workflows={}),lambda:self.cluster.connect('forge_agent')).create()
+        manual=WorkServiceFactory(replace(self.config,project_workflows={}),lambda:self.cluster.connect('forge_agent'),
+            retry_event_factory=lambda _:SimpleNamespace(create=lambda:None)).create()
         admitted=manual.submit(make_submit(agent_profile='agy-v2'))
         self.cluster.admin_exec('UPDATE forge_agent.coding_review_budget SET repair_rounds=2,stagnant_rounds=1',owner=False)
         self.configure_shared();self.coordinator.store._apply_retry_allowances()
