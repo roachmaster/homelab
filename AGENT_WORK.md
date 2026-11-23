@@ -29,6 +29,8 @@ CI integration7745032: explicit legacy/scoped contracts drive closed privileged 
 
 Integrated source qualification: all104 historical raw paths resolved; two reviewed current-guide values and eleven explicit CI source-context overrides match actual bytes. Historical v1 baseline hashes remain literal provenance; all26 migrations and20 legacy authority ASTs pass unchanged. Full9-case M27 qualification passed0.626s before expensive checks. Actual branch-scope and full-main verification follow on this integrated revision.
 
+Actual branch attempt1 found missing installed contract and inherited PostgreSQL skip provenance; follow-up4bed406 adds required module publication and exact MRO declaration matching.21 focused packaging/runner/contract tests passed2.770s with no outer skips. Preserve original966-test branch failure; rerun on corrected source.
+
 --- Previous task record ---
 
 # Current: Verify latest main in Jenkins and deploy the portal — 2026-11-22

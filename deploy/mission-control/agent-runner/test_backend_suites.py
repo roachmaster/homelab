@@ -145,6 +145,21 @@ class BackendSuitesTests(unittest.TestCase):
             with patch.object(backend_suites, 'REPO_ROOT', root):
                 self.assertNotEqual(backend_suites.main(('--scope', 'branch')), 0)
 
+    def test_branch_recognizes_the_actual_pg_declaration_in_an_inherited_base_module(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            suite = root / 'deploy/mission-control/agent-runner'
+            suite.mkdir(parents=True)
+            (suite / 'pgbase.py').write_text('import unittest\nPG16_AVAILABLE = False\n'
+                '@unittest.skipUnless(PG16_AVAILABLE, "Requires owned PostgreSQL16")\n'
+                'class PgBase(unittest.TestCase):\n    def test_base_db(self): pass\n')
+            self._write_suite(suite, 'import unittest, pgbase\n'
+                'class Memory(unittest.TestCase):\n    def test_memory(self): pass\n'
+                'class Derived(pgbase.PgBase):\n    def test_derived_db(self): pass\n')
+            with patch.object(backend_suites, 'REPO_ROOT', root):
+                self.assertEqual(backend_suites.main(('--scope', 'branch')), 0)
+            self.assertNotEqual(backend_suites.run_suite(suite, 'test_*.py', {}), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

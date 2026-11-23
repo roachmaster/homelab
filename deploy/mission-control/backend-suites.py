@@ -96,11 +96,16 @@ PREFLIGHT_TESTS = (
 )
 BRANCH_RUNNER_CODE = RUNNER_CODE.replace(
     "if not res.wasSuccessful() or res.testsRun == 0 or res.skipped:\n",
-    "declared_db = [(test, reason) for test, reason in res.skipped "
-    "if getattr(type(test), '__unittest_skip__', False) is True "
-    "and getattr(type(test), '__unittest_skip_why__', None) == reason "
-    "and getattr(sys.modules.get(type(test).__module__), 'PG16_AVAILABLE', None) is False "
-    "and 'postgres' in reason.lower()]\n"
+    "def declared_pg_class(test, reason):\n"
+    "    cls = type(test)\n"
+    "    return (getattr(cls, '__unittest_skip__', False) is True "
+    "and getattr(cls, '__unittest_skip_why__', None) == reason "
+    "and 'postgres' in reason.lower() and any(\n"
+    "        base.__dict__.get('__unittest_skip__') is True "
+    "and base.__dict__.get('__unittest_skip_why__') == reason "
+    "and getattr(sys.modules.get(base.__module__), 'PG16_AVAILABLE', None) is False\n"
+    "        for base in cls.__mro__))\n"
+    "declared_db = [(test, reason) for test, reason in res.skipped if declared_pg_class(test, reason)]\n"
     "unexpected = len(res.skipped) - len(declared_db)\n"
     "executed = res.testsRun - len(res.skipped)\n"
     "print(f'MEMORY_SUMMARY executed={executed} db_not_run={len(declared_db)} unexpected_skips={unexpected}', flush=True)\n"
