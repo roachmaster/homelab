@@ -374,10 +374,88 @@ AGENT_WIDE_RETRY_GUARD_AST_SHA256 = {
     "work_workflow.py::WorkflowStore.retry_preparation": "7ff0c6fc57c9897d65e62b44897fc73dc76465670529560e29736b0831d7312e"
 }
 
+# Reviewed per-event retry context. Task totals are audit history; immutable
+# predecessor source/guard maps remain provenance. These source identities do
+# not grant CI success, publication or privileged deployment authority.
+EVENT_RETRY_CONTEXT_SHA256 = {
+    "deploy/mission-control/agent-runner/runner.py": "fa8e8499b8f4e7cdebc2e247883d361e1c034ce71aef24c809e4c9d642c99269",
+    "deploy/mission-control/agent-runner/setup-runner.sh": "52b0281e3d7883404d63b7e645acc00ec71875a0d33cf7bbd3770f8ff11629ec",
+    "deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py": "c162a99ea675880e87e5e52179cca612893cdb3ec7d1bd37bad5316d1689c9bd",
+    "deploy/mission-control/agent-runner/test_ci_supervision.py": "74ae48834d922cd39ea77473f297f535d6a96386c27b5685e66097d7d2a4b0f7",
+    "deploy/mission-control/agent-runner/test_external_flow.py": "32f339f42cdb23f33e3b3d5b5def9a0ecf2546e0a54fbc689ce6ec46d289d8b6",
+    "deploy/mission-control/agent-runner/test_muse_read_access.py": "bbe690cf42053e2c96016ff9b50576dd32102deef290cb8bd4362dda2307a541",
+    "deploy/mission-control/agent-runner/test_portal_release_actor.py": "90ee41284a6dc77acb40f41bf3bbf4ff497366dd97fc4b64902230f1175068a0",
+    "deploy/mission-control/agent-runner/test_work_muse_intake.py": "69690f7f4e6fc3a9145761bb98ac9b72575def23664497cc065171577df37355",
+    "deploy/mission-control/agent-runner/test_work_owner_fence.py": "b63a85dbf0916c99a8c47b80dccd26ddd675e63bdd44d5b5df0f574439b39aae",
+    "deploy/mission-control/agent-runner/test_work_peer_review.py": "8671ac91c081a628710a7c6941002f31aec9c3735d5fb2424f3f64c4b98f580c",
+    "deploy/mission-control/agent-runner/test_work_policy_upgrade.py": "179db8a4d6296cdbfed421d2c464d8cd7be5b56eb6af77b6c9a68ade48cf1f4e",
+    "deploy/mission-control/agent-runner/work_api.py": "f1fd9c317fe2c16ad7e5e7fd8fe81c24cee6ec48a36af871ef32c51d05820845",
+    "deploy/mission-control/agent-runner/work_ci_contract.py": "f9b427a05e55bb8c5f52535bfdad13d7b04e9e8d80c6cde41afce67915d25072",
+    "deploy/mission-control/agent-runner/work_ci_phases.py": "2fccd2c704725a05e329b64587377acc2ccded53840487b2acc478bb7a85e368",
+    "deploy/mission-control/agent-runner/work_context_recovery.py": "e1c45a25d308064719aa0d69c9607786bc8923a46aa951addd8b356e2f1b21a8",
+    "deploy/mission-control/agent-runner/work_external_delivery.py": "48a522a2e6dcbc4a77adeb84bc383053636878d6f1e2e35b5a0736d65f03e251",
+    "deploy/mission-control/agent-runner/work_external_workflow.py": "e4d437e1059e7003940ab2abb7f3ebe1c72282a561696ee4556c4b07b73c66cf",
+    "deploy/mission-control/agent-runner/work_native_jenkins.py": "f5a21ced3a46f3e26fb00ce89df51aaba32c5797b15162fd617657e182f8ca4b",
+    "deploy/mission-control/agent-runner/work_peer_review.py": "7149ea2ce2695044304c82bf67107b03619cb57cdc6e272ec90112022c2711e5",
+    "deploy/mission-control/agent-runner/work_post_merge.py": "5956dca2dfa6f63a5c77ec76c056e906c8f0223c744b6100fcd9d56ef94b229b",
+    "deploy/mission-control/agent-runner/work_post_merge_provider.py": "8d6fb012d5df68f440803ecd0c1ba653417cf38abc8ff68a3a30a6ee072d0df8",
+    "deploy/mission-control/agent-runner/work_publication.py": "c7005095f2f7da285b8a3ef9c7b408402bbce93e28e8b92a0399974538c0c8b7",
+    "deploy/mission-control/agent-runner/work_publication_config.py": "9f96505e090b141aaa222dac50d6030e0b19abd1463012c889ff73205fe458bf",
+    "deploy/mission-control/agent-runner/work_retry_continuation.py": "d149e3062836b020cd30f0acc0910ddd58ebd744f271c4db0030a9189cb40b17",
+    "deploy/mission-control/agent-runner/work_retry_events.py": "4acbf3e6d349fe14f397ed85b4f4eb3c48b944815a17144f8c759866ece846ce",
+    "deploy/mission-control/agent-runner/work_review.py": "fcc2a693568907b8d5caddc6d4f4a171c2c63356c021f8189e52153949bb35ea",
+    "deploy/mission-control/agent-runner/work_reviewer_correction.py": "d7ab9c6169fe78bf4ce68816c4dfc22acba96fe86f7d0f8e9f6f1168bf38a614",
+    "deploy/mission-control/agent-runner/work_store.py": "406a61339e70ead1f6ba6e023f7c4aad060f25414f89e9401dc8ad1e14d8313e",
+    "deploy/mission-control/agent-runner/work_workflow.py": "71ef104c1ea457bdd2e9ee05772592b3fd11428c1eaeb82b5260c40c02cfbfa3",
+    "deploy/mission-control/jenkins/verify-candidate.py": "7cf0c893614f85bbbc2f8e43bbe15e8a0792120be05163681d603ded827a317a",
+    "deploy/mission-control/portal_release_actor.py": "87a36d555a25c861d9af541dd4d5186a9c8ca60c9ffccd260941b5289e0bb23c",
+    "deploy/mission-control/sql/apply.sql": "7b0ae2a3a9c356d73f58afece7d6c82f53b9b86697a7ebfad0eacb759f94c105",
+    "deploy/mission-control/sql/fragments/0031_ci_stage_receipts.sql": "4aed05a59da74265333dab2ff925edfeaa013cd1e8c08465f8a92a750b179230",
+    "deploy/mission-control/sql/fragments/0031_delivery_retry_events.sql": "e8bc47f0affbccbc8322c6a144155085a4fe7ab03001e05b031b5576ed4618ae",
+    "deploy/mission-control/sql/fragments/0031_native_retry_events.sql": "00146a3a7eaba569d33b14f7719884edaa135009412e69ac1d113de6e213f043",
+    "deploy/mission-control/sql/fragments/0031_retry_event_fingerprints.sql": "b58f74581f3b2fa4ffce56df84a339a74ead632c1c83661ce24200f5921a6864",
+    "deploy/mission-control/sql/management/verify-agent-retries.sql": "065d986c62ca47c1b5fae6e3b64c7b51c1eea8b57a183649f3f46eb34121affc",
+    "deploy/mission-control/sql/management/verify-delivery.sql": "358e3f07059cca044adb2a94cc63f57701019e38ea5d96af575baed2f9d244f7",
+    "deploy/mission-control/sql/management/verify-feedback.sql": "098a45773217ed011af84a22db4512d22dd190fa589481d22d9f2fc8897005f0",
+    "deploy/mission-control/sql/management/verify-owner-continuation.sql": "4835f574c275a0884eb3bf16be9deedbe7a7f950abcf00bd8a24622e2fa08d7e",
+    "deploy/mission-control/sql/management/verify-post-merge.sql": "177f2da332366b620f6efbac13630b29c304e5d142a243a20081d59c6c7480c8",
+    "deploy/mission-control/sql/management/verify-retry-events.sql": "6b856ed7708baa0c6b2fad4534923c5c285d844c88a0e8bcd73fc003e7e2cb2f",
+    "deploy/mission-control/sql/management/verify.sql": "d5adc6e08d278eb9d7ce180a92b82c3ca6780d1ad353529929ed6c2abe1939ab",
+    "deploy/mission-control/sql/migrations/0031_retry_events.sql": "c5eab9e20807dae1a9b695acd2e7b63ee27f91660dc13ae07763258c2a82c5dd",
+    "docs/architecture/forge-post-merge-verification.md": "db9887fee35cd3ebcbf7a2f1cfbc2452c8e163374e3840a8160deea04c2967c5",
+    "docs/design/implementation-status.md": "e0b487762cffdf7d32ebe9cc68260d6786d935a2d34b1544d61ff9a60b050b9c",
+    "src/rust/forge-ide-ui/src/model/agents.rs": "df4f384d4fccd8afedb01dcff5317e0b675de7d33f9dd943ae6639df33d0777e",
+    "src/rust/forge-ide-ui/src/model/agents/delivery.rs": "a32081673201aedffd18bf0937243b2dd71cb41edd3ffbe2bd2796a12a3d3efd",
+    "src/rust/forge-ide-ui/src/model/agents/tests.rs": "8a84dbe37b6489edf580674a0d7b48d73f3a8d357414c575071387ee15c55284",
+    "src/rust/forge-ide-ui/src/model/agents/tests/delivery.rs": "eaf72e886fbd80e3c78bfe0e4ee8bd1960dae9e20e4f01f58e3f9c6995bd60b4",
+    "src/rust/forge-ide-ui/src/model/agents/workflow.rs": "ef0b5ac47f0575fa8afc2c6730c716d070767c71d283e257be3240775461a434",
+    "src/rust/forge-ide-ui/src/protocol/work.rs": "c1fd35bd4ca84cd696a723c83b0ee2e53dc3339079a81a86cc2ddbe0d4855253",
+    "src/rust/forge-ide-ui/src/protocol/work/delivery.rs": "afd99590187b2c6e2a2bd4d1315333e4f622e376ac0a898cdb7ff0d2907f7b6f",
+    "src/rust/forge-ide-ui/tests/wasm_abi.mjs": "65e17657d542e26f89b87ab67a484e61950f4a273330807005ae577c47b0ff16",
+    "src/rust/forge-ide-ui/tests/work_review.rs": "2d636f315778c4b05b3391f7f73d13769ea553a54a86dfb128e3792fda8eda67",
+    "src/rust/forge-ide-web-host/src/assets.rs": "0d4a1e8e990229276345223a5ddb6a5ef8100d865dce004da1a8581561d4af3d",
+    "src/rust/forge-ide-web-host/src/chat.rs": "f1294d442317b6163c1e13388580adbea0aee427d99d1440a6d8c7eccaced15f",
+    "src/rust/forge-ide-web-host/tests/consumer.rs": "b99d76c127795092f790854c410a8bc11d9af8499b4dd8588b0c82f4551baf56",
+    "src/rust/forge-ide-web-host/tests/consumer/work.rs": "12d67cf7768e7cc513fce2a11c4dc51aad1d53da847010c5aed072a37f6b05f1",
+    "src/rust/forge-ide-web/src/generate/application.rs": "610dbfa80bb17352250bb28927765ec1dbc7a3d02dc37da0c8ecff3fb4ab9b3a",
+    "src/rust/forge-ide-web/src/generate/javascript.rs": "b08025b0c9d5e34551c5e5eef55fc2f16704328f4b3d866424b14da1ef6c3804",
+    "src/rust/forge-ide-web/src/generate/mod.rs": "e1bc357350d0b302c972baa47ded9d0fd32a743f7f7a0c20507aaec7972363d8",
+    "src/rust/forge-ide-web/src/wasm.rs": "8d2667307a56ecfdb38ff5c4ff7470983feda2364997c47cc6d5d8191c086aaa",
+    "src/rust/forge-ide-web/tests/browser/agents-relay.mjs": "b22e7128f3bb4126c2f6f91160b35594d36392a844f837030c95f52bb87778e0",
+    "src/rust/forge-ide-web/tests/browser/journey.mjs": "b8aeeac03349d36312a0646b5de369c229e5c2875b55dfacd8a35ec76840dda7",
+    "src/rust/forge-ide-web/tests/generation.rs": "e099773f1bf06525cc92dada0bc8d9ed5597b533a85919f6757ad9c9bffbbc0f",
+    "src/rust/forge-ide-web/tests/playtest-wire.mjs": "048817854abba0d5dff68dc42df4e3abae8b5768b13ad3b3bac945fff71df1f5"
+}
+
+EVENT_RETRY_GUARD_AST_SHA256 = {
+    "work_workflow.py::WorkflowStore.retry_peer_verdict": "23b6f5343d55f5e7fa387b4fbffee92caef63a2a6814edc4fa5366d9ecc3b8a2"
+}
+
 def qualified_source(relative, expected):
-    return AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))
+    return EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))
 
 STRICT_VERIFIER_FILES = {
+    "verify-retry-events.sql",
     "verify-agent-retries.sql",
     "verify-delivery.sql",
     "verify-post-merge.sql",
@@ -467,6 +545,18 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     or relative in {'docs/architecture/forge-post-merge-verification.md', 'docs/design/implementation-status.md'})
                 if '/migrations/' in relative:
                     self.assertTrue(relative.endswith('0030_agent_wide_retry_policy.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_event_retry_overlay_is_explicit_and_preserves_applied_migrations(self):
+        self.assertEqual(set(EVENT_RETRY_GUARD_AST_SHA256), {
+            'work_workflow.py::WorkflowStore.retry_peer_verdict'})
+        for relative, expected in EVENT_RETRY_CONTEXT_SHA256.items():
+            with self.subTest(event_retry_source=relative):
+                self.assertTrue(relative.startswith(('deploy/mission-control/', 'src/rust/'))
+                    or relative in {'docs/architecture/forge-post-merge-verification.md',
+                        'docs/design/implementation-status.md'})
+                if '/migrations/' in relative:
+                    self.assertTrue(relative.endswith('0031_retry_events.sql'))
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
@@ -477,6 +567,7 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
     def test_legacy_owner_and_publication_guards_remain_ast_identical(self):
         for identity, expected in UNCHANGED_LEGACY_GUARD_AST_SHA256.items():
             expected = AGENT_WIDE_RETRY_GUARD_AST_SHA256.get(identity, expected)
+            expected = EVENT_RETRY_GUARD_AST_SHA256.get(identity, expected)
             filename, qualified = identity.split('::')
             node = ast.parse((RUNNER / filename).read_text())
             for name in qualified.split('.'):

@@ -137,8 +137,9 @@ A failed-main check creates an independent durable repair operation with its
 source and diagnostics. Its consumer invokes the ready normal WorkService under
 the current project author/reviewer policy. A frozen idempotency key and verified
 queued receipt link the actual new task; the completed parent is never reopened.
-The lineage permits at most 20 repair admissions, including failures after a
-repair itself merges. A passed main check separately queues a release operation;
+Each unresolved protected failure event permits20 repair admissions, including
+handoffs to a different agent or child task. Lineage totals are history and may
+exceed20 across independent events. A passed main check separately queues a release operation;
 only a healthy Root activation receipt establishes deployment.
 
 ## Verification and rollout
@@ -285,7 +286,7 @@ cleanup of the previously admitted operation; it never starts a new candidate.
 | --- | --- | --- |
 | Unified main verification | `delivery_enabled` plus scoped v2 post-merge provider | One durable verification owner for coordinator and observed changes. |
 | Manual-main capture | `source_observation_enabled`, fixed 60-second interval | Durable scoped head observation, no OAuth quota polling. |
-| Failed-main repair | API `delivery_enabled` and `delivery_repair_projects` | Normal current-policy author/reviewer task, shared maximum 20 rounds. |
+| Failed-main repair | API `delivery_enabled` and `delivery_repair_projects` | Normal author/reviewer workflow; each unresolved failure event has its own20 repairs. |
 | Portal activation | `release_enabled` and pinned `release_actor_sha256` | Fixed web-only Root actor after full main proof; automatic rollback. |
 
 Database grants separately fence observe, repair and release per worker role,
@@ -295,27 +296,36 @@ Pending successors remain Active; a terminal exhausted repair or failed release
 appears in Attention. Header-absent legacy clients retain their previous payload
 and scope behavior before pagination; ABI14 clients negotiate the new projection.
 
-## Shared agent retry allowance
+## Twenty retries for each failure event
 
-The owner-selected default is 20 attempts for all agents: native and external
-plan revisions, code revisions, repair rounds, stagnant rounds, infrastructure
-retries, reviewer corrections and feedback delivery recovery. A provider does
-not get a separate allowance. Required reviews, checks, grants and process
-supervision remain enforced; this policy does not change rollback or timeout
-controls.
+Every agent uses the same policy: **20 repair attempts for each unresolved
+failure event**. Compilation fixes and test failures have independent budgets.
+One task can use20 compilation fixes followed by20 test fixes; its40 total
+repairs are history, not an exhaustion condition. The21st retry of the same
+unresolved event requires attention.
 
-Migration30 expands counter constraints and provides the scoped
-`amend_agent_retry_policy` port. Active work records a `retry_policy_updated`
-checkpoint before its numeric allowance changes. Original snapshots, approved
-plans, recipes, digests, source receipts and spent counters remain unchanged.
-An existing workflow with three revisions spent therefore has 17 remaining.
-Historical completed work retains its original receipts.
+Migration31 adds the scoped `RetryEventProvider` ports and event/admission ledger.
+The coordinator binds an event to its owner, project, workflow or delivery lineage,
+and trusted failed phase. New candidate commits, builds, diagnostic wording and
+agent changes keep that event's counter. An idempotent admission key reserves
+one attempt atomically with queued work; duplicate delivery consumes nothing.
+Models cannot mint events or reset their counters. Existing approvals, recipes,
+snapshots, findings, hashes, spent attempts and receipts remain unchanged.
 
-A workflow already stopped by the old limit uses a revision-bound, idempotent
-owner continuation. The next assignment contains the previous plan and actual
-review findings; it resumes at revision4 rather than starting another root.
-The UI accepts both historical limits and the shared20 contract. Activate the
-matching decoder and schema before exposing the wider backend projection.
+The protected v3 verifier records actual fixed commands and exit codes, including
+test compilation before test execution. Its exact successful phase closes that
+phase's event. Thus passing Rust tests and subsequently failing backend tests
+creates a separate event despite both being tests. Raw notifications and stdout
+only provide diagnostics; they cannot create a new allowance. Source-invalidated
+checks carry no passing authority. Historical v1/v2 receipts stay valid history
+and conservatively use unclassified verification events.
+
+The ABI15 portal negotiates `Forge-Retry-Events-Version: 1` and shows the active
+event, such as **Fixing tests · Retry4/20**. Aggregate revision counts appear
+separately. A legacy planning continuation adopts its verified three spent
+retries and reserves the fourth for the same event, retaining the saved plan
+and actual independent review. Required source, role, cancellation, quota,
+cleanup, CI and merge guards remain enforced.
 
 ## Feedback delivery recovery
 
@@ -331,7 +341,7 @@ The worker still verifies the actual protected build receipt and log before any
 CLI invocation. A server-issued continuation marker preserves the original
 feedback bytes and parent while binding the new attempt to the same reconciled
 workspace. Missing I/O has a distinct recoverable outcome; mismatched feedback or
-build hashes remain integrity failures. Recovery is limited to twenty deliveries
-per workflow with a sixty-second backoff. Plan/code review budgets, completed
+build hashes remain integrity failures. Each feedback packet's unresolved delivery
+event has twenty attempts with a sixty-second backoff. Plan/code history, completed
 attempts and failed CI receipts remain historical evidence. This path neither
 approves a plan nor accepts code.
