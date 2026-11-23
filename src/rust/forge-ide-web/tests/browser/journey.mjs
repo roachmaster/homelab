@@ -2028,7 +2028,7 @@ async function implementationDesignJourney(page, designUrl) {
   await check(report).toContainText('Active navigation is Agents, Workbench, Home and Design');
   await check(report).toContainText('with Agents as the default admitted view');
   const browserContract = report.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Browser application', exact: true }) });
-  await check(browserContract).toContainText('ABI13');
+  await check(browserContract).toContainText('browser ABI is 13');
   await check(report).toContainText('The last qualified live deployment is main 95651a5 (tree 6d380c5a)');
   await check(report).toContainText('actual built revision a3a14e9');
   await check(report).toContainText('499 consumed build inputs');
