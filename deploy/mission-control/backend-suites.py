@@ -96,6 +96,7 @@ PREFLIGHT_TESTS = (
     'test_work_delivery_automation.DeliveryFactoryTest',
     'test_work_external_delivery', 'test_work_native_jenkins',
     'test_ci_supervision.SupervisionBoundaryTest',
+    'test_ci_supervision.PortalArtifactExportTest',
     'test_ci_supervision.CargoCacheSupervisorIntegrationTest.test_end_to_end_delivery_prepare_submission_to_supervisor_reuse_and_extra_guards',
 )
 BRANCH_RUNNER_CODE = RUNNER_CODE.replace(
