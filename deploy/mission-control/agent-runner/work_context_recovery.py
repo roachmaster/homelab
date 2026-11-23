@@ -8,8 +8,9 @@ from psycopg2.extras import Json
 from queue_store import Rejected
 from work_feedback import parse_feedback_json
 from work_context_recovery_contract import POLICY, RECOVERY_SUMMARY, LEGACY_SUMMARY, make_recovery_note
+from work_retry_policy import AGENT_RETRY_LIMIT
 
-MAX_RECOVERIES = 20
+MAX_RECOVERIES = AGENT_RETRY_LIMIT
 BACKOFF_SECONDS = 60
 
 

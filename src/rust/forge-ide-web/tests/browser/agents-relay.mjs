@@ -9,8 +9,8 @@ import { join } from 'node:path';
 const time = '2026-11-19T18:00:00Z';
 const project = 'workspace';
 const base = 'a'.repeat(40);
-const externalWorkflowPolicy={policy_digest:'d'.repeat(64),author_profile:'muse-db-primary',reviewer_profile:'codex-primary',max_plan_revisions:3,max_code_revisions:3,auto_merge:true};
-const workflowPolicy={policy_digest:'c'.repeat(64),author_profile:'agy-primary',reviewer_profile:'codex-primary',max_plan_revisions:3,max_code_revisions:3,auto_merge:true};
+const externalWorkflowPolicy={policy_digest:'d'.repeat(64),author_profile:'muse-db-primary',reviewer_profile:'codex-primary',max_plan_revisions:20,max_code_revisions:20,auto_merge:true};
+const workflowPolicy={policy_digest:'c'.repeat(64),author_profile:'agy-primary',reviewer_profile:'codex-primary',max_plan_revisions:20,max_code_revisions:20,auto_merge:true};
 const publicPlan = '## Public fixture plan\n\n1. Inspect approved files.\n2. Implement the change.\n3. Verify the result.\n\nLiteral <script>window.__forgeProgressExecuted = true</script> stays text.';
 const publicMilestone = 'Public fixture milestone: implementation complete; running verification. <script>window.__forgeProgressExecuted = true</script>';
 const foreignProgress = 'FOREIGN ATTEMPT PROGRESS MUST NOT APPEAR';
@@ -39,7 +39,7 @@ function task(status, number, input = {}) {
   if(input.workflow_policy_digest){
     item.workflow_required=true;
     const policy=input.agent_profile==='muse-db-primary'?externalWorkflowPolicy:workflowPolicy;
-    item.workflow={kind:input.agent_profile==='muse-db-primary'?'external_database':'native',workflow_id:randomUUID(),policy_digest:policy.policy_digest,phase:'plan_review',author_profile:policy.author_profile,reviewer_profile:policy.reviewer_profile,plan_revisions:0,max_plan_revisions:3,code_revisions:0,max_code_revisions:3,escalation_reason:null,can_cancel:true};
+    item.workflow={kind:input.agent_profile==='muse-db-primary'?'external_database':'native',workflow_id:randomUUID(),policy_digest:policy.policy_digest,phase:'plan_review',author_profile:policy.author_profile,reviewer_profile:policy.reviewer_profile,plan_revisions:0,max_plan_revisions:policy.max_plan_revisions,code_revisions:0,max_code_revisions:policy.max_code_revisions,escalation_reason:null,can_cancel:true};
   }
   event(item, 'queued');
   if (status !== 'queued') {

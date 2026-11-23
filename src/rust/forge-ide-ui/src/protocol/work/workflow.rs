@@ -17,8 +17,8 @@ impl WorkWorkflowPolicy {
             && valid_work_name(&self.author_profile, 64)
             && valid_work_name(&self.reviewer_profile, 64)
             && self.author_profile != self.reviewer_profile
-            && self.max_plan_revisions <= 3
-            && self.max_code_revisions <= 10
+            && self.max_plan_revisions <= MAX_AGENT_RETRIES
+            && self.max_code_revisions <= MAX_AGENT_RETRIES
     }
 }
 
@@ -109,9 +109,9 @@ impl WorkWorkflowSummary {
             && valid_work_name(&self.author_profile, 64)
             && valid_work_name(&self.reviewer_profile, 64)
             && self.author_profile != self.reviewer_profile
-            && self.max_plan_revisions <= 3
+            && self.max_plan_revisions <= MAX_AGENT_RETRIES
             && self.plan_revisions <= self.max_plan_revisions
-            && self.max_code_revisions <= 10
+            && self.max_code_revisions <= MAX_AGENT_RETRIES
             && self.code_revisions <= self.max_code_revisions
             && self
                 .escalation_reason
@@ -175,10 +175,10 @@ mod tests {
         policy.reviewer_profile = policy.author_profile.clone();
         assert!(!policy.is_valid());
         let mut policy = valid_policy();
-        policy.max_plan_revisions = 4;
+        policy.max_plan_revisions = MAX_AGENT_RETRIES + 1;
         assert!(!policy.is_valid());
         let mut policy = valid_policy();
-        policy.max_code_revisions = 11;
+        policy.max_code_revisions = MAX_AGENT_RETRIES + 1;
         assert!(!policy.is_valid());
     }
 
@@ -237,6 +237,29 @@ mod tests {
         assert!(!summary.is_valid());
         let mut summary = valid_summary();
         summary.escalation_reason = Some("x".repeat(2048));
+        assert!(summary.is_valid());
+    }
+
+    #[test]
+    fn shared_retry_limit_accepts_twenty_and_preserves_spent_revisions() {
+        let mut policy = valid_policy();
+        policy.max_plan_revisions = MAX_AGENT_RETRIES;
+        policy.max_code_revisions = MAX_AGENT_RETRIES;
+        assert!(policy.is_valid());
+        let mut summary = valid_summary();
+        summary.max_plan_revisions = MAX_AGENT_RETRIES;
+        summary.max_code_revisions = MAX_AGENT_RETRIES;
+        summary.plan_revisions = 4;
+        summary.code_revisions = MAX_AGENT_RETRIES;
+        assert!(summary.is_valid());
+        summary.plan_revisions = MAX_AGENT_RETRIES;
+        assert!(summary.is_valid());
+        summary.plan_revisions += 1;
+        assert!(!summary.is_valid());
+        summary.plan_revisions = 3;
+        summary.max_plan_revisions = 3;
+        summary.code_revisions = 0;
+        summary.max_code_revisions = 3;
         assert!(summary.is_valid());
     }
 }

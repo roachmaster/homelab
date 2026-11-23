@@ -12,6 +12,7 @@ pub const MAX_WORK_CRITERIA_BYTES: usize = 2048;
 pub const MAX_WORK_RESULT_PAGE_BYTES: usize = 16384;
 pub const MAX_WORK_RESULT_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_WORK_INTEGER: u64 = 9_007_199_254_740_991;
+pub const MAX_AGENT_RETRIES: u32 = 20;
 
 pub fn valid_work_name(value: &str, max: usize) -> bool {
     !value.is_empty()
@@ -237,7 +238,7 @@ pub struct WorkReviewSummary {
 impl WorkReviewSummary {
     pub fn is_valid(&self) -> bool {
         valid_work_name(&self.stage, 64)
-            && self.max_rounds <= 10
+            && self.max_rounds <= MAX_AGENT_RETRIES
             && self.round <= self.max_rounds
             && self.review_id.as_deref().is_none_or(valid_chat_id)
             && self.feedback_id.as_deref().is_none_or(valid_chat_id)

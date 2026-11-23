@@ -3543,6 +3543,8 @@ async function agentsJourney() {
     await page.locator('#agents-new').click();
     await page.locator('#agents-profile').selectOption('muse-db-primary');
     await check(page.locator('#agents-compose-help')).toContainText('advance this assignment automatically');
+    await check(page.locator('#agents-assignment-policy')).toContainText('20 plan revisions');
+    await check(page.locator('#agents-assignment-policy')).toContainText('20 code revisions');
     await page.locator('#agents-prompt').fill('Run the external database workflow through independent review and verified merge.');
     await page.locator('#agents-criteria').fill('Preserve the envelope history and source receipts with no manual approvals.');
     await page.locator('#agents-send').click();
@@ -3551,6 +3553,7 @@ async function agentsJourney() {
     for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
       relay.workflowPhase(externalWorkflowTask,phase);await page.locator('#agents-refresh').click();
       await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+      await check(page.locator('#agents-workflow-revisions')).toContainText('/20');
       if(phase==='code_review'){
         await check(page.locator('#agents-workflow-reviewer')).toBeVisible();
         const linkedEvent=page.locator('#agents-history > li').filter({hasText:'Trusted fixture workflow: code_review.'});

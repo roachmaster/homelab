@@ -1,4 +1,18 @@
-# Current: Recover feedback delivery through the event stream — 2026-11-23
+# Current: Apply a shared twenty-attempt agent policy — 2026-11-23
+
+The user explicitly clarifies that the twenty-attempt allowance is agent-wide,
+including Muse, native authors and independent reviewers. Use one provider-neutral
+retry policy for plan, code and reviewer correction; remove provider-specific
+defaults that stop these loops at three. Preserve frozen delegation/recipe hashes,
+all prior reviews and spent counters. Apply additive schema30 for the existing
+database bounds; never edit migrations1–29. Continue the stopped Muse plan under
+a durable policy-update event, retaining its three spent revisions and original
+Codex feedback. Root owns UI protocol bounds, source qualification and live rollout;
+shared-policy owner owns native/SQL; external owner owns Muse continuation; audit
+owner owns reviewer-correction and manual-history compatibility. Process timeout
+durations and OS rollback limits remain separate from agent revision allowances.
+
+# Previous: Recover feedback delivery through the event stream — 2026-11-23
 
 The user explicitly requests implementing recovery for the stopped diagram
 workflow. Gemini's stale build-results directory was corrected in a versioned

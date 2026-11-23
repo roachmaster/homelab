@@ -330,6 +330,35 @@ fn missing_required_workflow_cannot_enable_legacy_approval_or_cancel() {
         .iter()
         .any(|b| b.id == "agents-workflow-help" && b.text.contains("unavailable")));
 }
+
+#[test]
+fn shared_retry_allowance_displays_preserved_counts_for_native_and_external_agents() {
+    for kind in [WorkWorkflowKind::Native, WorkWorkflowKind::ExternalDatabase] {
+        let mut agents = autonomous(WorkWorkflowPhase::PlanRevision);
+        let task = agents.task.as_mut().unwrap();
+        let workflow = task.workflow.as_mut().unwrap();
+        workflow.kind = kind;
+        workflow.plan_revisions = 4;
+        workflow.max_plan_revisions = MAX_AGENT_RETRIES;
+        workflow.code_revisions = 3;
+        workflow.max_code_revisions = MAX_AGENT_RETRIES;
+        if kind == WorkWorkflowKind::ExternalDatabase {
+            workflow.author_profile = "muse-db-primary".into();
+            task.agent_profile = "muse-db-primary".into();
+        }
+        assert!(workflow.is_valid());
+        let mut view = ViewModel::default();
+        agents.project(&mut view, true, true, true);
+        assert!(view.texts.iter().any(|binding| binding.id == "agents-workflow-revisions"
+            && binding.text == "Plan revisions 4/20 · Code revisions 3/20"));
+        let mut review = review_summary(false);
+        review.round = MAX_AGENT_RETRIES;
+        review.max_rounds = MAX_AGENT_RETRIES;
+        assert!(review.is_valid());
+        review.round += 1;
+        assert!(!review.is_valid());
+    }
+}
 #[test]
 fn workflow_review_and_hosted_progress_poll_detail_without_owner_prompts() {
     let mut agents = autonomous(WorkWorkflowPhase::CodeReview);
