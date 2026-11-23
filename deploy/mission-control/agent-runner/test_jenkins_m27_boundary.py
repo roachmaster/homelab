@@ -455,10 +455,35 @@ EVENT_RETRY_GUARD_AST_SHA256 = {
     "work_workflow.py::WorkflowStore.retry_peer_verdict": "23b6f5343d55f5e7fa387b4fbffee92caef63a2a6814edc4fa5366d9ecc3b8a2"
 }
 
+# Exact additive M32 source; predecessor maps remain historical provenance.
+# Source identities never substitute for real CI or deployment receipts.
+LINEAGE_RETRY_CONTEXT_SHA256 = {
+    'AGENT_WORK.md': '01e68b6a41f72847fb6e9a70fad7d2c3f2aabdeaa603d16fa12180edd2a28515',
+    'deploy/mission-control/agent-runner/test_agy_unattended_db_contract.py': '2b1c724ce4520d577004ab2cfb451b2d89581052aff001a4bccc4a7b11852143',
+    'deploy/mission-control/agent-runner/test_ci_event_phases.py': 'ce2a2595160ef3bdefef48cc3691013a11146de5977c0c81f09677a717527c04',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_events.py': 'f2f6f2639976d6ca6d2e43779c3be44f76fee7bbef46c8fd1fd2789301036a42',
+    'deploy/mission-control/agent-runner/test_delivery_lineage_schema.py': '21151b2f6f948243a04b43c3639df0959a718b5f52fdb2d437daa961a297f86f',
+    'deploy/mission-control/agent-runner/test_muse_read_access.py': 'f86f55d35ef8ad4d27b57dd69a89fd6d53dc839485c5bdc941fcaed4bf789c14',
+    'deploy/mission-control/agent-runner/test_work_muse_intake.py': 'edf3c9a5d911251eb31a51078b58ef04ffb8cbfce63e18d7de82282fbe5ace8a',
+    'deploy/mission-control/agent-runner/test_work_owner_fence.py': '1f7ab99858ef7ead05d531b9c85fa2a5377834850f0fe5a1ab0aa669c42509f3',
+    'deploy/mission-control/agent-runner/test_work_policy_upgrade.py': 'de99aabf23334e84baf38c7258c1cafe308a51535fb51596aea8159293317121',
+    'deploy/mission-control/agent-runner/work_ci_contract.py': '2ca9f31ecb7b9c0f2ad2238e7e577fbe693ed28c93e65b5809fd32cec82e2b6e',
+    'deploy/mission-control/jenkins/verify-candidate.py': 'e438b506c12d108de13ef8c272a5b6c58ae613708bb82a6b622d1322fd29d60a',
+    'deploy/mission-control/sql/apply.sql': '074f4f938b8bd108e165285a2380f417dfa34e7ab59daf4a1e0038d44ae45516',
+    'deploy/mission-control/sql/fragments/0032_observer_retry_lineage.sql': '2313c56322a9f339ca46163d443fc036be18d92a7d807831d9bb4b59a788d0d5',
+    'deploy/mission-control/sql/management/verify-delivery-lineage.sql': '61facd8165eef6cf478bd2d12d60bb937c48c5c548dad8a21acf3750bf11b67b',
+    'deploy/mission-control/sql/management/verify-delivery.sql': '6f4241976a6b5f802e5841ed96f0989c4a8db8819a84def148e46b1742efc56f',
+    'deploy/mission-control/sql/management/verify-retry-events.sql': 'edc86b38c191252ca643965a9a753f03a8d32031c80f308f51b16b8faeb9dc73',
+    'deploy/mission-control/sql/management/verify.sql': '215ea6880b3b356f1f2a3756d53ce01681f94dd7315a6ed1f9e4b278d5ce28aa',
+    'deploy/mission-control/sql/migrations/0032_observer_retry_lineage.sql': '88705c12ceb94b3264d5af084e0cf08bb095a10ec74460099c54da3dfe64bfbf',
+    'docs/architecture/ci-stage-evidence.md': '976d0728e0522e967363559adeadcf033738e86f156e668e54f228c293944966',
+}
+
 def qualified_source(relative, expected):
-    return EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))))
+    return LINEAGE_RETRY_CONTEXT_SHA256.get(relative, EVENT_RETRY_CONTEXT_SHA256.get(relative, AGENT_WIDE_RETRY_CONTEXT_SHA256.get(relative, DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected))))))
 
 STRICT_VERIFIER_FILES = {
+    "verify-delivery-lineage.sql",
     "verify-retry-events.sql",
     "verify-agent-retries.sql",
     "verify-delivery.sql",
@@ -561,7 +586,20 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                         'docs/design/implementation-status.md'})
                 if '/migrations/' in relative:
                     self.assertTrue(relative.endswith('0031_retry_events.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_lineage_overlay_preserves_applied_migrations_and_exact_source(self):
+        for relative, expected in LINEAGE_RETRY_CONTEXT_SHA256.items():
+            with self.subTest(lineage_source=relative):
+                self.assertTrue(relative.startswith('deploy/mission-control/') or relative in {
+                    'AGENT_WORK.md', 'docs/architecture/ci-stage-evidence.md'})
+                if '/migrations/' in relative:
+                    self.assertTrue(relative.endswith('0032_observer_retry_lineage.sql'))
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
+        for relative, expected in EVENT_RETRY_CONTEXT_SHA256.items():
+            if '/migrations/0031_' in relative or '/fragments/0031_' in relative:
+                with self.subTest(applied_m31=relative):
+                    self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):
         for relative in RETIRED_BROWSER_SOURCE_FILES:

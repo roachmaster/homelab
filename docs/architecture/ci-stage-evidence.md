@@ -57,3 +57,12 @@ Verification includes a real isolated Cargo compiler error and a real failing
 assertion after successful compilation, malformed/forged result rejection,
 feature-matrix coverage and scope isolation. Printed claims cannot change the
 classification or produce a pass witness.
+
+An observer can detect a normal repair commit before its merge confirmation
+arrives. M32 binds that provisional verification to the repair's existing
+lineage only after checking the genuine task, admission and exact source
+identity. The verification UUID and CI receipt remain intact; another commit
+does not grant another twenty retries. A provisional scope that already has
+spent work cannot be silently combined with another budget. It records the
+conflicting evidence and fences further automatic repair admission instead.
+Only the exact passing receipt can resolve the retained failure event.

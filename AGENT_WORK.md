@@ -1,4 +1,27 @@
-# Current: Twenty tries for each failure event — 2026-11-23
+# Current follow-up: Preserve repair lineage when the observer wins — 2026-11-23
+
+M31 is live and strict verification passed with unchanged Muse history. M1–31
+are immutable. The independent PostgreSQL ordering probe found a remaining
+normal-repair race: an observer-created verification could keep a fresh lineage
+when its genuine repair merge was confirmed later. Add M32 rather than rewriting
+the applied migration. Adopt only a proven, unused provisional lineage; preserve
+verification identities, receipts and all spent attempts. Conflicting used
+scopes need durable evidence and an admission fence, never counter resets.
+
+Core owns M32/schema compatibility; Audit owns independent PostgreSQL regressions
+and future CI protection. Root owns integration and the exact-source rollout.
+The prior main4da verification retains its frozen installed verifier; no
+candidate may change a running build. Future helper/policy changes require their own immutable pins and
+qualification. Continue Muse through its recorded planning event only after the
+matching runtime and ABI15 portal are verified, retaining its three spent tries.
+
+Component verification passed64 upgrade/security/schema cases,24 delivery
+regressions and4 independent observer-first cases. The latter retain the same
+event UUID through20 normal admissions and refuse21, preserve a prior exact PASS
+and fence conflicting used scopes. Full integrated qualification and the actual
+runtime/deployment receipts remain separately recorded operational evidence.
+
+# Twenty tries for each failure event — 2026-11-23
 
 The user corrected the earlier interpretation: "20 tries per event", for every
 agent. Compilation fixes, tests, and other independently failed phases have
