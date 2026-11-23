@@ -2028,7 +2028,7 @@ async function implementationDesignJourney(page, designUrl) {
   await check(report).toContainText('Active navigation is Agents, Workbench, Home and Design');
   await check(report).toContainText('with Agents as the default admitted view');
   const browserContract = report.getByRole('row').filter({ has: page.getByRole('cell', { name: 'Browser application', exact: true }) });
-  await check(browserContract).toContainText('browser ABI is 14');
+  await check(browserContract).toContainText('browser ABI is 15');
   await check(report).toContainText('The retained pre-delivery live checkpoint is main 95651a5 (tree 6d380c5a)');
   await check(report).toContainText('actual built revision a3a14e9');
   await check(report).toContainText('499 consumed build inputs');
@@ -3224,6 +3224,9 @@ async function agentsJourney() {
       const row = page.locator(`#agents-tasks [data-row-id="${taskId}"] .fg-row-select`);
       await check(row).toBeVisible(); await row.click();
       await check(page.locator('#agents-plan-actions')).toBeVisible();
+      await check(page.locator('#agents-stage-panel')).toBeVisible();
+      await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText(status === 'completed' ? 'Accepted' : 'Ready for review');
+      await check(page.locator('#agents-stage-diagram script,#agents-stage-diagram img')).toHaveCount(0);
       await check(page.locator('#agents-plan-resume')).toBeEnabled();
       await check(page.locator('#agents-plan-resume')).toHaveText('Resume');
       await check(page.locator('#agents-plan-revise')).toHaveText('Revise');
@@ -3314,6 +3317,7 @@ async function agentsJourney() {
     }
     relay.faults.holdPublication = false;
     await check(page.locator('#agents-publication-status')).toHaveText('Pull request published', { timeout: 15000 });
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Publish');
     await check(page.locator('#agents-accept')).toBeVisible();
     await check(page.locator('#agents-accept')).toBeEnabled();
     const pullRequest = page.locator('#agents-publication-link a');
@@ -3361,6 +3365,8 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Keep peer review and automatic merge source-bound.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · Native');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
     const autonomousSubmission=relay.workflowSubmissions.at(-1);
     assert.equal(autonomousSubmission.workflow_policy_digest,'c'.repeat(64));
     assert.equal(autonomousSubmission.mode,'plan');assert.equal(autonomousSubmission.agent_profile,'agy-primary');
@@ -3376,7 +3382,18 @@ async function agentsJourney() {
     for(const phase of ['code_review','hosted','merging','completed']){
       relay.workflowPhase(workflowTaskId,phase);await page.locator('#agents-refresh').click();
       const phaseLabel={code_review:'Reviewing code',hosted:'Hosted checks pending',merging:'Merging',completed:'Merged'}[phase];
+      const stageLabel={code_review:'Code review',hosted:'Hosted',merging:'Merge',completed:'Merged'}[phase];
       await check(page.locator('#agents-workflow-phase')).toHaveText(phaseLabel);
+      await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText(stageLabel);
+      if(phase==='code_review'){
+        for(const [width,name] of [[390,'phone'],[1440,'desktop']]){
+          await page.setViewportSize({width,height:844});
+          assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'stage diagram fits the viewport');
+          await page.locator('#agents-stage-panel').scrollIntoViewIfNeeded();
+          await screenshot(page,`ide-agents-stage-diagram-${name}.png`);
+        }
+        await page.setViewportSize({width:390,height:844});
+      }
       await check(page.locator('#agents-accept')).toBeHidden();
       await check(page.locator('#agents-plan-actions')).toBeHidden();
       if(['merging','completed'].includes(phase))await check(page.locator('#agents-cancel')).toBeHidden();
@@ -3407,10 +3424,13 @@ async function agentsJourney() {
       if(stage==='repair'){
         await check(page.locator('#agents-delivery-repair-summary')).toContainText('Round 1/20');
         await check(page.locator('#agents-delivery-repair-task')).toBeEnabled();
+        await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-branch-id="delivery_repair"]')).toContainText('Round 1/20');
       }
       if(stage==='deployed'){
         await check(page.locator('#agents-delivery-state')).toHaveAttribute('data-tone','success');
         await check(page.locator('#agents-delivery-source')).toContainText('Activation receipt · '+'e'.repeat(64));
+        await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="delivery_deploy"]')).toHaveAttribute('data-state','completed');
+        await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="delivery_deploy"]')).toHaveAttribute('aria-current','step');
       }
     }
     // Exact receipt assertions above stay read-only; keep hash-shaped values
@@ -3435,9 +3455,13 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Preserve the source and expose cancellation after escalation.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · Native');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
     const escalationTaskId=relay.latestWorkflowTaskId;
     relay.workflowPhase(escalationTaskId,'escalated');await page.locator('#agents-refresh').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
+    await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-kind="exception"]')).toContainText('Needs attention');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="merged"]')).toHaveAttribute('data-state','skipped');
     await check(page.locator('#agents-workflow-escalation')).toContainText('Revision budget exhausted');
     await check(page.locator('#agents-accept')).toBeHidden();await check(page.locator('#agents-plan-actions')).toBeHidden();
     await page.locator('#agents-back').click();
@@ -3448,6 +3472,8 @@ async function agentsJourney() {
     await check(page.locator('#agents-workflow-phase')).toHaveText('Needs attention');
     await page.locator('#agents-cancel').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Cancelled');
+    await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-kind="exception"]')).toContainText('Cancelled');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="merged"]')).toHaveAttribute('data-state','skipped');
     await oversizedDormantWorkspaceJourney(page, context, fixture, relay, traffic);
     relay.enableExternal();
     await respondToLeaveWarning(() => page.reload({ waitUntil: 'domcontentloaded' }), 'leave');
@@ -3479,6 +3505,12 @@ async function agentsJourney() {
     await check(page.locator('#agents-task-correlation')).toContainText('Correlation ·');
     await check(page.locator('#agents-history > li')).toHaveCount(50);
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    await check(page.locator('#agents-stage-diagram .fg-flow-summary')).toContainText('Events 1–61');
+    await check(page.locator('#agents-stage-diagram script,#agents-stage-diagram img')).toHaveCount(0);
+    const stageTrace=page.locator('#agents-stage-diagram details.fg-flow-trace');
+    await stageTrace.locator('summary').focus();await page.keyboard.press('Enter');
+    await check(stageTrace).toHaveJSProperty('open',true);
+    const stageTraceNode=await stageTrace.elementHandle();
     const eventDetails=page.locator('#agents-history > li').first().locator('details');
     await eventDetails.locator('summary').focus();await page.keyboard.press('Enter');
     await check(eventDetails).toHaveJSProperty('open',true);
@@ -3500,6 +3532,8 @@ async function agentsJourney() {
     await check(page.locator('#agents-history-next')).toBeEnabled();
     await check(eventDetails).toHaveJSProperty('open',true);
     assert.equal(await eventNode.evaluate(node=>node.isConnected),true,'event disclosure nodes survive refresh');
+    await check(stageTrace).toHaveJSProperty('open',true);
+    assert.equal(await stageTraceNode.evaluate(node=>node.isConnected),true,'stage trace disclosure survives refresh');
     await check(page.locator('#agents-history script,#agents-history img')).toHaveCount(0);
     assert.equal(await page.evaluate(()=>globalThis.__historyExecuted),undefined);
     const historyReadStart=relay.eventReads.length;
@@ -3530,9 +3564,20 @@ async function agentsJourney() {
     await check(page.locator('#agents-history-range')).toHaveText('Events 51–61');
     await page.locator('#agents-history-first').click();
     await check(page.locator('#agents-history-range')).toHaveText('Events 1–50');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="queued"]')).toHaveAttribute('data-state','skipped');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="queued"] .fg-flow-detail')).toHaveText('Not recorded');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="running"]')).toHaveAttribute('data-state','completed');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[data-stage-id="running"] .fg-flow-detail')).toHaveText('#1–#61');
+    await check(page.locator('#agents-stage-diagram .fg-flow-hops > li')).toHaveCount(1);
+    await check(stageTrace).toHaveJSProperty('open',true);
+    await stageTraceNode.dispose();
     for(const width of [320,390,1440]){
       await page.setViewportSize({width,height:844});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'event metadata and summaries fit the viewport');
+      assert.equal(await page.locator('#agents-stage-diagram .fg-flow-track').evaluate((node,phone)=>{
+        const dir=getComputedStyle(node).flexDirection;
+        return phone?dir==='column':dir==='row';
+      },width<640),true,'stage track stacks vertically on phones and flows horizontally on desktop');
     }
     await page.setViewportSize({width:390,height:844});
     await page.locator('#agents-history-panel').scrollIntoViewIfNeeded();
@@ -3547,10 +3592,20 @@ async function agentsJourney() {
     await page.locator('#agents-criteria').fill('Preserve the envelope history and source receipts with no manual approvals.');
     await page.locator('#agents-send').click();
     await check(page.locator('#agents-workflow-phase')).toHaveText('Reviewing plan');
+    await check(page.locator('#agents-stage-diagram .fg-flow-track-label')).toHaveText('Autonomous workflow · External Muse');
+    await check(page.locator('#agents-stage-diagram .fg-flow-node[aria-current="step"]')).toContainText('Plan review');
+    assert.deepEqual(
+      await page.locator('#agents-stage-diagram .fg-flow-node .fg-flow-label').allTextContents(),
+      ['Plan','Plan review','Implement','Code review','Checks','Merge','Merged'],
+      'external Muse workflow renders Code review before Checks without fabricating Publish/Hosted',
+    );
     const externalWorkflowTask=relay.latestWorkflowTaskId;
     for(const [phase,label] of [['plan_revision','Revising plan'],['implement','Implementing'],['code_review','Reviewing code'],['checks','Running checks'],['merging','Merging'],['completed','Merged']]){
       relay.workflowPhase(externalWorkflowTask,phase);await page.locator('#agents-refresh').click();
       await check(page.locator('#agents-workflow-phase')).toHaveText(label);
+      if(phase==='plan_revision'){
+        await check(page.locator('#agents-stage-diagram .fg-flow-branch[data-branch-id="branch-plan-revision"]')).toBeVisible();
+      }
       if(phase==='code_review'){
         await check(page.locator('#agents-workflow-reviewer')).toBeVisible();
         const linkedEvent=page.locator('#agents-history > li').filter({hasText:'Trusted fixture workflow: code_review.'});

@@ -201,6 +201,10 @@ pub enum Component {
         id: String,
         label: String,
     },
+    FlowDiagram {
+        id: String,
+        label: String,
+    },
     Select {
         id: String,
         label: String,
@@ -341,6 +345,7 @@ macro_rules! component {
     (badge $id:expr, $label:expr) => { $crate::generate::Component::Badge{id:$id.into(),label:$label.into()} };
     (metric_cards $id:expr, $label:expr) => { $crate::generate::Component::MetricCards{id:$id.into(),label:$label.into()} };
     (timeline $id:expr, $label:expr) => { $crate::generate::Component::Timeline{id:$id.into(),label:$label.into()} };
+    (flow_diagram $id:expr, $label:expr) => { $crate::generate::Component::FlowDiagram{id:$id.into(),label:$label.into()} };
     (caption $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Caption} };
     (context $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Context} };
     (heading $id:expr, $text:expr) => { $crate::generate::Component::Text{id:$id.into(),text:$text.into(),live:false,style:$crate::generate::TextStyle::Heading} };
@@ -464,6 +469,7 @@ impl Document {
                 Component::Badge { id, label }
                 | Component::MetricCards { id, label }
                 | Component::Timeline { id, label }
+                | Component::FlowDiagram { id, label }
                 | Component::Transcript { id, label, .. }
                 | Component::Tree { id, label, .. }
                 | Component::Reload { id, label }
@@ -492,6 +498,9 @@ impl Document {
                 return Err("invalid component label/action");
             }
             match c {
+                Component::FlowDiagram { label, .. } if label.trim().is_empty() => {
+                    return Err("flow diagram requires a nonempty label");
+                }
                 Component::ReaderLayout(children)
                     if children.len() != 2
                         || children

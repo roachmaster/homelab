@@ -326,8 +326,54 @@ DELIVERY_AUTOMATION_CONTEXT_SHA256 = {
 }
 
 
+# Current additive ABI15 event-stream stage-diagram UI source; historical maps
+# above remain literal provenance. This narrow overlay binds only the UI model,
+# declarative component/emitters, atomic ABI15 metadata, docs, and UI/host tests.
+# It grants no live activation or CI success and changes no SQL, native
+# publication guard, or backend source pin.
+UI_STAGE_DIAGRAM_CONTEXT_SHA256 = {
+    'docs/design/implementation-status.md': '501ddbe33afeda2654ee0a797637d00e712ef006178a3711c6e721b3061b07f5',
+    'src/rust/forge-ide-ui/README.md': 'e952faf199fa1ac5ed4deeab6fbb2b566dc60e94f1c09739fab56548368252d4',
+    'src/rust/forge-ide-ui/src/model/agents.rs': 'c6d97aba13a20452773d509e7a395e1f2b1bc9aa39666a48e302a86a0b1dd51e',
+    'src/rust/forge-ide-ui/src/model/agents/history.rs': 'd4fe5e7cd2a9464c3e79ee3145cfcd2064a1aeae6534cd44818229b9287e775c',
+    'src/rust/forge-ide-ui/src/model/agents/stage_diagram.rs': '335703712bb9ddb468d4d892df5200e8c97d741b59719134eb2bff52e7f27c2f',
+    'src/rust/forge-ide-ui/src/model/agents/tests.rs': '06251bf76ea2cb29f2824dc406a0418643d52a584eeceef97e01d8c562cfc49e',
+    'src/rust/forge-ide-ui/src/model/agents/tests/stage_diagram.rs': '07e5f07a86bd0ff21cbaea2fe2c2e00f9d3b1f071810c2c4fb0445cca38c263a',
+    'src/rust/forge-ide-ui/src/model/projection.rs': '9ea4d08b8f14a1d7d7b6ff36bcf5379209a2219b7496f547aa4210cb52801d33',
+    'src/rust/forge-ide-ui/src/view.rs': '51ab58c988c8b1b4fe6f804b89bde4b4c092b09b044f5ec7be3f6731461cebf2',
+    'src/rust/forge-ide-ui/tests/wasm_abi.mjs': '65e17657d542e26f89b87ab67a484e61950f4a273330807005ae577c47b0ff16',
+    'src/rust/forge-ide-ui/tests/worker_glue.mjs': '44e733ef50d84c2457ebf98db60d3591309ed03275925ee89ee000f546968831',
+    'src/rust/forge-ide-web-host/README.md': 'cc9dfbe13b50803c1d2910427846972d7d42c9b0fedb623aeb141ba5f1c102f6',
+    'src/rust/forge-ide-web-host/deploy/README.md': '0d0dda823d829f0e27fe0795e16a4d4691888766aa32cf07991b6fee06cadf39',
+    'src/rust/forge-ide-web-host/src/assets.rs': '0d4a1e8e990229276345223a5ddb6a5ef8100d865dce004da1a8581561d4af3d',
+    'src/rust/forge-ide-web-host/tests/consumer.rs': 'b99d76c127795092f790854c410a8bc11d9af8499b4dd8588b0c82f4551baf56',
+    'src/rust/forge-ide-web/README.md': '2feb9e100fa0368ebe3963b3865ede6bc5be8af5f672acbfa57c4eba919323a4',
+    'src/rust/forge-ide-web/WORKBENCH.md': '688c4e0407f1f0f9bc862b29832bd2ce7cf0950cd7121d5dfa239b134f1d1a46',
+    'src/rust/forge-ide-web/src/generate/application.rs': '3973e182b48d7614dfd82b62909cc91a113a95e4a6d55fd0539113ab9fc36f63',
+    'src/rust/forge-ide-web/src/generate/component.rs': 'f7af659a222113f7e7c5ef19688ab15fba59c71705f1095dd0555eae5a52acbc',
+    'src/rust/forge-ide-web/src/generate/html.rs': 'ad0cd101d75d0ff8ff72b1c0af0255536089d29bfa23dc65751d0ac946254e99',
+    'src/rust/forge-ide-web/src/generate/javascript.rs': '07a68e5a3bbe95966ddbfb81956a5c690b03cb6c1c950f579e18d6da9e9c5465',
+    'src/rust/forge-ide-web/src/generate/mod.rs': 'e1bc357350d0b302c972baa47ded9d0fd32a743f7f7a0c20507aaec7972363d8',
+    'src/rust/forge-ide-web/src/wasm.rs': '45d34c317566a17856f256ef4797bcff98f4badd11cb24517e996e69b3d14fc8',
+    'src/rust/forge-ide-web/tests/browser/journey.mjs': '8729e2bc141a048d7ccbf36835bbc62fcd18741b848923a20c9e6bb37ddcbd16',
+    'src/rust/forge-ide-web/tests/generation.rs': '05593548ed89438b693b6eff48321e2c45d38c3d7a83c3f5489f6b152829447b',
+    'src/rust/forge-ide-web/tests/input-presentation.mjs': 'dd283c642be034d177c1b01a43c1fbd3ee8387cc160fcdd5b056ec61d5cf1e9e',
+    'src/rust/forge-ide-web/tests/playtest-wire.mjs': '048817854abba0d5dff68dc42df4e3abae8b5768b13ad3b3bac945fff71df1f5',
+    'src/rust/forge-ide-web/ui/styles.yaml': '360c749e12f3d7e623d71e311a92516e9a757606129e68b93191dcd2a41a467d',
+}
+
+
 def qualified_source(relative, expected):
-    return DELIVERY_AUTOMATION_CONTEXT_SHA256.get(relative, UI_DELIVERY_CONTEXT_SHA256.get(relative, POST_MERGE_CONTEXT_SHA256.get(relative, expected)))
+    return UI_STAGE_DIAGRAM_CONTEXT_SHA256.get(
+        relative,
+        DELIVERY_AUTOMATION_CONTEXT_SHA256.get(
+            relative,
+            UI_DELIVERY_CONTEXT_SHA256.get(
+                relative,
+                POST_MERGE_CONTEXT_SHA256.get(relative, expected),
+            ),
+        ),
+    )
 
 STRICT_VERIFIER_FILES = {
     "verify-delivery.sql",
@@ -404,6 +450,16 @@ class JenkinsM27SourceBoundaryTest(unittest.TestCase):
                     'docs/architecture/forge-post-merge-verification.md', 'docs/design/implementation-status.md'})
                 if '/migrations/' in relative:
                     self.assertTrue(relative.endswith('0029_delivery_automation.sql'))
+                self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), qualified_source(relative, expected))
+
+    def test_stage_diagram_ui_overlay_is_scoped_to_abi15_ui_source(self):
+        self.assertEqual(len(UI_STAGE_DIAGRAM_CONTEXT_SHA256), 28)
+        for relative, expected in UI_STAGE_DIAGRAM_CONTEXT_SHA256.items():
+            with self.subTest(stage_diagram_ui=relative):
+                self.assertTrue(
+                    relative.startswith(('src/rust/forge-ide-ui/', 'src/rust/forge-ide-web/', 'src/rust/forge-ide-web-host/'))
+                    or relative == 'docs/design/implementation-status.md'
+                )
                 self.assertEqual(hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest(), expected)
 
     def test_retired_browser_reducers_and_dispatchers_are_absent(self):

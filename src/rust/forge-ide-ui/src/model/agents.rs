@@ -4,6 +4,7 @@ use crate::markdown::render_markdown;
 mod delivery;
 mod history;
 mod presentation;
+mod stage_diagram;
 mod workflow;
 use presentation::{compact_counter, group_counter, model_title, relative_time, short_time};
 const USAGE_PAGE: usize = 6;
@@ -70,6 +71,7 @@ pub(super) struct Agents {
     history_next: Option<u64>,
     history_loaded: bool,
     history_request: Option<history::HistoryRequest>,
+    stage_trace: stage_diagram::StageTrace,
     result: String,
     result_digest: Option<String>,
     result_attempt: Option<String>,
@@ -329,6 +331,7 @@ impl Agents {
         self.events_loaded = false;
         self.events_more = false;
         self.progress.clear();
+        self.clear_stage_trace();
     }
     fn keep_progress(&mut self, events: Vec<WorkLogEvent>) {
         let attempt = self
@@ -1540,6 +1543,7 @@ impl Agents {
                 self.events_more = events.len() == 50;
                 let updates = !events.is_empty();
                 self.update_history(&events);
+                self.fold_stage_events(&events);
                 self.keep_progress(events);
                 if self
                     .task
@@ -1772,6 +1776,7 @@ impl Agents {
         view.metric_cards.clear();
         view.transcripts.clear();
         view.timelines.clear();
+        view.flow_diagrams.clear();
         let compose = self.pane == Pane::Compose;
         let reader = self.pane == Pane::Reader;
         let locked = self.locked();
@@ -2721,6 +2726,7 @@ impl Agents {
         });
         self.project_workflow(view, compose, reader);
         self.project_delivery(view, active && work, reader, pending);
+        self.project_stage_diagram(view, active && work && reader);
         self.project_history(view, active && work && reader);
     }
 }

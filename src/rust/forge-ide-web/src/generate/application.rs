@@ -97,6 +97,10 @@ pub fn ide_document() -> Document {
                         component!(caption "agents-task-mode", ""),
                         component!(caption "agents-attempt", ""),
                         component!(caption "agents-task-correlation", ""),
+                        component!(region "agents-stage-panel"; [
+                            component!(heading "agents-stage-heading", "Event stream path"),
+                            component!(flow_diagram "agents-stage-diagram", "Task event-stream stage diagram"),
+                        ]),
                         component!(region "agents-workflow"; [
                             component!(row [
                                 component!(heading "agents-workflow-heading", "Autonomous workflow"),

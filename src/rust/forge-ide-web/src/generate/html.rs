@@ -568,6 +568,14 @@ pub(crate) fn emit(c: &Component, out: &mut String) {
                 escape(label)
             );
         }
+        Component::FlowDiagram { id, label } => {
+            let _ = write!(
+                out,
+                "<section id=\"{}\" class=\"fg-flow-diagram\" aria-label=\"{}\"></section>",
+                escape(id),
+                escape(label)
+            );
+        }
         Component::Tree { id, label, stacked } => {
             let class = if *stacked {
                 "fg-tree fg-stacked-tree"

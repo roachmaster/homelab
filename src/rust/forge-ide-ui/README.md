@@ -211,7 +211,7 @@ and impl generic parameters mean even those header matches are tentative.
 
 All shape rows use existing `SelectEntry` actions with the accepted report token.
 `MoreShape` and `PreviousShape`, originally introduced in ABI2, remain local
-intents in ABI14. The independent
+intents in ABI15. The independent
 page is bounded by the same 256-row/192-KiB budget as other lists, has reversible
 history, emits no pagination effects, ignores stale report tokens and clears with the report. Selecting a readable file prepares its source read.
 The additive bindings require rebuilding and deploying the generated assets and

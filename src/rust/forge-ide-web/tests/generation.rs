@@ -423,9 +423,9 @@ fn presentation_adapter_is_generic_and_recovery_clears_before_resume() {
     assert!(main.contains("function fatal(message)"));
     assert!(main.contains("new ResizeObserver"));
     let worker = std::str::from_utf8(&assets.files["worker.js"]).unwrap();
-    assert!(worker.contains("wasm.abi_version()!==14"));
+    assert!(worker.contains("wasm.abi_version()!==15"));
     let manifest: serde_json::Value = serde_json::from_slice(&assets.manifest).unwrap();
-    assert_eq!(manifest["abi_version"], 14);
+    assert_eq!(manifest["abi_version"], 15);
 }
 
 #[test]
@@ -701,7 +701,7 @@ fn agents_keep_intent_in_rust_and_require_local_checkpoint_before_mutations() {
     assert!(main.contains("navigation_checkpoint_saved"));
     assert!(worker.contains("!await localCheckpoint.pending"));
     assert!(worker.contains("restore_agents_navigation"));
-    assert!(worker.contains("wasm.abi_version()!==14"));
+    assert!(worker.contains("wasm.abi_version()!==15"));
 }
 
 #[test]
@@ -1043,4 +1043,46 @@ fn asset_error_display_names_each_failure_exactly() {
             .source()
             .is_some()
     );
+}
+
+#[test]
+fn flow_diagram_component_validates_renders_deterministically_and_clears_on_teardown() {
+    let mut bad_id = config();
+    bad_id.document = Document {
+        title: "Fixture".into(),
+        subtitle: "Flow".into(),
+        children: vec![component!(flow_diagram "bad id", "Valid label")],
+    };
+    assert!(register_assets("assets", bad_id).is_err());
+
+    let mut bad_label = config();
+    bad_label.document = Document {
+        title: "Fixture".into(),
+        subtitle: "Flow".into(),
+        children: vec![component!(flow_diagram "stage-flow", "   ")],
+    };
+    assert!(register_assets("assets", bad_label).is_err());
+
+    let first = build(config());
+    let second = build(config());
+    assert_eq!(
+        first, second,
+        "flow diagram generation must be deterministic"
+    );
+    let html = std::str::from_utf8(&first.files["index.html"]).unwrap();
+    let css = std::str::from_utf8(&first.files["style.css"]).unwrap();
+    let main = std::str::from_utf8(&first.files["main.js"]).unwrap();
+    let worker = std::str::from_utf8(&first.files["worker.js"]).unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&first.manifest).unwrap();
+    assert!(html.contains(
+        "<section id=\"agents-stage-diagram\" class=\"fg-flow-diagram\" aria-label=\"Task event-stream stage diagram\"></section>"
+    ));
+    assert!(css.contains(".fg-flow-track"));
+    assert!(css.contains("@media (max-width:639px)"));
+    assert!(css.contains(".fg-flow-node,.fg-flow-trace>summary,.fg-flow-trace>summary::after"));
+    assert!(main.contains("function renderFlowDiagram(binding)"));
+    assert!(main.contains(".fg-flow-diagram"));
+    assert!(main.contains("flowDiagramViews=new WeakMap()"));
+    assert!(worker.contains("wasm.abi_version()!==15"));
+    assert_eq!(manifest["abi_version"], 15);
 }

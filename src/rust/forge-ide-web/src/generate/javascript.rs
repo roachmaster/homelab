@@ -185,6 +185,10 @@ function updateSourceFormat(format,context,markdown){
   showSourceFormat(format);
 }
 let metricViews=new WeakMap();
+let flowDiagramViews=new WeakMap();
+const SVG_NS='http://www.w3.org/2000/svg';
+const FLOW_STATES=['completed','current','upcoming','skipped','warning','error','cancelled'];
+const FLOW_MARKERS={completed:'✓',current:'●',upcoming:'○',skipped:'◌',warning:'!',error:'×',cancelled:'×'};
 function clearProtected(){
   // Synchronous: never leave catalog/report pixels behind on pagehide or bfcache restore.
   for(const n of document.querySelectorAll('[data-protected]'))n.hidden=true;
@@ -193,7 +197,7 @@ function clearProtected(){
   for(const n of document.querySelectorAll('select[data-action]')){n.replaceChildren();n.value='';n.removeAttribute('title');delete n.dataset.options;n.disabled=true;}
   for(const n of document.querySelectorAll('input,textarea')){n.value='';if(n.type==='checkbox')n.checked=false;n.setCustomValidity('');n.removeAttribute('aria-invalid');if(n.hasAttribute('data-action'))n.disabled=true;}
   for(const n of document.querySelectorAll('button[data-action],form[data-action] button'))n.disabled=true;
-  for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,.fg-timeline,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
+  for(const n of document.querySelectorAll('.fg-tree,.fg-details,.fg-metric-cards,.fg-timeline,.fg-flow-diagram,[data-source-view],[data-transcript]')){n.replaceChildren();n.scrollTop=0;delete n.dataset.conversation;}
   for(const n of document.querySelectorAll('[data-source-wrap],[data-compact-toolbar]')){
     if(n.hasAttribute('data-source-wrap')){
       const source=element(n.getAttribute('aria-controls'));
@@ -210,6 +214,7 @@ function clearProtected(){
   actionByElement=new WeakMap();focusKeyByElement=new WeakMap();typeahead=new WeakMap();inputDrafts=new WeakMap();sourceViews=new WeakMap();transcriptViews=new WeakMap();presentationSequence=0;pendingActionOrigin=null;
   for(const state of layouts.values()){state.focus.clear();state.context.clear();state.reveal.clear();state.resetScroll.clear();}
   metricViews=new WeakMap();
+  flowDiagramViews=new WeakMap();
   workspaceWork=false;
   documentDirty=false;
   syncLeaveWarning();
@@ -344,6 +349,139 @@ function renderTimeline(binding){
   if(!binding.rows.length){const empty=document.createElement('li');empty.className='fg-empty';empty.textContent=binding.empty_message;host.append(empty);}
 }
 
+function flowState(value){return FLOW_STATES.includes(value)?value:'upcoming';}
+function flowConnectorSvg(dashed){
+  const svg=document.createElementNS(SVG_NS,'svg');
+  svg.setAttribute('viewBox','0 0 24 12');svg.setAttribute('width','24');svg.setAttribute('height','12');svg.setAttribute('aria-hidden','true');svg.setAttribute('focusable','false');
+  const line=document.createElementNS(SVG_NS,'path');line.setAttribute('d','M1 6H17');line.setAttribute('stroke','currentColor');line.setAttribute('stroke-width','1.75');line.setAttribute('stroke-linecap','round');line.setAttribute('fill','none');
+  if(dashed)line.setAttribute('stroke-dasharray','3 3');
+  const head=document.createElementNS(SVG_NS,'path');head.setAttribute('d','M14 2.5L20.5 6L14 9.5');head.setAttribute('stroke','currentColor');head.setAttribute('stroke-width','1.75');head.setAttribute('stroke-linecap','round');head.setAttribute('stroke-linejoin','round');head.setAttribute('fill','none');
+  svg.append(line,head);return svg;
+}
+function flowBranchSvg(kind){
+  const svg=document.createElementNS(SVG_NS,'svg');
+  svg.setAttribute('viewBox','0 0 18 18');svg.setAttribute('width','16');svg.setAttribute('height','16');svg.setAttribute('aria-hidden','true');svg.setAttribute('focusable','false');
+  const path=document.createElementNS(SVG_NS,'path');
+  path.setAttribute('d',kind==='loop'?'M14 6.5A5 5 0 1 0 14.5 11M14 3.5V7H10.5':'M4 3v5a3 3 0 0 0 3 3h7.5M11.5 8l3 3-3 3');
+  path.setAttribute('stroke','currentColor');path.setAttribute('stroke-width','1.6');path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');path.setAttribute('fill','none');
+  svg.append(path);return svg;
+}
+function renderFlowDiagram(binding){
+  const host=element(binding.id);if(!host)return;
+  let parts=flowDiagramViews.get(host);
+  if(!parts||!host.contains(parts.header)){
+    const header=document.createElement('div');header.className='fg-flow-header';
+    const meta=document.createElement('div');meta.className='fg-flow-header-meta';
+    const trackLabel=document.createElement('span');trackLabel.className='fg-flow-track-label';
+    const currentBadge=document.createElement('span');
+    meta.append(trackLabel,currentBadge);
+    const summary=document.createElement('p');summary.className='fg-flow-summary';
+    header.append(meta,summary);
+    const track=document.createElement('ol');track.className='fg-flow-track';
+    const branches=document.createElement('div');branches.className='fg-flow-branches';
+    const trace=document.createElement('details');trace.className='fg-flow-trace';
+    const traceSummary=document.createElement('summary');
+    const hops=document.createElement('ol');hops.className='fg-flow-hops';
+    trace.append(traceSummary,hops);
+    const empty=document.createElement('p');empty.className='fg-empty';
+    host.replaceChildren(header,track,branches,trace,empty);
+    parts={header,trackLabel,currentBadge,summary,track,branches,trace,traceSummary,hops,empty,nodeSig:null,branchSig:null,hopSig:null};
+    flowDiagramViews.set(host,parts);
+  }
+  const nodes=Array.isArray(binding.nodes)?binding.nodes:[];
+  const branchList=Array.isArray(binding.branches)?binding.branches:[];
+  const hopList=Array.isArray(binding.trace_hops)?binding.trace_hops:[];
+  if(!nodes.length){
+    parts.header.hidden=true;parts.track.hidden=true;parts.branches.hidden=true;parts.trace.hidden=true;parts.trace.open=false;
+    parts.empty.hidden=false;parts.empty.textContent=binding.empty_message||'';
+    parts.nodeSig=null;parts.branchSig=null;parts.hopSig=null;
+    return;
+  }
+  parts.empty.hidden=true;parts.header.hidden=false;parts.track.hidden=false;parts.trace.hidden=false;
+  parts.trackLabel.textContent=binding.track_label||'';
+  if(binding.current_badge)paintBadge(parts.currentBadge,binding.current_badge);
+  parts.summary.textContent=binding.summary||'';
+  const nodeSig=JSON.stringify(nodes);
+  if(parts.nodeSig!==nodeSig){
+    const items=[];
+    for(let i=0;i<nodes.length;i++){
+      const node=nodes[i];const st=flowState(node.state);
+      const step=document.createElement('li');step.className='fg-flow-step';step.dataset.state=st;
+      const card=document.createElement('div');card.className='fg-flow-node';card.dataset.stageId=String(node.id||'');card.dataset.state=st;
+      if(node.current)card.setAttribute('aria-current','step');
+      const head=document.createElement('div');head.className='fg-flow-node-head';
+      const marker=document.createElement('span');marker.className='fg-flow-marker';marker.setAttribute('aria-hidden','true');marker.textContent=FLOW_MARKERS[st]||'○';
+      const label=document.createElement('span');label.className='fg-flow-label';label.textContent=node.label||'';
+      head.append(marker,label);
+      if(node.count_label){
+        const count=document.createElement('span');count.className='fg-flow-count';count.textContent=node.count_label;head.append(count);
+      }
+      card.append(head);
+      if(node.detail){
+        const detail=document.createElement('span');detail.className='fg-flow-detail';detail.textContent=node.detail;card.append(detail);
+      }
+      if(node.time){
+        const time=document.createElement('time');time.className='fg-flow-time';paintTime(time,node.time);card.append(time);
+      }
+      step.append(card);
+      if(i<nodes.length-1){
+        const next=nodes[i+1];const nextSt=flowState(next.state);
+        const edge=nextSt==='current'||(st==='completed'&&next.current)?'active':st==='completed'&&nextSt==='completed'?'traversed':(nextSt==='warning'||nextSt==='error'||nextSt==='cancelled')?'alert':'upcoming';
+        const conn=document.createElement('span');conn.className='fg-flow-connector';conn.dataset.edge=edge;conn.setAttribute('aria-hidden','true');
+        conn.append(flowConnectorSvg(edge==='upcoming'));
+        step.append(conn);
+      }
+      items.push(step);
+    }
+    parts.track.replaceChildren(...items);parts.nodeSig=nodeSig;
+  }
+  parts.branches.hidden=!branchList.length;
+  const branchSig=JSON.stringify(branchList);
+  if(parts.branchSig!==branchSig){
+    const cards=branchList.map(branch=>{
+      const kind=branch.kind==='loop'?'loop':'exception';const st=flowState(branch.state);
+      const el=document.createElement('div');el.className='fg-flow-branch';el.dataset.branchId=String(branch.id||'');el.dataset.kind=kind;el.dataset.state=st;
+      const icon=document.createElement('span');icon.className='fg-flow-branch-icon';icon.setAttribute('aria-hidden','true');icon.append(flowBranchSvg(kind));
+      const body=document.createElement('div');body.className='fg-flow-branch-body';
+      const head=document.createElement('div');head.className='fg-flow-branch-head';
+      const origin=document.createElement('span');origin.className='fg-flow-branch-origin';origin.textContent='From '+(branch.from_stage_label||'');
+      const label=document.createElement('strong');label.className='fg-flow-branch-label';label.textContent=branch.label||'';
+      head.append(label,origin);
+      body.append(head);
+      if(branch.detail){
+        const detail=document.createElement('span');detail.className='fg-flow-branch-detail';detail.textContent=branch.detail;body.append(detail);
+      }
+      if(branch.time){
+        const time=document.createElement('time');time.className='fg-flow-time';paintTime(time,branch.time);body.append(time);
+      }
+      el.append(icon,body);return el;
+    });
+    parts.branches.replaceChildren(...cards);parts.branchSig=branchSig;
+  }
+  parts.traceSummary.textContent=binding.trace_label||'Observed event path';
+  const hopSig=JSON.stringify(hopList);
+  if(parts.hopSig!==hopSig){
+    if(!hopList.length){
+      const emptyHop=document.createElement('li');emptyHop.className='fg-empty';emptyHop.textContent='No stage transitions recorded yet.';
+      parts.hops.replaceChildren(emptyHop);
+    }else{
+      const rows=hopList.map(hop=>{
+        const row=document.createElement('li');row.className='fg-flow-hop';row.dataset.hopId=String(hop.id||'');
+        const seq=document.createElement('code');seq.className='fg-flow-hop-seq';seq.textContent=hop.sequence_label||'';
+        const state=document.createElement('span');if(hop.badge)paintBadge(state,hop.badge);
+        const time=document.createElement('time');time.className='fg-flow-time';if(hop.time)paintTime(time,hop.time);
+        row.append(seq,state,time);
+        if(hop.detail){
+          const detail=document.createElement('span');detail.className='fg-flow-hop-detail';detail.textContent=hop.detail;row.append(detail);
+        }
+        return row;
+      });
+      parts.hops.replaceChildren(...rows);
+    }
+    parts.hopSig=hopSig;
+  }
+}
+
 function apply(view,acknowledgedSequence,hasWorkspaceWork){
   if(!view||typeof view!=='object')throw new Error('Invalid view');
   const focus=document.activeElement;
@@ -370,6 +508,7 @@ function apply(view,acknowledgedSequence,hasWorkspaceWork){
   for(const b of view.badges||[]){const n=element(b.id);if(n)paintBadge(n,b.badge);}
   for(const b of view.metric_cards||[])renderMetricCards(b);
   for(const b of view.timelines||[])renderTimeline(b);
+  for(const b of view.flow_diagrams||[])renderFlowDiagram(b);
   for(const b of view.buttons||[]){const n=element(b.id);if(n){n.disabled=b.disabled;if(typeof b.pressed==='boolean')n.setAttribute('aria-pressed',String(b.pressed));actionByElement.set(n,b.action);if(n.closest('.fg-navigation')){if(typeof b.pressed==='boolean'?b.pressed:b.disabled)n.setAttribute('aria-current','page');else n.removeAttribute('aria-current');}}}
   for(const b of view.inputs||[]){
     const n=element(b.id);if(!n)continue;
@@ -1113,7 +1252,7 @@ const ready=(async()=>{
   const response=await fetch('/app.wasm',{credentials:'same-origin',cache:'no-store'});if(!response.ok)throw new Error('WASM asset unavailable');
   const bytes=await bounded(response,MAX);const instance=await WebAssembly.instantiate(bytes,{});wasm=instance.instance.exports;
   for(const name of ['abi_version','reserve_input','dispatch_input','output_ptr','output_len','release_output'])if(typeof wasm[name]!=='function')throw new Error('Missing WASM export');
-  if(wasm.abi_version()!==14 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
+  if(wasm.abi_version()!==15 || !(wasm.memory instanceof WebAssembly.Memory))throw new Error('WASM ABI mismatch');
   dispatch({kind:CONFIG.initial_event});
 })();
 ready.catch(()=>fatal('Could not start the verified Rust WASM application. Reload to retry.'));
