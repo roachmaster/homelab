@@ -30,6 +30,17 @@ configuration against owner, repository, canonical source and GitHub scope.
 Focused provider/existing-delivery/v1-v2 consumer tests: 33 passed, zero skips,
 4.005s; `git diff --check` passed. No live operations or broad build was run.
 
+Tests/docs handoff (`portal_release_ready`): added17 focused worker/config/factory
+regressions, including durable checkpoint-before-submit, same-request restart,
+source/identity/lease rejection, full v2 main receipt validation, pending cleanup,
+cancellation recovery and disabled-provider zero construction. The invalid UUID
+outcome test exposed an admission bug; Root fixed it before the final run. All50
+new/provider/legacy publication/config/merge tests passed in7.662s, zero skips.
+The new architecture source contains editable ownership and sequence diagrams,
+and the CI guide now distinguishes implemented scheduling from unactivated
+runtime configuration. Scoped local links and both diagrams' official Mermaid
+grammar passed. No Rust/browser/Jenkins/live execution or portal page change.
+
 --- Previous task record ---
 
 # Current: Fix repository review findings — 2026-11-23

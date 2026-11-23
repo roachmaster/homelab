@@ -223,11 +223,15 @@ branch scopes; cache reuse cannot upgrade branch coverage into main coverage.
 ### Source and runtime separation
 
 A deliberate future rollout must qualify and install the matching verifier,
-profile and worker configuration together. Automatically invoking a full main
-verification after merge also requires the existing event composition to
-submit a main-scoped request. This change does not add a scheduler, broker,
-service or automatic post-merge invocation. The standalone main entrypoint and
-its strict consumer contract are implemented and testable independently.
+profile and worker configuration together. The [coordinator-owned post-merge
+flow](forge-post-merge-verification.md) composes a confirmed merge into a durable,
+main-scoped request in source. PostgreSQL records the successor atomically with
+the merge receipt; an injected worker in the existing publication process
+checkpoints and reconciles the same Jenkins action across restarts. It binds the
+actual merged commit/tree, requires the complete v2 main contract and preserves
+failed-main follow-up events separately from the completed merge. No service or
+broker is added, and the source implementation does not activate live scheduling.
+Migration28, matching provider configuration and verifier rollout remain separate.
 
 The GitHub workflow files are separate source artifacts from the earlier
 split. This change enables or submits no GitHub Actions workflow. Hosted
@@ -241,8 +245,9 @@ pretending to be a GitHub browser job.
 - Classify remaining service/driver/studio cases before moving any into the
   branch stage. The current branch plan runs only declared agent-runner
   in-memory coverage; main runs all four suites.
-- Qualify an intentional v2 rollout and compose the existing post-merge event
-  into a main-scoped request; neither is claimed active by this source change.
+- Qualify an intentional v2/migration28 rollout and enable the implemented
+  post-merge coordinator with its main-scoped provider. Neither profile rollout
+  nor live scheduling is claimed active by this source change.
 - The `forge-kernel` rename is done: the crate is now `forge-system`
   (crate-dependency-tree.md section 10). The `forge-llama` and
   demo-crate decisions are done too: both removed from the workspace.
