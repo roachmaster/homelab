@@ -4,6 +4,9 @@ The user explicitly authorizes completing all five listed gaps: live v2/M28+
 activation, normal-policy automatic failed-main repair, portal lifecycle visibility,
 guarded automatic deployment, and capture of main changes outside coordinator
 merges. Complete and prove the loop; do not stop at source-only partial work.
+Latest user steering sets the shared failed-main repair lineage cap to **20**
+for now. This supersedes the initial three-round cap described in component
+checkpoints below.
 Use existing PostgreSQL/coordinators and factory-selected injected ports. No NATS,
 GitHub Actions, new broker/service, paid API fallback or model credentials passed
 to workers. Preserve existing data, completed receipts, worktrees and secrets.
