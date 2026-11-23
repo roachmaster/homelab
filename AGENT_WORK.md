@@ -69,6 +69,20 @@ rollback, staged-copy recovery, failed-candidate cleanup and source/proof tamper
 rejection. Provider/actor planned-replay handling is included. Final combined
 focused run: 71 passed, zero skips, 4.148s. These substitute system calls and do
 not constitute live activation evidence.
+## Actual HTTP rolling compatibility correction
+
+Live validation found the new Work header rejected by the shared closed header
+validator and legacy projection stripping aimed at a non-envelope shape. Fix only
+Work routing: validate the extension, preserve all other header multiplicities and
+shared validation, and strip known delivery fields inside the actual protocol/event
+envelope. Exercise the real authenticated runner HTTP path for old and new
+callers, malformed/duplicate/unknown headers and preserved user payload. No schema
+change or live operation; Root owns republishing/redeploy and new Jenkins source.
+The33-case focused actual HTTP/decode/listener/catalog plus full delivery suite
+passed in19.723s withzero skips. This includes real old/new HTTP envelopes and
+result content, strict pre-effect negative headers, actual PG legacy/new list
+filter-before-pagination, and the20-admission shared-lineage cap.
+
 ## Latest user steering: twenty failed-main repair assignments
 
 The user now requests a shared failed-main lineage limit of20. Apply only to

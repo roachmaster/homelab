@@ -46,17 +46,76 @@ class DeliveryNegotiationTest(unittest.TestCase):
             headers=Message();headers['Forge-Delivery-Version']=value
             with self.assertRaises(Rejected):delivery_version(headers)
     def test_only_known_extension_fields_are_stripped_without_mutating_service_objects(self):
-        bodies=[{'kind':'work_catalog','projects':[{'alias':'homelab','delivery':{'secret':'not-for-old-ABI'}}]},
-                {'kind':'work_opened','task':{'task_id':'id','delivery':{'status':'queued'},'prompt':'delivery'}},
-                {'kind':'work_listed','tasks':[{'task_id':'id','delivery':{}}]}]
+        from test_work_api import reply
+        bodies=[reply('work_catalog',projects=[{'alias':'homelab','delivery':{'status':'queued'}}]),
+                reply('work_opened',task={'task_id':'id','delivery':{'status':'queued'},'prompt':'delivery'}),
+                reply('work_listed',tasks=[{'task_id':'id','delivery':{}}])]
         for body in bodies:
-            result=delivery_response((200,body),None)[1]
+            result=delivery_response((200,body),None)[1]['event'];original=body['event']
             rows=result.get('projects') or result.get('tasks') or [result['task']]
             self.assertTrue(all('delivery' not in row for row in rows))
-            self.assertIn('delivery',body.get('projects',body.get('tasks',[body.get('task')]))[0])
+            self.assertIn('delivery',original.get('projects',original.get('tasks',[original.get('task')]))[0])
             self.assertEqual(delivery_response((200,body),1),(200,body))
-        payload={'kind':'work_result_page','content':{'delivery':'user-owned'}}
+        payload=reply('work_result_page',content={'delivery':'user-owned'})
         self.assertEqual(delivery_response((200,payload),None),(200,payload))
+
+    def test_real_http_negotiates_catalog_opened_list_and_preserves_user_payload(self):
+        from test_work_api import runner_server,work_post,sample_summary,REQUEST_ID,TASK_ID,CURSOR_ID,RECIPE_DIGEST
+        from work_api import Destination
+        service=Mock();service.delivery_projection_enabled=True
+        project={'alias':'homelab','delivery':{'verification_id':'project-proof'}}
+        task=sample_summary(delivery={'verification_id':'task-proof'},prompt='delivery',result={'delivery':'user-owned'})
+        service.catalog.return_value={'projects':[project]}
+        service.get.return_value=task
+        service.list_tasks.return_value={'tasks':[task],'next_cursor':None}
+        service.result.return_value={'content':{'delivery':'user-owned'}}
+        cases=[(Destination.CATALOG,{'kind':'work_catalog','request_id':REQUEST_ID},'projects'),
+               (Destination.GET,{'kind':'work_get','request_id':REQUEST_ID,'project_alias':'homelab','task_id':str(TASK_ID)},'task'),
+               (Destination.LIST,{'kind':'work_list','request_id':REQUEST_ID,'project_alias':'homelab','status_filter':'active','limit':20},'tasks')]
+        with runner_server(work_service=service) as port:
+            for headers,visible in (({},False),({'Forge-Delivery-Version':'1'},True)):
+                for destination,body,field in cases:
+                    with self.subTest(destination=destination,visible=visible):
+                        status,response,cache=work_post(port,destination,body,extra_headers=headers)
+                        self.assertEqual((status,cache),(200,'no-store'));self.assertEqual(response['protocol_version'],1)
+                        event=response['event'];values=event[field] if field!='task' else [event[field]]
+                        self.assertEqual(['delivery' in value for value in values],[visible])
+                        if field!='projects':self.assertEqual(values[0]['result'],{'delivery':'user-owned'})
+                        self.assertTrue('delivery' in task);self.assertTrue('delivery' in project)
+                self.assertEqual(service.list_tasks.call_args.args[0].delivery_visible,visible)
+                status,response,cache=work_post(port,Destination.RESULT,{'kind':'work_result','request_id':REQUEST_ID,
+                    'project_alias':'homelab','task_id':str(TASK_ID),'attempt_id':str(CURSOR_ID),
+                    'cursor':f'{RECIPE_DIGEST}.0','limit_bytes':16},extra_headers=headers)
+                self.assertEqual((status,cache),(200,'no-store'))
+                self.assertEqual(response['event']['content'],{'delivery':'user-owned'})
+
+    def test_real_http_bad_negotiation_and_other_closed_headers_fail_before_service_effects(self):
+        from contextlib import closing
+        from http.client import HTTPConnection
+        from test_work_api import runner_server,work_post,REQUEST_ID,TOKEN,reply
+        import chat_history_api,runner
+        from work_api import Destination
+        service=Mock();body={'kind':'work_catalog','request_id':REQUEST_ID}
+        with runner_server(work_service=service) as port:
+            for headers in ({'Forge-Delivery-Version':'0'},{'Forge-Delivery-Version':'2'},
+                            {'Forge-Delivery-Version':'1,1'},{'Forge-Delivery-Version':'true'},
+                            {'Forge-Delivery-Version':'1','Forge-Extra':'1'},
+                            {'Forge-Delivery-Version':'1','Forge-Contract-Version':'2'}):
+                with self.subTest(headers=headers):
+                    self.assertEqual(work_post(port,Destination.CATALOG,body,extra_headers=headers),
+                                     (400,reply('work_failed',code='invalid_request'),'no-store'))
+            payload=runner.workspace_json(body)
+            # Keep unrelated closed Forge headers duplicated for common validation.
+            for duplicate in ('Forge-Delivery-Version','Forge-Destination','Forge-Contract-Version','Forge-Request-Id'):
+                with self.subTest(duplicate=duplicate),closing(HTTPConnection('127.0.0.1',port,timeout=3)) as connection:
+                    headers={'Authorization':f'Bearer {TOKEN}','Content-Type':'application/json','Content-Length':str(len(payload)),
+                             'Forge-Envelope-Version':'1','Forge-Contract-Version':'1','Forge-Destination':Destination.CATALOG.value,
+                             'Forge-Request-Id':REQUEST_ID,'Forge-Delivery-Version':'1'}
+                    connection.putrequest('POST',chat_history_api.PATH)
+                    for name,value in headers.items():connection.putheader(name,value)
+                    connection.putheader(duplicate,headers[duplicate]);connection.endheaders(payload)
+                    response=connection.getresponse();self.assertEqual(response.status,400);response.read()
+        service.assert_not_called();self.assertFalse(service.method_calls)
 
 class DeliveryFactoryTest(unittest.TestCase):
     def test_long_original_context_cannot_truncate_trusted_ci_identity_or_build_diagnostics(self):

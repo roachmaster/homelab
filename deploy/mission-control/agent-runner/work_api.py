@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 from enum import Enum
+from email.message import Message
 from http import HTTPStatus
 import re
 import unicodedata
@@ -517,30 +518,40 @@ def delivery_version(headers):
 
 
 def delivery_response(response, version):
-    """Strip only new fields from known envelopes, never user result content."""
+    """Strip only the negotiated extension in actual Work event envelopes."""
     if version == 1:
         return response
     status, body = response
-    body = dict(body)
-    kind = body.get('kind')
+    if not isinstance(body, dict) or not isinstance(body.get('event'), dict):
+        return response
+    event = dict(body['event'])
+    kind = event.get('kind')
     def legacy(value):
         if not isinstance(value, dict):
             return value
         value = dict(value)
         value.pop('delivery', None)
         return value
-    if kind == 'work_catalog' and isinstance(body.get('projects'), list):
-        body['projects'] = [legacy(value) for value in body['projects']]
+    if kind == 'work_catalog' and isinstance(event.get('projects'), list):
+        event['projects'] = [legacy(value) for value in event['projects']]
     elif kind == 'work_opened':
-        body['task'] = legacy(body.get('task'))
-    elif kind == 'work_listed' and isinstance(body.get('tasks'), list):
-        body['tasks'] = [legacy(value) for value in body['tasks']]
-    return status, body
+        event['task'] = legacy(event.get('task'))
+    elif kind == 'work_listed' and isinstance(event.get('tasks'), list):
+        event['tasks'] = [legacy(value) for value in event['tasks']]
+    else:
+        return response
+    return status, {**body, 'event': event}
 
 
 def destination(headers):
     delivery_version(headers)  # Reject malformed negotiation before request effects.
-    value = common.dispatch_destination(headers)
+    # Work owns this extension. Preserve every other header, including duplicates,
+    # for the shared closed-envelope validator rather than relaxing that contract.
+    route_headers = Message()
+    for name, value in headers.items():
+        if name.lower() != 'forge-delivery-version':
+            route_headers[name] = value
+    value = common.dispatch_destination(route_headers)
     try:
         return Destination(value)
     except ValueError:
