@@ -97,10 +97,10 @@ class ExternalWorkflowStore:
     def _project_retry_limit(self,w,key):
         # Historical reads survive unrelated configuration changes. Mutating
         # paths keep the strict compatibility check in _retry_limit.
-        try:return self._retry_limit(w,key)
-        except (ValueError,KeyError,TypeError):
-            frozen=effective_limit(w['snapshot'],key)
-            return self._recorded_retry_limit(w,key,frozen)
+        frozen=effective_limit(w['snapshot'],key)
+        recorded=self._recorded_retry_limit(w,key,frozen)
+        try:return max(recorded,self._retry_limit(w,key))
+        except (ValueError,KeyError,TypeError):return recorded
 
     def _recorded_retry_limit(self,w,key,frozen):
         # A recorded allowance belongs to this immutable workflow, even after

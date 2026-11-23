@@ -78,6 +78,17 @@ class ExternalSharedRetryPolicyTest(unittest.TestCase):
         flow.policies={}
         self.assertEqual(flow._project_retry_limit(w,'max_plan_revisions'),20)
 
+    def test_recorded_twenty_remains_visible_when_current_budget_is_reduced(self):
+        from work_external_workflow import ExternalWorkflowStore
+        _drifted,w=self.recorded_projection()
+        config=replace(fixture.cfg(),external_workflows={'homelab':{
+            'author_profile':fixture.ALIAS,'reviewer_profile':'codex-v2',
+            'max_plan_revisions':3,'max_code_revisions':3}})
+        flow=ExternalWorkflowStore(config,config.catalog())
+        self.assertEqual(flow._retry_limit(w,'max_plan_revisions'),3)
+        self.assertEqual(flow._project_retry_limit(w,'max_plan_revisions'),20)
+        self.assertEqual(flow._project_retry_limit(w,'max_code_revisions'),20)
+
     def test_missing_or_altered_allowance_record_never_authorizes_display_increase(self):
         flow,original=self.recorded_projection()
         transforms=[lambda w:w.update(state={}),lambda w:w['state'].update(retry_policy_updates={}),
